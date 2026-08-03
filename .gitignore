@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+data/
+.files/
+output/
+lecture_notes/*
+!lecture_notes/README.txt

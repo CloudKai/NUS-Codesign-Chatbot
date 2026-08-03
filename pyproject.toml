@@ -1,0 +1,11 @@
+[tool.pytest.ini_options]
+addopts = "-q"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+  "live: requires OPENAI_API_KEY and explicit RUN_LIVE_OPENAI_TESTS=true",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
