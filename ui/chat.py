@@ -1,0 +1,404 @@
+"""Discussion panel, message rendering, and composer handling."""
+
+from __future__ import annotations
+
+import mimetypes
+from pathlib import Path
+from typing import Any
+
+import streamlit as st
+
+from backend.chat_service import ChatOptions
+from backend.domain import CoachRequest
+from backend.models import MODEL_REGISTRY, get_model
+from backend.settings import settings
+from backend.source_library import add_file_sources, selected_source_context
+from backend.student_journey import (
+    STAGE_BY_ID,
+    advanced_stage_response,
+    concise_coach_response,
+    normalize_journey,
+    personalized_stage_questions,
+)
+from backend.student_support import DEFAULT_SUPPORT_MODE
+
+from ui.runtime import engine, local_api_client, local_api_enabled, rerun, store
+from ui.composer_layout import sync_composer_layout
+from ui.settings import apply_selected_model
+from ui.sources import source_viewer_dialog
+
+
+def _render_composer_model_picker() -> None:
+    """Render a Cursor-style model chip inside the chat composer footer."""
+    current = get_model(st.session_state.selected_model)
+    with st.container(key="composer_model_slot"):
+        with st.popover(current.label, type="tertiary"):
+            st.caption("Model for your next message")
+            for model in MODEL_REGISTRY:
+                label = f"{model.label}{' · Legacy' if model.deprecated else ''}"
+                if st.button(
+                    label,
+                    key=f"composer-model-{model.id}",
+                    use_container_width=True,
+                    type="primary" if model.id == current.id else "tertiary",
+                ):
+                    if model.id != current.id:
+                        apply_selected_model(model.id)
+                        rerun()
+
+
+def render_media(raw_paths: list[str]) -> None:
+    for raw_path in raw_paths:
+        path = Path(raw_path).resolve()
+        workspace_root = settings.workspaces_dir.resolve()
+        files_root = settings.files_dir.resolve()
+        if not path.is_file() or not (
+            workspace_root in path.parents or files_root in path.parents
+        ):
+            continue
+        mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        if mime.startswith("image/") or path.suffix.lower() == ".svg":
+            st.image(str(path), use_container_width=True)
+            st.download_button(
+                "Download image",
+                data=path.read_bytes(),
+                file_name=path.name,
+                mime=mime,
+                key=f"media-{path}-{path.stat().st_mtime_ns}",
+                type="tertiary",
+            )
+        elif mime.startswith("audio/"):
+            st.audio(path.read_bytes(), format=mime)
+
+
+def render_citations(message: dict[str, Any]) -> None:
+    """Render one citation inline or collapse multiple citations into a dropdown."""
+    references = (message.get("metadata") or {}).get("source_refs") or []
+    valid_references = [
+        reference
+        for reference in references
+        if store.get_source(st.session_state.thread_id, str(reference.get("id") or ""))
+    ]
+    if not valid_references:
+        return
+
+    def render_reference(reference: dict[str, Any]) -> None:
+        """Render a source action that opens the corresponding source viewer."""
+        label = str(reference.get("label") or "Source")
+        title = str(reference.get("title") or "Untitled source")
+        if st.button(
+            f"[{label}] {title}",
+            key=f"citation_{message['id']}_{reference['id']}",
+            type="secondary",
+        ):
+            source_viewer_dialog(str(reference["id"]))
+
+    if len(valid_references) == 1:
+        render_reference(valid_references[0])
+        return
+
+    with st.expander(f"Sources used ({len(valid_references)})", expanded=False):
+        for reference in valid_references:
+            render_reference(reference)
+
+
+def render_message(message: dict[str, Any]) -> None:
+    role = message["role"]
+    with st.chat_message(
+        role,
+        avatar=(
+            ":material/auto_awesome:"
+            if role == "assistant"
+            else ":material/person:"
+        ),
+    ):
+        metadata = message.get("metadata") or {}
+        if role == "user" and st.session_state.editing_message == message["id"]:
+            revised = st.text_area(
+                "Revise your message",
+                value=message["content"],
+                key=f"edit-text-{message['id']}",
+            )
+            save_column, cancel_column = st.columns(2)
+            if save_column.button(
+                "Save & resend",
+                key=f"save-{message['id']}",
+                use_container_width=True,
+            ):
+                if not revised.strip():
+                    st.error("Enter a message before resending.")
+                    return
+                st.session_state.pending_edit = {
+                    "message_id": message["id"],
+                    "prompt": revised.strip(),
+                }
+                st.session_state.editing_message = None
+                rerun()
+            if cancel_column.button(
+                "Cancel",
+                key=f"cancel-{message['id']}",
+                use_container_width=True,
+            ):
+                st.session_state.editing_message = None
+                rerun()
+            return
+        if role == "user":
+            safe_id = message["id"].replace("-", "_")
+            with st.container(key=f"user_message_row_{safe_id}"):
+                st.markdown(message["content"])
+                with st.popover(
+                    "⋮",
+                    type="tertiary",
+                    key=f"message-menu-{message['id']}",
+                ):
+                    if st.button(
+                        "Edit message",
+                        key=f"edit-{message['id']}",
+                        use_container_width=True,
+                    ):
+                        st.session_state.editing_message = message["id"]
+                        rerun()
+            return
+
+        st.markdown(
+            '<div class="message-meta">Coach</div>',
+            unsafe_allow_html=True,
+        )
+        display_content = str(message["content"])
+        auto_advanced_to = str(metadata.get("auto_advanced_to") or "")
+        if auto_advanced_to in STAGE_BY_ID and "**Thinking Path:**" in display_content:
+            assessment = metadata.get("assessment") or {}
+            questions = assessment.get("guidance_questions") or list(
+                personalized_stage_questions(
+                    auto_advanced_to,
+                    str(assessment.get("contribution_summary") or display_content),
+                    has_course_sources=bool(metadata.get("source_ids")),
+                )
+            )
+            display_content = advanced_stage_response(
+                display_content,
+                str(metadata.get("thinking_stage") or "focus"),
+                auto_advanced_to,
+                questions,
+            )
+        st.markdown(concise_coach_response(display_content))
+        render_citations(message)
+        web_sources = metadata.get("sources") or []
+        if web_sources:
+            with st.expander(f"Web sources ({len(web_sources)})"):
+                for source in web_sources:
+                    title = source.get("title") or source.get("url")
+                    st.markdown(f"- [{title}]({source.get('url')})")
+        render_media(metadata.get("artifacts") or [])
+
+
+def normalize_composer_value(value: Any) -> tuple[str, list[Any]]:
+    if value is None:
+        return "", []
+    if isinstance(value, str):
+        return value.strip(), []
+    prompt = str(getattr(value, "text", "") or "").strip()
+    uploads = list(getattr(value, "files", []) or [])
+    audio = getattr(value, "audio", None)
+    if audio is not None:
+        try:
+            transcript = engine.transcribe(
+                audio.getvalue(),
+                getattr(audio, "type", None) or "audio/wav",
+            ).strip()
+            if transcript:
+                prompt = "\n\n".join(part for part in (prompt, transcript) if part)
+        except Exception as exc:
+            st.error(f"Voice transcription was unavailable: {exc}")
+    if not prompt and uploads:
+        prompt = "Help me understand the source material I just added."
+    return prompt, uploads
+
+
+def handle_prompt(
+    prompt: str,
+    uploads: list[Any],
+    model_id: str,
+    reasoning_effort: str | None,
+    target: Any,
+    existing_user_message_id: str | None = None,
+) -> None:
+    journey = normalize_journey(st.session_state.learning_journey)
+    selected_sources = store.list_sources(
+        st.session_state.thread_id,
+        selected_only=True,
+    )
+    allow_model_knowledge = not selected_sources and not uploads
+    st.session_state.allow_model_knowledge = allow_model_knowledge
+    options = ChatOptions(
+        model_id=model_id,
+        reasoning_effort=reasoning_effort,
+        support_mode=DEFAULT_SUPPORT_MODE,
+        web_search=False,
+        image_generation=False,
+        local_analysis=False,
+        speak_response=False,
+        assignment=st.session_state.assignment,
+        thinking_stage=journey["current_stage"],
+        response_detail=journey["response_detail"],
+        response_language=st.session_state.response_language,
+        source_ids=[source["id"] for source in selected_sources],
+        allow_model_knowledge=allow_model_knowledge,
+        existing_user_message_id=existing_user_message_id,
+    )
+    upload_tuples = [
+        (upload.name, upload.getvalue(), getattr(upload, "type", None))
+        for upload in uploads
+    ]
+    with target:
+        if existing_user_message_id is None:
+            with st.chat_message("user", avatar=":material/person:"):
+                st.write(prompt)
+                if uploads:
+                    st.caption(
+                        "Adding to Sources · "
+                        + ", ".join(upload.name for upload in uploads)
+                    )
+        if local_api_enabled():
+            if upload_tuples:
+                add_file_sources(
+                    store,
+                    st.session_state.thread_id,
+                    upload_tuples,
+                    origin="chat_composer",
+                )
+                selected_sources = store.list_sources(
+                    st.session_state.thread_id,
+                    selected_only=True,
+                )
+            source_context, source_references = selected_source_context(selected_sources)
+            request = CoachRequest(
+                thread_id=st.session_state.thread_id,
+                student_message=prompt,
+                current_stage=journey["current_stage"],
+                response_detail=journey["response_detail"],
+                source_ids=[reference["id"] for reference in source_references],
+                source_context=source_context,
+                allow_model_knowledge=allow_model_knowledge,
+            )
+            with st.chat_message("assistant", avatar=":material/auto_awesome:"):
+                try:
+                    turn = local_api_client().coach_turn(request)
+                    st.write(turn.response_text)
+                    if turn.pending_transition:
+                        st.caption("The coach has recommended a next step in Thinking Path.")
+                except Exception as exc:
+                    st.error(
+                        "The local coaching API is unavailable. Start it with "
+                        "`sh scripts/run_local_demo.sh`, then retry. "
+                        f"({exc})"
+                    )
+                    if st.button(
+                        "Retry",
+                        icon=":material/refresh:",
+                        key="retry-coach-api",
+                    ):
+                        st.session_state.pending_edit = {
+                            "message_id": existing_user_message_id,
+                            "prompt": prompt,
+                        }
+                        rerun()
+                    return
+        else:
+            stream = engine.submit(
+                st.session_state.thread_id,
+                prompt,
+                options,
+                upload_tuples,
+            )
+            with st.chat_message("assistant", avatar=":material/auto_awesome:"):
+                st.write_stream(stream)
+                if stream.sources:
+                    with st.expander(f"Web sources ({len(stream.sources)})"):
+                        for source in stream.sources:
+                            st.markdown(f"- [{source['title']}]({source['url']})")
+                render_media([str(path) for path in stream.artifacts])
+    updated_thread = store.get_thread(st.session_state.thread_id) or {}
+    updated_metadata = updated_thread.get("metadata") or {}
+    updated_journey = normalize_journey(updated_metadata.get("learning_journey"))
+    st.session_state.learning_journey = updated_journey
+    st.session_state.response_detail = updated_journey["response_detail"]
+    st.session_state.composer_nonce += 1
+    rerun()
+
+
+def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
+    selected_sources = store.list_sources(
+        st.session_state.thread_id,
+        selected_only=True,
+    )
+    allow_model_knowledge = not selected_sources
+    st.session_state.allow_model_knowledge = allow_model_knowledge
+    messages = store.get_messages(st.session_state.thread_id)
+    chat_log = st.container(key="chat_log")
+    with chat_log:
+        if not messages:
+            with st.chat_message("assistant", avatar=":material/auto_awesome:"):
+                st.markdown(
+                    '<div class="message-meta coach-welcome">Coach</div>',
+                    unsafe_allow_html=True,
+                )
+                st.markdown("### Welcome — let’s think this through")
+                st.write(
+                    "Hi, I’m your critical-thinking coach. I’ll help you work "
+                    "through Focus, Evidence, Assumptions, Perspectives, "
+                    "Synthesis, and Conclusion."
+                )
+                st.write(
+                    "Start by describing the question, problem, or claim you "
+                    "want to examine. You can also add sources in the Sources "
+                    "panel before we begin."
+                )
+        else:
+            for message in messages:
+                render_message(message)
+            if messages[-1]["role"] == "assistant":
+                previous_user = next(
+                    (
+                        message
+                        for message in reversed(messages[:-1])
+                        if message["role"] == "user"
+                    ),
+                    None,
+                )
+                if previous_user and st.button(
+                    "Regenerate",
+                    icon=":material/refresh:",
+                    type="tertiary",
+                    key="regenerate-response",
+                ):
+                    st.session_state.pending_edit = {
+                        "message_id": previous_user["id"],
+                        "prompt": previous_user["content"],
+                    }
+                    rerun()
+    with st.container(key="chat_composer"):
+        _render_composer_model_picker()
+        composer_value = st.chat_input(
+            "Ask a question or share your thinking",
+            key=f"composer-{st.session_state.composer_nonce}",
+            accept_file="multiple",
+            accept_audio=False,
+            max_upload_size=settings.max_file_size_mb,
+            submit_mode="stop",
+            height="content",
+        )
+        sync_composer_layout()
+    pending_edit = st.session_state.pop("pending_edit", None)
+    prompt, uploads = normalize_composer_value(
+        (pending_edit or {}).get("prompt") or composer_value
+    )
+    if prompt:
+        handle_prompt(
+            prompt,
+            uploads,
+            model_id,
+            reasoning_effort,
+            chat_log,
+            existing_user_message_id=(pending_edit or {}).get("message_id"),
+        )
