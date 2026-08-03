@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Socratic AI Design Thinking Assistant</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f1016;
+    --panel: #181a20;
+    --panel-soft: #1f2129;
+    --gold: #c39b2f;
+    --gold-soft: rgba(195, 155, 47, 0.18);
+    --text: #ede5cf;
+    --muted: #9a95a3;
+    --border: rgba(255, 255, 255, 0.08);
+    --accent: #f5c65d;
+    --accent-dark: #c18f1a;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif; background: radial-gradient(circle at top, rgba(195,155,47,.14), transparent 34%), var(--bg); color: var(--text); }
+  body { padding: 24px; }
+  button, input, textarea, select { font: inherit; }
+
+  .app-shell { display: grid; grid-template-columns: 280px 1fr; gap: 20px; max-width: 1440px; margin: 0 auto; }
+
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .sidebar h1 {
+    margin: 0;
+    font-size: 1.05rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--gold);
+  }
+
+  .side-card,
+  .main-card,
+  .chat-panel,
+  .message-panel {
+    background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+    border: 1px solid var(--border);
+    border-radius: 28px;
+    padding: 24px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+  }
+
+  .side-card { display: flex; flex-direction: column; gap: 16px; }
+  .session-label { display: inline-flex; align-items: center; gap: 10px; font-size: 0.95rem; color: var(--muted); }
+  .session-pill { padding: 6px 10px; border-radius: 999px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08); color: var(--text); font-size: 0.82rem; }
+  .session-item {
+    display: grid; gap: 10px;
+    padding: 18px;
+    border-radius: 22px;
+    background: rgba(255,255,255,.03);
+    border: 1px solid rgba(255,255,255,.08);
+  }
+
+  .session-item h2 { margin: 0; font-size: 1rem; letter-spacing: -.01em; }
+  .session-item p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+  .session-item .status { color: #7dd3fc; font-size: 0.85rem; letter-spacing: .04em; text-transform: uppercase; }
+
+  .main-card { position: relative; overflow: hidden; }
+  .main-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at top right, rgba(195,155,47,.12), transparent 24%);
+    pointer-events: none;
+  }
+  .main-card .hero {
+    position: relative;
+    display: grid;
+    gap: 18px;
+  }
+
+  .main-card h1 { margin: 0; font-size: 2rem; line-height: 1.05; }
+  .main-card p { margin: 0; color: var(--muted); max-width: 620px; }
+  .phase-chip { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 999px; background: rgba(195,155,47,.16); color: #ffe8a7; border: 1px solid rgba(195,155,47,.25); font-size: 0.92rem; }
+  .progress-wrap { padding: 14px; background: rgba(255,255,255,.03); border-radius: 22px; border: 1px solid rgba(255,255,255,.08); }
+  .progress-bar { height: 10px; width: 100%; border-radius: 999px; background: rgba(255,255,255,.06); overflow: hidden; }
+  .progress-fill { height: 100%; width: 20%; border-radius: inherit; background: linear-gradient(90deg, var(--gold), var(--accent)); }
+  .progress-text { margin-top: 10px; color: var(--muted); font-size: 0.9rem; }
+
+  .chat-panel {
+    display: grid;
+    gap: 18px;
+  }
+
+  .message-panel {
+    min-height: 420px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  #chat { flex: 1; overflow-y: auto; display: grid; gap: 14px; padding-right: 8px; }
+  .msg { max-width: 78%; padding: 16px 18px; border-radius: 22px; line-height: 1.6; font-size: 0.97rem; white-space: pre-wrap; }
+  .assistant { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); align-self: flex-start; }
+  .user { background: linear-gradient(135deg, rgba(195,155,47,.16), rgba(195,155,47,.08)); border: 1px solid rgba(195,155,47,.2); align-self: flex-end; }
+  .critique { box-shadow: inset 0 0 0 1px rgba(255,183,19,.12); }
+
+  .controls-row { display: grid; gap: 16px; }
+  .control-group { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .control-group input,
+  .control-group select,
+  .control-group button { background: rgba(255,255,255,.05); color: var(--text); border: 1px solid rgba(255,255,255,.08); border-radius: 16px; padding: 12px 16px; }
+  .control-group select { min-width: 180px; }
+  .control-group input[type="file"] { padding: 10px 12px; }
+  .control-group button { cursor: pointer; transition: transform .2s ease, background .2s ease; }
+  .control-group button:hover { transform: translateY(-1px); background: rgba(255,255,255,.08); }
+
+  .action-row { display: flex; flex-wrap: wrap; gap: 12px; justify-content: flex-start; }
+  .action-row button { background: rgba(255,255,255,.06); color: var(--text); border-color: rgba(255,255,255,.08); }
+  .action-row button.primary { background: linear-gradient(90deg, var(--gold), var(--accent)); color: #111; border-color: transparent; }
+
+  .input-area { display: grid; gap: 12px; }
+  textarea#message { width: 100%; min-height: 110px; resize: vertical; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); color: var(--text); padding: 16px; border-radius: 20px; }
+  .send-button { align-self: end; justify-self: end; display: inline-flex; align-items: center; gap: 10px; border: none; padding: 14px 20px; border-radius: 18px; background: linear-gradient(90deg, var(--gold), var(--accent)); color: #111; font-weight: 700; cursor: pointer; }
+
+  .status-line { color: var(--muted); font-size: 0.95rem; }
+
+  @media (max-width: 1024px) {
+    .app-shell { grid-template-columns: 1fr; }
+    body { padding: 18px; }
+  }
+</style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="side-card">
+        <div class="session-label">
+          <span>Project Folder</span>
+          <span class="session-pill">ACTIVE</span>
+        </div>
+        <div class="session-item">
+          <h2>New session</h2>
+          <p>Problem Identification</p>
+          <span class="status">Active</span>
+        </div>
+      </div>
+      <div class="side-card">
+        <h1>Session info</h1>
+        <p>Use the chat panel to guide your design thinking journey. Upload sketches, switch phases, and save work as you go.</p>
+      </div>
+    </aside>
+
+    <main>
+      <section class="main-card">
+        <div class="hero">
+          <div>
+            <h1>Socratic AI Design Thinking Assistant</h1>
+            <p>Your guide through the design thinking process. Ask questions, get critique, and move through each phase from problem framing to prototype testing.</p>
+          </div>
+          <div class="phase-chip">Current Phase: Problem Identification (1/5)</div>
+          <div class="progress-wrap">
+            <div class="progress-bar">
+              <div class="progress-fill"></div>
+            </div>
+            <div class="progress-text">Phase 1 of 5 completed</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="chat-panel">
+        <div class="message-panel">
+          <div id="chat"></div>
+
+          <div class="controls-row">
+            <div class="control-group">
+              <input id="studentId" placeholder="Student ID" value="demo-student" />
+              <input id="projectId" placeholder="Project ID" value="default" />
+            </div>
+            <div class="control-group">
+              <select id="phase">
+                <option value="empathize">Empathize</option>
+                <option value="define">Define</option>
+                <option value="ideate">Ideate</option>
+                <option value="prototype">Prototype</option>
+                <option value="test">Test</option>
+              </select>
+              <input type="file" id="imageInput" accept="image/*" />
+            </div>
+          </div>
+
+          <div class="input-area">
+            <textarea id="message" placeholder="Type your response here... (Shift+Enter for new line)"></textarea>
+            <div class="action-row">
+              <button type="button">New Conversation</button>
+              <button type="button">Standard</button>
+              <button type="button">Save Conversation</button>
+              <button class="send-button" onclick="send()">Send message</button>
+            </div>
+            <div class="status-line" id="statusLine">Ready to begin your design thinking journey.</div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+<script>
+const chat = document.getElementById('chat');
+
+function addMessage(role, text, critique) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + role + (critique ? ' critique' : '');
+  div.textContent = text;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function send() {
+  const studentId = document.getElementById('studentId').value;
+  const projectId = document.getElementById('projectId').value;
+  const phase = document.getElementById('phase').value;
+  const messageEl = document.getElementById('message');
+  const message = messageEl.value.trim();
+  const imageFile = document.getElementById('imageInput').files[0];
+  if (!message && !imageFile) return;
+
+  addMessage('user', message || '[image attached]');
+  messageEl.value = '';
+
+  const payload = { student_id: studentId, project_id: projectId, phase, message };
+  if (imageFile) {
+    payload.image_base64 = await fileToBase64(imageFile);
+    payload.image_format = imageFile.type.split('/')[1] || 'png';
+  }
+
+  document.getElementById('statusLine').textContent = 'Thinking...';
+  const res = await fetch('/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  addMessage('assistant', data.reply, data.critique_mode);
+  document.getElementById('statusLine').textContent = `Phase: ${data.phase} | Turn: ${data.turn_count} | Mode: ${data.critique_mode ? 'CRITIQUE' : 'question'}`;
+}
+
+document.getElementById('message').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+</script>
+</body>
+</html>
