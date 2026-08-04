@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import base64
+import html
 import mimetypes
 from pathlib import Path
 from typing import Any
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from backend.chat_service import ChatOptions
 from backend.domain import CoachRequest
@@ -104,6 +107,99 @@ def render_citations(message: dict[str, Any]) -> None:
             render_reference(reference)
 
 
+def _render_copy_control(text: str) -> None:
+    """Render a Copy control whose click stays in-iframe (clipboard gesture works)."""
+    encoded = base64.b64encode(text.encode("utf-8")).decode("ascii")
+    components.html(
+        f"""
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body {{
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    overflow: hidden;
+  }}
+  button {{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 7px;
+    color: #d7dee6;
+    background: rgba(255, 255, 255, 0.12);
+    cursor: pointer;
+  }}
+  button:hover {{
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.22);
+  }}
+  button.copied {{
+    color: #5eead4;
+  }}
+  svg {{
+    width: 15px;
+    height: 15px;
+    fill: currentColor;
+  }}
+</style>
+</head>
+<body>
+<button id="copy-btn" type="button" title="Copy" aria-label="Copy">
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+  </svg>
+</button>
+<script>
+(() => {{
+  const btn = document.getElementById("copy-btn");
+  const encoded = "{encoded}";
+  const text = new TextDecoder("utf-8").decode(
+    Uint8Array.from(atob(encoded), (ch) => ch.charCodeAt(0))
+  );
+  btn.addEventListener("click", async () => {{
+    let ok = false;
+    try {{
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    }} catch (err) {{
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      try {{ ok = document.execCommand("copy"); }} catch (e2) {{ ok = false; }}
+      ta.remove();
+    }}
+    if (ok) {{
+      btn.classList.add("copied");
+      btn.title = "Copied";
+      window.setTimeout(() => {{
+        btn.classList.remove("copied");
+        btn.title = "Copy";
+      }}, 1200);
+    }}
+  }});
+}})();
+</script>
+</body>
+</html>
+        """,
+        height=30,
+        width=34,
+    )
+
+
 def render_message(message: dict[str, Any]) -> None:
     role = message["role"]
     with st.chat_message(
@@ -116,47 +212,63 @@ def render_message(message: dict[str, Any]) -> None:
     ):
         metadata = message.get("metadata") or {}
         if role == "user" and st.session_state.editing_message == message["id"]:
-            revised = st.text_area(
-                "Revise your message",
-                value=message["content"],
-                key=f"edit-text-{message['id']}",
-            )
-            save_column, cancel_column = st.columns(2)
-            if save_column.button(
-                "Save & resend",
-                key=f"save-{message['id']}",
-                use_container_width=True,
-            ):
-                if not revised.strip():
-                    st.error("Enter a message before resending.")
-                    return
-                st.session_state.pending_edit = {
-                    "message_id": message["id"],
-                    "prompt": revised.strip(),
-                }
-                st.session_state.editing_message = None
-                rerun()
-            if cancel_column.button(
-                "Cancel",
-                key=f"cancel-{message['id']}",
-                use_container_width=True,
-            ):
-                st.session_state.editing_message = None
-                rerun()
+            safe_id = message["id"].replace("-", "_")
+            with st.container(key=f"user_message_edit_{safe_id}"):
+                revised = st.text_area(
+                    "Edit message",
+                    value=message["content"],
+                    key=f"edit-text-{message['id']}",
+                    label_visibility="collapsed",
+                    height=78,
+                )
+                with st.container(key=f"user_message_edit_actions_{safe_id}"):
+                    cancel_column, send_column = st.columns(2, gap="small")
+                    if cancel_column.button(
+                        "Cancel",
+                        key=f"cancel-{message['id']}",
+                        type="secondary",
+                    ):
+                        st.session_state.editing_message = None
+                        rerun()
+                    if send_column.button(
+                        "Send",
+                        key=f"save-{message['id']}",
+                        type="primary",
+                    ):
+                        if not revised.strip():
+                            st.error("Enter a message before resending.")
+                            return
+                        st.session_state.pending_edit = {
+                            "message_id": message["id"],
+                            "prompt": revised.strip(),
+                        }
+                        st.session_state.editing_message = None
+                        rerun()
             return
         if role == "user":
             safe_id = message["id"].replace("-", "_")
+            content = str(message["content"])
             with st.container(key=f"user_message_row_{safe_id}"):
-                st.markdown(message["content"])
-                with st.popover(
-                    "⋮",
-                    type="tertiary",
-                    key=f"message-menu-{message['id']}",
-                ):
-                    if st.button(
-                        "Edit message",
+                # Own the bubble padding in HTML we control (Streamlit chat chrome
+                # keeps resetting padding on stChatMessage).
+                escaped = html.escape(content).replace("\n", "<br />")
+                st.markdown(
+                    f'<div class="cd-user-bubble-text">{escaped}</div>',
+                    unsafe_allow_html=True,
+                )
+                with st.container(key=f"user_message_actions_{safe_id}"):
+                    _, copy_column, edit_column = st.columns(
+                        [0.76, 0.12, 0.12],
+                        gap="small",
+                    )
+                    with copy_column:
+                        _render_copy_control(content)
+                    if edit_column.button(
+                        "",
+                        icon=":material/edit:",
                         key=f"edit-{message['id']}",
-                        use_container_width=True,
+                        help="Edit",
+                        type="tertiary",
                     ):
                         st.session_state.editing_message = message["id"]
                         rerun()

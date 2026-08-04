@@ -56,7 +56,7 @@ existing Streamlit UI remains compatible during the incremental migration.
   source folders. The UI exposes selection and preview only, while repository
   enforcement blocks interactive deletion and keeps synchronizer refreshes safe.
   A separate 50 MB trusted-course-file limit includes the supplied 27 MB and
-  34 MB lecture PDFs without increasing the 25 MB student-upload limit.
+  34 MB lecture PDFs without increasing the 10 MB student-upload limit.
 - Replaced automatic-stage movement announcements with the next stage heading
   and one or two topic-specific coaching questions. Provider prompts use the
   selected course context; deterministic mock/offline mode includes a focused
@@ -125,7 +125,7 @@ existing Streamlit UI remains compatible during the incremental migration.
   removed.
 - Sources/Guidance browser acceptance passed at desktop and 390 px: the help
   icon stays beside `Sources`, selector spacing is compact, Add remains aligned,
-  and `Guidance: Quick/Complex` uses a compact field. The mock suite remains at
+  and `Guidance Level: Quick/Complex` uses a compact field. The mock suite remains at
   **60 passing tests**, compilation passes, and the browser console is clean.
 - Corrected the top-bar regression at desktop and wide-desktop: the notebook
   title is permanently visible and editable, Notebooks shows its Material icon

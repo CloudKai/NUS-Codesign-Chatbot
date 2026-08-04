@@ -25,6 +25,8 @@
         --cd-subtle:#E8ECF0;
         --cd-shadow:0 8px 24px rgba(21,32,43,.08);
         --cd-scrollbar:#C4CBD4;
+        --cd-checkbox-bg:#FFFFFF;
+        --cd-checkbox-border:#D5DCE3;
         --cd-header-height:5.4rem;
         --cd-radius:.75rem;
     }
@@ -79,19 +81,10 @@
         font-weight:680;
         line-height:1;
     }
-    .cd-thinking-path-tip {
-        margin:.55rem 0 0;
-        padding:.15rem .1rem 0;
-        color:var(--cd-muted);
-        font-size:.68rem;
-        font-weight:450;
-        line-height:1.4;
-    }
     .st-key-thinking_path_footer {
         margin-top:auto !important;
         flex:0 0 auto !important;
     }
-    .st-key-studio_panel [data-testid="stElementContainer"]:has(.cd-thinking-path-tip),
     .st-key-studio_panel [data-testid="stElementContainer"].st-key-thinking_path_footer,
     .st-key-studio_panel > [data-testid="stVerticalBlock"]
     > [data-testid="stLayoutWrapper"]:has(.st-key-thinking_path_footer) {
@@ -238,6 +231,7 @@
         font-size:.84rem;
         font-weight:700;
         line-height:1.35;
+        padding: 0.4rem 0;
     }
     .cd-profile-help-body {
         margin:0;
@@ -352,9 +346,14 @@
     }
 
     [data-testid="stChatMessage"]:has([aria-label="Chat message from user"]) {
-        background:var(--cd-accent-soft) !important;
-        border-radius:var(--cd-radius);
-        padding:.2rem .45rem;
+        background:transparent !important;
+        border-radius:0 !important;
+        padding:0 !important;
+        width:fit-content !important;
+        max-width:min(72%, calc(70ch + 16px)) !important;
+        margin-left:auto !important;
+        margin-right:0 !important;
+        box-sizing:border-box !important;
     }
 
 
@@ -1770,13 +1769,37 @@
         background:transparent;
     }
 
+    /* User bubble chrome lives on our keyed row (padding we control). */
     [data-testid="stChatMessage"]:has([aria-label="Chat message from user"]) {
-        width:fit-content;
-        max-width:72%;
-        margin-left:auto;
-        padding:.95rem 1.02rem;
-        border-radius:.85rem;
-        background:var(--cd-accent-soft);
+        width:fit-content !important;
+        max-width:min(72%, calc(70ch + 16px)) !important;
+        margin-left:auto !important;
+        margin-right:0 !important;
+        padding:0 !important;
+        border-radius:0 !important;
+        background:transparent !important;
+        box-sizing:border-box !important;
+        gap:0 !important;
+    }
+
+    [data-testid="stChatMessage"]:has([aria-label="Chat message from user"])
+    [data-testid="stChatMessageContent"],
+    [data-testid="stChatMessage"]:has([aria-label="Chat message from user"])
+    [data-testid="stChatMessageContent"] > div {
+        width:fit-content !important;
+        max-width:100% !important;
+        margin-left:auto !important;
+        padding:0 !important;
+        box-sizing:border-box !important;
+    }
+
+    [data-testid="stChatMessage"]:has([class*="st-key-user_message_edit_"]) {
+        width:fit-content !important;
+        max-width:min(72%, calc(70ch + 16px)) !important;
+        margin-left:auto !important;
+        margin-right:0 !important;
+        padding:0 !important;
+        background:transparent !important;
     }
 
     [data-testid="stChatMessageAvatarCustom"] {
@@ -1826,40 +1849,196 @@
         line-height:1.3;
     }
 
-    [class*="st-key-user_message_row_"] {
-        position:relative;
-        min-height:2rem;
-        padding-right:2rem;
+    [class*="st-key-user_message_row_"],
+    [class*="st-key-user_message_edit_"],
+    [data-testid="stElementContainer"]:has(> [class*="st-key-user_message_row_"]),
+    [data-testid="stElementContainer"]:has(> [class*="st-key-user_message_edit_"]) {
+        position:relative !important;
+        display:block !important;
+        width:fit-content !important;
+        max-width:min(100%, calc(70ch + 16px)) !important;
+        margin-left:auto !important;
+        padding:10px 8px 8px !important;
+        border-radius:.85rem !important;
+        background:var(--cd-accent-soft) !important;
+        box-sizing:border-box !important;
     }
 
-    [class*="st-key-user_message_row_"] div[data-testid="stPopover"] {
-        position:absolute;
-        top:-.05rem;
-        right:-.1rem;
-        width:1.8rem !important;
-        opacity:.5;
+    [class*="st-key-user_message_row_"] > [data-testid="stVerticalBlock"],
+    [class*="st-key-user_message_row_"] > [data-testid="stLayoutWrapper"],
+    [class*="st-key-user_message_edit_"] > [data-testid="stVerticalBlock"],
+    [class*="st-key-user_message_edit_"] > [data-testid="stLayoutWrapper"] {
+        gap:.35rem !important;
+        row-gap:.35rem !important;
+        width:100% !important;
+        max-width:100% !important;
+        margin:0 !important;
+        padding:0 !important;
     }
 
-    [class*="st-key-user_message_row_"] div[data-testid="stPopover"] button {
-        width:1.8rem;
-        min-width:1.8rem;
-        min-height:1.8rem;
+    .cd-user-bubble-text {
+        width:fit-content;
+        max-width:70ch; /* 70 chars incl. spaces */
+        max-height:calc(0.9rem * 1.45 * 3);
+        margin:0;
         padding:0;
+        overflow-x:hidden;
+        overflow-y:auto;
+        color:var(--cd-text);
+        font-size:.9rem;
+        line-height:1.45;
+        scrollbar-width:thin;
+        overflow-wrap:anywhere;
+        word-break:normal;
+    }
+
+    [class*="st-key-user_message_row_"] [data-testid="stMarkdownContainer"],
+    [class*="st-key-user_message_row_"] [data-testid="stMarkdownContainer"] p {
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    [class*="st-key-user_message_actions_"] {
+        position:static !important;
+        display:block !important;
+        width:100% !important;
+        height:auto !important;
+        min-height:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    [data-testid="stElementContainer"]:has(> [class*="st-key-user_message_actions_"]),
+    [data-testid="stLayoutWrapper"]:has(> [data-testid="stElementContainer"] > [class*="st-key-user_message_actions_"]) {
+        position:static !important;
+        width:100% !important;
+        height:auto !important;
+        min-height:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    [class*="st-key-user_message_actions_"] [data-testid="stHorizontalBlock"] {
+        gap:.2rem !important;
+        justify-content:flex-end !important;
+        align-items:center !important;
+        min-height:0 !important;
+        width:100% !important;
+        margin:0 !important;
+    }
+
+    [class*="st-key-user_message_actions_"] [data-testid="stColumn"] {
+        min-width:0 !important;
+        width:auto !important;
+        flex:0 0 auto !important;
+    }
+
+    [class*="st-key-user_message_actions_"] [data-testid="stElementContainer"],
+    [class*="st-key-user_message_actions_"] [data-testid="stButton"],
+    [class*="st-key-user_message_actions_"] iframe {
+        margin:0 !important;
+        padding:0 !important;
+        min-height:0 !important;
+    }
+
+    [class*="st-key-user_message_actions_"] iframe {
+        display:block !important;
+        width:34px !important;
+        height:30px !important;
         border:0 !important;
         background:transparent !important;
     }
 
-    [class*="st-key-user_message_row_"] div[data-testid="stPopover"] button p {
-        display:block !important;
-        margin:0 !important;
-        font-size:1.18rem !important;
-        line-height:1;
+    [class*="st-key-user_message_actions_"] button {
+        width:1.7rem !important;
+        min-width:1.7rem !important;
+        min-height:1.7rem !important;
+        height:1.7rem !important;
+        padding:0 !important;
+        border:0 !important;
+        border-radius:.45rem !important;
+        background:color-mix(in srgb, var(--cd-surface) 35%, transparent) !important;
+        color:var(--cd-muted) !important;
+        opacity:.9;
     }
 
-    [class*="st-key-user_message_row_"] div[data-testid="stPopover"] button
-    [data-testid="stIconMaterial"],
-    [class*="st-key-user_message_row_"] div[data-testid="stPopover"] button svg {
+    [class*="st-key-user_message_actions_"] button:hover {
+        background:color-mix(in srgb, var(--cd-border) 55%, transparent) !important;
+        color:var(--cd-text) !important;
+        opacity:1;
+    }
+
+    [class*="st-key-user_message_actions_"] button p {
         display:none !important;
+    }
+
+    [class*="st-key-user_message_edit_"] [data-testid="stTextArea"],
+    [class*="st-key-user_message_edit_"] [data-testid="stTextArea"] > div,
+    [class*="st-key-user_message_edit_"] [data-baseweb="textarea"],
+    [class*="st-key-user_message_edit_"] [data-baseweb="base-input"] {
+        width:fit-content !important;
+        max-width:70ch !important; /* 70 chars incl. spaces */
+        margin:0 !important;
+        border:0 !important;
+        background:transparent !important;
+        box-shadow:none !important;
+    }
+
+    [class*="st-key-user_message_edit_"] textarea {
+        width:min(70ch, 100%) !important;
+        max-width:min(70ch, 100%) !important;
+        min-height:calc(0.9rem * 1.45 * 3) !important;
+        max-height:calc(0.9rem * 1.45 * 3) !important;
+        height:calc(0.9rem * 1.45 * 3) !important;
+        margin:0 !important;
+        padding:0 !important;
+        border:0 !important;
+        background:transparent !important;
+        box-shadow:none !important;
+        color:var(--cd-text) !important;
+        font-size:.9rem !important;
+        line-height:1.45 !important;
+        resize:none !important;
+        overflow-y:auto !important;
+        overflow-wrap:anywhere;
+    }
+
+    [class*="st-key-user_message_edit_actions_"] {
+        width:fit-content !important;
+        max-width:100% !important;
+        margin:0 0 0 auto !important;
+    }
+
+    [data-testid="stElementContainer"]:has(> [class*="st-key-user_message_edit_actions_"]) {
+        width:fit-content !important;
+        margin-left:auto !important;
+    }
+
+    [class*="st-key-user_message_edit_actions_"] [data-testid="stHorizontalBlock"] {
+        gap:.35rem !important;
+        justify-content:flex-end;
+        width:fit-content !important;
+        margin-left:auto !important;
+    }
+
+    [class*="st-key-user_message_edit_actions_"] [data-testid="stColumn"] {
+        flex:0 0 auto !important;
+        width:auto !important;
+        min-width:4.6rem !important;
+    }
+
+    [class*="st-key-user_message_edit_actions_"] button {
+        min-width:4.6rem !important;
+        min-height:2rem !important;
+        padding:.2rem .85rem !important;
+        border-radius:999px !important;
+        font-weight:620 !important;
+        white-space:nowrap !important;
+    }
+
+    [class*="st-key-user_message_edit_actions_"] button p {
+        white-space:nowrap !important;
+        writing-mode:horizontal-tb !important;
     }
 
     .st-key-chat_composer {
@@ -3256,9 +3435,9 @@
 
     [role="dialog"]:has(.notebook-actions-context)
     [data-testid="stCheckbox"] label > div:nth-child(2) {
-        border:1px solid var(--cd-border) !important;
+        border:1px solid var(--cd-checkbox-border, var(--cd-border)) !important;
         border-radius:.35rem !important;
-        background:var(--cd-surface) !important;
+        background:var(--cd-checkbox-bg, var(--cd-surface)) !important;
         color:var(--cd-accent) !important;
     }
 
@@ -3279,6 +3458,37 @@
     [data-testid="stCheckbox"] p {
         color:var(--cd-text) !important;
         -webkit-text-fill-color:var(--cd-text) !important;
+    }
+
+    /* All checkboxes: white control in Light mode (via --cd-checkbox-bg). */
+    [data-testid="stCheckbox"] label > div:nth-child(2),
+    [data-testid="stCheckbox"] label > div:has(> svg),
+    [data-testid="stCheckbox"] [data-baseweb="checkbox"] > div,
+    [data-baseweb="checkbox"] > div:first-child {
+        border:1px solid var(--cd-checkbox-border, var(--cd-border)) !important;
+        background:var(--cd-checkbox-bg, #FFFFFF) !important;
+        box-shadow:none !important;
+    }
+
+    [data-testid="stCheckbox"] label:has(input:checked) > div:nth-child(2),
+    [data-testid="stCheckbox"] label:has(input:checked) > div:has(> svg),
+    [data-testid="stCheckbox"] [data-baseweb="checkbox"][data-checked="true"] > div,
+    [data-baseweb="checkbox"][data-checked="true"] > div:first-child {
+        border-color:var(--cd-accent) !important;
+        background:var(--cd-accent) !important;
+    }
+
+    [data-testid="stCheckbox"] label:has(input:checked) > div:nth-child(2) svg,
+    [data-testid="stCheckbox"] label:has(input:checked) > div:has(> svg) svg,
+    [data-baseweb="checkbox"][data-checked="true"] svg {
+        fill:#fff !important;
+        stroke:#fff !important;
+        color:#fff !important;
+    }
+
+    [data-testid="stCheckbox"] label:not(:has(input:checked)) > div:nth-child(2) svg,
+    [data-testid="stCheckbox"] label:not(:has(input:checked)) > div:has(> svg) svg {
+        opacity:0 !important;
     }
 
     .st-key-notebook_action_danger

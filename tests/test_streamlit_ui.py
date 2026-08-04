@@ -2,6 +2,8 @@ from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
 
+from backend.settings import settings
+
 
 def test_streamlit_notebook_workspace_smoke():
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
@@ -14,9 +16,9 @@ def test_streamlit_notebook_workspace_smoke():
     assert composer.placeholder == "Ask a question or share your thinking"
     assert composer.proto.accept_file
     assert not composer.proto.accept_audio
-    assert composer.proto.max_upload_size_mb == 25
+    assert composer.proto.max_upload_size_mb == settings.max_file_size_mb
 
-    assert not any(selectbox.label == "Guidance:" for selectbox in app.selectbox)
+    assert not any(selectbox.label == "Guidance Level:" for selectbox in app.selectbox)
     assert not any(selectbox.label == "Model" for selectbox in app.selectbox)
     # Profile preferences live in the settings popover (exposed to AppTest).
     assert any(selectbox.label == "Language" for selectbox in app.selectbox)
@@ -28,7 +30,7 @@ def test_streamlit_notebook_workspace_smoke():
     )
     assert workspace_panel.options == ["Sources", "Chat", "Journey"]
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "Guidance:" in rendered
+    assert "Guidance Level:" in rendered
     assert any(button.label == "Quick" for button in app.button)
     assert {tab.label for tab in app.tabs} >= {"Journey", "Review"}
     assert not any(
@@ -123,9 +125,8 @@ def test_streamlit_notebook_workspace_smoke():
     assert any(button.label == "‹" for button in app.button)
     assert any(button.label == "›" for button in app.button)
     assert "cd-roadmap" in rendered
-    assert "cd-thinking-path-tip" in rendered
-    assert "less critical" in rendered
-    assert "press" in rendered.lower() or "<strong>Next</strong>" in rendered
+    assert "cd-thinking-path-tip" not in rendered
+    assert "less critical" not in rendered
     assert "ask to skip ahead" not in rendered
     assert "tell the coach you are ready to move on" not in rendered
     assert 'say "next" in Chat to move on' not in rendered

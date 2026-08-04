@@ -107,7 +107,7 @@ Default local configuration supports:
 
 ```env
 MODEL_PROVIDER=ollama|openai|mock
-OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_CHAT_MODEL=gpt-oss:20b
 OLLAMA_EMBEDDING_MODEL=<local-embedding-model>
 OPENAI_API_KEY=

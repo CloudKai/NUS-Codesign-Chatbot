@@ -49,6 +49,7 @@ def render_theme_css() -> None:
         --cd-panel:#EEF1F4;--cd-subtle:#E8ECF0;--cd-accent-soft:#E6F5F3;
         --cd-accent:#0F766E;--cd-accent-hover:#0D9488;--cd-success:#15803D;
         --cd-scrollbar:#C4CBD4;
+        --cd-checkbox-bg:#FFFFFF;--cd-checkbox-border:#D5DCE3;
         --cd-shadow:0 8px 24px rgba(21,32,43,.08);
     """
     dark_tokens = """
@@ -58,6 +59,7 @@ def render_theme_css() -> None:
         --cd-panel:#171C22;--cd-subtle:#1C232B;--cd-accent-soft:#14352F;
         --cd-accent:#2DD4BF;--cd-accent-hover:#5EEAD4;--cd-success:#4ADE80;
         --cd-scrollbar:#4A5560;
+        --cd-checkbox-bg:#1C232B;--cd-checkbox-border:#2A343E;
         --cd-shadow:0 18px 50px rgba(0,0,0,.34);
     """
     mode = st.session_state.get("appearance", "System")
@@ -252,6 +254,26 @@ def render_theme_css() -> None:
             [data-testid="stDownloadButton"] button * {{
                 color:var(--cd-text) !important;
                 -webkit-text-fill-color:var(--cd-text) !important;
+            }}
+            [data-testid="stCheckbox"] label > div:nth-child(2),
+            [data-testid="stCheckbox"] label > div:has(> svg),
+            [data-baseweb="checkbox"] > div:first-child {{
+                border:1px solid var(--cd-checkbox-border) !important;
+                background:var(--cd-checkbox-bg) !important;
+                box-shadow:none !important;
+            }}
+            [data-testid="stCheckbox"] label:has(input:checked) > div:nth-child(2),
+            [data-testid="stCheckbox"] label:has(input:checked) > div:has(> svg),
+            [data-baseweb="checkbox"][data-checked="true"] > div:first-child {{
+                border-color:var(--cd-accent) !important;
+                background:var(--cd-accent) !important;
+            }}
+            [data-testid="stCheckbox"] label:has(input:checked) > div:nth-child(2) svg,
+            [data-testid="stCheckbox"] label:has(input:checked) > div:has(> svg) svg,
+            [data-baseweb="checkbox"][data-checked="true"] svg {{
+                fill:#fff !important;
+                stroke:#fff !important;
+                color:#fff !important;
             }}
             [data-testid="stChatInput"] {{
                 color:var(--cd-text) !important;

@@ -328,29 +328,12 @@ def _confirm_next_stage_dialog() -> None:
 
 
 def render_thinking_path_footer() -> None:
-    """Render the footer tip and confirmation-gated Next control."""
-    pending = _fetch_pending_transition()
+    """Render the confirmation-gated Next control for Thinking Path."""
     if settings.auto_advance_stages:
-        tip = (
-            "Work through the current stage in Chat. When the coach judges this "
-            "step is addressed, the Thinking Path advances automatically."
-        )
-        st.markdown(
-            f'<div class="cd-thinking-path-tip">{tip}</div>',
-            unsafe_allow_html=True,
-        )
         return
 
-    tip = (
-        "Work through the current stage in Chat. When the coach recommends the "
-        "next stage, press <strong>Next</strong>. Confirming early can make the "
-        "process less critical."
-    )
-    tip_column, next_column = st.columns([0.72, 0.28], gap="small")
-    tip_column.markdown(
-        f'<div class="cd-thinking-path-tip">{tip}</div>',
-        unsafe_allow_html=True,
-    )
+    pending = _fetch_pending_transition()
+    _, next_column = st.columns([0.72, 0.28], gap="small")
     next_disabled = pending is None or not local_api_enabled()
     next_help = (
         "Available when the coach recommends moving on."

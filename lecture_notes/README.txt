@@ -19,7 +19,7 @@ Supported formats:
 - PNG, JPEG, WebP, and GIF images
 
 Instructor-managed course files may be up to 50 MB. Student uploads keep their
-separate 25 MB limit.
+separate 10 MB limit.
 
 The Sources panel automatically copies supported files into the active notebook,
 selects them, and includes extracted text in grounded responses. Originals stay

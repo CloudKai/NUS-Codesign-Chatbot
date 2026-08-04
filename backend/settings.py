@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+"""Application settings loaded from the project ``.env`` file.
+
+Fallback defaults match ``.env.example`` so missing keys stay cost-safe and
+aligned with documented local setup.
+"""
+
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,19 +47,19 @@ class Settings:
     mock_recommend_advance: bool = _boolean("MOCK_RECOMMEND_ADVANCE", False)
     auto_advance_stages: bool = _boolean("AUTO_ADVANCE_STAGES", False)
     model_provider: str = os.getenv("MODEL_PROVIDER", "mock").strip().lower()
-    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     ollama_chat_model: str = os.getenv("OLLAMA_CHAT_MODEL", "gpt-oss:20b")
     ollama_embedding_model: str = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
     openai_chat_model: str = os.getenv("OPENAI_CHAT_MODEL", "gpt-5.6-luna")
     api_base_url: str = os.getenv("CO_DESIGN_API_URL", "http://127.0.0.1:8000")
-    use_local_api: bool = _boolean("USE_LOCAL_API", False)
-    max_tool_iterations: int = int(os.getenv("MAX_TOOL_ITERATIONS", "20"))
-    max_files: int = int(os.getenv("MAX_FILES_PER_MESSAGE", "10"))
-    max_lecture_notes: int = int(os.getenv("MAX_LECTURE_NOTES", "50"))
+    use_local_api: bool = _boolean("USE_LOCAL_API", True)
+    max_tool_iterations: int = int(os.getenv("MAX_TOOL_ITERATIONS", "3"))
+    max_files: int = int(os.getenv("MAX_FILES_PER_MESSAGE", "5"))
+    max_lecture_notes: int = int(os.getenv("MAX_LECTURE_NOTES", "20"))
     max_course_material_size_mb: int = int(
         os.getenv("MAX_COURSE_MATERIAL_SIZE_MB", "50")
     )
-    max_file_size_mb: int = int(os.getenv("MAX_FILE_SIZE_MB", "25"))
+    max_file_size_mb: int = int(os.getenv("MAX_FILE_SIZE_MB", "10"))
     python_timeout_seconds: int = int(os.getenv("PYTHON_TIMEOUT_SECONDS", "30"))
     default_model: str = os.getenv("DEFAULT_CHAT_MODEL", "gpt-5.6-luna")
     default_reasoning_effort: str = os.getenv("DEFAULT_REASONING_EFFORT", "low")
