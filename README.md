@@ -191,8 +191,8 @@ Put instructor PDFs and related files under:
 - `lecture_notes/readings/`
 
 They sync into each notebook as locked **Lecture Notes** / **Readings** groups.
-`lecture_notes/README.txt` is instructional only and is not imported. Git ignores
-lecture contents; originals are never moved.
+`lecture_notes/README.txt` is instructional only and is not imported. Course
+materials in this folder are shared in the repo; originals are never moved.
 
 Trusted course files may be up to **50 MB**; student uploads remain **25 MB**
 (up to 10 files per add).

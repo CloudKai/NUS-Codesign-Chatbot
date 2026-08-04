@@ -3,8 +3,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.DS_Store
 data/
 .files/
 output/
-lecture_notes/*
-!lecture_notes/README.txt
