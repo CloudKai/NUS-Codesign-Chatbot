@@ -155,6 +155,31 @@ def test_lecture_notes_folder_syncs_updates_and_removes_sources(tmp_path, monkey
     assert store.list_sources(thread_id) == []
 
 
+def test_lecture_notes_sync_skips_upload_compression(tmp_path, monkeypatch):
+    from backend import source_library
+
+    store, thread_id, _files_dir = make_notebook(tmp_path, monkeypatch)
+    lecture_notes = tmp_path / "lecture_notes"
+    notes_folder = lecture_notes / "lectureNotes"
+    notes_folder.mkdir(parents=True)
+    (notes_folder / "week-01.txt").write_text("Course note", encoding="utf-8")
+    monkeypatch.setattr(source_library.settings, "lecture_notes_dir", lecture_notes)
+    monkeypatch.setattr(source_library.settings, "max_lecture_notes", 50)
+    monkeypatch.setattr(source_library.settings, "max_course_material_size_mb", 1)
+
+    seen: list[bool] = []
+    original = source_library.save_uploads
+
+    def tracking_save_uploads(*args, **kwargs):
+        seen.append(bool(kwargs.get("compress", True)))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(source_library, "save_uploads", tracking_save_uploads)
+    result = sync_lecture_notes_folder(store, thread_id)
+    assert result.added == 1
+    assert seen == [False]
+
+
 def test_course_material_groups_readings_without_moving_files():
     assert course_material_group("readings/Article.pdf") == "Readings"
     assert course_material_group("lectureNotes/Week 1.pdf") == "Lecture Notes"

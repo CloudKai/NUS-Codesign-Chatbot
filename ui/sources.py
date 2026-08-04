@@ -13,10 +13,7 @@ import streamlit as st
 from backend.settings import settings
 from backend.source_library import (
     COURSE_MATERIAL_GROUPS,
-    SourceImportError,
     add_file_sources,
-    add_text_source,
-    add_url_source,
     backfill_legacy_sources,
     is_locked_course_source,
 )
@@ -55,105 +52,51 @@ def safe_source_path(source: dict[str, Any]) -> Path | None:
     return path
 
 
-@st.dialog("Add sources", width="medium")
-def add_sources_dialog() -> None:
-    st.caption("Choose material to ground this notebook’s responses.")
-    upload_tab, web_tab, text_tab = st.tabs(["Upload", "Website", "Paste text"])
-    with upload_tab:
-        uploads = st.file_uploader(
-            "Drop files here or browse",
-            accept_multiple_files=True,
-            key=f"source-upload-{st.session_state.thread_id}",
-            help=f"Up to {settings.max_files} files, {settings.max_file_size_mb} MB each.",
-        )
-        st.caption(
-            "PDF, Word, PowerPoint, Excel, images, audio, or text · "
-            f"up to {settings.max_files} files · {settings.max_file_size_mb} MB each"
-        )
-        if st.button(
-            "Add to notebook",
-            type="primary",
-            use_container_width=True,
-            disabled=not uploads,
-        ):
-            try:
-                added = add_file_sources(
-                    store,
-                    st.session_state.thread_id,
-                    [
-                        (upload.name, upload.getvalue(), getattr(upload, "type", None))
-                        for upload in uploads
-                    ],
-                )
-                if added:
-                    st.session_state.allow_model_knowledge = False
-                    store.update_thread(
-                        st.session_state.thread_id,
-                        metadata={"allow_model_knowledge": False},
-                    )
-                st.success(f"Added {len(added)} source{'s' if len(added) != 1 else ''}.")
-                rerun()
-            except Exception as exc:
-                st.error(str(exc))
-        st.caption("Files stay in this local notebook.")
+def _import_uploaded_sources(uploads: list[Any]) -> None:
+    """Persist selected files into the active notebook and reset the picker.
 
-    with web_tab:
-        url = st.text_input(
-            "Public webpage URL",
-            placeholder="https://example.edu/article",
-            key=f"source-url-{st.session_state.thread_id}",
+    Dedupes against the current uploader widget generation (``source_upload_nonce``)
+    so the 1s Sources fragment cannot re-import the same selection, while a later
+    picker generation can re-add the same filenames after delete or retry.
+    """
+    if not uploads:
+        return
+    thread_id = st.session_state.thread_id
+    nonce = int(st.session_state.get("source_upload_nonce") or 0)
+    fingerprint = tuple(
+        (upload.name, int(getattr(upload, "size", 0) or 0)) for upload in uploads
+    )
+    handled_key = f"source-upload-handled-{thread_id}-{nonce}"
+    if st.session_state.get(handled_key) == fingerprint:
+        return
+    # Claim this selection before the slow import so the fragment cannot start
+    # a second concurrent attempt while the first is still running.
+    st.session_state[handled_key] = fingerprint
+    try:
+        added = add_file_sources(
+            store,
+            thread_id,
+            [
+                (upload.name, upload.getvalue(), getattr(upload, "type", None))
+                for upload in uploads
+            ],
         )
-        st.caption(
-            "Safely import a public HTML or plain-text webpage. "
-            "Local network URLs are blocked."
+    except Exception as exc:
+        st.session_state["source_upload_error"] = str(exc)
+        # Clear the picker so the fragment stops retrying the failed selection.
+        st.session_state["source_upload_nonce"] = nonce + 1
+        rerun()
+        return
+    st.session_state.pop("source_upload_error", None)
+    if added:
+        st.session_state.allow_model_knowledge = False
+        store.update_thread(
+            thread_id,
+            metadata={"allow_model_knowledge": False},
         )
-        if st.button(
-            "Import webpage",
-            type="primary",
-            use_container_width=True,
-            disabled=not url.strip(),
-        ):
-            try:
-                add_url_source(store, st.session_state.thread_id, url)
-                st.session_state.allow_model_knowledge = False
-                store.update_thread(
-                    st.session_state.thread_id,
-                    metadata={"allow_model_knowledge": False},
-                )
-                st.success("Web source added.")
-                rerun()
-            except SourceImportError as exc:
-                st.error(str(exc))
-
-    with text_tab:
-        title = st.text_input(
-            "Source title",
-            placeholder="Lecture notes",
-            key=f"pasted-title-{st.session_state.thread_id}",
-        )
-        text = st.text_area(
-            "Source text",
-            placeholder="Paste notes, an article excerpt, or assignment material…",
-            height=230,
-            key=f"pasted-text-{st.session_state.thread_id}",
-        )
-        if st.button(
-            "Add pasted text",
-            type="primary",
-            use_container_width=True,
-            disabled=not text.strip(),
-        ):
-            try:
-                add_text_source(store, st.session_state.thread_id, title, text)
-                st.session_state.allow_model_knowledge = False
-                store.update_thread(
-                    st.session_state.thread_id,
-                    metadata={"allow_model_knowledge": False},
-                )
-                st.success("Text source added.")
-                rerun()
-            except SourceImportError as exc:
-                st.error(str(exc))
+        st.toast(f"Added {len(added)} source{'s' if len(added) != 1 else ''}.")
+    st.session_state["source_upload_nonce"] = nonce + 1
+    rerun()
 
 
 @st.dialog("Source", width="large")
@@ -281,18 +224,30 @@ def render_sources_panel() -> None:
                 "</div></div>",
                 unsafe_allow_html=True,
             )
-            if st.button(
-                "Add",
-                icon=":material/add:",
-                key="add-sources",
-            ):
-                add_sources_dialog()
-        notification_key = f"source-sync-notified-{st.session_state.thread_id}"
-        if lecture_sync and (
-            lecture_sync.added or lecture_sync.updated or lecture_sync.removed
-        ) and st.session_state.get(notification_key) != id(sync_future):
-            st.session_state[notification_key] = id(sync_future)
-            st.toast("Course materials are ready.")
+            with st.container(key="add-sources"):
+                st.markdown(
+                    '<div class="cd-sources-add-face" aria-hidden="true">+ Add</div>',
+                    unsafe_allow_html=True,
+                )
+                upload_nonce = int(st.session_state.get("source_upload_nonce") or 0)
+                uploads = st.file_uploader(
+                    "Add",
+                    accept_multiple_files=True,
+                    label_visibility="collapsed",
+                    key=(
+                        f"source-upload-{st.session_state.thread_id}-"
+                        f"{upload_nonce}"
+                    ),
+                    help=(
+                        f"Choose files to add · up to {settings.max_files} files · "
+                        f"{settings.max_file_size_mb} MB each"
+                    ),
+                )
+                if uploads:
+                    _import_uploaded_sources(list(uploads))
+            upload_error = st.session_state.pop("source_upload_error", None)
+            if upload_error:
+                st.error(upload_error)
         if lecture_sync and lecture_sync.errors:
             st.caption(
                 "Some lecture notes could not be imported: "
@@ -301,15 +256,7 @@ def render_sources_panel() -> None:
         if sync_error:
             st.error(sync_error)
         if sync_loading:
-            st.status(
-                "Loading course materials…",
-                state="running",
-                expanded=False,
-            )
-            st.caption(
-                "Chat and Thinking Path remain available while Sources finish loading."
-            )
-            return
+            st.caption("Loading course materials in the background…")
 
         search = st.text_input(
             "Search sources",
@@ -343,6 +290,10 @@ def render_sources_panel() -> None:
                         metadata={"allow_model_knowledge": False},
                     )
                 rerun()
+        elif sync_loading:
+            st.caption(
+                "Chat and Thinking Path stay available while course materials import."
+            )
 
     def render_source_card(source: dict[str, Any]) -> None:
         """Render one selectable source with preview and edit actions."""

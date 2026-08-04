@@ -103,7 +103,7 @@ def render_topbar() -> tuple[str, str | None]:
                 ):
                     notebooks_dialog()
             guidance_label_column.markdown(
-                '<p class="topbar-guidance-label">Guidance:</p>',
+                '<p class="topbar-guidance-label">Guidance Level:</p>',
                 unsafe_allow_html=True,
             )
             journey = normalize_journey(st.session_state.learning_journey)

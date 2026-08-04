@@ -28,6 +28,7 @@ Only read that for UI tasks that touch API migration or coaching flow.
 |---|---|
 | `constants.py` | Response languages and appearance modes |
 | `components.py` | Shared HTML helpers for progress, empty states, review cards |
+| `toasts.py` | Corner toast helper (timed slide-in notifications) |
 | `assets/template.css` | Static layout/component stylesheet (edit CSS here) |
 | `theme.py` | Loads `assets/template.css`, `inject_template_css()`, dynamic `render_theme_css()` |
 | `layout/` | Browser-side layout helpers (column resize, sources scroll, composer) |

@@ -18,7 +18,7 @@ def test_streamlit_notebook_workspace_smoke():
     assert not composer.proto.accept_audio
     assert composer.proto.max_upload_size_mb == settings.max_file_size_mb
 
-    assert not any(selectbox.label == "Guidance Level:" for selectbox in app.selectbox)
+    assert not any(selectbox.label == "Guidance:" for selectbox in app.selectbox)
     assert not any(selectbox.label == "Model" for selectbox in app.selectbox)
     # Profile preferences live in the settings popover (exposed to AppTest).
     assert any(selectbox.label == "Language" for selectbox in app.selectbox)
@@ -30,7 +30,7 @@ def test_streamlit_notebook_workspace_smoke():
     )
     assert workspace_panel.options == ["Sources", "Chat", "Journey"]
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "Guidance Level:" in rendered
+    assert "Guidance:" in rendered
     assert any(button.label == "Quick" for button in app.button)
     assert {tab.label for tab in app.tabs} >= {"Journey", "Review"}
     assert not any(
@@ -61,7 +61,7 @@ def test_streamlit_notebook_workspace_smoke():
     assert "Clarify the question, problem, or claim" in rendered
     assert "Add your first source" in rendered
     assert "Drop files into lecture_notes/" not in rendered
-    assert "Loading course materials…" in Path("ui/sources.py").read_text(
+    assert "Loading course materials in the background…" in Path("ui/sources.py").read_text(
         encoding="utf-8"
     )
     assert not any("Course library" in (caption.value or "") for caption in app.caption)
@@ -139,7 +139,12 @@ def test_streamlit_notebook_workspace_smoke():
     assert "background:var(--cd-panel)" in rendered
 
     button_labels = {button.label for button in app.button}
-    assert {"Notebooks", "Add"} <= button_labels
+    assert "Notebooks" in button_labels
+    assert "Link" not in button_labels
+    assert len(app.file_uploader) >= 1
+    assert any(
+        (uploader.label or "") == "Add" for uploader in app.file_uploader
+    )
     assert "About Sources" not in button_labels
     assert 'aria-label="About Sources"' not in rendered
     assert "source-title-help" not in rendered
@@ -177,15 +182,7 @@ def test_add_pasted_source_then_chat_with_citation():
     from backend.student_store import StudentStore
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    next(button for button in app.button if button.label == "Add").click().run()
-    assert not app.exception
-    assert {tab.label for tab in app.tabs} >= {
-        "Upload",
-        "Website",
-        "Paste text",
-    }
-    assert any(item.label == "Source title" for item in app.text_input)
-    assert any(item.label == "Source text" for item in app.text_area)
+    assert any((uploader.label or "") == "Add" for uploader in app.file_uploader)
 
     local_store = StudentStore()
     add_text_source(

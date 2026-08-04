@@ -40,7 +40,6 @@ def render_profile_menu() -> None:
                 APPEARANCE_MODES,
                 key="setting_appearance",
                 on_change=persist_appearance,
-                help="System follows your device theme.",
             )
             current_language = str(st.session_state.response_language or "English")
             if current_language not in RESPONSE_LANGUAGES:

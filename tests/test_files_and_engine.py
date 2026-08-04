@@ -4,7 +4,11 @@ from types import SimpleNamespace
 import pytest
 
 from backend.chat_service import ChatOptions, StudentChatEngine, response_input_for_model
-from backend.file_processing import document_context, save_uploads
+from backend.file_processing import (
+    compress_upload_bytes,
+    document_context,
+    save_uploads,
+)
 from backend.student_store import StudentStore
 
 
@@ -19,6 +23,64 @@ def test_text_assignment_upload_is_saved_and_extracted(tmp_path, monkeypatch):
     assert uploads[0].supported is True
     assert uploads[0].path.is_file()
     assert "Compare two theories" in document_context(uploads)
+
+
+def test_compress_upload_bytes_shrinks_large_jpeg_without_growing():
+    from io import BytesIO
+
+    from PIL import Image
+
+    image = Image.new("RGB", (2400, 1800), color=(32, 96, 160))
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG", quality=95)
+    original = buffer.getvalue()
+    compressed = compress_upload_bytes("photo.jpg", original)
+    assert len(compressed) <= len(original)
+    assert compressed[:2] == b"\xff\xd8"
+
+
+def test_compress_upload_bytes_leaves_small_text_unchanged():
+    payload = b"short notes"
+    assert compress_upload_bytes("notes.txt", payload) is payload
+
+
+def test_save_uploads_compresses_before_persist(tmp_path, monkeypatch):
+    from io import BytesIO
+
+    from backend import file_processing
+    from PIL import Image
+
+    monkeypatch.setattr(file_processing.settings, "files_dir", tmp_path / "files")
+    image = Image.new("RGB", (2200, 1600), color=(200, 40, 40))
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG", quality=95)
+    original = buffer.getvalue()
+    uploads = save_uploads(
+        "thread-compress",
+        [("slide.jpg", original, "image/jpeg")],
+    )
+    assert uploads[0].path.is_file()
+    assert uploads[0].size == uploads[0].path.stat().st_size
+    assert uploads[0].size <= len(original)
+
+
+def test_save_uploads_can_skip_compression(tmp_path, monkeypatch):
+    from backend import file_processing
+
+    monkeypatch.setattr(file_processing.settings, "files_dir", tmp_path / "files")
+
+    def fail_if_called(name: str, content: bytes) -> bytes:
+        raise AssertionError(f"compress should be skipped for {name}")
+
+    monkeypatch.setattr(file_processing, "compress_upload_bytes", fail_if_called)
+    payload = b"%PDF-1.4 already prepared course material"
+    uploads = save_uploads(
+        "thread-course",
+        [("Week1.pdf", payload, "application/pdf")],
+        compress=False,
+    )
+    assert uploads[0].path.read_bytes() == payload
+    assert uploads[0].size == len(payload)
 
 
 def test_upload_path_and_limits_are_safe(tmp_path, monkeypatch):

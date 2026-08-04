@@ -55,8 +55,15 @@ existing Streamlit UI remains compatible during the incremental migration.
 - Grouped instructor-managed PDFs into locked **Lecture Notes** and **Readings**
   source folders. The UI exposes selection and preview only, while repository
   enforcement blocks interactive deletion and keeps synchronizer refreshes safe.
-  A separate 50 MB trusted-course-file limit includes the supplied 27 MB and
-  34 MB lecture PDFs without increasing the 10 MB student-upload limit.
+  A separate 50 MB trusted-course-file limit covers compressed lecture PDFs
+  without increasing the 10 MB student-upload limit. New notebooks keep Sources
+  open so course-material import can start immediately; sync runs quietly in
+  the background without re-compressing shared lecture files.
+- Student uploads stored through ``save_uploads`` (Sources Add, chat attachments)
+  are compressed when safe. PDFs keep extractable text; images are downscaled.
+  Lecture-note sync copies prepared folder files without recompression.
+  Sources **Add** is a compact file picker in the original header spot: choose
+  files and they import immediately, with no dialog.
 - Replaced automatic-stage movement announcements with the next stage heading
   and one or two topic-specific coaching questions. Provider prompts use the
   selected course context; deterministic mock/offline mode includes a focused

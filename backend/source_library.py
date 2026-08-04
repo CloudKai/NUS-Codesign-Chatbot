@@ -318,12 +318,14 @@ def add_file_sources(
     extra_metadata: dict[str, Any] | None = None,
     max_file_size_mb: int | None = None,
     preserve_display_names: bool = False,
+    compress: bool = True,
 ) -> list[dict[str, Any]]:
     upload_items = list(uploads)
     stored_uploads = save_uploads(
         thread_id,
         upload_items,
         max_file_size_mb=max_file_size_mb,
+        compress=compress,
     )
     created: list[dict[str, Any]] = []
     for index, upload in enumerate(stored_uploads):
@@ -450,6 +452,9 @@ def _sync_lecture_notes_folder(
                 },
                 max_file_size_mb=settings.max_course_material_size_mb,
                 preserve_display_names=True,
+                # Shared lecture files are prepared offline; skip MuPDF/Pillow
+                # rewrite so new-notebook sync stays a fast copy + extract.
+                compress=False,
             )
         except (OSError, ValueError) as exc:
             errors.append(f"{relative_text}: {exc}")

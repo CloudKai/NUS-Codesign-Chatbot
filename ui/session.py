@@ -19,6 +19,7 @@ from backend.student_journey import default_journey, normalize_journey
 from backend.student_support import DEFAULT_SUPPORT_MODE
 
 from ui.constants import APPEARANCE_MODES, RESPONSE_LANGUAGES
+from ui.layout.column_resize import set_side_panel_collapsed
 from ui.runtime import rerun, store
 
 
@@ -86,6 +87,9 @@ def initialize_session() -> None:
 def new_notebook(should_rerun: bool = True) -> None:
     """Create an untitled notebook with a fresh Focus-stage journey.
 
+    User-initiated creates stay on Chat with Sources open so course materials
+    can load. Shows a short loading toast, then reruns the app.
+
     Args:
         should_rerun: When True, trigger a Streamlit rerun after session updates.
     """
@@ -114,8 +118,11 @@ def new_notebook(should_rerun: bool = True) -> None:
     st.session_state.assignment = {"title": "", "course": "", "brief": "", "rubric": ""}
     st.session_state.allow_model_knowledge = False
     st.session_state.editing_message = None
-    st.session_state.mobile_panel = "Sources"
     if should_rerun:
+        st.session_state.mobile_panel = "Chat"
+        st.session_state.nav_section = "Chat"
+        set_side_panel_collapsed("sources", False)
+        st.session_state.toast_course_materials_loading = True
         rerun()
 
 

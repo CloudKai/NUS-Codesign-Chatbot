@@ -56,12 +56,18 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
         key="mobile_panel",
         label_visibility="collapsed",
     )
+    previous_panel = st.session_state.get("_last_mobile_panel")
     if panel == "Chat":
         st.session_state.nav_section = "Chat"
     elif panel == "Sources":
         st.session_state.nav_section = "Sources"
+        # Expanding Sources on mobile opens the desktop rail when it was
+        # collapsed, without fighting a collapse the student just chose.
+        if previous_panel != "Sources" and side_panel_collapsed("sources"):
+            set_side_panel_collapsed("sources", False)
     else:
         st.session_state.nav_section = st.session_state.get("studio_tab", "Journey")
+    st.session_state._last_mobile_panel = panel
 
     studio_collapsed = side_panel_collapsed("studio")
     sources_collapsed = side_panel_collapsed("sources")

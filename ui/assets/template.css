@@ -836,12 +836,13 @@
         overflow:hidden;
     }
 
-    /* Drag the divider between columns (no header strip). */
+    /* Drag the divider between columns (no header strip).
+       Keep below collapse/expand pills so the chevron stays readable. */
     .cd-col-resize-handle {
         position:absolute;
         top:0;
         right:-3px;
-        z-index:40;
+        z-index:15;
         width:6px;
         height:100%;
         cursor:col-resize;
@@ -851,6 +852,7 @@
     .cd-col-resize-handle:hover,
     .cd-col-resize-handle:focus-visible,
     body.cd-col-resizing .cd-col-resize-handle {
+        /* Continuous divider; the collapse/expand pill paints over it. */
         background:color-mix(in srgb,var(--cd-accent) 42%,transparent);
     }
 
@@ -886,9 +888,21 @@
     }
 
     .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-sources_panel) {
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel),
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-sources_panel),
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_rail),
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-sources_rail) {
         position:relative;
-        z-index:3;
+        z-index:5;
+    }
+
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel) {
+        position:relative;
+        z-index:1;
     }
 
     [class*="st-key-collapse-studio"],
@@ -896,7 +910,7 @@
     [class*="st-key-expand-studio"],
     [class*="st-key-expand-sources"] {
         position:absolute !important;
-        z-index:120 !important;
+        z-index:200 !important;
         top:50% !important;
         width:1.35rem !important;
         height:0 !important;
@@ -924,10 +938,21 @@
         transform:translate(-50%, -50%) !important;
     }
 
+    [class*="st-key-collapse-studio"] div[data-testid="stButton"],
+    [class*="st-key-collapse-sources"] div[data-testid="stButton"],
+    [class*="st-key-expand-studio"] div[data-testid="stButton"],
+    [class*="st-key-expand-sources"] div[data-testid="stButton"] {
+        position:relative !important;
+        z-index:201 !important;
+    }
+
     [class*="st-key-collapse-studio"] div[data-testid="stButton"] button,
     [class*="st-key-collapse-sources"] div[data-testid="stButton"] button,
     [class*="st-key-expand-studio"] div[data-testid="stButton"] button,
     [class*="st-key-expand-sources"] div[data-testid="stButton"] button {
+        position:relative !important;
+        z-index:202 !important;
+        isolation:isolate;
         width:1.35rem !important;
         min-width:1.35rem !important;
         min-height:2.4rem !important;
@@ -1105,7 +1130,7 @@
         border:0 !important;
         overflow:visible !important;
         flex:0 0 0 !important;
-        z-index:120 !important;
+        z-index:200 !important;
     }
 
     .st-key-sources_panel > [data-testid="stVerticalBlock"] {
@@ -2714,7 +2739,7 @@
         border:0 !important;
         overflow:visible !important;
         flex:0 0 0 !important;
-        z-index:120 !important;
+        z-index:200 !important;
     }
 
     .st-key-studio_panel > [data-testid="stVerticalBlock"]
@@ -2739,6 +2764,7 @@
         gap:0 !important;
         margin:0 !important;
         padding:0 !important;
+        overflow:visible !important;
     }
 
     .st-key-sources_header > [data-testid="stVerticalBlock"],
@@ -2753,19 +2779,21 @@
     .st-key-sources_title_row,
     [data-testid="stElementContainer"].st-key-sources_title_row {
         position:relative !important;
-        min-height:2rem !important;
+        min-height:2.35rem !important;
         margin:0 !important;
         padding:0 !important;
+        overflow:visible !important;
     }
 
     .st-key-sources_title_row > [data-testid="stVerticalBlock"],
     .st-key-sources_title_row > [data-testid="stLayoutWrapper"] {
         position:relative !important;
-        min-height:2rem !important;
+        min-height:2.35rem !important;
         gap:0 !important;
         row-gap:0 !important;
         margin:0 !important;
         padding:0 !important;
+        overflow:visible !important;
     }
 
     .st-key-sources_title_row .source-pane-heading {
@@ -2776,14 +2804,115 @@
     .st-key-sources_title_row [data-testid="stElementContainer"]:has([class*="st-key-add-sources"]),
     .st-key-sources_title_row [data-testid="stLayoutWrapper"]:has([class*="st-key-add-sources"]) {
         position:absolute !important;
-        top:0 !important;
+        top:.15rem !important;
         right:0 !important;
-        width:auto !important;
+        width:4.6rem !important;
         height:2rem !important;
-        min-height:0 !important;
+        min-height:2rem !important;
+        max-height:2rem !important;
         margin:0 !important;
         padding:0 !important;
-        z-index:5 !important;
+        z-index:6 !important;
+        overflow:visible !important;
+    }
+
+    /* Real visible pill; only the file uploader above it is transparent. */
+    .st-key-sources_panel [class*="st-key-add-sources"] .cd-sources-add-face {
+        position:absolute !important;
+        inset:0 !important;
+        z-index:1 !important;
+        display:flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        border:1px solid var(--cd-border) !important;
+        border-radius:.75rem !important;
+        background:var(--cd-surface) !important;
+        color:var(--cd-text) !important;
+        -webkit-text-fill-color:var(--cd-text) !important;
+        font-size:.95rem !important;
+        font-weight:700 !important;
+        line-height:1 !important;
+        pointer-events:none !important;
+        box-sizing:border-box !important;
+        opacity:1 !important;
+        visibility:visible !important;
+    }
+
+    .st-key-sources_panel [class*="st-key-add-sources"]:hover .cd-sources-add-face {
+        background:var(--cd-surface-muted) !important;
+    }
+
+    .st-key-sources_panel [class*="st-key-add-sources"]
+    [data-testid="stElementContainer"]:has(.cd-sources-add-face),
+    .st-key-sources_panel [class*="st-key-add-sources"]
+    [data-testid="stMarkdownContainer"]:has(.cd-sources-add-face) {
+        position:absolute !important;
+        inset:0 !important;
+        width:100% !important;
+        height:2rem !important;
+        margin:0 !important;
+        padding:0 !important;
+        opacity:1 !important;
+        z-index:1 !important;
+    }
+
+    .st-key-sources_panel [class*="st-key-add-sources"] [data-testid="stFileUploader"],
+    .st-key-sources_panel [class*="st-key-add-sources"]
+    [data-testid="stFileUploader"] section,
+    .st-key-sources_panel [class*="st-key-add-sources"]
+    [data-testid="stFileUploader"] > div,
+    .st-key-sources_panel [class*="st-key-add-sources"]
+    [data-testid="stFileUploaderDropzone"] {
+        position:absolute !important;
+        inset:0 !important;
+        width:100% !important;
+        height:2rem !important;
+        min-height:0 !important;
+        max-height:2rem !important;
+        margin:0 !important;
+        padding:0 !important;
+        border:0 !important;
+        background:transparent !important;
+        box-shadow:none !important;
+        opacity:0 !important;
+        cursor:pointer !important;
+        z-index:2 !important;
+        gap:0 !important;
+    }
+
+    .st-key-sources_panel [class*="st-key-add-sources"]
+    [data-testid="stFileUploaderDropzone"]::before,
+    .st-key-sources_panel [class*="st-key-add-sources"]
+    [data-testid="stFileUploaderDropzone"]::after {
+        content:none !important;
+        display:none !important;
+    }
+
+    .st-key-sources_panel [class*="st-key-add-sources"]
+    [data-testid="stFileUploaderDropzone"] > *,
+    .st-key-sources_panel [class*="st-key-add-sources"]
+    [data-testid="stFileUploaderDropzoneInstructions"],
+    .st-key-sources_panel [class*="st-key-add-sources"]
+    [data-testid="stFileUploaderFile"],
+    .st-key-sources_panel [class*="st-key-add-sources"]
+    [data-testid="stFileUploaderFileList"],
+    .st-key-sources_panel [class*="st-key-add-sources"]
+    [data-testid="stFileUploaderFileData"],
+    .st-key-sources_panel [class*="st-key-add-sources"]
+    [data-testid="stFileUploaderDeleteBtn"],
+    .st-key-sources_panel [class*="st-key-add-sources"]
+    [data-testid="stWidgetLabel"] {
+        display:none !important;
+    }
+
+    .st-key-sources_panel [class*="st-key-add-sources"] input[type="file"] {
+        position:absolute !important;
+        inset:0 !important;
+        width:100% !important;
+        height:100% !important;
+        opacity:0 !important;
+        cursor:pointer !important;
+        z-index:3 !important;
     }
 
     .st-key-sources_header > [data-testid="stLayoutWrapper"]:first-child,
@@ -2791,6 +2920,7 @@
     > [data-testid="stLayoutWrapper"]:first-child {
         margin:0 !important;
         padding:0 !important;
+        overflow:visible !important;
     }
 
     .st-key-sources_header > [data-testid="stLayoutWrapper"]:first-child
@@ -2935,48 +3065,6 @@
         display:flex !important;
         justify-content:flex-end !important;
         align-items:flex-start !important;
-    }
-
-    .st-key-sources_panel [class*="st-key-add-sources"] div[data-testid="stButton"] {
-        display:flex;
-        justify-content:flex-end;
-        width:auto !important;
-        margin:0 !important;
-        padding:0 !important;
-    }
-
-    .st-key-sources_panel [class*="st-key-add-sources"] div[data-testid="stButton"] button {
-        width:auto !important;
-        min-width:0;
-        min-height:2rem !important;
-        height:2rem !important;
-        padding:0 .7rem !important;
-        border:1px solid var(--cd-border) !important;
-        border-radius:.75rem !important;
-        background:var(--cd-surface) !important;
-        color:var(--cd-text) !important;
-        justify-content:center;
-        white-space:nowrap;
-        box-shadow:none !important;
-        font-size:.95rem;
-        font-weight:700;
-    }
-
-    .st-key-sources_panel [class*="st-key-add-sources"] div[data-testid="stButton"] button:hover,
-    .st-key-sources_panel [class*="st-key-add-sources"] div[data-testid="stButton"] button:focus,
-    .st-key-sources_panel [class*="st-key-add-sources"] div[data-testid="stButton"] button:focus-visible {
-        color:var(--cd-text) !important;
-        border-color:var(--cd-border) !important;
-        background:var(--cd-surface-muted) !important;
-        outline:0 !important;
-        box-shadow:none !important;
-    }
-
-    .st-key-sources_panel [class*="st-key-add-sources"] div[data-testid="stButton"] button p {
-        white-space:nowrap;
-        color:var(--cd-text);
-        font-size:.95rem;
-        font-weight:700;
     }
 
     .st-key-sources_scroll {
