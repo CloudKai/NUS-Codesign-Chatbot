@@ -16,6 +16,8 @@ actionable, transparent, and connected to the student’s own discussion and sel
 
 ## 2. Design principles
 
+
+
 ### Focus before features
 
 Show the controls needed for the current task. Secondary settings belong in Preferences or
@@ -82,11 +84,13 @@ Sources, Chat, and Journey/Review. Notebooks opens as a folder-free library dial
 
 The application fills the viewport and uses a compact header above one continuous workspace.
 
-| Region | Relative width | Purpose |
-|---|---:|---|
-| Thinking Path | 1.05 | Journey guidance and actionable review |
-| Discussion | 2.35 | Primary student–coach interaction |
-| Sources | 1.05 | Grounding material and source management |
+
+| Region        | Relative width | Purpose                                  |
+| ------------- | -------------- | ---------------------------------------- |
+| Thinking Path | 1.05           | Journey guidance and actionable review   |
+| Discussion    | 2.35           | Primary student–coach interaction        |
+| Sources       | 1.05           | Grounding material and source management |
+
 
 The three areas share one outer surface. Thin vertical dividers create structure without
 turning each area into a floating card.
@@ -101,7 +105,11 @@ turning each area into a floating card.
 - Compact radius: `10–14px`
 - Dialog radius: approximately `16px`
 
+
+
 ## 5. Visual system
+
+
 
 ### Typography
 
@@ -111,35 +119,41 @@ Use IBM Plex Sans for UI chrome and Source Serif 4 for the brand wordmark:
 "IBM Plex Sans", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif
 ```
 
-| Style | Typical size | Usage |
-|---|---:|---|
-| Notebook/page title | `18px` | Discussion heading |
-| Panel title | `15–16px` | Thinking Path, Sources |
-| Body | `14px` | Messages and primary content |
-| Supporting text | `12px` | Metadata, summaries, hints |
-| Micro label | `11px` | Counts and compact status |
+
+| Style               | Typical size | Usage                        |
+| ------------------- | ------------ | ---------------------------- |
+| Notebook/page title | `18px`       | Discussion heading           |
+| Panel title         | `15–16px`    | Thinking Path, Sources       |
+| Body                | `14px`       | Messages and primary content |
+| Supporting text     | `12px`       | Metadata, summaries, hints   |
+| Micro label         | `11px`       | Counts and compact status    |
+
 
 Use weight and spacing for hierarchy. Avoid all-caps section labels and oversized marketing
 headings.
 
 ### Core color tokens
 
+
+
 #### Light
 
-| Token | Value | Usage |
-|---|---|---|
-| Background | `#F3F5F7` | Cool-slate application canvas |
-| Surface | `#FFFFFF` | Discussion, header, dialogs, and controls |
-| Panel | `#EEF1F4` | Thinking Path and Sources columns |
-| Muted surface | `#F7F9FA` | Low-emphasis controls and states |
-| Text | `#15202B` | Primary slate copy |
-| Muted text | `#5B6B7C` | Supporting copy and metadata |
-| Border | `#D5DCE3` | Soft dividers and control outlines |
-| Accent | `#0F766E` | Teal selected states and primary actions |
-| Accent hover | `#0D9488` | Primary-action hover |
-| Accent soft | `#E6F5F3` | Active stage and user messages |
-| Success | `#15803D` | Positive status |
-| Warning dot | `#E11D48` | Review change notification |
+
+| Token         | Value     | Usage                                     |
+| ------------- | --------- | ----------------------------------------- |
+| Background    | `#F3F5F7` | Cool-slate application canvas             |
+| Surface       | `#FFFFFF` | Discussion, header, dialogs, and controls |
+| Panel         | `#EEF1F4` | Thinking Path and Sources columns         |
+| Muted surface | `#F7F9FA` | Low-emphasis controls and states          |
+| Text          | `#15202B` | Primary slate copy                        |
+| Muted text    | `#5B6B7C` | Supporting copy and metadata              |
+| Border        | `#D5DCE3` | Soft dividers and control outlines        |
+| Accent        | `#0F766E` | Teal selected states and primary actions  |
+| Accent hover  | `#0D9488` | Primary-action hover                      |
+| Accent soft   | `#E6F5F3` | Active stage and user messages            |
+| Success       | `#15803D` | Positive status                           |
+| Warning dot   | `#E11D48` | Review change notification                |
+
 
 The light theme uses subtle surface contrast to clarify the workspace: quiet cool-slate side
 panels frame a white discussion canvas, while teal is reserved for active states and actions.
@@ -147,18 +161,20 @@ Avoid flat all-white layouts and avoid using accent color for passive decoration
 
 #### Dark
 
-| Token | Value | Usage |
-|---|---|---|
-| Background | `#0e1420` | Application canvas |
-| Surface | `#151c2a` | Header, workspace, dialogs |
-| Muted surface | `#1a2232` | Low-emphasis controls and states |
-| Text | `#f3f5fb` | Primary copy |
-| Muted text | `#a6afc1` | Supporting copy and metadata |
-| Border | `#2b3548` | Dividers and control outlines |
-| Accent | `#8d87ff` | Selected states and primary actions |
-| Accent hover | `#a49fff` | Primary-action hover |
-| Accent soft | `#28285a` | Active stage and user messages |
-| Success | `#53c9a2` | Source-grounding status |
+
+| Token         | Value     | Usage                               |
+| ------------- | --------- | ----------------------------------- |
+| Background    | `#0e1420` | Application canvas                  |
+| Surface       | `#151c2a` | Header, workspace, dialogs          |
+| Muted surface | `#1a2232` | Low-emphasis controls and states    |
+| Text          | `#f3f5fb` | Primary copy                        |
+| Muted text    | `#a6afc1` | Supporting copy and metadata        |
+| Border        | `#2b3548` | Dividers and control outlines       |
+| Accent        | `#8d87ff` | Selected states and primary actions |
+| Accent hover  | `#a49fff` | Primary-action hover                |
+| Accent soft   | `#28285a` | Active stage and user messages      |
+| Success       | `#53c9a2` | Source-grounding status             |
+
 
 The application supports `System`, `Light`, and `Dark`. Theme changes must affect the whole
 experience, including messages, inputs, menus, dialogs, upload areas, disabled states, and
@@ -175,6 +191,8 @@ Long, language, and model choices remain readable in both light and dark appeara
 - Use rounded rectangles for controls, user messages, and the active journey stage.
 - Do not wrap every content section in a card.
 
+
+
 ### Icons
 
 Use Streamlit’s bundled Material Symbols so icon size and stroke weight remain consistent.
@@ -182,6 +200,8 @@ Icons support a label; they do not replace important text except in compact mobi
 controls with accessible names.
 
 ## 6. Core components
+
+
 
 ### Top bar
 
@@ -225,19 +245,19 @@ Rules:
 - Present “Suggested questions” as a clear, bordered action inside the active stage.
 - Opening it reveals three stage-relevant options.
 - Treat those questions as view-only guidance. They never populate, submit, or otherwise
-  modify the discussion composer.
+modify the discussion composer.
 - Keep the six-stage track compact enough to remain fully visible in the desktop panel
-  without routine vertical scrolling.
+without routine vertical scrolling.
 - Do not show a separate “N of 6” counter; the numbered stages already communicate
-  position and total length.
+position and total length.
 - Align the active stage’s title, description, and suggested-question control beneath
-  the stage name rather than beneath its number.
+the stage name rather than beneath its number.
 - Use one clear vertical rhythm inside the active card: stage identity, guidance title,
-  explanation, then a full-width nested suggested-question row.
+explanation, then a full-width nested suggested-question row.
 - Give the active card deliberate internal breathing room and keep every nested action
-  left-aligned with the guidance content; avoid centered controls that fragment the scan path.
+left-aligned with the guidance content; avoid centered controls that fragment the scan path.
 - Do not add a separate “previous step completed” banner beneath the track; stage styling
-  already communicates completion and the banner displaces the next-step action.
+already communicates completion and the banner displaces the next-step action.
 - Show “Move to next step” below the journey.
 
 Manual progression opens a confirmation dialog showing the current and next stages. The
@@ -262,28 +282,32 @@ Avoid:
 - Duplicate summaries with different labels.
 - Scores, charts, or analytics that do not help the student reason.
 
+
+
 ### Discussion
 
 The discussion is the primary workspace.
 
 - Use the notebook title once, in the top bar, as the page-level heading. Do not
-  repeat it above the discussion.
+repeat it above the discussion.
 - Immediately state whether selected sources or model knowledge ground the response.
 - Right-align student messages in a soft accent surface.
 - Do not show a redundant student avatar; bubble alignment and surface color already
-  communicate authorship.
+communicate authorship.
 - Keep coach responses on the main surface for readability.
 - Use “Coach” as the minimal assistant identity.
 - Keep edit and regeneration actions contextual.
 - Anchor the composer to the bottom of the discussion area.
 - Keep the empty composer compact. Let it grow with the draft until its maximum
-  height, then scroll vertically inside the textarea.
+height, then scroll vertically inside the textarea.
 - Use a single vertical-ellipsis trigger for student-message actions; do not pair it
-  with a second dropdown chevron.
+with a second dropdown chevron.
 
 Composer placeholder:
 
 > Ask a question or Share your thinking
+
+
 
 ### Sources
 
@@ -302,6 +326,8 @@ Populated state:
 - Concise metadata below the title.
 - Contextual menu for preview, download, or deletion.
 - Thin dividers between sources.
+
+
 
 ### Add sources dialog
 
@@ -375,11 +401,15 @@ enablement step.
 
 ## 8. Responsive behavior
 
+
+
 ### Desktop: above `1050px`
 
 - Show all three workspace columns.
 - Keep the current notebook identity in the header.
 - Keep response detail and Preferences visible.
+
+
 
 ### Tablet and mobile: `1050px` and below
 
@@ -405,7 +435,11 @@ must not overlap adjacent controls.
 - Keep confirmation dialogs focused and provide both cancel and confirm actions.
 - Respect the operating-system theme when Appearance is set to System.
 
+
+
 ## 10. Content guidelines
+
+
 
 ### Voice
 
@@ -415,11 +449,15 @@ must not overlap adjacent controls.
 - Specific about reasoning
 - Respectful of student authorship
 
+
+
 ### Preferred patterns
 
 - “Name the specific group, setting, or context you want to study.”
 - “Choose one outcome that would show meaningful change.”
 - “You’re about to mark Focus as complete and continue to Evidence.”
+
+
 
 ### Avoid
 
@@ -429,29 +467,31 @@ must not overlap adjacent controls.
 - Fabricated evidence, citations, conclusions, or source claims.
 - Long instructional paragraphs when one clear sentence or action is sufficient.
 
+
+
 ## 11. Implementation map
 
-| Design area | Implementation |
-|---|---|
-| Layout and component styling | `ui/assets/template.css` (injected via `ui/theme.py`) |
-| Shared presentation helpers | `ui/components.py` |
-| Theme tokens and overrides | `ui/theme.py` → `render_theme_css()` |
-| Column resize / scroll / composer DOM | `ui/layout/` |
-| Journey | `ui/studio.py` → `render_journey_track()` |
-| Review | `ui/studio.py` → `render_learning_review()` |
-| Notebook library | `ui/notebooks.py` → `notebooks_dialog()` |
-| Profile / preferences | `ui/profile.py` → `render_profile_menu()` |
-| Top bar and section nav | `ui/topbar.py` → `render_topbar()` |
-| Sources library UI | `ui/sources.py` → `render_sources_panel()` |
-| Critical-thinking state | `backend/student_journey.py` |
-| Language-aware coaching prompt | `backend/student_support.py` |
-| Response persistence | `backend/chat_service.py` |
-| Sources backend | `backend/source_library.py` |
+
+| Design area                           | Implementation                                        |
+| ------------------------------------- | ----------------------------------------------------- |
+| Layout and component styling          | `ui/assets/template.css` (injected via `ui/theme.py`) |
+| Shared presentation helpers           | `ui/components.py`                                    |
+| Theme tokens and overrides            | `ui/theme.py` → `render_theme_css()`                  |
+| Column resize / scroll / composer DOM | `ui/layout/`                                          |
+| Journey                               | `ui/studio.py` → `render_journey_track()`             |
+| Review                                | `ui/studio.py` → `render_learning_review()`           |
+| Notebook library                      | `ui/notebooks.py` → `notebooks_dialog()`              |
+| Profile / preferences                 | `ui/profile.py` → `render_profile_menu()`             |
+| Top bar and section nav               | `ui/topbar.py` → `render_topbar()`                    |
+| Sources library UI                    | `ui/sources.py` → `render_sources_panel()`            |
+| Critical-thinking state               | `backend/student_journey.py`                          |
+| Language-aware coaching prompt        | `backend/student_support.py`                          |
+| Response persistence                  | `backend/chat_service.py`                             |
+| Sources backend                       | `backend/source_library.py`                           |
+
 
 Visual QA evidence is recorded in
-[`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md). The combined
-reference comparison is available at
-[`output/product-design/reference-comparison.png`](output/product-design/reference-comparison.png).
+`[docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)`. 
 
 ## 12. Definition of done
 
@@ -465,3 +505,4 @@ A design change is complete when:
 6. Semantic labels and keyboard interaction remain intact.
 7. Automated tests pass.
 8. Visual QA is captured and documented.
+
