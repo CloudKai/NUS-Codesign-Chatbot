@@ -48,7 +48,7 @@ existing Streamlit UI remains compatible during the incremental migration.
 - Enabled automatic stage advancement by default. Every advance remains an
   auditable persisted transition, but the application resolves it immediately
   and updates the visible Thinking Path without confirmation controls.
-- Added the ignored local `lecture_notes/` drop folder. Supported files are
+- Added the shared `lecture_notes/` drop folder. Supported files are
   safely copied into each active notebook, selected, refreshed on change,
   removed when the folder file disappears, and exposed as stable citation
   chips in the local coaching workflow.
