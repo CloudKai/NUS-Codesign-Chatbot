@@ -287,7 +287,7 @@ def handle_prompt(
                 except Exception as exc:
                     st.error(
                         "The local coaching API is unavailable. Start it with "
-                        "`sh scripts/run_local_demo.sh`, then retry. "
+                        "`sh scripts/start.sh`, then retry. "
                         f"({exc})"
                     )
                     if st.button(

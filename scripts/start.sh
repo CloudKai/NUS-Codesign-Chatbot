@@ -7,8 +7,7 @@
 #   2) Streamlit UI on http://127.0.0.1:8501
 #
 # Always sets USE_LOCAL_API=true so Thinking Path stage advancement and selected
-# image grounding work. Prefer this (or run.sh / dev.sh / run_local_demo.sh,
-# which all call this script) over starting Streamlit alone.
+# image grounding work. Prefer this over starting Streamlit alone.
 #
 # Prerequisites: project .venv with requirements.txt installed; optional .env
 # from .env.example (MODEL_PROVIDER=mock by default).

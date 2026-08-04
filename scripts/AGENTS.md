@@ -17,10 +17,7 @@ logic.
 
 | Script | Purpose | Safety notes |
 |---|---|---|
-| `start.sh` | **Canonical launcher** — FastAPI `:8000` + Streamlit `:8501` with `USE_LOCAL_API=true` | Preferred everyday path |
-| `run.sh` | Alias → `start.sh` | Same full stack |
-| `dev.sh` | Alias → `start.sh` | Same full stack (do not start UI-only) |
-| `run_local_demo.sh` | Alias → `start.sh` | Same full stack |
+| `start.sh` | **Canonical launcher** — FastAPI `:8000` + Streamlit `:8501` with `USE_LOCAL_API=true` | Everyday path |
 | `build.sh` | `compileall`, full `pytest`, then `init_db.py` | **Initializes the database** — do not run blindly on user data |
 | `init_db.py` | Database initialization / schema setup | Same caution as `build.sh` |
 
@@ -40,7 +37,7 @@ Never commit `.env` or embed API keys in scripts.
   developer's existing `data/` directory.
 - **Do not hard-code secrets** or model API keys in scripts.
 - **Prefer `.venv/bin/python`** when the virtual environment exists (as
-  `run_local_demo.sh` does).
+  `start.sh` does).
 - **Keep mock/Ollama paths explicit** in documentation when adding new startup
   modes. Paid OpenAI smoke tests require explicit user approval per root
   `AGENTS.md`.
@@ -62,16 +59,14 @@ Update `docs/IMPLEMENTATION_STATUS.md`.
 Syntax-check shell scripts:
 
 ```sh
-sh -n scripts/run_local_demo.sh
+sh -n scripts/start.sh
 sh -n scripts/build.sh
-sh -n scripts/dev.sh
-sh -n scripts/run.sh
 ```
 
 After script changes that affect startup, smoke-test:
 
 ```sh
-sh scripts/run_local_demo.sh
+sh scripts/start.sh
 ```
 
 Run in a separate terminal only when needed; stop after confirming startup.

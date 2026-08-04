@@ -115,7 +115,7 @@ entrypoint or a parent panel if it must open on load.
 **API vs legacy chat path**
 
 `chat.py` branches on `local_api_enabled()`. Prefer the FastAPI coaching path
-(`USE_LOCAL_API=true` via `scripts/run.sh`). The legacy `StudentChatEngine`
+(`USE_LOCAL_API=true` via `scripts/start.sh`). The legacy `StudentChatEngine`
 path remains for offline fallback during migration — do not add new stage or
 vision behaviour only to the legacy path.
 
@@ -131,9 +131,7 @@ For visual changes, also run Streamlit locally and check desktop and 390 px
 widths with a clean browser console:
 
 ```sh
-sh scripts/run.sh
-# or full API path:
-sh scripts/run_local_demo.sh
+sh scripts/start.sh
 ```
 
 If a test asserts text from a source file (not rendered output), update the

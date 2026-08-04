@@ -68,7 +68,7 @@ FastAPI (api.py)
 ## Current migration state
 
 Coaching turns and transition resolution run through the FastAPI path when
-`USE_LOCAL_API=true` (`scripts/run.sh` / `run_local_demo.sh`). That path owns
+`USE_LOCAL_API=true` (`scripts/start.sh`). That path owns
 structured assessments, image grounding, and stage advancement.
 
 A second stack remains for compatibility:

@@ -12,8 +12,8 @@ existing Streamlit UI remains compatible during the incremental migration.
 - Locked coaching to **GPT-5.6 Luna** with **low** reasoning: removed the
   composer model picker, collapsed the model registry to one entry, and set
   OpenAI coach calls to `gpt-5.6-luna` / `low`.
-- Fixed Learning Path advancement for everyday startup: `scripts/run.sh` now
-  starts FastAPI + Streamlit with `USE_LOCAL_API=true` (same as the local demo).
+- Fixed Learning Path advancement for everyday startup: `scripts/start.sh`
+  starts FastAPI + Streamlit with `USE_LOCAL_API=true`.
   Legacy Streamlit-only chat never mutated the journey; that was why the
   progress bar stayed on Focus.
 - Hardened OpenAI structured coaching output (`additionalProperties: false`
@@ -30,7 +30,7 @@ existing Streamlit UI remains compatible during the incremental migration.
   pending-transition, and transition-resolution endpoints plus a typed client.
 - Added the additive SQLite `phase_transitions` table; existing rows are not
   converted or deleted.
-- Added `scripts/run_local_demo.sh`, `.env.example`, and local demo setup
+- Added `scripts/start.sh`, `.env.example`, and local demo setup
   documentation.
 - Removed hidden HTML stage-control markers and legacy automatic progression.
   Streamlit now shows a coach recommendation only after one is persisted, then
@@ -101,7 +101,7 @@ existing Streamlit UI remains compatible during the incremental migration.
   entrypoint).
 - Python compilation passed for `backend/`, `ui/`, and `streamlit_app.py`.
 - A real LangGraph invocation passed against the deterministic provider.
-- `sh -n scripts/run_local_demo.sh` passed.
+- `sh -n scripts/start.sh` passed.
 - Browser acceptance passed at desktop and 390 px: greeting, first-turn
   guidance, second-turn Focus-to-Evidence recommendation, explicit transition
   confirmation, responsive composer, and a clean console.

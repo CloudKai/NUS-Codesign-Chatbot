@@ -82,14 +82,6 @@ Do **not** commit `.env` (it may contain secrets later).
 sh scripts/start.sh
 ```
 
-These aliases do the **same** thing:
-
-```bash
-sh scripts/run.sh
-sh scripts/dev.sh
-sh scripts/run_local_demo.sh
-```
-
 Then open:
 
 | Service | URL |
