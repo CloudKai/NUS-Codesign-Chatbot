@@ -1,8 +1,5 @@
 #!/usr/bin/env sh
+# Alias → scripts/start.sh (full API + UI stack). Prefer start.sh in docs.
 set -eu
-
-if [ -x ".venv/bin/python" ]; then
-  exec .venv/bin/python -m streamlit run streamlit_app.py --server.port 8501
-fi
-
-exec python -m streamlit run streamlit_app.py --server.port 8501
+ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
+exec sh "$ROOT/scripts/start.sh"

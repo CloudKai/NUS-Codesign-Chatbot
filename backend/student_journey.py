@@ -448,19 +448,157 @@ def _prompt_summary(student_messages: list[str], detail: str) -> str:
     ) + "."
 
 
+_DEFAULT_REVIEW_FEEDBACK: dict[str, tuple[str, tuple[str, str]]] = {
+    "focus": (
+        "You have identified a meaningful topic and are asking a question that can be refined.",
+        (
+            "Name the specific group, setting, or context you want to study.",
+            "Choose one outcome that would show meaningful change.",
+        ),
+    ),
+    "evidence": (
+        "You are bringing evidence into the discussion instead of relying on a claim alone.",
+        (
+            "Compare the quality and relevance of your strongest sources.",
+            "Name one limitation that could weaken the evidence.",
+        ),
+    ),
+    "assumptions": (
+        "You are beginning to make the reasoning behind your claim visible.",
+        (
+            "State the assumption connecting your evidence to your claim.",
+            "Test what changes if that assumption is false.",
+        ),
+    ),
+    "perspectives": (
+        "You are considering more than one plausible interpretation.",
+        (
+            "Represent the strongest competing explanation fairly.",
+            "Explain what evidence would distinguish between the views.",
+        ),
+    ),
+    "synthesis": (
+        "You are weighing evidence and alternatives rather than listing them separately.",
+        (
+            "Explain which consideration deserves the most weight and why.",
+            "Qualify your claim where the evidence remains uncertain.",
+        ),
+    ),
+    "conclusion": (
+        "You are forming a conclusion that reflects the reasoning developed in this notebook.",
+        (
+            "State your confidence and the most important limitation.",
+            "Identify the next justified question or action.",
+        ),
+    ),
+}
+
+
+def _latest_assessment(messages: Iterable[dict[str, Any]]) -> dict[str, Any] | None:
+    """Return the newest assistant assessment payload, if one was persisted."""
+    for message in reversed(list(messages)):
+        if message.get("role") != "assistant":
+            continue
+        assessment = (message.get("metadata") or {}).get("assessment")
+        if isinstance(assessment, dict) and assessment.get("recommendation"):
+            return assessment
+    return None
+
+
+def _personalized_review_feedback(
+    stage_id: str,
+    assessment: dict[str, Any] | None,
+) -> tuple[str, list[str]]:
+    """Build strengths and improvement items from the latest coach assessment."""
+    fallback_strength, fallback_areas = _DEFAULT_REVIEW_FEEDBACK.get(
+        stage_id,
+        _DEFAULT_REVIEW_FEEDBACK["focus"],
+    )
+    if not assessment:
+        return fallback_strength, list(fallback_areas)
+
+    stage_assessment = " ".join(
+        str(assessment.get("stage_assessment") or "").split()
+    ).strip()
+    contribution = " ".join(
+        str(assessment.get("contribution_summary") or "").split()
+    ).strip()
+    evidence = [
+        " ".join(str(item).split()).strip()
+        for item in (assessment.get("evidence_identified") or [])
+        if str(item).strip()
+    ]
+    if stage_assessment:
+        strengths = stage_assessment
+        if contribution and contribution.lower() not in strengths.lower():
+            strengths = f"{strengths} Your latest contribution centered on: {contribution}"
+    elif contribution:
+        strengths = f"Recent progress: {contribution}"
+    elif evidence:
+        strengths = "Evidence noted: " + "; ".join(evidence[:2])
+    else:
+        strengths = fallback_strength
+
+    missing = [
+        " ".join(str(item).split()).strip()
+        for item in (assessment.get("missing_reasoning_elements") or [])
+        if str(item).strip()
+    ]
+    guidance = [
+        " ".join(str(item).split()).strip()
+        for item in (assessment.get("guidance_questions") or [])
+        if str(item).strip()
+    ]
+    rationale = " ".join(
+        str(assessment.get("recommendation_rationale") or "").split()
+    ).strip()
+    areas = missing[:3]
+    if not areas and guidance:
+        areas = guidance[:2]
+    if not areas and rationale and str(assessment.get("recommendation")) == "stay":
+        areas = [rationale]
+    if not areas:
+        areas = list(fallback_areas)
+    return strengths, areas[:3]
+
+
 def learning_review(
     messages: Iterable[dict[str, Any]],
     journey: dict[str, Any],
     *,
     detail: str | None = None,
 ) -> dict[str, Any]:
+    """Build the Review-tab payload for the current notebook.
+
+    When the newest assistant message includes a structured ``assessment``,
+    strengths, improvement areas, understanding level, conclusion, and
+    reflection are personalized from that assessment. Otherwise stage fallbacks
+    are used so empty notebooks still show guidance.
+
+    Returns:
+        A dict consumed by ``ui.studio.render_learning_review``, including
+        ``strengths``, ``improvement_areas``, and ``has_personalized_assessment``.
+    """
+    message_list = list(messages)
     normalized = normalize_journey(journey)
     stage = current_stage(normalized)
-    student_messages = _student_messages(messages)
+    student_messages = _student_messages(message_list)
     selected_detail = detail if detail in RESPONSE_DETAILS else normalized["response_detail"]
     contribution_limit = 3 if selected_detail == "short" else 8
     contributions = student_messages[-contribution_limit:]
     level, level_description = understanding_level(normalized)
+    assessment = _latest_assessment(message_list)
+    if assessment:
+        assessed_level = str(
+            assessment.get("critical_understanding_level") or ""
+        ).strip()
+        if assessed_level:
+            level = assessed_level
+            level_description = (
+                " ".join(str(assessment.get("stage_assessment") or "").split()).strip()
+                or level_description
+            )
+    strengths, improvement_areas = _personalized_review_feedback(stage.id, assessment)
     completed_labels = [
         STAGE_BY_ID[stage_id].label for stage_id in normalized["completed_stages"]
     ]
@@ -473,8 +611,22 @@ def learning_review(
         if normalized["stage_notes"].get(stage_id)
     ]
     conclusion = (
-        normalized["working_conclusion"]
+        (
+            " ".join(str(assessment.get("working_conclusion") or "").split()).strip()
+            if assessment
+            else ""
+        )
+        or normalized["working_conclusion"]
         or "The coach has not identified a supported conclusion yet."
+    )
+    critical_reflection = (
+        (
+            " ".join(str(assessment.get("understanding_change") or "").split()).strip()
+            if assessment
+            else ""
+        )
+        or normalized["critical_reflection"]
+        or "The coach will summarize how your understanding changes as the discussion develops."
     )
     return {
         "detail": selected_detail,
@@ -487,10 +639,10 @@ def learning_review(
         "prompt_summary": _prompt_summary(student_messages, selected_detail),
         "stage_notes": notes,
         "conclusion": conclusion,
-        "critical_reflection": (
-            normalized["critical_reflection"]
-            or "The coach will summarize how your understanding changes as the discussion develops."
-        ),
+        "critical_reflection": critical_reflection,
+        "strengths": strengths,
+        "improvement_areas": improvement_areas,
         "next_question": stage.reflection_prompt,
         "turn_count": len(student_messages),
+        "has_personalized_assessment": assessment is not None,
     }

@@ -271,25 +271,22 @@ def render_sources_panel() -> None:
     selected_count = sum(1 for source in sources if source["selected"])
     count_label = "Loading…" if sync_loading else f"{selected_count} selected"
     with st.container(key="sources_header"):
-        title_column, add_column = st.columns(
-            [0.8, 0.2],
-            gap="small",
-        )
-        title_column.markdown(
-            '<div class="pane-heading source-pane-heading">'
-            '<div class="source-heading-group">'
-            '<span class="pane-title">Sources</span>'
-            f'<span class="pane-count">{count_label}</span>'
-            "</div></div>",
-            unsafe_allow_html=True,
-        )
-        if add_column.button(
-            "Add",
-            icon=":material/add:",
-            use_container_width=True,
-            key="add-sources",
-        ):
-            add_sources_dialog()
+        # Match Thinking Path: markdown title first (no st.columns chrome), Add overlaid.
+        with st.container(key="sources_title_row"):
+            st.markdown(
+                '<div class="pane-heading source-pane-heading">'
+                '<div class="source-heading-group">'
+                '<span class="pane-title">Sources</span>'
+                f'<span class="pane-count">{count_label}</span>'
+                "</div></div>",
+                unsafe_allow_html=True,
+            )
+            if st.button(
+                "Add",
+                icon=":material/add:",
+                key="add-sources",
+            ):
+                add_sources_dialog()
         notification_key = f"source-sync-notified-{st.session_state.thread_id}"
         if lecture_sync and (
             lecture_sync.added or lecture_sync.updated or lecture_sync.removed
@@ -320,34 +317,23 @@ def render_sources_panel() -> None:
             label_visibility="collapsed",
             key=f"source-search-{st.session_state.thread_id}",
         )
-        with st.container(key="sources_filters"):
-            type_column, sort_column = st.columns(2, gap="small")
-            type_filter = type_column.selectbox(
-                "Source type",
-                ["All", "PDF", "Web", "Text", "Image", "Course", "File"],
-                key=f"source-type-filter-{st.session_state.thread_id}",
-            )
-            sort_mode = sort_column.selectbox(
-                "Sort",
-                ["Recent", "Name"],
-                key=f"source-sort-{st.session_state.thread_id}",
-            )
         visible_sources = _filter_sources(
             sources,
             query=search,
-            type_filter=type_filter,
-            sort_mode=sort_mode,
+            type_filter="All",
+            sort_mode="Recent",
         )
         if sources:
             all_selected = selected_count == len(sources)
-            next_all = st.checkbox(
-                "Select all sources",
-                value=all_selected,
-                key=(
-                    f"all-sources-{st.session_state.thread_id}-"
-                    f"{len(sources)}-{selected_count}"
-                ),
-            )
+            with st.container(key="sources_select_all"):
+                next_all = st.checkbox(
+                    "Select all sources",
+                    value=all_selected,
+                    key=(
+                        f"all-sources-{st.session_state.thread_id}-"
+                        f"{len(sources)}-{selected_count}"
+                    ),
+                )
             if next_all != all_selected:
                 store.set_all_sources_selected(st.session_state.thread_id, next_all)
                 if next_all:
@@ -386,13 +372,19 @@ def render_sources_panel() -> None:
                         metadata={"allow_model_knowledge": False},
                     )
                 rerun()
-            if title_column.button(
-                source["title"],
-                type="tertiary",
-                use_container_width=True,
-                key=f"view-source-title-{source['id']}",
-            ):
-                source_viewer_dialog(source["id"])
+            with title_column:
+                if title_column.button(
+                    source["title"],
+                    type="tertiary",
+                    use_container_width=True,
+                    key=f"view-source-title-{source['id']}",
+                ):
+                    source_viewer_dialog(source["id"])
+                title_column.markdown(
+                    f'<div class="source-meta">{escape(source_kind_label(source))} · '
+                    f'{format_size(int(source.get("size") or 0))}</div>',
+                    unsafe_allow_html=True,
+                )
             if locked:
                 menu_column.button(
                     "Managed course material",
@@ -459,11 +451,6 @@ def render_sources_panel() -> None:
                     ):
                         store.delete_source(st.session_state.thread_id, source["id"])
                         rerun()
-            st.markdown(
-                f'<div class="source-meta">{escape(source_kind_label(source))} · '
-                f'{format_size(int(source.get("size") or 0))}</div>',
-                unsafe_allow_html=True,
-            )
 
     with st.container(key="sources_scroll", height="stretch"):
         grouped_course_sources = {
@@ -489,17 +476,14 @@ def render_sources_panel() -> None:
                 and (source.get("metadata") or {}).get("course_material_group") == group
             ]
             group_sources = _sort_course_sources_by_name(grouped_course_sources[group])
-            show_group = type_filter in {"All", "Course"} or bool(group_sources)
-            if not show_group and type_filter != "All":
-                continue
             with st.expander(
-                f"{group} · {len(group_sources if type_filter != 'All' else group_all)}",
+                f"{group} · {len(group_all)}",
                 expanded=True,
             ):
                 if group_sources:
                     for source in group_sources:
                         render_source_card(source)
-                elif type_filter == "All" and not search.strip():
+                elif not search.strip():
                     st.caption("No materials available yet.")
                 else:
                     st.caption("No matching materials in this group.")

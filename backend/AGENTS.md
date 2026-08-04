@@ -67,10 +67,29 @@ FastAPI (api.py)
 
 ## Current migration state
 
-Coaching turns and transition resolution can run through the FastAPI path when
-`USE_LOCAL_API=true`. Source, notebook, and folder CRUD may still be called
-directly from the Streamlit UI via `StudentStore`. When migrating CRUD behind
-API routes, preserve the verified UI behavior and existing SQLite data.
+Coaching turns and transition resolution run through the FastAPI path when
+`USE_LOCAL_API=true` (`scripts/run.sh` / `run_local_demo.sh`). That path owns
+structured assessments, image grounding, and stage advancement.
+
+A second stack remains for compatibility:
+
+| Path | Entry | Use |
+|---|---|---|
+| Preferred | `application.py` → `workflow.py` → providers → API | Stage progression, assessments, selected-image inputs |
+| Legacy | `chat_service.StudentChatEngine` | Streamlit-only / `USE_LOCAL_API=false` fallback; does not mutate learning stages |
+
+Do not add new coaching behaviour only to the legacy engine. The next
+architecture step (including AWS cutover) is to collapse onto the API/workflow
+path and retire `StudentChatEngine` for student turns.
+
+`StudentStore` still concentrates notebooks, messages, sources, and preferences
+in one SQLite module. Repository adapters in `repositories.py` already narrow
+some access; when CRUD moves fully behind API routes (local or AWS), split
+persistence along those boundaries without changing the Streamlit contracts.
+
+Source, notebook, and folder CRUD may still be called directly from the
+Streamlit UI via `StudentStore`. When migrating CRUD behind API routes,
+preserve the verified UI behavior and existing SQLite data.
 
 ## Common edit paths
 

@@ -1,4 +1,10 @@
-"""Notebook session initialization and lifecycle helpers."""
+"""Notebook session initialization and lifecycle helpers.
+
+Owns Streamlit ``session_state`` defaults, notebook create/select/delete, and
+journey persistence. Appearance is always loaded from the user preference store
+and forced onto ``setting_appearance`` so a stale settings widget cannot rewrite
+the database on the next sync.
+"""
 
 from __future__ import annotations
 
@@ -6,24 +12,33 @@ from typing import Any
 
 import streamlit as st
 
-from backend.models import MODEL_BY_ID
+from backend.models import LOCKED_CHAT_MODEL_ID, LOCKED_REASONING_EFFORT, MODEL_BY_ID
 from backend.settings import settings
 from backend.source_library import backfill_legacy_sources
 from backend.student_journey import default_journey, normalize_journey
 from backend.student_support import DEFAULT_SUPPORT_MODE
 
-from ui.constants import RESPONSE_LANGUAGES
+from ui.constants import APPEARANCE_MODES, RESPONSE_LANGUAGES
 from ui.runtime import rerun, store
 
+
 def initialize_session() -> None:
+    """Seed session defaults and restore the active notebook plus appearance.
+
+    Side effects:
+        - Writes missing keys into ``st.session_state``.
+        - Loads appearance from ``StudentStore`` user preferences and realigns
+          ``setting_appearance`` to that value.
+        - Creates or selects a notebook when none is active.
+        - Backfills legacy message attachments into the source library.
+    """
     defaults: dict[str, Any] = {
         "thread_id": None,
-        "selected_model": settings.default_model,
+        "selected_model": LOCKED_CHAT_MODEL_ID,
         "support_mode": DEFAULT_SUPPORT_MODE,
-        "reasoning_effort": "medium",
+        "reasoning_effort": LOCKED_REASONING_EFFORT,
         "web_search": False,
         "image_generation": False,
-        "speak_response": False,
         "allow_model_knowledge": False,
         "response_detail": "short",
         "response_language": "English",
@@ -47,9 +62,18 @@ def initialize_session() -> None:
     st.session_state.support_mode = DEFAULT_SUPPORT_MODE
     st.session_state.web_search = False
     st.session_state.image_generation = False
-    st.session_state.speak_response = False
     if st.session_state.selected_model not in MODEL_BY_ID:
-        st.session_state.selected_model = settings.default_model
+        st.session_state.selected_model = LOCKED_CHAT_MODEL_ID
+    if st.session_state.reasoning_effort not in {LOCKED_REASONING_EFFORT, None}:
+        st.session_state.reasoning_effort = LOCKED_REASONING_EFFORT
+    stored_appearance = str(
+        (store.get_user_preferences() or {}).get("appearance") or ""
+    ).strip()
+    if stored_appearance in APPEARANCE_MODES:
+        st.session_state.appearance = stored_appearance
+    # Always realign the widget key from persisted appearance so a stale
+    # popover value cannot rewrite the database on the next sync.
+    st.session_state.setting_appearance = st.session_state.appearance
     if not st.session_state.thread_id or not store.get_thread(st.session_state.thread_id):
         threads = store.list_threads()
         if threads:
@@ -60,10 +84,15 @@ def initialize_session() -> None:
 
 
 def new_notebook(should_rerun: bool = True) -> None:
+    """Create an untitled notebook with a fresh Focus-stage journey.
+
+    Args:
+        should_rerun: When True, trigger a Streamlit rerun after session updates.
+    """
     journey = default_journey()
     thread_id = store.create_thread(
         name="Untitled notebook",
-        model_id=st.session_state.get("selected_model", settings.default_model),
+        model_id=LOCKED_CHAT_MODEL_ID,
         support_mode=DEFAULT_SUPPORT_MODE,
         assignment={"title": "", "course": "", "brief": "", "rubric": ""},
     )
@@ -91,6 +120,7 @@ def new_notebook(should_rerun: bool = True) -> None:
 
 
 def delete_notebook(thread_id: str) -> None:
+    """Delete a notebook and clear the active thread when it was selected."""
     st.session_state.pending_notebook_actions = None
     store.delete_thread(thread_id)
     if thread_id == st.session_state.thread_id:
@@ -98,14 +128,22 @@ def delete_notebook(thread_id: str) -> None:
 
 
 def request_notebook_actions(thread_id: str) -> None:
+    """Open the notebook actions dialog for ``thread_id`` on the next render."""
     st.session_state.pending_notebook_actions = thread_id
 
 
 def cancel_notebook_actions() -> None:
+    """Dismiss a pending notebook-actions dialog without changing data."""
     st.session_state.pending_notebook_actions = None
 
 
 def select_thread(thread_id: str, should_rerun: bool = True) -> None:
+    """Load a notebook into session state (journey, language, assignment).
+
+    Args:
+        thread_id: Persisted notebook identifier.
+        should_rerun: When True, trigger a Streamlit rerun after loading.
+    """
     thread = store.get_thread(thread_id)
     if not thread:
         return
@@ -113,6 +151,9 @@ def select_thread(thread_id: str, should_rerun: bool = True) -> None:
     selected = metadata.get("selected_model")
     if selected in MODEL_BY_ID:
         st.session_state.selected_model = selected
+    else:
+        st.session_state.selected_model = LOCKED_CHAT_MODEL_ID
+    st.session_state.reasoning_effort = LOCKED_REASONING_EFFORT
     st.session_state.support_mode = DEFAULT_SUPPORT_MODE
     st.session_state.allow_model_knowledge = False
     raw_journey = metadata.get("learning_journey")
@@ -143,6 +184,7 @@ def select_thread(thread_id: str, should_rerun: bool = True) -> None:
 
 
 def save_journey(journey: dict[str, Any]) -> None:
+    """Normalize and persist the learning journey for the active notebook."""
     normalized = normalize_journey(journey)
     st.session_state.learning_journey = normalized
     st.session_state.response_detail = normalized["response_detail"]

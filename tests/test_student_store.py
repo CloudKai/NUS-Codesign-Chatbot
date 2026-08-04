@@ -132,3 +132,22 @@ def test_revise_user_message_truncates_later_turns_and_resets_state(tmp_path):
     assert state["previousResponseId"] is None
     assert state["modelId"] is None
     assert state["history"] == []
+
+
+def test_user_preferences_merge_and_persist(tmp_path):
+    store = make_store(tmp_path)
+    assert store.get_user_preferences().get("role") == "student"
+
+    store.update_user_preferences({"appearance": "Dark"})
+    prefs = store.get_user_preferences()
+    assert prefs["appearance"] == "Dark"
+    assert prefs["role"] == "student"
+
+    store.update_user_preferences({"appearance": "System", "extra": True})
+    prefs = store.get_user_preferences()
+    assert prefs["appearance"] == "System"
+    assert prefs["extra"] is True
+    assert prefs["role"] == "student"
+
+    reloaded = StudentStore(tmp_path / "student.sqlite3", identifier="test-student")
+    assert reloaded.get_user_preferences()["appearance"] == "System"

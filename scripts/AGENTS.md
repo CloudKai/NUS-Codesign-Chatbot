@@ -17,15 +17,16 @@ logic.
 
 | Script | Purpose | Safety notes |
 |---|---|---|
-| `run.sh` | Start Streamlit (`streamlit_app.py`) | Read-only on user DB unless the app writes through normal use |
-| `dev.sh` | Development convenience wrapper | Check contents before running against real data |
-| `run_local_demo.sh` | Start FastAPI on `:8000` and Streamlit on `:8501` with `USE_LOCAL_API=true` | Preferred path for API-integrated coaching |
+| `start.sh` | **Canonical launcher** — FastAPI `:8000` + Streamlit `:8501` with `USE_LOCAL_API=true` | Preferred everyday path |
+| `run.sh` | Alias → `start.sh` | Same full stack |
+| `dev.sh` | Alias → `start.sh` | Same full stack (do not start UI-only) |
+| `run_local_demo.sh` | Alias → `start.sh` | Same full stack |
 | `build.sh` | `compileall`, full `pytest`, then `init_db.py` | **Initializes the database** — do not run blindly on user data |
 | `init_db.py` | Database initialization / schema setup | Same caution as `build.sh` |
 
 ## Environment variables
 
-`run_local_demo.sh` sets:
+`start.sh` sets:
 
 - `USE_LOCAL_API=true`
 - `CO_DESIGN_API_URL` (default `http://127.0.0.1:8000`)

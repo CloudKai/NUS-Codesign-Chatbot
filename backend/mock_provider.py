@@ -16,10 +16,10 @@ class DeterministicCoachProvider:
         """Build a repeatable coaching turn with visible, guided progression.
 
         An explicit recommendation keeps unit tests fully controllable. In the
-        normal local demonstration, the first contribution at a stage receives
-        focused guidance and a follow-up contribution creates an advance
-        recommendation. This is turn-based demo behavior, not a claim that the
-        mock provider semantically evaluated the student's writing.
+        normal local demonstration, Quick guidance recommends advance after one
+        follow-up contribution at the stage; Complex waits for a second follow-up
+        so progression is a little stricter. This is turn-based demo behavior, not
+        a claim that the mock provider semantically evaluated the writing.
         """
         stage = STAGE_BY_ID[request.current_stage]
         prior_stage_contributions = sum(
@@ -28,9 +28,11 @@ class DeterministicCoachProvider:
             if message.get("role") == "user"
             and (message.get("metadata") or {}).get("thinking_stage") == stage.id
         )
+        # Quick (short): advance after 1 prior turn; Complex (long): after 2.
+        advance_after = 2 if request.response_detail == "long" else 1
         guided_recommendation = (
             StageDecision.ADVANCE
-            if prior_stage_contributions >= 1 and stage.id != "conclusion"
+            if prior_stage_contributions >= advance_after and stage.id != "conclusion"
             else StageDecision.STAY
         )
         recommendation = self.recommendation or guided_recommendation
@@ -79,4 +81,9 @@ class DeterministicCoachProvider:
             )
         if request.source_context:
             response += "\n\nI’ll use the selected lecture material as evidence as we continue."
+        if request.image_inputs:
+            response += (
+                f"\n\nI can see {len(request.image_inputs)} selected image "
+                "source(s) and will treat them as notebook evidence."
+            )
         return response, assessment

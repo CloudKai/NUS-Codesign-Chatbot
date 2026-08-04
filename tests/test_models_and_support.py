@@ -1,4 +1,11 @@
-from backend.models import MODEL_REGISTRY, get_model, validate_reasoning
+from backend.models import (
+    LOCKED_CHAT_MODEL_ID,
+    LOCKED_REASONING_EFFORT,
+    MODEL_REGISTRY,
+    get_model,
+    validate_reasoning,
+)
+from backend.domain import ProviderCoachOutput, openai_strict_schema
 from backend.student_support import (
     DEFAULT_SUPPORT_MODE,
     SUPPORT_MODES,
@@ -8,36 +15,31 @@ from backend.student_support import (
 )
 
 
-EXPECTED_MODELS = {
-    "gpt-5.5",
-    "gpt-5.4",
-    "gpt-5.4-mini",
-    "gpt-5.4-nano",
-    "gpt-5.3-chat-latest",
-    "gpt-5.2",
-    "gpt-5.1",
-    "gpt-5",
-    "gpt-5-mini",
-    "gpt-5-nano",
-    "gpt-4.1",
-    "gpt-4.1-mini",
-}
-
-
 def test_curated_model_registry_and_capabilities():
-    assert {model.id for model in MODEL_REGISTRY} == EXPECTED_MODELS
-    assert get_model("gpt-5.3-chat-latest").deprecated is True
-    for model in MODEL_REGISTRY:
-        assert model.vision is True
-        assert model.web_search is True
-        assert model.file_search is True
-        assert model.function_calling is True
+    assert {model.id for model in MODEL_REGISTRY} == {LOCKED_CHAT_MODEL_ID}
+    locked = get_model(LOCKED_CHAT_MODEL_ID)
+    assert locked.label == "GPT-5.6 Luna"
+    assert locked.reasoning_efforts == (LOCKED_REASONING_EFFORT,)
+    assert locked.vision is True
+    assert locked.web_search is True
+    assert locked.file_search is True
+    assert locked.function_calling is True
+    # Unknown legacy IDs fall back to the locked model.
+    assert get_model("gpt-5.5").id == LOCKED_CHAT_MODEL_ID
+
+
+def test_openai_strict_schema_marks_objects_closed():
+    schema = openai_strict_schema(ProviderCoachOutput)
+    assert schema["additionalProperties"] is False
+    assert "response_text" in schema["required"]
+    assert schema["$defs"]["EducationalAssessment"]["additionalProperties"] is False
 
 
 def test_reasoning_is_model_compatible():
-    assert validate_reasoning(get_model("gpt-5.4"), "high") == "high"
-    assert validate_reasoning(get_model("gpt-5.4"), "unsupported") == "medium"
-    assert validate_reasoning(get_model("gpt-4.1"), "high") is None
+    locked = get_model(LOCKED_CHAT_MODEL_ID)
+    assert validate_reasoning(locked, "low") == "low"
+    assert validate_reasoning(locked, "high") == "low"
+    assert validate_reasoning(locked, "unsupported") == "low"
 
 
 def test_student_modes_cover_assignment_workflows():

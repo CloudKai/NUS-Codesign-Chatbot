@@ -3,8 +3,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import html
-import io
-import mimetypes
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -41,7 +39,6 @@ class ChatOptions:
     web_search: bool = False
     image_generation: bool = False
     local_analysis: bool = False
-    speak_response: bool = False
     assignment: dict[str, str] = field(default_factory=dict)
     thinking_stage: str = "focus"
     response_detail: str = "short"
@@ -672,37 +669,6 @@ Co-design concept</text>
         workspace.mkdir(parents=True, exist_ok=True)
         path = workspace / f"generated-{uuid.uuid4().hex[:8]}.png"
         path.write_bytes(base64.b64decode(result))
-        return path
-
-    def transcribe(self, data: bytes, mime: str = "audio/wav") -> str:
-        if settings.mock_openai:
-            return "Mock voice note for the assignment."
-        if not settings.openai_api_key:
-            raise RuntimeError("OPENAI_API_KEY is required for transcription.")
-        extension = mimetypes.guess_extension(mime) or ".wav"
-        buffer = io.BytesIO(data)
-        buffer.name = f"student-recording{extension}"
-        response = OpenAI(api_key=settings.openai_api_key).audio.transcriptions.create(
-            model=settings.transcription_model,
-            file=(buffer.name, buffer.getvalue(), mime),
-        )
-        return response.text
-
-    def synthesize(self, thread_id: str, text: str) -> Path:
-        workspace = (settings.workspaces_dir / thread_id).resolve()
-        workspace.mkdir(parents=True, exist_ok=True)
-        path = workspace / f"response-{uuid.uuid4().hex[:8]}.mp3"
-        if settings.mock_openai:
-            path.write_bytes(b"")
-            return path
-        if not settings.openai_api_key:
-            raise RuntimeError("OPENAI_API_KEY is required for speech output.")
-        response = OpenAI(api_key=settings.openai_api_key).audio.speech.create(
-            model=settings.speech_model,
-            voice="alloy",
-            input=text[:4096],
-        )
-        response.stream_to_file(path)
         return path
 
     @staticmethod

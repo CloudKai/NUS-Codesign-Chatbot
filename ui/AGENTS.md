@@ -26,20 +26,36 @@ Only read that for UI tasks that touch API migration or coaching flow.
 
 | Module | Responsibility |
 |---|---|
-| `constants.py` | Response languages, appearance modes, review feedback copy |
+| `constants.py` | Response languages and appearance modes |
 | `components.py` | Shared HTML helpers for progress, empty states, review cards |
-| `theme.py` | `TEMPLATE_UI_CSS`, `inject_template_css()`, `render_theme_css()` |
+| `assets/template.css` | Static layout/component stylesheet (edit CSS here) |
+| `theme.py` | Loads `assets/template.css`, `inject_template_css()`, dynamic `render_theme_css()` |
+| `layout/` | Browser-side layout helpers (column resize, sources scroll, composer) |
 | `runtime.py` | Cached `store`, `engine`, `course_material_sync()`, `local_api_client()`, `rerun()` |
 | `session.py` | Session defaults, notebook create/select/delete, `save_journey()` |
 | `topbar.py` | Brand, title, section switcher, Guidance, profile entry |
-| `profile.py` | Profile dialog (name, appearance, language, model, help, log out) |
+| `profile.py` | Compact settings popover (display name, appearance, language, help) |
 | `workspace.py` | Mobile panel radio and three-column studio/chat/sources layout |
-| `column_resize.py` | Between-column drag handles and side-panel collapse widths |
 | `chat.py` | Message rendering, citations, composer, `handle_prompt()`, `render_chat_panel()` |
 | `sources.py` | Source library with search/filter, add/viewer dialogs |
 | `studio.py` | Thinking Path journey roadmap, review cards, pending transition UI |
 | `notebooks.py` | Folder-free notebook library and actions dialog |
-| `settings.py` | Preference persistence callbacks used by the profile dialog |
+| `settings.py` | Preference persistence callbacks used by the profile popover |
+
+Compatibility shims at `ui/column_resize.py`, `ui/sources_scroll.py`, and
+`ui/composer_layout.py` re-export `ui.layout.*`. Prefer importing from
+`ui.layout` (or `ui.layout.<module>`) in new code.
+
+## Layout helpers (`ui/layout/`)
+
+| Module | Responsibility |
+|---|---|
+| `column_resize.py` | Between-column drag handles and side-panel collapse widths |
+| `sources_scroll.py` | Sources list scroll region sizing |
+| `composer_layout.py` | Composer footer card / model-slot placement |
+
+These modules inject small `components.html` scripts because Streamlit lacks
+first-class APIs for those layout behaviours. Do not put educational logic here.
 
 ## Hard constraints
 
@@ -53,7 +69,8 @@ Only read that for UI tasks that touch API migration or coaching flow.
   `@st.fragment` on the functions that own them. Changing keys breaks session
   state and AppTest expectations.
 - **Explicit CSS injection.** Call `inject_template_css()` from the entrypoint;
-  do not auto-inject CSS on `ui.theme` import.
+  do not auto-inject CSS on `ui.theme` import. Edit static styles in
+  `ui/assets/template.css`, not by re-embedding large CSS strings in Python.
 - **Avoid circular imports.** Typical flow: `runtime` → `session` → panels;
   `topbar` imports `notebooks` and `settings`; `workspace` imports panel modules.
 - **No hidden stage controls.** Show coach recommendations and respect persisted
@@ -65,6 +82,7 @@ Only read that for UI tasks that touch API migration or coaching flow.
 streamlit_app.py
   -> inject_template_css()
   -> initialize_session()
+  -> sync_appearance_from_widget()
   -> render_theme_css()
   -> render_topbar()  -> model_id, reasoning_effort
   -> render_workspace(model_id, reasoning_effort)
@@ -80,8 +98,14 @@ Edit the owning module (`chat.py`, `sources.py`, `studio.py`, etc.). Check
 
 **Theme or responsive CSS**
 
-`theme.py` only. AppTest in `tests/test_streamlit_ui.py` asserts many CSS
-strings from rendered output — run UI tests after visual changes.
+Edit `ui/assets/template.css` for static styles. Edit `theme.py` only for
+Light/Dark/System token overrides in `render_theme_css()`. AppTest in
+`tests/test_streamlit_ui.py` asserts many CSS strings from rendered output —
+run UI tests after visual changes.
+
+**Layout / scroll / composer DOM helpers**
+
+Edit the matching module under `ui/layout/`.
 
 **New dialog**
 
@@ -90,8 +114,10 @@ entrypoint or a parent panel if it must open on load.
 
 **API vs legacy chat path**
 
-`chat.py` branches on `local_api_enabled()`. Keep both paths working until
-migration is complete.
+`chat.py` branches on `local_api_enabled()`. Prefer the FastAPI coaching path
+(`USE_LOCAL_API=true` via `scripts/run.sh`). The legacy `StudentChatEngine`
+path remains for offline fallback during migration — do not add new stage or
+vision behaviour only to the legacy path.
 
 ## Validation
 

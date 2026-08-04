@@ -1,140 +1,238 @@
 # Co-design Student Chatbot
 
-Co-design is a **Streamlit** learning assistant for university students. It includes an
-OpenAI model registry, Responses API conversation logic, SQLite history, folders, model
-switching, attachments, and a local analysis foundation.
+Local critical-thinking coach for university students. The app is a **Streamlit**
+UI plus a **FastAPI** coaching API. Student data stays on your machine (SQLite +
+files under `data/`). There is no cloud auth in this prototype.
 
-There is no authentication and there is no Replit dependency. Student data is stored locally.
+Use **one command** to start everything. That command starts both services with
+`USE_LOCAL_API=true`, which is required for:
 
-## Student experience
+- Thinking Path / progress-bar stage advancement
+- Structured coach assessments and Review personalization
+- Selected **image** sources being sent to the coach
 
-- A NotebookLM-inspired research workspace with dedicated Sources, Chat, and Learning
-Studio panels, adaptive light and dark themes, and mobile panel switching.
-- Notebook history and folders are available from the top bar. Every notebook shows its
-current thinking stage, journey progress, student contribution count, concise learning
-summary, and feedback status.
-- A persistent source library for uploaded files, pasted text, and safely imported public
-webpages. Students can select exactly which sources ground each response, preview them,
-download originals, and open source citations from assistant messages.
-- A six-stage critical-thinking journey: Focus, Evidence, Assumptions, Perspectives,
-Synthesis, and Conclusion.
-- Coach-controlled stage progression that evaluates each student contribution automatically,
-alongside a focused Learning Review of the student’s developing understanding.
-- Short and Long response modes, persisted with each chat and applied to every model.
-- An on-demand Learning Review showing chat contributions, completed stages, the current
-critical-understanding level, conclusion, reflection, and next question.
-- A fixed Critical Thinking Coach mode with no learning-mode or advanced-settings clutter.
-- Explicit academic-integrity guidance that protects student authorship and never fabricates
-sources, evidence, quotations, experiments, or citations.
-- Model selection before every message, capability-aware reasoning levels, a visible Legacy
-label, exact-model execution, and no silent model fallback.
-- Streaming responses, persistent anonymous chat history, search, folders, rename, move,
-delete, edit, regenerate, and transcript download.
-- A single composer for text, files, images, and voice. Composer attachments are added to
-the notebook source library automatically.
-- Common document, presentation, spreadsheet, image, and text formats: up to 10 files and
-25 MB each by default.
-- A full mock mode so instructors and students can explore the UI without an API key.
+Starting Streamlit alone (without the API) leaves the Learning Path stuck and
+skips image grounding on the coaching path.
 
+---
 
+## Prerequisites
 
-## Architecture
+- **Python 3.12+** (3.12 recommended)
+- macOS or Linux shell (`zsh` / `bash`)
+- Optional later: [Ollama](https://ollama.com/) or an OpenAI API key
 
-```text
-Streamlit UI (streamlit_app.py)
-        |
-        +-- backend/student_support.py  learning modes + critical-thinking foundation
-        +-- backend/student_journey.py  stages + reflections + learning reviews
-        +-- backend/chat_service.py     Responses API streaming + tools + model replay
-        +-- backend/student_store.py    SQLite chats, folders, feedback, model state
-        +-- backend/source_library.py   notebook sources + URL safety + grounding context
-        +-- backend/file_processing.py  safe uploads + local assignment extraction
-        +-- backend/models.py           curated per-message model registry
-```
+---
 
-The OpenAI backend uses the Responses API for multi-turn, tool-using workflows. Canonical
-history is replayed when a student changes models or the selected source set changes;
-`previous_response_id` is reused only while both the model and source snapshot remain the
-same.
+## First-time setup
 
-## Run the UI
+From the project root (`Co-design Chatbot`):
 
-Python 3.12 or newer is recommended.
+### 1. Create and activate a virtual environment
 
 ```bash
-cd "Co-design Chatbot"
+cd "/path/to/Co-design Chatbot"
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+On Windows (PowerShell):
+
+```powershell
+cd "\path\to\Co-design Chatbot"
 python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-sh scripts/run.sh
+.\.venv\Scripts\Activate.ps1
 ```
 
-Open [http://localhost:8501](http://localhost:8501).
+Confirm the venv is active (`which python` / `where python` should point inside
+`.venv`).
 
-`MOCK_OPENAI=true` is the default, so the complete local interface works immediately without
-an API key.
+### 2. Install dependencies
 
-## Run the local LangGraph demonstration
-
-This starts the FastAPI boundary and the Streamlit UI together. It is the
-recommended professor demonstration mode: it uses the deterministic local
-provider by default and automatically advances the Thinking Path after a
-validated stage recommendation. Set `AUTO_ADVANCE_STAGES=false` to restore the
-student-confirmation flow.
+Prefer `pip` from the active venv (same as `pip3` inside `.venv`):
 
 ```bash
-cd "Co-design Chatbot"
-source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Equivalent if the venv is already active:
+
+```bash
+pip3 install -r requirements.txt
+```
+
+### 3. Create a local env file
+
+```bash
 cp .env.example .env
+```
+
+The example defaults are safe for local development:
+
+- `MODEL_PROVIDER=mock` — no API key required
+- `USE_LOCAL_API=true` — coaching API enabled (also forced by `scripts/start.sh`)
+- `AUTO_ADVANCE_STAGES=false` — coach recommends a stage; press **Next** and confirm
+
+Do **not** commit `.env` (it may contain secrets later).
+
+### 4. Start the whole program (one command)
+
+```bash
+sh scripts/start.sh
+```
+
+These aliases do the **same** thing:
+
+```bash
+sh scripts/run.sh
+sh scripts/dev.sh
 sh scripts/run_local_demo.sh
 ```
 
-For a local model, install [Ollama](https://ollama.com/), then run:
+Then open:
+
+| Service | URL |
+|---|---|
+| Streamlit UI | [http://127.0.0.1:8501](http://127.0.0.1:8501) |
+| API health | [http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health) |
+
+Stop with `Ctrl+C` in the terminal that ran the script (it stops both API and UI).
+
+---
+
+## Everyday restart
+
+If the venv already exists and dependencies are installed:
+
+```bash
+cd "/path/to/Co-design Chatbot"
+source .venv/bin/activate
+sh scripts/start.sh
+```
+
+You can also run without activating first; `scripts/start.sh` prefers
+`.venv/bin/python` when that interpreter exists.
+
+---
+
+## What you get in mock mode
+
+With `MODEL_PROVIDER=mock` (default in `.env.example`):
+
+1. First chat turn at a stage gets guidance (stage stays).
+2. Second turn at that stage advances the Thinking Path (progress bar updates).
+3. Upload/select sources (including images); the API coach path receives selected
+   image inputs for grounding.
+
+No OpenAI key is required.
+
+---
+
+## Optional: live providers
+
+### Ollama (local model)
 
 ```bash
 ollama pull gpt-oss:20b
-MODEL_PROVIDER=ollama sh scripts/run_local_demo.sh
 ```
 
-The local API runs at [http://127.0.0.1:8000/api/v1/health](http://127.0.0.1:8000/api/v1/health).
-Use `MODEL_PROVIDER=openai` only after explicitly deciding to run paid OpenAI
-requests and configuring `OPENAI_API_KEY`.
+In `.env`:
 
-In mock mode, the first contribution receives guidance and the follow-up moves
-to the next stage. OpenAI and Ollama providers generate the structured stage
-recommendation from the student's reasoning.
+```bash
+MODEL_PROVIDER=ollama
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_CHAT_MODEL=gpt-oss:20b
+```
 
-Course materials are synchronized from `lecture_notes/lectureNotes/` and
-`lecture_notes/readings/`, then displayed as locked **Lecture Notes** and
-**Readings** groups in Sources. Students can select and preview these materials,
-but the app does not offer download or delete controls for instructor-managed
-files. The original files are never moved or modified.
-Trusted local course files may be up to 50 MB; the student composer retains its
-25 MB upload limit.
+Then:
 
-## Lecture-notes RAG folder
+```bash
+sh scripts/start.sh
+```
 
-Place PDFs, Word documents, PowerPoint decks, spreadsheets, text files, or
-images in `lecture_notes/`. The Sources panel automatically copies new or
-changed files into the active notebook, selects them, extracts readable text,
-and includes them in the next grounded response. Removing a file from the
-folder removes only its synchronized notebook copy on the next refresh.
+### OpenAI (paid — only with explicit approval / budget)
 
-Lecture-note contents are ignored by Git. `README.txt` remains as the safe  
-folder instruction file and is never imported as a source. Each file retains  
-the 25 MB limit; up to 50 lecture-note files are synchronized by default.
+In `.env`:
+
+```bash
+MODEL_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+OPENAI_CHAT_MODEL=gpt-5.6-luna
+DEFAULT_REASONING_EFFORT=low
+MOCK_OPENAI=false
+```
+
+Paid calls are **not** part of the default local workflow. Keep mock or Ollama
+for routine development.
+
+### Thinking Path Next confirmation
+
+Default: `AUTO_ADVANCE_STAGES=false`. After the coach recommends the next stage:
+
+1. Press **Next** on Thinking Path.
+2. Read the warning that confirming early can make the process less critical.
+3. Press **Next** again in the dialog to confirm (or Cancel).
+
+Quick guidance is a lighter advance bar; Complex is stricter. To restore silent
+auto-advance:
+
+```bash
+AUTO_ADVANCE_STAGES=true
+```
+
+---
+
+## Course materials (`lecture_notes/`)
+
+Put instructor PDFs and related files under:
+
+- `lecture_notes/lectureNotes/`
+- `lecture_notes/readings/`
+
+They sync into each notebook as locked **Lecture Notes** / **Readings** groups.
+`lecture_notes/README.txt` is instructional only and is not imported. Git ignores
+lecture contents; originals are never moved.
+
+Trusted course files may be up to **50 MB**; student uploads remain **25 MB**
+(up to 10 files per add).
+
+---
+
+## Architecture (local)
+
+```text
+scripts/start.sh
+  ├── FastAPI  backend.api:app     :8000   (coach turns, transitions)
+  └── Streamlit streamlit_app.py   :8501   (ui/ panels)
+
+ui/  → presentation only
+backend/ → domain, workflow, providers, SQLite, sources
+```
+
+Prefer the API coaching path for all new behaviour. The legacy
+`StudentChatEngine` path exists only as a fallback when `USE_LOCAL_API` is off;
+do not use that for normal local development.
+
+---
 
 ## Tests
 
 ```bash
 source .venv/bin/activate
-python -m pytest
-python -m compileall -q backend streamlit_app.py
+python -m pytest -q
+PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \
+  python -m compileall -q backend ui streamlit_app.py
 ```
 
-The suite covers the student-support prompts, academic-integrity guardrails, model registry,  
-reasoning compatibility, model/source replay, persistent notebook/folder/feedback state,  
-source CRUD and selection, safe URL imports, legacy attachment migration, upload safety,  
-mock streaming, generated media, citations, and the multimodal Streamlit composer
+---
 
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Progress bar never leaves Focus | UI started without API | Use `sh scripts/start.sh` only |
+| Coach error about local API | API not up / wrong URL | Check `:8000/api/v1/health`; keep `CO_DESIGN_API_URL=http://127.0.0.1:8000` |
+| Provider / OpenAI errors on first run | `.env` set to `openai` without a key | Set `MODEL_PROVIDER=mock` |
+| Port already in use | Another process on 8000 or 8501 | Stop the other process, then restart `start.sh` |
+| Imports missing | Wrong Python / no venv packages | `source .venv/bin/activate` then `python -m pip install -r requirements.txt` |

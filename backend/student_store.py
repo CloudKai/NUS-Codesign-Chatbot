@@ -232,6 +232,36 @@ class StudentStore:
             )
             return owner_id
 
+    def get_user_preferences(self) -> dict[str, Any]:
+        """Return the local user's preference metadata blob."""
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT metadata FROM users WHERE id = ?",
+                (self.owner_id,),
+            ).fetchone()
+        if not row:
+            return {}
+        metadata = _load(row["metadata"], {})
+        return metadata if isinstance(metadata, dict) else {}
+
+    def update_user_preferences(self, patch: dict[str, Any]) -> None:
+        """Merge preference keys into the local user's metadata."""
+        if not patch:
+            return
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT metadata FROM users WHERE id = ?",
+                (self.owner_id,),
+            ).fetchone()
+            current = _load(row["metadata"] if row else None, {})
+            if not isinstance(current, dict):
+                current = {}
+            next_metadata = {**current, **patch}
+            connection.execute(
+                "UPDATE users SET metadata = ? WHERE id = ?",
+                (_dump(next_metadata), self.owner_id),
+            )
+
     def create_thread(
         self,
         *,

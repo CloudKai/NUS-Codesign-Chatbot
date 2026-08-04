@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import streamlit as st
 
 from backend.api_client import LocalApiClient
@@ -10,13 +12,42 @@ from backend.settings import settings
 from backend.source_library import CourseMaterialSyncCoordinator
 from backend.student_store import StudentStore
 
+
 @st.cache_resource
 def resources() -> tuple[StudentStore, StudentChatEngine]:
     store = StudentStore()
     return store, StudentChatEngine(store)
 
 
-store, engine = resources()
+def _resolve_resources() -> tuple[StudentStore, StudentChatEngine]:
+    """Return a store/engine pair, refreshing if hot-reload left a stale class."""
+    store, engine = resources()
+    if not hasattr(store, "get_user_preferences") or not hasattr(
+        store, "update_user_preferences"
+    ):
+        resources.clear()
+        store, engine = resources()
+    return store, engine
+
+
+class _LazyStore:
+    """Proxy so importers always hit the current cached StudentStore instance."""
+
+    def __getattr__(self, name: str) -> Any:
+        store, _ = _resolve_resources()
+        return getattr(store, name)
+
+
+class _LazyEngine:
+    """Proxy so importers always hit the current cached StudentChatEngine."""
+
+    def __getattr__(self, name: str) -> Any:
+        _, engine = _resolve_resources()
+        return getattr(engine, name)
+
+
+store = _LazyStore()
+engine = _LazyEngine()
 
 
 @st.cache_resource

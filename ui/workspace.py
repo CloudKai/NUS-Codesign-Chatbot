@@ -1,19 +1,23 @@
-"""Three-column notebook workspace layout."""
+"""Three-column notebook workspace layout.
+
+Composes Thinking Path (studio), Chat, and Sources with optional collapsed
+rails. Layout helpers live under ``ui.layout``; this module only wires panels.
+"""
 
 from __future__ import annotations
 
 import streamlit as st
 
 from ui.chat import render_chat_panel
-from ui.column_resize import (
+from ui.layout.column_resize import (
     effective_column_widths,
     set_side_panel_collapsed,
     side_panel_collapsed,
     sync_workspace_column_resize,
 )
+from ui.layout.sources_scroll import sync_sources_scroll
 from ui.runtime import rerun
 from ui.sources import render_sources_panel
-from ui.sources_scroll import sync_sources_scroll
 from ui.studio import render_studio_panel
 
 
@@ -30,7 +34,12 @@ def _render_collapsed_rail(*, side: str, expand_icon: str, label: str) -> None:
 
 
 def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
-    """Render the mobile panel switcher and three-column workspace."""
+    """Render the mobile panel switcher and three-column workspace.
+
+    Args:
+        model_id: Model id forwarded to the chat panel.
+        reasoning_effort: Reasoning effort forwarded to the chat panel.
+    """
     panel = st.radio(
         "Workspace panel",
         ["Sources", "Chat", "Studio"],
@@ -72,6 +81,9 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                 )
             else:
                 with st.container(key="studio_panel"):
+                    # Render content first so the absolute collapse control cannot
+                    # leave a leading spacer above "Thinking Path".
+                    render_studio_panel()
                     if st.button(
                         "‹",
                         type="tertiary",
@@ -79,7 +91,6 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                     ):
                         set_side_panel_collapsed("studio", True)
                         rerun()
-                    render_studio_panel()
         with chat_column:
             with st.container(key="chat_panel"):
                 render_chat_panel(model_id, reasoning_effort)
@@ -92,6 +103,8 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                 )
             else:
                 with st.container(key="sources_panel"):
+                    # Same order as studio: header content before collapse control.
+                    render_sources_panel()
                     if st.button(
                         "›",
                         type="tertiary",
@@ -99,6 +112,5 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                     ):
                         set_side_panel_collapsed("sources", True)
                         rerun()
-                    render_sources_panel()
                     sync_sources_scroll()
         sync_workspace_column_resize()

@@ -609,6 +609,11 @@ def selected_source_context(
 
 
 def source_image_input(source: dict[str, Any]) -> dict[str, str] | None:
+    """Build an OpenAI-style ``input_image`` part for a notebook image source.
+
+    Returns None when the source is not an image, the path is missing, or the
+    file is outside the configured files directory (path-traversal guard).
+    """
     path_value = source.get("path")
     if source.get("kind") != "image" or not path_value:
         return None
@@ -623,3 +628,31 @@ def source_image_input(source: dict[str, Any]) -> dict[str, str] | None:
         "image_url": f"data:{mime};base64,{encoded}",
         "detail": "auto",
     }
+
+
+def image_inputs_for_source_ids(
+    store: StudentStore,
+    thread_id: str,
+    source_ids: Iterable[str],
+) -> list[dict[str, str]]:
+    """Resolve selected notebook images into coach-ready image payloads.
+
+    Resolution stays in the source/infrastructure layer so providers and future
+    AWS adapters can swap storage backends without changing the workflow.
+    """
+    resolved: list[dict[str, str]] = []
+    for source_id in source_ids:
+        source = store.get_source(thread_id, str(source_id))
+        if not source:
+            continue
+        image_part = source_image_input(source)
+        if not image_part:
+            continue
+        resolved.append(
+            {
+                "source_id": str(source["id"]),
+                "mime": str(source.get("mime") or "image/png"),
+                "data_url": image_part["image_url"],
+            }
+        )
+    return resolved

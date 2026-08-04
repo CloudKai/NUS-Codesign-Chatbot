@@ -18,9 +18,9 @@ def test_streamlit_notebook_workspace_smoke():
 
     assert not any(selectbox.label == "Guidance:" for selectbox in app.selectbox)
     assert not any(selectbox.label == "Model" for selectbox in app.selectbox)
-    assert not any(
-        selectbox.label == "Response language" for selectbox in app.selectbox
-    )
+    # Profile preferences live in the settings popover (exposed to AppTest).
+    assert any(selectbox.label == "Language" for selectbox in app.selectbox)
+    assert any(control.label == "Appearance" for control in app.segmented_control)
     assert not any(selectbox.label == "Current stage" for selectbox in app.selectbox)
     assert not any(selectbox.label == "Learning mode" for selectbox in app.selectbox)
     workspace_panel = next(
@@ -73,7 +73,7 @@ def test_streamlit_notebook_workspace_smoke():
     ) < rendered.index('<span class="pane-title">Sources</span>')
     assert ".st-key-chat_log" in rendered
     assert "overflow-y:auto" in rendered
-    assert "scrollbar-color:var(--cd-text) transparent" in rendered
+    assert "scrollbar-color:var(--cd-scrollbar) transparent" in rendered
     assert "max-height:calc(1em * 1.45 * 3)" in rendered
     assert "min-height:4.5rem" in rendered
     assert "cd-composer-single" not in rendered
@@ -83,8 +83,13 @@ def test_streamlit_notebook_workspace_smoke():
     assert "grid-template-columns:minmax(0,1fr) auto" in rendered
     assert "stChatInputTextArea" in rendered
     assert "arrow_upward" in rendered
-    assert "cd-composer-card" in Path("ui/composer_layout.py").read_text(encoding="utf-8")
-    assert '[data-testid="stHeaderActionElements"]' in rendered
+    assert "cd-composer-card" in Path("ui/layout/composer_layout.py").read_text(encoding="utf-8")
+    assert (
+        '[data-testid="stHeaderActionElements"] {\n'
+        "        display:none !important;"
+    ) in rendered
+    assert "stChatInputMicButton" in rendered
+    assert "coach-welcome-title" in rendered
     assert "st-key-topbar_navigation" in rendered
     assert "color:var(--cd-text) !important" in rendered
     assert "background:transparent !important" in rendered
@@ -118,11 +123,22 @@ def test_streamlit_notebook_workspace_smoke():
     assert any(button.label == "‹" for button in app.button)
     assert any(button.label == "›" for button in app.button)
     assert "cd-roadmap" in rendered
+    assert "cd-thinking-path-tip" in rendered
+    assert "less critical" in rendered
+    assert "press" in rendered.lower() or "<strong>Next</strong>" in rendered
+    assert "ask to skip ahead" not in rendered
+    assert "tell the coach you are ready to move on" not in rendered
+    assert 'say "next" in Chat to move on' not in rendered
+    assert "cd-progress-help" not in rendered
+    assert "Stuck or want to move on" not in rendered
+    assert "Stay on this step" not in {button.label for button in app.button}
+    # Footer Next is present but disabled without a pending coach recommendation / local API.
+    assert any(button.label == "Next" for button in app.button)
     assert "IBM Plex Sans" in rendered
     assert "background:var(--cd-panel)" in rendered
 
     button_labels = {button.label for button in app.button}
-    assert {"Chats", "Add"} <= button_labels
+    assert {"Notebooks", "Add"} <= button_labels
     assert "About Sources" not in button_labels
     assert 'aria-label="About Sources"' not in rendered
     assert "source-title-help" not in rendered
@@ -138,7 +154,13 @@ def test_streamlit_notebook_workspace_smoke():
     assert not any("login" in (button.label or "").lower() for button in app.button)
     assert len(app.warning) == 0
 
-    assert any(button.label == "S" for button in app.button)
+    assert any(input_widget.label == "Display name" for input_widget in app.text_input)
+    assert any(control.label == "Appearance" for control in app.segmented_control)
+    assert any(selectbox.label == "Language" for selectbox in app.selectbox)
+    assert "cd-profile-menu" in rendered
+    assert "cd-profile-help-title" in rendered
+    assert "cd-profile-help-body" in rendered
+    assert "stTooltipHoverTarget" in rendered
     assert not any(selectbox.label == "Model" for selectbox in app.selectbox)
     assert "st-key-composer_model_slot" in rendered
     assert any(
@@ -264,7 +286,7 @@ def test_learning_studio_and_notebook_history_controls():
     assert "Thinking Path" in rendered
     assert "Discussion summary" in rendered
     assert "Next question" not in rendered
-    next(button for button in app.button if button.label == "Chats").click().run()
+    next(button for button in app.button if button.label == "Notebooks").click().run()
     assert not app.exception
     assert any(
         text_input.label == "Search notebooks" for text_input in app.text_input
@@ -274,24 +296,26 @@ def test_learning_studio_and_notebook_history_controls():
         button.label == "New notebook" for button in app.button
     )
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "notebook-card-summary" in rendered
+    assert "notebook-card-meta" in rendered
+    assert "of 6" in rendered
 
 
 def test_language_theme_and_journey_has_no_manual_progression_control():
+    from backend.student_store import StudentStore
+
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    # Preferences live in the profile popover; open by clicking the avatar initial.
-    next(button for button in app.button if button.label == "S").click().run()
+    # Preferences live in the profile settings popover (content exposed to AppTest).
 
     language = next(
         selectbox
         for selectbox in app.selectbox
-        if selectbox.label == "Response language"
+        if selectbox.label == "Language"
     )
     assert language.options == ["English", "中文", "Bahasa Melayu", "தமிழ்"]
     language.set_value("中文").run()
     assert app.session_state["response_language"] == "中文"
 
-    next(button for button in app.button if button.label == "S").click().run()
+    # Popover content remains available for further preference changes.
     appearance = next(
         control
         for control in app.segmented_control
@@ -300,11 +324,44 @@ def test_language_theme_and_journey_has_no_manual_progression_control():
     assert appearance.options == ["System", "Light", "Dark"]
     appearance.set_value("Dark").run()
     assert app.session_state["appearance"] == "Dark"
+    assert StudentStore().get_user_preferences().get("appearance") == "Dark"
     assert not app.exception
+
+    # Fresh session reload restores the stored appearance.
+    restored = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    assert restored.session_state["appearance"] == "Dark"
+    assert restored.session_state["setting_appearance"] == "Dark"
+    assert StudentStore().get_user_preferences().get("appearance") == "Dark"
 
     assert app.session_state["learning_journey"]["current_stage"] == "focus"
     assert not any(button.label == "Move to next step" for button in app.button)
     assert not any(button.label == "Move to Evidence" for button in app.button)
+    assert not app.exception
+
+
+def test_stale_appearance_widget_does_not_overwrite_stored_dark():
+    """DB appearance wins over a leftover settings-widget value on init."""
+    from backend.student_store import StudentStore
+
+    StudentStore().update_user_preferences({"appearance": "Dark"})
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30)
+    app.session_state["setting_appearance"] = "Light"
+    app.run()
+
+    assert app.session_state["appearance"] == "Dark"
+    assert app.session_state["setting_appearance"] == "Dark"
+    assert StudentStore().get_user_preferences().get("appearance") == "Dark"
+    assert not app.exception
+
+    appearance = next(
+        control
+        for control in app.segmented_control
+        if control.label == "Appearance"
+    )
+    appearance.set_value("System").run()
+    assert app.session_state["appearance"] == "System"
+    assert StudentStore().get_user_preferences().get("appearance") == "System"
     assert not app.exception
 
 
@@ -329,7 +386,7 @@ def test_current_notebook_title_is_directly_editable_and_syncs_with_history():
     from backend.student_store import StudentStore
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    next(button for button in app.button if button.label == "Chats").click().run()
+    next(button for button in app.button if button.label == "Notebooks").click().run()
     next(button for button in app.button if button.label == "New notebook").click().run()
     current = StudentStore().get_thread(app.session_state["thread_id"])
     assert current
@@ -341,7 +398,7 @@ def test_current_notebook_title_is_directly_editable_and_syncs_with_history():
     assert StudentStore().get_thread(app.session_state["thread_id"])["name"] == (
         "Road Safety Research"
     )
-    next(button for button in app.button if button.label == "Chats").click().run()
+    next(button for button in app.button if button.label == "Notebooks").click().run()
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Road Safety Research" in rendered
     assert not any(button.label == "Edit title" for button in app.button)
@@ -352,7 +409,7 @@ def test_notebook_history_card_highlights_active_notebook_without_folders():
     from backend.student_store import StudentStore
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    next(button for button in app.button if button.label == "Chats").click().run()
+    next(button for button in app.button if button.label == "Notebooks").click().run()
     next(button for button in app.button if button.label == "New notebook").click().run()
     local_store = StudentStore()
     thread_id = app.session_state["thread_id"]
@@ -367,12 +424,13 @@ def test_notebook_history_card_highlights_active_notebook_without_folders():
     )
     assert title.value == local_store.get_thread(thread_id)["name"]
 
-    next(button for button in app.button if button.label == "Chats").click().run()
+    next(button for button in app.button if button.label == "Notebooks").click().run()
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "notebook-card-folder" not in rendered or '<div class="notebook-card-folder">' not in rendered
     assert '<div class="notebook-card-folder">' not in rendered
-    assert "cd-notebook-card" in rendered
+    assert "notebook-current-badge" in rendered
     assert "Active research notebook" in rendered
+    assert "cd-notebook-card is-active" not in rendered
     assert not any(selectbox.label == "Folder" for selectbox in app.selectbox)
     assert not any(button.label == "Manage folders" for button in app.button)
     assert not app.exception
@@ -382,7 +440,7 @@ def test_notebook_history_confirmed_delete_removes_the_selected_notebook():
     from backend.student_store import StudentStore
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    next(button for button in app.button if button.label == "Chats").click().run()
+    next(button for button in app.button if button.label == "Notebooks").click().run()
     next(button for button in app.button if button.label == "New notebook").click().run()
     deleted_thread_id = app.session_state["thread_id"]
 
@@ -408,7 +466,7 @@ def test_notebook_history_confirmed_delete_removes_the_selected_notebook():
 
 def test_legacy_chat_turn_does_not_move_the_learning_stage_without_confirmation():
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    next(button for button in app.button if button.label == "Chats").click().run()
+    next(button for button in app.button if button.label == "Notebooks").click().run()
     next(button for button in app.button if button.label == "New notebook").click().run()
     app.chat_input[0].set_value(
         "My focus is to evaluate whether the study evidence supports the main claim."

@@ -14,6 +14,7 @@ from backend.source_library import (
     backfill_legacy_sources,
     course_material_group,
     fetch_public_webpage,
+    image_inputs_for_source_ids,
     selected_source_context,
     sync_lecture_notes_folder,
     validate_public_url,
@@ -80,6 +81,29 @@ def test_pasted_source_context_has_stable_labels_and_limit(tmp_path, monkeypatch
     assert references[1]["label"] == "S2"
     assert "[S1] Lecture" in context
     assert len(context) <= 145
+
+
+def test_image_inputs_for_source_ids_resolves_selected_png(tmp_path, monkeypatch):
+    store, thread_id, _ = make_notebook(tmp_path, monkeypatch)
+    png = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f"
+        b"\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    created = add_file_sources(
+        store,
+        thread_id,
+        [("diagram.png", png, "image/png")],
+    )
+    text = add_text_source(store, thread_id, "Notes", "Text only")
+    images = image_inputs_for_source_ids(
+        store,
+        thread_id,
+        [created[0]["id"], text["id"]],
+    )
+    assert len(images) == 1
+    assert images[0]["source_id"] == created[0]["id"]
+    assert images[0]["data_url"].startswith("data:image/png;base64,")
 
 
 def test_lecture_notes_folder_syncs_updates_and_removes_sources(tmp_path, monkeypatch):

@@ -16,7 +16,7 @@ from ui.settings import apply_selected_model
 
 GUIDANCE_LABELS = {
     "short": "Quick",
-    "long": "Deep",
+    "long": "Complex",
 }
 
 
@@ -96,7 +96,7 @@ def render_topbar() -> tuple[str, str | None]:
             ) = st.columns([0.24, 0.28, 0.2, 0.28], gap="small")
             with chats_column.container(key="topbar_navigation"):
                 if st.button(
-                    "Chats",
+                    "Notebooks",
                     icon=":material/library_books:",
                     type="tertiary",
                     key="open-notebooks",

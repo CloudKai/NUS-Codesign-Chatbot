@@ -10,7 +10,7 @@ from backend.student_store import StudentStore
 def test_local_api_runs_a_mock_turn_and_auto_advances(tmp_path):
     store = StudentStore(tmp_path / "api.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
-    client = TestClient(create_app(store))
+    client = TestClient(create_app(store, auto_advance_stages=True))
 
     health = client.get("/api/v1/health")
     assert health.status_code == 200
@@ -92,6 +92,53 @@ def test_local_api_can_retain_confirmation_mode(tmp_path):
     state = client.get(f"/api/v1/threads/{thread_id}/learning-state").json()
     assert (state.get("learning_journey") or {}).get("current_stage", "focus") == "focus"
 
+    transition_id = follow_up.json()["pending_transition"]["id"]
+    resolved = client.post(
+        f"/api/v1/threads/{thread_id}/phase-transitions/{transition_id}/resolve",
+        json={"accepted": True},
+    )
+    assert resolved.status_code == 200
+    advanced = client.get(f"/api/v1/threads/{thread_id}/learning-state").json()
+    assert (advanced.get("learning_journey") or {}).get("current_stage") == "evidence"
+
+
+def test_complex_guidance_is_stricter_before_recommending_advance(tmp_path):
+    store = StudentStore(tmp_path / "complex-api.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = TestClient(create_app(store, auto_advance_stages=False))
+    request = {
+        "thread_id": thread_id,
+        "current_stage": "focus",
+        "response_detail": "long",
+    }
+
+    client.post(
+        "/api/v1/coach/turn",
+        json={**request, "student_message": "I want to evaluate a crossing design."},
+    )
+    second = client.post(
+        "/api/v1/coach/turn",
+        json={
+            **request,
+            "student_message": "Which design gives older pedestrians time to cross?",
+        },
+    )
+    assert second.status_code == 200
+    assert second.json()["pending_transition"] is None
+
+    third = client.post(
+        "/api/v1/coach/turn",
+        json={
+            **request,
+            "student_message": (
+                "I will compare signal timing and curb cuts for older pedestrians "
+                "near schools."
+            ),
+        },
+    )
+    assert third.status_code == 200
+    assert third.json()["pending_transition"]["to_stage"] == "evidence"
+
 
 def test_first_coaching_turn_generates_a_concise_model_assisted_title(tmp_path):
     store = StudentStore(tmp_path / "title-api.sqlite3")
@@ -141,3 +188,48 @@ def test_local_api_persists_selected_source_citations(tmp_path):
     assert citation["label"] == "S1"
     assistant = store.get_messages(thread_id)[-1]
     assert assistant["metadata"]["source_refs"][0]["id"] == source["id"]
+
+
+def test_local_api_resolves_selected_images_into_coach_turn(tmp_path, monkeypatch):
+    from backend import file_processing, source_library
+    from backend.source_library import add_file_sources
+
+    files_dir = tmp_path / "files"
+    files_dir.mkdir()
+    monkeypatch.setattr(file_processing.settings, "files_dir", files_dir)
+    monkeypatch.setattr(source_library.settings, "files_dir", files_dir)
+
+    store = StudentStore(tmp_path / "image-api.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    # Minimal valid 1x1 PNG.
+    png = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f"
+        b"\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    created = add_file_sources(
+        store,
+        thread_id,
+        [("crossing.png", png, "image/png")],
+        origin="test",
+    )
+    assert created[0]["kind"] == "image"
+    client = TestClient(create_app(store))
+
+    response = client.post(
+        "/api/v1/coach/turn",
+        json={
+            "thread_id": thread_id,
+            "student_message": "What does this crossing photo show for older adults?",
+            "current_stage": "focus",
+            "response_detail": "short",
+            "source_ids": [created[0]["id"]],
+            "source_context": (
+                "--- [S1] crossing.png ---\n"
+                "[Image source. Inspect the accompanying image input.]"
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    assert "selected image source" in response.json()["response_text"]

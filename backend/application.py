@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from .domain import CitationReference, CoachRequest, CoachTurn
+from .domain import CitationReference, CoachImageInput, CoachRequest, CoachTurn
 from .learning_service import LearningProgressService
 from .repositories import NotebookRepository
+from .source_library import image_inputs_for_source_ids
 from .student_journey import advanced_stage_response, personalized_stage_questions
 from .student_store import StudentStore
 from .title_service import NotebookTitleService
@@ -32,10 +33,14 @@ class CoachApplicationService:
     def submit(self, request: CoachRequest) -> CoachTurn:
         """Run and persist one turn, optionally applying its recommendation.
 
+        Always resolves selected image sources server-side from ``source_ids``
+        (ignoring any client-supplied image payloads) so storage can later move
+        to object storage without changing the Streamlit contract.
+
         The workflow always writes an auditable transition first. When automatic
         progression is enabled, the application resolves that transition before
         persisting the visible response. Otherwise it remains pending for the
-        existing confirmation UI.
+        confirmation UI.
         """
         initial_thread = self._notebooks.get_thread(request.thread_id)
         if not initial_thread:
@@ -45,9 +50,23 @@ class CoachApplicationService:
             and not any(message.get("role") == "user" for message in request.history)
         )
         history = request.history or self._store.get_messages(request.thread_id)
-        prepared_request = request.model_copy(update={"history": history})
+        image_inputs = [
+            CoachImageInput.model_validate(item)
+            for item in image_inputs_for_source_ids(
+                self._store,
+                request.thread_id,
+                request.source_ids,
+            )
+        ]
+        prepared_request = request.model_copy(
+            update={
+                "history": history,
+                # Always resolve images server-side from selected source IDs.
+                "image_inputs": image_inputs,
+            }
+        )
         turn = self._workflow.run(prepared_request)
-        citations = self._source_citations(request)
+        citations = self._source_citations(prepared_request)
         if citations:
             turn = turn.model_copy(
                 update={

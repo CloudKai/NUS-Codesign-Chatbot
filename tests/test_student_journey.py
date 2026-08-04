@@ -146,3 +146,49 @@ def test_legacy_coach_restatement_is_hidden_without_changing_the_response_body()
 def test_empty_learning_review_has_a_prompt_summary_placeholder():
     review = learning_review([], default_journey())
     assert "summarized here" in review["prompt_summary"]
+    assert review["has_personalized_assessment"] is False
+    assert "meaningful topic" in review["strengths"]
+    assert len(review["improvement_areas"]) == 2
+
+
+def test_learning_review_personalizes_from_latest_assessment():
+    journey = default_journey()
+    messages = [
+        {
+            "role": "user",
+            "content": "I want older adults to cross safely near schools.",
+        },
+        {
+            "role": "assistant",
+            "content": "Add one concrete detail.",
+            "metadata": {
+                "assessment": {
+                    "current_stage": "focus",
+                    "contribution_summary": "Crossing safety for older adults near schools.",
+                    "stage_assessment": (
+                        "You named a group and setting, which makes the focus workable."
+                    ),
+                    "missing_reasoning_elements": [
+                        "Name the outcome that would show safer crossings.",
+                    ],
+                    "critical_understanding_level": "Developing",
+                    "recommendation": "stay",
+                    "recommendation_rationale": "Add the outcome before moving on.",
+                    "guidance_questions": [
+                        "What outcome would show the crossing is safer?",
+                    ],
+                    "working_conclusion": "",
+                    "understanding_change": "You are clarifying who and where.",
+                }
+            },
+        },
+    ]
+    review = learning_review(messages, journey, detail="short")
+    assert review["has_personalized_assessment"] is True
+    assert review["understanding_level"] == "Developing"
+    assert "group and setting" in review["strengths"]
+    assert "Crossing safety for older adults" in review["strengths"]
+    assert review["improvement_areas"] == [
+        "Name the outcome that would show safer crossings."
+    ]
+    assert "clarifying who and where" in review["critical_reflection"]

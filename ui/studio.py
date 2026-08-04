@@ -1,4 +1,10 @@
-"""Thinking Path studio panel and learning review."""
+"""Thinking Path studio panel and learning review.
+
+Renders the six-stage journey, confirmation-gated pending transitions (when
+auto-advance is off and the local API is available), and Review cards. Review
+strengths and improvement areas come from the latest coach assessment when
+present; otherwise stage fallbacks from ``learning_review`` are used.
+"""
 
 from __future__ import annotations
 
@@ -7,32 +13,29 @@ from typing import Any
 
 import streamlit as st
 
-from backend.learning_service import LearningProgressService
-from backend.repositories import SQLiteNotebookRepository, SQLitePhaseTransitionRepository
+from backend.settings import settings
 from backend.student_journey import (
     THINKING_STAGES,
     ThinkingStage,
-    current_stage,
     learning_review,
     normalize_journey,
     stage_guidance_questions,
 )
 
 from ui.components import progress_bar_html, review_card_html
-from ui.constants import ACTIONABLE_REVIEW_FEEDBACK
 from ui.runtime import local_api_client, local_api_enabled, rerun, store
 
 
-def _review_fingerprint(review: dict[str, Any], positive: str, critique: tuple[str, str]) -> str:
+def _review_fingerprint(review: dict[str, Any]) -> str:
     """Build a stable fingerprint used for Review notification dots."""
+    areas = review.get("improvement_areas") or []
     return "|".join(
         [
             str(review.get("understanding_level") or ""),
             str(review.get("prompt_summary") or ""),
             str(review.get("conclusion") or ""),
-            positive,
-            critique[0],
-            critique[1],
+            str(review.get("strengths") or ""),
+            *[str(item) for item in areas],
         ]
     )
 
@@ -183,16 +186,25 @@ def render_journey_track() -> None:
 
 
 def render_learning_review(journey: dict[str, Any]) -> None:
-    """Render actionable review cards and mark Review notifications as seen."""
+    """Render actionable Review cards from the latest coaching assessment.
+
+    Prefers personalized strengths / improvement areas derived from the newest
+    assistant ``assessment`` metadata. Marks the Review notification fingerprint
+    as seen when the Review tab is active.
+    """
     messages = store.get_messages(st.session_state.thread_id)
     review = learning_review(
         messages,
         journey,
         detail=journey["response_detail"],
     )
-    stage = current_stage(journey)
-    positive, critique = ACTIONABLE_REVIEW_FEEDBACK[stage.id]
-    fingerprint = _review_fingerprint(review, positive, critique)
+    strengths = str(review.get("strengths") or "")
+    improvement_areas = [
+        str(item).strip()
+        for item in (review.get("improvement_areas") or [])
+        if str(item).strip()
+    ]
+    fingerprint = _review_fingerprint(review)
     st.session_state.review_fingerprint = fingerprint
     if st.session_state.get("studio_tab") == "Review" or st.session_state.get(
         "nav_section"
@@ -215,14 +227,14 @@ def render_learning_review(journey: dict[str, Any]) -> None:
         unsafe_allow_html=True,
     )
     st.markdown(
-        review_card_html(label="Strengths", body=positive),
+        review_card_html(label="Strengths", body=strengths),
         unsafe_allow_html=True,
     )
     st.markdown(
         review_card_html(
             label="Areas for improvement",
             body="",
-            items=[critique[0], critique[1]],
+            items=improvement_areas or ["Continue the discussion to get specific coaching tips."],
         ),
         unsafe_allow_html=True,
     )
@@ -243,16 +255,11 @@ def render_learning_review(journey: dict[str, Any]) -> None:
 
 
 def render_pending_transition() -> None:
-    """Render a coach recommendation and require the student's explicit choice."""
-    if local_api_enabled():
-        try:
-            pending = local_api_client().pending_transition(st.session_state.thread_id)
-        except Exception:
-            return
-    else:
-        pending = SQLitePhaseTransitionRepository(store).get_pending(
-            st.session_state.thread_id
-        )
+    """Show a coach recommendation banner when confirmation mode is active.
+
+    Advancement actions live in the Thinking Path footer (Next + confirm dialog).
+    """
+    pending = _fetch_pending_transition()
     if not pending:
         return
     st.info(
@@ -260,43 +267,117 @@ def render_pending_transition() -> None:
         f"{pending.to_stage.title()}: {pending.assessment.recommendation_rationale}",
         icon=":material/auto_awesome:",
     )
-    stay_column, advance_column = st.columns(2)
-    if stay_column.button("Stay on this step", use_container_width=True):
-        _resolve_pending_transition(pending.id, accepted=False)
-    if advance_column.button(
-        f"Continue to {pending.to_stage.title()}",
-        type="primary",
-        use_container_width=True,
-    ):
-        _resolve_pending_transition(pending.id, accepted=True)
+
+
+def _fetch_pending_transition():
+    """Return the pending transition when the local API confirmation path is on."""
+    if settings.auto_advance_stages or not local_api_enabled():
+        return None
+    try:
+        return local_api_client().pending_transition(st.session_state.thread_id)
+    except Exception:
+        return None
 
 
 def _resolve_pending_transition(transition_id: str, accepted: bool) -> None:
-    """Persist a student decision and refresh the visible learning journey."""
+    """Persist a student decision via the local API and refresh the journey."""
     try:
-        if local_api_enabled():
-            local_api_client().resolve_transition(
-                st.session_state.thread_id,
-                transition_id,
-                accepted,
-            )
-        else:
-            LearningProgressService(
-                store,
-                SQLiteNotebookRepository(store),
-                SQLitePhaseTransitionRepository(store),
-            ).resolve(st.session_state.thread_id, transition_id, accepted)
+        local_api_client().resolve_transition(
+            st.session_state.thread_id,
+            transition_id,
+            accepted,
+        )
         updated = store.get_thread(st.session_state.thread_id) or {}
         st.session_state.learning_journey = normalize_journey(
             (updated.get("metadata") or {}).get("learning_journey")
         )
+        st.session_state.pop("confirm_next_transition_id", None)
         rerun()
     except Exception as exc:
         st.error(str(exc))
 
 
+@st.dialog("Move to the next stage?")
+def _confirm_next_stage_dialog() -> None:
+    """Warn that confirming Next can reduce thoroughness, then require confirm."""
+    transition_id = str(st.session_state.get("confirm_next_transition_id") or "")
+    to_stage = str(st.session_state.get("confirm_next_to_stage") or "next stage")
+    st.write(
+        "Confirming **Next** moves you forward without finishing more work on "
+        "this step. That usually makes the Thinking Path **less critical and "
+        "less thorough** than staying with the coach’s guidance."
+    )
+    st.caption(f"You are about to continue to {to_stage.title()}.")
+    cancel_column, confirm_column = st.columns(2)
+    if cancel_column.button("Cancel", use_container_width=True):
+        st.session_state.pop("confirm_next_transition_id", None)
+        st.session_state.pop("confirm_next_to_stage", None)
+        rerun()
+    if confirm_column.button(
+        "Next",
+        type="primary",
+        use_container_width=True,
+        key="confirm-next-stage",
+    ):
+        if transition_id:
+            _resolve_pending_transition(transition_id, accepted=True)
+        else:
+            st.session_state.pop("confirm_next_transition_id", None)
+            st.session_state.pop("confirm_next_to_stage", None)
+            rerun()
+
+
+def render_thinking_path_footer() -> None:
+    """Render the footer tip and confirmation-gated Next control."""
+    pending = _fetch_pending_transition()
+    if settings.auto_advance_stages:
+        tip = (
+            "Work through the current stage in Chat. When the coach judges this "
+            "step is addressed, the Thinking Path advances automatically."
+        )
+        st.markdown(
+            f'<div class="cd-thinking-path-tip">{tip}</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    tip = (
+        "Work through the current stage in Chat. When the coach recommends the "
+        "next stage, press <strong>Next</strong>. Confirming early can make the "
+        "process less critical."
+    )
+    tip_column, next_column = st.columns([0.72, 0.28], gap="small")
+    tip_column.markdown(
+        f'<div class="cd-thinking-path-tip">{tip}</div>',
+        unsafe_allow_html=True,
+    )
+    next_disabled = pending is None or not local_api_enabled()
+    next_help = (
+        "Available when the coach recommends moving on."
+        if next_disabled
+        else "Review a warning, then confirm Next."
+    )
+    with next_column:
+        if st.button(
+            "Next",
+            type="primary",
+            use_container_width=True,
+            disabled=next_disabled,
+            help=next_help,
+            key="thinking-path-next",
+        ):
+            if pending is not None:
+                st.session_state.confirm_next_transition_id = pending.id
+                st.session_state.confirm_next_to_stage = pending.to_stage
+                rerun()
+
+
 def render_studio_panel() -> None:
-    """Render Thinking Path with Journey/Review driven by nav focus when possible."""
+    """Render Thinking Path with Journey/Review tabs and the Next footer.
+
+    Stage changes require a coach ADVANCE recommendation, then an explicit Next
+    confirmation (unless auto-advance is enabled).
+    """
     journey = normalize_journey(st.session_state.learning_journey)
     preferred = st.session_state.get("studio_tab", "Journey")
     st.markdown(
@@ -316,3 +397,7 @@ def render_studio_panel() -> None:
                     "review_fingerprint", ""
                 )
             render_learning_review(journey)
+    with st.container(key="thinking_path_footer"):
+        render_thinking_path_footer()
+    if st.session_state.get("confirm_next_transition_id"):
+        _confirm_next_stage_dialog()

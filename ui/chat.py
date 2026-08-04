@@ -22,18 +22,17 @@ from backend.student_journey import (
 )
 from backend.student_support import DEFAULT_SUPPORT_MODE
 
+from ui.layout.composer_layout import sync_composer_layout
 from ui.runtime import engine, local_api_client, local_api_enabled, rerun, store
-from ui.composer_layout import sync_composer_layout
 from ui.settings import apply_selected_model
 from ui.sources import source_viewer_dialog
 
 
 def _render_composer_model_picker() -> None:
-    """Render a Cursor-style model chip inside the chat composer footer."""
+    """Render a compact model dropdown beside the attach control."""
     current = get_model(st.session_state.selected_model)
     with st.container(key="composer_model_slot"):
-        with st.popover(current.label, type="tertiary"):
-            st.caption("Model for your next message")
+        with st.popover(current.label):
             for model in MODEL_REGISTRY:
                 label = f"{model.label}{' · Legacy' if model.deprecated else ''}"
                 if st.button(
@@ -44,8 +43,11 @@ def _render_composer_model_picker() -> None:
                 ):
                     if model.id != current.id:
                         apply_selected_model(model.id)
+                        store.update_thread(
+                            st.session_state.thread_id,
+                            metadata={"selected_model": model.id},
+                        )
                         rerun()
-
 
 def render_media(raw_paths: list[str]) -> None:
     for raw_path in raw_paths:
@@ -199,17 +201,6 @@ def normalize_composer_value(value: Any) -> tuple[str, list[Any]]:
         return value.strip(), []
     prompt = str(getattr(value, "text", "") or "").strip()
     uploads = list(getattr(value, "files", []) or [])
-    audio = getattr(value, "audio", None)
-    if audio is not None:
-        try:
-            transcript = engine.transcribe(
-                audio.getvalue(),
-                getattr(audio, "type", None) or "audio/wav",
-            ).strip()
-            if transcript:
-                prompt = "\n\n".join(part for part in (prompt, transcript) if part)
-        except Exception as exc:
-            st.error(f"Voice transcription was unavailable: {exc}")
     if not prompt and uploads:
         prompt = "Help me understand the source material I just added."
     return prompt, uploads
@@ -223,6 +214,13 @@ def handle_prompt(
     target: Any,
     existing_user_message_id: str | None = None,
 ) -> None:
+    """Submit one student turn via the local API or legacy chat engine.
+
+    When ``USE_LOCAL_API`` is enabled, uploads are added as sources and the
+    typed ``CoachRequest`` path runs (stage recommendations, image grounding).
+    Otherwise the legacy ``StudentChatEngine`` streams a response without
+    mutating the learning journey.
+    """
     journey = normalize_journey(st.session_state.learning_journey)
     selected_sources = store.list_sources(
         st.session_state.thread_id,
@@ -237,7 +235,6 @@ def handle_prompt(
         web_search=False,
         image_generation=False,
         local_analysis=False,
-        speak_response=False,
         assignment=st.session_state.assignment,
         thinking_stage=journey["current_stage"],
         response_detail=journey["response_detail"],
@@ -328,6 +325,12 @@ def handle_prompt(
 
 
 def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
+    """Render the discussion log, empty-state welcome, and chat composer.
+
+    Args:
+        model_id: Locked coaching model id for the next turn.
+        reasoning_effort: Compatible reasoning effort for that model, or None.
+    """
     selected_sources = store.list_sources(
         st.session_state.thread_id,
         selected_only=True,
@@ -343,7 +346,12 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
                     '<div class="message-meta coach-welcome">Coach</div>',
                     unsafe_allow_html=True,
                 )
-                st.markdown("### Welcome — let’s think this through")
+                st.markdown(
+                    '<div class="coach-welcome-title">'
+                    "Welcome — let’s think this through"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
                 st.write(
                     "Hi, I’m your critical-thinking coach. I’ll help you work "
                     "through Focus, Evidence, Assumptions, Perspectives, "

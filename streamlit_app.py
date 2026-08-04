@@ -1,9 +1,18 @@
+"""Streamlit entrypoint for the Co-design learning notebook.
+
+Startup order matters: inject static CSS, initialize session (including
+appearance from the store), sync appearance, apply theme tokens, then render
+the top bar and three-column workspace. Prefer ``sh scripts/start.sh`` so the
+local coaching API is running with ``USE_LOCAL_API=true``.
+"""
+
 from __future__ import annotations
 
 import streamlit as st
 
 from ui.notebooks import notebook_actions_dialog
 from ui.session import initialize_session
+from ui.settings import sync_appearance_from_widget
 from ui.theme import inject_template_css, render_theme_css
 from ui.topbar import render_topbar
 from ui.workspace import render_workspace
@@ -17,6 +26,7 @@ st.set_page_config(
 
 inject_template_css()
 initialize_session()
+sync_appearance_from_widget()
 render_theme_css()
 model_id, reasoning_effort = render_topbar()
 render_workspace(model_id, reasoning_effort)

@@ -81,6 +81,20 @@ class PendingPhaseTransition(BaseModel):
     resolved_at: str | None = None
 
 
+class CoachImageInput(BaseModel):
+    """A selected notebook image resolved for a coaching turn.
+
+    Local adapters may use a data URL. Future AWS adapters can resolve the same
+    ``source_id`` from object storage without changing the coach workflow.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    source_id: str
+    mime: str = "image/png"
+    data_url: str = Field(min_length=1, max_length=12_000_000)
+
+
 class CoachRequest(BaseModel):
     """Input required to run one local critical-thinking workflow turn."""
 
@@ -90,6 +104,7 @@ class CoachRequest(BaseModel):
     response_detail: str = Field(pattern="^(short|long)$")
     source_ids: list[str] = Field(default_factory=list)
     source_context: str = ""
+    image_inputs: list[CoachImageInput] = Field(default_factory=list)
     allow_model_knowledge: bool = False
     history: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -101,3 +116,29 @@ class CoachTurn(BaseModel):
     assessment: EducationalAssessment
     pending_transition: PendingPhaseTransition | None = None
     auto_advanced_to: str | None = None
+
+
+class ProviderCoachOutput(BaseModel):
+    """Structured provider payload before workflow-side transition handling."""
+
+    response_text: str = Field(min_length=1)
+    assessment: EducationalAssessment
+
+
+def openai_strict_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """Adapt a Pydantic JSON schema for OpenAI strict structured outputs."""
+
+    def harden(node: Any) -> Any:
+        if isinstance(node, list):
+            return [harden(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        hardened = {key: harden(value) for key, value in node.items()}
+        if hardened.get("type") == "object" or "properties" in hardened:
+            properties = hardened.setdefault("properties", {})
+            hardened["additionalProperties"] = False
+            hardened["required"] = list(properties.keys())
+        return hardened
+
+    schema = model.model_json_schema()
+    return harden(schema)

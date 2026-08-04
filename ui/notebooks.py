@@ -6,6 +6,7 @@ from html import escape
 from typing import Any
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from backend.student_journey import (
     THINKING_STAGES,
@@ -62,7 +63,7 @@ def thread_overview(thread: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@st.dialog("Your notebooks", width="large")
+@st.dialog("Your Notebooks", width="large")
 def notebooks_dialog() -> None:
     """Render a folder-free notebook library with search and actions."""
     st.caption("Continue a discussion or start a new inquiry.")
@@ -83,8 +84,7 @@ def notebooks_dialog() -> None:
 
     threads = store.list_threads(search, None)
     st.caption(f"{len(threads)} notebook{'s' if len(threads) != 1 else ''}")
-    with st.container(key="notebook_library_scroll"):
-        st.markdown('<div class="cd-notebook-list">', unsafe_allow_html=True)
+    with st.container(key="notebook_library_scroll", height=360):
         if not threads:
             st.markdown(
                 empty_state_html(
@@ -93,50 +93,128 @@ def notebooks_dialog() -> None:
                 ),
                 unsafe_allow_html=True,
             )
-            return
-        active_id = st.session_state.get("thread_id")
-        for thread in threads:
-            overview = thread_overview(thread)
-            safe_id = thread["id"].replace("-", "_")
-            is_active = thread["id"] == active_id
-            card_class = "cd-notebook-card is-active" if is_active else "cd-notebook-card"
-            with st.container(key=f"notebook_card_{safe_id}"):
-                st.markdown(f'<div class="{card_class}">', unsafe_allow_html=True)
-                title_column, open_column, menu_column = st.columns(
-                    [0.72, 0.18, 0.1],
-                    gap="small",
-                )
-                title_column.markdown(
-                    '<div class="notebook-card-title">'
-                    f"{escape(thread.get('name') or 'Untitled notebook')}</div>",
-                    unsafe_allow_html=True,
-                )
-                if open_column.button(
-                    "Open",
-                    use_container_width=True,
-                    type="primary" if is_active else "tertiary",
-                    key=f"open-notebook-{thread['id']}",
-                ):
-                    select_thread(thread["id"])
-                if menu_column.button(
-                    "Notebook actions",
-                    icon=":material/more_horiz:",
-                    type="tertiary",
-                    key=f"notebook-actions-{thread['id']}",
-                    help="Rename or delete this notebook",
-                ):
-                    request_notebook_actions(thread["id"])
-                    rerun()
-                st.markdown(
-                    f'<div class="notebook-card-meta">'
-                    f"{escape(overview['stage'].short_label)} · "
-                    f"phase {overview['stage_index']} of 6</div>"
-                    f'<div class="notebook-card-summary">'
-                    f"{escape(overview['summary'])}</div>",
-                    unsafe_allow_html=True,
-                )
-                st.markdown("</div>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            active_id = st.session_state.get("thread_id")
+            for thread in threads:
+                overview = thread_overview(thread)
+                safe_id = thread["id"].replace("-", "_")
+                is_active = thread["id"] == active_id
+                card_key = f"notebook_card_{safe_id}"
+                with st.container(key=card_key):
+                    title_column, open_column, menu_column = st.columns(
+                        [0.68, 0.2, 0.12],
+                        gap="small",
+                    )
+                    current_badge = (
+                        '<span class="notebook-current-badge">Current</span>'
+                        if is_active
+                        else ""
+                    )
+                    title_column.markdown(
+                        '<div class="notebook-card-copy">'
+                        '<div class="notebook-card-title">'
+                        f"{escape(thread.get('name') or 'Untitled notebook')}"
+                        f"{current_badge}</div>"
+                        f'<div class="notebook-card-meta">'
+                        f"{escape(overview['stage'].short_label)} · "
+                        f"{overview['stage_index']} of 6</div>"
+                        "</div>",
+                        unsafe_allow_html=True,
+                    )
+                    if open_column.button(
+                        "Open",
+                        use_container_width=True,
+                        type="secondary",
+                        key=f"open-notebook-{thread['id']}",
+                    ):
+                        select_thread(thread["id"])
+                    if menu_column.button(
+                        "⋯",
+                        type="tertiary",
+                        key=f"notebook-actions-{thread['id']}",
+                        help="Rename or delete this notebook",
+                    ):
+                        request_notebook_actions(thread["id"])
+                        rerun()
+
+    _sync_notebook_library_scroll()
+
+
+def _sync_notebook_library_scroll() -> None:
+    """Keep the notebook list scrollable and pinned to the top on open."""
+    components.html(
+        """
+<script>
+(() => {
+  const doc = window.parent.document;
+  const win = window.parent;
+
+  function scrollRoot() {
+    return doc.querySelector(".st-key-notebook_library_scroll");
+  }
+
+  function clearNestedScroll(root) {
+    root
+      .querySelectorAll(
+        "[data-testid='stLayoutWrapper'], [data-testid='stElementContainer'], [class*='st-key-notebook_card_']"
+      )
+      .forEach((node) => {
+        if (node === root) return;
+        node.style.setProperty("height", "auto", "important");
+        node.style.setProperty("max-height", "none", "important");
+        node.style.setProperty("min-height", "0", "important");
+        node.style.setProperty("flex", "0 0 auto", "important");
+        node.style.setProperty("overflow", "visible", "important");
+      });
+  }
+
+  function apply() {
+    const dialog = doc.querySelector('[role="dialog"]:has(.st-key-notebook-search)');
+    const root = scrollRoot();
+    if (!dialog || !root) return false;
+
+    const dialogBody = dialog.querySelector(":scope > [data-testid='stVerticalBlock']");
+    if (dialogBody) {
+      dialogBody.style.setProperty("gap", "0", "important");
+      dialogBody.style.setProperty("row-gap", "0", "important");
+    }
+
+    clearNestedScroll(root);
+    root.style.setProperty("padding", "0", "important");
+    root.style.setProperty("height", "360px", "important");
+    root.style.setProperty("max-height", "360px", "important");
+    root.style.setProperty("min-height", "0", "important");
+    root.style.setProperty("overflow-y", "auto", "important");
+    root.style.setProperty("overflow-x", "hidden", "important");
+    root.style.setProperty("overscroll-behavior", "contain", "important");
+    if (!root.dataset.cdNotebookScrollReady) {
+      root.scrollTop = 0;
+      root.dataset.cdNotebookScrollReady = "1";
+    }
+
+    return true;
+  }
+
+  function schedule() {
+    win.requestAnimationFrame(apply);
+  }
+
+  function boot() {
+    if (apply()) return;
+    let attempts = 0;
+    const timer = win.setInterval(() => {
+      attempts += 1;
+      if (apply() || attempts > 80) win.clearInterval(timer);
+    }, 80);
+  }
+
+  boot();
+  win.addEventListener("resize", schedule);
+})();
+</script>
+        """,
+        height=0,
+    )
 
 
 @st.dialog(
