@@ -427,7 +427,7 @@ def render_sources_panel() -> None:
                             st.error(str(exc))
                         else:
                             st.download_button(
-                                "Download",
+                                "Download File",
                                 data=content.data,
                                 file_name=content.filename,
                                 mime=content.mime,

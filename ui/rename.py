@@ -14,6 +14,7 @@ import streamlit.components.v1 as components
 
 RenameKind = Literal["notebook", "source", "topbar"]
 
+# Mirrored by ``content:"Press Enter to apply"`` in ``ui/assets/template.css``.
 _ENTER_HINT = "Press Enter to apply"
 
 _KEY_PREFIXES: dict[RenameKind, tuple[str, ...]] = {
@@ -75,8 +76,8 @@ def render_enter_to_apply_rename(
     """Render an Enter-only rename form and return ``(applied, cleaned_value)``.
 
     The Apply submit control is present for Streamlit form Enter handling and is
-    visually hidden by CSS. ``help`` exposes the same instruction to assistive
-    tech that the focused field shows as ``Press Enter to apply``.
+    visually hidden by CSS. Focused fields still show ``Press Enter to apply``
+    via CSS; no Streamlit help icon is attached to the label.
     """
     epoch = rename_epoch(kind, str(item_id))
     safe_value = str(current_value or "").strip()
@@ -96,7 +97,6 @@ def render_enter_to_apply_rename(
             "value": safe_value,
             "key": input_key,
             "label_visibility": label_visibility,
-            "help": _ENTER_HINT,
         }
         if max_chars is not None:
             kwargs["max_chars"] = max_chars

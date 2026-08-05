@@ -15,7 +15,7 @@ import logging
 import streamlit as st
 import streamlit.components.v1 as components
 
-DEFAULT_TOAST_DURATION_MS = 2500
+DEFAULT_TOAST_DURATION_MS = 3000
 _FALLBACK_TOAST_DURATION_S = 3
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ def show_corner_toasts(
 
     Args:
         messages: Toast bodies, shown newest on top in the same stack.
-        duration_ms: Visible lifetime before the exit animation. Defaults to 2.5s.
+        duration_ms: Visible lifetime before the exit animation. Defaults to 3s.
             Ignored by the ``st.toast`` fallback, which uses whole seconds.
     """
     cleaned = [str(message).strip() for message in messages if str(message).strip()]
@@ -57,14 +57,17 @@ def _inject_corner_toasts(messages: list[str], *, duration_ms: int) -> None:
   const hostId = "cd-corner-toast-host";
   const styleId = "cd-corner-toast-style";
 
-  if (!parentDoc.getElementById(styleId)) {{
-    const style = parentDoc.createElement("style");
+  let style = parentDoc.getElementById(styleId);
+  if (!style) {{
+    style = parentDoc.createElement("style");
     style.id = styleId;
-    style.textContent = `
+    parentDoc.head.appendChild(style);
+  }}
+  style.textContent = `
       #cd-corner-toast-host {{
         position: fixed;
-        top: 1rem;
-        right: 1rem;
+        top: 5.35rem;
+        right: 1.15rem;
         z-index: 100000;
         display: flex;
         flex-direction: column;
@@ -73,19 +76,23 @@ def _inject_corner_toasts(messages: list[str], *, duration_ms: int) -> None:
       }}
       .cd-corner-toast {{
         pointer-events: auto;
-        min-width: 15.5rem;
-        max-width: 22rem;
+        min-width: 16.5rem;
+        max-width: 24rem;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 0.85rem;
-        padding: 0.82rem 0.95rem;
+        gap: 0.9rem;
+        padding: 0.92rem 1.05rem;
         border-radius: 0.85rem;
-        background: var(--cd-surface, #171d27);
+        background: color-mix(in srgb, var(--cd-accent-soft, #E6F5F3) 72%, var(--cd-surface, #171d27));
         color: var(--cd-text, #f3f5fb);
-        border: 1px solid var(--cd-border, transparent);
-        font: 650 0.9rem/1.35 "IBM Plex Sans", system-ui, sans-serif;
-        box-shadow: var(--cd-shadow, 0 12px 28px rgba(0, 0, 0, 0.34));
+        border: 1px solid color-mix(in srgb, var(--cd-accent, #0F766E) 42%, var(--cd-border, transparent));
+        border-left: 3px solid var(--cd-accent, #0F766E);
+        font: 700 0.95rem/1.35 "IBM Plex Sans", system-ui, sans-serif;
+        letter-spacing: 0.01em;
+        box-shadow:
+          var(--cd-shadow, 0 12px 28px rgba(0, 0, 0, 0.34)),
+          0 0 0 1px color-mix(in srgb, var(--cd-accent, #0F766E) 10%, transparent);
         transform: translateX(110%);
         opacity: 0;
         animation: cdCornerToastIn 280ms ease-out forwards;
@@ -100,7 +107,7 @@ def _inject_corner_toasts(messages: list[str], *, duration_ms: int) -> None:
         background: transparent;
         color: var(--cd-muted, #a8b0bd);
         cursor: pointer;
-        font-size: 1rem;
+        font-size: 1.05rem;
         line-height: 1;
         padding: 0;
       }}
@@ -119,8 +126,6 @@ def _inject_corner_toasts(messages: list[str], *, duration_ms: int) -> None:
         to {{ transform: translateX(110%); opacity: 0; }}
       }}
     `;
-    parentDoc.head.appendChild(style);
-  }}
 
   let host = parentDoc.getElementById(hostId);
   if (!host) {{

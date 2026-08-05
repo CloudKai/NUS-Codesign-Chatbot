@@ -26,7 +26,7 @@ def render_profile_menu() -> None:
     display_name = str(st.session_state.get("display_name") or "Student")
     initial = profile_initial(display_name)
     with st.container(key="topbar_profile"):
-        with st.popover(initial):
+        with st.popover(initial, help="Settings"):
             with st.container(key="profile_menu_root"):
                 st.markdown(
                     '<div class="cd-profile-menu" hidden></div>',
@@ -73,10 +73,10 @@ def _render_language_dropdown(current_language: str) -> None:
             '<div class="cd-profile-language-head">'
             '<span class="cd-profile-language-label">Language</span>'
             '<span class="cd-profile-language-help" tabindex="0" '
-            'aria-label="The coach responds in this language while preserving source names.">'
+            'aria-label="The coach responds in this language">'
             "?"
             '<span class="cd-profile-language-tooltip" role="tooltip">'
-            "The coach responds in this language while preserving source names."
+            "The coach responds in this language"
             "</span>"
             "</span>"
             "</div>",

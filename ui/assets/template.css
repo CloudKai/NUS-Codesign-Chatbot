@@ -3411,7 +3411,95 @@
     }
 
     [class*="st-key-source_rename_"] [data-testid="stWidgetLabel"] {
-        margin-bottom:.28rem !important;
+        margin-bottom:.18rem !important;
+    }
+
+    /* Source ⋯ menu: compact vertical stack (Rename → Download → Delete). */
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"]),
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_action_danger"]) {
+        padding:.4rem .65rem .5rem !important;
+    }
+
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"])
+    > div,
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"])
+    > [data-testid="stVerticalBlock"],
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"])
+    [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"]:has([class*="st-key-source_rename_"])) {
+        gap:.2rem !important;
+        row-gap:.2rem !important;
+    }
+
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"])
+    > [data-testid="stVerticalBlock"]
+    > [data-testid="stElementContainer"],
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"])
+    > [data-testid="stVerticalBlock"]
+    > [data-testid="stLayoutWrapper"] {
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"])
+    [class*="st-key-source_rename_"],
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"])
+    [data-testid="stElementContainer"]:has([class*="st-key-source_rename_"]),
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"])
+    [data-testid="stLayoutWrapper"]:has([class*="st-key-source_rename_"]) {
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    /* Collapse unused rename-form chrome that still reserved vertical space. */
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"])
+    [class*="st-key-source_rename_"] [data-testid="stVerticalBlock"],
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"])
+    [class*="st-key-source_rename_"] form [data-testid="stVerticalBlock"] {
+        gap:0 !important;
+        row-gap:0 !important;
+    }
+
+    /* Hide Apply submit only — never the text-input ElementContainer. */
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"])
+    [class*="st-key-source_rename_"]
+    [data-testid="stElementContainer"]:has(> [data-testid="stFormSubmitButton"]),
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"])
+    [class*="st-key-source_rename_"]
+    [data-testid="stElementContainer"]:has(> div > [data-testid="stFormSubmitButton"]),
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"])
+    [class*="st-key-source_rename_"] [data-testid="stFormSubmitButton"] {
+        display:none !important;
+        height:0 !important;
+        min-height:0 !important;
+        max-height:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+        overflow:hidden !important;
+        border:0 !important;
+    }
+
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"])
+    [class*="st-key-source_rename_"] [data-testid="stTextInput"],
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"])
+    [class*="st-key-source_rename_"] [data-testid="stElementContainer"]:has([data-testid="stTextInput"]) {
+        margin:0 !important;
+        padding-bottom:0 !important;
+    }
+
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"])
+    [data-testid="stElementContainer"]:has([data-testid="stDownloadButton"]),
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"])
+    [data-testid="stLayoutWrapper"]:has([data-testid="stDownloadButton"]),
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"])
+    div[data-testid="stDownloadButton"] {
+        margin:.05rem 0 0 !important;
+        padding:0 !important;
+    }
+
+    [data-testid="stPopoverBody"]:has([class*="st-key-source_rename_"])
+    [data-testid="stDownloadButton"] button {
+        min-height:2.15rem !important;
+        margin:0 !important;
     }
 
     [class*="st-key-source_rename_"] form,
@@ -3447,6 +3535,10 @@
         color:transparent !important;
         font-size:0 !important;
         line-height:0 !important;
+        min-height:0 !important;
+        height:auto !important;
+        margin:0 !important;
+        padding:0 !important;
     }
 
     [class*="st-key-source_rename_"] [data-testid="InputInstructions"] *,
@@ -3609,6 +3701,46 @@
         width:min(54rem,calc(100vw - 3rem)) !important;
     }
 
+    /* New notebook: keep material + and label on one midline. */
+    [role="dialog"]:has(.st-key-notebook-search)
+    [data-testid="stBaseButton-primary"],
+    [role="dialog"]:has(.st-key-notebook-search)
+    div[data-testid="stButton"] button[kind="primary"] {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        gap:.35rem !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook-search)
+    [data-testid="stBaseButton-primary"] [data-testid="stIconMaterial"],
+    [role="dialog"]:has(.st-key-notebook-search)
+    div[data-testid="stButton"] button[kind="primary"] [data-testid="stIconMaterial"] {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        margin:0 !important;
+        padding:0 !important;
+        font-size:1.05rem !important;
+        line-height:1 !important;
+        transform:translateY(.05rem) !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook-search)
+    [data-testid="stBaseButton-primary"] [data-testid="stMarkdownContainer"],
+    [role="dialog"]:has(.st-key-notebook-search)
+    [data-testid="stBaseButton-primary"] [data-testid="stMarkdownContainer"] p,
+    [role="dialog"]:has(.st-key-notebook-search)
+    div[data-testid="stButton"] button[kind="primary"] [data-testid="stMarkdownContainer"],
+    [role="dialog"]:has(.st-key-notebook-search)
+    div[data-testid="stButton"] button[kind="primary"] p {
+        display:inline-flex !important;
+        align-items:center !important;
+        margin:0 !important;
+        padding:0 !important;
+        line-height:1.1 !important;
+    }
+
     [role="dialog"]:has([data-testid="stFileUploader"]) {
         width:min(42rem,calc(100vw - 3rem)) !important;
         max-width:min(42rem,calc(100vw - 3rem)) !important;
@@ -3721,7 +3853,7 @@
     .st-key-notebook_action_danger,
     [class*="st-key-source_action_danger"] {
         margin-top:.35rem;
-        padding:.7rem .8rem .75rem;
+        padding:.5rem .65rem .55rem;
         border:1px solid color-mix(in srgb,var(--cd-danger) 22%,var(--cd-border));
         border-radius:.68rem;
         background:color-mix(in srgb,var(--cd-danger) 5%,var(--cd-surface));
@@ -3735,45 +3867,45 @@
         padding-top:0 !important;
     }
 
-    /* Override panel-wide .1rem gap; use one rhythm for the three rows. */
+    /* Compact stack for source delete only (notebook keeps readable spacing). */
+    [class*="st-key-source_action_danger"] [data-testid="stVerticalBlock"] {
+        gap:.28rem !important;
+        row-gap:.28rem !important;
+    }
+
+    /* Must beat `.st-key-notebook_actions_panel [data-testid="stVerticalBlock"]`
+       (gap:.1rem) — Streamlit nests VerticalBlock, so no direct-child selector. */
     .st-key-notebook_actions_panel
-    .st-key-notebook_action_danger > [data-testid="stVerticalBlock"],
-    .st-key-notebook_action_danger > [data-testid="stVerticalBlock"],
-    [class*="st-key-source_action_danger"] > [data-testid="stVerticalBlock"] {
-        gap:.5rem !important;
-        row-gap:.5rem !important;
+    .st-key-notebook_action_danger [data-testid="stVerticalBlock"],
+    .st-key-notebook_action_danger [data-testid="stVerticalBlock"] {
+        gap:.7rem !important;
+        row-gap:.7rem !important;
     }
 
     .st-key-notebook_action_danger
-    > [data-testid="stVerticalBlock"]
-    > [data-testid="stElementContainer"],
+    [data-testid="stElementContainer"],
     .st-key-notebook_action_danger
-    > [data-testid="stVerticalBlock"]
-    > [data-testid="stLayoutWrapper"],
+    [data-testid="stLayoutWrapper"],
     [class*="st-key-source_action_danger"]
-    > [data-testid="stVerticalBlock"]
-    > [data-testid="stElementContainer"],
+    [data-testid="stElementContainer"],
     [class*="st-key-source_action_danger"]
-    > [data-testid="stVerticalBlock"]
-    > [data-testid="stLayoutWrapper"] {
+    [data-testid="stLayoutWrapper"] {
         margin:0 !important;
         padding:0 !important;
     }
 
-    /* Slightly more air before the destructive action. */
-    .st-key-notebook_action_danger
-    > [data-testid="stVerticalBlock"]
-    > [data-testid="stElementContainer"]:has([data-testid="stButton"]),
-    .st-key-notebook_action_danger
-    > [data-testid="stVerticalBlock"]
-    > [data-testid="stLayoutWrapper"]:has([data-testid="stButton"]),
     [class*="st-key-source_action_danger"]
-    > [data-testid="stVerticalBlock"]
-    > [data-testid="stElementContainer"]:has([data-testid="stButton"]),
+    [data-testid="stElementContainer"]:has([data-testid="stButton"]),
     [class*="st-key-source_action_danger"]
-    > [data-testid="stVerticalBlock"]
-    > [data-testid="stLayoutWrapper"]:has([data-testid="stButton"]) {
-        margin-top:.15rem !important;
+    [data-testid="stLayoutWrapper"]:has([data-testid="stButton"]) {
+        margin-top:.05rem !important;
+    }
+
+    .st-key-notebook_action_danger
+    [data-testid="stElementContainer"]:has([data-testid="stButton"]),
+    .st-key-notebook_action_danger
+    [data-testid="stLayoutWrapper"]:has([data-testid="stButton"]) {
+        margin-top:.35rem !important;
     }
 
     .st-key-notebook_action_danger
@@ -3789,17 +3921,34 @@
         margin:0 !important;
         padding:0 !important;
         color:var(--cd-text) !important;
-        font-size:.95rem !important;
+        font-size:.9rem !important;
         font-weight:700 !important;
-        line-height:1.3 !important;
+        line-height:1.2 !important;
         letter-spacing:-.01em;
+    }
+
+    /* Extra space under "Delete notebook" before the confirm row. */
+    .st-key-notebook_action_danger
+    [data-testid="stElementContainer"]:has(h4),
+    .st-key-notebook_action_danger
+    [data-testid="stLayoutWrapper"]:has(h4) {
+        margin:0 0 .2rem !important;
+        padding:0 !important;
+    }
+
+    .st-key-notebook_action_danger
+    [data-testid="stElementContainer"]:has([data-testid="stCheckbox"]),
+    .st-key-notebook_action_danger
+    [data-testid="stLayoutWrapper"]:has([data-testid="stCheckbox"]) {
+        margin:.35rem 0 0 !important;
+        padding:0 !important;
     }
 
     .st-key-notebook_action_danger [data-testid="stCheckbox"],
     [class*="st-key-source_action_danger"] [data-testid="stCheckbox"] {
         width:100% !important;
         margin:0 !important;
-        padding:.5rem 0 !important;
+        padding:0 !important;
     }
 
     .st-key-notebook_action_danger [data-testid="stCheckbox"] > label,
@@ -3828,10 +3977,6 @@
         align-self:center !important;
     }
 
-    .st-key-notebook_action_danger [data-testid="stWidgetLabel"],
-    .st-key-notebook_action_danger [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"],
-    .st-key-notebook_action_danger [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"] > div,
-    .st-key-notebook_action_danger [data-testid="stWidgetLabel"] p,
     [class*="st-key-source_action_danger"] [data-testid="stWidgetLabel"],
     [class*="st-key-source_action_danger"] [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"],
     [class*="st-key-source_action_danger"] [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"] > div,
@@ -3843,9 +3988,52 @@
         text-align:left !important;
     }
 
-    .st-key-notebook_action_danger div[data-testid="stButton"],
+    /* Vertically center confirm label with the checkbox control. */
+    .st-key-notebook_action_danger [data-testid="stCheckbox"] > label {
+        align-items:center !important;
+    }
+
+    .st-key-notebook_action_danger [data-testid="stWidgetLabel"] {
+        display:flex !important;
+        align-items:center !important;
+        align-self:center !important;
+        margin:0 !important;
+        padding:0 !important;
+        line-height:1 !important;
+        height:1.1rem !important;
+        min-height:1.1rem !important;
+        transform:translateY(.35rem) !important;
+    }
+
+    .st-key-notebook_action_danger [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"],
+    .st-key-notebook_action_danger [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"] > div {
+        display:flex !important;
+        align-items:center !important;
+        margin:0 !important;
+        padding:0 !important;
+        line-height:1 !important;
+        height:100% !important;
+        min-height:0 !important;
+    }
+
+    .st-key-notebook_action_danger [data-testid="stWidgetLabel"] p {
+        display:flex !important;
+        align-items:center !important;
+        margin:0 !important;
+        padding:0 !important;
+        line-height:1.1rem !important;
+        height:1.1rem !important;
+        text-align:left !important;
+        transform:none !important;
+    }
+
     [class*="st-key-source_action_danger"] div[data-testid="stButton"] {
         margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-notebook_action_danger div[data-testid="stButton"] {
+        margin:.15rem 0 0 !important;
         padding:0 !important;
     }
 
@@ -5432,6 +5620,7 @@
             flex-basis:4.6rem;
             margin:0 -.7rem;
             padding:0 .7rem;
+            overflow:hidden;
         }
 
         .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
@@ -5440,8 +5629,8 @@
             grid-template-columns:2.8rem minmax(0,1fr) max-content 2.35rem;
             justify-content:stretch;
             align-items:center !important;
-            column-gap:1rem !important;
-            gap:1rem !important;
+            column-gap:.65rem !important;
+            gap:.65rem !important;
         }
 
         .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
@@ -5451,6 +5640,46 @@
             flex:none !important;
             align-items:center !important;
             height:100% !important;
+            overflow:hidden !important;
+        }
+
+        /* Keep the notebook title in-flow so it cannot cover Notebooks/Guidance. */
+        .st-key-current_notebook_identity {
+            position:relative !important;
+            top:auto !important;
+            left:auto !important;
+            right:auto !important;
+            transform:none !important;
+            width:100% !important;
+            max-width:100% !important;
+            min-height:0 !important;
+            justify-content:flex-start !important;
+            z-index:1 !important;
+        }
+
+        .st-key-current_notebook_identity input {
+            text-align:left !important;
+        }
+
+        /* Drop "Guidance Level:" copy; keep the Quick/Complex control only. */
+        .topbar-guidance-label,
+        .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) {
+            display:none !important;
+        }
+
+        .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] {
+            display:flex !important;
+            align-items:center !important;
+            justify-content:flex-end !important;
+            gap:.45rem !important;
+            width:auto !important;
+        }
+
+        .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(1) {
+            margin-right:0 !important;
         }
 
         .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
@@ -5459,6 +5688,7 @@
             min-width:2.35rem !important;
             max-width:2.35rem !important;
             justify-content:flex-end !important;
+            overflow:visible !important;
         }
 
         .brand-lockup > div:last-child {
@@ -5472,8 +5702,14 @@
             font-size:1.05rem;
         }
 
+        .st-key-topbar_navigation div[data-testid="stButton"] button {
+            width:2.55rem !important;
+            min-width:2.55rem !important;
+            padding:0 !important;
+        }
+
         .st-key-topbar_navigation div[data-testid="stButton"] button p {
-            font-size:.86rem;
+            font-size:0 !important;
         }
 
         .st-key-notebook_topbar [data-baseweb="select"] > div {
@@ -5482,7 +5718,7 @@
         }
 
         .st-key-topbar_mode [data-testid="stPopover"] button {
-            min-width:6.25rem !important;
+            min-width:5.5rem !important;
             max-width:none !important;
             width:max-content !important;
             white-space:nowrap !important;
@@ -5550,17 +5786,24 @@
         .st-key-notebook_workspace {
             border:1px solid var(--cd-border);
             border-radius:.85rem;
+            /* Fill remaining viewport under topbar + panel switcher. */
+            min-height:0 !important;
+            height:calc(100dvh - 9.2rem) !important;
+            max-height:calc(100dvh - 9.2rem) !important;
         }
 
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] {
             display:block;
+            height:100% !important;
+            min-height:0 !important;
         }
 
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
             width:100% !important;
-            height:100%;
+            height:100% !important;
+            min-height:0 !important;
             min-width:0 !important;
             flex:none !important;
         }
@@ -5605,9 +5848,12 @@
         .st-key-studio_panel,
         .st-key-chat_panel,
         .st-key-sources_panel {
-            height:100%;
+            height:100% !important;
+            min-height:0 !important;
+            max-height:100% !important;
             padding:1.2rem 1rem 1rem;
             border:0;
+            overflow:hidden !important;
         }
 
         [data-testid="stChatMessage"]:has([aria-label="Chat message from user"]) {
@@ -5631,7 +5877,26 @@
             min-height:calc(1em * 1.45) !important;
             max-height:calc(1em * 1.45 * 5) !important;
             padding:.2rem 0 .3rem !important;
-        }    }
+        }
+    }
+
+    /* Mid-width desktop: shrink centered title before it hits the controls. */
+    @media (max-width:1280px) and (min-width:1051px) {
+        .st-key-current_notebook_identity {
+            max-width:min(22rem,24vw);
+        }
+
+        .topbar-guidance-label,
+        .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) {
+            display:none !important;
+        }
+
+        .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(1) {
+            margin-right:.7rem !important;
+        }
+    }
 
     @media (max-width:520px) {
         .block-container {

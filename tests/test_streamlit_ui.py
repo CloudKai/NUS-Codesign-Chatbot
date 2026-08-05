@@ -454,7 +454,7 @@ def test_rename_and_icon_controls_expose_accessible_instructions():
     css = Path("ui/assets/template.css").read_text(encoding="utf-8")
 
     assert '_ENTER_HINT = "Press Enter to apply"' in rename_source
-    assert '"help": _ENTER_HINT' in rename_source
+    assert '"help": _ENTER_HINT' not in rename_source
     assert 'help="Source actions"' in sources
     assert 'help="Settings"' in profile
     assert 'help="Collapse Thinking Path"' in workspace
@@ -467,6 +467,11 @@ def test_rename_and_icon_controls_expose_accessible_instructions():
     assert 'content:"Press Enter to apply"' in css
     assert (
         '.st-key-current_notebook_identity [data-testid="stFormSubmitButton"]' in css
+    )
+    assert "position:relative !important" in css
+    assert "calc(100dvh - 9.2rem)" in css
+    assert "ResizeObserver" in Path("ui/layout/sources_scroll.py").read_text(
+        encoding="utf-8"
     )
 
 

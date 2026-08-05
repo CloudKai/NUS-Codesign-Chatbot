@@ -41,6 +41,8 @@ def sync_sources_scroll() -> None:
     if (layoutWrapper?.querySelector(".st-key-sources_scroll") === root) {
       targets.add(layoutWrapper);
     }
+    const border = root.closest("[data-testid='stVerticalBlockBorderWrapper']");
+    if (border) targets.add(border);
     return [...targets];
   }
 
@@ -64,6 +66,18 @@ def sync_sources_scroll() -> None:
       });
   }
 
+  function usableBottom(sourcesPanel, sourcesColumn) {
+    const bounds = sourcesColumn
+      ? sourcesColumn.getBoundingClientRect()
+      : sourcesPanel.getBoundingClientRect();
+    const workspace = sourcesPanel.closest(".st-key-notebook_workspace");
+    const workspaceBottom = workspace
+      ? workspace.getBoundingClientRect().bottom
+      : win.innerHeight;
+    // Prefer the visible bottom of the panel within the workspace/viewport.
+    return Math.min(bounds.bottom, workspaceBottom, win.innerHeight - 6);
+  }
+
   function apply() {
     const sourcesPanel = panel();
     if (!sourcesPanel) return false;
@@ -72,6 +86,7 @@ def sync_sources_scroll() -> None:
     const bounds = sourcesColumn
       ? sourcesColumn.getBoundingClientRect()
       : sourcesPanel.getBoundingClientRect();
+    if (bounds.height < 80) return false;
 
     const panelInner = sourcesPanel.querySelector("[data-testid='stVerticalBlock']");
     if (panelInner) {
@@ -88,17 +103,18 @@ def sync_sources_scroll() -> None:
     const headerBottom = header
       ? header.getBoundingClientRect().bottom
       : bounds.top + 200;
-    const maxHeight = Math.max(160, bounds.bottom - headerBottom - 12);
+    const bottom = usableBottom(sourcesPanel, sourcesColumn);
+    const maxHeight = Math.max(140, Math.floor(bottom - headerBottom - 10));
 
     clearNestedScroll(sourcesPanel);
 
     scrollTargets(sourcesPanel).forEach((node) => {
       node.style.setProperty("flex", "1 1 auto", "important");
+      node.style.setProperty("min-height", "0", "important");
       node.style.setProperty("max-height", maxHeight + "px", "important");
       node.style.setProperty("height", maxHeight + "px", "important");
       node.style.setProperty("overflow-y", "auto", "important");
       node.style.setProperty("overflow-x", "hidden", "important");
-      node.style.setProperty("min-height", "0", "important");
       node.style.setProperty("overscroll-behavior", "contain", "important");
     });
 
@@ -106,7 +122,12 @@ def sync_sources_scroll() -> None:
   }
 
   function schedule() {
-    win.requestAnimationFrame(apply);
+    win.requestAnimationFrame(() => {
+      apply();
+      // Second pass after Streamlit stretch/layout settles.
+      win.setTimeout(apply, 50);
+      win.setTimeout(apply, 200);
+    });
   }
 
   function bind() {
@@ -120,8 +141,23 @@ def sync_sources_scroll() -> None:
     sourcesPanel.dataset.cdSourcesScrollBound = "1";
 
     win.addEventListener("resize", schedule);
-    const observer = new win.MutationObserver(schedule);
-    observer.observe(sourcesPanel, { childList: true, subtree: true });
+    if (win.visualViewport) {
+      win.visualViewport.addEventListener("resize", schedule);
+    }
+
+    const sourcesColumn = column(sourcesPanel);
+    if (typeof win.ResizeObserver === "function") {
+      const observer = new win.ResizeObserver(schedule);
+      observer.observe(sourcesPanel);
+      if (sourcesColumn) observer.observe(sourcesColumn);
+      const workspace = sourcesPanel.closest(".st-key-notebook_workspace");
+      if (workspace) observer.observe(workspace);
+      sourcesPanel.__cdSourcesResizeObserver = observer;
+    } else {
+      const observer = new win.MutationObserver(schedule);
+      observer.observe(sourcesPanel, { childList: true, subtree: true });
+    }
+
     schedule();
     return true;
   }
