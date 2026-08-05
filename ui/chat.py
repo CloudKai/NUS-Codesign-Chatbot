@@ -23,6 +23,10 @@ from backend.student_journey import (
 
 from ui.coach_welcome import COACH_WELCOME_KIND, seed_coach_welcome
 from ui.layout.composer_layout import sync_composer_layout
+from ui.layout.user_message_edit_layout import (
+    USER_MESSAGE_EDIT_HEIGHT_PX,
+    sync_user_message_edit_layout,
+)
 from ui.runtime import rerun, store, stream_coach_turn_events
 from ui.sources import source_viewer_dialog
 
@@ -242,8 +246,9 @@ def render_message(message: dict[str, Any]) -> None:
                     value=message["content"],
                     key=f"edit-text-{message['id']}",
                     label_visibility="collapsed",
-                    height=120,
+                    height=USER_MESSAGE_EDIT_HEIGHT_PX,
                 )
+                sync_user_message_edit_layout()
                 with st.container(key=f"user_message_edit_actions_{safe_id}"):
                     cancel_column, send_column = st.columns(2, gap="small")
                     if cancel_column.button(

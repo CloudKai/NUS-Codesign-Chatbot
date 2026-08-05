@@ -28,6 +28,9 @@
         --cd-checkbox-bg:#FFFFFF;
         --cd-checkbox-border:#D5DCE3;
         --cd-header-height:5.4rem;
+        --cd-user-bubble-max-rows:8;
+        --cd-user-bubble-row-height:calc(0.9rem * 1.45);
+        --cd-user-bubble-max-height:calc(var(--cd-user-bubble-row-height) * var(--cd-user-bubble-max-rows));
         --cd-radius:.75rem;
         --cd-placeholder-opacity:.48;
     }
@@ -2085,7 +2088,7 @@
     .cd-user-bubble-text {
         width:fit-content;
         max-width:80ch; /* 80 chars incl. spaces */
-        max-height:calc(0.9rem * 1.45 * 8);
+        max-height:var(--cd-user-bubble-max-height);
         margin:0;
         padding:0;
         overflow-x:hidden;
@@ -2189,18 +2192,20 @@
         width:100% !important;
         max-width:100% !important;
         min-width:0 !important;
+        max-height:var(--cd-user-bubble-max-height) !important;
         margin:0 !important;
         border:0 !important;
         background:transparent !important;
         box-shadow:none !important;
+        overflow:hidden !important;
     }
 
     [class*="st-key-user_message_edit_"] textarea {
         width:100% !important;
         max-width:100% !important;
         min-width:0 !important;
-        min-height:calc(0.9rem * 1.45 * 3) !important;
-        max-height:calc(0.9rem * 1.45 * 8) !important;
+        min-height:var(--cd-user-bubble-row-height) !important;
+        max-height:var(--cd-user-bubble-max-height) !important;
         height:auto !important;
         margin:0 !important;
         padding:0 !important;
@@ -3410,14 +3415,20 @@
     }
 
     [class*="st-key-source_rename_"] form,
-    .st-key-notebook_actions_panel form {
+    .st-key-notebook_actions_panel form,
+    .st-key-current_notebook_identity form {
         border:0 !important;
         padding:0 !important;
+        margin:0 !important;
+        gap:0 !important;
         background:transparent !important;
     }
 
     [class*="st-key-source_rename_"] [data-testid="stFormSubmitButton"],
-    .st-key-notebook_actions_panel [data-testid="stFormSubmitButton"] {
+    .st-key-notebook_actions_panel [data-testid="stFormSubmitButton"],
+    .st-key-current_notebook_identity [data-testid="stFormSubmitButton"],
+    .st-key-current_notebook_identity
+    [data-testid="stElementContainer"]:has([data-testid="stFormSubmitButton"]) {
         display:none !important;
         position:absolute !important;
         width:1px !important;
@@ -4505,6 +4516,214 @@
         font-size:.8rem !important;
     }
 
+    /* Language: select-only popover trigger (no text input / caret). */
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language {
+        margin:0 !important;
+        padding:0 !important;
+        width:100% !important;
+        max-width:100% !important;
+        align-self:stretch !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language > [data-testid="stLayoutWrapper"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language > [data-testid="stVerticalBlock"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language [data-testid="stElementContainer"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language [data-testid="stPopover"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language [data-testid="stPopover"] > div {
+        width:100% !important;
+        max-width:100% !important;
+        display:block !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .cd-profile-language-head {
+        display:flex !important;
+        align-items:center !important;
+        gap:.2rem !important;
+        margin:0 0 .45rem !important;
+        color:var(--cd-muted) !important;
+        font-size:.78rem !important;
+        font-weight:600 !important;
+        line-height:1.2 !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language [data-testid="stElementContainer"]:has(.cd-profile-language-head) {
+        margin:0 0 .35rem !important;
+        padding:0 !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .cd-profile-language-help {
+        position:relative !important;
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        width:.95rem !important;
+        height:.95rem !important;
+        border-radius:999px !important;
+        border:1px solid var(--cd-border) !important;
+        color:var(--cd-muted) !important;
+        font-size:.68rem !important;
+        font-weight:700 !important;
+        line-height:1 !important;
+        cursor:help !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .cd-profile-language-tooltip {
+        position:absolute !important;
+        left:50% !important;
+        bottom:calc(100% + .35rem) !important;
+        transform:translateX(-50%) !important;
+        z-index:10000 !important;
+        width:max-content !important;
+        max-width:14rem !important;
+        padding:.4rem .55rem !important;
+        border:1px solid var(--cd-border) !important;
+        border-radius:.45rem !important;
+        background:var(--cd-surface-muted) !important;
+        color:var(--cd-text) !important;
+        box-shadow:var(--cd-shadow) !important;
+        font-size:.68rem !important;
+        font-weight:500 !important;
+        line-height:1.35 !important;
+        white-space:normal !important;
+        text-align:left !important;
+        opacity:0 !important;
+        visibility:hidden !important;
+        pointer-events:none !important;
+        transition:opacity .12s ease, visibility .12s ease !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .cd-profile-language-help:hover .cd-profile-language-tooltip,
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .cd-profile-language-help:focus .cd-profile-language-tooltip,
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .cd-profile-language-help:focus-visible .cd-profile-language-tooltip {
+        opacity:1 !important;
+        visibility:visible !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language div[data-testid="stPopover"] button {
+        width:100% !important;
+        min-width:100% !important;
+        max-width:100% !important;
+        min-height:2rem !important;
+        height:2rem !important;
+        display:flex !important;
+        align-items:center !important;
+        justify-content:stretch !important;
+        text-align:left !important;
+        padding:.25rem .55rem .25rem .65rem !important;
+        border:1px solid var(--cd-border) !important;
+        border-radius:.5rem !important;
+        background:var(--cd-surface) !important;
+        color:var(--cd-text) !important;
+        font-size:.8rem !important;
+        font-weight:500 !important;
+        box-shadow:none !important;
+    }
+
+    /* Label left, chevron pinned to the far right of the full-width trigger. */
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language div[data-testid="stPopover"] button > div {
+        width:100% !important;
+        max-width:100% !important;
+        display:flex !important;
+        align-items:center !important;
+        justify-content:space-between !important;
+        gap:.5rem !important;
+        flex:1 1 auto !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language div[data-testid="stPopover"] button > div > div:first-child,
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language div[data-testid="stPopover"] button > div > div:first-child > span {
+        display:flex !important;
+        flex:1 1 auto !important;
+        align-items:center !important;
+        justify-content:flex-start !important;
+        min-width:0 !important;
+        width:auto !important;
+        text-align:left !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language div[data-testid="stPopover"] button
+    [data-testid="stMarkdownContainer"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language div[data-testid="stPopover"] button
+    [data-testid="stMarkdownContainer"] p {
+        margin:0 !important;
+        width:auto !important;
+        max-width:100% !important;
+        flex:0 1 auto !important;
+        text-align:left !important;
+        justify-content:flex-start !important;
+        overflow:hidden !important;
+        text-overflow:ellipsis !important;
+        white-space:nowrap !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language div[data-testid="stPopover"] button
+    [data-testid="stIconMaterial"] {
+        display:inline-flex !important;
+        flex:0 0 auto !important;
+        margin-left:0 !important;
+        font-size:1.05rem !important;
+        color:var(--cd-muted) !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language div[data-testid="stPopover"] button
+    [aria-hidden="true"] {
+        display:inline-flex !important;
+        flex:0 0 auto !important;
+        margin-left:0 !important;
+        align-items:center !important;
+    }
+
+    [data-testid="stPopoverBody"]:has([class*="st-key-profile-language-"]) {
+        border:0 !important;
+        outline:none !important;
+        box-shadow:var(--cd-shadow) !important;
+        background:var(--cd-surface) !important;
+        border-radius:.72rem !important;
+        padding:.2rem !important;
+        min-width:8.5rem !important;
+    }
+
+    [data-testid="stPopoverBody"] [class*="st-key-profile-language-"]
+    div[data-testid="stButton"] button {
+        min-height:1.85rem !important;
+        height:1.85rem !important;
+        margin:0 !important;
+        padding:0 .55rem !important;
+        border:0 !important;
+        border-radius:.45rem !important;
+        color:var(--cd-text) !important;
+        background:transparent !important;
+        box-shadow:none !important;
+        justify-content:flex-start !important;
+        text-align:left !important;
+    }
+
+    [data-testid="stPopoverBody"] [class*="st-key-profile-language-"]
+    div[data-testid="stButton"] button:hover {
+        background:var(--cd-subtle) !important;
+    }
+
     [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stButtonGroup"] {
         gap:.2rem !important;
@@ -4685,6 +4904,21 @@
 
     .st-key-current_notebook_identity [data-testid="InputInstructions"] {
         display:none !important;
+    }
+
+    .st-key-current_notebook_identity [data-testid="stVerticalBlock"],
+    .st-key-current_notebook_identity [data-testid="stForm"] > [data-testid="stVerticalBlock"],
+    .st-key-current_notebook_identity form [data-testid="stVerticalBlock"] {
+        gap:0 !important;
+        row-gap:0 !important;
+    }
+
+    .st-key-current_notebook_identity [data-testid="stElementContainer"]:has(
+        [data-testid="stTextInput"]
+    ) {
+        width:100% !important;
+        margin:0 !important;
+        padding:0 !important;
     }
 
     .st-key-topbar_navigation div[data-testid="stButton"] {

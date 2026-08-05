@@ -7,7 +7,7 @@ import streamlit.components.v1 as components
 
 from ui.components import profile_initial
 from ui.constants import APPEARANCE_MODES, RESPONSE_LANGUAGES
-from ui.runtime import store
+from ui.runtime import rerun, store
 from ui.settings import persist_appearance, persist_response_language
 
 
@@ -26,7 +26,7 @@ def render_profile_menu() -> None:
     display_name = str(st.session_state.get("display_name") or "Student")
     initial = profile_initial(display_name)
     with st.container(key="topbar_profile"):
-        with st.popover(initial, help="Settings"):
+        with st.popover(initial):
             with st.container(key="profile_menu_root"):
                 st.markdown(
                     '<div class="cd-profile-menu" hidden></div>',
@@ -50,14 +50,8 @@ def render_profile_menu() -> None:
                 if current_language not in RESPONSE_LANGUAGES:
                     current_language = "English"
                     st.session_state.response_language = current_language
-                st.selectbox(
-                    "Language",
-                    RESPONSE_LANGUAGES,
-                    index=RESPONSE_LANGUAGES.index(current_language),
-                    key="setting_response_language",
-                    on_change=persist_response_language,
-                    help="The coach responds in this language while preserving source names.",
-                )
+                st.session_state.setting_response_language = current_language
+                _render_language_dropdown(current_language)
                 st.divider()
                 st.markdown(
                     '<div class="cd-profile-help">'
@@ -66,6 +60,40 @@ def render_profile_menu() -> None:
                     "</div>",
                     unsafe_allow_html=True,
                 )
+
+
+def _render_language_dropdown(current_language: str) -> None:
+    """Render Language as a select-only menu (no text caret), left-aligned.
+
+    Uses the same popover + button pattern as Guidance Level so the control
+    cannot be typed into while keeping the value left-aligned in the trigger.
+    """
+    with st.container(key="profile_language"):
+        st.markdown(
+            '<div class="cd-profile-language-head">'
+            '<span class="cd-profile-language-label">Language</span>'
+            '<span class="cd-profile-language-help" tabindex="0" '
+            'aria-label="The coach responds in this language while preserving source names.">'
+            "?"
+            '<span class="cd-profile-language-tooltip" role="tooltip">'
+            "The coach responds in this language while preserving source names."
+            "</span>"
+            "</span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        with st.popover(current_language, use_container_width=True):
+            for index, language in enumerate(RESPONSE_LANGUAGES):
+                if st.button(
+                    language,
+                    key=f"profile-language-{index}",
+                    use_container_width=True,
+                    type="tertiary",
+                ):
+                    if language != current_language:
+                        st.session_state.setting_response_language = language
+                        persist_response_language()
+                        rerun()
 
 
 def inject_profile_leave_helper() -> None:
@@ -125,7 +153,8 @@ def _sync_profile_popover_close_on_leave() -> None:
       node.closest(".st-key-profile_menu_root") ||
       node.closest('[data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)') ||
       node.closest('[data-testid="stPopoverBody"]:has(.cd-profile-help)') ||
-      node.closest('[data-testid="stPopoverBody"]:has(.cd-profile-menu)')
+      node.closest('[data-testid="stPopoverBody"]:has(.cd-profile-menu)') ||
+      node.closest('[data-testid="stPopoverBody"]:has([class*="st-key-profile-language-"])')
     ) {
       return true;
     }

@@ -18,7 +18,9 @@ def test_streamlit_notebook_workspace_smoke():
     assert not composer.proto.accept_audio
     assert composer.proto.max_upload_size_mb == settings.max_file_size_mb
 
-    assert any(selectbox.label == "Language" for selectbox in app.selectbox)
+    assert any(
+        (button.key or "").startswith("profile-language-") for button in app.button
+    )
     assert any(control.label == "Appearance" for control in app.segmented_control)
     workspace_panel = next(
         radio for radio in app.radio if radio.label == "Workspace panel"
@@ -76,6 +78,20 @@ def test_streamlit_notebook_workspace_smoke():
         encoding="utf-8"
     )
     assert "MAX_COLS" not in Path("ui/layout/composer_layout.py").read_text(
+        encoding="utf-8"
+    )
+    edit_layout = Path("ui/layout/user_message_edit_layout.py").read_text(
+        encoding="utf-8"
+    )
+    assert "USER_BUBBLE_MAX_ROWS = 8" in edit_layout
+    assert "USER_MESSAGE_EDIT_HEIGHT_PX" in edit_layout
+    assert "__cdUserEditCleanup" in edit_layout
+    assert "--cd-user-bubble-max-rows:8" in rendered
+    assert "--cd-user-bubble-max-height" in rendered
+    assert "USER_MESSAGE_EDIT_HEIGHT_PX" in Path("ui/chat.py").read_text(
+        encoding="utf-8"
+    )
+    assert "height=USER_MESSAGE_EDIT_HEIGHT_PX" in Path("ui/chat.py").read_text(
         encoding="utf-8"
     )
     assert 'appearance == "Dark"' in Path("ui/chat.py").read_text(encoding="utf-8")
@@ -143,7 +159,10 @@ def test_streamlit_notebook_workspace_smoke():
 
     assert any(input_widget.label == "Display name" for input_widget in app.text_input)
     assert any(control.label == "Appearance" for control in app.segmented_control)
-    assert any(selectbox.label == "Language" for selectbox in app.selectbox)
+    assert "cd-profile-language-label" in rendered
+    assert any(
+        (button.key or "").startswith("profile-language-") for button in app.button
+    )
     assert "cd-profile-menu" in rendered
     assert "cd-profile-help-title" in rendered
     assert "cd-profile-help-title" in rendered
@@ -265,13 +284,27 @@ def test_language_theme_and_journey_has_no_manual_progression_control():
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     # Preferences live in the profile settings popover (content exposed to AppTest).
 
-    language = next(
-        selectbox
-        for selectbox in app.selectbox
-        if selectbox.label == "Language"
+    # Language is a select-only popover (no text caret), same idea as Guidance.
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert "cd-profile-language-label" in rendered
+    assert "cd-profile-language-tooltip" in rendered
+    assert "preserving source names" in rendered
+    css = Path("ui/assets/template.css").read_text(encoding="utf-8")
+    assert (
+        ".st-key-profile_language div[data-testid=\"stPopover\"] button > div > div:first-child"
+        in css
     )
-    assert language.options == ["English", "中文", "Bahasa Melayu", "தமிழ்"]
-    language.set_value("中文").run()
+    assert ".cd-profile-language-help:hover .cd-profile-language-tooltip" in css
+    assert "use_container_width=True" in Path("ui/profile.py").read_text(encoding="utf-8")
+    assert any(
+        (button.key or "").startswith("profile-language-") for button in app.button
+    )
+    chinese = next(
+        button
+        for button in app.button
+        if button.label == "中文" and (button.key or "").startswith("profile-language-")
+    )
+    chinese.click().run()
     assert app.session_state["response_language"] == "中文"
 
     # Popover content remains available for further preference changes.
@@ -432,6 +465,9 @@ def test_rename_and_icon_controls_expose_accessible_instructions():
         in css
     )
     assert 'content:"Press Enter to apply"' in css
+    assert (
+        '.st-key-current_notebook_identity [data-testid="stFormSubmitButton"]' in css
+    )
 
 
 def test_notebook_history_card_highlights_active_notebook_without_folders():
