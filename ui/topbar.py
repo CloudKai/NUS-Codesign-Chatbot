@@ -8,7 +8,8 @@ from backend.title_service import NotebookTitleService
 from backend.student_journey import RESPONSE_DETAILS, normalize_journey
 
 from ui.notebooks import notebooks_dialog
-from ui.profile import render_profile_menu
+from ui.profile import inject_profile_leave_helper, render_profile_menu
+from ui.rename import bump_rename_epoch, render_enter_to_apply_rename
 from ui.runtime import rerun, store
 from ui.session import save_journey
 from ui.settings import apply_selected_model
@@ -58,8 +59,8 @@ def render_topbar() -> tuple[str, str | None]:
         thread = store.get_thread(st.session_state.thread_id) or thread
     current_title = thread.get("name") or "Untitled notebook"
     with st.container(key="notebook_topbar"):
-        brand_column, title_column, actions_column = st.columns(
-            [1.25, 2.1, 1.95],
+        brand_column, title_column, controls_column, profile_column = st.columns(
+            [1.35, 2.4, 1.2, 0.32],
             gap="small",
         )
         brand_column.markdown(
@@ -73,27 +74,24 @@ def render_topbar() -> tuple[str, str | None]:
         )
         with title_column:
             with st.container(key="current_notebook_identity"):
-                edited_title = st.text_input(
-                    "Notebook title",
-                    value=current_title,
-                    max_chars=120,
+                thread_id = str(st.session_state.thread_id)
+                applied, cleaned_title = render_enter_to_apply_rename(
+                    kind="topbar",
+                    item_id=thread_id,
+                    label="Notebook title",
+                    current_value=str(current_title),
+                    max_chars=50,
                     label_visibility="collapsed",
-                    key=(
-                        f"topbar-notebook-title-{st.session_state.thread_id}-"
-                        f"{current_title}"
-                    ),
-                    help="Edit the notebook title and press Enter to save.",
                 )
-                cleaned_title = edited_title.strip()
-                if cleaned_title and cleaned_title != current_title:
-                    store.update_thread(st.session_state.thread_id, name=cleaned_title)
-        with actions_column.container(key="topbar_actions"):
-            (
-                chats_column,
-                guidance_label_column,
-                guidance_menu_column,
-                profile_column,
-            ) = st.columns([0.24, 0.28, 0.2, 0.28], gap="small")
+                if applied and cleaned_title and cleaned_title != current_title:
+                    store.update_thread(thread_id, name=cleaned_title)
+                    bump_rename_epoch("topbar", thread_id)
+                    rerun()
+        with controls_column.container(key="topbar_actions"):
+            chats_column, guidance_label_column, guidance_menu_column = st.columns(
+                [0.28, 0.40, 0.32],
+                gap="small",
+            )
             with chats_column.container(key="topbar_navigation"):
                 if st.button(
                     "Notebooks",
@@ -109,8 +107,9 @@ def render_topbar() -> tuple[str, str | None]:
             journey = normalize_journey(st.session_state.learning_journey)
             with guidance_menu_column:
                 _render_guidance_dropdown(journey)
-            with profile_column.container(key="topbar_profile_slot"):
-                render_profile_menu()
+        with profile_column.container(key="topbar_profile_slot"):
+            render_profile_menu()
+        inject_profile_leave_helper()
         chosen_model = st.session_state.selected_model
         apply_selected_model(chosen_model)
         chosen_effort = st.session_state.reasoning_effort

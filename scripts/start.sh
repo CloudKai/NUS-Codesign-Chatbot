@@ -31,6 +31,7 @@ export CO_DESIGN_API_URL="${CO_DESIGN_API_URL:-http://127.0.0.1:8000}"
 
 echo "Starting Co-design Chatbot"
 echo "  API:  http://127.0.0.1:8000/api/v1/health"
+echo "  Ready: http://127.0.0.1:8000/api/v1/ready"
 echo "  UI:   http://127.0.0.1:8501"
 echo "  Python: $PYTHON"
 echo "  USE_LOCAL_API=true (required for Thinking Path + image coaching)"
@@ -44,8 +45,30 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Give the API a moment so the first Streamlit coach turn is less likely to race.
-sleep 1
+echo "Waiting for API readiness…"
+READY_URL="${CO_DESIGN_API_URL}/api/v1/ready"
+i=0
+while [ "$i" -lt 60 ]; do
+  if "$PYTHON" - <<PY
+import sys
+import urllib.request
+try:
+    with urllib.request.urlopen("$READY_URL", timeout=1) as response:
+        sys.exit(0 if response.status == 200 else 1)
+except Exception:
+    sys.exit(1)
+PY
+  then
+    echo "API is ready."
+    break
+  fi
+  i=$((i + 1))
+  sleep 0.25
+done
+if [ "$i" -ge 60 ]; then
+  echo "API did not become ready in time." >&2
+  exit 1
+fi
 
 "$PYTHON" -m streamlit run streamlit_app.py \
   --server.address 127.0.0.1 \

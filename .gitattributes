@@ -1,0 +1,4 @@
+# Track future large course PDFs with Git LFS when LFS is installed.
+# Existing committed blobs are left as normal git objects until an explicit
+# LFS migrate is approved.
+lecture_notes/**/*.pdf filter=lfs diff=lfs merge=lfs -text

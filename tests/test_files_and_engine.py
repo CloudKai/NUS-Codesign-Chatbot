@@ -179,8 +179,9 @@ def test_mock_short_mode_is_concise_and_stage_specific(tmp_path, monkeypatch):
     )
     rendered = "".join(stream)
     assert "Surface assumptions" in rendered
-    assert "**Reflect:**" in rendered
+    assert "**Next:**" in rendered
     assert "critical-thinking pass" not in rendered
+    assert "Your question:" not in rendered
 
 
 def test_edit_and_resend_replaces_later_turns_and_uses_revised_prompt(
@@ -222,9 +223,9 @@ def test_edit_and_resend_replaces_later_turns_and_uses_revised_prompt(
     assert [message["role"] for message in messages] == ["user", "assistant"]
     assert messages[0]["id"] == first.user_message_id
     assert messages[0]["content"] == "Revised prompt"
-    assert "Revised prompt" in rendered
     assert "Old prompt" not in rendered
     assert "Later prompt" not in rendered
+    assert "Make this step more precise" in rendered or "a little more precise" in rendered
     assert [item["content"] for item in store.get_state(thread_id)["history"]] == [
         "Revised prompt",
         messages[1]["content"],

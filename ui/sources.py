@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import mimetypes
 import re
 from html import escape
 from pathlib import Path
@@ -11,17 +10,19 @@ from typing import Any
 import streamlit as st
 
 from backend.settings import settings
-from backend.source_library import (
-    COURSE_MATERIAL_GROUPS,
-    add_file_sources,
-    backfill_legacy_sources,
-    is_locked_course_source,
-)
+from backend.source_library import COURSE_MATERIAL_GROUPS, is_locked_course_source
 from ui.components import empty_state_html
-from ui.runtime import course_material_sync, rerun, store
+from ui.rename import (
+    bump_rename_epoch,
+    discard_rename_draft,
+    render_enter_to_apply_rename,
+    sync_rename_select_all,
+)
+from ui.runtime import rerun, store
 
 
 def format_size(size: int) -> str:
+    """Format a byte count for source metadata captions."""
     if size < 1024:
         return f"{size} B"
     if size < 1024 * 1024:
@@ -41,15 +42,11 @@ def source_kind_label(source: dict[str, Any]) -> str:
     return suffix or "File"
 
 
-def safe_source_path(source: dict[str, Any]) -> Path | None:
-    path_value = source.get("path")
-    if not path_value:
-        return None
-    path = Path(str(path_value)).resolve()
-    files_root = settings.files_dir.resolve()
-    if not path.is_file() or files_root not in path.parents:
-        return None
-    return path
+def _source_has_downloadable_file(source: dict[str, Any]) -> bool:
+    """Return True when the source has file bytes available via the workspace API."""
+    if "has_file" in source:
+        return bool(source.get("has_file"))
+    return bool(source.get("path"))
 
 
 def _import_uploaded_sources(uploads: list[Any]) -> None:
@@ -73,13 +70,13 @@ def _import_uploaded_sources(uploads: list[Any]) -> None:
     # a second concurrent attempt while the first is still running.
     st.session_state[handled_key] = fingerprint
     try:
-        added = add_file_sources(
-            store,
+        added = store.upload_sources(
             thread_id,
             [
                 (upload.name, upload.getvalue(), getattr(upload, "type", None))
                 for upload in uploads
             ],
+            origin="source_panel",
         )
     except Exception as exc:
         st.session_state["source_upload_error"] = str(exc)
@@ -109,37 +106,32 @@ def source_viewer_dialog(source_id: str) -> None:
     st.caption(
         f"{source_kind_label(source)} · {format_size(int(source.get('size') or 0))}"
     )
-    path = safe_source_path(source)
     if source.get("sourceUrl"):
         st.link_button(
             "Open original webpage",
             str(source["sourceUrl"]),
             icon=":material/open_in_new:",
         )
-    if path and path.suffix.lower() == ".pdf":
-        st.pdf(path.read_bytes(), height=560, key=f"pdf-preview-{source_id}")
-    elif path and str(source.get("mime") or "").startswith("image/"):
-        st.image(str(path), use_container_width=True)
+    content = None
+    if _source_has_downloadable_file(source):
+        try:
+            content = store.get_source_content(st.session_state.thread_id, source_id)
+        except Exception:
+            content = None
+    if content and (
+        content.filename.lower().endswith(".pdf")
+        or content.mime == "application/pdf"
+    ):
+        st.pdf(content.data, height=560, key=f"pdf-preview-{source_id}")
+    elif content and str(source.get("mime") or content.mime).startswith("image/"):
+        st.image(content.data, use_container_width=True)
     else:
         text = str(source.get("extractedText") or "").strip()
         if text:
             with st.container(height=500, border=True):
                 st.write(text)
         else:
-            st.info("This file is stored for download but has no readable text preview.")
-    if path and not is_locked_course_source(source):
-        mime = str(
-            source.get("mime")
-            or mimetypes.guess_type(path.name)[0]
-            or "application/octet-stream"
-        )
-        st.download_button(
-            "Download source",
-            data=path.read_bytes(),
-            file_name=path.name,
-            mime=mime,
-            use_container_width=True,
-        )
+            st.info("No readable text preview is available for this file.")
 
 
 def _source_type_bucket(source: dict[str, Any]) -> str:
@@ -198,10 +190,49 @@ def _sort_course_sources_by_name(sources: list[dict[str, Any]]) -> list[dict[str
     )
 
 
+def _sources_expander_widget_key(section: str) -> str:
+    """Stable Streamlit key for a Sources section expander."""
+    slug = re.sub(r"[^a-z0-9]+", "_", section.strip().lower()).strip("_")
+    return f"sources_expander_{slug}"
+
+
+def _ensure_sources_expander_state(section: str, *, default: bool = True) -> str:
+    """Seed expander open/closed state from preferences after a browser refresh.
+
+    Returns:
+        The Streamlit widget key for ``st.expander``.
+    """
+    widget_key = _sources_expander_widget_key(section)
+    if widget_key not in st.session_state:
+        prefs = store.get_user_preferences() or {}
+        saved = prefs.get("sources_expander_state")
+        if isinstance(saved, dict) and section in saved:
+            st.session_state[widget_key] = bool(saved[section])
+        else:
+            st.session_state[widget_key] = default
+    return widget_key
+
+
+def _persist_sources_expander_state(section: str, widget_key: str) -> None:
+    """Remember expander open/closed state across refreshes when it changes."""
+    expanded = bool(st.session_state.get(widget_key, True))
+    prefs = store.get_user_preferences() or {}
+    saved_raw = prefs.get("sources_expander_state")
+    saved = dict(saved_raw) if isinstance(saved_raw, dict) else {}
+    if saved.get(section) is expanded:
+        return
+    saved[section] = expanded
+    store.update_user_preferences({"sources_expander_state": saved})
+
+
+def _sources_expander_changed(section: str, widget_key: str) -> None:
+    """Persist as soon as the student expands or collapses a Sources section."""
+    _persist_sources_expander_state(section, widget_key)
+
 @st.fragment(run_every="1s")
 def render_sources_panel() -> None:
-    backfill_legacy_sources(store, st.session_state.thread_id)
-    sync_future = course_material_sync().request(store, st.session_state.thread_id)
+    store.backfill_legacy_sources(st.session_state.thread_id)
+    sync_future = store.request_course_material_sync(st.session_state.thread_id)
     sync_loading = not sync_future.done()
     lecture_sync = None
     sync_error = ""
@@ -346,62 +377,81 @@ def render_sources_panel() -> None:
                     help="Managed course material",
                 )
             else:
-                with menu_column.popover(
-                    "⋯",
+                # Icon in the label (not icon=) so Streamlit hides the expand chevron.
+                menu = menu_column.popover(
+                    ":material/more_horiz:",
                     type="tertiary",
-                    help="Preview, rename, or delete",
-                ):
-                    if st.button(
-                        "Preview",
-                        icon=":material/visibility:",
-                        use_container_width=True,
-                        key=f"view-source-{source['id']}",
-                    ):
-                        source_viewer_dialog(source["id"])
-                    renamed = st.text_input(
-                        "Rename",
-                        value=str(source.get("title") or ""),
-                        key=f"rename-source-input-{source['id']}",
-                    )
-                    if st.button(
-                        "Save name",
-                        use_container_width=True,
-                        key=f"rename-source-{source['id']}",
-                    ):
+                    key=f"source-menu-{source['id']}",
+                    help="Source actions",
+                    on_change="rerun",
+                )
+                was_open_key = f"source-menu-was-open-{source['id']}"
+                was_open = bool(st.session_state.get(was_open_key))
+                is_open = bool(menu.open)
+                if was_open and not is_open:
+                    discard_rename_draft("source", str(source["id"]))
+                    bump_rename_epoch("source", str(source["id"]))
+                st.session_state[was_open_key] = is_open
+                with menu:
+                    current_title = str(source.get("title") or "").strip()
+                    with st.container(key=f"source_rename_{safe_id}"):
+                        applied, cleaned = render_enter_to_apply_rename(
+                            kind="source",
+                            item_id=str(source["id"]),
+                            label="Rename",
+                            current_value=current_title,
+                        )
+                    if applied and cleaned and cleaned != current_title:
                         try:
                             store.rename_source(
                                 st.session_state.thread_id,
                                 source["id"],
-                                renamed,
+                                cleaned,
                             )
-                            st.toast("Source renamed.")
                             rerun()
                         except Exception as exc:
                             st.error(str(exc))
-                    path = safe_source_path(source)
-                    if path:
-                        st.download_button(
-                            "Download",
-                            data=path.read_bytes(),
-                            file_name=path.name,
-                            mime=str(source.get("mime") or "application/octet-stream"),
-                            use_container_width=True,
-                            key=f"download-source-{source['id']}",
-                        )
-                    st.divider()
-                    confirm = st.checkbox(
-                        "Confirm delete",
-                        key=f"confirm-remove-source-{source['id']}",
+                    sync_rename_select_all(
+                        root_selector=(
+                            f'[data-testid="stPopoverBody"]'
+                            f':has(.st-key-source_rename_{safe_id})'
+                        ),
+                        aria_label="Rename",
                     )
-                    if st.button(
-                        "Delete",
-                        icon=":material/delete:",
-                        use_container_width=True,
-                        disabled=not confirm,
-                        key=f"remove-source-{source['id']}",
-                    ):
-                        store.delete_source(st.session_state.thread_id, source["id"])
-                        rerun()
+                    if _source_has_downloadable_file(source):
+                        try:
+                            content = store.get_source_content(
+                                st.session_state.thread_id, source["id"]
+                            )
+                        except Exception as exc:
+                            st.error(str(exc))
+                        else:
+                            st.download_button(
+                                "Download",
+                                data=content.data,
+                                file_name=content.filename,
+                                mime=content.mime,
+                                use_container_width=True,
+                                key=f"download-source-{source['id']}",
+                            )
+                    with st.container(key=f"source_action_danger_{safe_id}"):
+                        st.markdown("#### Delete source")
+                        confirm = st.checkbox(
+                            "I understand this cannot be undone",
+                            key=f"confirm-remove-source-{source['id']}",
+                        )
+                        if st.button(
+                            "Delete permanently",
+                            icon=":material/delete:",
+                            use_container_width=True,
+                            disabled=not confirm,
+                            key=f"remove-source-{source['id']}",
+                        ):
+                            store.delete_source(
+                                st.session_state.thread_id,
+                                source["id"],
+                            )
+                            rerun()
 
     with st.container(key="sources_scroll", height="stretch"):
         grouped_course_sources = {
@@ -427,9 +477,16 @@ def render_sources_panel() -> None:
                 and (source.get("metadata") or {}).get("course_material_group") == group
             ]
             group_sources = _sort_course_sources_by_name(grouped_course_sources[group])
+            group_key = _ensure_sources_expander_state(group, default=True)
             with st.expander(
                 f"{group} · {len(group_all)}",
-                expanded=True,
+                expanded=bool(st.session_state.get(group_key, True)),
+                key=group_key,
+                # Required for session_state[key] to track open/closed. Without
+                # this, the 1s Sources fragment re-applies the seeded expanded
+                # value and collapsed sections snap back open.
+                on_change=_sources_expander_changed,
+                args=(group, group_key),
             ):
                 if group_sources:
                     for source in group_sources:
@@ -438,7 +495,15 @@ def render_sources_panel() -> None:
                     st.caption("No materials available yet.")
                 else:
                     st.caption("No matching materials in this group.")
-        with st.expander(f"My Sources · {len(personal_sources)}", expanded=True):
+            _persist_sources_expander_state(group, group_key)
+        my_sources_key = _ensure_sources_expander_state("My Sources", default=True)
+        with st.expander(
+            f"My Sources · {len(personal_sources)}",
+            expanded=bool(st.session_state.get(my_sources_key, True)),
+            key=my_sources_key,
+            on_change=_sources_expander_changed,
+            args=("My Sources", my_sources_key),
+        ):
             if personal_sources:
                 for source in personal_sources:
                     render_source_card(source)
@@ -455,4 +520,4 @@ def render_sources_panel() -> None:
                 )
             else:
                 st.caption("No matching personal sources.")
-
+        _persist_sources_expander_state("My Sources", my_sources_key)

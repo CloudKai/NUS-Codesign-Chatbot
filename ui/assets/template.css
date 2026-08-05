@@ -2050,7 +2050,7 @@
         width:fit-content !important;
         max-width:min(100%, calc(80ch + 16px)) !important;
         margin-left:auto !important;
-        padding:10px 8px 8px !important;
+        padding:10px 12px 10px 16px !important;
         border-radius:.85rem !important;
         background:var(--cd-accent-soft) !important;
         box-sizing:border-box !important;
@@ -2064,7 +2064,7 @@
         max-width:min(100%, calc(80ch + 16px)) !important;
         min-width:min(100%, 22rem) !important;
         margin-left:auto !important;
-        padding:10px 8px 8px !important;
+        padding:10px 12px 10px 16px !important;
         border-radius:.85rem !important;
         background:var(--cd-accent-soft) !important;
         box-sizing:border-box !important;
@@ -2137,6 +2137,9 @@
         min-width:0 !important;
         width:auto !important;
         flex:0 0 auto !important;
+        display:flex !important;
+        align-items:center !important;
+        justify-content:center !important;
     }
 
     [class*="st-key-user_message_actions_"] [data-testid="stElementContainer"],
@@ -2149,10 +2152,11 @@
 
     [class*="st-key-user_message_actions_"] iframe {
         display:block !important;
-        width:34px !important;
-        height:30px !important;
+        width:1.7rem !important;
+        height:1.7rem !important;
         border:0 !important;
         background:transparent !important;
+        vertical-align:middle !important;
     }
 
     [class*="st-key-user_message_actions_"] button {
@@ -2256,197 +2260,6 @@
         padding-top:0;
         overflow:visible;
     }
-
-    /* Model chip: overlay the composer so bottom/left pin to the footer. */
-    .st-key-chat_composer > [data-testid="stLayoutWrapper"]:has(.st-key-composer_model_slot),
-    .st-key-chat_composer [data-testid="stElementContainer"]:has(.st-key-composer_model_slot) {
-        position:absolute !important;
-        inset:0 !important;
-        width:auto !important;
-        height:auto !important;
-        min-height:0 !important;
-        margin:0 !important;
-        padding:0 !important;
-        overflow:visible !important;
-        pointer-events:none !important;
-    }
-
-    .st-key-composer_model_slot {
-        position:static !important;
-        width:100% !important;
-        height:100% !important;
-        min-height:0 !important;
-        margin:0 !important;
-        padding:0 !important;
-        overflow:visible !important;
-        pointer-events:none;
-    }
-
-    .st-key-composer_model_slot > [data-testid="stLayoutWrapper"],
-    .st-key-composer_model_slot [data-testid="stVerticalBlock"],
-    .st-key-composer_model_slot [data-testid="stElementContainer"] {
-        position:static !important;
-        width:100% !important;
-        height:100% !important;
-        min-width:0 !important;
-        min-height:0 !important;
-        margin:0 !important;
-        padding:0 !important;
-        overflow:visible !important;
-    }
-
-    .st-key-composer_model_slot [data-testid="stPopover"] {
-        position:absolute !important;
-        z-index:45 !important;
-        inset:auto !important;
-        left:0 !important;
-        top:0 !important;
-        right:auto !important;
-        bottom:auto !important;
-        width:max-content !important;
-        max-width:10.5rem !important;
-        min-width:max-content !important;
-        margin:0 !important;
-        pointer-events:auto !important;
-        white-space:nowrap !important;
-        transform:none !important;
-        opacity:0;
-    }
-
-    .st-key-composer_model_slot [data-testid="stPopover"].cd-model-placed {
-        opacity:1 !important;
-        visibility:visible !important;
-    }
-
-    .st-key-composer_model_slot [data-testid="stPopover"] > button,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-secondary"],
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-tertiary"],
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stPopoverButton"] {
-        display:inline-flex !important;
-        align-items:center !important;
-        justify-content:center !important;
-        flex-direction:row !important;
-        flex-wrap:nowrap !important;
-        width:max-content !important;
-        min-width:max-content !important;
-        max-width:9.5rem !important;
-        min-height:1.65rem !important;
-        height:1.65rem !important;
-        padding:0 .35rem 0 .1rem !important;
-        border:0 !important;
-        border-radius:.45rem !important;
-        color:var(--cd-text) !important;
-        background:transparent !important;
-        box-shadow:none !important;
-        outline:none !important;
-        font-size:.72rem !important;
-        font-weight:700 !important;
-        line-height:1 !important;
-        gap:.1rem !important;
-        white-space:nowrap !important;
-        writing-mode:horizontal-tb !important;
-        overflow:hidden !important;
-    }
-
-    .cd-locked-model-chip {
-        display:inline-flex !important;
-        align-items:center !important;
-        justify-content:center !important;
-        min-height:1.5rem !important;
-        height:1.5rem !important;
-        padding:0 .4rem !important;
-        border:0 !important;
-        border-radius:.45rem !important;
-        color:var(--cd-muted) !important;
-        background:transparent !important;
-        font-size:.78rem !important;
-        font-weight:600 !important;
-        line-height:1 !important;
-        white-space:nowrap !important;
-        pointer-events:none !important;
-    }
-
-    .cd-locked-model-chip.cd-model-placed {
-        opacity:1 !important;
-        visibility:visible !important;
-    }
-
-    .st-key-composer_model_slot [data-testid="stMarkdownContainer"],
-    .st-key-composer_model_slot [data-testid="stMarkdownContainer"] > div {
-        position:static !important;
-        width:100% !important;
-        height:100% !important;
-        margin:0 !important;
-        padding:0 !important;
-        overflow:visible !important;
-    }
-
-    .st-key-composer_model_slot [data-testid="stPopover"] > button:hover,
-    .st-key-composer_model_slot [data-testid="stPopover"] > button:focus,
-    .st-key-composer_model_slot [data-testid="stPopover"] > button:focus-visible,
-    .st-key-composer_model_slot [data-testid="stPopover"] > button:active,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-secondary"]:hover,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-secondary"]:focus,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-secondary"]:focus-visible,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-secondary"]:active,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-tertiary"]:hover,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-tertiary"]:focus,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-tertiary"]:focus-visible,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-tertiary"]:active,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stPopoverButton"]:hover,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stPopoverButton"]:focus,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stPopoverButton"]:focus-visible,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stPopoverButton"]:active {
-        border:0 !important;
-        color:var(--cd-text) !important;
-        background:transparent !important;
-        outline:none !important;
-        box-shadow:none !important;
-    }
-
-    .st-key-composer_model_slot [data-testid="stPopover"] > button *,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-tertiary"] * {
-        color:inherit !important;
-        -webkit-text-fill-color:currentColor !important;
-        white-space:nowrap !important;
-        writing-mode:horizontal-tb !important;
-    }
-
-    .st-key-composer_model_slot [data-testid="stPopover"] > button
-    span[data-has-shortcut],
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-tertiary"]
-    span[data-has-shortcut] {
-        display:inline-flex !important;
-        align-items:center !important;
-        flex-direction:row !important;
-        flex-wrap:nowrap !important;
-        width:max-content !important;
-        max-width:100%;
-        gap:.12rem !important;
-    }
-
-    .st-key-composer_model_slot [data-testid="stPopover"] > button p,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-secondary"] p,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-tertiary"] p {
-        display:inline !important;
-        margin:0 !important;
-        font-size:.72rem !important;
-        font-weight:650 !important;
-        white-space:nowrap !important;
-        overflow:hidden;
-        text-overflow:ellipsis;
-    }
-
-    .st-key-composer_model_slot [data-testid="stPopover"] > button
-    [data-testid="stIconMaterial"]:last-child {
-        display:inline-flex !important;
-        flex:none !important;
-        margin-left:.05rem;
-        font-size:.78rem !important;
-        color:var(--cd-muted) !important;
-        opacity:1;
-    }
-
     [data-testid="stPopoverBody"]:has([class*="st-key-composer-model-"]) {
         border:0 !important;
         outline:none !important;
@@ -3391,7 +3204,7 @@
 
     [class*="st-key-source_card_"] [data-testid="stHorizontalBlock"] {
         display:grid !important;
-        grid-template-columns:1.35rem minmax(0,1fr) 1.35rem;
+        grid-template-columns:1.35rem minmax(0,1fr) 1.7rem;
         gap:.35rem !important;
         align-items:center !important;
     }
@@ -3496,17 +3309,155 @@
         justify-content:center !important;
     }
 
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(3) div[data-testid="stPopover"] button {
-        width:1.35rem;
-        min-width:1.35rem;
-        min-height:1.35rem;
-        height:1.35rem;
-        padding:0;
+    /* Source ⋯ menu: icon only, no chevron, no hover/active chrome. */
+    [class*="st-key-source_card_"] [data-testid="stPopover"] button,
+    [class*="st-key-source_card_"] [data-testid="stPopover"] [data-testid="stPopoverButton"] {
+        width:1.7rem !important;
+        min-width:1.7rem !important;
+        max-width:1.7rem !important;
+        min-height:1.7rem !important;
+        height:1.7rem !important;
+        padding:0 !important;
         border:0 !important;
+        border-radius:.45rem !important;
         background:transparent !important;
+        box-shadow:none !important;
+        outline:none !important;
         display:inline-flex !important;
         align-items:center !important;
         justify-content:center !important;
+        gap:0 !important;
+        overflow:visible !important;
+        color:var(--cd-muted) !important;
+    }
+
+    [class*="st-key-source_card_"] [data-testid="stPopover"] button:hover,
+    [class*="st-key-source_card_"] [data-testid="stPopover"] button:focus,
+    [class*="st-key-source_card_"] [data-testid="stPopover"] button:focus-visible,
+    [class*="st-key-source_card_"] [data-testid="stPopover"] button:active,
+    [class*="st-key-source_card_"] [data-testid="stPopover"] [data-testid="stPopoverButton"]:hover,
+    [class*="st-key-source_card_"] [data-testid="stPopover"] [data-testid="stPopoverButton"]:focus,
+    [class*="st-key-source_card_"] [data-testid="stPopover"] [data-testid="stPopoverButton"]:focus-visible,
+    [class*="st-key-source_card_"] [data-testid="stPopover"] [data-testid="stPopoverButton"]:active {
+        color:var(--cd-muted) !important;
+        background:transparent !important;
+        border-color:transparent !important;
+        box-shadow:none !important;
+        outline:none !important;
+    }
+
+    /* Label-as-icon renders through markdown; keep it visible and centered. */
+    [class*="st-key-source_card_"] [data-testid="stPopover"] button
+    span[data-has-shortcut],
+    [class*="st-key-source_card_"] [data-testid="stPopover"] button > div {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        gap:0 !important;
+        margin:0 !important;
+        width:100% !important;
+        height:100% !important;
+    }
+
+    [class*="st-key-source_card_"] [data-testid="stPopover"] button p {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        margin:0 !important;
+        padding:0 !important;
+        line-height:1 !important;
+        color:inherit !important;
+    }
+
+    [class*="st-key-source_card_"] [data-testid="stPopover"] button
+    [data-testid="stIconMaterial"],
+    [class*="st-key-source_card_"] [data-testid="stPopover"] button
+    [data-testid="stMarkdownContainer"] {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        margin:0 !important;
+        font-size:1.15rem !important;
+        line-height:1 !important;
+        color:inherit !important;
+    }
+
+    /* Hide Streamlit's expand_more / expand_less chevron if it still appears. */
+    [class*="st-key-source_card_"] [data-testid="stPopover"] button
+    [aria-hidden="true"] {
+        display:none !important;
+    }
+
+    /* Source / notebook rename: plain textbox; Enter submits a hidden form button. */
+    [class*="st-key-source_rename_"] [data-testid="stTextInputRootElement"],
+    [class*="st-key-source_rename_"] [data-testid="stTextInputRootElement"] > div {
+        color:var(--cd-text) !important;
+        border-color:var(--cd-border) !important;
+        background:var(--cd-surface) !important;
+    }
+
+    [class*="st-key-source_rename_"] [data-testid="stTextInputRootElement"] input,
+    [class*="st-key-source_rename_"] input[aria-label="Rename"] {
+        opacity:1 !important;
+        color:var(--cd-text) !important;
+        -webkit-text-fill-color:var(--cd-text) !important;
+        caret-color:var(--cd-text) !important;
+        background:transparent !important;
+    }
+
+    [class*="st-key-source_rename_"] [data-testid="stWidgetLabel"] {
+        margin-bottom:.28rem !important;
+    }
+
+    [class*="st-key-source_rename_"] form,
+    .st-key-notebook_actions_panel form {
+        border:0 !important;
+        padding:0 !important;
+        background:transparent !important;
+    }
+
+    [class*="st-key-source_rename_"] [data-testid="stFormSubmitButton"],
+    .st-key-notebook_actions_panel [data-testid="stFormSubmitButton"] {
+        display:none !important;
+        position:absolute !important;
+        width:1px !important;
+        height:1px !important;
+        margin:0 !important;
+        padding:0 !important;
+        overflow:hidden !important;
+        clip:rect(0 0 0 0) !important;
+        border:0 !important;
+    }
+
+    /* Replace Streamlit form hint "Press Enter to submit form". */
+    [class*="st-key-source_rename_"] [data-testid="InputInstructions"],
+    .st-key-notebook_actions_panel [data-testid="InputInstructions"] {
+        position:relative !important;
+        color:transparent !important;
+        font-size:0 !important;
+        line-height:0 !important;
+    }
+
+    [class*="st-key-source_rename_"] [data-testid="InputInstructions"] *,
+    .st-key-notebook_actions_panel [data-testid="InputInstructions"] * {
+        visibility:hidden !important;
+        font-size:0 !important;
+    }
+
+    [class*="st-key-source_rename_"] [data-testid="InputInstructions"]::after,
+    .st-key-notebook_actions_panel [data-testid="InputInstructions"]::after {
+        content:"Press Enter to apply";
+        visibility:visible !important;
+        position:absolute;
+        right:0;
+        top:50%;
+        transform:translateY(-50%);
+        color:var(--cd-muted);
+        font-size:.68rem;
+        font-weight:500;
+        letter-spacing:.01em;
+        line-height:1;
+        white-space:nowrap;
     }
 
     [class*="st-key-source_card_"] .source-meta,
@@ -3755,8 +3706,9 @@
         line-height:1.2 !important;
     }
 
-    /* Delete notebook box — title, confirm, button with even left edge. */
-    .st-key-notebook_action_danger {
+    /* Delete notebook / source danger box — shared rhythm and chrome. */
+    .st-key-notebook_action_danger,
+    [class*="st-key-source_action_danger"] {
         margin-top:.35rem;
         padding:.7rem .8rem .75rem;
         border:1px solid color-mix(in srgb,var(--cd-danger) 22%,var(--cd-border));
@@ -3765,7 +3717,9 @@
     }
 
     [data-testid="stElementContainer"]:has(> .st-key-notebook_action_danger),
-    [data-testid="stLayoutWrapper"]:has(.st-key-notebook_action_danger) {
+    [data-testid="stLayoutWrapper"]:has(.st-key-notebook_action_danger),
+    [data-testid="stElementContainer"]:has(> [class*="st-key-source_action_danger"]),
+    [data-testid="stLayoutWrapper"]:has([class*="st-key-source_action_danger"]) {
         margin-top:.2rem !important;
         padding-top:0 !important;
     }
@@ -3773,7 +3727,8 @@
     /* Override panel-wide .1rem gap; use one rhythm for the three rows. */
     .st-key-notebook_actions_panel
     .st-key-notebook_action_danger > [data-testid="stVerticalBlock"],
-    .st-key-notebook_action_danger > [data-testid="stVerticalBlock"] {
+    .st-key-notebook_action_danger > [data-testid="stVerticalBlock"],
+    [class*="st-key-source_action_danger"] > [data-testid="stVerticalBlock"] {
         gap:.5rem !important;
         row-gap:.5rem !important;
     }
@@ -3782,6 +3737,12 @@
     > [data-testid="stVerticalBlock"]
     > [data-testid="stElementContainer"],
     .st-key-notebook_action_danger
+    > [data-testid="stVerticalBlock"]
+    > [data-testid="stLayoutWrapper"],
+    [class*="st-key-source_action_danger"]
+    > [data-testid="stVerticalBlock"]
+    > [data-testid="stElementContainer"],
+    [class*="st-key-source_action_danger"]
     > [data-testid="stVerticalBlock"]
     > [data-testid="stLayoutWrapper"] {
         margin:0 !important;
@@ -3794,17 +3755,26 @@
     > [data-testid="stElementContainer"]:has([data-testid="stButton"]),
     .st-key-notebook_action_danger
     > [data-testid="stVerticalBlock"]
+    > [data-testid="stLayoutWrapper"]:has([data-testid="stButton"]),
+    [class*="st-key-source_action_danger"]
+    > [data-testid="stVerticalBlock"]
+    > [data-testid="stElementContainer"]:has([data-testid="stButton"]),
+    [class*="st-key-source_action_danger"]
+    > [data-testid="stVerticalBlock"]
     > [data-testid="stLayoutWrapper"]:has([data-testid="stButton"]) {
         margin-top:.15rem !important;
     }
 
     .st-key-notebook_action_danger
+    [data-testid="stMarkdownContainer"]:has(h4),
+    [class*="st-key-source_action_danger"]
     [data-testid="stMarkdownContainer"]:has(h4) {
         margin:0 !important;
         padding:0 !important;
     }
 
-    .st-key-notebook_action_danger h4 {
+    .st-key-notebook_action_danger h4,
+    [class*="st-key-source_action_danger"] h4 {
         margin:0 !important;
         padding:0 !important;
         color:var(--cd-text) !important;
@@ -3814,13 +3784,15 @@
         letter-spacing:-.01em;
     }
 
-    .st-key-notebook_action_danger [data-testid="stCheckbox"] {
+    .st-key-notebook_action_danger [data-testid="stCheckbox"],
+    [class*="st-key-source_action_danger"] [data-testid="stCheckbox"] {
         width:100% !important;
         margin:0 !important;
         padding:.5rem 0 !important;
     }
 
-    .st-key-notebook_action_danger [data-testid="stCheckbox"] > label {
+    .st-key-notebook_action_danger [data-testid="stCheckbox"] > label,
+    [class*="st-key-source_action_danger"] [data-testid="stCheckbox"] > label {
         display:inline-flex !important;
         flex-direction:row !important;
         align-items:center !important;
@@ -3834,7 +3806,9 @@
     }
 
     .st-key-notebook_action_danger [data-testid="stCheckbox"] > label > div:has(svg),
-    .st-key-notebook_action_danger [data-testid="stCheckbox"] > label > div:nth-child(2) {
+    .st-key-notebook_action_danger [data-testid="stCheckbox"] > label > div:nth-child(2),
+    [class*="st-key-source_action_danger"] [data-testid="stCheckbox"] > label > div:has(svg),
+    [class*="st-key-source_action_danger"] [data-testid="stCheckbox"] > label > div:nth-child(2) {
         display:flex !important;
         align-items:center !important;
         justify-content:center !important;
@@ -3846,7 +3820,11 @@
     .st-key-notebook_action_danger [data-testid="stWidgetLabel"],
     .st-key-notebook_action_danger [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"],
     .st-key-notebook_action_danger [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"] > div,
-    .st-key-notebook_action_danger [data-testid="stWidgetLabel"] p {
+    .st-key-notebook_action_danger [data-testid="stWidgetLabel"] p,
+    [class*="st-key-source_action_danger"] [data-testid="stWidgetLabel"],
+    [class*="st-key-source_action_danger"] [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"],
+    [class*="st-key-source_action_danger"] [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"] > div,
+    [class*="st-key-source_action_danger"] [data-testid="stWidgetLabel"] p {
         display:inline !important;
         margin:0 !important;
         padding:0 !important;
@@ -3854,12 +3832,14 @@
         text-align:left !important;
     }
 
-    .st-key-notebook_action_danger div[data-testid="stButton"] {
+    .st-key-notebook_action_danger div[data-testid="stButton"],
+    [class*="st-key-source_action_danger"] div[data-testid="stButton"] {
         margin:0 !important;
         padding:0 !important;
     }
 
-    .st-key-notebook_action_danger div[data-testid="stButton"] button {
+    .st-key-notebook_action_danger div[data-testid="stButton"] button,
+    [class*="st-key-source_action_danger"] div[data-testid="stButton"] button {
         min-height:2.35rem !important;
         margin:0 !important;
     }
@@ -3967,6 +3947,8 @@
     }
 
     .st-key-notebook_action_danger
+    div[data-testid="stButton"] button:not(:disabled),
+    [class*="st-key-source_action_danger"]
     div[data-testid="stButton"] button:not(:disabled) {
         border-color:var(--cd-danger) !important;
         color:#fff !important;
@@ -3974,6 +3956,8 @@
     }
 
     .st-key-notebook_action_danger
+    div[data-testid="stButton"] button:not(:disabled) *,
+    [class*="st-key-source_action_danger"]
     div[data-testid="stButton"] button:not(:disabled) * {
         color:#fff !important;
         -webkit-text-fill-color:#fff !important;
@@ -3982,6 +3966,10 @@
     .st-key-notebook_action_danger
     div[data-testid="stButton"] button:disabled,
     .st-key-notebook_action_danger
+    div[data-testid="stButton"] button:disabled *,
+    [class*="st-key-source_action_danger"]
+    div[data-testid="stButton"] button:disabled,
+    [class*="st-key-source_action_danger"]
     div[data-testid="stButton"] button:disabled * {
         color:var(--cd-muted) !important;
         -webkit-text-fill-color:var(--cd-muted) !important;
@@ -4050,7 +4038,7 @@
         max-height:min(50vh, 22.5rem) !important;
         min-height:0 !important;
         overflow-x:hidden !important;
-        overflow-y:hidden !important;
+        overflow-y:auto !important;
         margin-top:0 !important;
         padding:0 !important;
         border:0 !important;
@@ -4059,13 +4047,8 @@
         row-gap:0 !important;
         overscroll-behavior:contain;
         scrollbar-gutter:stable;
-        scrollbar-width:none;
-        scrollbar-color:var(--cd-scrollbar) transparent;
-    }
-
-    .st-key-notebook_library_scroll.is-scrollable {
-        overflow-y:auto !important;
         scrollbar-width:thin;
+        scrollbar-color:var(--cd-scrollbar) transparent;
     }
 
     .st-key-notebook_library_scroll[data-testid="stVerticalBlock"],
@@ -4094,10 +4077,6 @@
     }
 
     .st-key-notebook_library_scroll::-webkit-scrollbar {
-        width:0;
-    }
-
-    .st-key-notebook_library_scroll.is-scrollable::-webkit-scrollbar {
         width:6px;
     }
 
@@ -4105,7 +4084,7 @@
         background:transparent;
     }
 
-    .st-key-notebook_library_scroll.is-scrollable::-webkit-scrollbar-thumb {
+    .st-key-notebook_library_scroll::-webkit-scrollbar-thumb {
         border-radius:999px;
         background:var(--cd-scrollbar);
     }
@@ -4799,79 +4778,6 @@
         font-size:1rem !important;
         color:var(--cd-muted) !important;
     }
-
-    /* Composer model dropdown: guidance-style pill, compact for footer row. */
-    .st-key-chat_composer .st-key-composer_model_slot div[data-testid="stPopover"] button,
-    .st-key-chat_composer .st-key-composer_model_slot [data-testid="stPopover"] > button,
-    .st-key-chat_composer .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stPopoverButton"] {
-        width:auto !important;
-        min-width:max-content !important;
-        max-width:9.25rem !important;
-        min-height:1.65rem !important;
-        height:1.65rem !important;
-        padding:0 .35rem 0 .1rem !important;
-        border:0 !important;
-        border-radius:.45rem !important;
-        color:var(--cd-text) !important;
-        background:transparent !important;
-        box-shadow:none !important;
-        outline:none !important;
-        font-size:.72rem !important;
-        font-weight:700 !important;
-    }
-
-    .st-key-chat_composer .st-key-composer_model_slot div[data-testid="stPopover"] button:hover,
-    .st-key-chat_composer .st-key-composer_model_slot [data-testid="stPopover"] > button:hover,
-    .st-key-chat_composer .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stPopoverButton"]:hover,
-    .st-key-chat_composer .st-key-composer_model_slot div[data-testid="stPopover"] button:focus,
-    .st-key-chat_composer .st-key-composer_model_slot [data-testid="stPopover"] > button:focus,
-    .st-key-chat_composer .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stPopoverButton"]:focus,
-    .st-key-chat_composer .st-key-composer_model_slot div[data-testid="stPopover"] button:focus-visible,
-    .st-key-chat_composer .st-key-composer_model_slot [data-testid="stPopover"] > button:focus-visible,
-    .st-key-chat_composer .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stPopoverButton"]:focus-visible,
-    .st-key-chat_composer .st-key-composer_model_slot div[data-testid="stPopover"] button:active,
-    .st-key-chat_composer .st-key-composer_model_slot [data-testid="stPopover"] > button:active,
-    .st-key-chat_composer .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stPopoverButton"]:active,
-    .st-key-chat_composer .st-key-composer_model_slot [data-testid="stPopover"]:hover,
-    .st-key-chat_composer .st-key-composer_model_slot [data-testid="stPopover"]:focus-within {
-        border:0 !important;
-        color:var(--cd-text) !important;
-        background:transparent !important;
-        box-shadow:none !important;
-        outline:none !important;
-    }
-
-    .st-key-chat_composer .st-key-composer_model_slot div[data-testid="stPopover"] button:hover *,
-    .st-key-chat_composer .st-key-composer_model_slot [data-testid="stPopover"] > button:hover *,
-    .st-key-chat_composer .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stPopoverButton"]:hover * {
-        background:transparent !important;
-    }
-
-    .st-key-chat_composer .st-key-composer_model_slot [data-testid="stPopover"] button p,
-    .st-key-chat_composer .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stPopoverButton"] p {
-        display:inline !important;
-        margin:0 !important;
-        font-size:.72rem !important;
-        font-weight:700 !important;
-        color:var(--cd-text) !important;
-        -webkit-text-fill-color:var(--cd-text) !important;
-        white-space:nowrap !important;
-        overflow:hidden;
-        text-overflow:ellipsis;
-    }
-
-    .st-key-chat_composer .st-key-composer_model_slot [data-testid="stPopover"] button
-    [data-testid="stIconMaterial"]:last-child,
-    .st-key-chat_composer .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stPopoverButton"]
-    [data-testid="stIconMaterial"]:last-child {
-        display:inline-flex !important;
-        margin-left:.05rem;
-        font-size:.78rem !important;
-        color:var(--cd-text) !important;
-        -webkit-text-fill-color:var(--cd-text) !important;
-        opacity:.85;
-    }
-
     .st-key-notebook_topbar .st-key-topbar_profile div[data-testid="stPopover"] button,
     .st-key-notebook_topbar .st-key-topbar_profile div[data-testid="stButton"] button {
         display:inline-flex !important;
@@ -5491,12 +5397,7 @@
             min-height:calc(1em * 1.45) !important;
             max-height:calc(1em * 1.45 * 5) !important;
             padding:.2rem 0 .3rem !important;
-        }
-
-        .st-key-composer_model_slot [data-testid="stPopover"] {
-            margin-left:10px !important;
-        }
-    }
+        }    }
 
     @media (max-width:520px) {
         .block-container {

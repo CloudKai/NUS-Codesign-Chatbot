@@ -58,8 +58,15 @@ def test_journey_normalization_and_short_long_learning_reviews():
     assert short_review["understanding_level"] == "Connected"
     assert len(short_review["contributions"]) == 3
     assert len(long_review["contributions"]) == 6
-    assert "Student contribution 6" in short_review["prompt_summary"]
-    assert "Student contribution 1" in long_review["prompt_summary"]
+    assert "summarized here" in short_review["summary"]
+    assert short_review["facione_scores"] == {
+        "analysis": 0,
+        "interpretation": 0,
+        "inference": 0,
+        "evaluation": 0,
+        "explanation": 0,
+        "self_regulation": 0,
+    }
     assert long_review["stage_notes"] == [
         {"stage": "Examine evidence", "note": "The sample is small."}
     ]
@@ -143,12 +150,15 @@ def test_legacy_coach_restatement_is_hidden_without_changing_the_response_body()
     assert "Before moving on" in display
 
 
-def test_empty_learning_review_has_a_prompt_summary_placeholder():
+def test_empty_learning_review_has_a_summary_placeholder():
     review = learning_review([], default_journey())
-    assert "summarized here" in review["prompt_summary"]
+    assert "summarized here" in review["summary"]
     assert review["has_personalized_assessment"] is False
-    assert "meaningful topic" in review["strengths"]
-    assert len(review["improvement_areas"]) == 2
+    assert review["strengths"] == ""
+    assert review["improvement_areas"] == []
+    assert all(section["items"] == [] for section in review["strength_sections"])
+    assert all(section["items"] == [] for section in review["improvement_sections"])
+    assert all(score == 0 for score in review["facione_scores"].values())
 
 
 def test_learning_review_personalizes_from_latest_assessment():
@@ -177,8 +187,20 @@ def test_learning_review_personalizes_from_latest_assessment():
                     "guidance_questions": [
                         "What outcome would show the crossing is safer?",
                     ],
+                    "learning_summary": (
+                        "The student is clarifying a crossing-safety question for "
+                        "older adults near schools."
+                    ),
                     "working_conclusion": "",
                     "understanding_change": "You are clarifying who and where.",
+                    "facione_scores": {
+                        "analysis": 3,
+                        "interpretation": 2,
+                        "inference": 0,
+                        "evaluation": 1,
+                        "explanation": 0,
+                        "self_regulation": 0,
+                    },
                 }
             },
         },
@@ -186,9 +208,98 @@ def test_learning_review_personalizes_from_latest_assessment():
     review = learning_review(messages, journey, detail="short")
     assert review["has_personalized_assessment"] is True
     assert review["understanding_level"] == "Developing"
-    assert "group and setting" in review["strengths"]
-    assert "Crossing safety for older adults" in review["strengths"]
-    assert review["improvement_areas"] == [
+    assert "crossing-safety" in review["summary"]
+    assert "I want older adults" not in review["summary"]
+    assert review["facione_scores"]["analysis"] == 3
+    assert review["facione_scores"]["inference"] == 0
+    focus_strengths = next(
+        section["items"]
+        for section in review["strength_sections"]
+        if section["stage_id"] == "focus"
+    )
+    focus_improvements = next(
+        section["items"]
+        for section in review["improvement_sections"]
+        if section["stage_id"] == "focus"
+    )
+    assert "group and setting" in focus_strengths[0]
+    assert "Crossing safety for older adults" not in " ".join(focus_strengths)
+    assert focus_improvements == [
         "Name the outcome that would show safer crossings."
     ]
     assert "clarifying who and where" in review["critical_reflection"]
+
+
+def test_learning_review_keeps_feedback_by_stage():
+    journey = default_journey()
+    journey["current_stage"] = "evidence"
+    journey["completed_stages"] = ["focus"]
+    messages = [
+        {
+            "role": "assistant",
+            "content": "Focus reply",
+            "metadata": {
+                "assessment": {
+                    "current_stage": "focus",
+                    "recommendation": "advance",
+                    "review_strengths": ["Named who is affected."],
+                    "review_improvements": ["Clarify the success outcome."],
+                    "learning_summary": "Focus clarified.",
+                    "stage_assessment": "Focus is workable.",
+                    "contribution_summary": "Topic draft.",
+                }
+            },
+        },
+        {
+            "role": "assistant",
+            "content": "Evidence reply",
+            "metadata": {
+                "assessment": {
+                    "current_stage": "evidence",
+                    "recommendation": "stay",
+                    "review_strengths": ["Started checking source quality."],
+                    "review_improvements": ["Name one limit of the evidence."],
+                    "learning_summary": "Evidence is developing.",
+                    "stage_assessment": "Evidence needs a limit.",
+                    "contribution_summary": "Evidence draft.",
+                }
+            },
+        },
+    ]
+    review = learning_review(messages, journey, detail="short")
+    by_stage = {
+        section["stage_id"]: section["items"]
+        for section in review["strength_sections"]
+    }
+    assert by_stage["focus"] == ["Named who is affected."]
+    assert by_stage["evidence"] == ["Started checking source quality."]
+    assert by_stage["assumptions"] == []
+    assert review["improvement_areas"] == ["Name one limit of the evidence."]
+
+
+def test_learning_review_clamps_invalid_facione_scores():
+    journey = default_journey()
+    messages = [
+        {
+            "role": "assistant",
+            "content": "Keep going.",
+            "metadata": {
+                "assessment": {
+                    "recommendation": "stay",
+                    "learning_summary": "A short overview of progress.",
+                    "stage_assessment": "Working on focus.",
+                    "contribution_summary": "Topic draft.",
+                    "facione_scores": {
+                        "analysis": 9,
+                        "interpretation": -2,
+                        "inference": "oops",
+                    },
+                }
+            },
+        }
+    ]
+    review = learning_review(messages, journey, detail="short")
+    assert review["facione_scores"]["analysis"] == 4
+    assert review["facione_scores"]["interpretation"] == 0
+    assert review["facione_scores"]["inference"] == 0
+    assert review["facione_scores"]["evaluation"] == 0

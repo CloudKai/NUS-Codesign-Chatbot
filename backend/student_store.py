@@ -814,6 +814,73 @@ class StudentStore:
             value["resolvedAt"] = resolved_at
         return self._phase_transition_dict_from_value(value)
 
+    def apply_phase_transition_decision(
+        self,
+        thread_id: str,
+        transition_id: str,
+        *,
+        accepted: bool,
+        metadata_patch: dict[str, Any] | None = None,
+        expected_from_stage: str | None = None,
+    ) -> dict[str, Any]:
+        """Confirm or reject a transition and optionally advance journey atomically.
+
+        Transition status and notebook metadata update in one SQLite connection so
+        a failure cannot leave a confirmed transition without matching journey
+        state (or a journey advance without a resolved transition).
+        """
+        status = "confirmed" if accepted else "rejected"
+        if accepted and not metadata_patch:
+            raise ValueError("Accepted transitions require a journey metadata patch")
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT pt.* FROM phase_transitions pt
+                JOIN threads t ON t.id=pt.threadId
+                WHERE pt.id=? AND pt.threadId=? AND t.userId=? AND pt.status='pending'
+                """,
+                (transition_id, thread_id, self.owner_id),
+            ).fetchone()
+            if not row:
+                raise ValueError("Pending transition not found")
+            thread_row = connection.execute(
+                "SELECT metadata FROM threads WHERE id=? AND userId=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not thread_row:
+                raise ValueError("Notebook not found")
+            current_metadata = _load(thread_row["metadata"], {})
+            if not isinstance(current_metadata, dict):
+                current_metadata = {}
+            if accepted and expected_from_stage is not None:
+                journey = current_metadata.get("learning_journey")
+                journey_stage = (
+                    journey.get("current_stage")
+                    if isinstance(journey, dict)
+                    else None
+                )
+                thinking_stage = current_metadata.get("thinking_stage")
+                active_stage = journey_stage or thinking_stage or "focus"
+                if active_stage != expected_from_stage:
+                    raise ValueError(
+                        "The notebook stage changed; request a new recommendation"
+                    )
+            resolved_at = utc_now()
+            connection.execute(
+                "UPDATE phase_transitions SET status=?, resolvedAt=? WHERE id=?",
+                (status, resolved_at, transition_id),
+            )
+            if accepted and metadata_patch:
+                next_metadata = {**current_metadata, **metadata_patch}
+                connection.execute(
+                    "UPDATE threads SET metadata=? WHERE id=? AND userId=?",
+                    (_dump(next_metadata), thread_id, self.owner_id),
+                )
+            value = dict(row)
+            value["status"] = status
+            value["resolvedAt"] = resolved_at
+        return self._phase_transition_dict_from_value(value)
+
     @staticmethod
     def _phase_transition_dict(row: sqlite3.Row) -> dict[str, Any]:
         """Convert a SQLite transition row into the domain-facing snake-case form."""

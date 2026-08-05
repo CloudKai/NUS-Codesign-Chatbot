@@ -28,6 +28,7 @@ def _render_collapsed_rail(*, side: str, expand_icon: str, label: str) -> None:
             expand_icon,
             type="tertiary",
             key=f"expand-{side}",
+            help=f"Expand {label}",
         ):
             set_side_panel_collapsed(side, False)
             rerun()
@@ -94,6 +95,7 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                         "‹",
                         type="tertiary",
                         key="collapse-studio",
+                        help="Collapse Thinking Path",
                     ):
                         set_side_panel_collapsed("studio", True)
                         rerun()
@@ -115,6 +117,7 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                         "›",
                         type="tertiary",
                         key="collapse-sources",
+                        help="Collapse Sources",
                     ):
                         set_side_panel_collapsed("sources", True)
                         rerun()

@@ -73,8 +73,13 @@ def test_guided_mock_changes_its_question_then_recommends_progress(tmp_path):
     follow_up = workflow.run(follow_up_request)
 
     assert first.assessment.recommendation is StageDecision.STAY
-    assert "**Next:**" in first.response_text
+    assert "That's an interesting direction" in first.response_text
+    assert "?" in first.response_text
     assert first.response_text != follow_up.response_text
     assert follow_up.assessment.recommendation is StageDecision.ADVANCE
     assert follow_up.pending_transition is not None
     assert follow_up.pending_transition.to_stage == "evidence"
+    summary = workflow.inspect_thread(thread_id)
+    assert summary is not None
+    assert summary["steps"] == ["load_context", "assess", "recommend", "format"]
+    assert summary["mode"] in {"langgraph", "sequential"}

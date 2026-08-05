@@ -18,29 +18,40 @@ logic, contracts, and key UI structure.
 
 ## Test environment (`conftest.py`)
 
-`conftest.py` runs before the suite and:
+`conftest.py` sets cost-safe bootstrap env vars, then an **autouse fixture**
+gives every test its own temporary data/database/files/lecture-notes tree and:
 
-- Creates a temporary `APP_DATA_DIR` under a temp prefix.
-- Points `APP_DATABASE_PATH`, `APP_FILES_DIR`, `APP_WORKSPACES_DIR`, and
-  `LECTURE_NOTES_DIR` at isolated paths.
-- Sets `MOCK_OPENAI=true` so provider code stays deterministic.
+- Forces `MOCK_OPENAI=true`, `MODEL_PROVIDER=mock`, and clears `OPENAI_API_KEY`
+  (asserted each test).
+- Defaults `USE_LOCAL_API=false` for legacy AppTest; API-mode UI tests opt in.
+- Defaults `AUTO_ADVANCE_STAGES=false`.
+- Monkeypatches `backend.settings.settings` paths onto the per-test tree.
+- Clears Streamlit `cache_resource` handles so AppTest does not reuse a store.
 
-Do not point tests at a developer's real `data/` directory.
+Do not point tests at a developer's real `data/` directory. Prefer explicit
+`StudentStore(tmp_path / "...")` for backend tests; AppTest uses the isolated
+default `StudentStore()` path.
 
 ## Test file map
 
 | File | Covers |
 |---|---|
-| `test_api.py` | FastAPI `/api/v1` health, coaching turn, transitions |
+| `test_api.py` | FastAPI `/api/v1` health, coaching turn, transitions, integrity guards |
+| `test_api_client.py` | Typed `LocalApiClient` confirmation + auto-advance contracts |
+| `test_workspace_api.py` | Notebook/source/preference CRUD API and path redaction |
+| `test_primary_path.py` | All six stages, stale/reject, restart, notebook isolation, schema |
 | `test_workflow.py` | LangGraph workflow routing and structured output |
-| `test_learning_service.py` | Phase transition confirmation and resolution |
+| `test_learning_service.py` | Phase transition confirmation, resolution, atomic rollback |
 | `test_student_store.py` | Notebook, folder, message, source persistence |
 | `test_student_journey.py` | Stage normalization, journey helpers, review |
 | `test_source_library.py` | Source import, lecture sync, locked course groups |
 | `test_title_service.py` | Notebook title shortening and legacy replacement |
 | `test_files_and_engine.py` | Upload processing and chat engine behavior |
 | `test_models_and_support.py` | Model registry and support-mode helpers |
-| `test_streamlit_ui.py` | AppTest smoke against `streamlit_app.py` |
+| `test_streamlit_ui.py` | AppTest smoke against `streamlit_app.py` (legacy path) |
+| `test_streamlit_api_mode.py` | AppTest API confirmation + auto-advance; one legacy fallback |
+| `test_rename.py` | Enter-only rename draft helpers and epochs |
+| `test_init_db.py` | Safe `init_db.py` refuse-existing / `--force` behavior |
 
 ## Hard constraints
 
@@ -52,6 +63,7 @@ Do not point tests at a developer's real `data/` directory.
 - **Prefer targeted tests** after a localized change; run the full suite at
   phase boundaries and before handoff.
 - **Do not delete user data** in tests. Use the isolated paths from `conftest.py`.
+- Live Ollama/OpenAI tests stay `@pytest.mark.live` and disabled by default.
 
 ## Common edit paths
 
@@ -62,13 +74,12 @@ boundaries — e.g. source changes go in `test_source_library.py`.
 
 **New Streamlit UI control or copy**
 
-Extend `test_streamlit_ui.py`. Assert on rendered output (`app.markdown`,
-`app.button`, etc.) when possible. Read source files only when checking static
-CSS or strings not exposed in AppTest output.
+Extend `test_streamlit_ui.py` (legacy) or `test_streamlit_api_mode.py` (API).
+Assert on rendered output (`app.markdown`, `app.button`, etc.) when possible.
 
 **API contract change**
 
-Update `test_api.py` and the typed client in `backend/api_client.py` together.
+Update `test_api.py`, `test_api_client.py`, and `backend/api_client.py` together.
 
 ## Validation
 
@@ -90,6 +101,9 @@ With compile check:
 PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \
   .venv/bin/python -m compileall -q backend ui streamlit_app.py tests
 ```
+
+CI: [`.github/workflows/mock-ci.yml`](../.github/workflows/mock-ci.yml) runs
+shell syntax, compileall, and mock pytest on push/PR.
 
 ## Handoff
 

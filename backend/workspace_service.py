@@ -1,0 +1,224 @@
+"""Application service for notebook, history, source, and preference CRUD.
+
+Keeps Streamlit and FastAPI on one persistence path while ``StudentStore``
+remains the SQLite adapter. Source file bytes are read here so the UI never
+touches notebook paths under ``files_dir``.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Iterable
+
+from .source_library import (
+    CourseMaterialSyncCoordinator,
+    LectureNotesSyncResult,
+    add_file_sources,
+    backfill_legacy_sources,
+    safe_source_file_path,
+)
+from .student_store import StudentStore
+
+
+@dataclass(frozen=True)
+class SourceContent:
+    """Binary payload for source preview or download."""
+
+    data: bytes
+    mime: str
+    filename: str
+
+
+def public_source(source: dict[str, Any]) -> dict[str, Any]:
+    """Return a source record safe for API/UI consumers (no filesystem path)."""
+    payload = {key: value for key, value in source.items() if key != "path"}
+    payload["has_file"] = bool(source.get("path"))
+    return payload
+
+
+def public_thread(thread: dict[str, Any]) -> dict[str, Any]:
+    """Return a notebook record for API/UI consumers."""
+    return dict(thread)
+
+
+class WorkspaceService:
+    """Coordinate notebook workspace CRUD over the local SQLite store."""
+
+    def __init__(
+        self,
+        store: StudentStore,
+        course_sync: CourseMaterialSyncCoordinator | None = None,
+    ) -> None:
+        self._store = store
+        self._course_sync = course_sync or CourseMaterialSyncCoordinator()
+
+    @property
+    def store(self) -> StudentStore:
+        """Expose the underlying store for legacy engine wiring only."""
+        return self._store
+
+    def get_preferences(self) -> dict[str, Any]:
+        """Return the local user preference blob."""
+        return self._store.get_user_preferences() or {}
+
+    def update_preferences(self, patch: dict[str, Any]) -> dict[str, Any]:
+        """Merge preference keys and return the updated blob."""
+        self._store.update_user_preferences(patch)
+        return self.get_preferences()
+
+    def list_threads(self, search: str = "") -> list[dict[str, Any]]:
+        """List notebooks for the local student, newest activity first."""
+        return [public_thread(thread) for thread in self._store.list_threads(search, None)]
+
+    def get_thread(self, thread_id: str) -> dict[str, Any] | None:
+        """Return one owned notebook or ``None``."""
+        thread = self._store.get_thread(thread_id)
+        return public_thread(thread) if thread else None
+
+    def create_thread(
+        self,
+        *,
+        name: str,
+        model_id: str,
+        support_mode: str,
+        assignment: dict[str, str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create a notebook and optionally merge initial metadata."""
+        thread_id = self._store.create_thread(
+            name=name,
+            model_id=model_id,
+            support_mode=support_mode,
+            assignment=assignment,
+        )
+        if metadata:
+            self._store.update_thread(thread_id, metadata=metadata)
+        thread = self.get_thread(thread_id)
+        if not thread:
+            raise ValueError("Notebook not found")
+        return thread
+
+    def update_thread(
+        self,
+        thread_id: str,
+        *,
+        name: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Rename a notebook and/or merge metadata."""
+        if not self._store.get_thread(thread_id):
+            raise ValueError("Notebook not found")
+        self._store.update_thread(thread_id, name=name, metadata=metadata)
+        thread = self.get_thread(thread_id)
+        if not thread:
+            raise ValueError("Notebook not found")
+        return thread
+
+    def delete_thread(self, thread_id: str) -> None:
+        """Delete a notebook and its owned files."""
+        self._store.delete_thread(thread_id)
+
+    def get_messages(self, thread_id: str) -> list[dict[str, Any]]:
+        """Return canonical chat history for a notebook."""
+        if not self._store.get_thread(thread_id):
+            raise ValueError("Notebook not found")
+        return self._store.get_messages(thread_id)
+
+    def add_message(
+        self,
+        thread_id: str,
+        role: str,
+        content: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        """Persist one chat message (used for coach welcome seeding)."""
+        return self._store.add_message(
+            thread_id, role, content, metadata=metadata
+        )
+
+    def list_sources(
+        self, thread_id: str, *, selected_only: bool = False
+    ) -> list[dict[str, Any]]:
+        """List notebook sources without exposing filesystem paths."""
+        if not self._store.get_thread(thread_id):
+            raise ValueError("Notebook not found")
+        return [
+            public_source(source)
+            for source in self._store.list_sources(
+                thread_id, selected_only=selected_only
+            )
+        ]
+
+    def get_source(self, thread_id: str, source_id: str) -> dict[str, Any] | None:
+        """Return one source without a filesystem path."""
+        source = self._store.get_source(thread_id, source_id)
+        return public_source(source) if source else None
+
+    def upload_sources(
+        self,
+        thread_id: str,
+        uploads: Iterable[tuple[str, bytes, str | None]],
+        *,
+        origin: str = "source_panel",
+    ) -> list[dict[str, Any]]:
+        """Store uploaded files as notebook sources."""
+        if not self._store.get_thread(thread_id):
+            raise ValueError("Notebook not found")
+        created = add_file_sources(
+            self._store, thread_id, uploads, origin=origin
+        )
+        return [public_source(source) for source in created]
+
+    def set_source_selected(
+        self, thread_id: str, source_id: str, selected: bool
+    ) -> dict[str, Any]:
+        """Toggle one source selection flag."""
+        self._store.set_source_selected(thread_id, source_id, selected)
+        source = self.get_source(thread_id, source_id)
+        if not source:
+            raise ValueError("Source not found")
+        return source
+
+    def set_all_sources_selected(self, thread_id: str, selected: bool) -> list[dict[str, Any]]:
+        """Select or deselect every source in a notebook."""
+        self._store.set_all_sources_selected(thread_id, selected)
+        return self.list_sources(thread_id)
+
+    def rename_source(self, thread_id: str, source_id: str, title: str) -> dict[str, Any]:
+        """Rename a non-locked source."""
+        self._store.rename_source(thread_id, source_id, title)
+        source = self.get_source(thread_id, source_id)
+        if not source:
+            raise ValueError("Source not found")
+        return source
+
+    def delete_source(self, thread_id: str, source_id: str) -> None:
+        """Delete a non-locked source."""
+        self._store.delete_source(thread_id, source_id)
+
+    def read_source_content(self, thread_id: str, source_id: str) -> SourceContent:
+        """Read source file bytes for preview/download after path validation."""
+        source = self._store.get_source(thread_id, source_id)
+        if not source:
+            raise ValueError("Source not found")
+        path = safe_source_file_path(source)
+        if path is None:
+            raise ValueError("Source file is not available")
+        mime = str(source.get("mime") or "application/octet-stream")
+        filename = Path(str(source.get("title") or path.name)).name or path.name
+        return SourceContent(data=path.read_bytes(), mime=mime, filename=filename)
+
+    def backfill_legacy_sources(self, thread_id: str) -> int:
+        """Import legacy message attachments into the source library."""
+        if not self._store.get_thread(thread_id):
+            raise ValueError("Notebook not found")
+        return backfill_legacy_sources(self._store, thread_id)
+
+    def sync_course_materials(self, thread_id: str) -> LectureNotesSyncResult:
+        """Run (or join) course-material synchronization for one notebook."""
+        if not self._store.get_thread(thread_id):
+            raise ValueError("Notebook not found")
+        future = self._course_sync.request(self._store, thread_id)
+        return future.result()

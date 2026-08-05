@@ -170,9 +170,9 @@ Avoid flat all-white layouts and avoid using accent color for passive decoration
 | Text          | `#f3f5fb` | Primary copy                        |
 | Muted text    | `#a6afc1` | Supporting copy and metadata        |
 | Border        | `#2b3548` | Dividers and control outlines       |
-| Accent        | `#8d87ff` | Selected states and primary actions |
-| Accent hover  | `#a49fff` | Primary-action hover                |
-| Accent soft   | `#28285a` | Active stage and user messages      |
+| Accent        | `#2DD4BF` | Teal selected states and primary actions |
+| Accent hover  | `#5EEAD4` | Primary-action hover                |
+| Accent soft   | `#14352F` | Active stage and user messages      |
 | Success       | `#53c9a2` | Source-grounding status             |
 
 
@@ -269,18 +269,26 @@ Review is a focused feedback surface, not another progress dashboard.
 
 Required sections:
 
-1. Current understanding level and explanation.
-2. Discussion summary based on the student’s contributions.
-3. What’s working.
-4. What to strengthen, with two concrete actions.
-5. Working conclusion.
+1. Summary — a model-written overview of the student’s thinking (not pasted prompts).
+2. Facione critical-thinking scores — six dimensions in a compact table with
+   Holistic rubric icons (0 not started, 1 Weak, 2 Unacceptable, 3 Acceptable,
+   4 Strong): Analysis, Interpretation, Inference, Evaluation, Explanation,
+   Self-Regulation.
+3. Strengths — collapsed expander with one subsection per Thinking Path stage.
+   Stages stay empty until coaching feedback exists, and earlier stage feedback
+   is preserved.
+4. Areas for improvement — collapsed expander, also grouped by stage, with
+   concrete supportive next actions when available.
+5. Working conclusion — collapsed expander.
 
 Avoid:
 
 - Repeating “1 of 6” or progress history inside Review.
 - Generic praise without evidence or a next action.
 - Duplicate summaries with different labels.
-- Scores, charts, or analytics that do not help the student reason.
+- Charts, dashboards, or analytics beyond the Facione icon table.
+- Quoting student prompts verbatim as the summary.
+- Showing Strengths or Areas filler before the student has earned feedback.
 
 
 

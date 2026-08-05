@@ -17,6 +17,10 @@ from backend.student_journey import (
 
 from ui.components import empty_state_html
 from ui.runtime import rerun, store
+from ui.rename import (
+    render_enter_to_apply_rename,
+    sync_rename_select_all,
+)
 from ui.session import (
     cancel_notebook_actions,
     delete_notebook,
@@ -187,6 +191,11 @@ def _sync_notebook_library_scroll() -> None:
     root.style.setProperty("overflow-y", "auto", "important");
     root.style.setProperty("overflow-x", "hidden", "important");
     root.style.setProperty("overscroll-behavior", "contain", "important");
+    root.style.setProperty("scrollbar-width", "thin", "important");
+    root.classList.toggle(
+      "is-scrollable",
+      root.scrollHeight > root.clientHeight + 1
+    );
     if (!root.dataset.cdNotebookScrollReady) {
       root.scrollTop = 0;
       root.dataset.cdNotebookScrollReady = "1";
@@ -217,61 +226,13 @@ def _sync_notebook_library_scroll() -> None:
     )
 
 
-def _sync_notebook_rename_select_all() -> None:
-    """Select all rename text when the field is focused."""
-    components.html(
-        """
-<script>
-(() => {
-  const doc = window.parent.document;
-  const win = window.parent;
-
-  function renameInput() {
-    const dialog = doc.querySelector(
-      '[role="dialog"]:has(.st-key-notebook_actions_panel)'
-    );
-    if (!dialog) return null;
-    return (
-      dialog.querySelector('input[aria-label="Rename"]') ||
-      dialog.querySelector('[data-testid="stTextInputRootElement"] input')
-    );
-  }
-
-  function bind(input) {
-    if (!input || input.dataset.cdRenameSelectBound === "1") return false;
-    input.dataset.cdRenameSelectBound = "1";
-    input.addEventListener("focus", () => {
-      win.requestAnimationFrame(() => {
-        try { input.select(); } catch (err) {}
-      });
-    });
-    return true;
-  }
-
-  function boot() {
-    if (bind(renameInput())) return;
-    let attempts = 0;
-    const timer = win.setInterval(() => {
-      attempts += 1;
-      if (bind(renameInput()) || attempts > 40) win.clearInterval(timer);
-    }, 50);
-  }
-
-  boot();
-})();
-</script>
-        """,
-        height=0,
-    )
-
-
 @st.dialog(
     "Notebook Actions",
     width="small",
     on_dismiss=cancel_notebook_actions,
 )
 def notebook_actions_dialog() -> None:
-    """Rename with Enter-to-save, or delete a notebook with confirmation.
+    """Rename only when Enter submits the form; delete with confirmation.
 
     Dismissing (X, click outside, or Esc) clears the pending action and reopens
     Your Notebooks on the next script run.
@@ -285,19 +246,22 @@ def notebook_actions_dialog() -> None:
     current_title = str(thread.get("name") or "").strip() or "Untitled notebook"
     overview = thread_overview(thread)
     with st.container(key="notebook_actions_panel"):
-        renamed = st.text_input(
-            "Rename",
-            value=current_title,
-            key=f"rename-notebook-{thread_id}-{current_title}",
+        applied, cleaned = render_enter_to_apply_rename(
+            kind="notebook",
+            item_id=str(thread_id),
+            label="Rename",
+            current_value=current_title,
         )
         st.caption(
             f"{overview['stage'].short_label} · phase {overview['stage_index']} of 6"
         )
-        cleaned = (renamed or "").strip()
-        if cleaned and cleaned != current_title:
+        if applied and cleaned and cleaned != current_title:
             store.update_thread(thread_id, name=cleaned)
             rerun()
-        _sync_notebook_rename_select_all()
+        sync_rename_select_all(
+            root_selector='[role="dialog"]:has(.st-key-notebook_actions_panel)',
+            aria_label="Rename",
+        )
 
         with st.container(key="notebook_action_danger"):
             st.markdown("#### Delete notebook")

@@ -215,6 +215,29 @@ def render_journey_track() -> None:
                     _render_stage_suggestions(stage)
 
 
+def _sync_review_stage_expander_state(
+    *,
+    key_prefix: str,
+    thread_key: str,
+    stage_ids: list[str],
+    current_stage_id: str,
+) -> None:
+    """Open only the current-stage expander when the notebook or stage changes.
+
+    Streamlit expanders with ``key`` keep open/closed state in session. Without
+    a sync, switching notebooks (or advancing stages) can leave the previous
+    stage open — e.g. Examine evidence staying open on a new Focus notebook.
+    """
+    sync_key = f"_review_expander_sync_{key_prefix}"
+    marker = f"{thread_key}:{current_stage_id}"
+    if st.session_state.get(sync_key) == marker:
+        return
+    st.session_state[sync_key] = marker
+    for stage_id in stage_ids:
+        expander_key = f"review_{key_prefix}_{thread_key}_{stage_id}"
+        st.session_state[expander_key] = stage_id == current_stage_id
+
+
 def _render_review_stage_expanders(
     *,
     sections: list[dict[str, Any]] | None,
@@ -225,7 +248,9 @@ def _render_review_stage_expanders(
 
     Every stage starts collapsed except the student's current stage, so past
     feedback stays available without competing with the active focus. The
-    current stage is wrapped so CSS can give it a stronger outline.
+    current stage is wrapped so CSS can give it a stronger outline. Expander
+    keys are scoped to the active notebook so open state does not leak across
+    notebooks.
     """
     stage_sections = list(sections or [])
     if not stage_sections:
@@ -234,12 +259,28 @@ def _render_review_stage_expanders(
             unsafe_allow_html=True,
         )
         return
+
+    thread_key = str(st.session_state.get("thread_id") or "none").replace("-", "_")
+    stage_ids = [
+        str(section.get("stage_id") or "").strip()
+        or str(section.get("stage") or "").strip()
+        or "stage"
+        for section in stage_sections
+    ]
+    _sync_review_stage_expander_state(
+        key_prefix=key_prefix,
+        thread_key=thread_key,
+        stage_ids=stage_ids,
+        current_stage_id=current_stage_id,
+    )
+
     for section in stage_sections:
         stage_id = str(section.get("stage_id") or "").strip()
         stage_label = str(section.get("stage") or "").strip() or "Stage"
+        stage_key = stage_id or stage_label
         is_current = bool(stage_id) and stage_id == current_stage_id
         expander_parent = (
-            st.container(key=f"review_{key_prefix}_current")
+            st.container(key=f"review_{key_prefix}_{thread_key}_current")
             if is_current
             else nullcontext()
         )
@@ -247,7 +288,7 @@ def _render_review_stage_expanders(
             with st.expander(
                 stage_label,
                 expanded=is_current,
-                key=f"review_{key_prefix}_{stage_id or stage_label}",
+                key=f"review_{key_prefix}_{thread_key}_{stage_key}",
             ):
                 st.markdown(
                     review_feedback_items_html(section.get("items")),

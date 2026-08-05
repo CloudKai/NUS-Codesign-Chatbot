@@ -29,8 +29,9 @@ class LearningProgressService:
     ) -> PendingPhaseTransition:
         """Record a student choice and advance only when the current stage matches.
 
-        The transition audit record is written before the journey state changes.
-        A stale recommendation cannot advance a notebook after another update.
+        Journey metadata and transition status are updated in one SQLite
+        transaction so a mid-flight failure cannot leave a confirmed transition
+        without the matching Thinking Path stage (or the reverse).
         """
         pending = self._transitions.get_pending(thread_id)
         if not pending or pending.id != transition_id:
@@ -43,25 +44,30 @@ class LearningProgressService:
         if accepted and current_stage(journey).id != pending.from_stage:
             raise ValueError("The notebook stage changed; request a new recommendation")
 
-        resolved = self._transitions.resolve(thread_id, transition_id, accepted)
-        if not accepted:
-            return resolved
-
-        next_journey = complete_and_advance(
-            journey,
-            note=pending.assessment.contribution_summary,
-        )
-        if current_stage(next_journey).id != pending.to_stage:
-            raise ValueError("Confirmed transition does not match the learning journey")
-        self._store.update_thread(
-            thread_id,
-            metadata={
+        metadata_patch: dict | None = None
+        if accepted:
+            next_journey = complete_and_advance(
+                journey,
+                note=pending.assessment.contribution_summary,
+            )
+            if current_stage(next_journey).id != pending.to_stage:
+                raise ValueError(
+                    "Confirmed transition does not match the learning journey"
+                )
+            metadata_patch = {
                 "learning_journey": next_journey,
                 "thinking_stage": pending.to_stage,
                 "learning_summary": pending.assessment.learning_summary,
                 "working_conclusion": pending.assessment.working_conclusion,
                 "understanding_change": pending.assessment.understanding_change,
                 "critical_understanding": pending.assessment.critical_understanding_level,
-            },
+            }
+
+        resolved = self._store.apply_phase_transition_decision(
+            thread_id,
+            transition_id,
+            accepted=accepted,
+            metadata_patch=metadata_patch,
+            expected_from_stage=pending.from_stage if accepted else None,
         )
-        return resolved
+        return PendingPhaseTransition.model_validate(resolved)

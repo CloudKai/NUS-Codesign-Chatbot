@@ -1,0 +1,43 @@
+name: Mock CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  mock-suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Shell syntax
+        run: |
+          sh -n scripts/start.sh
+          sh -n scripts/build.sh
+
+      - name: Compile sources
+        env:
+          PYTHONPYCACHEPREFIX: /tmp/co-design-pycache
+        run: python -m compileall -q backend ui streamlit_app.py tests
+
+      - name: Run mock pytest suite
+        env:
+          MOCK_OPENAI: "true"
+          MODEL_PROVIDER: mock
+          OPENAI_API_KEY: ""
+          USE_LOCAL_API: "false"
+          AUTO_ADVANCE_STAGES: "false"
+        run: python -m pytest -q

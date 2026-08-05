@@ -2,10 +2,13 @@
 
 ## Current phase
 
-**Phase 3 — local workflow foundation and compatibility migration**
+**Phase 6 complete (streaming, checkpoints, observability, legacy retirement) — stop for review**
 
-The application now has a working local FastAPI/LangGraph foundation while the
-existing Streamlit UI remains compatible during the incremental migration.
+Phases 1–5 covered UI rename/a11y, safe defaults, backend integrity, test
+isolation, and CRUD behind the typed API. Phase 6 added readiness polling,
+request IDs, NDJSON coach streaming, multi-step LangGraph with inspectable
+checkpoints, retired ``StudentChatEngine`` for student turns, and removed the
+dead composer model picker. Private `.env` was not modified.
 
 ## Completed
 
@@ -45,9 +48,9 @@ existing Streamlit UI remains compatible during the incremental migration.
   as semantic model evaluation.
 - Added recent canonical history and non-repetitive coaching requirements to
   the OpenAI provider prompt while retaining structured stage decisions.
-- Enabled automatic stage advancement by default. Every advance remains an
-  auditable persisted transition, but the application resolves it immediately
-  and updates the visible Thinking Path without confirmation controls.
+- Repository defaults use confirmation mode (`AUTO_ADVANCE_STAGES=false`).
+  Audited auto-advance (`AUTO_ADVANCE_STAGES=true`) remains an explicit local
+  override that still persists a transition row.
 - Added the shared `lecture_notes/` drop folder. Supported files are
   safely copied into each active notebook, selected, refreshed on change,
   removed when the folder file disappears, and exposed as stable citation
@@ -63,7 +66,12 @@ existing Streamlit UI remains compatible during the incremental migration.
   are compressed when safe. PDFs keep extractable text; images are downscaled.
   Lecture-note sync copies prepared folder files without recompression.
   Sources **Add** is a compact file picker in the original header spot: choose
-  files and they import immediately, with no dialog.
+  files and they import immediately, with no dialog. Upload dedupe is scoped to
+  the current picker generation (claim → import → reset), and failures clear the
+  picker so the 1s Sources fragment does not retry forever.
+- Isolated short-lived corner toasts in ``ui/toasts.py`` (new-notebook
+  ``Course materials are loading.`` notice). Presentation HTML helpers stay in
+  ``ui/components.py``.
 - Replaced automatic-stage movement announcements with the next stage heading
   and one or two topic-specific coaching questions. Provider prompts use the
   selected course context; deterministic mock/offline mode includes a focused
@@ -100,99 +108,322 @@ existing Streamlit UI remains compatible during the incremental migration.
   bar. Notebooks now shows its Material notebook icon and label in a content-fit,
   borderless action; Setting remains a compact icon-only action. Both controls
   keep their behavior without an outlined selection container.
+- Phase 1: shared Enter-only rename + a11y for Settings, Source actions, and
+  rail collapse/expand.
+- Phase 2: validation-only `scripts/build.sh`; `init_db.py` refuses existing DB
+  without `--force`; repository defaults mock + confirmation; test suite clears
+  `OPENAI_API_KEY`; all configured data paths resolve via `_project_path`.
+- Phase 3: API coaching turns reject spoofed stage/history/sources/images;
+  domain validates known stages; confirmations apply journey + transition status
+  atomically; provider outages return HTTP 503 with request/thread logging.
+- Phase 4: per-test isolated data dirs; `LocalApiClient` session injection;
+  API-mode AppTest (confirmation + auto-advance) plus legacy fallback;
+  all-six-stage / stale / restart / isolation tests; `.github/workflows/mock-ci.yml`.
+- Phase 5: notebook/message/source/preference CRUD API; `WorkspaceService` +
+  `WorkspaceFacade`; source content endpoint; UI no longer reads source paths.
 
 ## Validation evidence
 
-- `pytest -q` passed in forced mock/auto mode: **63 tests** (including 11
-  Streamlit AppTest cases against the redesigned `streamlit_app.py` / `ui/`
-  entrypoint).
-- Python compilation passed for `backend/`, `ui/`, and `streamlit_app.py`.
-- A real LangGraph invocation passed against the deterministic provider.
-- `sh -n scripts/start.sh` passed.
-- Browser acceptance passed at desktop and 390 px: greeting, first-turn
-  guidance, second-turn Focus-to-Evidence recommendation, explicit transition
-  confirmation, responsive composer, and a clean console.
-- Browser acceptance also passed for automatic Focus-to-Evidence movement,
-  lecture-folder synchronization, selected-source grounding, persisted `[S1]`
-  citation rendering, and a fresh clean console.
-- Final browser acceptance passed at desktop and 390 px with all 10 supplied
-  PDFs grouped as **Lecture Notes (7)** and **Readings (3)**, locked source
-  controls, in-dialog PDF viewing, personalized Evidence questions after
-  automatic advancement, and a clean fresh-tab console.
-- Latest browser acceptance passed for inline title editing and history sync,
-  simplified Setting contents, responsive Sources-header alignment, removed
-  contribution boilerplate, and a clean fresh-tab console.
-- Citation browser acceptance passed for closed and expanded dropdown states at
-  desktop, the compact state at 390 px, removal of the selected-source strip,
-  source-viewer action retention, and a clean console. Temporary QA notebook
-  data was deleted after the test.
-- Header browser acceptance passed for desktop resting and active-title states,
-  the 390 px responsive state, preserved action accessibility, and a clean
-  console. The Streamlit input-root outline found in the first visual pass was
-  removed.
-- Sources/Guidance browser acceptance passed at desktop and 390 px: the help
-  icon stays beside `Sources`, selector spacing is compact, Add remains aligned,
-  and `Guidance Level: Quick/Complex` uses a compact field. The mock suite remains at
-  **60 passing tests**, compilation passes, and the browser console is clean.
-- Corrected the top-bar regression at desktop and wide-desktop: the notebook
-  title is permanently visible and editable, Notebooks shows its Material icon
-  plus label, and Setting stays icon-only. Both actions are compact, borderless,
-  and interaction-tested; 390 px responsive behavior remains intact.
-- Grouped Notebooks, Guidance, the response-detail selector, and Setting into
-  compact grid tracks so their internal spacing stays consistent rather than
-  stretching across the header. The narrow breakpoint uses the same compact
-  control group after the title is hidden.
-- Tightened the Sources title/count stack and the divider-to-source-list inset
-  so the help icon and Add action remain aligned without leaving an oversized
-  vertical gap above the selected-source controls.
-- Restored a deliberate breathing space between the selected-source count and
-  its divider, while keeping the source controls immediately below compact.
-- Extracted the 5,653-line `streamlit_app.py` monolith into a presentation-layer
-  `ui/` package (`constants`, `theme`, `runtime`, `session`, `sources`, `chat`,
-  `studio`, `notebooks`, `settings`, `topbar`, `workspace`). The entrypoint is
-  now a thin orchestrator; behavior, keys, CSS, and dialog wiring are unchanged.
-- Made managed course-material imports refresh-safe: overlapping Streamlit
-  runs now share one background synchronization job, and legacy duplicate rows
-  are repaired by relative path. The Sources panel shows a loading state while
-  Chat and Thinking Path remain visible and interactive.
-- Redesigned the Streamlit presentation into a teal academic design system with
-  IBM Plex Sans / Source Serif branding, a top section switcher
-  (Journey / Review / Chat / Sources / Notebooks), and a profile dialog that
-  replaces Setting. Journey uses a roadmap + progress bar; Review uses insight
-  cards with a change notification fingerprint; Sources gained search/type/sort
-  and empty states; Notebooks is folder-free with active highlighting; Chat uses
-  a clearer composer placeholder, attach helper, and API retry.
-- Browser acceptance reproduced the new-notebook refresh path, observed the
-  in-panel loading state, and then verified **Lecture Notes (7)**,
-  **Readings (3)**, desktop and 390 px layouts, and a clean console. The
-  temporary QA notebook was removed afterward.
+- Historical browser and feature acceptance notes remain for continuity; the
+  latest automated counts are under Phase 1 / Phase 2 evidence.
+- `sh -n scripts/start.sh` and `sh -n scripts/build.sh` passed.
+- Private interactive `.env` may still use OpenAI + auto-advance; repository
+  defaults and automated tests use mock + confirmation.
 
 ## Data and migration state
 
 - Existing SQLite data and local uploads remain in ignored data paths.
-- No schema migration is required. The next course-material refresh removes
-  only duplicate managed copies created by the older race, preserving one
-  canonical source for each of the 7 lecture notes and 3 readings.
-- The affected local notebook was repaired in place: 8 stale managed copies
-  were removed, leaving the expected 10 protected course sources.
-- The new schema is additive and initialized by the current store initializer.
-- No existing notebook, folder, message, source, or learning-state record was
-  modified by migration code.
+- No schema migration is required for Phase 2.
+- `scripts/init_db.py` no longer runs from `build.sh`; explicit `--database` or
+  `--force` is required to touch an existing file.
+- Private `.env` was left unchanged.
 
 ## Risks and open questions
 
 - The project baseline remains mostly untracked; no Git commit was created.
+- Private `.env` may still enable OpenAI / auto-advance; that is intentional and
+  out of repository defaults.
 - The Ollama provider still needs live host validation.
-- Live OpenAI behavior remains unverified because paid requests require a
-  rotated credential and an explicit request/token or cost cap.
 - Lecture-folder retrieval currently uses the bounded selected-source context
   path; vector/embedding retrieval remains a later provider-adapter phase.
 - Source, notebook, and folder CRUD still use the existing direct Streamlit
   store calls; only coaching turns and transition decisions use the API path.
-- `scripts/build.sh` initializes the database and must not be used against user
-  data until its behavior is reviewed.
+- Corner toasts use a ``components.html`` parent-DOM injection; Streamlit
+  upgrades can break that path (fallback to ``st.toast`` is in place).
+- Shared lecture PDFs in ``lecture_notes/`` remain large git blobs; prefer
+  compressed PDFs and Git LFS for future large files.
+- Website / Paste Sources Add was intentionally removed from the UI; backend
+  ``add_url_source`` / ``add_text_source`` remain for tests and API use.
+- Rename Apply remains CSS-hidden so Enter can submit Streamlit forms; if CSS
+  fails to inject, Apply becomes visible. Source draft reset still depends on
+  popover open-edge detection inside the 1s Sources fragment.
+- Profile leave-to-close still uses parent-DOM MutationObserver automation.
+- AppTest defaults to ``USE_LOCAL_API=false`` (in-process coach); preferred API
+  coaching is covered by ``tests/test_streamlit_api_mode.py`` and
+  ``tests/test_api_client.py``.
+- Course-material sync still uses the in-process coordinator from the facade
+  (HTTP sync endpoint exists for non-UI callers). Legacy engine artifact
+  ``render_media`` may still read workspace/files paths.
+- ``StudentChatEngine`` remains only for dedicated unit tests
+  (``tests/test_files_and_engine.py``); UI student turns use the typed coach path.
+- LangGraph checkpoints are in-memory (``MemorySaver``); they do not survive
+  API process restart. Graph inspection returns the latest in-process summary.
+
+## Phase 1 evidence (UI rename / a11y)
+
+### Behavior implemented
+
+- Shared Enter-only rename helper in ``ui/rename.py`` used by notebook actions,
+  source menus, and the top-bar title.
+- Rename commits only on form Apply/Enter; blur alone does not persist.
+- Closing notebook actions or a source menu without Enter discards draft keys
+  via explicit prefixes and bumps an epoch so the next open shows the saved
+  title.
+- Accessible help restored/added for Settings, Source actions, and workspace
+  collapse/expand controls; source ⋯ keeps a visible ``:focus-visible`` ring.
+- ``Press Enter to apply`` remains the focused-field hint; ``help`` exposes the
+  same instruction to assistive tech.
+
+### Files changed
+
+- ``ui/rename.py`` (new)
+- ``ui/session.py``, ``ui/notebooks.py``, ``ui/sources.py``, ``ui/topbar.py``
+- ``ui/profile.py``, ``ui/workspace.py``, ``ui/assets/template.css``, ``ui/AGENTS.md``
+- ``tests/test_rename.py`` (new), ``tests/test_streamlit_ui.py``
+- ``docs/IMPLEMENTATION_STATUS.md``
+
+### Commands run and results
+
+- Focused: ``.venv/bin/python -m pytest -q tests/test_rename.py tests/test_streamlit_ui.py`` → **17 passed**
+- Full: ``.venv/bin/python -m pytest -q`` → **85 passed** (before Phase 2)
+- ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m compileall -q backend ui streamlit_app.py tests`` → success
+
+### Manual validation
+
+- Not re-run in-browser in this phase boundary. Recommend hard-refresh and check:
+  topbar Enter-only title, notebook actions dismiss reset, source ⋯ rename
+  dismiss reset, keyboard focus ring on source menu, Settings help on profile.
+
+### Migration and rollback
+
+- No database or schema changes.
+- Rollback: restore the listed UI/test files; private ``.env`` and SQLite data
+  were not modified.
+
+### Known incomplete items
+
+- Browser acceptance for Phase 1 controls still pending manual hard-refresh.
+- Phase 4+ not started (test isolation, API-mode UI coverage, all-six-stage /
+  restart tests, CI workflow).
+
+## Phase 2 evidence (safety / repository defaults)
+
+### Behavior implemented
+
+- ``scripts/build.sh`` is validation-only: prefers ``.venv/bin/python``,
+  ``compileall`` on ``backend ui streamlit_app.py tests``, then mock ``pytest``.
+  It no longer calls ``init_db.py``.
+- ``scripts/init_db.py`` refuses an existing database unless ``--force``; prefer
+  ``--database PATH`` for a fresh file.
+- Repository defaults in ``.env.example`` and ``backend/settings.py``:
+  ``MODEL_PROVIDER=mock``, ``MOCK_OPENAI=true``, ``AUTO_ADVANCE_STAGES=false``.
+- All configured data paths resolve through ``_project_path`` relative to the
+  project root when not absolute.
+- ``tests/conftest.py`` clears ``OPENAI_API_KEY``.
+- Docs/AGENTS/README/DESIGN aligned: confirmation is the safe default;
+  auto-advance is an explicit audited local mode. Dark DESIGN tokens match the
+  live teal dark theme (no purple accent table).
+- Removed unused ``asyncio_mode`` from ``pyproject.toml``.
+- Private ``.env`` untouched.
+
+### Files changed
+
+- ``scripts/build.sh``, ``scripts/init_db.py``, ``scripts/AGENTS.md``
+- ``.env.example``, ``backend/settings.py``, ``tests/conftest.py``
+- ``tests/test_init_db.py`` (new), ``pyproject.toml``
+- ``README.md``, ``docs/LOCAL_DEMO_IMPLEMENTATION.md``, ``DESIGN.md``
+- ``AGENTS.md``, ``tests/AGENTS.md``, ``docs/IMPLEMENTATION_STATUS.md``
+
+### Commands run and results
+
+- ``sh -n scripts/start.sh && sh -n scripts/build.sh`` → success
+- Focused: ``.venv/bin/python -m pytest -q tests/test_init_db.py`` (with models) → passed
+- Full: ``.venv/bin/python -m pytest -q`` → **89 passed**
+- ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m compileall -q backend ui streamlit_app.py tests`` → success
+- Fresh init: ``scripts/init_db.py --database /tmp/co-design-phase2-fresh.sqlite3`` → created
+- Second init without ``--force`` → refused (exit 1)
+
+### Migration and rollback
+
+- No schema migration. Existing live DB is unchanged.
+- Rollback: restore listed files; re-enable old ``build.sh`` init only if needed.
+- Developers with an existing private ``.env`` keep current provider/stage mode.
+
+### Known incomplete items
+
+- Superseded by Phase 3 completion notes below.
+
+## Phase 3 evidence (backend integrity)
+
+### Behavior implemented
+
+- ``CoachApplicationService`` reloads persisted stage, canonical history,
+  selected source IDs, source context, and image inputs from the notebook store.
+  Mismatched or unknown client hints return HTTP 400.
+- ``CoachRequest.current_stage`` is validated against the six Thinking Path IDs
+  (HTTP 422 for unknown values).
+- ``StudentStore.apply_phase_transition_decision`` updates transition status and
+  journey metadata in one SQLite transaction; injected journey-write failures
+  leave the transition pending.
+- ``ProviderUnavailableError`` maps to HTTP 503. API routes log thread IDs
+  without source text or secrets.
+
+### Files changed
+
+- ``backend/application.py``, ``backend/domain.py``, ``backend/api.py``
+- ``backend/learning_service.py``, ``backend/student_store.py``, ``backend/workflow.py``
+- ``backend/AGENTS.md``, ``docs/LOCAL_DEMO_IMPLEMENTATION.md``
+- ``tests/test_api.py``, ``tests/test_learning_service.py``
+- ``docs/IMPLEMENTATION_STATUS.md``
+
+### Commands run and results
+
+- Focused: ``.venv/bin/python -m pytest -q tests/test_api.py tests/test_learning_service.py tests/test_workflow.py`` → **18 passed**
+- Full: ``.venv/bin/python -m pytest -q`` → **95 passed**
+- ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m compileall -q backend ui streamlit_app.py tests`` → success
+
+### Migration and rollback
+
+- No schema migration. Existing live DB and private ``.env`` unchanged.
+- Rollback: restore the listed backend/test/doc files.
+
+### Known incomplete items
+
+- Superseded by Phase 4 completion notes below.
+
+## Phase 4 evidence (test isolation / primary-path coverage)
+
+### Behavior implemented
+
+- Autouse ``isolated_test_environment`` gives each test its own data/DB/files
+  tree, asserts mock mode + empty ``OPENAI_API_KEY``, and clears Streamlit
+  resource caches.
+- ``LocalApiClient`` accepts an injectable sync session for in-process FastAPI
+  ``TestClient`` contracts; adds ``learning_state``.
+- API-mode AppTest covers confirmation (pending transition) and auto-advance
+  (Thinking Path moves); one legacy AppTest remains on ``USE_LOCAL_API=false``.
+- Primary-path tests cover all six stages, reject/stale transitions, restart
+  recovery, cross-notebook isolation, and additive ``phase_transitions`` schema.
+- Mock CI workflow runs shell syntax, compileall, and pytest on push/PR.
+
+### Files changed
+
+- ``tests/conftest.py``, ``tests/AGENTS.md``
+- ``tests/test_api_client.py`` (new), ``tests/test_primary_path.py`` (new)
+- ``tests/test_streamlit_api_mode.py`` (new)
+- ``backend/api_client.py``
+- ``.github/workflows/mock-ci.yml`` (new)
+- ``docs/IMPLEMENTATION_STATUS.md``
+
+### Commands run and results
+
+- Focused: ``tests/test_api_client.py tests/test_primary_path.py tests/test_streamlit_api_mode.py`` → **11 passed**
+- Full: ``.venv/bin/python -m pytest -q`` → **106 passed**
+- ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m compileall -q backend ui streamlit_app.py tests`` → success
+
+### Migration and rollback
+
+- No schema migration. Existing live DB and private ``.env`` unchanged.
+- Rollback: restore listed test/client/CI files.
+
+### Known incomplete items
+
+- Superseded by Phase 5 completion notes below.
+
+## Phase 5 evidence (CRUD behind typed API)
+
+### Behavior implemented
+
+- ``WorkspaceService`` owns notebook/history/source/preference CRUD and safe
+  source-byte reads; API responses redact filesystem ``path`` (``has_file``).
+- FastAPI routes under ``/api/v1`` for preferences, threads, messages, sources,
+  upload, select-all, content, legacy backfill, and course-material sync.
+- ``LocalApiClient`` covers the new contracts; ``ui.runtime.store`` is a
+  ``WorkspaceFacade`` that uses the API when ``USE_LOCAL_API=true`` else the
+  in-process service.
+- Sources preview/download and uploads go through the facade (no direct path
+  reads in ``ui/sources.py`` / chat upload path).
+
+### Files changed
+
+- ``backend/workspace_service.py`` (new), ``backend/api.py``, ``backend/api_client.py``
+- ``backend/domain.py``, ``backend/repositories.py``, ``backend/source_library.py``
+- ``ui/runtime.py``, ``ui/sources.py``, ``ui/chat.py``, ``ui/session.py``
+- ``ui/AGENTS.md``, ``backend/AGENTS.md``
+- ``tests/test_workspace_api.py`` (new)
+- ``docs/IMPLEMENTATION_STATUS.md``
+
+### Commands run and results
+
+- Full: ``.venv/bin/python -m pytest -q`` → **109 passed**
+- ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m compileall -q backend ui streamlit_app.py tests`` → success
+
+### Migration and rollback
+
+- No schema migration. Existing live DB and private ``.env`` unchanged.
+- Rollback: restore listed backend/UI/test files.
+
+### Known incomplete items
+
+- None for Phase 5; Phase 6 evidence follows.
+
+## Phase 6 evidence (streaming / checkpoints / legacy retirement)
+
+### Behavior implemented
+
+- ``scripts/start.sh`` polls ``GET /api/v1/ready`` before starting Streamlit.
+- FastAPI stamps ``X-Request-ID`` on every response and exposes readiness,
+  ``POST /api/v1/coach/turn/stream`` (NDJSON), and
+  ``GET /api/v1/threads/{id}/graph``.
+- ``CoachWorkflow`` runs ``load_context → assess → recommend → format`` with
+  LangGraph ``MemorySaver`` when available; sequential fallback remains.
+- Streamlit student turns always use typed coaching (API or in-process
+  ``CoachApplicationService``) with streamed tokens; ``StudentChatEngine`` is
+  no longer on the UI path.
+- Removed the one-option composer model picker, related layout JS, and dead
+  model-slot CSS.
+
+### Files changed
+
+- ``scripts/start.sh``
+- ``backend/workflow.py``, ``backend/api.py``, ``backend/api_client.py``
+- ``ui/runtime.py``, ``ui/chat.py``, ``ui/layout/composer_layout.py``
+- ``ui/assets/template.css``, ``ui/AGENTS.md``
+- ``tests/test_api.py``, ``tests/test_api_client.py``, ``tests/test_workflow.py``
+- ``tests/test_streamlit_ui.py``, ``tests/test_streamlit_api_mode.py``,
+  ``tests/conftest.py``
+- ``docs/IMPLEMENTATION_STATUS.md``
+
+### Commands run and results
+
+- Full: ``.venv/bin/python -m pytest -q`` → **111 passed**
+- ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m compileall -q backend ui streamlit_app.py tests`` → success
+
+### Migration and rollback
+
+- No schema migration. Existing live DB and private ``.env`` unchanged.
+- Rollback: restore listed backend/UI/test/script files.
+
+### Known incomplete items / risks
+
+- In-memory LangGraph checkpoints do not survive API process restart.
+- ``StudentChatEngine`` unit tests remain; do not rewire UI to that path.
+- CSS cleanup removed model-slot rules from the recovered working-tree stylesheet;
+  re-check desktop and 390 px composer layout visually after restart.
 
 ## Next exact action
 
-Migrate source/notebook/folder CRUD behind typed API routes and replace the
-remaining direct Streamlit store calls while preserving the verified UI.
+**Stop for review.** After approval, optional follow-ups: durable checkpoint
+adapter beyond ``MemorySaver``, further CSS maintainability splits, or a live
+Ollama smoke (labelled, separate from mock CI). Do not start unpaid OpenAI
+calls or commits unless explicitly requested.

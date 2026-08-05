@@ -11,11 +11,8 @@ from typing import Any
 import streamlit as st
 import streamlit.components.v1 as components
 
-from backend.chat_service import ChatOptions
-from backend.domain import CoachRequest
-from backend.models import MODEL_REGISTRY, get_model
+from backend.domain import CoachRequest, CoachTurn
 from backend.settings import settings
-from backend.source_library import add_file_sources, selected_source_context
 from backend.student_journey import (
     STAGE_BY_ID,
     advanced_stage_response,
@@ -23,35 +20,12 @@ from backend.student_journey import (
     normalize_journey,
     personalized_stage_questions,
 )
-from backend.student_support import DEFAULT_SUPPORT_MODE
 
 from ui.coach_welcome import COACH_WELCOME_KIND, seed_coach_welcome
 from ui.layout.composer_layout import sync_composer_layout
-from ui.runtime import engine, local_api_client, local_api_enabled, rerun, store
-from ui.settings import apply_selected_model
+from ui.runtime import rerun, store, stream_coach_turn_events
 from ui.sources import source_viewer_dialog
 
-
-def _render_composer_model_picker() -> None:
-    """Render a compact model dropdown beside the attach control."""
-    current = get_model(st.session_state.selected_model)
-    with st.container(key="composer_model_slot"):
-        with st.popover(current.label):
-            for model in MODEL_REGISTRY:
-                label = f"{model.label}{' · Legacy' if model.deprecated else ''}"
-                if st.button(
-                    label,
-                    key=f"composer-model-{model.id}",
-                    use_container_width=True,
-                    type="primary" if model.id == current.id else "tertiary",
-                ):
-                    if model.id != current.id:
-                        apply_selected_model(model.id)
-                        store.update_thread(
-                            st.session_state.thread_id,
-                            metadata={"selected_model": model.id},
-                        )
-                        rerun()
 
 def render_media(raw_paths: list[str]) -> None:
     for raw_path in raw_paths:
@@ -110,8 +84,42 @@ def render_citations(message: dict[str, Any]) -> None:
 
 
 def _render_copy_control(text: str) -> None:
-    """Render a Copy control whose click stays in-iframe (clipboard gesture works)."""
+    """Render a Copy control whose click stays in-iframe (clipboard gesture works).
+
+    Appearance is passed from Streamlit session because the iframe cannot use
+    parent ``--cd-*`` variables. Colors match the Edit control in
+    ``template.css`` (muted icon on a soft surface wash).
+    """
     encoded = base64.b64encode(text.encode("utf-8")).decode("ascii")
+    appearance = str(st.session_state.get("appearance") or "Light")
+    # Mirror [class*="st-key-user_message_actions_"] button tokens.
+    if appearance == "Dark":
+        icon = "#9AA8B5"
+        icon_hover = "#F2F5F7"
+        bg = "rgba(23, 28, 34, 0.35)"
+        bg_hover = "rgba(42, 52, 62, 0.55)"
+        copied = "#5EEAD4"
+    else:
+        icon = "#5B6B7C"
+        icon_hover = "#15202B"
+        bg = "rgba(255, 255, 255, 0.35)"
+        bg_hover = "rgba(213, 220, 227, 0.55)"
+        copied = "#0F766E"
+    system_dark = ""
+    if appearance == "System":
+        system_dark = """
+  @media (prefers-color-scheme: dark) {
+    button {
+      color: #9AA8B5;
+      background: rgba(23, 28, 34, 0.35);
+    }
+    button:hover {
+      color: #F2F5F7;
+      background: rgba(42, 52, 62, 0.55);
+    }
+    button.copied { color: #5EEAD4; }
+  }
+"""
     components.html(
         f"""
 <!DOCTYPE html>
@@ -122,6 +130,11 @@ def _render_copy_control(text: str) -> None:
   html, body {{
     margin: 0;
     padding: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     background: transparent;
     overflow: hidden;
   }}
@@ -129,28 +142,36 @@ def _render_copy_control(text: str) -> None:
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    box-sizing: border-box;
+    width: 1.7rem;
+    height: 1.7rem;
     margin: 0;
     padding: 0;
     border: 0;
-    border-radius: 7px;
-    color: #9aa8b5;
-    background: rgba(15, 20, 25, 0.72);
+    border-radius: .45rem;
+    color: {icon};
+    background: {bg};
+    opacity: .9;
     cursor: pointer;
+    line-height: 0;
   }}
   button:hover {{
-    color: #f2f5f7;
-    background: rgba(15, 20, 25, 0.9);
+    color: {icon_hover};
+    background: {bg_hover};
+    opacity: 1;
   }}
   button.copied {{
-    color: #5eead4;
+    color: {copied};
   }}
   svg {{
-    width: 15px;
-    height: 15px;
+    display: block;
+    width: .82rem;
+    height: .82rem;
+    margin: 0;
+    flex: 0 0 auto;
     fill: currentColor;
   }}
+{system_dark}
 </style>
 </head>
 <body>
@@ -197,8 +218,8 @@ def _render_copy_control(text: str) -> None:
 </body>
 </html>
         """,
-        height=30,
-        width=34,
+        height=28,
+        width=28,
     )
 
 
@@ -340,13 +361,13 @@ def handle_prompt(
     target: Any,
     existing_user_message_id: str | None = None,
 ) -> None:
-    """Submit one student turn via the local API or legacy chat engine.
+    """Submit one student turn through the typed coaching workflow.
 
-    When ``USE_LOCAL_API`` is enabled, uploads are added as sources and the
-    typed ``CoachRequest`` path runs (stage recommendations, image grounding).
-    Otherwise the legacy ``StudentChatEngine`` streams a response without
-    mutating the learning journey.
+    Uploads become sources first. The coach path always uses ``CoachRequest``
+    via the local API or in-process ``CoachApplicationService``, streaming
+    token events into the assistant bubble.
     """
+    del model_id, reasoning_effort
     journey = normalize_journey(st.session_state.learning_journey)
     selected_sources = store.list_sources(
         st.session_state.thread_id,
@@ -354,21 +375,6 @@ def handle_prompt(
     )
     allow_model_knowledge = not selected_sources and not uploads
     st.session_state.allow_model_knowledge = allow_model_knowledge
-    options = ChatOptions(
-        model_id=model_id,
-        reasoning_effort=reasoning_effort,
-        support_mode=DEFAULT_SUPPORT_MODE,
-        web_search=False,
-        image_generation=False,
-        local_analysis=False,
-        assignment=st.session_state.assignment,
-        thinking_stage=journey["current_stage"],
-        response_detail=journey["response_detail"],
-        response_language=st.session_state.response_language,
-        source_ids=[source["id"] for source in selected_sources],
-        allow_model_knowledge=allow_model_knowledge,
-        existing_user_message_id=existing_user_message_id,
-    )
     upload_tuples = [
         (upload.name, upload.getvalue(), getattr(upload, "type", None))
         for upload in uploads
@@ -382,65 +388,58 @@ def handle_prompt(
                         "Adding to Sources · "
                         + ", ".join(upload.name for upload in uploads)
                     )
-        if local_api_enabled():
-            if upload_tuples:
-                add_file_sources(
-                    store,
-                    st.session_state.thread_id,
-                    upload_tuples,
-                    origin="chat_composer",
-                )
-                selected_sources = store.list_sources(
-                    st.session_state.thread_id,
-                    selected_only=True,
-                )
-            source_context, source_references = selected_source_context(selected_sources)
-            request = CoachRequest(
-                thread_id=st.session_state.thread_id,
-                student_message=prompt,
-                current_stage=journey["current_stage"],
-                response_detail=journey["response_detail"],
-                source_ids=[reference["id"] for reference in source_references],
-                source_context=source_context,
-                allow_model_knowledge=allow_model_knowledge,
-            )
-            with st.chat_message("assistant", avatar=":material/auto_awesome:"):
-                try:
-                    turn = local_api_client().coach_turn(request)
-                    st.write(turn.response_text)
-                    if turn.pending_transition:
-                        st.caption("The coach has recommended a next step in Thinking Path.")
-                except Exception as exc:
-                    st.error(
-                        "The local coaching API is unavailable. Start it with "
-                        "`sh scripts/start.sh`, then retry. "
-                        f"({exc})"
-                    )
-                    if st.button(
-                        "Retry",
-                        icon=":material/refresh:",
-                        key="retry-coach-api",
-                    ):
-                        st.session_state.pending_edit = {
-                            "message_id": existing_user_message_id,
-                            "prompt": prompt,
-                        }
-                        rerun()
-                    return
-        else:
-            stream = engine.submit(
+        if upload_tuples:
+            store.upload_sources(
                 st.session_state.thread_id,
-                prompt,
-                options,
                 upload_tuples,
+                origin="chat_composer",
             )
-            with st.chat_message("assistant", avatar=":material/auto_awesome:"):
-                st.write_stream(stream)
-                if stream.sources:
-                    with st.expander(f"Web sources ({len(stream.sources)})"):
-                        for source in stream.sources:
-                            st.markdown(f"- [{source['title']}]({source['url']})")
-                render_media([str(path) for path in stream.artifacts])
+        # Leave source_ids/context empty so the application service loads them.
+        request = CoachRequest(
+            thread_id=st.session_state.thread_id,
+            student_message=prompt,
+            current_stage=journey["current_stage"],
+            response_detail=journey["response_detail"],
+            allow_model_knowledge=allow_model_knowledge,
+        )
+        with st.chat_message("assistant", avatar=":material/auto_awesome:"):
+            try:
+                turn: CoachTurn | None = None
+
+                def token_stream():
+                    nonlocal turn
+                    for event in stream_coach_turn_events(request):
+                        kind = event.get("event")
+                        if kind == "token":
+                            yield str(event.get("text") or "")
+                        elif kind == "done":
+                            turn = CoachTurn.model_validate(event["turn"])
+                        elif kind == "error":
+                            status = event.get("status")
+                            detail = event.get("detail") or "Coaching failed"
+                            raise RuntimeError(f"{detail} (status={status})")
+
+                st.write_stream(token_stream())
+                if turn and turn.pending_transition:
+                    st.caption(
+                        "The coach has recommended a next step in Thinking Path."
+                    )
+            except Exception as exc:
+                st.error(
+                    "Coaching is unavailable. Prefer `sh scripts/start.sh` for "
+                    f"API mode, or check the local provider. ({exc})"
+                )
+                if st.button(
+                    "Retry",
+                    icon=":material/refresh:",
+                    key="retry-coach-api",
+                ):
+                    st.session_state.pending_edit = {
+                        "message_id": existing_user_message_id,
+                        "prompt": prompt,
+                    }
+                    rerun()
+                return
     updated_thread = store.get_thread(st.session_state.thread_id) or {}
     updated_metadata = updated_thread.get("metadata") or {}
     updated_journey = normalize_journey(updated_metadata.get("learning_journey"))
@@ -490,7 +489,6 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
                 }
                 rerun()
     with st.container(key="chat_composer"):
-        _render_composer_model_picker()
         composer_value = st.chat_input(
             "Ask a question or share your thinking",
             key=f"composer-{st.session_state.composer_nonce}",

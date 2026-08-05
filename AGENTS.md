@@ -112,9 +112,10 @@ PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \\
   .venv/bin/python -m compileall -q backend ui streamlit_app.py
 ```
 
-`scripts/build.sh` also initializes the database; do not run it against user
-data without checking its impact first. Do not claim Ruff or static typing
-passed until those tools are configured and installed.
+`scripts/build.sh` is validation-only (`compileall` + mock `pytest`) and does
+not initialize the live database. Use `scripts/init_db.py` explicitly with
+`--database` or `--force` when schema setup is needed. Do not claim Ruff or
+static typing passed until those tools are configured and installed.
 
 For UI changes, edit [`ui/`](ui/) modules and the thin
 [`streamlit_app.py`](streamlit_app.py) entrypoint. Start Streamlit and inspect

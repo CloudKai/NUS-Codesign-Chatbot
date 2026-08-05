@@ -51,6 +51,7 @@ def render_theme_css() -> None:
         --cd-scrollbar:#C4CBD4;
         --cd-checkbox-bg:#FFFFFF;--cd-checkbox-border:#D5DCE3;
         --cd-shadow:0 8px 24px rgba(21,32,43,.08);
+        --cd-placeholder-opacity:.48;
     """
     dark_tokens = """
         color-scheme:dark;
@@ -61,6 +62,7 @@ def render_theme_css() -> None:
         --cd-scrollbar:#4A5560;
         --cd-checkbox-bg:#1C232B;--cd-checkbox-border:#2A343E;
         --cd-shadow:0 18px 50px rgba(0,0,0,.34);
+        --cd-placeholder-opacity:.48;
     """
     mode = st.session_state.get("appearance", "System")
     tokens = dark_tokens if mode == "Dark" else light_tokens
@@ -290,7 +292,8 @@ def render_theme_css() -> None:
             input::placeholder,
             textarea::placeholder {{
                 color:var(--cd-muted) !important;
-                opacity:1;
+                -webkit-text-fill-color:var(--cd-muted) !important;
+                opacity:var(--cd-placeholder-opacity, .48) !important;
             }}
             [data-testid="stChatMessage"],
             [data-testid="stChatMessage"] [data-testid="stMarkdownContainer"],

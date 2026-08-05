@@ -118,9 +118,14 @@ def cited_source_references(
     text: str,
     references: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    """Return only sources explicitly cited as ``[S#]`` in the reply text.
+
+    Selected sources alone do not create a Sources-used footer. When the reply
+    has no citation markers, return an empty list.
+    """
     cited = {f"S{value}" for value in re.findall(r"\[S(\d+)\]", text)}
     if not cited:
-        return references
+        return []
     return [reference for reference in references if reference.get("label") in cited]
 
 
@@ -459,24 +464,11 @@ class StudentChatEngine:
         mode = get_support_mode(stream.options.support_mode)
         stage = current_stage({"current_stage": stream.options.thinking_stage})
         attached = ", ".join(upload.name for upload in stream.uploads)
-        source_line = ""
-        if stream.source_references:
-            source_line = (
-                "\n\nSelected notebook evidence: "
-                + ", ".join(
-                    f"[{reference['label']}] {reference['title']}"
-                    for reference in stream.source_references
-                )
-                + "."
-            )
         if stream.options.response_detail == "short":
             answer = (
                 f"**{stage.label}**\n\n"
-                f"- Your question: “{stream.prompt.strip()}”\n"
-                f"- Focus for this stage: {stage.description}\n"
-                f"- Keep your answer grounded in evidence and record what changes your view.\n\n"
-                f"**Reflect:** {stage.reflection_prompt}"
-                f"{source_line}"
+                "Make this step more precise with one concrete detail.\n\n"
+                f"**Next:** {stage.reflection_prompt}"
             )
         else:
             scaffold = "\n".join(
@@ -486,13 +478,11 @@ class StudentChatEngine:
             answer = (
                 f"You are previewing {mode.label} with {model.label}.\n\n"
                 f"**Current stage: {stage.label}.** {stage.description}\n\n"
-                f"Let’s work from your question: “{stream.prompt.strip()}”\n\n"
                 f"A useful critical-thinking pass is:\n{scaffold}\n\n"
                 "As the student author, write your current claim, identify the strongest "
                 "evidence for it, and name one reason that evidence might be insufficient. "
                 "I can help you test the next step without taking over authorship.\n\n"
                 f"**Reflect:** {stage.reflection_prompt}"
-                f"{source_line}"
             )
         if attached:
             answer += f"\n\nAttached assignment material saved for this chat: {attached}."

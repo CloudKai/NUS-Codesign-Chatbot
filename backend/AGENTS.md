@@ -33,8 +33,9 @@ FastAPI (api.py)
 |---|---|
 | `domain.py` | Pydantic contracts: `CoachRequest`, `CoachTurn`, `EducationalAssessment`, `PendingPhaseTransition`, citations |
 | `application.py` | `CoachApplicationService` — coordinates workflow, persistence, optional auto-advance |
-| `api.py` | FastAPI `/api/v1` routes, app factory, structured errors |
+| `api.py` | FastAPI `/api/v1` routes (coach + workspace CRUD), app factory, structured errors |
 | `api_client.py` | Typed client used by Streamlit when `USE_LOCAL_API=true` |
+| `workspace_service.py` | Notebook/history/source/preference CRUD application service |
 | `workflow.py` | Single LangGraph coach workflow wrapper (not six agents) |
 | `student_journey.py` | Six thinking stages, journey normalization, review helpers, stage questions |
 | `learning_service.py` | Confirmation-gated phase transitions and learning progression |
@@ -59,6 +60,12 @@ FastAPI (api.py)
 - **Confirmation-gated advancement** when not in automatic-resolve mode. Persist
   recommendations and student decisions; never use hidden HTML markers or keyword
   heuristics for stage changes.
+- **Server-authoritative coaching inputs** on the API path: persisted stage,
+  canonical history, selected sources, source context, and image inputs come from
+  the notebook store. Reject mismatched or unknown client values with 4xx.
+- **Atomic transition apply** for confirmations (journey metadata + transition
+  status in one SQLite transaction).
+- **Structured provider failures** map to HTTP 503 at the API boundary.
 - **Mock-first testing**. Automated tests must not require paid APIs or internet.
 - **No AWS runtime dependencies** unless explicitly requested. Keep ports
   replaceable for future adapters.
@@ -67,9 +74,11 @@ FastAPI (api.py)
 
 ## Current migration state
 
-Coaching turns and transition resolution run through the FastAPI path when
-`USE_LOCAL_API=true` (`scripts/start.sh`). That path owns
-structured assessments, image grounding, and stage advancement.
+Coaching turns, transition resolution, and workspace CRUD (notebooks, messages,
+sources, preferences, source content) run through the FastAPI path when
+`USE_LOCAL_API=true` (`scripts/start.sh`). Streamlit panels use
+`ui.runtime.store` (a `WorkspaceFacade`) so they do not open SQLite or source
+paths directly.
 
 A second stack remains for compatibility:
 

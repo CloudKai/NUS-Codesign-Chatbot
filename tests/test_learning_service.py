@@ -55,3 +55,45 @@ def test_rejected_recommendation_keeps_current_stage(tmp_path):
 
     assert resolved.status is TransitionStatus.REJECTED
     assert "thinking_stage" not in (store.get_thread(thread_id) or {})["metadata"]
+
+
+def test_accepted_transition_rolls_back_when_journey_write_fails(tmp_path, monkeypatch):
+    import backend.student_store as student_store_module
+
+    store = StudentStore(tmp_path / "atomic.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    pending = CoachWorkflow(
+        DeterministicCoachProvider(StageDecision.ADVANCE), transitions
+    ).run(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="I have defined a focused question.",
+            current_stage="focus",
+            response_detail="short",
+        )
+    ).pending_transition
+    assert pending is not None
+
+    real_dump = student_store_module._dump
+
+    def flaky_dump(value):
+        if isinstance(value, dict) and "learning_journey" in value:
+            raise RuntimeError("simulated journey write failure")
+        return real_dump(value)
+
+    monkeypatch.setattr(student_store_module, "_dump", flaky_dump)
+
+    service = LearningProgressService(store, notebooks, transitions)
+    try:
+        service.resolve(thread_id, pending.id, accepted=True)
+        raised = False
+    except RuntimeError:
+        raised = True
+
+    assert raised
+    assert transitions.get_pending(thread_id) is not None
+    thread = store.get_thread(thread_id) or {}
+    journey = (thread.get("metadata") or {}).get("learning_journey") or {}
+    assert journey.get("current_stage", "focus") == "focus"

@@ -1,17 +1,24 @@
 """Browser corner toasts for short-lived Streamlit notifications.
 
 Streamlit ``st.toast`` only accepts whole-second durations and does not expose
-slide-in styling. This helper injects a small parent-page script so messages can
-auto-dismiss after a precise interval without tying timers to a disposable iframe.
+slide-in styling. This helper prefers a small parent-page script so messages can
+auto-dismiss after a precise interval without tying timers to a disposable
+iframe. If that injection fails (Streamlit upgrade, sandbox, etc.), it falls
+back to ``st.toast``.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 
+import streamlit as st
 import streamlit.components.v1 as components
 
 DEFAULT_TOAST_DURATION_MS = 2500
+_FALLBACK_TOAST_DURATION_S = 3
+
+logger = logging.getLogger(__name__)
 
 
 def show_corner_toasts(
@@ -23,18 +30,29 @@ def show_corner_toasts(
     Args:
         messages: Toast bodies, shown newest on top in the same stack.
         duration_ms: Visible lifetime before the exit animation. Defaults to 2.5s.
+            Ignored by the ``st.toast`` fallback, which uses whole seconds.
     """
     cleaned = [str(message).strip() for message in messages if str(message).strip()]
     if not cleaned:
         return
-    payload = json.dumps(cleaned)
     safe_duration = max(500, int(duration_ms))
+    try:
+        _inject_corner_toasts(cleaned, duration_ms=safe_duration)
+    except Exception:
+        logger.debug("Corner toast injection failed; using st.toast", exc_info=True)
+        for message in cleaned:
+            st.toast(message, duration=_FALLBACK_TOAST_DURATION_S)
+
+
+def _inject_corner_toasts(messages: list[str], *, duration_ms: int) -> None:
+    """Inject parent-page toast DOM. Raises if the component call fails."""
+    payload = json.dumps(messages)
     components.html(
         f"""
 <script>
 (() => {{
   const messages = {payload};
-  const durationMs = {safe_duration};
+  const durationMs = {duration_ms};
   const parentDoc = window.parent.document;
   const hostId = "cd-corner-toast-host";
   const styleId = "cd-corner-toast-style";

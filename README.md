@@ -113,7 +113,9 @@ You can also run without activating first; `scripts/start.sh` prefers
 With `MODEL_PROVIDER=mock` (default in `.env.example`):
 
 1. First chat turn at a stage gets guidance (stage stays).
-2. Second turn at that stage advances the Thinking Path (progress bar updates).
+2. Second turn at that stage recommends ADVANCE; with the default
+   `AUTO_ADVANCE_STAGES=false`, press **Next** on Thinking Path and confirm to
+   move the progress bar.
 3. Upload/select sources (including images); the API coach path receives selected
    image inputs for grounding.
 
@@ -185,10 +187,14 @@ Put instructor PDFs and related files under:
 They sync into each notebook as locked **Lecture Notes** / **Readings** groups.
 `lecture_notes/README.txt` is instructional only and is not imported. Course
 materials in this folder are shared in the repo; originals are never moved.
+Prefer compressed PDFs. Future large PDFs under `lecture_notes/` are marked for
+Git LFS in `.gitattributes` (existing blobs are unchanged until an explicit
+migrate).
 
 Trusted course files may be up to **50 MB**; student uploads remain **10 MB**
-(up to 5 files per add).
-
+(up to 5 files per add). Student-upload compression uses `pymupdf` and `Pillow`
+from `requirements.txt` when installed; lecture sync does not re-compress
+shared course files.
 ---
 
 ## Architecture (local)

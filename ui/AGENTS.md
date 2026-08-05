@@ -4,8 +4,9 @@
 
 The `ui/` package is the Streamlit presentation layer for Co-design Chatbot. It
 renders notebooks, sources, discussion, thinking path, dialogs, and theme CSS.
-It calls typed backend facades (`StudentStore`, `StudentChatEngine`,
-`LocalApiClient`) but does not implement educational or persistence logic.
+It calls the workspace facade (`store` from `ui.runtime`) and the typed coaching
+helpers (`submit_coach_turn` / `stream_coach_turn_events`); it does not implement
+educational or persistence logic and must not open SQLite or source files directly.
 
 [`streamlit_app.py`](../streamlit_app.py) is the thin entrypoint: page config,
 CSS injection, session init, top bar, workspace layout, and pending dialog
@@ -32,8 +33,9 @@ Only read that for UI tasks that touch API migration or coaching flow.
 | `assets/template.css` | Static layout/component stylesheet (edit CSS here) |
 | `theme.py` | Loads `assets/template.css`, `inject_template_css()`, dynamic `render_theme_css()` |
 | `layout/` | Browser-side layout helpers (column resize, sources scroll, composer) |
-| `runtime.py` | Cached `store`, `engine`, `course_material_sync()`, `local_api_client()`, `rerun()` |
+| `runtime.py` | Cached store/workspace/coach + `WorkspaceFacade`, `local_api_client()`, coach helpers, `rerun()` |
 | `session.py` | Session defaults, notebook create/select/delete, `save_journey()` |
+| `rename.py` | Shared Enter-only rename forms, draft discard, select-all helper |
 | `topbar.py` | Brand, title, section switcher, Guidance, profile entry |
 | `profile.py` | Compact settings popover (display name, appearance, language, help) |
 | `workspace.py` | Mobile panel radio and three-column studio/chat/sources layout |
@@ -53,7 +55,7 @@ Compatibility shims at `ui/column_resize.py`, `ui/sources_scroll.py`, and
 |---|---|
 | `column_resize.py` | Between-column drag handles and side-panel collapse widths |
 | `sources_scroll.py` | Sources list scroll region sizing |
-| `composer_layout.py` | Composer footer card / model-slot placement |
+| `composer_layout.py` | Composer footer card / textarea sizing |
 
 These modules inject small `components.html` scripts because Streamlit lacks
 first-class APIs for those layout behaviours. Do not put educational logic here.
@@ -65,9 +67,11 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
 - **Presentation only.** Do not import SQLite drivers, LangChain, LangGraph,
   OpenAI/Ollama SDKs, or read/write the filesystem directly except through
   backend helpers already used in this package.
-- **Import shared runtime from `ui.runtime` only.** Use `store`, `engine`,
-  `local_api_client()`, and `course_material_sync()` from there — never from
-  `streamlit_app.py`.
+- **Import shared runtime from `ui.runtime` only.** Use `store` (workspace
+  facade), `local_api_client()`, coach helpers, and `rerun()` from there — never
+  from `streamlit_app.py`. When `USE_LOCAL_API=true`, `store` routes CRUD through
+  the typed API; otherwise it uses in-process `WorkspaceService`. Student turns
+  always use the typed coach path (API or in-process), not `StudentChatEngine`.
 - **Preserve widget keys and dialog decorators.** Keep `@st.dialog` and
   `@st.fragment` on the functions that own them. Changing keys breaks session
   state and AppTest expectations.
@@ -116,12 +120,12 @@ Edit the matching module under `ui/layout/`.
 Add `@st.dialog` in the module that owns the feature. Import it from the
 entrypoint or a parent panel if it must open on load.
 
-**API vs legacy chat path**
+**API vs in-process coach path**
 
-`chat.py` branches on `local_api_enabled()`. Prefer the FastAPI coaching path
-(`USE_LOCAL_API=true` via `scripts/start.sh`). The legacy `StudentChatEngine`
-path remains for offline fallback during migration — do not add new stage or
-vision behaviour only to the legacy path.
+`chat.py` always submits typed `CoachRequest` turns. Prefer
+`USE_LOCAL_API=true` via `scripts/start.sh` (readiness-gated). The in-process
+`CoachApplicationService` path remains for Streamlit-only runs. Keep
+`StudentChatEngine` only for legacy unit tests in `backend/chat_service.py`.
 
 ## Validation
 

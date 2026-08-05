@@ -2,8 +2,9 @@ from __future__ import annotations
 
 """Application settings loaded from the project ``.env`` file.
 
-Fallback defaults match ``.env.example`` so missing keys stay cost-safe and
-aligned with documented local setup.
+Fallback defaults match ``.env.example``: mock provider, confirmation-mode
+stage progression, and project-root-relative data paths so a missing ``.env``
+stays cost-safe.
 """
 
 import os
@@ -30,20 +31,14 @@ def _project_path(name: str, default: str) -> Path:
 @dataclass
 class Settings:
     project_root: Path = PROJECT_ROOT
-    data_dir: Path = Path(os.getenv("APP_DATA_DIR", PROJECT_ROOT / "data")).resolve()
-    database_path: Path = Path(
-        os.getenv("APP_DATABASE_PATH", PROJECT_ROOT / "data" / "co_design.sqlite3")
-    ).resolve()
-    files_dir: Path = Path(
-        os.getenv("APP_FILES_DIR", PROJECT_ROOT / "data" / "files")
-    ).resolve()
-    workspaces_dir: Path = Path(
-        os.getenv("APP_WORKSPACES_DIR", PROJECT_ROOT / "data" / "workspaces")
-    ).resolve()
+    data_dir: Path = _project_path("APP_DATA_DIR", "data")
+    database_path: Path = _project_path("APP_DATABASE_PATH", "data/co_design.sqlite3")
+    files_dir: Path = _project_path("APP_FILES_DIR", "data/files")
+    workspaces_dir: Path = _project_path("APP_WORKSPACES_DIR", "data/workspaces")
     lecture_notes_dir: Path = _project_path("LECTURE_NOTES_DIR", "lecture_notes")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     enable_local_code_execution: bool = _boolean("ENABLE_LOCAL_CODE_EXECUTION", False)
-    mock_openai: bool = _boolean("MOCK_OPENAI", False)
+    mock_openai: bool = _boolean("MOCK_OPENAI", True)
     mock_recommend_advance: bool = _boolean("MOCK_RECOMMEND_ADVANCE", False)
     auto_advance_stages: bool = _boolean("AUTO_ADVANCE_STAGES", False)
     model_provider: str = os.getenv("MODEL_PROVIDER", "mock").strip().lower()

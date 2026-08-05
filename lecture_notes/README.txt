@@ -21,6 +21,14 @@ Supported formats:
 Instructor-managed course files may be up to 50 MB. Student uploads keep their
 separate 10 MB limit. Prefer compressed PDFs so new notebooks import faster.
 
+Student uploads (Sources Add and chat attachments) are compressed when safe
+using optional local packages from requirements.txt: pymupdf (PDF) and Pillow
+(images). Lecture-note sync copies prepared folder files without recompressing
+them. If those packages are missing, uploads still work but skip compression.
+
+For new large PDFs under this tree, prefer Git LFS (see repo .gitattributes).
+Do not rewrite existing git history without an explicit migrate.
+
 The Sources panel automatically copies supported files into the active notebook,
 selects them, and includes extracted text in grounded responses. Originals stay
 in their current folders and are never moved. This README file is never imported.

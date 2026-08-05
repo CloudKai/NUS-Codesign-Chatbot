@@ -430,7 +430,7 @@ def test_response_continuation_requires_same_source_snapshot():
     assert response_id is None
 
 
-def test_mock_turn_persists_source_snapshot_and_citations(tmp_path, monkeypatch):
+def test_mock_turn_persists_source_snapshot_without_forcing_citations(tmp_path, monkeypatch):
     from backend import chat_service
 
     store, thread_id, _ = make_notebook(tmp_path, monkeypatch)
@@ -446,7 +446,8 @@ def test_mock_turn_persists_source_snapshot_and_citations(tmp_path, monkeypatch)
         ),
     )
     rendered = "".join(stream)
-    assert "[S1] Evidence note" in rendered
+    assert "[S1] Evidence note" not in rendered
+    assert "Your question:" not in rendered
     assert store.get_state(thread_id)["sourceSnapshot"] == [source["id"]]
     assistant = store.get_messages(thread_id)[-1]
-    assert assistant["metadata"]["source_refs"][0]["label"] == "S1"
+    assert assistant["metadata"]["source_refs"] == []

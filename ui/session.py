@@ -13,14 +13,13 @@ from typing import Any
 import streamlit as st
 
 from backend.models import LOCKED_CHAT_MODEL_ID, LOCKED_REASONING_EFFORT, MODEL_BY_ID
-from backend.settings import settings
-from backend.source_library import backfill_legacy_sources
 from backend.student_journey import default_journey, normalize_journey
 from backend.student_support import DEFAULT_SUPPORT_MODE
 
 from ui.coach_welcome import seed_coach_welcome
 from ui.constants import APPEARANCE_MODES, RESPONSE_LANGUAGES
 from ui.layout.column_resize import set_side_panel_collapsed
+from ui.rename import bump_rename_epoch, discard_rename_draft
 from ui.runtime import rerun, store
 
 
@@ -31,6 +30,8 @@ def initialize_session() -> None:
         - Writes missing keys into ``st.session_state``.
         - Loads appearance from ``StudentStore`` user preferences and realigns
           ``setting_appearance`` to that value.
+        - Restores the last-open notebook from preferences when the Streamlit
+          session has no valid ``thread_id`` (e.g. browser refresh).
         - Creates or selects a notebook when none is active.
         - Backfills legacy message attachments into the source library.
     """
@@ -69,21 +70,28 @@ def initialize_session() -> None:
         st.session_state.selected_model = LOCKED_CHAT_MODEL_ID
     if st.session_state.reasoning_effort not in {LOCKED_REASONING_EFFORT, None}:
         st.session_state.reasoning_effort = LOCKED_REASONING_EFFORT
-    stored_appearance = str(
-        (store.get_user_preferences() or {}).get("appearance") or ""
-    ).strip()
+    preferences = store.get_user_preferences() or {}
+    stored_appearance = str(preferences.get("appearance") or "").strip()
     if stored_appearance in APPEARANCE_MODES:
         st.session_state.appearance = stored_appearance
     # Always realign the widget key from persisted appearance so a stale
     # popover value cannot rewrite the database on the next sync.
     st.session_state.setting_appearance = st.session_state.appearance
     if not st.session_state.thread_id or not store.get_thread(st.session_state.thread_id):
+        preferred_id = str(preferences.get("active_thread_id") or "").strip()
         threads = store.list_threads()
-        if threads:
+        if preferred_id and store.get_thread(preferred_id):
+            select_thread(preferred_id, should_rerun=False)
+        elif threads:
             select_thread(threads[0]["id"], should_rerun=False)
         else:
             new_notebook(should_rerun=False)
-    backfill_legacy_sources(store, st.session_state.thread_id)
+    store.backfill_legacy_sources(st.session_state.thread_id)
+
+
+def _persist_active_thread(thread_id: str | None) -> None:
+    """Remember which notebook should reopen after a browser refresh."""
+    store.update_user_preferences({"active_thread_id": thread_id})
 
 
 def new_notebook(should_rerun: bool = True) -> None:
@@ -121,6 +129,7 @@ def new_notebook(should_rerun: bool = True) -> None:
     st.session_state.assignment = {"title": "", "course": "", "brief": "", "rubric": ""}
     st.session_state.allow_model_knowledge = False
     st.session_state.editing_message = None
+    _persist_active_thread(thread_id)
     if should_rerun:
         st.session_state.mobile_panel = "Chat"
         st.session_state.nav_section = "Chat"
@@ -136,6 +145,7 @@ def delete_notebook(thread_id: str) -> None:
     store.delete_thread(thread_id)
     if thread_id == st.session_state.thread_id:
         st.session_state.thread_id = None
+        _persist_active_thread(None)
 
 
 def request_notebook_actions(thread_id: str) -> None:
@@ -147,8 +157,13 @@ def request_notebook_actions(thread_id: str) -> None:
 def cancel_notebook_actions() -> None:
     """Close notebook actions and reopen Your Notebooks on the next run.
 
-    Used for the dialog X, click-outside, and Esc dismiss paths.
+    Used for the dialog X, click-outside, and Esc dismiss paths. Uncommitted
+    rename drafts are discarded so the field restores the saved title.
     """
+    thread_id = st.session_state.get("pending_notebook_actions")
+    if thread_id:
+        discard_rename_draft("notebook", str(thread_id))
+        bump_rename_epoch("notebook", str(thread_id))
     st.session_state.pending_notebook_actions = None
     st.session_state.reopen_notebooks_dialog = True
 
@@ -194,7 +209,8 @@ def select_thread(thread_id: str, should_rerun: bool = True) -> None:
         st.session_state.display_name = display_name
     st.session_state.thread_id = thread_id
     st.session_state.editing_message = None
-    backfill_legacy_sources(store, thread_id)
+    _persist_active_thread(thread_id)
+    store.backfill_legacy_sources(thread_id)
     seed_coach_welcome(store, thread_id)
     if should_rerun:
         rerun()

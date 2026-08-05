@@ -78,7 +78,15 @@ def test_streamlit_notebook_workspace_smoke():
     assert "MAX_COLS" not in Path("ui/layout/composer_layout.py").read_text(
         encoding="utf-8"
     )
-    assert "rgba(15, 20, 25, 0.72)" in Path("ui/chat.py").read_text(encoding="utf-8")
+    assert 'appearance == "Dark"' in Path("ui/chat.py").read_text(encoding="utf-8")
+    assert "#5B6B7C" in Path("ui/chat.py").read_text(encoding="utf-8")
+    assert "rgba(255, 255, 255, 0.35)" in Path("ui/chat.py").read_text(
+        encoding="utf-8"
+    )
+    assert "#9AA8B5" in Path("ui/chat.py").read_text(encoding="utf-8")
+    assert "rgba(15, 20, 25, 0.72)" not in Path("ui/chat.py").read_text(
+        encoding="utf-8"
+    )
     assert "writing-mode:horizontal-tb" in rendered
     assert "grid-template-columns:minmax(0,1fr) auto" in rendered
     assert "stChatInputTextArea" in rendered
@@ -141,10 +149,8 @@ def test_streamlit_notebook_workspace_smoke():
     assert "cd-profile-help-title" in rendered
     assert "cd-profile-help-body" in rendered
     assert "stTooltipHoverTarget" in rendered
-    assert "st-key-composer_model_slot" in rendered
-    assert any(
-        (button.label or "").startswith("GPT") for button in app.button
-    )
+    assert "st-key-composer_model_slot" not in rendered
+    assert "st-key-chat_composer" in rendered
     assert len(app.chat_message) == 1
     assert app.chat_message[0].name == "assistant"
 
@@ -333,6 +339,50 @@ def test_suggested_questions_are_view_only_and_do_not_change_the_composer():
     assert not app.exception
 
 
+def test_collapsed_sources_expander_survives_refresh():
+    from backend.student_store import StudentStore
+    from ui.sources import _sources_expander_widget_key
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    key = _sources_expander_widget_key("Lecture Notes")
+    app.session_state[key] = False
+    app.run()
+    prefs = StudentStore().get_user_preferences().get("sources_expander_state") or {}
+    assert prefs.get("Lecture Notes") is False
+
+    # Browser refresh drops Streamlit session; preferences should restore collapsed.
+    del app.session_state[key]
+    app.run()
+    assert app.session_state[key] is False
+    assert not app.exception
+
+
+def test_refresh_restores_last_open_notebook():
+    from backend.models import LOCKED_CHAT_MODEL_ID
+    from backend.student_store import StudentStore
+    from backend.student_support import DEFAULT_SUPPORT_MODE
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    local_store = StudentStore()
+    first_id = app.session_state["thread_id"]
+    assert local_store.get_user_preferences().get("active_thread_id") == first_id
+
+    other_id = local_store.create_thread(
+        name="Persisted research notebook",
+        model_id=LOCKED_CHAT_MODEL_ID,
+        support_mode=DEFAULT_SUPPORT_MODE,
+    )
+    local_store.update_user_preferences({"active_thread_id": other_id})
+
+    # Browser refresh clears Streamlit session; preferences should reopen the
+    # notebook that was active before the reload.
+    app.session_state["thread_id"] = None
+    app.run()
+    assert app.session_state["thread_id"] == other_id
+    assert local_store.get_user_preferences().get("active_thread_id") == other_id
+    assert not app.exception
+
+
 def test_current_notebook_title_is_directly_editable_and_syncs_with_history():
     from backend.student_store import StudentStore
 
@@ -345,7 +395,14 @@ def test_current_notebook_title_is_directly_editable_and_syncs_with_history():
         text_input for text_input in app.text_input if text_input.label == "Notebook title"
     )
     assert title.value == current["name"]
-    title.set_value("Road Safety Research").run()
+    # Enter-only form: value changes alone must not persist until Apply/Enter.
+    title.set_value("Should Not Persist").run()
+    assert StudentStore().get_thread(app.session_state["thread_id"])["name"] == current["name"]
+    title = next(
+        text_input for text_input in app.text_input if text_input.label == "Notebook title"
+    )
+    title.set_value("Road Safety Research")
+    next(button for button in app.button if button.label == "Apply").click().run()
     assert StudentStore().get_thread(app.session_state["thread_id"])["name"] == (
         "Road Safety Research"
     )
@@ -353,6 +410,28 @@ def test_current_notebook_title_is_directly_editable_and_syncs_with_history():
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Road Safety Research" in rendered
     assert not app.exception
+
+
+def test_rename_and_icon_controls_expose_accessible_instructions():
+    """Static a11y contracts for Enter-only rename and icon-only controls."""
+    rename_source = Path("ui/rename.py").read_text(encoding="utf-8")
+    sources = Path("ui/sources.py").read_text(encoding="utf-8")
+    profile = Path("ui/profile.py").read_text(encoding="utf-8")
+    workspace = Path("ui/workspace.py").read_text(encoding="utf-8")
+    css = Path("ui/assets/template.css").read_text(encoding="utf-8")
+
+    assert '_ENTER_HINT = "Press Enter to apply"' in rename_source
+    assert '"help": _ENTER_HINT' in rename_source
+    assert 'help="Source actions"' in sources
+    assert 'help="Settings"' in profile
+    assert 'help="Collapse Thinking Path"' in workspace
+    assert 'help="Collapse Sources"' in workspace
+    assert 'help=f"Expand {label}"' in workspace
+    assert (
+        '[class*="st-key-source_card_"] [data-testid="stPopover"] button:focus-visible'
+        in css
+    )
+    assert 'content:"Press Enter to apply"' in css
 
 
 def test_notebook_history_card_highlights_active_notebook_without_folders():

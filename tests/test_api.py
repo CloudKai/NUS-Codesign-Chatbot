@@ -50,9 +50,11 @@ def test_local_api_runs_a_mock_turn_and_auto_advances(tmp_path):
     assert payload["assessment"]["recommendation"] == "advance"
     assert payload["pending_transition"] is None
     assert payload["auto_advanced_to"] == "evidence"
-    assert "ready for the next part" in payload["response_text"]
+    assert "ready for the next part" not in payload["response_text"].lower()
+    assert "You’ve made this step clearer" not in payload["response_text"]
+    assert "You've made this step clearer" not in payload["response_text"]
     assert payload["response_text"].startswith("**Examine evidence**")
-    assert "**Questions to explore**" in payload["response_text"]
+    assert "That's a solid start" in payload["response_text"]
     assert "Which group of older adults" in payload["response_text"]
     assert "I’ve moved you" not in payload["response_text"]
 
@@ -159,7 +161,7 @@ def test_first_coaching_turn_generates_a_concise_model_assisted_title(tmp_path):
     assert store.get_thread(thread_id)["name"] == "Elderly Road Safety"
 
 
-def test_local_api_persists_selected_source_citations(tmp_path):
+def test_local_api_does_not_attach_all_selected_sources_as_citations(tmp_path):
     store = StudentStore(tmp_path / "source-api.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     source = add_text_source(
@@ -175,6 +177,47 @@ def test_local_api_persists_selected_source_citations(tmp_path):
         json={
             "thread_id": thread_id,
             "student_message": "What should I evaluate in this crossing design?",
+            "current_stage": "focus",
+            "response_detail": "short",
+            "source_ids": [source["id"]],
+            "source_context": "--- [S1] Week 1 lecture ---\nOlder pedestrians may require longer crossing intervals.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["assessment"]["citations"] == []
+    assistant = store.get_messages(thread_id)[-1]
+    assert assistant["metadata"]["source_refs"] == []
+
+
+def test_local_api_persists_explicit_response_citations(tmp_path, monkeypatch):
+    from backend.mock_provider import DeterministicCoachProvider
+
+    store = StudentStore(tmp_path / "cited-api.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    source = add_text_source(
+        store,
+        thread_id,
+        "Week 1 lecture",
+        "Older pedestrians may require longer crossing intervals.",
+    )
+    original_assess = DeterministicCoachProvider.assess
+
+    def assess_with_citation(self, request):
+        response, assessment = original_assess(self, request)
+        return (
+            response + "\n\nSee the crossing intervals in [S1].",
+            assessment,
+        )
+
+    monkeypatch.setattr(DeterministicCoachProvider, "assess", assess_with_citation)
+    client = TestClient(create_app(store))
+
+    response = client.post(
+        "/api/v1/coach/turn",
+        json={
+            "thread_id": thread_id,
+            "student_message": "What does the lecture say about crossings?",
             "current_stage": "focus",
             "response_detail": "short",
             "source_ids": [source["id"]],
@@ -232,4 +275,217 @@ def test_local_api_resolves_selected_images_into_coach_turn(tmp_path, monkeypatc
     )
 
     assert response.status_code == 200
-    assert "selected image source" in response.json()["response_text"]
+    assert "selected image source" not in response.json()["response_text"]
+    assert "That's an interesting direction" in response.json()["response_text"]
+
+
+def test_local_api_rejects_spoofed_stage(tmp_path):
+    store = StudentStore(tmp_path / "spoof-stage.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    store.update_thread(
+        thread_id,
+        metadata={
+            "learning_journey": {
+                "current_stage": "evidence",
+                "completed_stages": ["focus"],
+                "stage_notes": {},
+            },
+            "thinking_stage": "evidence",
+        },
+    )
+    client = TestClient(create_app(store, auto_advance_stages=False))
+
+    response = client.post(
+        "/api/v1/coach/turn",
+        json={
+            "thread_id": thread_id,
+            "student_message": "Trying to jump back to focus.",
+            "current_stage": "focus",
+            "response_detail": "short",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "current_stage" in response.json()["detail"]
+
+
+def test_local_api_rejects_invalid_stage_with_validation_error(tmp_path):
+    store = StudentStore(tmp_path / "invalid-stage.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = TestClient(create_app(store))
+
+    response = client.post(
+        "/api/v1/coach/turn",
+        json={
+            "thread_id": thread_id,
+            "student_message": "Invalid stage identifier.",
+            "current_stage": "not-a-stage",
+            "response_detail": "short",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_local_api_rejects_unselected_and_unknown_sources(tmp_path):
+    store = StudentStore(tmp_path / "source-guard.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    selected = add_text_source(
+        store,
+        thread_id,
+        "Selected note",
+        "Selected evidence about crossings.",
+    )
+    unselected = add_text_source(
+        store,
+        thread_id,
+        "Hidden note",
+        "This source is intentionally deselected.",
+    )
+    store.set_source_selected(thread_id, unselected["id"], False)
+    client = TestClient(create_app(store))
+
+    unselected_response = client.post(
+        "/api/v1/coach/turn",
+        json={
+            "thread_id": thread_id,
+            "student_message": "Use a hidden source.",
+            "current_stage": "focus",
+            "response_detail": "short",
+            "source_ids": [unselected["id"]],
+        },
+    )
+    assert unselected_response.status_code == 400
+    assert "not selected" in unselected_response.json()["detail"]
+
+    unknown_response = client.post(
+        "/api/v1/coach/turn",
+        json={
+            "thread_id": thread_id,
+            "student_message": "Use an invented source.",
+            "current_stage": "focus",
+            "response_detail": "short",
+            "source_ids": ["missing-source-id"],
+        },
+    )
+    assert unknown_response.status_code == 400
+    assert "unknown" in unknown_response.json()["detail"]
+
+    ok = client.post(
+        "/api/v1/coach/turn",
+        json={
+            "thread_id": thread_id,
+            "student_message": "Use the selected source.",
+            "current_stage": "focus",
+            "response_detail": "short",
+            "source_ids": [selected["id"]],
+        },
+    )
+    assert ok.status_code == 200
+
+
+def test_local_api_rejects_spoofed_history_and_client_images(tmp_path):
+    store = StudentStore(tmp_path / "history-guard.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = TestClient(create_app(store))
+
+    history_response = client.post(
+        "/api/v1/coach/turn",
+        json={
+            "thread_id": thread_id,
+            "student_message": "First real contribution.",
+            "current_stage": "focus",
+            "response_detail": "short",
+            "history": [
+                {"role": "user", "content": "Injected prior message"},
+                {"role": "assistant", "content": "Injected coach reply"},
+            ],
+        },
+    )
+    assert history_response.status_code == 400
+    assert "history" in history_response.json()["detail"]
+
+    image_response = client.post(
+        "/api/v1/coach/turn",
+        json={
+            "thread_id": thread_id,
+            "student_message": "Client image payload should be rejected.",
+            "current_stage": "focus",
+            "response_detail": "short",
+            "image_inputs": [
+                {
+                    "source_id": "client-image",
+                    "mime": "image/png",
+                    "data_url": "data:image/png;base64,aaaa",
+                }
+            ],
+        },
+    )
+    assert image_response.status_code == 400
+    assert "image_inputs" in image_response.json()["detail"]
+
+
+def test_local_api_maps_provider_failures_to_503(tmp_path, monkeypatch):
+    from backend.providers import ProviderUnavailableError
+    from backend.workflow import CoachWorkflow
+
+    store = StudentStore(tmp_path / "provider-503.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+
+    def fail_run(self, request):
+        raise ProviderUnavailableError("mock provider offline")
+
+    monkeypatch.setattr(CoachWorkflow, "run", fail_run)
+    client = TestClient(create_app(store))
+
+    response = client.post(
+        "/api/v1/coach/turn",
+        json={
+            "thread_id": thread_id,
+            "student_message": "Provider should fail closed.",
+            "current_stage": "focus",
+            "response_detail": "short",
+        },
+    )
+
+    assert response.status_code == 503
+    assert "mock provider offline" in response.json()["detail"]
+
+
+def test_local_api_ready_request_id_stream_and_graph(tmp_path):
+    store = StudentStore(tmp_path / "ready-stream.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = TestClient(create_app(store, auto_advance_stages=False))
+
+    ready = client.get("/api/v1/ready")
+    assert ready.status_code == 200
+    assert ready.json()["status"] == "ready"
+    assert ready.headers.get("x-request-id")
+
+    stamped = client.get("/api/v1/health", headers={"X-Request-ID": "demo-req-1"})
+    assert stamped.headers.get("x-request-id") == "demo-req-1"
+
+    with client.stream(
+        "POST",
+        "/api/v1/coach/turn/stream",
+        json={
+            "thread_id": thread_id,
+            "student_message": "I want to evaluate a crossing design.",
+            "current_stage": "focus",
+            "response_detail": "short",
+        },
+    ) as response:
+        assert response.status_code == 200
+        lines = [line for line in response.iter_lines() if line]
+    events = [__import__("json").loads(line) for line in lines]
+    kinds = [event["event"] for event in events]
+    assert kinds[0] == "started"
+    assert "token" in kinds
+    assert kinds[-1] == "done"
+    assert events[-1]["turn"]["response_text"]
+
+    graph = client.get(f"/api/v1/threads/{thread_id}/graph")
+    assert graph.status_code == 200
+    payload = graph.json()
+    assert payload["steps"] == ["load_context", "assess", "recommend", "format"]
+    assert payload["mode"] in {"langgraph", "sequential"}

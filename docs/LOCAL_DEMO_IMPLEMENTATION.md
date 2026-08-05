@@ -80,6 +80,9 @@ durable per-thread checkpoints.
 Its steps are:
 
 1. Load the notebook, canonical conversation history, and learning state.
+   Client-supplied stage, history, selected source IDs, source context, and
+   image payloads are treated as hints only; the server reloads persisted values
+   and rejects mismatches with typed 4xx responses.
 2. Retrieve evidence from selected notebook sources.
 3. Assess the student contribution against the current stage.
 4. Execute the current stage handler.
@@ -94,30 +97,40 @@ Each assessment includes: current stage, contribution summary, stage-specific
 assessment, evidence, assumptions, missing reasoning elements,
 critical-understanding level, confidence, stay/advance recommendation,
 rationale, guidance questions, updated learning summary, working conclusion,
-understanding change, citations, and user-facing response.
+understanding change, citations, Facione dimension scores (0–4 Holistic rubric
+plus not-started), supportive review strengths and improvements for the current
+stage (may be empty), and user-facing response.
 
-Only the student's explicit confirmation may apply an advancement. The system
-must persist the recommendation and confirmation/rejection event first. Remove
-hidden comment parsing, keyword-stage heuristics, and unrestricted manual
-advancement.
+Only the student's explicit confirmation may apply an advancement in the safe
+default mode (`AUTO_ADVANCE_STAGES=false`). The system must persist the
+recommendation and confirmation/rejection event first. Remove hidden comment
+parsing, keyword-stage heuristics, and unrestricted manual advancement.
+
+Audited auto-advance (`AUTO_ADVANCE_STAGES=true`) is an explicit local demo
+override: the coach ADVANCE recommendation is applied immediately without the
+Next/confirm UI, but a transition row is still persisted for auditability. Do
+not treat auto-advance as the repository default.
 
 ## Providers and retrieval
 
-Default local configuration supports:
+Repository defaults in `.env.example` and `backend/settings.py` are cost-safe:
 
 ```env
-MODEL_PROVIDER=ollama|openai|mock
+MODEL_PROVIDER=mock
+MOCK_OPENAI=true
+AUTO_ADVANCE_STAGES=false
+USE_LOCAL_API=true
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_CHAT_MODEL=gpt-oss:20b
 OLLAMA_EMBEDDING_MODEL=<local-embedding-model>
 OPENAI_API_KEY=
-OPENAI_CHAT_MODEL=gpt-5.6-terra
-MOCK_MODEL_ENABLED=true
+OPENAI_CHAT_MODEL=gpt-5.6-luna
 ```
 
-Do not hard-code a model in the workflow. Give a helpful, actionable error if
-Ollama is unavailable. The mock provider must be deterministic and support all
-automated tests without network access.
+Set `MODEL_PROVIDER=ollama` or `openai` in a private `.env` when needed. Do not
+hard-code a model in the workflow. Give a helpful, actionable error if Ollama is
+unavailable. The mock provider must be deterministic and support all automated
+tests without network access.
 
 Retrieval is notebook-isolated and source-first. It stores chunk metadata and
 stable source mappings, retrieves only selected sources from the active

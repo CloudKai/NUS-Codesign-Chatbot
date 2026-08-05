@@ -613,18 +613,33 @@ def selected_source_context(
     return "\n\n".join(sections), references
 
 
+def safe_source_file_path(source: dict[str, Any]) -> Path | None:
+    """Resolve a notebook source path when it stays inside ``files_dir``.
+
+    Returns:
+        Absolute path when the file exists and is owned by the configured files
+        root; otherwise ``None`` (missing path, missing file, or traversal).
+    """
+    path_value = source.get("path")
+    if not path_value:
+        return None
+    path = Path(str(path_value)).resolve()
+    files_root = settings.files_dir.resolve()
+    if not path.is_file() or files_root not in path.parents:
+        return None
+    return path
+
+
 def source_image_input(source: dict[str, Any]) -> dict[str, str] | None:
     """Build an OpenAI-style ``input_image`` part for a notebook image source.
 
     Returns None when the source is not an image, the path is missing, or the
     file is outside the configured files directory (path-traversal guard).
     """
-    path_value = source.get("path")
-    if source.get("kind") != "image" or not path_value:
+    if source.get("kind") != "image":
         return None
-    path = Path(str(path_value)).resolve()
-    files_root = settings.files_dir.resolve()
-    if not path.is_file() or files_root not in path.parents:
+    path = safe_source_file_path(source)
+    if path is None:
         return None
     mime = str(source.get("mime") or mimetypes.guess_type(path.name)[0] or "image/png")
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
