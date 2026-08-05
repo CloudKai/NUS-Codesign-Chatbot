@@ -26,7 +26,7 @@ def render_profile_menu() -> None:
     display_name = str(st.session_state.get("display_name") or "Student")
     initial = profile_initial(display_name)
     with st.container(key="topbar_profile"):
-        with st.popover(initial, help="Settings"):
+        with st.popover(initial):
             with st.container(key="profile_menu_root"):
                 st.markdown(
                     '<div class="cd-profile-menu" hidden></div>',
