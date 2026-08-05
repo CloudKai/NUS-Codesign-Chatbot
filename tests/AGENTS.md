@@ -49,6 +49,7 @@ default `StudentStore()` path.
 | `test_files_and_engine.py` | Upload processing and chat engine behavior |
 | `test_models_and_support.py` | Model registry and support-mode helpers |
 | `test_streamlit_ui.py` | AppTest smoke against `streamlit_app.py` (legacy path) |
+| `test_theme_styles.py` | Ordered CSS partial manifest and assembled stylesheet contracts |
 | `test_streamlit_api_mode.py` | AppTest API confirmation + auto-advance; one legacy fallback |
 | `test_rename.py` | Enter-only rename draft helpers and epochs |
 | `test_init_db.py` | Safe `init_db.py` refuse-existing / `--force` behavior |

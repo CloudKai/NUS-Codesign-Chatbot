@@ -1,4 +1,6 @@
 from backend.models import (
+    DEFAULT_CHAT_MODEL_ID,
+    DEFAULT_REASONING_EFFORT,
     LOCKED_CHAT_MODEL_ID,
     LOCKED_REASONING_EFFORT,
     MODEL_REGISTRY,
@@ -22,16 +24,17 @@ from backend.student_support import (
 
 
 def test_curated_model_registry_and_capabilities():
-    assert {model.id for model in MODEL_REGISTRY} == {LOCKED_CHAT_MODEL_ID}
+    assert {model.id for model in MODEL_REGISTRY} == {DEFAULT_CHAT_MODEL_ID}
     locked = get_model(LOCKED_CHAT_MODEL_ID)
     assert locked.label == "GPT-5.6 Luna"
-    assert locked.reasoning_efforts == (LOCKED_REASONING_EFFORT,)
+    assert DEFAULT_REASONING_EFFORT in locked.reasoning_efforts
     assert locked.vision is True
     assert locked.web_search is True
     assert locked.file_search is True
     assert locked.function_calling is True
-    # Unknown legacy IDs fall back to the locked model.
-    assert get_model("gpt-5.5").id == LOCKED_CHAT_MODEL_ID
+    # Unknown legacy IDs fall back to the default model.
+    assert get_model("gpt-5.4").id == DEFAULT_CHAT_MODEL_ID
+    assert get_model("gpt-5.5").id == DEFAULT_CHAT_MODEL_ID
 
 
 def test_openai_strict_schema_marks_objects_closed():
@@ -89,9 +92,12 @@ def test_mock_provider_includes_facione_scores():
 
 def test_reasoning_is_model_compatible():
     locked = get_model(LOCKED_CHAT_MODEL_ID)
+    assert locked.reasoning_efforts == (DEFAULT_REASONING_EFFORT, "medium")
     assert validate_reasoning(locked, "low") == "low"
-    assert validate_reasoning(locked, "high") == "low"
-    assert validate_reasoning(locked, "unsupported") == "low"
+    assert validate_reasoning(locked, "medium") == "medium"
+    assert validate_reasoning(locked, "high") == DEFAULT_REASONING_EFFORT
+    assert validate_reasoning(locked, "unsupported") == DEFAULT_REASONING_EFFORT
+    assert validate_reasoning(locked, "xhigh") == DEFAULT_REASONING_EFFORT
 
 
 def test_student_modes_cover_assignment_workflows():
@@ -135,3 +141,42 @@ def test_critical_thinking_scaffold_is_actionable():
     assert any("evidence" in question.lower() for question in scaffold)
     assert any("assumption" in question.lower() for question in scaffold)
     assert any("alternative" in question.lower() for question in scaffold)
+
+
+def test_apply_selected_model_accepts_explicit_effort(monkeypatch):
+    """Composer helpers apply and clamp reasoning effort for the chosen model."""
+    import streamlit as st
+
+    from ui.settings import apply_selected_model
+
+    class _Session(dict):
+        def __getattr__(self, key):  # noqa: D105
+            try:
+                return self[key]
+            except KeyError as exc:
+                raise AttributeError(key) from exc
+
+        def __setattr__(self, key, value):  # noqa: D105
+            self[key] = value
+
+    state = _Session(
+        selected_model=DEFAULT_CHAT_MODEL_ID,
+        reasoning_effort="low",
+    )
+    monkeypatch.setattr(st, "session_state", state)
+
+    apply_selected_model(DEFAULT_CHAT_MODEL_ID, effort="medium")
+    assert state["selected_model"] == DEFAULT_CHAT_MODEL_ID
+    assert state["reasoning_effort"] == "medium"
+
+    apply_selected_model(DEFAULT_CHAT_MODEL_ID, effort="not-allowed")
+    assert state["reasoning_effort"] == DEFAULT_REASONING_EFFORT
+
+
+def test_composer_model_chip_includes_effort_label():
+    from ui.chat import _composer_model_chip_label, _effort_label
+
+    assert _effort_label("medium") == "Med"
+    assert _composer_model_chip_label("GPT-5.6 Luna", "low") == "GPT-5.6 Luna · Low"
+    assert _composer_model_chip_label("GPT-5.6 Luna", "medium") == "GPT-5.6 Luna · Med"
+    assert _composer_model_chip_label("GPT-5.6 Luna", None) == "GPT-5.6 Luna"

@@ -28,17 +28,19 @@ class ModelDefinition:
         return value
 
 
-# Single locked coaching model for this application.
-LOCKED_CHAT_MODEL_ID = "gpt-5.6-luna"
-LOCKED_REASONING_EFFORT = "low"
+# Default coaching model for new sessions; also kept as LOCKED_* aliases.
+DEFAULT_CHAT_MODEL_ID = "gpt-5.6-luna"
+DEFAULT_REASONING_EFFORT = "low"
+LOCKED_CHAT_MODEL_ID = DEFAULT_CHAT_MODEL_ID
+LOCKED_REASONING_EFFORT = DEFAULT_REASONING_EFFORT
 
 MODEL_REGISTRY: tuple[ModelDefinition, ...] = (
     ModelDefinition(
-        LOCKED_CHAT_MODEL_ID,
+        DEFAULT_CHAT_MODEL_ID,
         "GPT-5.6 Luna",
-        "Locked coaching model for this application (low reasoning).",
+        "Default coaching model for this application (low reasoning).",
         "Current",
-        (LOCKED_REASONING_EFFORT,),
+        (DEFAULT_REASONING_EFFORT, "medium"),
         vision=True,
         web_search=True,
         file_search=True,
@@ -51,8 +53,8 @@ MODEL_BY_ID = {model.id: model for model in MODEL_REGISTRY}
 
 
 def get_model(model_id: str) -> ModelDefinition:
-    """Return the locked model; unknown IDs fall back to the only allowed model."""
-    return MODEL_BY_ID.get(model_id) or MODEL_BY_ID[LOCKED_CHAT_MODEL_ID]
+    """Return a registered model; unknown IDs fall back to the default."""
+    return MODEL_BY_ID.get(model_id) or MODEL_BY_ID[DEFAULT_CHAT_MODEL_ID]
 
 
 def validate_reasoning(model: ModelDefinition, effort: str | None) -> str | None:
@@ -60,6 +62,10 @@ def validate_reasoning(model: ModelDefinition, effort: str | None) -> str | None
         return None
     if effort in model.reasoning_efforts:
         return effort
+    if DEFAULT_REASONING_EFFORT in model.reasoning_efforts:
+        return DEFAULT_REASONING_EFFORT
+    if "medium" in model.reasoning_efforts:
+        return "medium"
     return model.reasoning_efforts[0]
 
 

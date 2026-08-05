@@ -1,14 +1,14 @@
 """Size the inline user-message editor to match the 8-row bubble cap.
 
 ``USER_BUBBLE_MAX_ROWS`` is the single source of truth for the bubble and edit
-cap. Keep ``ui/assets/template.css`` ``--cd-user-bubble-max-rows`` in sync.
+cap. Keep ``ui/assets/styles/00-foundations.css`` ``--cd-user-bubble-max-rows`` in sync.
 """
 
 from __future__ import annotations
 
 import streamlit.components.v1 as components
 
-# Keep in sync with --cd-user-bubble-max-rows / row-height tokens in template.css.
+# Keep in sync with --cd-user-bubble-max-rows / row-height tokens in styles/00-foundations.css.
 USER_BUBBLE_MAX_ROWS = 8
 USER_BUBBLE_FONT_REM = 0.9
 USER_BUBBLE_LINE_HEIGHT = 1.45

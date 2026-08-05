@@ -54,7 +54,7 @@ class OllamaCoachProvider:
             response = httpx.post(
                 f"{self._base_url}/api/chat",
                 json={
-                    "model": self._model,
+                    "model": request.model_id or self._model,
                     "stream": False,
                     "format": schema,
                     "messages": [
@@ -227,7 +227,7 @@ class OpenAICoachProvider:
             else:
                 model_input = prompt
             create_kwargs: dict[str, Any] = {
-                "model": self._model,
+                "model": request.model_id or self._model,
                 "input": model_input,
                 "text": {
                     "format": {
@@ -238,8 +238,13 @@ class OpenAICoachProvider:
                     }
                 },
             }
-            if self._reasoning_effort:
-                create_kwargs["reasoning"] = {"effort": self._reasoning_effort}
+            effort = (
+                request.reasoning_effort
+                if request.reasoning_effort is not None
+                else self._reasoning_effort
+            )
+            if effort:
+                create_kwargs["reasoning"] = {"effort": effort}
             response = self._client.responses.create(**create_kwargs)
             turn = ProviderCoachOutput.model_validate_json(response.output_text)
         except Exception as error:  # Provider errors are translated at the application boundary.

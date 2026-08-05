@@ -12,7 +12,13 @@ from typing import Any
 
 import streamlit as st
 
-from backend.models import LOCKED_CHAT_MODEL_ID, LOCKED_REASONING_EFFORT, MODEL_BY_ID
+from backend.models import (
+    DEFAULT_CHAT_MODEL_ID,
+    DEFAULT_REASONING_EFFORT,
+    MODEL_BY_ID,
+    get_model,
+    validate_reasoning,
+)
 from backend.student_journey import default_journey, normalize_journey
 from backend.student_support import DEFAULT_SUPPORT_MODE
 
@@ -21,6 +27,7 @@ from ui.constants import APPEARANCE_MODES, RESPONSE_LANGUAGES
 from ui.layout.column_resize import set_side_panel_collapsed
 from ui.rename import bump_rename_epoch, discard_rename_draft
 from ui.runtime import rerun, store
+from ui.settings import apply_selected_model
 
 
 def initialize_session() -> None:
@@ -37,9 +44,9 @@ def initialize_session() -> None:
     """
     defaults: dict[str, Any] = {
         "thread_id": None,
-        "selected_model": LOCKED_CHAT_MODEL_ID,
+        "selected_model": DEFAULT_CHAT_MODEL_ID,
         "support_mode": DEFAULT_SUPPORT_MODE,
-        "reasoning_effort": LOCKED_REASONING_EFFORT,
+        "reasoning_effort": DEFAULT_REASONING_EFFORT,
         "web_search": False,
         "image_generation": False,
         "allow_model_knowledge": False,
@@ -67,9 +74,8 @@ def initialize_session() -> None:
     st.session_state.web_search = False
     st.session_state.image_generation = False
     if st.session_state.selected_model not in MODEL_BY_ID:
-        st.session_state.selected_model = LOCKED_CHAT_MODEL_ID
-    if st.session_state.reasoning_effort not in {LOCKED_REASONING_EFFORT, None}:
-        st.session_state.reasoning_effort = LOCKED_REASONING_EFFORT
+        st.session_state.selected_model = DEFAULT_CHAT_MODEL_ID
+    apply_selected_model(st.session_state.selected_model)
     preferences = store.get_user_preferences() or {}
     stored_appearance = str(preferences.get("appearance") or "").strip()
     if stored_appearance in APPEARANCE_MODES:
@@ -106,7 +112,7 @@ def new_notebook(should_rerun: bool = True) -> None:
     journey = default_journey()
     thread_id = store.create_thread(
         name="Untitled notebook",
-        model_id=LOCKED_CHAT_MODEL_ID,
+        model_id=st.session_state.get("selected_model") or DEFAULT_CHAT_MODEL_ID,
         support_mode=DEFAULT_SUPPORT_MODE,
         assignment={"title": "", "course": "", "brief": "", "rubric": ""},
     )
@@ -181,10 +187,14 @@ def select_thread(thread_id: str, should_rerun: bool = True) -> None:
     metadata = thread.get("metadata") or {}
     selected = metadata.get("selected_model")
     if selected in MODEL_BY_ID:
-        st.session_state.selected_model = selected
+        apply_selected_model(str(selected))
     else:
-        st.session_state.selected_model = LOCKED_CHAT_MODEL_ID
-    st.session_state.reasoning_effort = LOCKED_REASONING_EFFORT
+        apply_selected_model(DEFAULT_CHAT_MODEL_ID)
+    # Keep effort compatible with the restored model choice.
+    st.session_state.reasoning_effort = validate_reasoning(
+        get_model(st.session_state.selected_model),
+        st.session_state.get("reasoning_effort"),
+    )
     st.session_state.support_mode = DEFAULT_SUPPORT_MODE
     st.session_state.allow_model_knowledge = False
     raw_journey = metadata.get("learning_journey")

@@ -14,7 +14,7 @@ import streamlit.components.v1 as components
 
 RenameKind = Literal["notebook", "source", "topbar"]
 
-# Mirrored by ``content:"Press Enter to apply"`` in ``ui/assets/template.css``.
+# Mirrored by ``content:"Press Enter to apply"`` in ``ui/assets/styles/``.
 _ENTER_HINT = "Press Enter to apply"
 
 _KEY_PREFIXES: dict[RenameKind, tuple[str, ...]] = {

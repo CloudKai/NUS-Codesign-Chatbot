@@ -168,10 +168,78 @@ def test_streamlit_notebook_workspace_smoke():
     assert "cd-profile-help-title" in rendered
     assert "cd-profile-help-body" in rendered
     assert "stTooltipHoverTarget" in rendered
-    assert "st-key-composer_model_slot" not in rendered
+    assert "st-key-composer_model_slot" in rendered
+    assert any(
+        (button.key or "").startswith("composer-model-") for button in app.button
+    )
+    assert not any(
+        (button.key or "").startswith("composer-effort-") for button in app.button
+    )
     assert "st-key-chat_composer" in rendered
     assert len(app.chat_message) == 1
     assert app.chat_message[0].name == "assistant"
+
+
+def test_composer_effort_picker_updates_session_and_thread_metadata():
+    """Choosing an intelligence level updates session state and notebook metadata."""
+    from backend.models import DEFAULT_CHAT_MODEL_ID
+    from backend.student_store import StudentStore
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    thread_id = app.session_state["thread_id"]
+    assert app.session_state["selected_model"] == DEFAULT_CHAT_MODEL_ID
+    assert app.session_state["reasoning_effort"] == "low"
+    assert not any(
+        (button.key or "").startswith("composer-effort-") for button in app.button
+    )
+
+    model_button = next(
+        button
+        for button in app.button
+        if (button.key or "") == f"composer-model-{DEFAULT_CHAT_MODEL_ID}"
+    )
+    model_button.click().run()
+    assert not app.exception
+    assert app.session_state["composer_effort_menu_model"] == DEFAULT_CHAT_MODEL_ID
+    assert {button.label for button in app.button} >= {"Low", "Med"}
+    assert "High" not in {button.label for button in app.button}
+    assert any(
+        (button.key or "").startswith("composer-effort-") for button in app.button
+    )
+
+    model_button = next(
+        button
+        for button in app.button
+        if (button.key or "") == f"composer-model-{DEFAULT_CHAT_MODEL_ID}"
+    )
+    model_button.click().run()
+    assert not app.exception
+    assert app.session_state["composer_effort_menu_model"] in (None, "")
+    assert not any(
+        (button.key or "").startswith("composer-effort-") for button in app.button
+    )
+
+    model_button = next(
+        button
+        for button in app.button
+        if (button.key or "") == f"composer-model-{DEFAULT_CHAT_MODEL_ID}"
+    )
+    model_button.click().run()
+    medium = next(
+        button
+        for button in app.button
+        if (button.key or "") == f"composer-effort-{DEFAULT_CHAT_MODEL_ID}-medium"
+    )
+    medium.click().run()
+    assert not app.exception
+    assert app.session_state["selected_model"] == DEFAULT_CHAT_MODEL_ID
+    assert app.session_state["reasoning_effort"] == "medium"
+    assert app.session_state["composer_effort_menu_model"] in (None, "")
+    assert int(app.session_state["composer_model_popover_epoch"]) >= 1
+
+    metadata = StudentStore().get_thread(thread_id).get("metadata") or {}
+    assert metadata.get("selected_model") == DEFAULT_CHAT_MODEL_ID
+    assert metadata.get("reasoning_effort") == "medium"
 
 
 def test_add_pasted_source_then_chat_with_citation():
@@ -288,8 +356,10 @@ def test_language_theme_and_journey_has_no_manual_progression_control():
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "cd-profile-language-label" in rendered
     assert "cd-profile-language-tooltip" in rendered
-    assert "preserving source names" in rendered
-    css = Path("ui/assets/template.css").read_text(encoding="utf-8")
+    assert "The coach responds in this language" in rendered
+    from ui.theme import _template_stylesheet
+
+    css = _template_stylesheet()
     assert (
         ".st-key-profile_language div[data-testid=\"stPopover\"] button > div > div:first-child"
         in css
@@ -447,16 +517,19 @@ def test_current_notebook_title_is_directly_editable_and_syncs_with_history():
 
 def test_rename_and_icon_controls_expose_accessible_instructions():
     """Static a11y contracts for Enter-only rename and icon-only controls."""
+    from ui.theme import _template_stylesheet
+
     rename_source = Path("ui/rename.py").read_text(encoding="utf-8")
     sources = Path("ui/sources.py").read_text(encoding="utf-8")
     profile = Path("ui/profile.py").read_text(encoding="utf-8")
     workspace = Path("ui/workspace.py").read_text(encoding="utf-8")
-    css = Path("ui/assets/template.css").read_text(encoding="utf-8")
+    css = _template_stylesheet()
 
     assert '_ENTER_HINT = "Press Enter to apply"' in rename_source
     assert '"help": _ENTER_HINT' not in rename_source
     assert 'help="Source actions"' in sources
-    assert 'help="Settings"' in profile
+    assert "with st.popover(initial)" in profile
+    assert 'help="Settings"' not in profile
     assert 'help="Collapse Thinking Path"' in workspace
     assert 'help="Collapse Sources"' in workspace
     assert 'help=f"Expand {label}"' in workspace

@@ -1,7 +1,8 @@
 """Theme CSS injection and appearance overrides for the Streamlit UI.
 
-Static layout and component styles live in ``ui/assets/template.css``.
-Appearance token overrides remain here so Light/Dark/System can stay dynamic.
+Static layout and component styles live in ordered partials under
+``ui/assets/styles/``. Appearance token overrides remain here so
+Light/Dark/System can stay dynamic.
 """
 
 from __future__ import annotations
@@ -11,16 +12,47 @@ from pathlib import Path
 import streamlit as st
 
 _ASSETS_DIR = Path(__file__).resolve().parent / "assets"
-_TEMPLATE_CSS_PATH = _ASSETS_DIR / "template.css"
-_template_css_cache: tuple[float, str] | None = None
+_STYLES_DIR = _ASSETS_DIR / "styles"
+# Fixed cascade order. Do not reorder without comparing the assembled CSS.
+_STYLE_PARTIALS: tuple[str, ...] = (
+    "00-foundations.css",
+    "10-workspace.css",
+    "20-studio.css",
+    "30-chat.css",
+    "40-sources.css",
+    "50-dialogs-notebooks.css",
+    "60-profile-topbar.css",
+    "90-responsive.css",
+)
+_template_css_cache: tuple[tuple[tuple[str, int, int], ...], str] | None = None
+
+
+def style_partial_paths() -> list[Path]:
+    """Return the ordered stylesheet partial paths used by the UI."""
+    return [_STYLES_DIR / name for name in _STYLE_PARTIALS]
+
+
+def _stylesheet_signature(paths: list[Path]) -> tuple[tuple[str, int, int], ...]:
+    """Build a cache key from each partial's name, mtime, and size."""
+    return tuple(
+        (path.name, path.stat().st_mtime_ns, path.stat().st_size) for path in paths
+    )
 
 
 def _template_stylesheet() -> str:
-    """Load the static template stylesheet, refreshing when the file changes."""
+    """Load and concatenate static stylesheets, refreshing when any change."""
     global _template_css_cache
-    mtime = _TEMPLATE_CSS_PATH.stat().st_mtime
-    if _template_css_cache is None or _template_css_cache[0] != mtime:
-        _template_css_cache = (mtime, _TEMPLATE_CSS_PATH.read_text(encoding="utf-8"))
+    paths = style_partial_paths()
+    missing = [path.name for path in paths if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(
+            "Missing stylesheet partial(s) in "
+            f"{_STYLES_DIR}: {', '.join(missing)}"
+        )
+    signature = _stylesheet_signature(paths)
+    if _template_css_cache is None or _template_css_cache[0] != signature:
+        assembled = "".join(path.read_text(encoding="utf-8") for path in paths)
+        _template_css_cache = (signature, assembled)
     return _template_css_cache[1]
 
 

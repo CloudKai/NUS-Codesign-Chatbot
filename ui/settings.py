@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from backend.models import get_model
+from backend.models import get_model, validate_reasoning
 
 from ui.runtime import store
 
@@ -24,18 +24,33 @@ def persist_response_language() -> None:
     )
 
 
-def apply_selected_model(model_id: str) -> None:
-    """Apply a model choice and keep reasoning effort compatible with it."""
+def apply_selected_model(model_id: str, *, effort: str | None = None) -> None:
+    """Apply a model choice and keep reasoning effort compatible with it.
+
+    Args:
+        model_id: Registered coaching model id.
+        effort: Optional requested reasoning effort. When omitted, the current
+            session effort is kept if still valid for the model; otherwise the
+            model's first allowed effort is used.
+    """
     selected = get_model(str(model_id))
     st.session_state.selected_model = selected.id
-    efforts = list(selected.reasoning_efforts)
-    if efforts:
-        current = st.session_state.get("reasoning_effort")
-        if current not in efforts:
-            current = efforts[0]
-        st.session_state.reasoning_effort = current
-    else:
+    if not selected.reasoning_efforts:
         st.session_state.reasoning_effort = None
+        return
+    requested = effort if effort is not None else st.session_state.get("reasoning_effort")
+    st.session_state.reasoning_effort = validate_reasoning(selected, requested)
+
+
+def persist_composer_model_choice() -> None:
+    """Persist the active composer model and reasoning effort on the notebook."""
+    store.update_thread(
+        st.session_state.thread_id,
+        metadata={
+            "selected_model": st.session_state.selected_model,
+            "reasoning_effort": st.session_state.get("reasoning_effort"),
+        },
+    )
 
 
 def persist_appearance() -> None:

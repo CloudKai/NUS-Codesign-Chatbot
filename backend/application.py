@@ -7,6 +7,7 @@ from typing import Any
 
 from .domain import CitationReference, CoachImageInput, CoachRequest, CoachTurn
 from .learning_service import LearningProgressService
+from .models import DEFAULT_CHAT_MODEL_ID, get_model, validate_reasoning
 from .repositories import NotebookRepository
 from .source_library import image_inputs_for_source_ids, selected_source_context
 from .student_journey import (
@@ -222,6 +223,15 @@ class CoachApplicationService:
                 authoritative_ids,
             )
         ]
+        selected_model = get_model(
+            str(metadata.get("selected_model") or request.model_id or DEFAULT_CHAT_MODEL_ID)
+        )
+        selected_effort = validate_reasoning(
+            selected_model,
+            request.reasoning_effort
+            if request.reasoning_effort is not None
+            else metadata.get("reasoning_effort"),
+        )
         return request.model_copy(
             update={
                 "current_stage": authoritative_stage,
@@ -229,6 +239,8 @@ class CoachApplicationService:
                 "source_ids": authoritative_ids,
                 "source_context": source_context,
                 "image_inputs": image_inputs,
+                "model_id": selected_model.id,
+                "reasoning_effort": selected_effort,
             }
         )
 

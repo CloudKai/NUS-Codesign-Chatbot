@@ -482,7 +482,7 @@ must not overlap adjacent controls.
 
 | Design area                           | Implementation                                        |
 | ------------------------------------- | ----------------------------------------------------- |
-| Layout and component styling          | `ui/assets/template.css` (injected via `ui/theme.py`) |
+| Layout and component styling          | `ui/assets/styles/*.css` (injected via `ui/theme.py`) |
 | Shared presentation helpers           | `ui/components.py`                                    |
 | Theme tokens and overrides            | `ui/theme.py` → `render_theme_css()`                  |
 | Column resize / scroll / composer DOM | `ui/layout/`                                          |

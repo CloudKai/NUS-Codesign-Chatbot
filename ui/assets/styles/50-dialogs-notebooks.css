@@ -1,0 +1,913 @@
+    /* Buttons and form controls */
+    div[data-testid="stButton"] button,
+    div[data-testid="stPopover"] button,
+    [data-baseweb="select"] > div,
+    [data-baseweb="input"],
+    [data-baseweb="textarea"] {
+        border-radius:.6rem;
+    }
+
+    div[data-testid="stButton"] button[kind="primary"],
+    [data-testid="stBaseButton-primary"] {
+        border-color:var(--cd-accent) !important;
+        color:#fff !important;
+        background:var(--cd-accent) !important;
+    }
+
+    div[data-testid="stButton"] button[kind="primary"] *,
+    [data-testid="stBaseButton-primary"] * {
+        color:#fff !important;
+        -webkit-text-fill-color:#fff !important;
+    }
+
+    div[data-testid="stButton"] button[kind="primary"]:hover,
+    [data-testid="stBaseButton-primary"]:hover {
+        background:var(--cd-accent-hover) !important;
+    }
+
+    div[data-testid="stButton"] button[kind="primary"]:disabled,
+    [data-testid="stBaseButton-primary"]:disabled {
+        opacity:1 !important;
+        border-color:var(--cd-border) !important;
+        color:var(--cd-muted) !important;
+        background:var(--cd-surface-muted) !important;
+    }
+
+    /* Dialogs and popovers */
+    [data-testid="stDialog"] {
+        padding:1.5rem !important;
+        align-items:center !important;
+        justify-content:center !important;
+    }
+
+    [role="dialog"] {
+        max-height:calc(100vh - 3rem);
+        overflow:auto;
+        border:1px solid var(--cd-border) !important;
+        border-radius:1rem !important;
+        color:var(--cd-text) !important;
+        background:var(--cd-surface) !important;
+        box-shadow:var(--cd-shadow) !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook-search) {
+        width:min(54rem,calc(100vw - 3rem)) !important;
+        max-width:min(54rem,calc(100vw - 3rem)) !important;
+        max-height:calc(100vh - 3rem) !important;
+        min-height:0;
+        height:auto;
+        /* Scroll only the notebook list, never the whole dialog. */
+        overflow:hidden !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook-search)
+    > [data-testid="stVerticalBlock"] {
+        overflow:hidden !important;
+        max-height:100%;
+    }
+
+    [data-testid="stDialog"] > div:has(> [role="dialog"] .st-key-notebook-search) {
+        width:min(54rem,calc(100vw - 3rem)) !important;
+    }
+
+    /* New notebook: keep material + and label on one midline. */
+    [role="dialog"]:has(.st-key-notebook-search)
+    [data-testid="stBaseButton-primary"],
+    [role="dialog"]:has(.st-key-notebook-search)
+    div[data-testid="stButton"] button[kind="primary"] {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        gap:.35rem !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook-search)
+    [data-testid="stBaseButton-primary"] [data-testid="stIconMaterial"],
+    [role="dialog"]:has(.st-key-notebook-search)
+    div[data-testid="stButton"] button[kind="primary"] [data-testid="stIconMaterial"] {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        margin:0 !important;
+        padding:0 !important;
+        font-size:1.05rem !important;
+        line-height:1 !important;
+        transform:translateY(.05rem) !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook-search)
+    [data-testid="stBaseButton-primary"] [data-testid="stMarkdownContainer"],
+    [role="dialog"]:has(.st-key-notebook-search)
+    [data-testid="stBaseButton-primary"] [data-testid="stMarkdownContainer"] p,
+    [role="dialog"]:has(.st-key-notebook-search)
+    div[data-testid="stButton"] button[kind="primary"] [data-testid="stMarkdownContainer"],
+    [role="dialog"]:has(.st-key-notebook-search)
+    div[data-testid="stButton"] button[kind="primary"] p {
+        display:inline-flex !important;
+        align-items:center !important;
+        margin:0 !important;
+        padding:0 !important;
+        line-height:1.1 !important;
+    }
+
+    [role="dialog"]:has([data-testid="stFileUploader"]) {
+        width:min(42rem,calc(100vw - 3rem)) !important;
+        max-width:min(42rem,calc(100vw - 3rem)) !important;
+    }
+
+    [data-testid="stDialog"] > div:has(> [role="dialog"] [data-testid="stFileUploader"]) {
+        width:min(42rem,calc(100vw - 3rem)) !important;
+    }
+
+    [role="dialog"]:has(.stage-confirm-row) {
+        width:min(35rem,calc(100vw - 3rem)) !important;
+        max-width:min(35rem,calc(100vw - 3rem)) !important;
+    }
+
+    [data-testid="stDialog"] > div:has(> [role="dialog"] .stage-confirm-row) {
+        width:min(35rem,calc(100vw - 3rem)) !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel) {
+        width:min(31rem,calc(100vw - 3rem)) !important;
+        max-width:min(31rem,calc(100vw - 3rem)) !important;
+        padding:.9rem 1.15rem 1.1rem !important;
+        box-sizing:border-box !important;
+    }
+
+    [data-testid="stDialog"] > div:has(
+        > [role="dialog"] .st-key-notebook_actions_panel
+    ) {
+        width:min(31rem,calc(100vw - 3rem)) !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    > [data-testid="stVerticalBlock"] {
+        gap:.15rem !important;
+        row-gap:.15rem !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-notebook_actions_panel > [data-testid="stVerticalBlock"],
+    .st-key-notebook_actions_panel [data-testid="stVerticalBlock"] {
+        gap:.1rem !important;
+        row-gap:.1rem !important;
+    }
+
+    /* Keep the dialog title on the same left edge as Rename / body fields. */
+    [role="dialog"]:has(.st-key-notebook_actions_panel) > h2[slot="title"],
+    [role="dialog"]:has(.st-key-notebook_actions_panel) header,
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stDialogHeader"],
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stMarkdownContainer"]:has(h2) {
+        margin:0 0 .35rem !important;
+        padding:0 !important;
+        padding-right:2rem !important; /* room for the close control */
+        box-sizing:border-box !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel) > h2[slot="title"],
+    [role="dialog"]:has(.st-key-notebook_actions_panel) header h2,
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stDialogHeader"] h2 {
+        margin:0 !important;
+        padding:0 !important;
+        text-align:left !important;
+    }
+
+    /* Tighten Rename → phase caption → delete spacing. */
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stElementContainer"]:has([data-testid="stTextInput"]),
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stLayoutWrapper"]:has([data-testid="stTextInput"]) {
+        margin:0 !important;
+        padding:0 0 .05rem !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stWidgetLabel"],
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stWidgetLabel"] p {
+        margin:0 0 .28rem !important;
+        padding:0 !important;
+        line-height:1.2 !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stElementContainer"]:has([data-testid="stCaptionContainer"]),
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stLayoutWrapper"]:has([data-testid="stCaptionContainer"]) {
+        margin:0 !important;
+        padding:0 !important;
+        min-height:0 !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stCaptionContainer"] {
+        margin:0 !important;
+        padding:0 !important;
+        min-height:0 !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stCaptionContainer"] p {
+        margin:0 !important;
+        padding:0 !important;
+        line-height:1.2 !important;
+    }
+
+    /* Delete notebook / source danger box — shared rhythm and chrome. */
+    .st-key-notebook_action_danger,
+    [class*="st-key-source_action_danger"] {
+        margin-top:.35rem;
+        padding:.5rem .65rem .55rem;
+        border:1px solid color-mix(in srgb,var(--cd-danger) 22%,var(--cd-border));
+        border-radius:.68rem;
+        background:color-mix(in srgb,var(--cd-danger) 5%,var(--cd-surface));
+    }
+
+    [data-testid="stElementContainer"]:has(> .st-key-notebook_action_danger),
+    [data-testid="stLayoutWrapper"]:has(.st-key-notebook_action_danger),
+    [data-testid="stElementContainer"]:has(> [class*="st-key-source_action_danger"]),
+    [data-testid="stLayoutWrapper"]:has([class*="st-key-source_action_danger"]) {
+        margin-top:.2rem !important;
+        padding-top:0 !important;
+    }
+
+    /* Compact stack for source delete only (notebook keeps readable spacing). */
+    [class*="st-key-source_action_danger"] [data-testid="stVerticalBlock"] {
+        gap:.28rem !important;
+        row-gap:.28rem !important;
+    }
+
+    /* Must beat `.st-key-notebook_actions_panel [data-testid="stVerticalBlock"]`
+       (gap:.1rem) — Streamlit nests VerticalBlock, so no direct-child selector. */
+    .st-key-notebook_actions_panel
+    .st-key-notebook_action_danger [data-testid="stVerticalBlock"],
+    .st-key-notebook_action_danger [data-testid="stVerticalBlock"] {
+        gap:.7rem !important;
+        row-gap:.7rem !important;
+    }
+
+    .st-key-notebook_action_danger
+    [data-testid="stElementContainer"],
+    .st-key-notebook_action_danger
+    [data-testid="stLayoutWrapper"],
+    [class*="st-key-source_action_danger"]
+    [data-testid="stElementContainer"],
+    [class*="st-key-source_action_danger"]
+    [data-testid="stLayoutWrapper"] {
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    [class*="st-key-source_action_danger"]
+    [data-testid="stElementContainer"]:has([data-testid="stButton"]),
+    [class*="st-key-source_action_danger"]
+    [data-testid="stLayoutWrapper"]:has([data-testid="stButton"]) {
+        margin-top:.05rem !important;
+    }
+
+    .st-key-notebook_action_danger
+    [data-testid="stElementContainer"]:has([data-testid="stButton"]),
+    .st-key-notebook_action_danger
+    [data-testid="stLayoutWrapper"]:has([data-testid="stButton"]) {
+        margin-top:.35rem !important;
+    }
+
+    .st-key-notebook_action_danger
+    [data-testid="stMarkdownContainer"]:has(h4),
+    [class*="st-key-source_action_danger"]
+    [data-testid="stMarkdownContainer"]:has(h4) {
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-notebook_action_danger h4,
+    [class*="st-key-source_action_danger"] h4 {
+        margin:0 !important;
+        padding:0 !important;
+        color:var(--cd-text) !important;
+        font-size:.9rem !important;
+        font-weight:700 !important;
+        line-height:1.2 !important;
+        letter-spacing:-.01em;
+    }
+
+    /* Extra space under "Delete notebook" before the confirm row. */
+    .st-key-notebook_action_danger
+    [data-testid="stElementContainer"]:has(h4),
+    .st-key-notebook_action_danger
+    [data-testid="stLayoutWrapper"]:has(h4) {
+        margin:0 0 .2rem !important;
+        padding:0 !important;
+    }
+
+    .st-key-notebook_action_danger
+    [data-testid="stElementContainer"]:has([data-testid="stCheckbox"]),
+    .st-key-notebook_action_danger
+    [data-testid="stLayoutWrapper"]:has([data-testid="stCheckbox"]) {
+        margin:.35rem 0 0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-notebook_action_danger [data-testid="stCheckbox"],
+    [class*="st-key-source_action_danger"] [data-testid="stCheckbox"] {
+        width:100% !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-notebook_action_danger [data-testid="stCheckbox"] > label,
+    [class*="st-key-source_action_danger"] [data-testid="stCheckbox"] > label {
+        display:inline-flex !important;
+        flex-direction:row !important;
+        align-items:center !important;
+        justify-content:flex-start !important;
+        gap:.5rem !important;
+        width:auto !important;
+        max-width:100% !important;
+        margin:0 !important;
+        padding:0 !important;
+        min-height:1.35rem !important;
+    }
+
+    .st-key-notebook_action_danger [data-testid="stCheckbox"] > label > div:has(svg),
+    .st-key-notebook_action_danger [data-testid="stCheckbox"] > label > div:nth-child(2),
+    [class*="st-key-source_action_danger"] [data-testid="stCheckbox"] > label > div:has(svg),
+    [class*="st-key-source_action_danger"] [data-testid="stCheckbox"] > label > div:nth-child(2) {
+        display:flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        flex:0 0 auto !important;
+        margin:0 !important;
+        align-self:center !important;
+    }
+
+    [class*="st-key-source_action_danger"] [data-testid="stWidgetLabel"],
+    [class*="st-key-source_action_danger"] [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"],
+    [class*="st-key-source_action_danger"] [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"] > div,
+    [class*="st-key-source_action_danger"] [data-testid="stWidgetLabel"] p {
+        display:inline !important;
+        margin:0 !important;
+        padding:0 !important;
+        line-height:1.3 !important;
+        text-align:left !important;
+    }
+
+    /* Vertically center confirm label with the checkbox control. */
+    .st-key-notebook_action_danger [data-testid="stCheckbox"] > label {
+        align-items:center !important;
+    }
+
+    .st-key-notebook_action_danger [data-testid="stWidgetLabel"] {
+        display:flex !important;
+        align-items:center !important;
+        align-self:center !important;
+        margin:0 !important;
+        padding:0 !important;
+        line-height:1 !important;
+        height:1.1rem !important;
+        min-height:1.1rem !important;
+        transform:translateY(.35rem) !important;
+    }
+
+    .st-key-notebook_action_danger [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"],
+    .st-key-notebook_action_danger [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"] > div {
+        display:flex !important;
+        align-items:center !important;
+        margin:0 !important;
+        padding:0 !important;
+        line-height:1 !important;
+        height:100% !important;
+        min-height:0 !important;
+    }
+
+    .st-key-notebook_action_danger [data-testid="stWidgetLabel"] p {
+        display:flex !important;
+        align-items:center !important;
+        margin:0 !important;
+        padding:0 !important;
+        line-height:1.1rem !important;
+        height:1.1rem !important;
+        text-align:left !important;
+        transform:none !important;
+    }
+
+    [class*="st-key-source_action_danger"] div[data-testid="stButton"] {
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-notebook_action_danger div[data-testid="stButton"] {
+        margin:.15rem 0 0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-notebook_action_danger div[data-testid="stButton"] button,
+    [class*="st-key-source_action_danger"] div[data-testid="stButton"] button {
+        min-height:2.35rem !important;
+        margin:0 !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stTextInputRootElement"],
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stTextInputRootElement"] > div {
+        color:var(--cd-text) !important;
+        border-color:var(--cd-border) !important;
+        background:var(--cd-surface) !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stTextInputRootElement"] input,
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    input[aria-label="Rename"] {
+        opacity:1 !important;
+        color:var(--cd-text) !important;
+        -webkit-text-fill-color:var(--cd-text) !important;
+        caret-color:var(--cd-text) !important;
+        background:transparent !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stBaseButton-secondary"],
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    div[data-testid="stButton"] button {
+        opacity:1 !important;
+        border:1px solid var(--cd-border) !important;
+        color:var(--cd-text) !important;
+        -webkit-text-fill-color:var(--cd-text) !important;
+        background:var(--cd-surface) !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stBaseButton-secondary"] *,
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    div[data-testid="stButton"] button * {
+        color:var(--cd-text) !important;
+        -webkit-text-fill-color:var(--cd-text) !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stCheckbox"] label {
+        color:var(--cd-text) !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stCheckbox"] label > div:nth-child(2) {
+        border:1px solid var(--cd-checkbox-border, var(--cd-border)) !important;
+        border-radius:.35rem !important;
+        background:var(--cd-checkbox-bg, var(--cd-surface)) !important;
+        color:var(--cd-accent) !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stCheckbox"] label:has(input:checked) > div:nth-child(2) {
+        border-color:var(--cd-accent) !important;
+        background:var(--cd-accent) !important;
+        color:#fff !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stCheckbox"] label > div:nth-child(2) svg {
+        fill:#fff !important;
+        stroke:#fff !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stCheckbox"] p {
+        color:var(--cd-text) !important;
+        -webkit-text-fill-color:var(--cd-text) !important;
+    }
+
+    /* All checkboxes: white control in Light mode (via --cd-checkbox-bg). */
+    [data-testid="stCheckbox"] label > div:nth-child(2),
+    [data-testid="stCheckbox"] label > div:has(> svg),
+    [data-testid="stCheckbox"] [data-baseweb="checkbox"] > div,
+    [data-baseweb="checkbox"] > div:first-child {
+        border:1px solid var(--cd-checkbox-border, var(--cd-border)) !important;
+        background:var(--cd-checkbox-bg, #FFFFFF) !important;
+        box-shadow:none !important;
+    }
+
+    [data-testid="stCheckbox"] label:has(input:checked) > div:nth-child(2),
+    [data-testid="stCheckbox"] label:has(input:checked) > div:has(> svg),
+    [data-testid="stCheckbox"] [data-baseweb="checkbox"][data-checked="true"] > div,
+    [data-baseweb="checkbox"][data-checked="true"] > div:first-child {
+        border-color:var(--cd-accent) !important;
+        background:var(--cd-accent) !important;
+    }
+
+    [data-testid="stCheckbox"] label:has(input:checked) > div:nth-child(2) svg,
+    [data-testid="stCheckbox"] label:has(input:checked) > div:has(> svg) svg,
+    [data-baseweb="checkbox"][data-checked="true"] svg {
+        fill:#fff !important;
+        stroke:#fff !important;
+        color:#fff !important;
+    }
+
+    [data-testid="stCheckbox"] label:not(:has(input:checked)) > div:nth-child(2) svg,
+    [data-testid="stCheckbox"] label:not(:has(input:checked)) > div:has(> svg) svg {
+        opacity:0 !important;
+    }
+
+    .st-key-notebook_action_danger
+    div[data-testid="stButton"] button:not(:disabled),
+    [class*="st-key-source_action_danger"]
+    div[data-testid="stButton"] button:not(:disabled) {
+        border-color:var(--cd-danger) !important;
+        color:#fff !important;
+        background:var(--cd-danger) !important;
+    }
+
+    .st-key-notebook_action_danger
+    div[data-testid="stButton"] button:not(:disabled) *,
+    [class*="st-key-source_action_danger"]
+    div[data-testid="stButton"] button:not(:disabled) * {
+        color:#fff !important;
+        -webkit-text-fill-color:#fff !important;
+    }
+
+    .st-key-notebook_action_danger
+    div[data-testid="stButton"] button:disabled,
+    .st-key-notebook_action_danger
+    div[data-testid="stButton"] button:disabled *,
+    [class*="st-key-source_action_danger"]
+    div[data-testid="stButton"] button:disabled,
+    [class*="st-key-source_action_danger"]
+    div[data-testid="stButton"] button:disabled * {
+        color:var(--cd-muted) !important;
+        -webkit-text-fill-color:var(--cd-muted) !important;
+        border-color:var(--cd-border) !important;
+        background:var(--cd-surface) !important;
+    }
+
+    [role="dialog"]:has(.stage-confirm-row) > h2[slot="title"] {
+        position:absolute !important;
+        width:1px !important;
+        height:1px !important;
+        overflow:hidden !important;
+        clip:rect(0,0,0,0) !important;
+        white-space:nowrap !important;
+    }
+
+    [role="dialog"] h2,
+    [role="dialog"] h3,
+    [role="dialog"] h4 {
+        color:var(--cd-text) !important;
+        letter-spacing:-.025em;
+    }
+
+    [role="dialog"] [data-baseweb="input"],
+    [role="dialog"] [data-baseweb="select"] > div,
+    [role="dialog"] [data-baseweb="textarea"] {
+        border-color:var(--cd-border) !important;
+        color:var(--cd-text) !important;
+        background:var(--cd-surface) !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook-search)
+    > [data-testid="stVerticalBlock"] {
+        gap:0 !important;
+        row-gap:0 !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook-search)
+    [data-testid="stCaptionContainer"] {
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook-search)
+    [data-testid="stCaptionContainer"] p {
+        margin:0 !important;
+        line-height:1.2;
+    }
+
+    [role="dialog"]:has(.st-key-notebook-search)
+    [data-testid="stElementContainer"]:has([data-testid="stCaptionContainer"]) {
+        margin:0 !important;
+        padding:0 !important;
+        min-height:0 !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook-search)
+    [data-testid="stElementContainer"]:has(.st-key-notebook_library_scroll) {
+        margin:0 !important;
+        padding:0 !important;
+        min-height:0 !important;
+    }
+
+    .st-key-notebook_library_scroll {
+        height:auto !important;
+        max-height:min(50vh, 22.5rem) !important;
+        min-height:0 !important;
+        overflow-x:hidden !important;
+        overflow-y:auto !important;
+        margin-top:0 !important;
+        padding:0 !important;
+        border:0 !important;
+        background:transparent !important;
+        gap:0 !important;
+        row-gap:0 !important;
+        overscroll-behavior:contain;
+        scrollbar-gutter:stable;
+        scrollbar-width:thin;
+        scrollbar-color:var(--cd-scrollbar) transparent;
+    }
+
+    .st-key-notebook_library_scroll[data-testid="stVerticalBlock"],
+    [data-testid="stVerticalBlock"].st-key-notebook_library_scroll {
+        gap:0 !important;
+        row-gap:0 !important;
+    }
+
+    .st-key-notebook_library_scroll > [data-testid="stLayoutWrapper"],
+    .st-key-notebook_library_scroll [data-testid="stLayoutWrapper"] {
+        height:auto !important;
+        max-height:none !important;
+        min-height:0 !important;
+        flex:0 0 auto !important;
+        overflow:visible !important;
+    }
+
+    .st-key-notebook_library_scroll [data-testid="stElementContainer"] {
+        margin:0 !important;
+        padding:0 !important;
+        height:auto !important;
+        max-height:none !important;
+        min-height:0 !important;
+        flex:0 0 auto !important;
+        overflow:visible !important;
+    }
+
+    .st-key-notebook_library_scroll::-webkit-scrollbar {
+        width:6px;
+    }
+
+    .st-key-notebook_library_scroll::-webkit-scrollbar-track {
+        background:transparent;
+    }
+
+    .st-key-notebook_library_scroll::-webkit-scrollbar-thumb {
+        border-radius:999px;
+        background:var(--cd-scrollbar);
+    }
+
+    [class*="st-key-notebook_card_"] {
+        margin:0 !important;
+        padding:15px .1rem 15px 8px;
+        border:0;
+        border-bottom:1px solid var(--cd-border);
+        border-radius:0;
+        background:transparent !important;
+        box-sizing:border-box !important;
+    }
+
+    [class*="st-key-notebook_card_"][data-testid="stVerticalBlock"] {
+        gap:0 !important;
+        row-gap:0 !important;
+        background:transparent !important;
+    }
+
+    [class*="st-key-notebook_card_"] [data-testid="stColumn"]:nth-child(1) [data-testid="stElementContainer"],
+    [class*="st-key-notebook_card_"] [data-testid="stColumn"]:nth-child(1) [data-testid="stLayoutWrapper"],
+    [class*="st-key-notebook_card_"] [data-testid="stColumn"]:nth-child(1) [data-testid="stMarkdownContainer"] {
+        margin:0 !important;
+        padding:0 !important;
+        min-height:0 !important;
+    }
+
+    [class*="st-key-notebook_card_"] [data-testid="stColumn"]:nth-child(1) [data-testid="stMarkdownContainer"] p {
+        margin:0 !important;
+        line-height:1.2;
+    }
+
+    [class*="st-key-notebook_card_"]:hover {
+        background:var(--cd-surface-muted) !important;
+    }
+
+    [class*="st-key-notebook_card_"] [data-testid="stHorizontalBlock"] {
+        display:grid !important;
+        grid-template-columns:minmax(0,1fr) 4.5rem 2rem;
+        gap:.45rem !important;
+        align-items:center !important;
+        padding:0 !important;
+        margin:0 !important;
+    }
+
+    [class*="st-key-notebook_card_"] [data-testid="stColumn"] {
+        width:auto !important;
+        min-width:0 !important;
+        flex:none !important;
+        align-self:center !important;
+    }
+
+    [class*="st-key-notebook_card_"] [data-testid="stColumn"]:nth-child(2),
+    [class*="st-key-notebook_card_"] [data-testid="stColumn"]:nth-child(3) {
+        display:flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+    }
+
+    [class*="st-key-notebook_card_"] [data-testid="stColumn"]:nth-child(2) div[data-testid="stButton"] button,
+    [class*="st-key-notebook_card_"] [data-testid="stColumn"]:nth-child(2) [data-testid="stBaseButton-secondary"] {
+        min-height:1.85rem !important;
+        height:1.85rem !important;
+        padding:0 .65rem !important;
+        border:1px solid var(--cd-border) !important;
+        border-radius:.55rem !important;
+        color:var(--cd-text) !important;
+        background:var(--cd-surface) !important;
+        font-size:.76rem !important;
+        font-weight:650 !important;
+    }
+
+    [class*="st-key-notebook_card_"] [data-testid="stColumn"]:nth-child(2) div[data-testid="stButton"] button:hover,
+    [class*="st-key-notebook_card_"] [data-testid="stColumn"]:nth-child(2) [data-testid="stBaseButton-secondary"]:hover {
+        border-color:color-mix(in srgb,var(--cd-accent) 35%,var(--cd-border)) !important;
+        background:var(--cd-surface-muted) !important;
+    }
+
+    [class*="st-key-notebook_card_"] [data-testid="stColumn"]:nth-child(2) div[data-testid="stButton"] button p,
+    [class*="st-key-notebook_card_"] [data-testid="stColumn"]:nth-child(2) [data-testid="stBaseButton-secondary"] p {
+        margin:0 !important;
+        overflow:hidden;
+        text-align:center !important;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+        font-size:.76rem !important;
+        font-weight:650 !important;
+    }
+
+    [class*="st-key-notebook_card_"] [data-testid="stColumn"]:nth-child(3) div[data-testid="stButton"] button,
+    [class*="st-key-notebook_card_"] [data-testid="stColumn"]:nth-child(3) [data-testid="stBaseButton-tertiary"] {
+        width:1.85rem !important;
+        min-width:1.85rem !important;
+        max-width:1.85rem !important;
+        min-height:1.85rem !important;
+        height:1.85rem !important;
+        padding:0 !important;
+        border:0 !important;
+        color:var(--cd-muted) !important;
+        background:transparent !important;
+        font-size:1rem !important;
+        line-height:1 !important;
+    }
+
+    [class*="st-key-notebook_card_"] [data-testid="stColumn"]:nth-child(3) div[data-testid="stButton"] button p,
+    [class*="st-key-notebook_card_"] [data-testid="stColumn"]:nth-child(3) [data-testid="stBaseButton-tertiary"] p {
+        margin:0 !important;
+        font-size:1rem !important;
+        line-height:1 !important;
+    }
+
+    .notebook-card-copy {
+        display:grid;
+        gap:0;
+        min-width:0;
+    }
+
+    .notebook-card-title {
+        display:flex;
+        align-items:center;
+        flex-wrap:wrap;
+        gap:.35rem;
+        min-width:0;
+        overflow:visible;
+        color:var(--cd-text);
+        font-size:.8rem;
+        font-weight:650;
+        line-height:1.2;
+    }
+
+    .notebook-current-badge {
+        flex:none;
+        padding:.1rem .38rem;
+        border-radius:999px;
+        color:var(--cd-accent);
+        background:color-mix(in srgb,var(--cd-accent) 12%,var(--cd-surface));
+        border:1px solid color-mix(in srgb,var(--cd-accent) 28%,var(--cd-border));
+        font-size:.62rem;
+        font-weight:700;
+        letter-spacing:.03em;
+        text-transform:uppercase;
+        line-height:1.1;
+    }
+
+    .notebook-card-meta {
+        margin:0;
+        color:var(--cd-muted);
+        font-size:.68rem;
+        font-weight:520;
+        line-height:1.15;
+    }
+
+    .notebook-folder-active {
+        margin:.35rem 0 .5rem;
+        padding:.55rem .7rem;
+        border-radius:.48rem;
+        color:var(--cd-accent);
+        background:var(--cd-accent-soft);
+        font-size:.78rem;
+        font-weight:650;
+    }
+
+    .notebook-card-folder {
+        margin:.05rem 0 0;
+        color:var(--cd-muted);
+        font-size:.7rem;
+    }
+
+    .notebook-card-summary {
+        margin:.28rem 0 0;
+        overflow:hidden;
+        color:var(--cd-muted);
+        font-size:.76rem;
+        line-height:1.45;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+    }
+
+    [data-testid="stFileUploaderDropzone"] {
+        min-height:12rem;
+        display:flex !important;
+        flex-direction:column !important;
+        align-items:center !important;
+        justify-content:center !important;
+        gap:.42rem !important;
+        border:1px dashed color-mix(in srgb,var(--cd-accent) 42%,var(--cd-border)) !important;
+        border-radius:.72rem;
+        color:var(--cd-text) !important;
+        background:var(--cd-surface-muted) !important;
+        text-align:center;
+    }
+
+    [data-testid="stFileUploaderDropzone"]::before {
+        content:"upload_file";
+        order:1;
+        color:var(--cd-muted);
+        font-family:"Material Symbols Rounded";
+        font-size:2.25rem;
+        font-variation-settings:"FILL" 0,"wght" 350,"GRAD" 0,"opsz" 32;
+        line-height:1;
+    }
+
+    [data-testid="stFileUploaderDropzone"]::after {
+        content:"Drop files here or browse";
+        order:2;
+        color:var(--cd-text);
+        font-size:.96rem;
+        font-weight:700;
+    }
+
+    [data-testid="stFileUploaderDropzone"] > [data-testid="stFileUploaderDropzoneInstructions"] {
+        order:3;
+    }
+
+    [data-testid="stFileUploaderDropzone"] > span {
+        order:4;
+    }
+
+    [data-testid="stFileUploaderDropzone"] > span button {
+        min-height:2.35rem;
+        padding:.35rem 1.1rem !important;
+        border-color:var(--cd-accent) !important;
+        color:var(--cd-accent) !important;
+        background:var(--cd-surface) !important;
+    }
+
+    [data-testid="stFileUploaderDropzone"] > span button p {
+        font-size:0 !important;
+    }
+
+    [data-testid="stFileUploaderDropzone"] > span button p::after {
+        content:"Choose files";
+        font-size:.82rem;
+    }
+
+    [data-testid="stFileUploaderDropzone"] *,
+    [data-testid="stFileUploaderDropzone"] button * {
+        color:var(--cd-text) !important;
+        -webkit-text-fill-color:var(--cd-text) !important;
+    }
+
+    [data-testid="stPopoverBody"] {
+        max-width:23rem;
+        overflow:hidden;
+        border:1px solid var(--cd-border) !important;
+        border-radius:.9rem !important;
+        color:var(--cd-text) !important;
+        background:var(--cd-surface) !important;
+        box-shadow:var(--cd-shadow) !important;
+    }
+
+    [data-testid="stPopoverBody"] > div {
+        color:var(--cd-text) !important;
+        background:var(--cd-surface) !important;
+    }
+
+

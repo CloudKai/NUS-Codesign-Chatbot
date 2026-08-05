@@ -30,8 +30,8 @@ Only read that for UI tasks that touch API migration or coaching flow.
 | `constants.py` | Response languages and appearance modes |
 | `components.py` | Shared HTML helpers for progress, empty states, review cards |
 | `toasts.py` | Corner toast helper (timed slide-in; falls back to `st.toast`) |
-| `assets/template.css` | Static layout/component stylesheet (edit CSS here) |
-| `theme.py` | Loads `assets/template.css`, `inject_template_css()`, dynamic `render_theme_css()` |
+| `assets/styles/` | Ordered static CSS partials (edit the matching component file) |
+| `theme.py` | Loads `assets/styles/` in fixed order, `inject_template_css()`, dynamic `render_theme_css()` |
 | `layout/` | Browser-side layout helpers (column resize, sources scroll, composer) |
 | `runtime.py` | Cached store/workspace/coach + `WorkspaceFacade`, `local_api_client()`, coach helpers, `rerun()` |
 | `session.py` | Session defaults, notebook create/select/delete, `save_journey()` |
@@ -76,8 +76,9 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
   `@st.fragment` on the functions that own them. Changing keys breaks session
   state and AppTest expectations.
 - **Explicit CSS injection.** Call `inject_template_css()` from the entrypoint;
-  do not auto-inject CSS on `ui.theme` import. Edit static styles in
-  `ui/assets/template.css`, not by re-embedding large CSS strings in Python.
+  do not auto-inject CSS on `ui.theme` import. Edit static styles in the matching
+  file under `ui/assets/styles/` (fixed cascade order in `ui/theme.py`), not by
+  re-embedding large CSS strings in Python.
 - **Avoid circular imports.** Typical flow: `runtime` → `session` → panels;
   `topbar` imports `notebooks` and `settings`; `workspace` imports panel modules.
 - **No hidden stage controls.** Show coach recommendations and respect persisted
@@ -106,10 +107,13 @@ Edit the owning module (`chat.py`, `sources.py`, `studio.py`, etc.). Check
 
 **Theme or responsive CSS**
 
-Edit `ui/assets/template.css` for static styles. Edit `theme.py` only for
-Light/Dark/System token overrides in `render_theme_css()`. AppTest in
-`tests/test_streamlit_ui.py` asserts many CSS strings from rendered output —
-run UI tests after visual changes.
+Edit the matching partial under `ui/assets/styles/` for static styles
+(`00-foundations`, `10-workspace`, `20-studio`, `30-chat`, `40-sources`,
+`50-dialogs-notebooks`, `60-profile-topbar`, `90-responsive`). Keep the
+manifest order in `ui/theme.py`. Edit `theme.py` only for Light/Dark/System
+token overrides in `render_theme_css()`. AppTest in
+`tests/test_streamlit_ui.py` and `tests/test_theme_styles.py` assert assembled
+CSS contracts — run UI tests after visual changes.
 
 **Layout / scroll / composer DOM helpers**
 

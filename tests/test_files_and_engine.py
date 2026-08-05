@@ -150,12 +150,12 @@ def test_mock_student_turn_streams_and_persists(tmp_path, monkeypatch):
     assert "student" in rendered.lower()
     messages = store.get_messages(thread_id)
     assert [message["role"] for message in messages] == ["user", "assistant"]
-    from backend.models import LOCKED_CHAT_MODEL_ID
+    from backend.models import DEFAULT_CHAT_MODEL_ID
 
-    assert messages[-1]["metadata"]["model"] == LOCKED_CHAT_MODEL_ID
+    assert messages[-1]["metadata"]["model"] == DEFAULT_CHAT_MODEL_ID
     assert messages[-1]["metadata"]["thinking_stage"] == "evidence"
     assert messages[-1]["metadata"]["response_detail"] == "long"
-    assert store.get_state(thread_id)["modelId"] == LOCKED_CHAT_MODEL_ID
+    assert store.get_state(thread_id)["modelId"] == DEFAULT_CHAT_MODEL_ID
 
 
 def test_mock_short_mode_is_concise_and_stage_specific(tmp_path, monkeypatch):
@@ -324,9 +324,9 @@ def test_responses_stream_web_sources_and_state_without_live_api(tmp_path, monke
     assert stream.sources == [
         {"url": "https://example.edu/source", "title": "Primary source"}
     ]
-    from backend.models import LOCKED_CHAT_MODEL_ID
+    from backend.models import DEFAULT_CHAT_MODEL_ID
 
-    assert fake_responses.kwargs["model"] == LOCKED_CHAT_MODEL_ID
+    assert fake_responses.kwargs["model"] == DEFAULT_CHAT_MODEL_ID
     assert fake_responses.kwargs["tools"] == [{"type": "web_search"}]
     assert fake_responses.kwargs["include"] == ["web_search_call.action.sources"]
     assert store.get_state(thread_id)["previousResponseId"] == "resp_streamed"

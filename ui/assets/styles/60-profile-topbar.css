@@ -1,0 +1,1066 @@
+    [data-testid="stPopoverBody"][aria-label="Settings"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root) {
+        width:min(16.5rem,calc(100vw - 1.5rem)) !important;
+        max-width:min(16.5rem,calc(100vw - 1.5rem)) !important;
+        padding:.32rem .7rem .7rem !important;
+        border:1px solid var(--cd-border) !important;
+        border-radius:.72rem !important;
+        background:var(--cd-surface) !important;
+        box-shadow:var(--cd-shadow) !important;
+        overflow:visible !important;
+    }
+
+    /* Marker-only markdown must not add top gap above Display name. */
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stElementContainer"]:has(.cd-profile-menu),
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root) .cd-profile-menu {
+        display:none !important;
+        height:0 !important;
+        min-height:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+        border:0 !important;
+        overflow:hidden !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    > [data-testid="stVerticalBlock"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stVerticalBlock"] {
+        gap:.55rem !important;
+        row-gap:.55rem !important;
+        overflow:visible !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_menu_root > [data-testid="stVerticalBlock"] {
+        gap:.5rem !important;
+        row-gap:.5rem !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stElementContainer"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stMarkdownContainer"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stWidgetLabel"] {
+        overflow:visible !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stWidgetLabel"] {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:flex-start !important;
+        flex-wrap:nowrap !important;
+        gap:.28rem !important;
+        width:fit-content !important;
+        max-width:fit-content !important;
+        margin-bottom:.28rem !important;
+        min-height:1.1rem !important;
+        line-height:1.25 !important;
+    }
+
+    /* Segmented controls stretch their label row; keep help icon tight like Language. */
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stElementContainer"]:has([data-testid="stButtonGroup"])
+    [data-testid="stWidgetLabel"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stElementContainer"]:has([data-testid="stButtonGroup"])
+    [data-testid="stWidgetLabel"] > div,
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stElementContainer"]:has([data-testid="stButtonGroup"])
+    label:has([data-testid="stTooltipHoverTarget"]) {
+        display:inline-flex !important;
+        width:fit-content !important;
+        max-width:fit-content !important;
+        justify-content:flex-start !important;
+        gap:.28rem !important;
+        column-gap:.28rem !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stWidgetLabel"] p,
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stWidgetLabel"] label {
+        margin:0 !important;
+        padding:0 !important;
+        color:var(--cd-muted) !important;
+        -webkit-text-fill-color:var(--cd-muted) !important;
+        font-size:.72rem !important;
+        font-weight:650 !important;
+        line-height:1.3 !important;
+        white-space:nowrap !important;
+        width:auto !important;
+        flex:0 0 auto !important;
+    }
+
+    /* Help (?) icons: contrast in light/dark; keep glyph (not a solid disc). */
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stTooltipHoverTarget"] {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        flex:0 0 auto !important;
+        width:auto !important;
+        margin:0 0 0 .05rem !important;
+        padding:0 !important;
+        color:var(--cd-muted) !important;
+        -webkit-text-fill-color:var(--cd-muted) !important;
+        opacity:1 !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stTooltipHoverTarget"] [data-testid="stIconMaterial"] {
+        color:var(--cd-muted) !important;
+        -webkit-text-fill-color:var(--cd-muted) !important;
+        font-size:.92rem !important;
+        line-height:1 !important;
+        opacity:1 !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stTooltipHoverTarget"] svg {
+        width:.9rem !important;
+        height:.9rem !important;
+        color:var(--cd-muted) !important;
+        fill:currentColor !important;
+        opacity:1 !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stCaptionContainer"] {
+        margin:0 !important;
+        padding:0 !important;
+        overflow:visible !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stCaptionContainer"] p {
+        margin:0 !important;
+        font-size:.68rem !important;
+        line-height:1.35 !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root) hr {
+        margin:.2rem 0 .05rem !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stTextInput"] input,
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stTextInputRootElement"] input {
+        min-height:2rem !important;
+        font-size:.8rem !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-baseweb="select"] > div {
+        min-height:2rem !important;
+        font-size:.8rem !important;
+    }
+
+    /* Language: select-only popover trigger (no text input / caret). */
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language {
+        margin:0 !important;
+        padding:0 !important;
+        width:100% !important;
+        max-width:100% !important;
+        align-self:stretch !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language > [data-testid="stLayoutWrapper"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language > [data-testid="stVerticalBlock"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language [data-testid="stElementContainer"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language [data-testid="stPopover"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language [data-testid="stPopover"] > div {
+        width:100% !important;
+        max-width:100% !important;
+        display:block !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .cd-profile-language-head {
+        display:flex !important;
+        align-items:center !important;
+        gap:.2rem !important;
+        margin:0 0 .45rem !important;
+        color:var(--cd-muted) !important;
+        font-size:.78rem !important;
+        font-weight:600 !important;
+        line-height:1.2 !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language [data-testid="stElementContainer"]:has(.cd-profile-language-head) {
+        margin:0 0 .35rem !important;
+        padding:0 !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .cd-profile-language-help {
+        position:relative !important;
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        width:.95rem !important;
+        height:.95rem !important;
+        border-radius:999px !important;
+        border:1px solid var(--cd-border) !important;
+        color:var(--cd-muted) !important;
+        font-size:.68rem !important;
+        font-weight:700 !important;
+        line-height:1 !important;
+        cursor:help !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .cd-profile-language-tooltip {
+        position:absolute !important;
+        left:50% !important;
+        bottom:calc(100% + .35rem) !important;
+        transform:translateX(-50%) !important;
+        z-index:10000 !important;
+        width:max-content !important;
+        max-width:14rem !important;
+        padding:.4rem .55rem !important;
+        border:1px solid var(--cd-border) !important;
+        border-radius:.45rem !important;
+        background:var(--cd-surface-muted) !important;
+        color:var(--cd-text) !important;
+        box-shadow:var(--cd-shadow) !important;
+        font-size:.68rem !important;
+        font-weight:500 !important;
+        line-height:1.35 !important;
+        white-space:normal !important;
+        text-align:left !important;
+        opacity:0 !important;
+        visibility:hidden !important;
+        pointer-events:none !important;
+        transition:opacity .12s ease, visibility .12s ease !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .cd-profile-language-help:hover .cd-profile-language-tooltip,
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .cd-profile-language-help:focus .cd-profile-language-tooltip,
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .cd-profile-language-help:focus-visible .cd-profile-language-tooltip {
+        opacity:1 !important;
+        visibility:visible !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language div[data-testid="stPopover"] button {
+        width:100% !important;
+        min-width:100% !important;
+        max-width:100% !important;
+        min-height:2rem !important;
+        height:2rem !important;
+        display:flex !important;
+        align-items:center !important;
+        justify-content:stretch !important;
+        text-align:left !important;
+        padding:.25rem .55rem .25rem .65rem !important;
+        border:1px solid var(--cd-border) !important;
+        border-radius:.5rem !important;
+        background:var(--cd-surface) !important;
+        color:var(--cd-text) !important;
+        font-size:.8rem !important;
+        font-weight:500 !important;
+        box-shadow:none !important;
+    }
+
+    /* Label left, chevron pinned to the far right of the full-width trigger. */
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language div[data-testid="stPopover"] button > div {
+        width:100% !important;
+        max-width:100% !important;
+        display:flex !important;
+        align-items:center !important;
+        justify-content:space-between !important;
+        gap:.5rem !important;
+        flex:1 1 auto !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language div[data-testid="stPopover"] button > div > div:first-child,
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language div[data-testid="stPopover"] button > div > div:first-child > span {
+        display:flex !important;
+        flex:1 1 auto !important;
+        align-items:center !important;
+        justify-content:flex-start !important;
+        min-width:0 !important;
+        width:auto !important;
+        text-align:left !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language div[data-testid="stPopover"] button
+    [data-testid="stMarkdownContainer"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language div[data-testid="stPopover"] button
+    [data-testid="stMarkdownContainer"] p {
+        margin:0 !important;
+        width:auto !important;
+        max-width:100% !important;
+        flex:0 1 auto !important;
+        text-align:left !important;
+        justify-content:flex-start !important;
+        overflow:hidden !important;
+        text-overflow:ellipsis !important;
+        white-space:nowrap !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language div[data-testid="stPopover"] button
+    [data-testid="stIconMaterial"] {
+        display:inline-flex !important;
+        flex:0 0 auto !important;
+        margin-left:0 !important;
+        font-size:1.05rem !important;
+        color:var(--cd-muted) !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_language div[data-testid="stPopover"] button
+    [aria-hidden="true"] {
+        display:inline-flex !important;
+        flex:0 0 auto !important;
+        margin-left:0 !important;
+        align-items:center !important;
+    }
+
+    [data-testid="stPopoverBody"]:has([class*="st-key-profile-language-"]) {
+        border:0 !important;
+        outline:none !important;
+        box-shadow:var(--cd-shadow) !important;
+        background:var(--cd-surface) !important;
+        border-radius:.72rem !important;
+        padding:.2rem !important;
+        min-width:8.5rem !important;
+    }
+
+    [data-testid="stPopoverBody"] [class*="st-key-profile-language-"]
+    div[data-testid="stButton"] button {
+        min-height:1.85rem !important;
+        height:1.85rem !important;
+        margin:0 !important;
+        padding:0 .55rem !important;
+        border:0 !important;
+        border-radius:.45rem !important;
+        color:var(--cd-text) !important;
+        background:transparent !important;
+        box-shadow:none !important;
+        justify-content:flex-start !important;
+        text-align:left !important;
+    }
+
+    [data-testid="stPopoverBody"] [class*="st-key-profile-language-"]
+    div[data-testid="stButton"] button:hover {
+        background:var(--cd-subtle) !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stButtonGroup"] {
+        gap:.2rem !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stButtonGroup"] button {
+        min-height:1.75rem !important;
+        padding:.2rem .42rem !important;
+        font-size:.72rem !important;
+    }
+
+    [data-testid="stPopoverBody"][aria-label="Setting"] {
+        width:min(21rem,calc(100vw - 1.5rem));
+        max-width:min(21rem,calc(100vw - 1.5rem));
+    }
+
+    [data-testid="stPopoverBody"][aria-label="Setting"]
+    > [data-testid="stVerticalBlock"] {
+        gap:.82rem;
+    }
+
+    [data-testid="stPopoverBody"][aria-label="Setting"] h3 {
+        margin:0 0 .08rem;
+        line-height:1.2;
+    }
+
+    [data-testid="stPopoverBody"][aria-label="Setting"]
+    [data-testid="stWidgetLabel"] {
+        margin-bottom:.34rem;
+    }
+
+    [data-testid="stPopoverBody"][aria-label="Setting"]
+    [data-testid="stWidgetLabel"] p {
+        line-height:1.3;
+    }
+
+    [data-testid="stPopoverBody"][aria-label="Setting"] hr {
+        margin:.2rem 0 .05rem;
+    }
+
+    .response-mode-guide {
+        display:grid;
+        gap:.45rem;
+        margin:.08rem 0 .48rem;
+        padding:.72rem .78rem;
+        border:1px solid var(--cd-border);
+        border-radius:.62rem;
+        background:var(--cd-surface-muted);
+    }
+
+    .response-mode-row {
+        display:grid;
+        grid-template-columns:3.35rem minmax(0,1fr);
+        align-items:start;
+        gap:.55rem;
+        color:var(--cd-muted);
+        font-size:.72rem;
+        line-height:1.4;
+    }
+
+    .response-mode-row strong {
+        color:var(--cd-text);
+        font-size:.75rem;
+    }
+
+    .stage-confirm-row {
+        display:grid;
+        grid-template-columns:1fr auto 1fr;
+        align-items:center;
+        gap:.75rem;
+        margin:1rem 0;
+        padding:1rem;
+        border:1px solid var(--cd-border);
+        border-radius:.72rem;
+        background:var(--cd-surface-muted);
+        text-align:center;
+    }
+
+    .stage-confirm-row .material-symbols-rounded {
+        font-family:"Material Symbols Rounded";
+        font-size:1.1rem;
+        font-variation-settings:"FILL" 0,"wght" 400,"GRAD" 0,"opsz" 20;
+        line-height:1;
+    }
+
+    .stage-confirm-item {
+        min-width:0;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        gap:.48rem;
+    }
+
+    .stage-confirm-icon,
+    .stage-confirm-number {
+        width:1.9rem;
+        height:1.9rem;
+        flex:none;
+        display:grid;
+        place-items:center;
+        border:1px solid var(--cd-border);
+        border-radius:50%;
+        color:var(--cd-muted);
+        background:var(--cd-surface);
+    }
+
+    .stage-confirm-item.is-current .stage-confirm-icon,
+    .stage-confirm-item.is-current .stage-confirm-number {
+        border-color:var(--cd-accent);
+        color:#fff;
+        background:var(--cd-accent);
+    }
+
+    .stage-confirm-number {
+        font-size:.72rem;
+        font-weight:700;
+    }
+
+    .stage-confirm-item strong {
+        overflow:hidden;
+        color:var(--cd-text);
+        font-size:.86rem;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+    }
+
+    .stage-confirm-arrow {
+        color:var(--cd-muted);
+        font-size:1.35rem !important;
+    }
+
+    /* Simplified editable notebook header */
+    .st-key-current_notebook_identity {
+        width:min(31rem,34vw);
+    }
+
+    .st-key-current_notebook_identity > [data-testid="stLayoutWrapper"],
+    .st-key-current_notebook_identity [data-testid="stTextInput"] {
+        width:100%;
+    }
+
+    .st-key-current_notebook_identity [data-baseweb="input"],
+    .st-key-current_notebook_identity [data-testid="stTextInputRootElement"] {
+        min-height:2.45rem;
+        border:0 !important;
+        border-radius:.55rem;
+        background:transparent !important;
+        box-shadow:none !important;
+    }
+
+    .st-key-current_notebook_identity [data-baseweb="input"]:hover,
+    .st-key-current_notebook_identity [data-testid="stTextInputRootElement"]:hover {
+        border:1px solid var(--cd-border) !important;
+        background:var(--cd-surface-muted) !important;
+        box-shadow:none !important;
+    }
+
+    .st-key-current_notebook_identity [data-baseweb="input"]:focus-within,
+    .st-key-current_notebook_identity [data-testid="stTextInputRootElement"]:focus-within {
+        border:1px solid color-mix(in srgb, var(--cd-accent) 45%, var(--cd-border)) !important;
+        background:var(--cd-surface) !important;
+        box-shadow:0 0 0 3px color-mix(in srgb, var(--cd-accent) 14%, transparent) !important;
+    }
+
+    .st-key-current_notebook_identity input {
+        overflow:hidden;
+        color:var(--cd-text) !important;
+        -webkit-text-fill-color:var(--cd-text) !important;
+        background:transparent;
+        font-size:1.05rem;
+        font-weight:760;
+        letter-spacing:-.025em;
+        text-align:center;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+    }
+
+    .st-key-current_notebook_identity [data-testid="InputInstructions"] {
+        display:none !important;
+    }
+
+    .st-key-current_notebook_identity [data-testid="stVerticalBlock"],
+    .st-key-current_notebook_identity [data-testid="stForm"] > [data-testid="stVerticalBlock"],
+    .st-key-current_notebook_identity form [data-testid="stVerticalBlock"] {
+        gap:0 !important;
+        row-gap:0 !important;
+    }
+
+    .st-key-current_notebook_identity [data-testid="stElementContainer"]:has(
+        [data-testid="stTextInput"]
+    ) {
+        width:100% !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-topbar_navigation div[data-testid="stButton"] {
+        display:flex;
+        justify-content:center;
+    }
+
+    .st-key-notebook_topbar .st-key-topbar_navigation div[data-testid="stButton"] button {
+        width:auto !important;
+        min-width:0;
+        min-height:2.35rem !important;
+        height:2.35rem !important;
+        padding:0 .7rem !important;
+        border:1px solid var(--cd-border) !important;
+        border-radius:.75rem !important;
+        background:var(--cd-surface) !important;
+        outline:0 !important;
+        box-shadow:none !important;
+    }
+
+    .st-key-notebook_topbar .st-key-topbar_navigation div[data-testid="stButton"] button:hover,
+    .st-key-notebook_topbar .st-key-topbar_navigation div[data-testid="stButton"] button:focus,
+    .st-key-notebook_topbar .st-key-topbar_navigation div[data-testid="stButton"] button:focus-visible {
+        color:var(--cd-text) !important;
+        border-color:var(--cd-border) !important;
+        background:var(--cd-surface-muted) !important;
+        outline:0 !important;
+        box-shadow:none !important;
+    }
+
+    .st-key-topbar_navigation div[data-testid="stButton"] button p {
+        position:static;
+        width:auto;
+        height:auto;
+        overflow:visible;
+        clip:auto;
+        color:var(--cd-text);
+        font-size:.95rem;
+        font-weight:700;
+        white-space:nowrap;
+    }
+
+    .st-key-notebook_topbar .st-key-topbar_mode [data-testid="stPopover"] button,
+    .st-key-notebook_topbar .st-key-topbar_mode div[data-testid="stPopover"] > button,
+    .st-key-topbar_mode [data-testid="stPopover"] button {
+        width:max-content !important;
+        min-width:6.75rem !important;
+        max-width:none !important;
+        min-height:2.35rem !important;
+        height:2.35rem !important;
+        padding:0 .75rem !important;
+        border:1px solid var(--cd-border) !important;
+        border-radius:.75rem !important;
+        color:var(--cd-text) !important;
+        background:var(--cd-surface) !important;
+        box-shadow:none !important;
+        outline:none !important;
+        font-size:.9rem !important;
+        font-weight:650 !important;
+        white-space:nowrap !important;
+        overflow:visible !important;
+    }
+
+    .st-key-notebook_topbar .st-key-topbar_mode [data-testid="stPopover"] button:hover,
+    .st-key-notebook_topbar .st-key-topbar_mode [data-testid="stPopover"] button:focus,
+    .st-key-notebook_topbar .st-key-topbar_mode [data-testid="stPopover"] button:focus-visible,
+    .st-key-notebook_topbar .st-key-topbar_mode [data-testid="stPopover"] button:active,
+    .st-key-topbar_mode [data-testid="stPopover"] button:hover,
+    .st-key-topbar_mode [data-testid="stPopover"] button:focus,
+    .st-key-topbar_mode [data-testid="stPopover"] button:focus-visible,
+    .st-key-topbar_mode [data-testid="stPopover"] button:active {
+        border:1px solid var(--cd-border) !important;
+        background:var(--cd-surface-muted) !important;
+        box-shadow:none !important;
+        outline:none !important;
+    }
+
+    .st-key-topbar_mode [data-testid="stPopover"] button p {
+        display:inline !important;
+        margin:0 !important;
+        font-size:.9rem !important;
+        font-weight:650 !important;
+        color:var(--cd-text) !important;
+        white-space:nowrap !important;
+    }
+
+    .st-key-topbar_mode [data-testid="stPopover"] button
+    [data-testid="stIconMaterial"]:last-child {
+        display:inline-flex !important;
+        margin-left:.15rem;
+        font-size:1rem !important;
+        color:var(--cd-muted) !important;
+    }
+    .st-key-notebook_topbar .st-key-topbar_profile div[data-testid="stPopover"] button,
+    .st-key-notebook_topbar .st-key-topbar_profile div[data-testid="stButton"] button {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        gap:0 !important;
+        width:2.35rem !important;
+        min-width:2.35rem !important;
+        max-width:2.35rem !important;
+        min-height:2.35rem !important;
+        height:2.35rem !important;
+        padding:0 !important;
+        border:1px solid color-mix(in srgb, var(--cd-accent) 25%, var(--cd-border)) !important;
+        border-radius:999px !important;
+        background:var(--cd-accent-soft) !important;
+        color:var(--cd-accent) !important;
+        letter-spacing:0 !important;
+        box-shadow:none !important;
+        overflow:hidden !important;
+    }
+
+    .st-key-open-settings div[data-testid="stButton"] button {
+        width:2.4rem;
+        min-width:2.4rem;
+        min-height:2.4rem;
+        padding:0 !important;
+        border:0 !important;
+        background:transparent !important;
+        outline:0 !important;
+        box-shadow:none !important;
+    }
+
+    .st-key-open-settings div[data-testid="stButton"] button:hover,
+    .st-key-open-settings div[data-testid="stButton"] button:focus,
+    .st-key-open-settings div[data-testid="stButton"] button:focus-visible {
+        color:var(--cd-accent) !important;
+        background:transparent !important;
+        outline:0 !important;
+        box-shadow:none !important;
+    }
+
+    .st-key-open-settings div[data-testid="stButton"] button p {
+        position:absolute;
+        width:1px;
+        height:1px;
+        padding:0;
+        overflow:hidden;
+        clip:rect(0,0,0,0);
+        white-space:nowrap;
+        border:0;
+    }
+
+    .topbar-guidance-label {
+        margin:0 !important;
+        padding:0 !important;
+        color:var(--cd-text);
+        font-size:.95rem;
+        font-weight:700;
+        line-height:1 !important;
+        white-space:nowrap;
+    }
+
+    .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2)
+    [data-testid="stMarkdownContainer"],
+    .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2)
+    [data-testid="stMarkdownContainer"] > div,
+    .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2)
+    [data-testid="stVerticalBlock"] {
+        display:flex !important;
+        align-items:center !important;
+        height:100% !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-topbar_mode > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] {
+        align-items:center !important;
+        gap:.35rem !important;
+        width:max-content !important;
+    }
+
+    .st-key-topbar_mode [data-testid="stColumn"] {
+        width:auto !important;
+        flex:0 0 auto !important;
+        min-width:0 !important;
+    }
+
+    /* Guidance menu: no heavy outline, soft hover only. */
+    [data-testid="stPopoverBody"]:has([class*="st-key-topbar-guidance-"]) {
+        border:0 !important;
+        outline:none !important;
+        box-shadow:var(--cd-shadow) !important;
+        background:var(--cd-surface) !important;
+        border-radius:.72rem !important;
+        padding:.2rem !important;
+        min-width:6.5rem !important;
+    }
+
+    [data-testid="stPopoverBody"]:has([class*="st-key-topbar-guidance-"])
+    > div,
+    [data-testid="stPopoverBody"]:has([class*="st-key-topbar-guidance-"])
+    [data-testid="stVerticalBlock"],
+    [data-testid="stPopoverBody"]:has([class*="st-key-topbar-guidance-"])
+    [data-testid="stLayoutWrapper"] {
+        gap:0 !important;
+        row-gap:0 !important;
+    }
+
+    [data-testid="stPopoverBody"] [class*="st-key-topbar-guidance-"] {
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    [data-testid="stPopoverBody"] [class*="st-key-topbar-guidance-"]
+    div[data-testid="stButton"] {
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    [data-testid="stPopoverBody"] [class*="st-key-topbar-guidance-"]
+    div[data-testid="stButton"] button {
+        min-height:1.85rem !important;
+        height:1.85rem !important;
+        margin:0 !important;
+        padding:0 .55rem !important;
+        border:0 !important;
+        border-radius:.45rem !important;
+        color:var(--cd-text) !important;
+        background:transparent !important;
+        box-shadow:none !important;
+        justify-content:flex-start !important;
+    }
+
+    [data-testid="stPopoverBody"] [class*="st-key-topbar-guidance-"]
+    div[data-testid="stButton"] button:hover {
+        background:var(--cd-subtle) !important;
+    }
+
+    /* Neutral listbox options for any remaining selects. */
+    [data-baseweb="popover"] [role="listbox"] [role="option"],
+    [data-baseweb="menu"] [role="option"],
+    [role="listbox"] [role="option"] {
+        color:var(--cd-text) !important;
+        background:var(--cd-surface) !important;
+    }
+
+    [data-baseweb="popover"] [role="listbox"] [role="option"][aria-selected="true"],
+    [data-baseweb="menu"] [role="option"][aria-selected="true"],
+    [role="listbox"] [role="option"][aria-selected="true"] {
+        color:var(--cd-text) !important;
+        background:var(--cd-surface) !important;
+        font-weight:650 !important;
+    }
+
+    [data-baseweb="popover"] [role="listbox"] [role="option"]:hover,
+    [data-baseweb="menu"] [role="option"]:hover,
+    [role="listbox"] [role="option"]:hover,
+    [data-baseweb="popover"] [role="listbox"] [role="option"]:focus,
+    [role="listbox"] [role="option"]:focus {
+        color:var(--cd-text) !important;
+        background:var(--cd-subtle) !important;
+    }
+
+    .st-key-topbar_actions > [data-testid="stLayoutWrapper"],
+    .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] {
+        width:100% !important;
+        height:100% !important;
+        align-items:center !important;
+        justify-content:flex-end !important;
+    }
+
+    .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] {
+        gap:0 !important;
+        column-gap:0 !important;
+    }
+
+    /* Notebooks / Guidance cluster — asymmetric gaps (not uniform). */
+    .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        flex:0 0 auto !important;
+        width:auto !important;
+        display:flex !important;
+        align-items:center !important;
+        align-self:center !important;
+        min-height:2.35rem !important;
+        height:2.35rem !important;
+        transform:none !important;
+        padding:0 !important;
+        margin:0 !important;
+    }
+
+    /* Larger gap: Notebooks → Guidance Level */
+    .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(1) {
+        margin-right:1.25rem !important;
+    }
+
+    /* Tight gap: Guidance Level → Quick dropdown */
+    .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) {
+        margin-right:.25rem !important;
+        padding-right:0 !important;
+    }
+
+    .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(3) {
+        min-width:6.75rem !important;
+        width:max-content !important;
+        margin-left:0 !important;
+    }
+
+    .st-key-topbar_navigation,
+    .st-key-topbar_mode,
+    .st-key-topbar_navigation > [data-testid="stLayoutWrapper"],
+    .st-key-topbar_mode > [data-testid="stLayoutWrapper"],
+    .st-key-topbar_profile [data-testid="stPopover"] {
+        display:flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        margin:0 !important;
+        padding:0 !important;
+        min-height:2.35rem !important;
+        height:2.35rem !important;
+        max-height:2.35rem !important;
+    }
+
+    .st-key-topbar_profile_slot,
+    .st-key-topbar_profile,
+    .st-key-topbar_profile_slot > [data-testid="stLayoutWrapper"],
+    .st-key-topbar_profile > [data-testid="stVerticalBlock"] {
+        display:flex !important;
+        align-items:center !important;
+        justify-content:flex-end !important;
+        margin:0 !important;
+        padding:0 !important;
+        width:100% !important;
+        height:100% !important;
+        min-height:0 !important;
+        max-height:none !important;
+        position:relative !important;
+        overflow:visible !important;
+    }
+
+    /* Helper iframe must not take layout space or steal pointer events. */
+    .st-key-profile_leave_helper,
+    .st-key-topbar_profile_slot .st-key-profile_leave_helper,
+    [data-testid="stElementContainer"]:has(.st-key-profile_leave_helper),
+    .st-key-profile_leave_helper iframe,
+    .st-key-topbar_profile [data-testid="stElementContainer"]:has(iframe) {
+        position:absolute !important;
+        width:0 !important;
+        height:0 !important;
+        min-height:0 !important;
+        max-height:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+        border:0 !important;
+        overflow:hidden !important;
+        opacity:0 !important;
+        pointer-events:none !important;
+        clip:rect(0,0,0,0) !important;
+    }
+
+    .st-key-topbar_profile [data-testid="stElementContainer"],
+    .st-key-topbar_profile_slot [data-testid="stElementContainer"] {
+        margin:0 !important;
+        padding:0 !important;
+        min-height:0 !important;
+        display:flex !important;
+        align-items:center !important;
+    }
+
+    .st-key-topbar_profile div[data-testid="stPopover"] button,
+    .st-key-notebook_topbar .st-key-topbar_profile div[data-testid="stPopover"] button,
+    .st-key-topbar_profile_slot .st-key-topbar_profile div[data-testid="stPopover"] button {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        align-self:center !important;
+        width:2.35rem !important;
+        min-width:2.35rem !important;
+        max-width:2.35rem !important;
+        min-height:2.35rem !important;
+        height:2.35rem !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-open-settings div[data-testid="stButton"] button {
+        width:2.65rem;
+        min-width:2.65rem;
+        padding:0;
+        border:0 !important;
+        background:transparent !important;
+        box-shadow:none !important;
+    }
+
+    .st-key-open-settings div[data-testid="stButton"] button p {
+        position:absolute;
+        width:1px;
+        height:1px;
+        padding:0;
+        overflow:hidden;
+        clip:rect(0,0,0,0);
+        white-space:nowrap;
+        border:0;
+    }
+
+    .st-key-sources-help div[data-testid="stButton"] button {
+        width:2.1rem;
+        min-width:2.1rem;
+        min-height:2.1rem;
+        padding:0;
+        border:0 !important;
+        color:var(--cd-muted) !important;
+        background:transparent !important;
+    }
+
+    .st-key-sources-help div[data-testid="stButton"] button p,
+    [class*="st-key-locked-source-"] div[data-testid="stButton"] button p {
+        display:none;
+    }
+
+    [class*="st-key-locked-source-"] div[data-testid="stButton"] button {
+        width:2rem;
+        min-width:2rem;
+        min-height:2rem;
+        padding:0;
+        border:0 !important;
+        color:var(--cd-muted) !important;
+        background:transparent !important;
+        opacity:1 !important;
+    }
+
+    #MainMenu,
+    footer {
+        display:none !important;
+    }
+
+    /* Brand left, title centered, controls mid-right, profile flush right. */
+    .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] {
+        display:grid !important;
+        grid-template-columns:auto minmax(0,1fr) max-content 2.35rem;
+        column-gap:1.85rem !important;
+        align-items:center !important;
+        width:100% !important;
+        height:100% !important;
+    }
+
+    .st-key-topbar_actions,
+    .st-key-topbar_actions > [data-testid="stLayoutWrapper"],
+    .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"],
+    .st-key-topbar_profile_slot,
+    .st-key-topbar_profile_slot > [data-testid="stLayoutWrapper"],
+    .st-key-topbar_profile,
+    .st-key-topbar_profile > [data-testid="stVerticalBlock"] {
+        display:flex !important;
+        align-items:center !important;
+        height:100% !important;
+        min-height:100% !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        width:auto !important;
+        min-width:0 !important;
+        flex:none !important;
+        display:flex !important;
+        align-items:center !important;
+        align-self:center !important;
+        height:100% !important;
+    }
+
+    /* Controls column: keep cluster compact; gap to profile comes from column-gap. */
+    .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(3) {
+        justify-content:flex-end !important;
+    }
+
+    /* Profile column hugs the right padding edge (matches logo left inset). */
+    .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child {
+        justify-content:flex-end !important;
+        width:2.35rem !important;
+        min-width:2.35rem !important;
+        max-width:2.35rem !important;
+        margin-left:0 !important;
+        margin-right:0 !important;
+    }
+
+    .st-key-topbar_navigation,
+    .st-key-topbar_navigation > [data-testid="stLayoutWrapper"],
+    .st-key-topbar_navigation > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"],
+    .st-key-topbar_mode {
+        width:max-content !important;
+    }
+

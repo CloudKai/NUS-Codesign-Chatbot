@@ -2,7 +2,62 @@
 
 ## Current phase
 
-**Phase 6 complete (streaming, checkpoints, observability, legacy retirement) — stop for review**
+**UI stylesheet split complete — stop for review**
+
+Split the monolithic ``ui/assets/template.css`` into ordered component
+partials under ``ui/assets/styles/``. ``ui/theme.py`` concatenates them in a
+fixed cascade order into the same single ``<style>`` injection. No schema,
+API, or educational-behavior changes. Private `.env` was not modified.
+
+## Latest completed work (stylesheet split)
+
+### Behavior implemented
+
+- Static CSS now lives in eight ordered partials:
+  ``00-foundations``, ``10-workspace``, ``20-studio``, ``30-chat``,
+  ``40-sources``, ``50-dialogs-notebooks``, ``60-profile-topbar``,
+  ``90-responsive``.
+- ``ui/theme.py`` loads every partial, caches on per-file
+  ``(name, mtime_ns, size)`` signature, and still injects one ``<style>``
+  block.
+- UI tests assert the assembled stylesheet via ``_template_stylesheet()``;
+  ``tests/test_theme_styles.py`` covers manifest order and markers.
+
+### Files changed
+
+- Added ``ui/assets/styles/*.css``; removed ``ui/assets/template.css``
+- ``ui/theme.py``, ``ui/assets/__init__.py``, ``ui/AGENTS.md``, ``DESIGN.md``
+- ``ui/rename.py``, ``ui/chat.py``, ``ui/layout/user_message_edit_layout.py``
+- ``tests/test_theme_styles.py``, ``tests/test_streamlit_ui.py``,
+  ``tests/AGENTS.md``, ``docs/IMPLEMENTATION_STATUS.md``
+
+### Commands run and results
+
+- Focused: ``.venv/bin/python -m pytest -q tests/test_theme_styles.py tests/test_streamlit_ui.py -k 'theme or language_theme or rename_and_icon or assembled'`` → **4 passed**
+- Full: ``.venv/bin/python -m pytest -q`` → **113 passed**
+- ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m compileall -q backend ui streamlit_app.py`` → ok
+- Live Streamlit at ``http://127.0.0.1:8501/``: assembled partial markers present in injected CSS (including ``foundations stylesheet``); top bar, chat composer, Sources/Journey structure rendered.
+
+### Migration / compatibility / rollback
+
+- No data migration. Browser still receives one concatenated stylesheet.
+- Rollback: restore ``ui/assets/template.css`` and the previous single-file
+  loader in ``ui/theme.py``, or concatenate the partials back into one file
+  in the same order.
+
+### Risks / blockers
+
+- Cascade depends on manifest order in ``ui/theme.py``; reordering partials
+  can change override winners without a Python failure.
+
+### Next exact action
+
+- **Stop for review.** Stylesheet split is complete; no further action required
+  for this phase unless a visual regression is reported.
+
+## Previous phase
+
+**Phase 6 complete (streaming, checkpoints, observability, legacy retirement)**
 
 Phases 1–5 covered UI rename/a11y, safe defaults, backend integrity, test
 isolation, and CRUD behind the typed API. Phase 6 added readiness polling,

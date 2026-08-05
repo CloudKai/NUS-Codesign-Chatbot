@@ -160,6 +160,8 @@ class CoachRequest(BaseModel):
     image_inputs: list[CoachImageInput] = Field(default_factory=list)
     allow_model_knowledge: bool = False
     history: list[dict[str, Any]] = Field(default_factory=list)
+    model_id: str | None = None
+    reasoning_effort: str | None = None
 
     @field_validator("current_stage")
     @classmethod
