@@ -1,29 +1,35 @@
 """
 CDE2300 Socratic Design Thinking POC -- minimal single-file backend.
 
+This is the API only. The student-facing UI is streamlit_app.py.
+
 Run locally:
     pip install -r requirements.txt
     uvicorn main:app --reload --port 8000
-    open http://localhost:8000
+    streamlit run streamlit_app.py   # in a second terminal
 
 Deploy to Lambda (fastest real-AWS path):
-    See README.md -- zip this folder + deps, upload, enable Function URL.
+    See README_1.md -- zip this folder + deps, upload, enable Function URL.
+    (Lambda hosts the API; run Streamlit separately, e.g. Streamlit Community
+    Cloud, pointed at the Function URL via BACKEND_URL.)
 """
 
 import base64
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 import boto3
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from phases import build_system_prompt, CRITIQUE_EVERY_N_TURNS
 from storage import LocalJSONStorage
 
-load_dotenv()
+# .env lives outside the repo by default (e.g. so it's never at risk of being
+# committed). Override with ENV_FILE if you keep it somewhere else.
+DEFAULT_ENV_FILE = "C:\\NUS Courses\\Year 2 Sem 2\\.env"
+load_dotenv(os.environ.get("ENV_FILE", DEFAULT_ENV_FILE))
 
 # --- config ---
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
@@ -40,7 +46,7 @@ app = FastAPI()
 class ChatRequest(BaseModel):
     student_id: str
     project_id: str = "default"
-    phase: str  # "empathize" | "define" | "ideate" | "prototype" | "test"
+    phase: str  # one of phases.PHASES keys, e.g. "problem_identification"
     message: str
     image_base64: str | None = None  # optional: sketch/poster upload, raw base64, no data-uri prefix
     image_format: str = "png"  # png | jpeg | webp
@@ -93,15 +99,6 @@ def chat(req: ChatRequest):
 @app.get("/state")
 def get_state(student_id: str, project_id: str = "default"):
     return storage.get_state(student_id, project_id)
-
-
-# Serve the demo chat UI
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-
-@app.get("/")
-def root():
-    return FileResponse("static/index.html")
 
 
 # Lambda entrypoint (only used when deployed) -- requires `pip install mangum`

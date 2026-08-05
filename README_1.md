@@ -50,9 +50,16 @@ set MODEL_ID=anthropic.claude-haiku-4-5-20251001-v1:0
 uvicorn main:app --reload --port 8000
 ```
 
-Open http://localhost:8000 -- test all 5 phases, send >4 messages in one phase to see
-critique mode kick in, try uploading an image. Fix anything broken *here* before touching
-AWS deploy -- much faster debug loop than redeploying each time.
+In a second terminal (same venv), start the student-facing UI:
+
+```bash
+streamlit run streamlit_app.py
+```
+
+Open the URL Streamlit prints (usually http://localhost:8501) -- test all 5 phases, send
+>4 messages in one phase to see critique mode kick in, try uploading an image. Fix
+anything broken *here* before touching AWS deploy -- much faster debug loop than
+redeploying each time.
 
 ## Step 3 (45-60 min): Deploy to Lambda with a Function URL (no API Gateway needed)
 
@@ -67,7 +74,6 @@ mkdir package
 .venv\Scripts\activate          # Command Prompt
 python -m pip install -r requirements.txt -t package/
 cp main.py phases.py storage.py package/
-cp -r static package/
 cd package && zip -r ../lambda_deploy.zip . && cd ..
 ```
 
@@ -83,7 +89,9 @@ In the AWS Console:
 6. Increase timeout to ~30s (Configuration -> General configuration) since Bedrock calls
    can take a few seconds
 
-Hit the Function URL in a browser -- same UI as local.
+This Function URL is the API only (no browser UI). Point the Streamlit app at it by
+setting `BACKEND_URL` to the Function URL (or entering it in the app's sidebar under
+"Advanced") before running `streamlit run streamlit_app.py`.
 
 **Known limitation to say out loud in your demo:** Lambda's `/tmp` (where the local JSON
 store lives) is ephemeral per-instance, so history can reset on cold starts or if AWS

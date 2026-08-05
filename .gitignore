@@ -8,6 +8,7 @@ __pycache__/
 venv/
 ENV/
 .env/
+.env
 
 # Editor/IDE
 .vscode/
@@ -33,3 +34,6 @@ dist/
 
 # Logs
 *.log
+
+# Streamlit
+.streamlit/secrets.toml
