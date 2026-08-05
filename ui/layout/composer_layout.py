@@ -194,16 +194,59 @@ def sync_composer_layout() -> None:
     popover.style.setProperty("visibility", "visible", "important");
   }
 
+  function textShells(textarea) {
+    const shells = [];
+    let node = textarea.parentElement;
+    for (let depth = 0; depth < 5 && node; depth += 1) {
+      const testId = node.getAttribute("data-testid") || "";
+      if (testId === "stChatInput") break;
+      const isTextShell =
+        node.getAttribute("data-baseweb") === "textarea" ||
+        node === textarea.parentElement ||
+        (!!node.querySelector &&
+          !!node.querySelector('[data-testid="stChatInputTextArea"], textarea') &&
+          !node.querySelector('[data-testid="stChatInputSubmitButton"]'));
+      if (isTextShell) shells.push(node);
+      node = node.parentElement;
+    }
+    return shells;
+  }
+
   function capTextarea(textarea) {
+    const MAX_ROWS = 5;
     const styles = win.getComputedStyle(textarea);
-    const lineHeight = parseFloat(styles.lineHeight) || parseFloat(styles.fontSize) * 1.45;
-    const maxHeight = lineHeight * 3;
+    const fontSize = parseFloat(styles.fontSize) || 15.2;
+    const lineHeight = parseFloat(styles.lineHeight) || fontSize * 1.45;
+    const maxHeight = lineHeight * MAX_ROWS;
+    const minHeight = lineHeight;
+    const shells = textShells(textarea);
+
+    // Collapse first so scrollHeight tracks the current draft, not the old
+    // expanded height left behind after deleting a long paste.
+    for (const shell of shells) {
+      shell.style.setProperty("height", "auto", "important");
+      shell.style.setProperty("max-height", maxHeight + "px", "important");
+      shell.style.setProperty("overflow", "hidden", "important");
+    }
     textarea.style.setProperty("max-height", maxHeight + "px", "important");
-    textarea.style.setProperty("overflow-y", "auto", "important");
-    if (textarea.scrollHeight > maxHeight) {
-      textarea.style.setProperty("height", maxHeight + "px", "important");
-    } else {
-      textarea.style.removeProperty("height");
+    textarea.style.setProperty("height", minHeight + "px", "important");
+    textarea.style.setProperty("overflow-y", "hidden", "important");
+    void textarea.offsetHeight;
+
+    const measured = Math.max(textarea.scrollHeight, minHeight);
+    const nextHeight = Math.min(measured, maxHeight);
+    const needsScroll = measured > maxHeight;
+
+    textarea.style.setProperty("height", nextHeight + "px", "important");
+    textarea.style.setProperty(
+      "overflow-y",
+      needsScroll ? "auto" : "hidden",
+      "important"
+    );
+    for (const shell of shells) {
+      shell.style.setProperty("height", nextHeight + "px", "important");
+      shell.style.setProperty("max-height", maxHeight + "px", "important");
+      shell.style.setProperty("overflow", "hidden", "important");
     }
   }
 
@@ -243,6 +286,10 @@ def sync_composer_layout() -> None:
     const schedule = () => win.requestAnimationFrame(apply);
     textarea.addEventListener("input", schedule);
     textarea.addEventListener("change", schedule);
+    textarea.addEventListener("paste", () => {
+      win.setTimeout(schedule, 0);
+      win.setTimeout(schedule, 50);
+    });
     win.addEventListener("resize", schedule);
     const observer = new win.MutationObserver(schedule);
     observer.observe(input, { childList: true, subtree: true, characterData: true });

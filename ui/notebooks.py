@@ -217,69 +217,99 @@ def _sync_notebook_library_scroll() -> None:
     )
 
 
+def _sync_notebook_rename_select_all() -> None:
+    """Select all rename text when the field is focused."""
+    components.html(
+        """
+<script>
+(() => {
+  const doc = window.parent.document;
+  const win = window.parent;
+
+  function renameInput() {
+    const dialog = doc.querySelector(
+      '[role="dialog"]:has(.st-key-notebook_actions_panel)'
+    );
+    if (!dialog) return null;
+    return (
+      dialog.querySelector('input[aria-label="Rename"]') ||
+      dialog.querySelector('[data-testid="stTextInputRootElement"] input')
+    );
+  }
+
+  function bind(input) {
+    if (!input || input.dataset.cdRenameSelectBound === "1") return false;
+    input.dataset.cdRenameSelectBound = "1";
+    input.addEventListener("focus", () => {
+      win.requestAnimationFrame(() => {
+        try { input.select(); } catch (err) {}
+      });
+    });
+    return true;
+  }
+
+  function boot() {
+    if (bind(renameInput())) return;
+    let attempts = 0;
+    const timer = win.setInterval(() => {
+      attempts += 1;
+      if (bind(renameInput()) || attempts > 40) win.clearInterval(timer);
+    }, 50);
+  }
+
+  boot();
+})();
+</script>
+        """,
+        height=0,
+    )
+
+
 @st.dialog(
-    "Notebook actions",
+    "Notebook Actions",
     width="small",
     on_dismiss=cancel_notebook_actions,
 )
 def notebook_actions_dialog() -> None:
-    """Rename or delete a notebook with confirmation."""
+    """Rename with Enter-to-save, or delete a notebook with confirmation.
+
+    Dismissing (X, click outside, or Esc) clears the pending action and reopens
+    Your Notebooks on the next script run.
+    """
     thread_id = st.session_state.get("pending_notebook_actions")
     thread = store.get_thread(thread_id) if thread_id else None
     if not thread:
         cancel_notebook_actions()
         return
-    title = escape(thread.get("name") or "Untitled notebook")
+
+    current_title = str(thread.get("name") or "").strip() or "Untitled notebook"
     overview = thread_overview(thread)
-    st.markdown(
-        '<div class="notebook-actions-context">Editing '
-        f'<strong>“{title}”</strong></div>',
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        f"{overview['stage'].short_label} · phase {overview['stage_index']} of 6"
-    )
-
-    renamed = st.text_input(
-        "Rename",
-        value=thread.get("name") or "",
-        key=f"rename-notebook-{thread_id}",
-    )
-    if st.button(
-        "Save title",
-        icon=":material/edit:",
-        use_container_width=True,
-        key=f"rename-notebook-button-{thread_id}",
-    ):
-        store.update_thread(thread_id, name=renamed)
-        rerun()
-
-    messages = store.get_messages(thread_id)
-    if messages:
-        transcript = "\n\n".join(
-            f"{message['role'].title()}: {message['content']}"
-            for message in messages
+    with st.container(key="notebook_actions_panel"):
+        renamed = st.text_input(
+            "Rename",
+            value=current_title,
+            key=f"rename-notebook-{thread_id}-{current_title}",
         )
-        st.download_button(
-            "Download transcript",
-            transcript,
-            file_name=f"{thread.get('name') or 'notebook'}.txt",
-            mime="text/plain",
-            use_container_width=True,
-            key=f"download-notebook-{thread_id}",
+        st.caption(
+            f"{overview['stage'].short_label} · phase {overview['stage_index']} of 6"
         )
-
-    with st.container(key="notebook_action_danger"):
-        st.markdown("#### Delete notebook")
-        confirm = st.checkbox(
-            "I understand this cannot be undone",
-            key=f"confirm-delete-{thread_id}",
-        )
-        if st.button(
-            "Delete permanently",
-            icon=":material/delete:",
-            use_container_width=True,
-            disabled=not confirm,
-        ):
-            delete_notebook(thread_id)
+        cleaned = (renamed or "").strip()
+        if cleaned and cleaned != current_title:
+            store.update_thread(thread_id, name=cleaned)
             rerun()
+        _sync_notebook_rename_select_all()
+
+        with st.container(key="notebook_action_danger"):
+            st.markdown("#### Delete notebook")
+            confirm = st.checkbox(
+                "I understand this cannot be undone",
+                key=f"confirm-delete-{thread_id}",
+            )
+            if st.button(
+                "Delete permanently",
+                icon=":material/delete:",
+                use_container_width=True,
+                disabled=not confirm,
+            ):
+                delete_notebook(thread_id)
+                rerun()

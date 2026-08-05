@@ -2,12 +2,14 @@
 
 Renders the six-stage journey, confirmation-gated pending transitions (when
 auto-advance is off and the local API is available), and Review cards. Review
-strengths and improvement areas come from the latest coach assessment when
-present; otherwise stage fallbacks from ``learning_review`` are used.
+summary and Facione scores come from the latest coach assessment when present;
+strengths and improvement areas nest one expander per Thinking Path stage,
+with only the student's current stage open by default.
 """
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from html import escape
 from typing import Any
 
@@ -22,20 +24,48 @@ from backend.student_journey import (
     stage_guidance_questions,
 )
 
-from ui.components import progress_bar_html, review_card_html
+from ui.components import (
+    facione_scores_table_html,
+    progress_bar_html,
+    review_card_html,
+    review_feedback_items_html,
+)
 from ui.runtime import local_api_client, local_api_enabled, rerun, store
 
 
 def _review_fingerprint(review: dict[str, Any]) -> str:
     """Build a stable fingerprint used for Review notification dots."""
-    areas = review.get("improvement_areas") or []
+    facione = review.get("facione_scores") or {}
+    facione_part = ",".join(
+        f"{key}:{facione.get(key, 0)}"
+        for key in (
+            "analysis",
+            "interpretation",
+            "inference",
+            "evaluation",
+            "explanation",
+            "self_regulation",
+        )
+    )
+    strength_parts: list[str] = []
+    for section in review.get("strength_sections") or []:
+        items = section.get("items") or []
+        strength_parts.append(
+            f"{section.get('stage_id')}:{';'.join(str(item) for item in items)}"
+        )
+    improvement_parts: list[str] = []
+    for section in review.get("improvement_sections") or []:
+        items = section.get("items") or []
+        improvement_parts.append(
+            f"{section.get('stage_id')}:{';'.join(str(item) for item in items)}"
+        )
     return "|".join(
         [
-            str(review.get("understanding_level") or ""),
-            str(review.get("prompt_summary") or ""),
+            str(review.get("summary") or ""),
+            facione_part,
             str(review.get("conclusion") or ""),
-            str(review.get("strengths") or ""),
-            *[str(item) for item in areas],
+            *strength_parts,
+            *improvement_parts,
         ]
     )
 
@@ -185,12 +215,53 @@ def render_journey_track() -> None:
                     _render_stage_suggestions(stage)
 
 
+def _render_review_stage_expanders(
+    *,
+    sections: list[dict[str, Any]] | None,
+    current_stage_id: str,
+    key_prefix: str,
+) -> None:
+    """Render one nested expander per Thinking Path stage.
+
+    Every stage starts collapsed except the student's current stage, so past
+    feedback stays available without competing with the active focus. The
+    current stage is wrapped so CSS can give it a stronger outline.
+    """
+    stage_sections = list(sections or [])
+    if not stage_sections:
+        st.markdown(
+            '<p class="review-empty">No feedback yet</p>',
+            unsafe_allow_html=True,
+        )
+        return
+    for section in stage_sections:
+        stage_id = str(section.get("stage_id") or "").strip()
+        stage_label = str(section.get("stage") or "").strip() or "Stage"
+        is_current = bool(stage_id) and stage_id == current_stage_id
+        expander_parent = (
+            st.container(key=f"review_{key_prefix}_current")
+            if is_current
+            else nullcontext()
+        )
+        with expander_parent:
+            with st.expander(
+                stage_label,
+                expanded=is_current,
+                key=f"review_{key_prefix}_{stage_id or stage_label}",
+            ):
+                st.markdown(
+                    review_feedback_items_html(section.get("items")),
+                    unsafe_allow_html=True,
+                )
+
+
 def render_learning_review(journey: dict[str, Any]) -> None:
     """Render actionable Review cards from the latest coaching assessment.
 
-    Prefers personalized strengths / improvement areas derived from the newest
-    assistant ``assessment`` metadata. Marks the Review notification fingerprint
-    as seen when the Review tab is active.
+    Prefers a model-written summary and Facione scores from the newest assistant
+    ``assessment``. Strengths and areas for improvement nest one expander per
+    Thinking Path stage, with only the current stage open by default. Marks the
+    Review notification fingerprint as seen when the Review tab is active.
     """
     messages = store.get_messages(st.session_state.thread_id)
     review = learning_review(
@@ -198,12 +269,6 @@ def render_learning_review(journey: dict[str, Any]) -> None:
         journey,
         detail=journey["response_detail"],
     )
-    strengths = str(review.get("strengths") or "")
-    improvement_areas = [
-        str(item).strip()
-        for item in (review.get("improvement_areas") or [])
-        if str(item).strip()
-    ]
     fingerprint = _review_fingerprint(review)
     st.session_state.review_fingerprint = fingerprint
     if st.session_state.get("studio_tab") == "Review" or st.session_state.get(
@@ -211,40 +276,42 @@ def render_learning_review(journey: dict[str, Any]) -> None:
     ) == "Review":
         st.session_state.review_seen_fingerprint = fingerprint
 
-    st.markdown(
-        '<section class="review-section review-understanding">'
-        '<div class="review-icon"><span class="material-symbols-rounded">'
-        "find_in_page</span></div>"
-        f'<div class="review-value"><strong>{escape(review["understanding_level"])}</strong>'
-        f"<span>{escape(review['understanding_description'])}</span></div></section>",
-        unsafe_allow_html=True,
-    )
+    current_stage_id = str(journey.get("current_stage") or "focus")
     st.markdown(
         review_card_html(
-            label="Focus summary",
-            body=str(review["prompt_summary"]),
+            label="Summary",
+            body=str(review.get("summary") or ""),
         ),
         unsafe_allow_html=True,
     )
     st.markdown(
-        review_card_html(label="Strengths", body=strengths),
+        facione_scores_table_html(review.get("facione_scores")),
         unsafe_allow_html=True,
     )
-    st.markdown(
-        review_card_html(
-            label="Areas for improvement",
-            body="",
-            items=improvement_areas or ["Continue the discussion to get specific coaching tips."],
-        ),
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        review_card_html(
-            label="Working conclusion",
-            body=str(review["conclusion"]),
-        ),
-        unsafe_allow_html=True,
-    )
+    with st.expander("Strengths", expanded=False):
+        _render_review_stage_expanders(
+            sections=review.get("strength_sections"),
+            current_stage_id=current_stage_id,
+            key_prefix="strengths",
+        )
+    with st.expander("Areas for improvement", expanded=False):
+        _render_review_stage_expanders(
+            sections=review.get("improvement_sections"),
+            current_stage_id=current_stage_id,
+            key_prefix="improvements",
+        )
+    with st.expander("Working conclusion", expanded=False):
+        conclusion = str(review.get("conclusion") or "").strip()
+        if conclusion:
+            st.markdown(
+                f'<div class="review-conclusion-body">{escape(conclusion)}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<p class="review-empty">No working conclusion yet.</p>',
+                unsafe_allow_html=True,
+            )
     # Preserve labels used by AppTest smoke assertions.
     st.markdown(
         '<div class="review-legacy-labels" hidden>'

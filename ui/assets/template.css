@@ -29,6 +29,7 @@
         --cd-checkbox-border:#D5DCE3;
         --cd-header-height:5.4rem;
         --cd-radius:.75rem;
+        --cd-placeholder-opacity:.48;
     }
 
     @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400,0..1,0&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap");
@@ -44,6 +45,18 @@
             transition-duration:0.01ms !important;
             animation-duration:0.01ms !important;
         }
+    }
+
+    /* Fainter placeholders across inputs, textareas, and chat composer. */
+    input::placeholder,
+    textarea::placeholder,
+    [data-testid="stChatInput"] textarea::placeholder,
+    [data-testid="stChatInputTextArea"]::placeholder,
+    [data-baseweb="input"] input::placeholder,
+    [data-baseweb="textarea"] textarea::placeholder {
+        color:var(--cd-muted) !important;
+        -webkit-text-fill-color:var(--cd-muted) !important;
+        opacity:var(--cd-placeholder-opacity) !important;
     }
 
     .brand-name {
@@ -215,15 +228,15 @@
     }
 
     .cd-profile-menu {
-        display:grid;
-        gap:.55rem;
-        min-width:15.25rem;
-        padding:.05rem 0;
+        display:none;
+        height:0;
+        margin:0;
+        padding:0;
     }
     .cd-profile-help {
         display:grid;
         gap:.35rem;
-        padding:.05rem 0 .1rem;
+        padding:.05rem 0 .6rem .1rem;
     }
     .cd-profile-help-title {
         margin:0;
@@ -231,7 +244,7 @@
         font-size:.84rem;
         font-weight:700;
         line-height:1.35;
-        padding: 0.4rem 0;
+        padding: 0.4rem 0 0 0;
     }
     .cd-profile-help-body {
         margin:0;
@@ -350,7 +363,7 @@
         border-radius:0 !important;
         padding:0 !important;
         width:fit-content !important;
-        max-width:min(72%, calc(70ch + 16px)) !important;
+        max-width:min(72%, calc(80ch + 16px)) !important;
         margin-left:auto !important;
         margin-right:0 !important;
         box-sizing:border-box !important;
@@ -438,7 +451,8 @@
     .st-key-notebook_topbar > [data-testid="stLayoutWrapper"],
     .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
     > [data-testid="stHorizontalBlock"] {
-        height:100%;
+        height:100% !important;
+        min-height:100% !important;
     }
 
     .st-key-notebook_topbar [data-testid="stHorizontalBlock"] {
@@ -451,11 +465,15 @@
         display:flex !important;
         align-items:center !important;
         align-self:center !important;
+        height:100% !important;
     }
 
     .st-key-notebook_topbar [data-testid="stColumn"] > [data-testid="stVerticalBlock"] {
         width:100%;
-        justify-content:center;
+        height:100% !important;
+        display:flex !important;
+        align-items:center !important;
+        justify-content:center !important;
     }
 
     .brand-lockup {
@@ -663,12 +681,26 @@
     .st-key-notebook_topbar .st-key-topbar_mode [data-testid="stPopover"] button {
         min-height:2.35rem !important;
         height:2.35rem !important;
-        padding:0 .7rem !important;
+        min-width:6.75rem !important;
+        width:max-content !important;
+        max-width:none !important;
+        padding:0 .75rem !important;
         border:1px solid var(--cd-border) !important;
         border-radius:.75rem !important;
         color:var(--cd-text) !important;
         background:var(--cd-surface) !important;
         box-shadow:none !important;
+        white-space:nowrap !important;
+        overflow:visible !important;
+    }
+
+    .st-key-notebook_topbar .st-key-topbar_mode div[data-testid="stPopover"] button p,
+    .st-key-notebook_topbar .st-key-topbar_mode [data-testid="stPopover"] button span,
+    .st-key-notebook_topbar .st-key-topbar_mode div[data-testid="stPopover"] button div {
+        white-space:nowrap !important;
+        overflow:visible !important;
+        text-overflow:clip !important;
+        line-height:1.2 !important;
     }
 
     .st-key-notebook_topbar div[data-testid="stButton"] button:hover,
@@ -1689,43 +1721,6 @@
         line-height:1.58;
     }
 
-    .review-understanding .review-value strong {
-        display:block;
-        margin-bottom:.42rem;
-        color:var(--cd-text);
-        font-size:1rem;
-        font-weight:730;
-    }
-
-    .review-understanding {
-        display:grid;
-        grid-template-columns:2.7rem minmax(0,1fr);
-        gap:.8rem;
-        align-items:start;
-    }
-
-    .review-understanding .review-icon {
-        width:2.5rem;
-        height:2.5rem;
-        display:grid;
-        place-items:center;
-        border:1px solid var(--cd-border);
-        border-radius:50%;
-        color:var(--cd-muted);
-        background:var(--cd-surface);
-    }
-
-    .review-understanding .review-icon .material-symbols-rounded {
-        font-family:"Material Symbols Rounded";
-        font-size:1.22rem;
-        font-variation-settings:"FILL" 0,"wght" 400,"GRAD" 0,"opsz" 20;
-        line-height:1;
-    }
-
-    .review-understanding .review-value span {
-        display:block;
-    }
-
     .review-actions {
         margin:.1rem 0 0;
         padding-left:1.15rem;
@@ -1736,6 +1731,168 @@
 
     .review-actions li + li {
         margin-top:.42rem;
+    }
+
+    .facione-card .cd-card-body {
+        padding-top:.15rem;
+    }
+
+    .facione-table {
+        width:100%;
+        border-collapse:collapse;
+        border-spacing:0;
+        table-layout:fixed;
+        border:1px solid var(--cd-border);
+    }
+
+    .facione-table th,
+    .facione-table td {
+        display:table-cell;
+        padding:.48rem .65rem;
+        vertical-align:middle;
+        border:1px solid var(--cd-border);
+        font-size:.79rem;
+        line-height:1.35;
+        box-sizing:border-box;
+    }
+
+    .facione-table thead th {
+        color:var(--cd-muted);
+        font-size:.68rem;
+        font-weight:650;
+        letter-spacing:.02em;
+        text-transform:uppercase;
+        text-align:left;
+        background:color-mix(in srgb, var(--cd-border) 28%, transparent);
+    }
+
+    .facione-table tbody th {
+        width:58%;
+        color:var(--cd-text);
+        font-weight:620;
+        text-align:left;
+    }
+
+    .facione-table tbody td {
+        width:42%;
+        color:var(--cd-muted);
+    }
+
+    .facione-score-content {
+        display:inline-flex;
+        align-items:center;
+        gap:.42rem;
+        white-space:nowrap;
+    }
+
+    .facione-score .material-symbols-rounded {
+        font-family:"Material Symbols Rounded";
+        font-size:1.2rem;
+        font-variation-settings:"FILL" 0,"wght" 420,"GRAD" 0,"opsz" 20;
+        line-height:1;
+        color:var(--cd-muted);
+    }
+
+    .facione-score-3 .material-symbols-rounded,
+    .facione-score-4 .material-symbols-rounded {
+        color:var(--cd-text);
+        font-variation-settings:"FILL" 1,"wght" 480,"GRAD" 0,"opsz" 20;
+    }
+
+    .facione-score-0 .material-symbols-rounded {
+        opacity:.72;
+    }
+
+    .facione-rubric {
+        color:var(--cd-muted);
+        font-size:.72rem;
+    }
+
+    .review-stage-list {
+        display:grid;
+        gap:.7rem;
+    }
+
+    .review-stage-block {
+        padding:.55rem .65rem;
+        border:1px solid var(--cd-border);
+        border-radius:.55rem;
+        background:var(--cd-surface);
+    }
+
+    .review-stage-label {
+        margin-bottom:.28rem;
+        color:var(--cd-text);
+        font-size:.78rem;
+        font-weight:680;
+    }
+
+    .review-stage-body,
+    .review-conclusion-body {
+        color:var(--cd-muted);
+        font-size:.78rem;
+        line-height:1.5;
+    }
+
+    .review-stage-body ul {
+        margin:.1rem 0 0;
+        padding-left:1.05rem;
+    }
+
+    .review-stage-body li + li {
+        margin-top:.28rem;
+    }
+
+    .review-empty {
+        margin:0;
+        color:var(--cd-muted);
+        font-size:.76rem;
+        line-height:1.45;
+        opacity:.9;
+    }
+
+    /* Current Thinking Path stage in Review — stronger outline on the
+       rounded details card only (not the sharp outer expander wrapper). */
+    .st-key-studio_scroll [class*="st-key-review_"][class*="_current"]
+    [data-testid="stExpander"],
+    .st-key-studio_scroll
+    [data-testid="stElementContainer"]:has(> [class*="st-key-review_"][class*="_current"])
+    [data-testid="stExpander"] {
+        border:0 !important;
+        background:transparent !important;
+        box-shadow:none !important;
+    }
+
+    .st-key-studio_scroll [class*="st-key-review_"][class*="_current"]
+    [data-testid="stExpander"] details,
+    .st-key-studio_scroll
+    [data-testid="stElementContainer"]:has(> [class*="st-key-review_"][class*="_current"])
+    [data-testid="stExpander"] details {
+        border:1.5px solid color-mix(in srgb, var(--cd-text) 58%, var(--cd-border)) !important;
+        border-radius:.72rem !important;
+        overflow:hidden !important;
+        background:var(--cd-surface) !important;
+    }
+
+    .st-key-studio_scroll [class*="st-key-review_"][class*="_current"]
+    [data-testid="stExpander"] summary,
+    .st-key-studio_scroll
+    [data-testid="stElementContainer"]:has(> [class*="st-key-review_"][class*="_current"])
+    [data-testid="stExpander"] summary {
+        border:0 !important;
+        border-radius:.72rem .72rem 0 0 !important;
+    }
+
+    @media (max-width:420px) {
+        .facione-table tbody th {
+            width:52%;
+        }
+        .facione-rubric {
+            font-size:.68rem;
+        }
+        .review-stage-block {
+            padding:.48rem .55rem;
+        }
     }
 
     /* Discussion */
@@ -1797,7 +1954,7 @@
     /* User bubble chrome lives on our keyed row (padding we control). */
     [data-testid="stChatMessage"]:has([aria-label="Chat message from user"]) {
         width:fit-content !important;
-        max-width:min(72%, calc(70ch + 16px)) !important;
+        max-width:min(72%, calc(80ch + 16px)) !important;
         margin-left:auto !important;
         margin-right:0 !important;
         padding:0 !important;
@@ -1818,13 +1975,25 @@
         box-sizing:border-box !important;
     }
 
+    /* Edit mode must keep a full bubble width; fit-content collapses to the
+       Cancel/Send row and makes the textarea a skinny right-side strip. */
     [data-testid="stChatMessage"]:has([class*="st-key-user_message_edit_"]) {
-        width:fit-content !important;
-        max-width:min(72%, calc(70ch + 16px)) !important;
+        width:min(72%, calc(80ch + 16px)) !important;
+        max-width:min(72%, calc(80ch + 16px)) !important;
+        min-width:min(100%, 22rem) !important;
         margin-left:auto !important;
         margin-right:0 !important;
         padding:0 !important;
         background:transparent !important;
+    }
+
+    [data-testid="stChatMessage"]:has([class*="st-key-user_message_edit_"])
+    [data-testid="stChatMessageContent"],
+    [data-testid="stChatMessage"]:has([class*="st-key-user_message_edit_"])
+    [data-testid="stChatMessageContent"] > div {
+        width:100% !important;
+        max-width:100% !important;
+        min-width:0 !important;
     }
 
     [data-testid="stChatMessageAvatarCustom"] {
@@ -1875,13 +2044,25 @@
     }
 
     [class*="st-key-user_message_row_"],
-    [class*="st-key-user_message_edit_"],
-    [data-testid="stElementContainer"]:has(> [class*="st-key-user_message_row_"]),
-    [data-testid="stElementContainer"]:has(> [class*="st-key-user_message_edit_"]) {
+    [data-testid="stElementContainer"]:has(> [class*="st-key-user_message_row_"]) {
         position:relative !important;
         display:block !important;
         width:fit-content !important;
-        max-width:min(100%, calc(70ch + 16px)) !important;
+        max-width:min(100%, calc(80ch + 16px)) !important;
+        margin-left:auto !important;
+        padding:10px 8px 8px !important;
+        border-radius:.85rem !important;
+        background:var(--cd-accent-soft) !important;
+        box-sizing:border-box !important;
+    }
+
+    [class*="st-key-user_message_edit_"],
+    [data-testid="stElementContainer"]:has(> [class*="st-key-user_message_edit_"]) {
+        position:relative !important;
+        display:block !important;
+        width:100% !important;
+        max-width:min(100%, calc(80ch + 16px)) !important;
+        min-width:min(100%, 22rem) !important;
         margin-left:auto !important;
         padding:10px 8px 8px !important;
         border-radius:.85rem !important;
@@ -1903,8 +2084,8 @@
 
     .cd-user-bubble-text {
         width:fit-content;
-        max-width:70ch; /* 70 chars incl. spaces */
-        max-height:calc(0.9rem * 1.45 * 3);
+        max-width:80ch; /* 80 chars incl. spaces */
+        max-height:calc(0.9rem * 1.45 * 8);
         margin:0;
         padding:0;
         overflow-x:hidden;
@@ -2001,8 +2182,9 @@
     [class*="st-key-user_message_edit_"] [data-testid="stTextArea"] > div,
     [class*="st-key-user_message_edit_"] [data-baseweb="textarea"],
     [class*="st-key-user_message_edit_"] [data-baseweb="base-input"] {
-        width:fit-content !important;
-        max-width:70ch !important; /* 70 chars incl. spaces */
+        width:100% !important;
+        max-width:100% !important;
+        min-width:0 !important;
         margin:0 !important;
         border:0 !important;
         background:transparent !important;
@@ -2010,11 +2192,12 @@
     }
 
     [class*="st-key-user_message_edit_"] textarea {
-        width:min(70ch, 100%) !important;
-        max-width:min(70ch, 100%) !important;
+        width:100% !important;
+        max-width:100% !important;
+        min-width:0 !important;
         min-height:calc(0.9rem * 1.45 * 3) !important;
-        max-height:calc(0.9rem * 1.45 * 3) !important;
-        height:calc(0.9rem * 1.45 * 3) !important;
+        max-height:calc(0.9rem * 1.45 * 8) !important;
+        height:auto !important;
         margin:0 !important;
         padding:0 !important;
         border:0 !important;
@@ -2029,21 +2212,21 @@
     }
 
     [class*="st-key-user_message_edit_actions_"] {
-        width:fit-content !important;
+        width:100% !important;
         max-width:100% !important;
-        margin:0 0 0 auto !important;
+        margin:0 !important;
     }
 
     [data-testid="stElementContainer"]:has(> [class*="st-key-user_message_edit_actions_"]) {
-        width:fit-content !important;
-        margin-left:auto !important;
+        width:100% !important;
+        margin-left:0 !important;
     }
 
     [class*="st-key-user_message_edit_actions_"] [data-testid="stHorizontalBlock"] {
         gap:.35rem !important;
         justify-content:flex-end;
-        width:fit-content !important;
-        margin-left:auto !important;
+        width:100% !important;
+        margin-left:0 !important;
     }
 
     [class*="st-key-user_message_edit_actions_"] [data-testid="stColumn"] {
@@ -2358,6 +2541,9 @@
      * Cursor-style card for Streamlit 1.60+ chat input.
      * Empty state is a single flex row by default; force text on top and a
      * footer row (attach + model | send) underneath.
+     *
+     * Cap only the textarea / Baseweb wrappers at 5 rows, then scroll. Do not
+     * hard-cap the outer card height or long drafts cover the chat log.
      */
     .st-key-chat_composer [data-testid="stChatInput"] {
         position:relative !important;
@@ -2365,9 +2551,9 @@
         width:100% !important;
         box-sizing:border-box !important;
         min-height:4.5rem !important;
-        max-height:11rem !important;
+        max-height:none !important;
         height:auto !important;
-        overflow:visible !important;
+        overflow:hidden !important;
         border:1px solid var(--cd-border) !important;
         border-radius:1.05rem !important;
         color:var(--cd-text);
@@ -2384,7 +2570,9 @@
         width:100% !important;
         min-height:4.5rem !important;
         height:auto !important;
+        max-height:none !important;
         box-sizing:border-box !important;
+        padding:.55rem .8rem .45rem !important;
         border:0 !important;
         outline:none !important;
         box-shadow:none !important;
@@ -2400,8 +2588,10 @@
         justify-content:stretch !important;
         width:100% !important;
         column-gap:.35rem !important;
-        row-gap:.15rem !important;
+        row-gap:.2rem !important;
         flex:1 1 auto !important;
+        min-height:0 !important;
+        max-height:none !important;
     }
 
     .st-key-chat_composer [data-testid="stChatInput"] div:has(> [data-testid="stChatInputTextArea"]) {
@@ -2411,6 +2601,7 @@
         max-width:100% !important;
         min-width:0 !important;
         min-height:0 !important;
+        max-height:calc(1em * 1.45 * 5) !important;
         flex:1 1 auto !important;
         order:-1 !important;
         align-items:stretch !important;
@@ -2419,7 +2610,7 @@
         border:0 !important;
         background:transparent !important;
         box-shadow:none !important;
-        overflow:visible !important;
+        overflow:hidden !important;
     }
 
     /* Expanded Streamlit footer already holds attach + actions. */
@@ -2467,29 +2658,34 @@
     .st-key-chat_composer [data-testid="stChatInput"] [data-baseweb="textarea"] > div {
         width:100% !important;
         max-width:100% !important;
+        min-height:0 !important;
+        max-height:calc(1em * 1.45 * 5) !important;
+        height:auto !important;
         margin:0 !important;
         padding:0 !important;
         border:0 !important;
         background:transparent !important;
         box-shadow:none !important;
-        overflow:visible !important;
+        overflow:hidden !important;
     }
 
     .st-key-chat_composer [data-testid="stChatInput"] textarea,
     .st-key-chat_composer [data-testid="stChatInputTextArea"] {
         width:100% !important;
+        max-width:100% !important;
         box-sizing:border-box !important;
-        /* Let Streamlit auto-grow height; cap at 3 lines then scroll. */
+        /* Grow with the draft; cap at 5 rows, then scroll. */
         min-height:calc(1em * 1.45) !important;
-        max-height:calc(1em * 1.45 * 3) !important;
+        max-height:calc(1em * 1.45 * 5) !important;
         overflow-y:auto !important;
         overflow-x:hidden !important;
         resize:none !important;
-        padding:.1rem 0 !important;
+        padding:.2rem 0 .35rem !important;
         margin:0 !important;
         text-align:left !important;
         text-indent:0 !important;
         white-space:pre-wrap !important;
+        overflow-wrap:break-word !important;
         word-break:break-word !important;
         border:0 !important;
         outline:none !important;
@@ -2530,7 +2726,8 @@
     .st-key-chat_composer [data-testid="stChatInput"] textarea::placeholder,
     .st-key-chat_composer [data-testid="stChatInputTextArea"]::placeholder {
         color:var(--cd-muted) !important;
-        opacity:1;
+        -webkit-text-fill-color:var(--cd-muted) !important;
+        opacity:var(--cd-placeholder-opacity) !important;
     }
 
     /* Streamlit 1.60 controls are flex children — do not absolute-position them. */
@@ -2970,10 +3167,13 @@
 
     .st-key-sources_select_all [data-testid="stCheckbox"] > label {
         display:inline-flex !important;
+        flex-direction:row !important;
         align-items:center !important;
+        justify-content:center !important;
         gap:.45rem !important;
         width:auto !important;
         margin:0 auto !important;
+        min-height:1.35rem !important;
     }
 
     .st-key-sources_select_all [data-testid="stCheckbox"] > label > div:has(svg) {
@@ -2982,16 +3182,31 @@
         justify-content:center !important;
         flex:0 0 auto !important;
         margin:0 !important;
+        align-self:center !important;
     }
 
     .st-key-sources_select_all [data-testid="stWidgetLabel"],
     .st-key-sources_select_all [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"],
-    .st-key-sources_select_all [data-testid="stWidgetLabel"] p {
+    .st-key-sources_select_all [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"] > div {
         display:flex !important;
         align-items:center !important;
+        align-self:center !important;
         margin:0 !important;
         padding:0 !important;
         line-height:1.2 !important;
+        height:auto !important;
+        min-height:0 !important;
+    }
+
+    .st-key-sources_select_all [data-testid="stWidgetLabel"] p,
+    .st-key-sources_header .st-key-sources_select_all [data-testid="stWidgetLabel"] p {
+        display:block !important;
+        margin:0 !important;
+        margin-bottom:0 !important;
+        padding:0 !important;
+        line-height:1.2 !important;
+        /* Optical vertical center with the checkbox control. */
+        transform:translateY(.12rem);
     }
 
     .st-key-sources_header [data-testid="stWidgetLabel"] p {
@@ -3085,7 +3300,8 @@
     .st-key-sources_scroll [data-testid="stTextInput"] input::placeholder,
     .st-key-sources_scroll [data-testid="stTextInputRootElement"] input::placeholder {
         color:var(--cd-muted) !important;
-        opacity:1;
+        -webkit-text-fill-color:var(--cd-muted) !important;
+        opacity:var(--cd-placeholder-opacity) !important;
     }
 
     .source-empty {
@@ -3414,7 +3630,17 @@
     [role="dialog"]:has(.st-key-notebook-search) {
         width:min(54rem,calc(100vw - 3rem)) !important;
         max-width:min(54rem,calc(100vw - 3rem)) !important;
-        min-height:35rem;
+        max-height:calc(100vh - 3rem) !important;
+        min-height:0;
+        height:auto;
+        /* Scroll only the notebook list, never the whole dialog. */
+        overflow:hidden !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook-search)
+    > [data-testid="stVerticalBlock"] {
+        overflow:hidden !important;
+        max-height:100%;
     }
 
     [data-testid="stDialog"] > div:has(> [role="dialog"] .st-key-notebook-search) {
@@ -3439,52 +3665,217 @@
         width:min(35rem,calc(100vw - 3rem)) !important;
     }
 
-    [role="dialog"]:has(.notebook-actions-context) {
+    [role="dialog"]:has(.st-key-notebook_actions_panel) {
         width:min(31rem,calc(100vw - 3rem)) !important;
         max-width:min(31rem,calc(100vw - 3rem)) !important;
+        padding:.9rem 1.15rem 1.1rem !important;
+        box-sizing:border-box !important;
     }
 
     [data-testid="stDialog"] > div:has(
-        > [role="dialog"] .notebook-actions-context
+        > [role="dialog"] .st-key-notebook_actions_panel
     ) {
         width:min(31rem,calc(100vw - 3rem)) !important;
     }
 
-    .notebook-actions-context {
-        margin:.1rem 0 .65rem;
-        padding:.8rem .9rem;
-        border:1px solid var(--cd-border);
-        border-radius:.68rem;
-        color:var(--cd-muted);
-        background:var(--cd-surface-muted);
-        font-size:.8rem;
-        line-height:1.5;
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    > [data-testid="stVerticalBlock"] {
+        gap:.15rem !important;
+        row-gap:.15rem !important;
+        margin:0 !important;
+        padding:0 !important;
     }
 
-    .notebook-actions-context strong {
-        color:var(--cd-text);
+    .st-key-notebook_actions_panel > [data-testid="stVerticalBlock"],
+    .st-key-notebook_actions_panel [data-testid="stVerticalBlock"] {
+        gap:.1rem !important;
+        row-gap:.1rem !important;
     }
 
+    /* Keep the dialog title on the same left edge as Rename / body fields. */
+    [role="dialog"]:has(.st-key-notebook_actions_panel) > h2[slot="title"],
+    [role="dialog"]:has(.st-key-notebook_actions_panel) header,
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stDialogHeader"],
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stMarkdownContainer"]:has(h2) {
+        margin:0 0 .35rem !important;
+        padding:0 !important;
+        padding-right:2rem !important; /* room for the close control */
+        box-sizing:border-box !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel) > h2[slot="title"],
+    [role="dialog"]:has(.st-key-notebook_actions_panel) header h2,
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stDialogHeader"] h2 {
+        margin:0 !important;
+        padding:0 !important;
+        text-align:left !important;
+    }
+
+    /* Tighten Rename → phase caption → delete spacing. */
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stElementContainer"]:has([data-testid="stTextInput"]),
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stLayoutWrapper"]:has([data-testid="stTextInput"]) {
+        margin:0 !important;
+        padding:0 0 .05rem !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stWidgetLabel"],
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stWidgetLabel"] p {
+        margin:0 0 .28rem !important;
+        padding:0 !important;
+        line-height:1.2 !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stElementContainer"]:has([data-testid="stCaptionContainer"]),
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stLayoutWrapper"]:has([data-testid="stCaptionContainer"]) {
+        margin:0 !important;
+        padding:0 !important;
+        min-height:0 !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stCaptionContainer"] {
+        margin:0 !important;
+        padding:0 !important;
+        min-height:0 !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    [data-testid="stCaptionContainer"] p {
+        margin:0 !important;
+        padding:0 !important;
+        line-height:1.2 !important;
+    }
+
+    /* Delete notebook box — title, confirm, button with even left edge. */
     .st-key-notebook_action_danger {
-        margin-top:.3rem;
-        padding:.7rem .8rem .8rem;
+        margin-top:.35rem;
+        padding:.7rem .8rem .75rem;
         border:1px solid color-mix(in srgb,var(--cd-danger) 22%,var(--cd-border));
         border-radius:.68rem;
         background:color-mix(in srgb,var(--cd-danger) 5%,var(--cd-surface));
     }
 
-    [role="dialog"]:has(.notebook-actions-context)
+    [data-testid="stElementContainer"]:has(> .st-key-notebook_action_danger),
+    [data-testid="stLayoutWrapper"]:has(.st-key-notebook_action_danger) {
+        margin-top:.2rem !important;
+        padding-top:0 !important;
+    }
+
+    /* Override panel-wide .1rem gap; use one rhythm for the three rows. */
+    .st-key-notebook_actions_panel
+    .st-key-notebook_action_danger > [data-testid="stVerticalBlock"],
+    .st-key-notebook_action_danger > [data-testid="stVerticalBlock"] {
+        gap:.5rem !important;
+        row-gap:.5rem !important;
+    }
+
+    .st-key-notebook_action_danger
+    > [data-testid="stVerticalBlock"]
+    > [data-testid="stElementContainer"],
+    .st-key-notebook_action_danger
+    > [data-testid="stVerticalBlock"]
+    > [data-testid="stLayoutWrapper"] {
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    /* Slightly more air before the destructive action. */
+    .st-key-notebook_action_danger
+    > [data-testid="stVerticalBlock"]
+    > [data-testid="stElementContainer"]:has([data-testid="stButton"]),
+    .st-key-notebook_action_danger
+    > [data-testid="stVerticalBlock"]
+    > [data-testid="stLayoutWrapper"]:has([data-testid="stButton"]) {
+        margin-top:.15rem !important;
+    }
+
+    .st-key-notebook_action_danger
+    [data-testid="stMarkdownContainer"]:has(h4) {
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-notebook_action_danger h4 {
+        margin:0 !important;
+        padding:0 !important;
+        color:var(--cd-text) !important;
+        font-size:.95rem !important;
+        font-weight:700 !important;
+        line-height:1.3 !important;
+        letter-spacing:-.01em;
+    }
+
+    .st-key-notebook_action_danger [data-testid="stCheckbox"] {
+        width:100% !important;
+        margin:0 !important;
+        padding:.5rem 0 !important;
+    }
+
+    .st-key-notebook_action_danger [data-testid="stCheckbox"] > label {
+        display:inline-flex !important;
+        flex-direction:row !important;
+        align-items:center !important;
+        justify-content:flex-start !important;
+        gap:.5rem !important;
+        width:auto !important;
+        max-width:100% !important;
+        margin:0 !important;
+        padding:0 !important;
+        min-height:1.35rem !important;
+    }
+
+    .st-key-notebook_action_danger [data-testid="stCheckbox"] > label > div:has(svg),
+    .st-key-notebook_action_danger [data-testid="stCheckbox"] > label > div:nth-child(2) {
+        display:flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        flex:0 0 auto !important;
+        margin:0 !important;
+        align-self:center !important;
+    }
+
+    .st-key-notebook_action_danger [data-testid="stWidgetLabel"],
+    .st-key-notebook_action_danger [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"],
+    .st-key-notebook_action_danger [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"] > div,
+    .st-key-notebook_action_danger [data-testid="stWidgetLabel"] p {
+        display:inline !important;
+        margin:0 !important;
+        padding:0 !important;
+        line-height:1.3 !important;
+        text-align:left !important;
+    }
+
+    .st-key-notebook_action_danger div[data-testid="stButton"] {
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-notebook_action_danger div[data-testid="stButton"] button {
+        min-height:2.35rem !important;
+        margin:0 !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
     [data-testid="stTextInputRootElement"],
-    [role="dialog"]:has(.notebook-actions-context)
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
     [data-testid="stTextInputRootElement"] > div {
         color:var(--cd-text) !important;
         border-color:var(--cd-border) !important;
         background:var(--cd-surface) !important;
     }
 
-    [role="dialog"]:has(.notebook-actions-context)
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
     [data-testid="stTextInputRootElement"] input,
-    [role="dialog"]:has(.notebook-actions-context)
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
     input[aria-label="Rename"] {
         opacity:1 !important;
         color:var(--cd-text) !important;
@@ -3493,11 +3884,9 @@
         background:transparent !important;
     }
 
-    [role="dialog"]:has(.notebook-actions-context)
-    [data-testid="stDownloadButton"] button,
-    [role="dialog"]:has(.notebook-actions-context)
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
     [data-testid="stBaseButton-secondary"],
-    [role="dialog"]:has(.notebook-actions-context)
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
     div[data-testid="stButton"] button {
         opacity:1 !important;
         border:1px solid var(--cd-border) !important;
@@ -3506,22 +3895,20 @@
         background:var(--cd-surface) !important;
     }
 
-    [role="dialog"]:has(.notebook-actions-context)
-    [data-testid="stDownloadButton"] button *,
-    [role="dialog"]:has(.notebook-actions-context)
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
     [data-testid="stBaseButton-secondary"] *,
-    [role="dialog"]:has(.notebook-actions-context)
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
     div[data-testid="stButton"] button * {
         color:var(--cd-text) !important;
         -webkit-text-fill-color:var(--cd-text) !important;
     }
 
-    [role="dialog"]:has(.notebook-actions-context)
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
     [data-testid="stCheckbox"] label {
         color:var(--cd-text) !important;
     }
 
-    [role="dialog"]:has(.notebook-actions-context)
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
     [data-testid="stCheckbox"] label > div:nth-child(2) {
         border:1px solid var(--cd-checkbox-border, var(--cd-border)) !important;
         border-radius:.35rem !important;
@@ -3529,20 +3916,20 @@
         color:var(--cd-accent) !important;
     }
 
-    [role="dialog"]:has(.notebook-actions-context)
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
     [data-testid="stCheckbox"] label:has(input:checked) > div:nth-child(2) {
         border-color:var(--cd-accent) !important;
         background:var(--cd-accent) !important;
         color:#fff !important;
     }
 
-    [role="dialog"]:has(.notebook-actions-context)
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
     [data-testid="stCheckbox"] label > div:nth-child(2) svg {
         fill:#fff !important;
         stroke:#fff !important;
     }
 
-    [role="dialog"]:has(.notebook-actions-context)
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
     [data-testid="stCheckbox"] p {
         color:var(--cd-text) !important;
         -webkit-text-fill-color:var(--cd-text) !important;
@@ -3659,11 +4046,11 @@
     }
 
     .st-key-notebook_library_scroll {
-        max-height:360px;
-        height:360px;
+        height:auto !important;
+        max-height:min(50vh, 22.5rem) !important;
         min-height:0 !important;
-        overflow-y:auto !important;
         overflow-x:hidden !important;
+        overflow-y:hidden !important;
         margin-top:0 !important;
         padding:0 !important;
         border:0 !important;
@@ -3671,8 +4058,14 @@
         gap:0 !important;
         row-gap:0 !important;
         overscroll-behavior:contain;
-        scrollbar-width:thin;
+        scrollbar-gutter:stable;
+        scrollbar-width:none;
         scrollbar-color:var(--cd-scrollbar) transparent;
+    }
+
+    .st-key-notebook_library_scroll.is-scrollable {
+        overflow-y:auto !important;
+        scrollbar-width:thin;
     }
 
     .st-key-notebook_library_scroll[data-testid="stVerticalBlock"],
@@ -3701,6 +4094,10 @@
     }
 
     .st-key-notebook_library_scroll::-webkit-scrollbar {
+        width:0;
+    }
+
+    .st-key-notebook_library_scroll.is-scrollable::-webkit-scrollbar {
         width:6px;
     }
 
@@ -3708,7 +4105,7 @@
         background:transparent;
     }
 
-    .st-key-notebook_library_scroll::-webkit-scrollbar-thumb {
+    .st-key-notebook_library_scroll.is-scrollable::-webkit-scrollbar-thumb {
         border-radius:999px;
         background:var(--cd-scrollbar);
     }
@@ -3968,10 +4365,10 @@
 
 
     [data-testid="stPopoverBody"][aria-label="Settings"],
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu) {
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root) {
         width:min(16.5rem,calc(100vw - 1.5rem)) !important;
         max-width:min(16.5rem,calc(100vw - 1.5rem)) !important;
-        padding:.65rem .7rem .7rem !important;
+        padding:.32rem .7rem .7rem !important;
         border:1px solid var(--cd-border) !important;
         border-radius:.72rem !important;
         background:var(--cd-surface) !important;
@@ -3979,25 +4376,44 @@
         overflow:visible !important;
     }
 
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    /* Marker-only markdown must not add top gap above Display name. */
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    [data-testid="stElementContainer"]:has(.cd-profile-menu),
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root) .cd-profile-menu {
+        display:none !important;
+        height:0 !important;
+        min-height:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+        border:0 !important;
+        overflow:hidden !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     > [data-testid="stVerticalBlock"],
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stVerticalBlock"] {
         gap:.55rem !important;
         row-gap:.55rem !important;
         overflow:visible !important;
     }
 
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_menu_root > [data-testid="stVerticalBlock"] {
+        gap:.5rem !important;
+        row-gap:.5rem !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stElementContainer"],
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stMarkdownContainer"],
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stWidgetLabel"] {
         overflow:visible !important;
     }
 
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stWidgetLabel"] {
         display:inline-flex !important;
         align-items:center !important;
@@ -4012,13 +4428,13 @@
     }
 
     /* Segmented controls stretch their label row; keep help icon tight like Language. */
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stElementContainer"]:has([data-testid="stButtonGroup"])
     [data-testid="stWidgetLabel"],
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stElementContainer"]:has([data-testid="stButtonGroup"])
     [data-testid="stWidgetLabel"] > div,
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stElementContainer"]:has([data-testid="stButtonGroup"])
     label:has([data-testid="stTooltipHoverTarget"]) {
         display:inline-flex !important;
@@ -4029,9 +4445,9 @@
         column-gap:.28rem !important;
     }
 
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stWidgetLabel"] p,
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stWidgetLabel"] label {
         margin:0 !important;
         padding:0 !important;
@@ -4046,7 +4462,7 @@
     }
 
     /* Help (?) icons: contrast in light/dark; keep glyph (not a solid disc). */
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stTooltipHoverTarget"] {
         display:inline-flex !important;
         align-items:center !important;
@@ -4060,7 +4476,7 @@
         opacity:1 !important;
     }
 
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stTooltipHoverTarget"] [data-testid="stIconMaterial"] {
         color:var(--cd-muted) !important;
         -webkit-text-fill-color:var(--cd-muted) !important;
@@ -4069,7 +4485,7 @@
         opacity:1 !important;
     }
 
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stTooltipHoverTarget"] svg {
         width:.9rem !important;
         height:.9rem !important;
@@ -4078,44 +4494,44 @@
         opacity:1 !important;
     }
 
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stCaptionContainer"] {
         margin:0 !important;
         padding:0 !important;
         overflow:visible !important;
     }
 
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stCaptionContainer"] p {
         margin:0 !important;
         font-size:.68rem !important;
         line-height:1.35 !important;
     }
 
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu) hr {
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root) hr {
         margin:.2rem 0 .05rem !important;
     }
 
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stTextInput"] input,
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stTextInputRootElement"] input {
         min-height:2rem !important;
         font-size:.8rem !important;
     }
 
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-baseweb="select"] > div {
         min-height:2rem !important;
         font-size:.8rem !important;
     }
 
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stButtonGroup"] {
         gap:.2rem !important;
     }
 
-    [data-testid="stPopoverBody"]:has(.cd-profile-menu)
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stButtonGroup"] button {
         min-height:1.75rem !important;
         padding:.2rem .42rem !important;
@@ -4335,12 +4751,12 @@
     .st-key-notebook_topbar .st-key-topbar_mode [data-testid="stPopover"] button,
     .st-key-notebook_topbar .st-key-topbar_mode div[data-testid="stPopover"] > button,
     .st-key-topbar_mode [data-testid="stPopover"] button {
-        width:auto !important;
-        min-width:4.6rem !important;
-        max-width:5.4rem !important;
+        width:max-content !important;
+        min-width:6.75rem !important;
+        max-width:none !important;
         min-height:2.35rem !important;
         height:2.35rem !important;
-        padding:0 .7rem !important;
+        padding:0 .75rem !important;
         border:1px solid var(--cd-border) !important;
         border-radius:.75rem !important;
         color:var(--cd-text) !important;
@@ -4349,6 +4765,8 @@
         outline:none !important;
         font-size:.9rem !important;
         font-weight:650 !important;
+        white-space:nowrap !important;
+        overflow:visible !important;
     }
 
     .st-key-notebook_topbar .st-key-topbar_mode [data-testid="stPopover"] button:hover,
@@ -4371,6 +4789,7 @@
         font-size:.9rem !important;
         font-weight:650 !important;
         color:var(--cd-text) !important;
+        white-space:nowrap !important;
     }
 
     .st-key-topbar_mode [data-testid="stPopover"] button
@@ -4624,66 +5043,126 @@
     .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
     > [data-testid="stHorizontalBlock"] {
         width:100% !important;
+        height:100% !important;
         align-items:center !important;
+        justify-content:flex-end !important;
     }
 
     .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
     > [data-testid="stHorizontalBlock"] {
         gap:0 !important;
+        column-gap:0 !important;
     }
 
-    /* Only the top-level action columns — not nested widgets. */
+    /* Notebooks / Guidance cluster — asymmetric gaps (not uniform). */
+    .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        flex:0 0 auto !important;
+        width:auto !important;
+        display:flex !important;
+        align-items:center !important;
+        align-self:center !important;
+        min-height:2.35rem !important;
+        height:2.35rem !important;
+        transform:none !important;
+        padding:0 !important;
+        margin:0 !important;
+    }
+
+    /* Larger gap: Notebooks → Guidance Level */
     .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
     > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(1) {
-        flex:0 0 auto !important;
-        width:auto !important;
-        padding-right:30px !important;
-        transform:translateX(-50px);
+        margin-right:1.25rem !important;
     }
 
+    /* Tight gap: Guidance Level → Quick dropdown */
     .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
     > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) {
-        flex:0 0 auto !important;
-        width:auto !important;
-        transform:translateX(-50px);
+        margin-right:.25rem !important;
+        padding-right:0 !important;
     }
 
     .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
     > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(3) {
-        flex:0 0 auto !important;
+        min-width:6.75rem !important;
         width:max-content !important;
-        max-width:max-content !important;
-        transform:translateX(-50px);
-        padding-left:.35rem !important;
-    }
-
-    .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
-    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(4) {
-        flex:1 1 auto !important;
-        width:auto !important;
-        display:flex !important;
-        justify-content:flex-end !important;
+        margin-left:0 !important;
     }
 
     .st-key-topbar_navigation,
     .st-key-topbar_mode,
-    .st-key-topbar_profile_slot,
     .st-key-topbar_navigation > [data-testid="stLayoutWrapper"],
     .st-key-topbar_mode > [data-testid="stLayoutWrapper"],
-    .st-key-topbar_profile_slot > [data-testid="stLayoutWrapper"] {
+    .st-key-topbar_profile [data-testid="stPopover"] {
         display:flex !important;
         align-items:center !important;
-        height:auto !important;
+        justify-content:center !important;
         margin:0 !important;
         padding:0 !important;
+        min-height:2.35rem !important;
+        height:2.35rem !important;
+        max-height:2.35rem !important;
     }
 
-    .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
-    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child
+    .st-key-topbar_profile_slot,
+    .st-key-topbar_profile,
+    .st-key-topbar_profile_slot > [data-testid="stLayoutWrapper"],
+    .st-key-topbar_profile > [data-testid="stVerticalBlock"] {
+        display:flex !important;
+        align-items:center !important;
+        justify-content:flex-end !important;
+        margin:0 !important;
+        padding:0 !important;
+        width:100% !important;
+        height:100% !important;
+        min-height:0 !important;
+        max-height:none !important;
+        position:relative !important;
+        overflow:visible !important;
+    }
+
+    /* Helper iframe must not take layout space or steal pointer events. */
+    .st-key-profile_leave_helper,
+    .st-key-topbar_profile_slot .st-key-profile_leave_helper,
+    [data-testid="stElementContainer"]:has(.st-key-profile_leave_helper),
+    .st-key-profile_leave_helper iframe,
+    .st-key-topbar_profile [data-testid="stElementContainer"]:has(iframe) {
+        position:absolute !important;
+        width:0 !important;
+        height:0 !important;
+        min-height:0 !important;
+        max-height:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+        border:0 !important;
+        overflow:hidden !important;
+        opacity:0 !important;
+        pointer-events:none !important;
+        clip:rect(0,0,0,0) !important;
+    }
+
+    .st-key-topbar_profile [data-testid="stElementContainer"],
+    .st-key-topbar_profile_slot [data-testid="stElementContainer"] {
+        margin:0 !important;
+        padding:0 !important;
+        min-height:0 !important;
+        display:flex !important;
+        align-items:center !important;
+    }
+
+    .st-key-topbar_profile div[data-testid="stPopover"] button,
+    .st-key-notebook_topbar .st-key-topbar_profile div[data-testid="stPopover"] button,
     .st-key-topbar_profile_slot .st-key-topbar_profile div[data-testid="stPopover"] button {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        align-self:center !important;
         width:2.35rem !important;
         min-width:2.35rem !important;
         max-width:2.35rem !important;
+        min-height:2.35rem !important;
+        height:2.35rem !important;
+        margin:0 !important;
         padding:0 !important;
     }
 
@@ -4738,20 +5217,31 @@
         display:none !important;
     }
 
-    /* Brand left, title centered, actions right. */
+    /* Brand left, title centered, controls mid-right, profile flush right. */
     .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
     > [data-testid="stHorizontalBlock"] {
         display:grid !important;
-        grid-template-columns:minmax(12rem,16rem) minmax(10rem,1fr) minmax(17rem,max-content);
-        column-gap:.72rem !important;
+        grid-template-columns:auto minmax(0,1fr) max-content 2.35rem;
+        column-gap:1.85rem !important;
         align-items:center !important;
+        width:100% !important;
+        height:100% !important;
     }
 
     .st-key-topbar_actions,
     .st-key-topbar_actions > [data-testid="stLayoutWrapper"],
     .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
-    > [data-testid="stHorizontalBlock"] {
+    > [data-testid="stHorizontalBlock"],
+    .st-key-topbar_profile_slot,
+    .st-key-topbar_profile_slot > [data-testid="stLayoutWrapper"],
+    .st-key-topbar_profile,
+    .st-key-topbar_profile > [data-testid="stVerticalBlock"] {
+        display:flex !important;
         align-items:center !important;
+        height:100% !important;
+        min-height:100% !important;
+        margin:0 !important;
+        padding:0 !important;
     }
 
     .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
@@ -4759,6 +5249,27 @@
         width:auto !important;
         min-width:0 !important;
         flex:none !important;
+        display:flex !important;
+        align-items:center !important;
+        align-self:center !important;
+        height:100% !important;
+    }
+
+    /* Controls column: keep cluster compact; gap to profile comes from column-gap. */
+    .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(3) {
+        justify-content:flex-end !important;
+    }
+
+    /* Profile column hugs the right padding edge (matches logo left inset). */
+    .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child {
+        justify-content:flex-end !important;
+        width:2.35rem !important;
+        min-width:2.35rem !important;
+        max-width:2.35rem !important;
+        margin-left:0 !important;
+        margin-right:0 !important;
     }
 
     .st-key-topbar_navigation,
@@ -4785,10 +5296,12 @@
 
         .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] {
-            display:grid;
-            grid-template-columns:2.8rem minmax(0,1fr) max-content;
+            display:grid !important;
+            grid-template-columns:2.8rem minmax(0,1fr) max-content 2.35rem;
             justify-content:stretch;
-            gap:.65rem;
+            align-items:center !important;
+            column-gap:1rem !important;
+            gap:1rem !important;
         }
 
         .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
@@ -4796,6 +5309,16 @@
             width:auto !important;
             min-width:0 !important;
             flex:none !important;
+            align-items:center !important;
+            height:100% !important;
+        }
+
+        .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child {
+            width:2.35rem !important;
+            min-width:2.35rem !important;
+            max-width:2.35rem !important;
+            justify-content:flex-end !important;
         }
 
         .brand-lockup > div:last-child {
@@ -4819,8 +5342,10 @@
         }
 
         .st-key-topbar_mode [data-testid="stPopover"] button {
-            min-width:4.4rem !important;
-            max-width:5.2rem !important;
+            min-width:6.25rem !important;
+            max-width:none !important;
+            width:max-content !important;
+            white-space:nowrap !important;
             border:1px solid var(--cd-border) !important;
             border-radius:.75rem !important;
         }
@@ -4951,18 +5476,21 @@
 
         .st-key-chat_composer [data-testid="stChatInput"] {
             min-height:4.15rem !important;
-            max-height:9rem !important;
+            max-height:none !important;
         }
 
         .st-key-chat_composer [data-testid="stChatInput"] > div {
             min-height:4.15rem !important;
+            padding:.5rem .7rem .4rem !important;
         }
 
         .st-key-chat_composer [data-testid="stChatInput"] textarea,
         .st-key-chat_composer [data-testid="stChatInputTextArea"] {
+            width:100% !important;
+            max-width:100% !important;
             min-height:calc(1em * 1.45) !important;
-            max-height:calc(1em * 1.45 * 3) !important;
-            padding:.1rem 0 !important;
+            max-height:calc(1em * 1.45 * 5) !important;
+            padding:.2rem 0 .3rem !important;
         }
 
         .st-key-composer_model_slot [data-testid="stPopover"] {
@@ -4982,8 +5510,10 @@
 
         .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] {
-            grid-template-columns:2.55rem minmax(0,1fr) max-content;
-            gap:.48rem;
+            grid-template-columns:2.55rem minmax(0,1fr) max-content 2.35rem;
+            column-gap:.75rem !important;
+            gap:.75rem !important;
+            align-items:center !important;
         }
 
         .st-key-notebook_topbar div[data-testid="stButton"] button,

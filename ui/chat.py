@@ -25,6 +25,7 @@ from backend.student_journey import (
 )
 from backend.student_support import DEFAULT_SUPPORT_MODE
 
+from ui.coach_welcome import COACH_WELCOME_KIND, seed_coach_welcome
 from ui.layout.composer_layout import sync_composer_layout
 from ui.runtime import engine, local_api_client, local_api_enabled, rerun, store
 from ui.settings import apply_selected_model
@@ -77,7 +78,7 @@ def render_media(raw_paths: list[str]) -> None:
 
 
 def render_citations(message: dict[str, Any]) -> None:
-    """Render one citation inline or collapse multiple citations into a dropdown."""
+    """Render cited sources: one or two inline, three or more in a dropdown."""
     references = (message.get("metadata") or {}).get("source_refs") or []
     valid_references = [
         reference
@@ -98,8 +99,9 @@ def render_citations(message: dict[str, Any]) -> None:
         ):
             source_viewer_dialog(str(reference["id"]))
 
-    if len(valid_references) == 1:
-        render_reference(valid_references[0])
+    if len(valid_references) < 2:
+        for reference in valid_references:
+            render_reference(reference)
         return
 
     with st.expander(f"Sources used ({len(valid_references)})", expanded=False):
@@ -133,13 +135,13 @@ def _render_copy_control(text: str) -> None:
     padding: 0;
     border: 0;
     border-radius: 7px;
-    color: #d7dee6;
-    background: rgba(255, 255, 255, 0.12);
+    color: #9aa8b5;
+    background: rgba(15, 20, 25, 0.72);
     cursor: pointer;
   }}
   button:hover {{
-    color: #ffffff;
-    background: rgba(255, 255, 255, 0.22);
+    color: #f2f5f7;
+    background: rgba(15, 20, 25, 0.9);
   }}
   button.copied {{
     color: #5eead4;
@@ -219,7 +221,7 @@ def render_message(message: dict[str, Any]) -> None:
                     value=message["content"],
                     key=f"edit-text-{message['id']}",
                     label_visibility="collapsed",
-                    height=78,
+                    height=120,
                 )
                 with st.container(key=f"user_message_edit_actions_{safe_id}"):
                     cancel_column, send_column = st.columns(2, gap="small")
@@ -275,10 +277,22 @@ def render_message(message: dict[str, Any]) -> None:
             return
 
         st.markdown(
-            '<div class="message-meta">Coach</div>',
+            '<div class="message-meta coach-welcome">Coach</div>'
+            if metadata.get("kind") == COACH_WELCOME_KIND
+            else '<div class="message-meta">Coach</div>',
             unsafe_allow_html=True,
         )
         display_content = str(message["content"])
+        if metadata.get("kind") == COACH_WELCOME_KIND:
+            title, _, body = display_content.partition("\n\n")
+            title_text = title.removeprefix("**").removesuffix("**").strip() or title
+            st.markdown(
+                f'<div class="coach-welcome-title">{html.escape(title_text)}</div>',
+                unsafe_allow_html=True,
+            )
+            if body.strip():
+                st.markdown(body.strip())
+            return
         auto_advanced_to = str(metadata.get("auto_advanced_to") or "")
         if auto_advanced_to in STAGE_BY_ID and "**Thinking Path:**" in display_content:
             assessment = metadata.get("assessment") or {}
@@ -437,7 +451,7 @@ def handle_prompt(
 
 
 def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
-    """Render the discussion log, empty-state welcome, and chat composer.
+    """Render the discussion log, coach welcome history, and chat composer.
 
     Args:
         model_id: Locked coaching model id for the next turn.
@@ -449,54 +463,32 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
     )
     allow_model_knowledge = not selected_sources
     st.session_state.allow_model_knowledge = allow_model_knowledge
+    seed_coach_welcome(store, st.session_state.thread_id)
     messages = store.get_messages(st.session_state.thread_id)
     chat_log = st.container(key="chat_log")
     with chat_log:
-        if not messages:
-            with st.chat_message("assistant", avatar=":material/auto_awesome:"):
-                st.markdown(
-                    '<div class="message-meta coach-welcome">Coach</div>',
-                    unsafe_allow_html=True,
-                )
-                st.markdown(
-                    '<div class="coach-welcome-title">'
-                    "Welcome — let’s think this through"
-                    "</div>",
-                    unsafe_allow_html=True,
-                )
-                st.write(
-                    "Hi, I’m your critical-thinking coach. I’ll help you work "
-                    "through Focus, Evidence, Assumptions, Perspectives, "
-                    "Synthesis, and Conclusion."
-                )
-                st.write(
-                    "Start by describing the question, problem, or claim you "
-                    "want to examine. You can also add sources in the Sources "
-                    "panel before we begin."
-                )
-        else:
-            for message in messages:
-                render_message(message)
-            if messages[-1]["role"] == "assistant":
-                previous_user = next(
-                    (
-                        message
-                        for message in reversed(messages[:-1])
-                        if message["role"] == "user"
-                    ),
-                    None,
-                )
-                if previous_user and st.button(
-                    "Regenerate",
-                    icon=":material/refresh:",
-                    type="tertiary",
-                    key="regenerate-response",
-                ):
-                    st.session_state.pending_edit = {
-                        "message_id": previous_user["id"],
-                        "prompt": previous_user["content"],
-                    }
-                    rerun()
+        for message in messages:
+            render_message(message)
+        if messages and messages[-1]["role"] == "assistant":
+            previous_user = next(
+                (
+                    message
+                    for message in reversed(messages[:-1])
+                    if message["role"] == "user"
+                ),
+                None,
+            )
+            if previous_user and st.button(
+                "Regenerate",
+                icon=":material/refresh:",
+                type="tertiary",
+                key="regenerate-response",
+            ):
+                st.session_state.pending_edit = {
+                    "message_id": previous_user["id"],
+                    "prompt": previous_user["content"],
+                }
+                rerun()
     with st.container(key="chat_composer"):
         _render_composer_model_picker()
         composer_value = st.chat_input(

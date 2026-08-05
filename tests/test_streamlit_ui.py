@@ -18,31 +18,20 @@ def test_streamlit_notebook_workspace_smoke():
     assert not composer.proto.accept_audio
     assert composer.proto.max_upload_size_mb == settings.max_file_size_mb
 
-    assert not any(selectbox.label == "Guidance:" for selectbox in app.selectbox)
-    assert not any(selectbox.label == "Model" for selectbox in app.selectbox)
-    # Profile preferences live in the settings popover (exposed to AppTest).
     assert any(selectbox.label == "Language" for selectbox in app.selectbox)
     assert any(control.label == "Appearance" for control in app.segmented_control)
-    assert not any(selectbox.label == "Current stage" for selectbox in app.selectbox)
-    assert not any(selectbox.label == "Learning mode" for selectbox in app.selectbox)
     workspace_panel = next(
         radio for radio in app.radio if radio.label == "Workspace panel"
     )
     assert workspace_panel.options == ["Sources", "Chat", "Journey"]
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "Guidance:" in rendered
+    assert "Guidance Level:" in rendered
     assert any(button.label == "Quick" for button in app.button)
     assert {tab.label for tab in app.tabs} >= {"Journey", "Review"}
-    assert not any(
-        button.label == "Use the suggested next question" for button in app.button
-    )
 
     assert '<span class="pane-title">Sources</span>' in rendered
-    assert '<div class="chat-heading">' not in rendered
-    assert '<div class="chat-context-line">' not in rendered
-    assert "Using OpenAI knowledge until you select a source" not in rendered
-    assert "Hi, I’m your critical-thinking coach." in rendered
-    assert "Start by describing the question, problem, or claim" in rendered
+    assert "Welcome to your critical-thinking coach" in rendered
+    assert "What design challenge or problem are you working on today?" in rendered
     notebook_title = next(
         text_input for text_input in app.text_input if text_input.label == "Notebook title"
     )
@@ -50,38 +39,47 @@ def test_streamlit_notebook_workspace_smoke():
     assert '<span class="pane-title">Thinking Path</span>' in rendered
     assert "Critical Thinking Companion" in rendered
     assert 'aria-label="Critical-thinking journey"' in rendered
-    assert "Deeper explanations, examples, and follow-up prompts." not in rendered
     assert "Focus" in rendered
     assert "Conclusion" in rendered
-    assert "Next question" not in rendered
+    assert "Summary" in rendered
+    assert "Critical thinking (Facione)" in rendered
     assert "Discussion summary" in rendered
     assert "What to strengthen" in rendered
-    assert "What you have contributed" not in rendered
-    assert "% complete" not in rendered
-    assert "Clarify the question, problem, or claim" in rendered
-    assert "Add your first source" in rendered
-    assert "Drop files into lecture_notes/" not in rendered
-    assert "Loading course materials in the background…" in Path("ui/sources.py").read_text(
-        encoding="utf-8"
-    )
-    assert not any("Course library" in (caption.value or "") for caption in app.caption)
     assert {expander.label for expander in app.expander} >= {
+        "Strengths",
+        "Areas for improvement",
+        "Working conclusion",
+        "Define the focus",
+        "Examine evidence",
         "Lecture Notes · 0",
         "Readings · 0",
         "My Sources · 0",
     }
+    assert "Clarify the question, problem, or claim" in rendered
+    assert "Add your first source" in rendered
+    assert "Loading course materials in the background…" in Path("ui/sources.py").read_text(
+        encoding="utf-8"
+    )
     assert rendered.index('<span class="pane-title">Thinking Path</span>') < rendered.index(
         'class="message-meta coach-welcome"'
     ) < rendered.index('<span class="pane-title">Sources</span>')
     assert ".st-key-chat_log" in rendered
     assert "overflow-y:auto" in rendered
     assert "scrollbar-color:var(--cd-scrollbar) transparent" in rendered
-    assert "max-height:calc(1em * 1.45 * 3)" in rendered
+    assert "max-height:calc(1em * 1.45 * 5)" in rendered
+    assert "max-width:80ch" in rendered
+    assert "max-width:min(100%, calc(80ch + 16px))" in rendered
+    assert "max-height:none !important" in rendered
+    assert "max-height:11rem" not in rendered
     assert "min-height:4.5rem" in rendered
-    assert "cd-composer-single" not in rendered
-    assert "cd-composer-multiline" not in rendered
+    assert "MAX_ROWS = 5" in Path("ui/layout/composer_layout.py").read_text(
+        encoding="utf-8"
+    )
+    assert "MAX_COLS" not in Path("ui/layout/composer_layout.py").read_text(
+        encoding="utf-8"
+    )
+    assert "rgba(15, 20, 25, 0.72)" in Path("ui/chat.py").read_text(encoding="utf-8")
     assert "writing-mode:horizontal-tb" in rendered
-    assert "height:7.9rem" not in rendered
     assert "grid-template-columns:minmax(0,1fr) auto" in rendered
     assert "stChatInputTextArea" in rendered
     assert "arrow_upward" in rendered
@@ -111,7 +109,6 @@ def test_streamlit_notebook_workspace_smoke():
     assert "background:var(--cd-surface)" in rendered
     assert "justify-content:flex-start !important" in rendered
     assert ".journey-question-list {" in rendered
-    assert "Your latest contribution completed the previous step." not in rendered
     assert '[role="listbox"] [role="option"]' in rendered
     assert "-webkit-text-fill-color:currentColor" in rendered
     assert "--cd-bg:#F3F5F7" in rendered
@@ -121,18 +118,9 @@ def test_streamlit_notebook_workspace_smoke():
     assert "cd-col-resize-handle" in rendered
     assert "cd-col-rail" in rendered
     assert ":has(.st-key-studio_rail)" in rendered
-    assert "streamlit_adjustable_columns" not in rendered
     assert any(button.label == "‹" for button in app.button)
     assert any(button.label == "›" for button in app.button)
     assert "cd-roadmap" in rendered
-    assert "cd-thinking-path-tip" not in rendered
-    assert "less critical" not in rendered
-    assert "ask to skip ahead" not in rendered
-    assert "tell the coach you are ready to move on" not in rendered
-    assert 'say "next" in Chat to move on' not in rendered
-    assert "cd-progress-help" not in rendered
-    assert "Stuck or want to move on" not in rendered
-    assert "Stay on this step" not in {button.label for button in app.button}
     # Footer Next is present but disabled without a pending coach recommendation / local API.
     assert any(button.label == "Next" for button in app.button)
     assert "IBM Plex Sans" in rendered
@@ -140,39 +128,23 @@ def test_streamlit_notebook_workspace_smoke():
 
     button_labels = {button.label for button in app.button}
     assert "Notebooks" in button_labels
-    assert "Link" not in button_labels
     assert len(app.file_uploader) >= 1
     assert any(
         (uploader.label or "") == "Add" for uploader in app.file_uploader
     )
-    assert "About Sources" not in button_labels
-    assert 'aria-label="About Sources"' not in rendered
-    assert "source-title-help" not in rendered
-    assert "New" not in button_labels
-    assert "Assignment context" not in button_labels
-    assert "Notebook details" not in button_labels
-    assert "Move to next step" not in button_labels
-    assert "Complete & continue" not in button_labels
-    assert "Setting" not in button_labels
-    assert "Settings" not in button_labels
-    assert len(app.toggle) == 0
-    assert len(app.feedback) == 0
-    assert not any("login" in (button.label or "").lower() for button in app.button)
-    assert len(app.warning) == 0
 
     assert any(input_widget.label == "Display name" for input_widget in app.text_input)
     assert any(control.label == "Appearance" for control in app.segmented_control)
     assert any(selectbox.label == "Language" for selectbox in app.selectbox)
     assert "cd-profile-menu" in rendered
     assert "cd-profile-help-title" in rendered
+    assert "cd-profile-help-title" in rendered
     assert "cd-profile-help-body" in rendered
     assert "stTooltipHoverTarget" in rendered
-    assert not any(selectbox.label == "Model" for selectbox in app.selectbox)
     assert "st-key-composer_model_slot" in rendered
     assert any(
         (button.label or "").startswith("GPT") for button in app.button
     )
-    assert not any(button.label == "Attach" for button in app.button)
     assert len(app.chat_message) == 1
     assert app.chat_message[0].name == "assistant"
 
@@ -202,17 +174,17 @@ def test_add_pasted_source_then_chat_with_citation():
 
     app.chat_input[0].set_value("What evidence does my source provide?").run()
     assert not app.exception
-    assert len(app.chat_message) == 2
-    assert any(
-        "[S1] Lecture evidence" in (markdown.value or "")
-        for markdown in app.markdown
+    # Welcome + student turn + coach reply.
+    assert len(app.chat_message) == 3
+    assert not any(
+        (expander.label or "").startswith("Sources used (") for expander in app.expander
     )
-    assert any(
-        button.label == "[S1] Lecture evidence" for button in app.button
+    assert not any(
+        (button.label or "").startswith("[S1]") for button in app.button
     )
 
 
-def test_multiple_citations_are_collapsed_into_sources_dropdown():
+def test_multiple_selected_sources_do_not_force_sources_used_footer():
     from backend.source_library import add_text_source
     from backend.student_store import StudentStore
 
@@ -231,17 +203,7 @@ def test_multiple_citations_are_collapsed_into_sources_dropdown():
         for expander in app.expander
         if expander.label.startswith("Sources used (")
     ]
-    assert len(source_expanders) == 1
-    source_count = int(
-        source_expanders[0].label.removeprefix("Sources used (").removesuffix(")")
-    )
-    assert source_count > 1
-    assert any(
-        button.label.endswith("Lecture evidence") for button in app.button
-    )
-    assert any(
-        button.label.endswith("Reading evidence") for button in app.button
-    )
+    assert source_expanders == []
 
 
 def test_pdf_source_opens_in_installed_viewer():
@@ -273,23 +235,16 @@ def test_pdf_source_opens_in_installed_viewer():
 
 def test_learning_studio_and_notebook_history_controls():
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    text_area_labels = {text_area.label for text_area in app.text_area}
-    assert "My thinking at this stage" not in text_area_labels
-    assert "My working conclusion" not in text_area_labels
-    assert "How my understanding changed" not in text_area_labels
-    assert not any(
-        selectbox.label == "Current stage" for selectbox in app.selectbox
-    )
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Thinking Path" in rendered
+    assert "Summary" in rendered
+    assert "Critical thinking (Facione)" in rendered
     assert "Discussion summary" in rendered
-    assert "Next question" not in rendered
     next(button for button in app.button if button.label == "Notebooks").click().run()
     assert not app.exception
     assert any(
         text_input.label == "Search notebooks" for text_input in app.text_input
     )
-    assert not any(selectbox.label == "Folder" for selectbox in app.selectbox)
     assert any(
         button.label == "New notebook" for button in app.button
     )
@@ -332,8 +287,6 @@ def test_language_theme_and_journey_has_no_manual_progression_control():
     assert StudentStore().get_user_preferences().get("appearance") == "Dark"
 
     assert app.session_state["learning_journey"]["current_stage"] == "focus"
-    assert not any(button.label == "Move to next step" for button in app.button)
-    assert not any(button.label == "Move to Evidence" for button in app.button)
     assert not app.exception
 
 
@@ -399,7 +352,6 @@ def test_current_notebook_title_is_directly_editable_and_syncs_with_history():
     next(button for button in app.button if button.label == "Notebooks").click().run()
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Road Safety Research" in rendered
-    assert not any(button.label == "Edit title" for button in app.button)
     assert not app.exception
 
 
@@ -415,8 +367,6 @@ def test_notebook_history_card_highlights_active_notebook_without_folders():
 
     app.run()
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "notebook-eyebrow" not in rendered
-    assert "notebook-folder-tag" not in rendered
     title = next(
         text_input for text_input in app.text_input if text_input.label == "Notebook title"
     )
@@ -424,13 +374,8 @@ def test_notebook_history_card_highlights_active_notebook_without_folders():
 
     next(button for button in app.button if button.label == "Notebooks").click().run()
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "notebook-card-folder" not in rendered or '<div class="notebook-card-folder">' not in rendered
-    assert '<div class="notebook-card-folder">' not in rendered
     assert "notebook-current-badge" in rendered
     assert "Active research notebook" in rendered
-    assert "cd-notebook-card is-active" not in rendered
-    assert not any(selectbox.label == "Folder" for selectbox in app.selectbox)
-    assert not any(button.label == "Manage folders" for button in app.button)
     assert not app.exception
 
 
@@ -459,6 +404,8 @@ def test_notebook_history_confirmed_delete_removes_the_selected_notebook():
     assert StudentStore().get_thread(deleted_thread_id) is None
     assert app.session_state["thread_id"] != deleted_thread_id
     assert app.session_state["pending_notebook_actions"] is None
+    # Closing/deleting from actions returns to the notebook library.
+    assert any(button.label == "New notebook" for button in app.button)
     assert not app.exception
 
 

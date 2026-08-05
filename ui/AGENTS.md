@@ -28,7 +28,7 @@ Only read that for UI tasks that touch API migration or coaching flow.
 |---|---|
 | `constants.py` | Response languages and appearance modes |
 | `components.py` | Shared HTML helpers for progress, empty states, review cards |
-| `toasts.py` | Corner toast helper (timed slide-in notifications) |
+| `toasts.py` | Corner toast helper (timed slide-in; falls back to `st.toast`) |
 | `assets/template.css` | Static layout/component stylesheet (edit CSS here) |
 | `theme.py` | Loads `assets/template.css`, `inject_template_css()`, dynamic `render_theme_css()` |
 | `layout/` | Browser-side layout helpers (column resize, sources scroll, composer) |
@@ -57,6 +57,8 @@ Compatibility shims at `ui/column_resize.py`, `ui/sources_scroll.py`, and
 
 These modules inject small `components.html` scripts because Streamlit lacks
 first-class APIs for those layout behaviours. Do not put educational logic here.
+`ui/toasts.py` uses the same pattern for timed corner toasts and falls back to
+`st.toast` if injection fails.
 
 ## Hard constraints
 
@@ -88,6 +90,7 @@ streamlit_app.py
   -> render_topbar()  -> model_id, reasoning_effort
   -> render_workspace(model_id, reasoning_effort)
   -> notebook_actions_dialog() if pending
+  -> else notebooks_dialog() if reopen after actions dismiss/delete
 ```
 
 ## Common edit paths

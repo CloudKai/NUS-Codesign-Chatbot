@@ -18,6 +18,7 @@ from backend.source_library import backfill_legacy_sources
 from backend.student_journey import default_journey, normalize_journey
 from backend.student_support import DEFAULT_SUPPORT_MODE
 
+from ui.coach_welcome import seed_coach_welcome
 from ui.constants import APPEARANCE_MODES, RESPONSE_LANGUAGES
 from ui.layout.column_resize import set_side_panel_collapsed
 from ui.runtime import rerun, store
@@ -50,6 +51,7 @@ def initialize_session() -> None:
         "pending_edit": None,
         "editing_message": None,
         "pending_notebook_actions": None,
+        "reopen_notebooks_dialog": False,
         "mobile_panel": "Chat",
         "nav_section": "Chat",
         "studio_tab": "Journey",
@@ -110,6 +112,7 @@ def new_notebook(should_rerun: bool = True) -> None:
             "allow_model_knowledge": False,
         },
     )
+    seed_coach_welcome(store, thread_id)
     st.session_state.thread_id = thread_id
     st.session_state.support_mode = DEFAULT_SUPPORT_MODE
     st.session_state.learning_journey = journey
@@ -127,8 +130,9 @@ def new_notebook(should_rerun: bool = True) -> None:
 
 
 def delete_notebook(thread_id: str) -> None:
-    """Delete a notebook and clear the active thread when it was selected."""
+    """Delete a notebook and return to the notebook library dialog."""
     st.session_state.pending_notebook_actions = None
+    st.session_state.reopen_notebooks_dialog = True
     store.delete_thread(thread_id)
     if thread_id == st.session_state.thread_id:
         st.session_state.thread_id = None
@@ -137,11 +141,16 @@ def delete_notebook(thread_id: str) -> None:
 def request_notebook_actions(thread_id: str) -> None:
     """Open the notebook actions dialog for ``thread_id`` on the next render."""
     st.session_state.pending_notebook_actions = thread_id
+    st.session_state.reopen_notebooks_dialog = False
 
 
 def cancel_notebook_actions() -> None:
-    """Dismiss a pending notebook-actions dialog without changing data."""
+    """Close notebook actions and reopen Your Notebooks on the next run.
+
+    Used for the dialog X, click-outside, and Esc dismiss paths.
+    """
     st.session_state.pending_notebook_actions = None
+    st.session_state.reopen_notebooks_dialog = True
 
 
 def select_thread(thread_id: str, should_rerun: bool = True) -> None:
@@ -186,6 +195,7 @@ def select_thread(thread_id: str, should_rerun: bool = True) -> None:
     st.session_state.thread_id = thread_id
     st.session_state.editing_message = None
     backfill_legacy_sources(store, thread_id)
+    seed_coach_welcome(store, thread_id)
     if should_rerun:
         rerun()
 
