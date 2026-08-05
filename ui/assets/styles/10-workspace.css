@@ -436,11 +436,18 @@
         position:absolute;
         top:0;
         right:-3px;
-        z-index:15;
+        z-index:40;
         width:6px;
         height:100%;
         cursor:col-resize;
         background:transparent;
+    }
+
+    /* Chat|Sources handle lives on the Sources column so it (and its
+       tooltip) paint above Chat and open toward the center. */
+    .cd-col-resize-handle-start {
+        left:-3px;
+        right:auto;
     }
 
     .cd-col-resize-handle:hover,
@@ -448,6 +455,44 @@
     body.cd-col-resizing .cd-col-resize-handle {
         /* Continuous divider; the collapse/expand pill paints over it. */
         background:color-mix(in srgb,var(--cd-accent) 42%,transparent);
+    }
+
+    .cd-col-resize-handle::after {
+        content:attr(data-tooltip);
+        position:absolute;
+        top:50%;
+        z-index:50;
+        padding:.28rem .45rem;
+        border:1px solid color-mix(in srgb,var(--cd-text) 18%,transparent);
+        border-radius:.35rem;
+        background:var(--cd-surface);
+        color:var(--cd-text);
+        font-size:.68rem;
+        font-weight:600;
+        line-height:1.2;
+        white-space:nowrap;
+        opacity:0;
+        pointer-events:none;
+        transform:translateY(-50%);
+        box-shadow:0 4px 14px rgba(21,32,43,.16);
+    }
+
+    .cd-col-resize-handle:not(.cd-col-resize-handle-start)::after {
+        left:calc(100% + .45rem);
+    }
+
+    .cd-col-resize-handle-start::after {
+        right:calc(100% + .45rem);
+        left:auto;
+    }
+
+    .cd-col-resize-handle:hover::after,
+    .cd-col-resize-handle:focus-visible::after {
+        opacity:1;
+    }
+
+    body.cd-col-resizing .cd-col-resize-handle::after {
+        opacity:0;
     }
 
     body.cd-col-resizing,

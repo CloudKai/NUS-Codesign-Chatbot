@@ -283,15 +283,22 @@ def sync_workspace_column_resize() -> None:
       const rightRole = roles[index + 1];
       if (isCollapsedRole(leftRole) || isCollapsedRole(rightRole)) return;
 
+      // Attach the Sources divider to the Sources column (higher stacking
+      // context) so its tooltip is not covered by the Sources panel.
+      const attachToRight = rightRole === "sources";
+      const host = attachToRight ? columns[index + 1] : column;
       const handle = doc.createElement("div");
-      handle.className = "cd-col-resize-handle";
+      handle.className = attachToRight
+        ? "cd-col-resize-handle cd-col-resize-handle-start"
+        : "cd-col-resize-handle";
       handle.setAttribute("role", "separator");
       handle.setAttribute("aria-orientation", "vertical");
-      handle.title = "Drag to resize";
-      if (getComputedStyle(column).position === "static") {{
-        column.style.position = "relative";
+      handle.setAttribute("aria-label", "Drag to resize");
+      handle.setAttribute("data-tooltip", "Drag to resize");
+      if (getComputedStyle(host).position === "static") {{
+        host.style.position = "relative";
       }}
-      column.appendChild(handle);
+      host.appendChild(handle);
 
       handle.addEventListener("mousedown", (event) => {{
         if (event.button !== 0) return;
