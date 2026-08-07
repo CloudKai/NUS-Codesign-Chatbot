@@ -63,6 +63,44 @@ def generate_dsql_auth_token(
     return str(token)
 
 
+def generate_dsql_admin_auth_token(
+    *,
+    endpoint: str,
+    region: str,
+    expires_seconds: int = 900,
+    client: Any | None = None,
+) -> str:
+    """Generate a short-lived DSQL IAM DbConnectAdmin auth token.
+
+    Uses ``generate_db_connect_admin_auth_token`` for schema migration only.
+    Never call this from application runtime (``co_design_app``).
+
+    Returns:
+        Token string used as the admin database password for one connection.
+
+    Raises:
+        RuntimeError: when boto3 is unavailable or token generation fails.
+    """
+    if client is None:
+        try:
+            import boto3
+        except ImportError as error:  # pragma: no cover - production dependency
+            raise RuntimeError(
+                "boto3 is required for DSQL admin bootstrap"
+            ) from error
+        client = boto3.client("dsql", region_name=region)
+    token = client.generate_db_connect_admin_auth_token(
+        Hostname=endpoint,
+        Region=region,
+        ExpiresIn=expires_seconds,
+    )
+    if not token:
+        raise RuntimeError(
+            "DSQL admin auth token generation returned an empty token"
+        )
+    return str(token)
+
+
 def adapt_sqlite_sql(sql: str) -> str:
     """Translate SQLite-oriented SQL fragments to DSQL/PostgreSQL placeholders.
 

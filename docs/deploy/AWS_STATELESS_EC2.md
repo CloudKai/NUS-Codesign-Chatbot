@@ -51,13 +51,19 @@ container must not destroy conversations, progress, or uploads.
 
 ### Admin schema bootstrap
 
-Aurora DSQL allows **one DDL statement per transaction**. Apply schema with:
+Aurora DSQL allows **one DDL statement per transaction**. Indexes use
+``CREATE INDEX ASYNC`` / ``CREATE UNIQUE INDEX ASYNC`` (no partial ``WHERE``
+predicates). Apply schema with:
 
 ```sh
 DSQL_ENDPOINT=<hostname> AWS_REGION=us-west-2 \
   .venv/bin/python scripts/init_dsql.py --admin-user admin
 ```
 
+The script authenticates with **DbConnectAdmin**
+(``generate_db_connect_admin_auth_token``), commits each DDL alone, and for
+async indexes waits on ``sys.wait_for_job`` before the next statement.
+Runtime never uses DbConnectAdmin.
 Then grant runtime privileges (run as admin; no account ARNs in Git):
 
 ```sql

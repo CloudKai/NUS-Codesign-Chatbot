@@ -13,11 +13,15 @@ from .ports import StoredObject
 
 logger = logging.getLogger(__name__)
 
-_MISSING_CODES = frozenset({"NoSuchKey", "NotFound", "404", "NoSuchBucket"})
+_MISSING_CODES = frozenset({"NoSuchKey", "NotFound", "404"})
 
 
 def is_missing_object_error(error: BaseException) -> bool:
-    """Return True only when *error* indicates a missing S3 object."""
+    """Return True only when *error* indicates a missing S3 object.
+
+    Configuration failures such as ``NoSuchBucket`` must not be treated as a
+    missing object — they propagate to the caller.
+    """
     error_name = type(error).__name__
     if error_name in {"NoSuchKey", "NotFound"}:
         return True
@@ -25,19 +29,17 @@ def is_missing_object_error(error: BaseException) -> bool:
     if isinstance(response, dict):
         err = response.get("Error") or {}
         code = str(err.get("Code") or "")
+        if code in {"NoSuchBucket", "AccessDenied", "InvalidAccessKeyId", "ExpiredToken"}:
+            return False
         if code in _MISSING_CODES:
             return True
         meta = response.get("ResponseMetadata") or {}
         status = meta.get("HTTPStatusCode")
-        if status == 404:
+        # Bare 404 without a non-object error code still means missing object.
+        if status == 404 and code in {"", "NoSuchKey", "NotFound", "404"}:
             return True
-    text = str(error)
-    if "NoSuchKey" in text or "Not Found" == text:
-        # Narrow string match for simple test doubles named NoSuchKey.
-        if error_name == "NoSuchKey" or "NoSuchKey" in text.split():
-            return True
-        if error_name == "ClientError" and "NoSuchKey" in text:
-            return True
+    if error_name == "NoSuchKey":
+        return True
     return False
 
 

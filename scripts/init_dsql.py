@@ -2,9 +2,12 @@
 
 Aurora DSQL allows only one DDL statement per transaction. This script opens a
 fresh admin connection for each CREATE TABLE / CREATE INDEX statement, commits,
-and reconnects. It never runs at application startup.
+and reconnects. Asynchronous index builds return a ``job_id``; after commit the
+script waits for ``sys.wait_for_job`` before continuing. It never runs at
+application startup.
 
-Runtime traffic must use ``DSQL_USER=co_design_app`` (DbConnect), not admin.
+Admin auth uses ``generate_db_connect_admin_auth_token`` (DbConnectAdmin).
+Runtime traffic must use ``DSQL_USER=co_design_app`` with DbConnect only.
 
 Example:
 
@@ -34,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.persistence.dsql_connection import (  # noqa: E402
     DsqlConnectionProxy,
-    generate_dsql_auth_token,
+    generate_dsql_admin_auth_token,
 )
 from backend.persistence.dsql_schema import (  # noqa: E402
     RUNTIME_GRANT_SQL,
@@ -42,6 +45,35 @@ from backend.persistence.dsql_schema import (  # noqa: E402
     iter_dsql_ddl_statements,
 )
 from backend.settings import settings  # noqa: E402
+
+
+def is_async_index_ddl(statement: str) -> bool:
+    """Return True when *statement* is a CREATE [UNIQUE] INDEX ASYNC DDL."""
+    upper = " ".join(statement.upper().split())
+    return upper.startswith("CREATE") and " INDEX ASYNC " in f" {upper} "
+
+
+def _job_id_from_result(result: Any) -> str:
+    """Extract the async index ``job_id`` from a CREATE INDEX ASYNC result."""
+    row = result.fetchone() if result is not None else None
+    if row is None:
+        raise RuntimeError("CREATE INDEX ASYNC returned no job_id row")
+    if hasattr(row, "get"):
+        value = row.get("job_id")
+        if value is None:
+            # Case-insensitive mapping used by DsqlConnectionProxy rows.
+            for key in row:
+                if str(key).lower() == "job_id":
+                    value = row[key]
+                    break
+    elif isinstance(row, (tuple, list)) and row:
+        value = row[0]
+    else:
+        value = row
+    job_id = str(value or "").strip()
+    if not job_id:
+        raise RuntimeError("CREATE INDEX ASYNC returned an empty job_id")
+    return job_id
 
 
 def _connect_admin(
@@ -53,12 +85,17 @@ def _connect_admin(
     connect_fn: Callable[..., Any] | None = None,
     token_provider: Callable[[], str] | None = None,
 ) -> DsqlConnectionProxy:
-    """Open one admin connection for a single DDL transaction."""
+    """Open one admin connection for a single DDL or wait transaction."""
     if not endpoint.strip():
         raise ValueError("DSQL_ENDPOINT is required")
-    token = (token_provider or (
-        lambda: generate_dsql_auth_token(endpoint=endpoint, region=region)
-    ))()
+    token = (
+        token_provider
+        or (
+            lambda: generate_dsql_admin_auth_token(
+                endpoint=endpoint, region=region
+            )
+        )
+    )()
     active_connect = connect_fn
     if active_connect is None:
         try:
@@ -81,6 +118,120 @@ def _connect_admin(
     return DsqlConnectionProxy(raw)
 
 
+def wait_for_async_index_job(
+    *,
+    job_id: str,
+    endpoint: str,
+    region: str,
+    database: str,
+    admin_user: str,
+    connect_fn: Callable[..., Any] | None = None,
+    token_provider: Callable[[], str] | None = None,
+) -> None:
+    """Block until a DSQL async index job completes; raise on failure.
+
+    Opens a fresh admin connection (separate transaction from the CREATE INDEX
+    ASYNC statement) and calls ``sys.wait_for_job``.
+    """
+    connection = _connect_admin(
+        endpoint=endpoint,
+        region=region,
+        database=database,
+        admin_user=admin_user,
+        connect_fn=connect_fn,
+        token_provider=token_provider,
+    )
+    try:
+        result = connection.execute(
+            "SELECT sys.wait_for_job(?)",
+            (job_id,),
+        )
+        row = result.fetchone()
+        connection.commit()
+    except Exception:
+        try:
+            connection.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        connection.close()
+        raise
+    else:
+        connection.close()
+
+    success = True
+    if row is not None:
+        if hasattr(row, "get"):
+            # First column / value from wait_for_job boolean.
+            values = list(row.values()) if hasattr(row, "values") else []
+            if values:
+                success = bool(values[0])
+            else:
+                success = bool(row)
+        elif isinstance(row, (tuple, list)):
+            success = bool(row[0])
+        else:
+            success = bool(row)
+    if success:
+        return
+
+    detail = _async_job_failure_detail(
+        job_id=job_id,
+        endpoint=endpoint,
+        region=region,
+        database=database,
+        admin_user=admin_user,
+        connect_fn=connect_fn,
+        token_provider=token_provider,
+    )
+    raise RuntimeError(
+        f"DSQL async index job {job_id!r} failed"
+        + (f": {detail}" if detail else "")
+    )
+
+
+def _async_job_failure_detail(
+    *,
+    job_id: str,
+    endpoint: str,
+    region: str,
+    database: str,
+    admin_user: str,
+    connect_fn: Callable[..., Any] | None = None,
+    token_provider: Callable[[], str] | None = None,
+) -> str:
+    """Best-effort read of ``sys.jobs.details`` for a failed async index job."""
+    connection = _connect_admin(
+        endpoint=endpoint,
+        region=region,
+        database=database,
+        admin_user=admin_user,
+        connect_fn=connect_fn,
+        token_provider=token_provider,
+    )
+    try:
+        result = connection.execute(
+            "SELECT status, details FROM sys.jobs WHERE job_id = ?",
+            (job_id,),
+        )
+        row = result.fetchone()
+        connection.commit()
+    except Exception:  # noqa: BLE001 - details are optional
+        try:
+            connection.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        return ""
+    finally:
+        connection.close()
+    if row is None:
+        return ""
+    if hasattr(row, "get"):
+        status = row.get("status")
+        details = row.get("details")
+        return f"status={status!s} details={details!s}"
+    return str(row)
+
+
 def apply_dsql_schema(
     *,
     endpoint: str,
@@ -90,17 +241,20 @@ def apply_dsql_schema(
     connect_fn: Callable[..., Any] | None = None,
     token_provider: Callable[[], str] | None = None,
     statements: list[str] | None = None,
+    wait_for_job: Callable[..., None] | None = None,
 ) -> list[str]:
     """Apply each DDL statement in its own committed transaction.
 
     Reconnects after every statement so catalog changes are visible and DSQL's
-    one-DDL-per-transaction rule is respected.
+    one-DDL-per-transaction rule is respected. For ``CREATE INDEX ASYNC``,
+    captures ``job_id``, commits, then waits for the job before the next DDL.
 
     Returns:
         The list of statements that were executed.
     """
     planned = statements if statements is not None else iter_dsql_ddl_statements()
     applied: list[str] = []
+    waiter = wait_for_job or wait_for_async_index_job
     for statement in planned:
         connection = _connect_admin(
             endpoint=endpoint,
@@ -110,8 +264,11 @@ def apply_dsql_schema(
             connect_fn=connect_fn,
             token_provider=token_provider,
         )
+        job_id: str | None = None
         try:
-            connection.execute(statement)
+            result = connection.execute(statement)
+            if is_async_index_ddl(statement):
+                job_id = _job_id_from_result(result)
             connection.commit()
         except Exception:
             try:
@@ -122,6 +279,16 @@ def apply_dsql_schema(
             raise
         else:
             connection.close()
+        if job_id is not None:
+            waiter(
+                job_id=job_id,
+                endpoint=endpoint,
+                region=region,
+                database=database,
+                admin_user=admin_user,
+                connect_fn=connect_fn,
+                token_provider=token_provider,
+            )
         applied.append(statement)
     return applied
 
@@ -131,7 +298,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Admin-only Aurora DSQL schema bootstrap. "
-            "One DDL per transaction; not used by application startup."
+            "One DDL per transaction; waits for ASYNC index jobs; "
+            "not used by application startup."
         )
     )
     parser.add_argument(

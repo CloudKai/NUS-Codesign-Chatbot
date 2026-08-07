@@ -10,12 +10,14 @@ import pytest
 
 from backend.persistence.dsql_connection import (
     adapt_sqlite_sql,
+    generate_dsql_admin_auth_token,
     generate_dsql_auth_token,
     is_retryable_db_error,
     run_dsql_transaction,
     strip_foreign_keys,
 )
 from backend.persistence.dsql_schema import (
+    DSQL_SCHEMA,
     RUNTIME_ROLE_NAME,
     iter_dsql_ddl_statements,
 )
@@ -38,6 +40,7 @@ assert _SPEC is not None and _SPEC.loader is not None
 _INIT_DSQL = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_INIT_DSQL)
 apply_dsql_schema = _INIT_DSQL.apply_dsql_schema
+is_async_index_ddl = _INIT_DSQL.is_async_index_ddl
 
 
 class _OccError(Exception):
@@ -307,7 +310,7 @@ def test_generate_dsql_auth_token_uses_db_connect_not_admin():
             self.called = None
 
         def generate_db_connect_auth_token(self, **kwargs):
-            self.called = kwargs
+            self.called = ("connect", kwargs)
             return "token-value"
 
         def generate_db_connect_admin_auth_token(self, **kwargs):  # pragma: no cover
@@ -320,7 +323,41 @@ def test_generate_dsql_auth_token_uses_db_connect_not_admin():
         client=client,
     )
     assert token == "token-value"
+    assert client.called[0] == "connect"
+    assert client.called[1]["Hostname"] == "ep.example"
+
+
+def test_generate_dsql_admin_auth_token_uses_db_connect_admin():
+    class _Client:
+        def __init__(self) -> None:
+            self.called = None
+
+        def generate_db_connect_auth_token(self, **kwargs):  # pragma: no cover
+            raise AssertionError("admin bootstrap must not use DbConnect")
+
+        def generate_db_connect_admin_auth_token(self, **kwargs):
+            self.called = kwargs
+            return "admin-token"
+
+    client = _Client()
+    token = generate_dsql_admin_auth_token(
+        endpoint="ep.example",
+        region="us-west-2",
+        client=client,
+    )
+    assert token == "admin-token"
     assert client.called["Hostname"] == "ep.example"
+
+
+def test_dsql_schema_has_no_partial_index_where_predicate():
+    assert "WHERE cognitoSub" not in DSQL_SCHEMA
+    assert "WHERE cognitosub" not in DSQL_SCHEMA.lower()
+    assert "CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_users_cognito_sub" in DSQL_SCHEMA
+    for statement in iter_dsql_ddl_statements():
+        upper = statement.upper()
+        if "INDEX" in upper:
+            assert " WHERE " not in upper
+            assert "ASYNC" in upper
 
 
 def test_run_dsql_transaction_retries_occ_then_succeeds():
@@ -345,26 +382,43 @@ def test_run_dsql_transaction_does_not_retry_non_occ():
         run_dsql_transaction(work, max_attempts=5, sleep=lambda _s: None)
 
 
-def test_init_dsql_commits_each_ddl_separately():
+def test_init_dsql_commits_each_ddl_separately_and_waits_for_async_index():
     commits: list[str] = []
-    connections: list[_FakeDsqlConnection] = []
+    waited: list[str] = []
+    job_counter = {"n": 0}
 
     def connect_fn(**kwargs):
         assert kwargs["user"] == "admin"
-        conn = _FakeDsqlConnection(commits)
-        connections.append(conn)
 
         class _Raw:
             def cursor(self):
                 class _Cur:
                     description = None
                     rowcount = 0
+                    _rows: list = []
 
                     def execute(self, sql, params=None):
                         commits.append(sql)
+                        upper = sql.upper()
+                        if "CREATE" in upper and "INDEX ASYNC" in upper:
+                            job_counter["n"] += 1
+                            self.description = [
+                                type("Col", (), {"name": "job_id"})()
+                            ]
+                            self._rows = [(f"job-{job_counter['n']}",)]
+                        elif "WAIT_FOR_JOB" in upper:
+                            self.description = [
+                                type("Col", (), {"name": "wait_for_job"})()
+                            ]
+                            self._rows = [(True,)]
+                        else:
+                            self.description = None
+                            self._rows = []
 
                     def fetchall(self):
-                        return []
+                        rows = self._rows
+                        self._rows = []
+                        return rows
 
                     def __enter__(self):
                         return self
@@ -385,23 +439,78 @@ def test_init_dsql_commits_each_ddl_separately():
 
         return _Raw()
 
+    def wait_for_job(**kwargs):
+        waited.append(kwargs["job_id"])
+
     statements = [
         "CREATE TABLE IF NOT EXISTS t1 (id TEXT PRIMARY KEY)",
-        "CREATE INDEX IF NOT EXISTS i1 ON t1(id)",
+        "CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_t1 ON t1(id)",
+        "CREATE TABLE IF NOT EXISTS t2 (id TEXT PRIMARY KEY)",
     ]
+    assert is_async_index_ddl(statements[1])
+    assert not is_async_index_ddl(statements[0])
+
+    # Default token_provider would call admin token; inject a static token.
+    admin_tokens: list[str] = []
+
+    def token_provider():
+        admin_tokens.append("admin-tok")
+        return "admin-tok"
+
     applied = apply_dsql_schema(
         endpoint="ep.example",
         region="us-west-2",
         admin_user="admin",
         connect_fn=connect_fn,
-        token_provider=lambda: "tok",
+        token_provider=token_provider,
         statements=statements,
+        wait_for_job=wait_for_job,
     )
     assert applied == statements
-    assert commits.count("COMMIT") == 2
-    # One connection per DDL statement.
-    assert len(connections) == 2
-    assert len(iter_dsql_ddl_statements()) >= 10
+    assert commits.count("COMMIT") == 3
+    assert waited == ["job-1"]
+    assert admin_tokens  # admin bootstrap minted tokens
+    # Table DDL, then async index, then next table — wait happened between index and t2.
+    index_pos = next(
+        i for i, sql in enumerate(commits) if "INDEX ASYNC" in sql.upper()
+    )
+    commit_after_index = next(
+        i for i in range(index_pos + 1, len(commits)) if commits[i] == "COMMIT"
+    )
+    t2_pos = next(i for i, sql in enumerate(commits) if "t2" in sql.lower())
+    assert commit_after_index < t2_pos
+
+
+def test_s3_nosuchbucket_propagates():
+    class _Client:
+        def get_object(self, *, Bucket: str, Key: str):
+            err = type("ClientError", (Exception,), {})("NoSuchBucket")
+            err.response = {
+                "Error": {"Code": "NoSuchBucket"},
+                "ResponseMetadata": {"HTTPStatusCode": 404},
+            }
+            raise err
+
+        def head_object(self, *, Bucket: str, Key: str):
+            err = type("ClientError", (Exception,), {})("NoSuchBucket")
+            err.response = {
+                "Error": {"Code": "NoSuchBucket"},
+                "ResponseMetadata": {"HTTPStatusCode": 404},
+            }
+            raise err
+
+    s3 = S3FileStorage(bucket="missing-bucket", region="us-west-2", client=_Client())
+    with pytest.raises(Exception) as raised:
+        s3.get_bytes("users/a/b.txt")
+    assert not isinstance(raised.value, FileNotFoundError)
+    assert "NoSuchBucket" in str(raised.value) or getattr(
+        raised.value, "response", {}
+    ).get("Error", {}).get("Code") == "NoSuchBucket"
+    # HTTP 404 alone is not enough when Code is NoSuchBucket.
+    assert is_missing_object_error(raised.value) is False
+    with pytest.raises(Exception) as head_raised:
+        s3.exists("users/a/b.txt")
+    assert not isinstance(head_raised.value, FileNotFoundError)
 
 
 def test_save_uploads_and_workspace_read_via_object_storage(tmp_path: Path, monkeypatch):

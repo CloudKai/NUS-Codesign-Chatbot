@@ -6,7 +6,9 @@ Differences from the SQLite schema in ``student_store.SCHEMA``:
 - No ON DELETE CASCADE (delete child rows explicitly in the store).
 - JSON-shaped fields remain TEXT (DSQL does not use JSON/JSONB columns here).
 - UUID primary keys stay application-generated TEXT ids.
-- Partial unique index on ``users(cognitoSub)`` is applied during admin bootstrap.
+- Unique index on ``users(cognitoSub)`` uses ``CREATE UNIQUE INDEX ASYNC``
+  without a partial ``WHERE`` predicate (DSQL NULLS DISTINCT allows multiple
+  NULL cognitoSub values). Admin bootstrap waits for each ASYNC index job.
 
 Do not auto-create or destroy DSQL clusters from application startup. Schema
 application is explicit via ``scripts/init_dsql.py`` (admin only). Runtime
@@ -66,7 +68,7 @@ CREATE TABLE IF NOT EXISTS steps (
     modes TEXT NOT NULL DEFAULT '{}'
 );
 
-CREATE INDEX IF NOT EXISTS idx_steps_thread_created ON steps(threadId, createdAt);
+CREATE INDEX ASYNC IF NOT EXISTS idx_steps_thread_created ON steps(threadId, createdAt);
 
 CREATE TABLE IF NOT EXISTS folders (
     id TEXT PRIMARY KEY,
@@ -137,7 +139,7 @@ CREATE TABLE IF NOT EXISTS notebook_sources (
     uploadedAt TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_notebook_sources_thread
+CREATE INDEX ASYNC IF NOT EXISTS idx_notebook_sources_thread
 ON notebook_sources(threadId, createdAt);
 
 CREATE TABLE IF NOT EXISTS phase_transitions (
@@ -151,7 +153,7 @@ CREATE TABLE IF NOT EXISTS phase_transitions (
     resolvedAt TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_phase_transitions_thread_status
+CREATE INDEX ASYNC IF NOT EXISTS idx_phase_transitions_thread_status
 ON phase_transitions(threadId, status, createdAt);
 
 CREATE TABLE IF NOT EXISTS app_sessions (
@@ -164,10 +166,10 @@ CREATE TABLE IF NOT EXISTS app_sessions (
     revokedAt TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_app_sessions_token_hash
+CREATE INDEX ASYNC IF NOT EXISTS idx_app_sessions_token_hash
 ON app_sessions(tokenHash);
 
-CREATE INDEX IF NOT EXISTS idx_app_sessions_user
+CREATE INDEX ASYNC IF NOT EXISTS idx_app_sessions_user
 ON app_sessions(userId);
 
 CREATE TABLE IF NOT EXISTS oauth_login_states (
@@ -177,8 +179,8 @@ CREATE TABLE IF NOT EXISTS oauth_login_states (
     expiresAt TEXT NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_cognito_sub
-ON users(cognitoSub) WHERE cognitoSub IS NOT NULL;
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_users_cognito_sub
+ON users(cognitoSub);
 """
 
 
