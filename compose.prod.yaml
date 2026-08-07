@@ -16,6 +16,8 @@ services:
       DATABASE_PROVIDER: "dsql"
       FILE_STORAGE_PROVIDER: "s3"
       AWS_REGION: "us-west-2"
+      # Runtime DSQL role (DbConnect). Never admin — schema uses scripts/init_dsql.py.
+      DSQL_USER: "co_design_app"
       # Runtime-configured; do not hard-code account IDs or bucket names in Git.
       # DSQL_ENDPOINT: set in host .env
       # USER_UPLOADS_BUCKET: set in host .env

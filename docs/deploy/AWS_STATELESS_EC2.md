@@ -4,6 +4,9 @@ This document describes the image-based production topology for
 `cde2300chatbot.duckdns.org`. It does **not** delete local `data/` or migrate
 existing SQLite/uploads automatically.
 
+**A live DSQL + S3 smoke test is still required before declaring the migration
+complete.** Passing unit tests alone is not sufficient.
+
 ## Topology
 
 ```text
@@ -15,7 +18,7 @@ Students
        │     ├── Streamlit :8501 (internal)
        │     └── FastAPI :8000 (internal)
        │           ├── Cognito
-       │           ├── Aurora DSQL (structured state)
+       │           ├── Aurora DSQL (structured state, role co_design_app)
        │           ├── S3 (user uploads)
        │           └── Bedrock (us-west-2)
        └── DuckDNS cron on the host (not in the app container)
@@ -31,7 +34,36 @@ container must not destroy conversations, progress, or uploads.
 | Structured state | SQLite (`DATABASE_PROVIDER=sqlite`) | Aurora DSQL (`dsql`) |
 | Uploads | Local files (`FILE_STORAGE_PROVIDER=local`) | S3 (`s3`) |
 | Compose file | `compose.yaml` (build + `./data` mount) | `compose.prod.yaml` (image, no data mount) |
+| DB role | n/a | Runtime `DSQL_USER=co_design_app` (never `admin`) |
 | Secrets | `.env` + `.streamlit/secrets.toml` (never in Git) | Host files + IAM role |
+
+## DSQL security model
+
+| Role | Purpose | Privileges |
+|---|---|---|
+| `admin` | Schema migration only (`scripts/init_dsql.py`) | CREATE / ALTER / INDEX / GRANT |
+| `co_design_app` | Application runtime | SELECT / INSERT / UPDATE / DELETE only |
+
+- Runtime tokens use IAM **DbConnect** (`generate_db_connect_auth_token`), not
+  DbConnectAdmin.
+- Map the EC2 instance IAM role to `co_design_app` in IAM (do not commit ARNs).
+- Application startup must **not** run DDL.
+
+### Admin schema bootstrap
+
+Aurora DSQL allows **one DDL statement per transaction**. Apply schema with:
+
+```sh
+DSQL_ENDPOINT=<hostname> AWS_REGION=us-west-2 \
+  .venv/bin/python scripts/init_dsql.py --admin-user admin
+```
+
+Then grant runtime privileges (run as admin; no account ARNs in Git):
+
+```sql
+GRANT USAGE ON SCHEMA public TO co_design_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO co_design_app;
+```
 
 ## Build and push (CI or developer machine)
 
@@ -69,8 +101,26 @@ Required production `.env` keys (host-only):
 - `FILE_STORAGE_PROVIDER=s3`
 - `AWS_REGION=us-west-2`
 - `DSQL_ENDPOINT=<hostname>`
+- `DSQL_USER=co_design_app`
 - `USER_UPLOADS_BUCKET=<bucket>`
 - Cognito + public URL values already set in `compose.prod.yaml`
+
+## Live smoke test (required before cutover)
+
+1. Admin runs `scripts/init_dsql.py --admin-user admin`.
+2. Admin grants table privileges to `co_design_app` (SQL above).
+3. EC2 IAM role mapped to `co_design_app` (DbConnect).
+4. Host `.env` has `DSQL_USER=co_design_app` (not admin).
+5. App connects via IAM DbConnect token.
+6. Create Cognito user/session; create notebook; save/reload messages.
+7. Upload a file (lands in S3); preview/download succeeds.
+8. Restart or remove/recreate the app container (no `/app/data` mount).
+9. Login again: notebook + messages still present; S3 upload still
+   previews/downloads.
+10. Delete notebook: DSQL rows and S3 objects under the thread prefix are gone.
+
+Until this smoke sequence passes against real DSQL/S3 in `us-west-2`, the
+migration is **not** complete.
 
 ## DuckDNS (host)
 
@@ -88,7 +138,7 @@ Application startup must not depend on DuckDNS success.
 Grant least privilege for:
 
 - `ecr:GetAuthorizationToken` + repository pull
-- Aurora DSQL `db-connect` / IAM DB auth for the cluster
+- Aurora DSQL DbConnect for `co_design_app` (not admin)
 - S3 read/write/delete on the uploads bucket prefix
 - Bedrock invoke (existing model access)
 - Optional CloudWatch logs
@@ -100,25 +150,25 @@ Do **not** place long-lived AWS access keys in `.env`.
 1. Create/confirm Aurora DSQL cluster in `us-west-2` and note the endpoint.
 2. Create the S3 uploads bucket in `us-west-2` (block public access).
 3. Create ECR repository and push the first `linux/arm64` image.
-4. Attach the EC2 instance profile with the permissions above.
-5. Apply DSQL schema (store init / controlled migration) — no automatic data
-   migration from the old SQLite volume is performed by this codebase.
+4. Attach the EC2 instance profile; map it to DB role `co_design_app`.
+5. Run `scripts/init_dsql.py` as admin, then GRANT runtime privileges.
 6. Confirm Cognito callback remains
    `https://cde2300chatbot.duckdns.org/api/v1/auth/callback`.
-7. Cut over DNS/DuckDNS to the new instance when ready.
+7. Pass the live smoke sequence above, then cut over DuckDNS.
 
 ## Aurora DSQL assumptions
 
 - PostgreSQL wire protocol via `psycopg`
+- One DDL statement per transaction (admin bootstrap only)
 - No foreign keys / ON DELETE CASCADE — child rows deleted in application code
 - JSON-shaped fields stored as TEXT
-- IAM auth tokens (no permanent DB password)
-- OCC serialization failures should be retried by the connection helper
+- IAM DbConnect tokens for `co_design_app` (no permanent DB password)
+- OCC serialization failures (SQLSTATE 40001) retry the whole DB unit of work
 - Do not assume every PostgreSQL feature works (no temp tables, limited DDL)
 
 ## Before removing the old EC2 `/app/data` volume
 
 1. Confirm production Compose uses DSQL + S3 and no `./data` mount.
 2. Migrate or accept loss of any SQLite-only history (manual, approved).
-3. Verify uploads readable from S3 and coaching resumes after container replace.
+3. Verify the live smoke sequence (including container replace).
 4. Keep local `data/` for development unless separately instructed to delete it.

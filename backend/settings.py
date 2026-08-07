@@ -61,7 +61,8 @@ class Settings:
         or "postgres"
     )
     dsql_user: str = field(
-        default_factory=lambda: os.getenv("DSQL_USER", "admin").strip() or "admin"
+        default_factory=lambda: os.getenv("DSQL_USER", "co_design_app").strip()
+        or "co_design_app"
     )
     user_uploads_bucket: str = field(
         default_factory=lambda: os.getenv("USER_UPLOADS_BUCKET", "").strip()

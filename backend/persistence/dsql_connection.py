@@ -1,9 +1,10 @@
-"""Aurora DSQL connection helpers (IAM auth, retries, SQL adaptation).
+"""Aurora DSQL connection helpers (IAM auth, OCC retries, SQL adaptation).
 
 Aurora DSQL is PostgreSQL-wire compatible but not identical to PostgreSQL:
 no foreign keys, no temporary tables, optimistic concurrency (retry on
 serialization failures), and JSON should be stored as TEXT. Authentication
-uses short-lived IAM tokens — never a permanent password in source or ``.env``.
+uses short-lived IAM tokens via ``generate_db_connect_auth_token`` (DbConnect)
+— never a permanent password and never DbConnectAdmin for the app runtime role.
 """
 
 from __future__ import annotations
@@ -13,12 +14,17 @@ import random
 import re
 import time
 from contextlib import contextmanager
-from typing import Any, Callable, Iterator, Sequence
+from typing import Any, Callable, Iterator, Sequence, TypeVar
 
 logger = logging.getLogger(__name__)
 
 # SQLSTATE for serialization/OCC conflicts that callers should retry.
 _RETRYABLE_SQLSTATES = {"40001", "40P01"}
+
+# Default bounded OCC attempts for write transactions.
+DEFAULT_OCC_MAX_ATTEMPTS = 5
+
+T = TypeVar("T")
 
 
 def generate_dsql_auth_token(
@@ -28,7 +34,10 @@ def generate_dsql_auth_token(
     expires_seconds: int = 900,
     client: Any | None = None,
 ) -> str:
-    """Generate a short-lived DSQL IAM auth token.
+    """Generate a short-lived DSQL IAM DbConnect auth token.
+
+    Uses ``generate_db_connect_auth_token`` (custom/runtime role), not
+    DbConnectAdmin. Callers must not log the token.
 
     Returns:
         Token string used as the database password for one connection.
@@ -44,7 +53,6 @@ def generate_dsql_auth_token(
                 "boto3 is required when DATABASE_PROVIDER=dsql"
             ) from error
         client = boto3.client("dsql", region_name=region)
-    # boto3 DSQL client method name is generate_db_connect_auth_token.
     token = client.generate_db_connect_auth_token(
         Hostname=endpoint,
         Region=region,
@@ -68,11 +76,8 @@ def adapt_sqlite_sql(sql: str) -> str:
         if "ON CONFLICT" not in text.upper():
             text = text.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
     elif upper.startswith("INSERT OR REPLACE INTO"):
-        # Prefer explicit conflict targets from callers; fall back to DO NOTHING
-        # only when the statement already includes ON CONFLICT.
         text = "INSERT INTO" + text[len("INSERT OR REPLACE INTO") :]
         if "ON CONFLICT" not in text.upper():
-            # oauth_login_states uses state PK — generic upsert via excluded.
             text = (
                 text.rstrip().rstrip(";")
                 + " ON CONFLICT (state) DO UPDATE SET "
@@ -80,7 +85,6 @@ def adapt_sqlite_sql(sql: str) -> str:
                 + "createdAt = EXCLUDED.createdAt, "
                 + "expiresAt = EXCLUDED.expiresAt"
             )
-    # Convert qmark placeholders that are not inside quotes (simple scanner).
     return _qmark_to_percent(text)
 
 
@@ -167,8 +171,12 @@ class DsqlConnectionProxy:
         return DsqlCursorResult(rows, rowcount)
 
     def executescript(self, script: str) -> None:
-        """Execute multiple DDL/DML statements, skipping SQLite PRAGMAs."""
-        for statement in _split_statements(script):
+        """Execute multiple DML statements in the current transaction.
+
+        Intended for tests only. Production DDL must use
+        ``scripts/init_dsql.py`` (one DDL per committed transaction).
+        """
+        for statement in split_sql_statements(script):
             upper = statement.strip().upper()
             if not upper or upper.startswith("PRAGMA"):
                 continue
@@ -177,6 +185,10 @@ class DsqlConnectionProxy:
     def commit(self) -> None:
         """Commit the underlying transaction."""
         self._raw.commit()
+
+    def rollback(self) -> None:
+        """Roll back the underlying transaction."""
+        self._raw.rollback()
 
     def close(self) -> None:
         """Close the underlying connection."""
@@ -190,7 +202,7 @@ class DsqlConnectionProxy:
             if exc_type is None:
                 self.commit()
             else:
-                self._raw.rollback()
+                self.rollback()
         finally:
             self.close()
 
@@ -218,7 +230,7 @@ class _Row(dict):
         raise KeyError(key)
 
 
-def _split_statements(script: str) -> list[str]:
+def split_sql_statements(script: str) -> list[str]:
     """Split a SQL script on semicolons outside quotes."""
     statements: list[str] = []
     current: list[str] = []
@@ -238,13 +250,72 @@ def _split_statements(script: str) -> list[str]:
     return statements
 
 
+# Backwards-compatible private alias used by older call sites/tests.
+_split_statements = split_sql_statements
+
+
 def is_retryable_db_error(error: BaseException) -> bool:
     """Return whether *error* is an Aurora DSQL OCC/serialization conflict."""
     sqlstate = getattr(error, "sqlstate", None) or getattr(error, "pgcode", None)
     if sqlstate in _RETRYABLE_SQLSTATES:
         return True
+    # botocore / nested causes
+    cause = getattr(error, "__cause__", None)
+    if cause is not None and cause is not error:
+        if is_retryable_db_error(cause):
+            return True
     text = str(error).lower()
-    return "could not serialize" in text or "serialization failure" in text
+    return (
+        "could not serialize" in text
+        or "serialization failure" in text
+        or "occonflict" in text.replace(" ", "")
+        or "optimistic concurrency" in text
+    )
+
+
+def run_dsql_transaction(
+    work: Callable[[], T],
+    *,
+    max_attempts: int = DEFAULT_OCC_MAX_ATTEMPTS,
+    sleep: Callable[[float], None] = time.sleep,
+) -> T:
+    """Run an idempotent unit of work with OCC retries on SQLSTATE 40001.
+
+    Retries the *entire* ``work`` callback after rollback/failure. Callers must
+    keep ``work`` free of non-idempotent external side effects (S3 uploads,
+    emails, etc.) or perform those only after the DB transaction succeeds.
+
+    Args:
+        work: Zero-argument callable that opens its own connection/transaction.
+        max_attempts: Inclusive upper bound on attempts (default 5).
+        sleep: Injectable sleeper for tests.
+
+    Returns:
+        The return value of ``work`` on success.
+
+    Raises:
+        The last non-retryable or exhausted error from ``work``.
+    """
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be >= 1")
+    last_error: BaseException | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return work()
+        except Exception as error:  # noqa: BLE001 - classified below
+            last_error = error
+            if attempt >= max_attempts or not is_retryable_db_error(error):
+                raise
+            sleep_for = (0.05 * (2 ** (attempt - 1))) + random.uniform(0, 0.05)
+            logger.warning(
+                "DSQL OCC conflict on attempt %s/%s; retrying in %.3fs",
+                attempt,
+                max_attempts,
+                sleep_for,
+            )
+            sleep(sleep_for)
+    assert last_error is not None
+    raise last_error
 
 
 def connect_dsql(
@@ -252,62 +323,57 @@ def connect_dsql(
     endpoint: str,
     region: str,
     database: str = "postgres",
-    user: str = "admin",
+    user: str = "co_design_app",
     port: int = 5432,
     token_provider: Callable[[], str] | None = None,
     connect_fn: Callable[..., Any] | None = None,
-    max_attempts: int = 3,
 ) -> DsqlConnectionProxy:
-    """Open one DSQL connection using a fresh IAM auth token.
+    """Open one DSQL connection using a fresh IAM DbConnect auth token.
 
-    Retries a small number of times on retryable serialization errors during
-    connect only. Callers must not log the token.
+    Defaults to the runtime role ``co_design_app``. Do not pass ``admin`` for
+    application traffic. OCC retries belong in ``run_dsql_transaction``, not
+    around ``connect`` alone.
     """
     if not endpoint.strip():
         raise ValueError("DSQL_ENDPOINT is required when DATABASE_PROVIDER=dsql")
     if not region.strip():
         raise ValueError("AWS_REGION is required when DATABASE_PROVIDER=dsql")
+    role = (user or "").strip()
+    if not role:
+        raise ValueError("DSQL_USER is required when DATABASE_PROVIDER=dsql")
+    if role.lower() == "admin":
+        raise ValueError(
+            "DSQL_USER=admin is not allowed for application runtime; "
+            "use co_design_app (admin is for scripts/init_dsql.py only)"
+        )
 
     def _default_token() -> str:
         return generate_dsql_auth_token(endpoint=endpoint, region=region)
 
     provider = token_provider or _default_token
-    last_error: BaseException | None = None
-    for attempt in range(1, max_attempts + 1):
-        token = provider()
+    token = provider()
+    active_connect = connect_fn
+    if active_connect is None:
         try:
-            if connect_fn is None:
-                try:
-                    import psycopg
-                except ImportError as error:  # pragma: no cover
-                    raise RuntimeError(
-                        "psycopg is required when DATABASE_PROVIDER=dsql"
-                    ) from error
+            import psycopg
+        except ImportError as error:  # pragma: no cover
+            raise RuntimeError(
+                "psycopg is required when DATABASE_PROVIDER=dsql"
+            ) from error
 
-                def _connect(**kwargs: Any) -> Any:
-                    return psycopg.connect(**kwargs)
+        def _connect(**kwargs: Any) -> Any:
+            return psycopg.connect(**kwargs)
 
-                connect_fn = _connect
-            raw = connect_fn(
-                host=endpoint,
-                port=port,
-                dbname=database,
-                user=user,
-                password=token,
-                sslmode="require",
-            )
-            return DsqlConnectionProxy(raw)
-        except Exception as error:  # noqa: BLE001 - classified below
-            last_error = error
-            if attempt >= max_attempts or not is_retryable_db_error(error):
-                logger.exception(
-                    "DSQL connection failed (attempt %s/%s)", attempt, max_attempts
-                )
-                raise
-            sleep_for = (0.05 * (2 ** (attempt - 1))) + random.uniform(0, 0.05)
-            time.sleep(sleep_for)
-    assert last_error is not None
-    raise last_error
+        active_connect = _connect
+    raw = active_connect(
+        host=endpoint,
+        port=port,
+        dbname=database,
+        user=role,
+        password=token,
+        sslmode="require",
+    )
+    return DsqlConnectionProxy(raw)
 
 
 @contextmanager
@@ -319,7 +385,7 @@ def dsql_connection(**kwargs: Any) -> Iterator[DsqlConnectionProxy]:
         connection.commit()
     except Exception:
         try:
-            connection._raw.rollback()
+            connection.rollback()
         except Exception:  # noqa: BLE001
             pass
         raise

@@ -86,6 +86,7 @@ def validate_storage_configuration() -> None:
     """Raise ``ValueError`` when production storage settings are incomplete.
 
     Safe to call at API startup. Does not contact AWS or open connections.
+    Rejects ``DSQL_USER=admin`` for runtime (admin is migration-only).
     """
     if settings.database_provider == "dsql":
         if not settings.dsql_endpoint.strip():
@@ -95,6 +96,17 @@ def validate_storage_configuration() -> None:
         if not settings.aws_region.strip():
             raise ValueError(
                 "DATABASE_PROVIDER=dsql requires AWS_REGION to be configured"
+            )
+        role = settings.dsql_user.strip()
+        if not role:
+            raise ValueError(
+                "DATABASE_PROVIDER=dsql requires DSQL_USER "
+                "(runtime role co_design_app)"
+            )
+        if role.lower() == "admin":
+            raise ValueError(
+                "DSQL_USER=admin is not allowed for application runtime; "
+                "use co_design_app (admin is for scripts/init_dsql.py only)"
             )
     elif settings.database_provider != "sqlite":
         raise ValueError(

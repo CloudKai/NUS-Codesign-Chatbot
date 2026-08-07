@@ -6,13 +6,16 @@ Differences from the SQLite schema in ``student_store.SCHEMA``:
 - No ON DELETE CASCADE (delete child rows explicitly in the store).
 - JSON-shaped fields remain TEXT (DSQL does not use JSON/JSONB columns here).
 - UUID primary keys stay application-generated TEXT ids.
-- Partial unique index on ``users(cognitoSub)`` is created when supported.
+- Partial unique index on ``users(cognitoSub)`` is applied during admin bootstrap.
 
 Do not auto-create or destroy DSQL clusters from application startup. Schema
-application is explicit via store initialization or ``scripts/init_db.py``.
+application is explicit via ``scripts/init_dsql.py`` (admin only). Runtime
+``DsqlStudentStore`` must never issue CREATE/ALTER/INDEX DDL.
 """
 
 from __future__ import annotations
+
+from backend.persistence.dsql_connection import split_sql_statements
 
 DSQL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -173,6 +176,9 @@ CREATE TABLE IF NOT EXISTS oauth_login_states (
     createdAt TEXT NOT NULL,
     expiresAt TEXT NOT NULL
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_cognito_sub
+ON users(cognitoSub) WHERE cognitoSub IS NOT NULL;
 """
 
 
@@ -186,3 +192,22 @@ THREAD_CHILD_TABLES = (
     "phase_transitions",
     "thread_folders",
 )
+
+# Printed by admin bootstrap; map the EC2 instance role to this DB user in IAM.
+# Do not embed account ARNs in Git.
+RUNTIME_ROLE_NAME = "co_design_app"
+
+RUNTIME_GRANT_SQL = """
+GRANT USAGE ON SCHEMA public TO co_design_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO co_design_app;
+""".strip()
+
+
+def iter_dsql_ddl_statements() -> list[str]:
+    """Return individual DDL statements for one-per-transaction admin bootstrap."""
+    statements: list[str] = []
+    for statement in split_sql_statements(DSQL_SCHEMA):
+        cleaned = statement.strip()
+        if cleaned:
+            statements.append(cleaned)
+    return statements

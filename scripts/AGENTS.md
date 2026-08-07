@@ -22,7 +22,8 @@ logic.
 | `deploy_ecr.sh` | ECR login + `compose.prod.yaml` pull/up | Host-only; needs `APP_IMAGE` + IAM role |
 | `host/duck.sh` | DuckDNS IP updater | Host cron only; token in `duck.env` (not Git) |
 | `build.sh` | Validation-only: `compileall` + full mock `pytest` | **Does not** initialize or modify the live DB |
-| `init_db.py` | Explicit DB schema setup | Refuses existing DB unless `--force`; prefer `--database PATH` for new files |
+| `init_db.py` | Explicit SQLite schema setup | Refuses existing DB unless `--force`; prefer `--database PATH` for new files |
+| `init_dsql.py` | Admin-only Aurora DSQL schema bootstrap | One DDL per transaction; never app startup; not `co_design_app` |
 
 ## Environment variables
 

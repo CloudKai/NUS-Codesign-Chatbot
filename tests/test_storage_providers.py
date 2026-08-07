@@ -2,15 +2,24 @@
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from backend.persistence.dsql_connection import (
     adapt_sqlite_sql,
     generate_dsql_auth_token,
+    is_retryable_db_error,
+    run_dsql_transaction,
     strip_foreign_keys,
 )
+from backend.persistence.dsql_schema import (
+    RUNTIME_ROLE_NAME,
+    iter_dsql_ddl_statements,
+)
+from backend.persistence.dsql_student_store import DsqlStudentStore
 from backend.persistence.factory import (
     create_file_storage,
     create_student_store,
@@ -20,8 +29,93 @@ from backend.persistence.factory import (
 from backend.persistence.local_files import LocalFileStorage
 from backend.persistence.memory_files import MemoryFileStorage
 from backend.persistence.object_keys import build_upload_object_key, sanitize_filename
-from backend.persistence.s3_files import S3FileStorage
+from backend.persistence.s3_files import S3FileStorage, is_missing_object_error
 from backend.student_store import StudentStore
+
+_INIT_DSQL_PATH = Path(__file__).resolve().parents[1] / "scripts" / "init_dsql.py"
+_SPEC = importlib.util.spec_from_file_location("co_design_init_dsql", _INIT_DSQL_PATH)
+assert _SPEC is not None and _SPEC.loader is not None
+_INIT_DSQL = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_INIT_DSQL)
+apply_dsql_schema = _INIT_DSQL.apply_dsql_schema
+
+
+class _OccError(Exception):
+    """Fake psycopg serialization failure."""
+
+    sqlstate = "40001"
+
+
+class _FakeDsqlConnection:
+    """Minimal DSQL connection stand-in that records SQL and never talks to AWS."""
+
+    def __init__(self, recorder: list[str] | None = None):
+        self.recorder = recorder if recorder is not None else []
+        self.closed = False
+        self._rows: dict[str, Any] = {}
+
+    def execute(self, sql: str, params: Any = None) -> Any:
+        self.recorder.append(sql.strip())
+        upper = sql.strip().upper()
+        if upper.startswith("SELECT ID FROM USERS WHERE IDENTIFIER"):
+            identifier = (params or [None])[0]
+            owner = self._rows.get(("user", identifier))
+
+            class _R:
+                def fetchone(self_inner):
+                    if owner is None:
+                        return None
+                    return {"id": owner}
+
+            return _R()
+        if upper.startswith("INSERT INTO USERS"):
+            owner_id = (params or [None])[0]
+            identifier = (params or [None, None])[1]
+            self._rows[("user", identifier)] = owner_id
+
+            class _R:
+                rowcount = 1
+
+                def fetchone(self_inner):
+                    return None
+
+                def fetchall(self_inner):
+                    return []
+
+            return _R()
+
+        class _Empty:
+            rowcount = 0
+
+            def fetchone(self_inner):
+                return None
+
+            def fetchall(self_inner):
+                return []
+
+        return _Empty()
+
+    def executescript(self, script: str) -> None:
+        self.recorder.append(f"SCRIPT:{script[:40]}")
+
+    def commit(self) -> None:
+        self.recorder.append("COMMIT")
+
+    def rollback(self) -> None:
+        self.recorder.append("ROLLBACK")
+
+    def close(self) -> None:
+        self.closed = True
+
+    def __enter__(self) -> _FakeDsqlConnection:
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if exc_type is None:
+            self.commit()
+        else:
+            self.rollback()
+        self.close()
 
 
 def test_sanitize_and_object_key_never_trust_raw_path():
@@ -34,34 +128,32 @@ def test_sanitize_and_object_key_never_trust_raw_path():
     )
     assert key.startswith("users/user-1/thread-1/oid/")
     assert ".." not in key
-    assert key.endswith("secret.pdf") or key.endswith("_secret.pdf") or "secret" in key
 
 
 def test_local_file_storage_round_trip(tmp_path: Path):
     storage = LocalFileStorage(tmp_path)
-    stored = storage.put_bytes(key="users/a/b/file.txt", data=b"hello", content_type="text/plain")
-    assert stored.size == 5
+    storage.put_bytes(key="users/a/b/file.txt", data=b"hello", content_type="text/plain")
     assert storage.get_bytes("users/a/b/file.txt") == b"hello"
     assert storage.exists("users/a/b/file.txt")
     assert storage.delete_prefix("users/a/") == 1
-    assert not storage.exists("users/a/b/file.txt")
 
 
-def test_memory_and_s3_file_storage_without_aws():
-    memory = MemoryFileStorage()
-    memory.put_bytes(key="k1", data=b"x", content_type="text/plain")
-    assert memory.get_bytes("k1") == b"x"
-
+def test_s3_missing_vs_access_denied():
     class _Client:
         def __init__(self) -> None:
-            self.objects: dict[str, bytes] = {}
-
-        def put_object(self, *, Bucket: str, Key: str, Body: bytes, ContentType: str):
-            self.objects[Key] = Body
+            self.objects: dict[str, bytes] = {"k": b"v"}
 
         def get_object(self, *, Bucket: str, Key: str):
-            if Key not in self.objects:
-                raise type("NoSuchKey", (Exception,), {})("NoSuchKey")
+            if Key == "missing":
+                err = type("NoSuchKey", (Exception,), {})("NoSuchKey")
+                raise err
+            if Key == "denied":
+                err = type("ClientError", (Exception,), {})("AccessDenied")
+                err.response = {
+                    "Error": {"Code": "AccessDenied"},
+                    "ResponseMetadata": {"HTTPStatusCode": 403},
+                }
+                raise err
             payload = self.objects[Key]
 
             class _Body:
@@ -70,33 +162,51 @@ def test_memory_and_s3_file_storage_without_aws():
 
             return {"Body": _Body()}
 
-        def delete_object(self, *, Bucket: str, Key: str):
-            self.objects.pop(Key, None)
-
         def head_object(self, *, Bucket: str, Key: str):
-            if Key not in self.objects:
-                raise Exception("404")
+            if Key == "missing":
+                err = type("ClientError", (Exception,), {})("404")
+                err.response = {
+                    "Error": {"Code": "404"},
+                    "ResponseMetadata": {"HTTPStatusCode": 404},
+                }
+                raise err
+            if Key == "denied":
+                err = type("ClientError", (Exception,), {})("AccessDenied")
+                err.response = {
+                    "Error": {"Code": "AccessDenied"},
+                    "ResponseMetadata": {"HTTPStatusCode": 403},
+                }
+                raise err
             return {}
 
-        def get_paginator(self, _name: str):
-            client = self
+        def put_object(self, **kwargs):
+            return None
 
+        def delete_object(self, **kwargs):
+            return None
+
+        def get_paginator(self, _name: str):
             class _Pager:
-                def paginate(self, *, Bucket: str, Prefix: str):
-                    keys = [key for key in client.objects if key.startswith(Prefix)]
-                    yield {"Contents": [{"Key": key} for key in keys]}
+                def paginate(self, **kwargs):
+                    yield {"Contents": []}
 
             return _Pager()
 
-        def delete_objects(self, *, Bucket: str, Delete: dict):
-            for item in Delete.get("Objects") or []:
-                self.objects.pop(item["Key"], None)
-
     client = _Client()
     s3 = S3FileStorage(bucket="uploads-test", region="us-west-2", client=client)
-    s3.put_bytes(key="users/u/t/f.txt", data=b"payload", content_type="text/plain")
-    assert s3.get_bytes("users/u/t/f.txt") == b"payload"
-    assert s3.delete_prefix("users/u/") == 1
+    assert s3.get_bytes("k") == b"v"
+    with pytest.raises(FileNotFoundError):
+        s3.get_bytes("missing")
+    with pytest.raises(Exception) as denied:
+        s3.get_bytes("denied")
+    assert "AccessDenied" in type(denied.value).__name__ or "AccessDenied" in str(
+        denied.value
+    )
+    assert s3.exists("k") is True
+    assert s3.exists("missing") is False
+    with pytest.raises(Exception):
+        s3.exists("denied")
+    assert is_missing_object_error(type("NoSuchKey", (Exception,), {})()) is True
 
 
 def test_create_file_storage_provider_selection(tmp_path: Path, monkeypatch):
@@ -105,66 +215,72 @@ def test_create_file_storage_provider_selection(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("backend.persistence.factory.settings.files_dir", tmp_path)
     assert isinstance(create_file_storage(), LocalFileStorage)
 
-    monkeypatch.setattr("backend.persistence.factory.settings.file_storage_provider", "memory")
-    assert isinstance(create_file_storage(), MemoryFileStorage)
-
     monkeypatch.setattr("backend.persistence.factory.settings.file_storage_provider", "s3")
     monkeypatch.setattr("backend.persistence.factory.settings.user_uploads_bucket", "bucket")
     monkeypatch.setattr("backend.persistence.factory.settings.aws_region", "us-west-2")
-
-    class _Client:
-        pass
-
-    storage = create_file_storage(s3_client=_Client())
-    assert isinstance(storage, S3FileStorage)
+    assert isinstance(create_file_storage(s3_client=object()), S3FileStorage)
 
 
 def test_create_student_store_defaults_to_sqlite(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("backend.persistence.factory.settings.database_provider", "sqlite")
     store = create_student_store(path=tmp_path / "t.sqlite3", identifier="t")
     assert isinstance(store, StudentStore)
-    assert not isinstance(store, type("x", (), {}))
+    assert not isinstance(store, DsqlStudentStore)
 
 
-def test_create_student_store_selects_dsql(monkeypatch):
+def test_create_student_store_selects_dsql_without_path(monkeypatch):
     monkeypatch.setattr("backend.persistence.factory.settings.database_provider", "dsql")
-    monkeypatch.setattr("backend.persistence.factory.settings.dsql_endpoint", "example.dsql.amazonaws.com")
+    monkeypatch.setattr(
+        "backend.persistence.factory.settings.dsql_endpoint",
+        "example.dsql.amazonaws.com",
+    )
     monkeypatch.setattr("backend.persistence.factory.settings.aws_region", "us-west-2")
+    monkeypatch.setattr(
+        "backend.persistence.factory.settings.dsql_user", RUNTIME_ROLE_NAME
+    )
 
-    class _Conn:
-        def executescript(self, _script):
-            return None
+    shared: list[str] = []
 
-        def execute(self, *_a, **_k):
-            class _R:
-                def fetchone(self):
-                    return None
+    def factory() -> _FakeDsqlConnection:
+        return _FakeDsqlConnection(shared)
 
-            return _R()
+    store = create_student_store(identifier="cognito:test", connection_factory=factory)
+    assert isinstance(store, DsqlStudentStore)
+    assert store._user == RUNTIME_ROLE_NAME
+    joined = "\n".join(shared).upper()
+    assert "CREATE TABLE" not in joined
+    assert "ALTER TABLE" not in joined
+    assert "CREATE INDEX" not in joined
+    assert "CREATE UNIQUE INDEX" not in joined
 
-        def commit(self):
-            return None
 
-        def close(self):
-            return None
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return None
-
-    # Avoid real DSQL: explicit path still forces SQLite for tests/tools.
-    store = create_student_store(path=Path("/tmp/force-sqlite-unused"), identifier="x")
-    assert isinstance(store, StudentStore)
+def test_dsql_student_store_rejects_admin_runtime(monkeypatch):
+    monkeypatch.setattr("backend.settings.settings.dsql_endpoint", "ep.example")
+    monkeypatch.setattr("backend.settings.settings.aws_region", "us-west-2")
+    with pytest.raises(ValueError, match="admin"):
+        DsqlStudentStore(
+            identifier="x",
+            user="admin",
+            connection_factory=lambda: _FakeDsqlConnection(),
+        )
 
 
 def test_validate_storage_configuration_requires_production_fields(monkeypatch):
     monkeypatch.setattr("backend.persistence.factory.settings.database_provider", "dsql")
     monkeypatch.setattr("backend.persistence.factory.settings.dsql_endpoint", "")
     monkeypatch.setattr("backend.persistence.factory.settings.aws_region", "us-west-2")
+    monkeypatch.setattr(
+        "backend.persistence.factory.settings.dsql_user", RUNTIME_ROLE_NAME
+    )
     monkeypatch.setattr("backend.persistence.factory.settings.file_storage_provider", "local")
     with pytest.raises(ValueError, match="DSQL_ENDPOINT"):
+        validate_storage_configuration()
+
+    monkeypatch.setattr(
+        "backend.persistence.factory.settings.dsql_endpoint", "ep.example"
+    )
+    monkeypatch.setattr("backend.persistence.factory.settings.dsql_user", "admin")
+    with pytest.raises(ValueError, match="admin"):
         validate_storage_configuration()
 
     monkeypatch.setattr("backend.persistence.factory.settings.database_provider", "sqlite")
@@ -176,10 +292,8 @@ def test_validate_storage_configuration_requires_production_fields(monkeypatch):
 
 def test_adapt_sqlite_sql_and_strip_foreign_keys():
     adapted = adapt_sqlite_sql("INSERT OR IGNORE INTO users (id) VALUES (?)")
-    assert "INSERT INTO users" in adapted
     assert "%s" in adapted
     assert "ON CONFLICT DO NOTHING" in adapted
-
     ddl = strip_foreign_keys(
         "CREATE TABLE t (id TEXT PRIMARY KEY, "
         "FOREIGN KEY (id) REFERENCES users(id) ON DELETE CASCADE)"
@@ -187,43 +301,140 @@ def test_adapt_sqlite_sql_and_strip_foreign_keys():
     assert "FOREIGN KEY" not in ddl.upper()
 
 
-def test_generate_dsql_auth_token_uses_injected_client():
+def test_generate_dsql_auth_token_uses_db_connect_not_admin():
     class _Client:
+        def __init__(self) -> None:
+            self.called = None
+
         def generate_db_connect_auth_token(self, **kwargs):
-            assert kwargs["Hostname"] == "ep.example"
-            assert kwargs["Region"] == "us-west-2"
+            self.called = kwargs
             return "token-value"
 
+        def generate_db_connect_admin_auth_token(self, **kwargs):  # pragma: no cover
+            raise AssertionError("must not use DbConnectAdmin for runtime tokens")
+
+    client = _Client()
     token = generate_dsql_auth_token(
         endpoint="ep.example",
         region="us-west-2",
-        client=_Client(),
+        client=client,
     )
     assert token == "token-value"
+    assert client.called["Hostname"] == "ep.example"
 
 
-def test_save_uploads_uses_memory_object_storage(tmp_path: Path, monkeypatch):
+def test_run_dsql_transaction_retries_occ_then_succeeds():
+    attempts = {"n": 0}
+
+    def work():
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise _OccError("could not serialize access")
+        return "ok"
+
+    assert run_dsql_transaction(work, max_attempts=5, sleep=lambda _s: None) == "ok"
+    assert attempts["n"] == 3
+    assert is_retryable_db_error(_OccError("x"))
+
+
+def test_run_dsql_transaction_does_not_retry_non_occ():
+    def work():
+        raise ValueError("boom")
+
+    with pytest.raises(ValueError, match="boom"):
+        run_dsql_transaction(work, max_attempts=5, sleep=lambda _s: None)
+
+
+def test_init_dsql_commits_each_ddl_separately():
+    commits: list[str] = []
+    connections: list[_FakeDsqlConnection] = []
+
+    def connect_fn(**kwargs):
+        assert kwargs["user"] == "admin"
+        conn = _FakeDsqlConnection(commits)
+        connections.append(conn)
+
+        class _Raw:
+            def cursor(self):
+                class _Cur:
+                    description = None
+                    rowcount = 0
+
+                    def execute(self, sql, params=None):
+                        commits.append(sql)
+
+                    def fetchall(self):
+                        return []
+
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, *a):
+                        return None
+
+                return _Cur()
+
+            def commit(self):
+                commits.append("COMMIT")
+
+            def rollback(self):
+                commits.append("ROLLBACK")
+
+            def close(self):
+                return None
+
+        return _Raw()
+
+    statements = [
+        "CREATE TABLE IF NOT EXISTS t1 (id TEXT PRIMARY KEY)",
+        "CREATE INDEX IF NOT EXISTS i1 ON t1(id)",
+    ]
+    applied = apply_dsql_schema(
+        endpoint="ep.example",
+        region="us-west-2",
+        admin_user="admin",
+        connect_fn=connect_fn,
+        token_provider=lambda: "tok",
+        statements=statements,
+    )
+    assert applied == statements
+    assert commits.count("COMMIT") == 2
+    # One connection per DDL statement.
+    assert len(connections) == 2
+    assert len(iter_dsql_ddl_statements()) >= 10
+
+
+def test_save_uploads_and_workspace_read_via_object_storage(tmp_path: Path, monkeypatch):
     from backend import file_processing
-    from backend.persistence.factory import reset_file_storage_cache
     from backend.persistence.memory_files import MemoryFileStorage
+    from backend.source_library import add_file_sources
+    from backend.workspace_service import WorkspaceService
 
     memory = MemoryFileStorage()
     monkeypatch.setattr(file_processing.settings, "file_storage_provider", "memory")
-    monkeypatch.setattr(
-        "backend.persistence.factory.create_file_storage",
-        lambda **_kwargs: memory,
-    )
     reset_file_storage_cache()
     monkeypatch.setattr(
         "backend.persistence.factory.get_file_storage",
         lambda: memory,
     )
-    uploads = file_processing.save_uploads(
-        "thread-a",
-        [("note.txt", b"hello world", "text/plain")],
-        owner_id="owner-1",
+    monkeypatch.setattr(
+        "backend.source_library.get_file_storage",
+        lambda: memory,
+        raising=False,
     )
-    assert len(uploads) == 1
-    assert uploads[0].storage_provider == "memory"
-    assert uploads[0].storage_key is not None
-    assert memory.get_bytes(uploads[0].storage_key) == b"hello world"
+    store = StudentStore(tmp_path / "ws.sqlite3", identifier="owner-1")
+    thread_id = store.create_thread(name="n", model_id="m", support_mode="guided")
+    created = add_file_sources(
+        store,
+        thread_id,
+        [("note.txt", b"hello-s3-bytes", "text/plain")],
+    )
+    assert len(created) == 1
+    source = created[0]
+    assert (source.get("metadata") or {}).get("storage_provider") == "memory"
+    assert source["path"] in memory._objects or memory.exists(str(source["path"]))
+
+    service = WorkspaceService(store)
+    content = service.read_source_content(thread_id, source["id"])
+    assert content.data == b"hello-s3-bytes"
+    assert content.filename

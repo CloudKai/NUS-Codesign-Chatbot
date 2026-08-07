@@ -13,6 +13,33 @@ from .ports import StoredObject
 
 logger = logging.getLogger(__name__)
 
+_MISSING_CODES = frozenset({"NoSuchKey", "NotFound", "404", "NoSuchBucket"})
+
+
+def is_missing_object_error(error: BaseException) -> bool:
+    """Return True only when *error* indicates a missing S3 object."""
+    error_name = type(error).__name__
+    if error_name in {"NoSuchKey", "NotFound"}:
+        return True
+    response = getattr(error, "response", None)
+    if isinstance(response, dict):
+        err = response.get("Error") or {}
+        code = str(err.get("Code") or "")
+        if code in _MISSING_CODES:
+            return True
+        meta = response.get("ResponseMetadata") or {}
+        status = meta.get("HTTPStatusCode")
+        if status == 404:
+            return True
+    text = str(error)
+    if "NoSuchKey" in text or "Not Found" == text:
+        # Narrow string match for simple test doubles named NoSuchKey.
+        if error_name == "NoSuchKey" or "NoSuchKey" in text.split():
+            return True
+        if error_name == "ClientError" and "NoSuchKey" in text:
+            return True
+    return False
+
 
 class S3FileStorage:
     """Persist upload bytes in an S3 bucket using IAM-based credentials."""
@@ -74,12 +101,17 @@ class S3FileStorage:
         )
 
     def get_bytes(self, key: str) -> bytes:
-        """Download object bytes from S3."""
+        """Download object bytes from S3.
+
+        Raises:
+            FileNotFoundError: only for missing-object conditions.
+            Exception: AccessDenied, throttling, credentials, KMS, and other
+                AWS failures propagate unchanged.
+        """
         try:
             response = self._s3().get_object(Bucket=self.bucket, Key=key)
         except Exception as error:
-            error_name = type(error).__name__
-            if error_name in {"NoSuchKey", "ClientError"} or "NoSuchKey" in str(error):
+            if is_missing_object_error(error):
                 raise FileNotFoundError(key) from error
             raise
         body = response["Body"].read()
@@ -87,15 +119,26 @@ class S3FileStorage:
 
     def delete(self, key: str) -> None:
         """Delete one S3 object; missing keys are ignored."""
-        self._s3().delete_object(Bucket=self.bucket, Key=key)
+        try:
+            self._s3().delete_object(Bucket=self.bucket, Key=key)
+        except Exception as error:
+            if is_missing_object_error(error):
+                return
+            raise
 
     def exists(self, key: str) -> bool:
-        """Return whether *key* exists in the configured bucket."""
+        """Return whether *key* exists.
+
+        Returns False only for a confirmed missing object. AccessDenied and
+        other AWS failures propagate.
+        """
         try:
             self._s3().head_object(Bucket=self.bucket, Key=key)
             return True
-        except Exception:
-            return False
+        except Exception as error:
+            if is_missing_object_error(error):
+                return False
+            raise
 
     def delete_prefix(self, prefix: str) -> int:
         """Delete every object under *prefix* using list+delete batches."""

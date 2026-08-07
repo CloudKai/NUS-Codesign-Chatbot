@@ -59,7 +59,9 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert "target: /app/data" not in app
     assert 'DATABASE_PROVIDER: "dsql"' in app
     assert 'FILE_STORAGE_PROVIDER: "s3"' in app
+    assert 'DSQL_USER: "co_design_app"' in app
     assert 'AWS_REGION: "us-west-2"' in app
+    assert "DSQL_USER: \"admin\"" not in app
     assert "ports:" not in app
     assert '"8000"' in app
     assert '"8501"' in app
@@ -176,6 +178,7 @@ def test_production_script_validates_provider_config_without_requiring_data_for_
     assert "kill -0" in script
     assert "DATABASE_PROVIDER=dsql requires DSQL_ENDPOINT" in script
     assert "FILE_STORAGE_PROVIDER=s3 requires USER_UPLOADS_BUCKET" in script
+    assert "DSQL_USER=admin is not allowed" in script
     assert "Streamlit secrets must be a readable file" in script
     assert 'DATABASE_PROVIDER" = "sqlite"' in script
     assert 'FILE_STORAGE_PROVIDER" = "local"' in script

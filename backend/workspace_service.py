@@ -1,8 +1,9 @@
 """Application service for notebook, history, source, and preference CRUD.
 
 Keeps Streamlit and FastAPI on one persistence path while ``StudentStore``
-remains the SQLite adapter. Source file bytes are read here so the UI never
-touches notebook paths under ``files_dir``.
+(or ``DsqlStudentStore``) remains the persistence adapter. Source file bytes
+are read here via ``read_source_bytes`` so the UI never touches storage paths
+directly.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from .source_library import (
     LectureNotesSyncResult,
     add_file_sources,
     backfill_legacy_sources,
-    safe_source_file_path,
+    read_source_bytes,
 )
 from .student_store import StudentStore
 
@@ -199,16 +200,16 @@ class WorkspaceService:
         self._store.delete_source(thread_id, source_id)
 
     def read_source_content(self, thread_id: str, source_id: str) -> SourceContent:
-        """Read source file bytes for preview/download after path validation."""
+        """Read source file bytes for preview/download via local or object storage."""
         source = self._store.get_source(thread_id, source_id)
         if not source:
             raise ValueError("Source not found")
-        path = safe_source_file_path(source)
-        if path is None:
+        data = read_source_bytes(source)
+        if data is None:
             raise ValueError("Source file is not available")
         mime = str(source.get("mime") or "application/octet-stream")
-        filename = Path(str(source.get("title") or path.name)).name or path.name
-        return SourceContent(data=path.read_bytes(), mime=mime, filename=filename)
+        filename = Path(str(source.get("title") or "download")).name or "download"
+        return SourceContent(data=data, mime=mime, filename=filename)
 
     def backfill_legacy_sources(self, thread_id: str) -> int:
         """Import legacy message attachments into the source library."""

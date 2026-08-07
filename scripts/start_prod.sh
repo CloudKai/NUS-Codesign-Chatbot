@@ -32,6 +32,13 @@ if [ "$DATABASE_PROVIDER" = "dsql" ] && [ -z "${DSQL_ENDPOINT:-}" ]; then
   echo "DATABASE_PROVIDER=dsql requires DSQL_ENDPOINT." >&2
   exit 1
 fi
+if [ "$DATABASE_PROVIDER" = "dsql" ]; then
+  DSQL_USER_VALUE="${DSQL_USER:-co_design_app}"
+  if [ "$DSQL_USER_VALUE" = "admin" ]; then
+    echo "DSQL_USER=admin is not allowed for application runtime; use co_design_app." >&2
+    exit 1
+  fi
+fi
 if [ "$FILE_STORAGE_PROVIDER" = "s3" ] && [ -z "${USER_UPLOADS_BUCKET:-}" ]; then
   echo "FILE_STORAGE_PROVIDER=s3 requires USER_UPLOADS_BUCKET." >&2
   exit 1
