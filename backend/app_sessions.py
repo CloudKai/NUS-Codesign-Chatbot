@@ -108,3 +108,19 @@ def cookie_settings() -> dict[str, Any]:
         "secure": bool(settings.app_session_cookie_secure),
         "max_age": int(settings.app_session_ttl_seconds),
     }
+
+
+def oauth_state_cookie_settings(*, max_age: int) -> dict[str, Any]:
+    """Return cookie kwargs for the short-lived OAuth state binder.
+
+    Path is scoped to ``/api/v1/auth`` so the binder is sent only on login and
+    callback. Host-only (no Domain). Secure follows ``APP_SESSION_COOKIE_SECURE``.
+    """
+    return {
+        "key": settings.oauth_state_cookie_name,
+        "httponly": True,
+        "samesite": "lax",
+        "path": "/api/v1/auth",
+        "secure": bool(settings.app_session_cookie_secure),
+        "max_age": int(max_age),
+    }

@@ -15,8 +15,12 @@ from backend.auth_profiles import (
     store_identifier_for_sub,
     sync_authenticated_user,
 )
+from backend.settings import settings
 from backend.student_store import StudentStore
 from ui import auth_gate
+
+# Capture before per-test conftest stubs replace ``authenticated_user``.
+_REAL_AUTHENTICATED_USER = auth_gate.authenticated_user
 
 
 @pytest.fixture
@@ -384,6 +388,72 @@ def test_auth_source_does_not_use_streamlit_oidc_authority():
     assert "is_logged_in" in source
     assert "/api/v1/auth/me" in source
     assert "co_design_session" in source or "app_session_cookie_name" in source
+    assert "_auth_me_token" not in source
+    assert "_auth_me_user" not in source
+
+
+def test_authenticated_user_revalidates_without_caching_raw_token(monkeypatch):
+    """Revoked/expired sessions must not keep authenticating via Streamlit state."""
+    # Undo the suite-wide authenticated_user stub from conftest.
+    monkeypatch.setattr(auth_gate, "authenticated_user", _REAL_AUTHENTICATED_USER)
+
+    calls: list[str] = []
+    responses: list[dict | None] = [
+        {
+            "id": "u1",
+            "cognito_sub": "sub-live",
+            "email": "a@example.edu",
+            "display_name": "A",
+            "role": "student",
+        },
+        None,  # revoked / expired on next rerun
+    ]
+
+    class _Cookies(dict):
+        pass
+
+    class _Context:
+        cookies = _Cookies({settings.app_session_cookie_name: "raw-session-token"})
+
+    class _Client:
+        def auth_me(self, session_token: str):
+            calls.append(session_token)
+            return responses[min(len(calls) - 1, len(responses) - 1)]
+
+    class _Session(dict):
+        def __getattr__(self, key):
+            try:
+                return self[key]
+            except KeyError as exc:
+                raise AttributeError(key) from exc
+
+        def __setattr__(self, key, value):
+            self[key] = value
+
+        def pop(self, key, default=None):
+            return dict.pop(self, key, default)
+
+    session_obj = _Session()
+    monkeypatch.setattr(st, "context", _Context())
+    monkeypatch.setattr(st, "session_state", session_obj)
+    monkeypatch.setattr(
+        "ui.runtime.local_api_client",
+        lambda: _Client(),
+    )
+
+    first = auth_gate.authenticated_user()
+    assert first is not None
+    assert first["cognito_sub"] == "sub-live"
+    assert "_auth_me_token" not in session_obj
+    assert "_auth_me_user" not in session_obj
+    assert "raw-session-token" not in session_obj.values()
+    assert "raw-session-token" not in session_obj
+
+    second = auth_gate.authenticated_user()
+    assert second is None
+    assert calls == ["raw-session-token", "raw-session-token"]
+    assert "_auth_me_token" not in session_obj
+    assert "raw-session-token" not in session_obj
 
 
 def test_owner_binding_remains_cognito_sub(logged_in_user):

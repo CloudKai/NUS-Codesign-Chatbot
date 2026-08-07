@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,15 +13,40 @@ from joserfc import jwt
 from joserfc.jwk import OctKey
 
 from backend.api import create_app
-from backend.app_sessions import AppSessionService, cookie_settings
-from backend.auth_oidc import CognitoOIDCClient, CognitoOIDCError
-from backend.cognito_config import CognitoAuthConfig
+from backend.app_sessions import (
+    AppSessionService,
+    cookie_settings,
+    oauth_state_cookie_settings,
+)
+from backend.auth_oidc import CognitoOIDCClient, CognitoOIDCError, OAUTH_STATE_TTL_SECONDS
+from backend.cognito_config import CognitoAuthConfig, load_cognito_auth_config
 from backend.session_tokens import generate_session_token, hash_session_token
 from backend.settings import settings
 from backend.student_store import StudentStore
 
 
 FIXED_NOW = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
+
+
+def _set_cookie_header(response) -> str:
+    return ";".join(response.headers.get_list("set-cookie"))
+
+
+def _oauth_cookie_name() -> str:
+    return settings.oauth_state_cookie_name
+
+
+def _cookie_value_from_response(response, name: str) -> str | None:
+    for header in response.headers.get_list("set-cookie"):
+        first = header.split(";", 1)[0]
+        if first.lower().startswith(f"{name.lower()}="):
+            return first.split("=", 1)[1]
+    return None
+
+
+def _state_from_authorize_location(location: str) -> str:
+    query = parse_qs(urlparse(location).query)
+    return str(query.get("state", [""])[0])
 
 
 def _config() -> CognitoAuthConfig:
@@ -250,6 +275,7 @@ def test_callback_rejects_invalid_state_and_missing_sub(tmp_path, monkeypatch):
     response = missing.get(
         "/api/v1/auth/callback",
         params={"code": "x", "state": "y"},
+        cookies={_oauth_cookie_name(): "y"},
         follow_redirects=False,
     )
     assert response.status_code == 302
@@ -257,6 +283,7 @@ def test_callback_rejects_invalid_state_and_missing_sub(tmp_path, monkeypatch):
     with store._connect() as connection:
         sessions = connection.execute("SELECT COUNT(*) AS n FROM app_sessions").fetchone()
     assert int(sessions["n"]) == 0
+
 
 def test_callback_creates_session_cookie_without_persisting_tokens(
     tmp_path, monkeypatch
@@ -278,7 +305,7 @@ def test_callback_creates_session_cookie_without_persisting_tokens(
 
     class _FakeOIDC(CognitoOIDCClient):
         def begin_login(self):
-            return "https://login.example.test/oauth2/authorize?x=1", "state"
+            return "https://login.example.test/oauth2/authorize?x=1", "good-state"
 
         def complete_login(self, *, code: str, state: str):
             if code != "good" or state != "good-state":
@@ -309,15 +336,31 @@ def test_callback_creates_session_cookie_without_persisting_tokens(
     response = client.get(
         "/api/v1/auth/callback",
         params={"code": "good", "state": "good-state"},
+        cookies={_oauth_cookie_name(): "good-state"},
         follow_redirects=False,
     )
     assert response.status_code == 302
     assert response.headers["location"] == "http://127.0.0.1:8501/"
-    set_cookie = ";".join(response.headers.get_list("set-cookie"))
+    set_cookie = _set_cookie_header(response)
     assert f"{settings.app_session_cookie_name}=" in set_cookie
     assert "HttpOnly" in set_cookie
     assert "samesite=lax" in set_cookie.lower()
-    assert "secure" not in set_cookie.lower()
+    assert f"{_oauth_cookie_name()}=" in set_cookie.lower() or any(
+        _oauth_cookie_name() in h for h in response.headers.get_list("set-cookie")
+    )
+    # OAuth binder cleared (Max-Age=0) and session cookie set without Secure locally.
+    oauth_clear = next(
+        h
+        for h in response.headers.get_list("set-cookie")
+        if h.lower().startswith(f"{_oauth_cookie_name().lower()}=")
+    )
+    assert "max-age=0" in oauth_clear.lower()
+    session_header = next(
+        h
+        for h in response.headers.get_list("set-cookie")
+        if h.lower().startswith(f"{settings.app_session_cookie_name.lower()}=")
+    )
+    assert "secure" not in session_header.lower()
     db_text = (tmp_path / "callback-ok.sqlite3").read_bytes().decode(
         "latin-1", errors="ignore"
     )
@@ -328,8 +371,149 @@ def test_callback_creates_session_cookie_without_persisting_tokens(
     assert profile["display_name"] == "Callback"
 
 
-def test_login_redirects_to_cognito_authorize(tmp_path, monkeypatch):
+def test_login_sets_oauth_state_cookie(tmp_path, monkeypatch):
     store = StudentStore(tmp_path / "login.sqlite3")
+    monkeypatch.setattr(settings, "app_session_cookie_secure", False)
+    oidc = CognitoOIDCClient(
+        _config(),
+        store=store,
+        metadata_loader=lambda _url: _metadata(),
+        clock=lambda: FIXED_NOW,
+    )
+    client = TestClient(create_app(store, oidc_client=oidc))
+    response = client.get("/api/v1/auth/login", follow_redirects=False)
+    assert response.status_code == 302
+    location = response.headers["location"]
+    assert location.startswith("https://login.example.test/oauth2/authorize?")
+    assert "code_challenge=" in location
+    state = _state_from_authorize_location(location)
+    assert state
+    cookie_value = _cookie_value_from_response(response, _oauth_cookie_name())
+    assert cookie_value == state
+    header = next(
+        h
+        for h in response.headers.get_list("set-cookie")
+        if h.lower().startswith(f"{_oauth_cookie_name().lower()}=")
+    ).lower()
+    assert "httponly" in header
+    assert "samesite=lax" in header
+    assert "path=/api/v1/auth" in header
+    assert f"max-age={OAUTH_STATE_TTL_SECONDS}" in header
+    assert "secure" not in header
+
+
+def test_callback_requires_matching_oauth_state_cookie(tmp_path, monkeypatch):
+    store = StudentStore(tmp_path / "state-bind.sqlite3")
+    monkeypatch.setattr(settings, "ui_base_url", "http://127.0.0.1:8501")
+    monkeypatch.setattr(settings, "app_session_cookie_secure", False)
+
+    class _FakeOIDC(CognitoOIDCClient):
+        def begin_login(self):
+            return "https://login.example.test/oauth2/authorize?x=1", "bound-state"
+
+        def complete_login(self, *, code: str, state: str):
+            from backend.auth_oidc import CognitoIdentity
+
+            return CognitoIdentity(
+                sub="sub-bound",
+                email="bound@example.edu",
+                claims={"sub": "sub-bound", "email": "bound@example.edu", "given_name": "B"},
+            )
+
+    oidc = _FakeOIDC(_config(), store=store, clock=lambda: FIXED_NOW)
+    client = TestClient(
+        create_app(
+            store,
+            session_service=AppSessionService(store, clock=lambda: FIXED_NOW),
+            oidc_client=oidc,
+        )
+    )
+
+    no_cookie = client.get(
+        "/api/v1/auth/callback",
+        params={"code": "good", "state": "bound-state"},
+        follow_redirects=False,
+    )
+    assert no_cookie.status_code == 302
+    assert "auth_error=1" in no_cookie.headers["location"]
+
+    mismatch = client.get(
+        "/api/v1/auth/callback",
+        params={"code": "good", "state": "bound-state"},
+        cookies={_oauth_cookie_name(): "other-state"},
+        follow_redirects=False,
+    )
+    assert mismatch.status_code == 302
+    assert "auth_error=1" in mismatch.headers["location"]
+    with store._connect() as connection:
+        assert (
+            int(
+                connection.execute("SELECT COUNT(*) AS n FROM app_sessions").fetchone()[
+                    "n"
+                ]
+            )
+            == 0
+        )
+
+    ok = client.get(
+        "/api/v1/auth/callback",
+        params={"code": "good", "state": "bound-state"},
+        cookies={_oauth_cookie_name(): "bound-state"},
+        follow_redirects=False,
+    )
+    assert ok.status_code == 302
+    assert ok.headers["location"] == "http://127.0.0.1:8501/"
+    assert any(
+        h.lower().startswith(f"{settings.app_session_cookie_name.lower()}=")
+        for h in ok.headers.get_list("set-cookie")
+    )
+    oauth_clear = next(
+        h
+        for h in ok.headers.get_list("set-cookie")
+        if h.lower().startswith(f"{_oauth_cookie_name().lower()}=")
+    )
+    assert "max-age=0" in oauth_clear.lower()
+
+    # Replay with the same binder/state must not create another session once DB
+    # state is gone; FakeOIDC would succeed, so use a real OIDC client for replay.
+    real = CognitoOIDCClient(
+        _config(),
+        store=store,
+        metadata_loader=lambda _url: _metadata(),
+        clock=lambda: FIXED_NOW,
+    )
+    login = TestClient(create_app(store, oidc_client=real)).get(
+        "/api/v1/auth/login", follow_redirects=False
+    )
+    state = _state_from_authorize_location(login.headers["location"])
+    cookie = _cookie_value_from_response(login, _oauth_cookie_name())
+    assert cookie == state
+    # First consume via complete_login path with matching cookie but invalid code
+    # clears DB state; second matching attempt must fail.
+    first = TestClient(create_app(store, oidc_client=real)).get(
+        "/api/v1/auth/callback",
+        params={"code": "not-exchanged", "state": state},
+        cookies={_oauth_cookie_name(): state},
+        follow_redirects=False,
+    )
+    assert "auth_error=1" in first.headers["location"]
+    replay = TestClient(create_app(store, oidc_client=real)).get(
+        "/api/v1/auth/callback",
+        params={"code": "not-exchanged", "state": state},
+        cookies={_oauth_cookie_name(): state},
+        follow_redirects=False,
+    )
+    assert "auth_error=1" in replay.headers["location"]
+    with store._connect() as connection:
+        remaining = connection.execute(
+            "SELECT COUNT(*) AS n FROM oauth_login_states WHERE state = ?",
+            (state,),
+        ).fetchone()
+    assert int(remaining["n"]) == 0
+
+
+def test_login_redirects_to_cognito_authorize(tmp_path, monkeypatch):
+    store = StudentStore(tmp_path / "login-redirect.sqlite3")
     oidc = CognitoOIDCClient(
         _config(),
         store=store,
@@ -351,3 +535,42 @@ def test_cookie_settings_local_insecure():
     assert params["samesite"] == "lax"
     assert params["path"] == "/"
     assert params["key"] == settings.app_session_cookie_name
+    oauth = oauth_state_cookie_settings(max_age=OAUTH_STATE_TTL_SECONDS)
+    assert oauth["path"] == "/api/v1/auth"
+    assert oauth["httponly"] is True
+    assert oauth["samesite"] == "lax"
+    assert oauth["max_age"] == OAUTH_STATE_TTL_SECONDS
+
+
+def test_cognito_redirect_uri_precedence(monkeypatch, tmp_path):
+    monkeypatch.delenv("COGNITO_REDIRECT_URI", raising=False)
+    monkeypatch.setattr(
+        settings, "public_api_base_url", "https://cde2300chatbot.duckdns.org"
+    )
+    monkeypatch.setattr(
+        "backend.cognito_config._secrets_auth_table",
+        lambda: {"redirect_uri": "https://from-secrets.example/api/v1/auth/callback"},
+    )
+    assert (
+        load_cognito_auth_config().redirect_uri
+        == "https://from-secrets.example/api/v1/auth/callback"
+    )
+
+    monkeypatch.setenv(
+        "COGNITO_REDIRECT_URI",
+        "https://cde2300chatbot.duckdns.org/api/v1/auth/callback",
+    )
+    assert (
+        load_cognito_auth_config().redirect_uri
+        == "https://cde2300chatbot.duckdns.org/api/v1/auth/callback"
+    )
+
+    monkeypatch.delenv("COGNITO_REDIRECT_URI", raising=False)
+    monkeypatch.setattr(
+        "backend.cognito_config._secrets_auth_table",
+        lambda: {"redirect_uri": "http://127.0.0.1:8501/oauth2callback"},
+    )
+    assert (
+        load_cognito_auth_config().redirect_uri
+        == "https://cde2300chatbot.duckdns.org/api/v1/auth/callback"
+    )

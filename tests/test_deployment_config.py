@@ -87,6 +87,19 @@ def test_compose_keeps_internal_fastapi_url_for_container_local_calls():
     assert "ports:" not in app
 
 
+def test_compose_sets_production_cognito_redirect_uri():
+    """Production must not silently use the local 127.0.0.1 Cognito callback."""
+    compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+    app = _service_block(compose, "app")
+
+    assert (
+        'COGNITO_REDIRECT_URI: "https://cde2300chatbot.duckdns.org/api/v1/auth/callback"'
+        in app
+    )
+    assert 'COGNITO_REDIRECT_URI: "http://127.0.0.1' not in app
+    assert "127.0.0.1:8000/api/v1/auth/callback" not in app
+    assert 'APP_SESSION_COOKIE_SECURE: "true"' in app
+
 def test_docker_context_excludes_secrets_state_and_development_artifacts():
     ignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
 

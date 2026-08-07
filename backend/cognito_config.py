@@ -2,6 +2,12 @@
 
 Credentials may come from environment variables or the private
 ``.streamlit/secrets.toml`` ``[auth]`` table. Secrets are never committed.
+
+Redirect URI precedence (highest first):
+
+1. Explicit ``COGNITO_REDIRECT_URI`` environment variable
+2. Private ``secrets.toml`` ``[auth].redirect_uri``
+3. Derived ``CO_DESIGN_PUBLIC_API_URL`` + ``/api/v1/auth/callback``
 """
 
 from __future__ import annotations
@@ -54,6 +60,21 @@ def _secrets_auth_table() -> Mapping[str, Any]:
     return auth if isinstance(auth, dict) else {}
 
 
+def _resolve_redirect_uri(auth: Mapping[str, Any]) -> str:
+    """Resolve Cognito callback URL without a hard-coded local override."""
+    explicit = os.getenv("COGNITO_REDIRECT_URI", "").strip()
+    if explicit:
+        return explicit
+    secrets_redirect = str(auth.get("redirect_uri") or "").strip()
+    # Ignore legacy Streamlit OIDC callback so production secrets cannot stick
+    # on /oauth2callback after the FastAPI-owned login migration.
+    if secrets_redirect.endswith("/oauth2callback"):
+        secrets_redirect = ""
+    if secrets_redirect:
+        return secrets_redirect
+    return f"{str(settings.public_api_base_url).rstrip('/')}/api/v1/auth/callback"
+
+
 def load_cognito_auth_config() -> CognitoAuthConfig:
     """Resolve Cognito settings from environment, falling back to secrets.toml."""
     auth = _secrets_auth_table()
@@ -68,23 +89,6 @@ def load_cognito_auth_config() -> CognitoAuthConfig:
     prompt = str(
         os.getenv("COGNITO_PROMPT") or client_kwargs.get("prompt") or "login"
     ).strip() or "login"
-    redirect_uri = str(
-        os.getenv("COGNITO_REDIRECT_URI")
-        or getattr(settings, "cognito_redirect_uri", "")
-        or auth.get("redirect_uri")
-        or ""
-    ).strip()
-    # Prefer the FastAPI callback when secrets still list Streamlit's old URI.
-    if redirect_uri.endswith("/oauth2callback"):
-        redirect_uri = str(
-            os.getenv("COGNITO_REDIRECT_URI")
-            or getattr(settings, "cognito_redirect_uri", "")
-            or ""
-        ).strip()
-    if not redirect_uri:
-        redirect_uri = (
-            f"{str(settings.public_api_base_url).rstrip('/')}/api/v1/auth/callback"
-        )
     return CognitoAuthConfig(
         client_id=str(
             os.getenv("COGNITO_CLIENT_ID") or auth.get("client_id") or ""
@@ -97,7 +101,7 @@ def load_cognito_auth_config() -> CognitoAuthConfig:
             or auth.get("server_metadata_url")
             or ""
         ).strip(),
-        redirect_uri=redirect_uri,
+        redirect_uri=_resolve_redirect_uri(auth),
         scopes=scopes,
         prompt=prompt,
     )

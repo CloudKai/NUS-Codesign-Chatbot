@@ -26,7 +26,8 @@ from backend.student_store import StudentStore, utc_now
 
 logger = logging.getLogger(__name__)
 
-_OAUTH_STATE_TTL_SECONDS = 600
+# Short-lived OAuth login CSRF binder (DB row + browser cookie Max-Age).
+OAUTH_STATE_TTL_SECONDS = 600
 
 
 @dataclass(frozen=True)
@@ -112,7 +113,7 @@ class CognitoOIDCClient:
             state=state,
             code_verifier=verifier,
             created_at=now.isoformat(),
-            expires_at=(now + timedelta(seconds=_OAUTH_STATE_TTL_SECONDS)).isoformat(),
+            expires_at=(now + timedelta(seconds=OAUTH_STATE_TTL_SECONDS)).isoformat(),
         )
         query = urlencode(
             {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
 from typing import Any
 from urllib.parse import urlparse
@@ -9,8 +10,12 @@ from urllib.parse import urlparse
 from fastapi import HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from backend.app_sessions import AppSessionService, cookie_settings
-from backend.auth_oidc import CognitoOIDCClient, CognitoOIDCError
+from backend.app_sessions import (
+    AppSessionService,
+    cookie_settings,
+    oauth_state_cookie_settings,
+)
+from backend.auth_oidc import CognitoOIDCClient, CognitoOIDCError, OAUTH_STATE_TTL_SECONDS
 from backend.auth_profiles import sync_authenticated_user
 from backend.settings import settings
 from backend.student_store import StudentStore
@@ -76,6 +81,35 @@ def _clear_session_cookie(response: Response) -> None:
     )
 
 
+def _set_oauth_state_cookie(response: Response, state: str) -> None:
+    """Bind OAuth ``state`` to the initiating browser via a short-lived cookie."""
+    params = oauth_state_cookie_settings(max_age=OAUTH_STATE_TTL_SECONDS)
+    response.set_cookie(value=state, **params)
+
+
+def _clear_oauth_state_cookie(response: Response) -> None:
+    """Expire the temporary OAuth-state binder cookie."""
+    params = oauth_state_cookie_settings(max_age=0)
+    response.delete_cookie(
+        key=params["key"],
+        path=params["path"],
+        httponly=params["httponly"],
+        samesite=params["samesite"],
+        secure=params["secure"],
+    )
+
+
+def _oauth_state_matches(request: Request, query_state: str) -> bool:
+    """Return whether the OAuth-state cookie matches the callback query state."""
+    expected = str(query_state or "").strip()
+    cookie_value = str(
+        request.cookies.get(settings.oauth_state_cookie_name) or ""
+    ).strip()
+    if not expected or not cookie_value:
+        return False
+    return hmac.compare_digest(cookie_value, expected)
+
+
 def register_auth_routes(
     app,
     *,
@@ -91,34 +125,54 @@ def register_auth_routes(
     def auth_login() -> RedirectResponse:
         """Redirect the browser to Cognito Managed Login (authorization code + PKCE)."""
         try:
-            authorize_url, _state = oidc_client.begin_login()
+            authorize_url, state = oidc_client.begin_login()
         except CognitoOIDCError as error:
             raise HTTPException(status_code=503, detail=str(error)) from error
-        return RedirectResponse(authorize_url, status_code=302)
+        response = RedirectResponse(authorize_url, status_code=302)
+        _set_oauth_state_cookie(response, state)
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.get("/api/v1/auth/callback")
     def auth_callback(
+        request: Request,
         code: str | None = None,
         state: str | None = None,
         error: str | None = None,
     ) -> RedirectResponse:
         """Complete Cognito login, create an app session, and redirect to the UI."""
+
+        def _auth_error_redirect() -> RedirectResponse:
+            response = RedirectResponse(
+                _safe_ui_redirect("/?auth_error=1"), status_code=302
+            )
+            _clear_oauth_state_cookie(response)
+            response.headers["Cache-Control"] = "no-store"
+            return response
+
         if error:
             logger.info("Cognito callback returned error=%s", error)
-            return RedirectResponse(_safe_ui_redirect("/?auth_error=1"), status_code=302)
+            return _auth_error_redirect()
+
+        query_state = str(state or "").strip()
+        if not _oauth_state_matches(request, query_state):
+            logger.info("OAuth state cookie missing or mismatched")
+            return _auth_error_redirect()
+
         try:
-            identity = oidc_client.complete_login(code=code or "", state=state or "")
+            identity = oidc_client.complete_login(code=code or "", state=query_state)
             profile = sync_authenticated_user(identity.claims, store=store)
             created = session_service.create_session(profile.user_id)
         except CognitoOIDCError as exc:
             logger.info("Cognito callback rejected: %s", exc)
-            return RedirectResponse(_safe_ui_redirect("/?auth_error=1"), status_code=302)
+            return _auth_error_redirect()
         except Exception:
             logger.exception("Cognito callback failed unexpectedly")
-            return RedirectResponse(_safe_ui_redirect("/?auth_error=1"), status_code=302)
+            return _auth_error_redirect()
 
         response = RedirectResponse(_safe_ui_redirect("/"), status_code=302)
         _set_session_cookie(response, created.raw_token)
+        _clear_oauth_state_cookie(response)
         response.headers["Cache-Control"] = "no-store"
         return response
 

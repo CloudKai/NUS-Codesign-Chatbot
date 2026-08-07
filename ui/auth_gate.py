@@ -50,33 +50,22 @@ def _session_cookie_value() -> str | None:
 def authenticated_user() -> dict[str, Any] | None:
     """Return the FastAPI ``/auth/me`` user for the current cookie, if valid.
 
-    Results are cached in ``st.session_state`` for the current run identity so
-    Streamlit reruns do not hammer the API, but the cache key includes the raw
-    cookie so a different session cannot reuse another user's profile.
+    Always revalidates against FastAPI on each Streamlit rerun. The opaque
+    session cookie is read from the browser context and is never stored in
+    ``st.session_state``; FastAPI remains the authentication authority for
+    expiry and revocation.
     """
     token = _session_cookie_value()
     if not token:
-        st.session_state.pop("_auth_me_user", None)
-        st.session_state.pop("_auth_me_token", None)
         return None
-    cached_token = str(st.session_state.get("_auth_me_token") or "")
-    cached_user = st.session_state.get("_auth_me_user")
-    if cached_token == token and isinstance(cached_user, dict):
-        return cached_user
     try:
         from ui.runtime import local_api_client
 
         user = local_api_client().auth_me(token)
     except Exception:
-        st.session_state.pop("_auth_me_user", None)
-        st.session_state.pop("_auth_me_token", None)
         return None
     if not user or not str(user.get("cognito_sub") or "").strip():
-        st.session_state.pop("_auth_me_user", None)
-        st.session_state.pop("_auth_me_token", None)
         return None
-    st.session_state["_auth_me_token"] = token
-    st.session_state["_auth_me_user"] = user
     return user
 
 
@@ -340,8 +329,6 @@ def logout_user() -> None:
             "Start the app with scripts/start.sh."
         )
         return
-    st.session_state.pop("_auth_me_user", None)
-    st.session_state.pop("_auth_me_token", None)
     safe_url = json.dumps(url)
     components.html(
         f"""

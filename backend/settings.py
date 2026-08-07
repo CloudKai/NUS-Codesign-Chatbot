@@ -59,10 +59,12 @@ class Settings:
         "APP_SESSION_COOKIE_NAME", "co_design_session"
     ).strip() or "co_design_session"
     app_session_cookie_secure: bool = _boolean("APP_SESSION_COOKIE_SECURE", False)
-    cognito_redirect_uri: str = os.getenv(
-        "COGNITO_REDIRECT_URI",
-        "http://127.0.0.1:8000/api/v1/auth/callback",
-    ).strip()
+    # Empty when unset so Cognito config can fall through to secrets.toml or
+    # derive from CO_DESIGN_PUBLIC_API_URL (never hard-code a local override).
+    cognito_redirect_uri: str = os.getenv("COGNITO_REDIRECT_URI", "").strip()
+    oauth_state_cookie_name: str = os.getenv(
+        "OAUTH_STATE_COOKIE_NAME", "co_design_oauth_state"
+    ).strip() or "co_design_oauth_state"
     max_tool_iterations: int = int(os.getenv("MAX_TOOL_ITERATIONS", "3"))
     max_files: int = int(os.getenv("MAX_FILES_PER_MESSAGE", "5"))
     max_lecture_notes: int = int(os.getenv("MAX_LECTURE_NOTES", "20"))
