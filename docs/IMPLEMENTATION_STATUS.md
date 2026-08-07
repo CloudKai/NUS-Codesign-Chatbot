@@ -2,87 +2,72 @@
 
 ## Current phase
 
-**Single-EC2 production Docker deployment preparation complete**
+**Public Caddy API exposure reduced to logout + health**
 
-The unchanged local launcher still binds FastAPI and Streamlit to loopback.
-Production now has a Python 3.12 app image, supervised dual-process entrypoint,
-two-service Compose stack, and Caddy HTTPS routing for
-``cde2300chatbot.duckdns.org``. Only Caddy publishes host ports 80/443; app
-ports 8000/8501 stay on the Compose network.
+Production Caddy now publicly proxies only
+``/api/v1/auth/logout/callback`` and ``/api/v1/health`` to FastAPI. All other
+``/api/*`` requests return 404 at the edge and never reach the unauthenticated
+FastAPI process. Streamlit remains the fallback for non-API traffic. Local
+``scripts/start.sh``, Cognito/session semantics, FastAPI routes, and Compose
+topology are unchanged.
 
 ### Behavior implemented
 
-- Added ``Dockerfile``, ``.dockerignore``, ``compose.yaml``, ``Caddyfile``, and
-  ``scripts/start_prod.sh``.
-- The production entrypoint starts readiness-gated FastAPI and Streamlit on
-  ``0.0.0.0``, monitors both required processes, and terminates both on stop.
-- Compose loads private environment values at runtime, bind-mounts Streamlit
-  secrets read-only, bind-mounts ``./data`` for durable SQLite/uploads/workspaces,
-  and persists Caddy certificate/config state in named volumes. Bind sources
-  must already exist; Docker cannot silently create root-owned directories.
-- Caddy preserves ``/api`` while routing ``/api/*`` to ``app:8000`` and all
-  other requests (including Streamlit WebSockets/OIDC callback) to ``app:8501``.
-  API response flushing preserves public NDJSON streaming.
-- Production startup refuses a missing/unwritable data mount or a missing,
-  unreadable, or directory-valued Streamlit secrets mount with a clear error.
-- Added a backward-compatible ``CO_DESIGN_PUBLIC_API_URL`` so server-side API
-  calls stay on container loopback while browser logout uses the public HTTPS
-  origin. Local defaults and ``scripts/start.sh`` behavior are unchanged.
-- Course inputs under ``lecture_notes/`` remain in the image; private ``data/``,
-  ``.env``, secrets, virtual environments, and caches are excluded from builds.
+- Restricted ``Caddyfile`` public FastAPI exposure to the browser logout
+  callback and optional health probe.
+- Remaining ``/api/*`` paths respond ``404 Not Found`` at Caddy before FastAPI.
+- In-container ``CO_DESIGN_API_URL=http://127.0.0.1:8000`` remains for local
+  process communication; browser logout still uses
+  ``CO_DESIGN_PUBLIC_API_URL``.
+- Deployment tests assert the allow-list, ``/api/*`` block, Streamlit fallback,
+  internal app ports, and unchanged container-local API URL.
 
 ### Files changed
 
-- Added: ``Dockerfile``, ``.dockerignore``, ``compose.yaml``, ``Caddyfile``,
-  ``scripts/start_prod.sh``, ``tests/test_deployment_config.py``.
-- Updated: ``.env.example``, ``README.md``, ``backend/api.py``,
-  ``backend/settings.py``, ``ui/auth_gate.py``, ``tests/test_auth_gate.py``,
-  ``scripts/AGENTS.md``, this status file.
+- Updated: ``Caddyfile``, ``tests/test_deployment_config.py``, ``README.md``,
+  this status file.
 
 ### Commands run and results
 
 - ``docker compose config --quiet`` → passed.
-- ``sh -n scripts/start.sh scripts/start_prod.sh scripts/build.sh`` → passed.
-- Deployment/auth selection → **33 passed**.
-- Full deterministic mock suite → **157 passed**, one existing
-  Starlette/httpx deprecation warning.
-- ``compileall -q backend ui streamlit_app.py tests`` → passed.
-- IDE diagnostics and ``git diff --check`` → passed.
-- Docker image build could not run because the local Docker daemon was not
-  running. Caddy binary validation was unavailable; Caddy routing is covered by
-  static tests and Compose config validation.
-- Ruff is configured but not installed, so no Ruff result is claimed.
+- ``sh -n scripts/start.sh scripts/start_prod.sh`` → passed; ``scripts/start.sh``
+  diff empty.
+- ``.venv/bin/python -m pytest -q tests/test_deployment_config.py`` → **7 passed**.
+- No auth, FastAPI route, Dockerfile, Compose topology, or private secret/data
+  files were modified.
 
 ### Migration / compatibility / rollback
 
-- No schema or data migration. ``./data`` remains the persistence boundary,
-  covering ``co_design.sqlite3`` (including SQLite WAL sidecars), ``files/``,
-  and ``workspaces/``. Container replacement does not remove this host path.
-- The app runs as uid/gid ``1000:1000``. Linux/EC2 operators must pre-create
-  and assign the data tree and secrets file to that identity.
-- Existing ``scripts/start.sh`` and its ``127.0.0.1`` bindings were not changed.
-- Rollback removes the production deployment files and public-URL setting;
-  no database, upload, private environment, or private Streamlit secret was
-  modified.
+- No schema or data migration. Private ``.env``, secrets, and ``data/`` are
+  untouched.
+- Rollback restores the previous ``Caddyfile`` that proxied all ``/api/*`` to
+  FastAPI; application code does not need to change.
 
 ### Risks / blockers
 
-- FastAPI has no authenticated request boundary. Publicly routing ``/api/*`` is
-  not safe for sensitive production student data; authentication/authorization
-  is intentionally deferred because this phase forbids changing auth semantics.
-- Existing database source rows store absolute paths. Data first created outside
-  the container may need a separately tested path-portability migration before
-  transfer; rebuilds of data first created at ``/app/data`` remain stable.
-- EC2/DuckDNS/Cognito settings and live HTTPS were not changed or tested in this
-  preparation-only phase.
+- FastAPI still has no authenticated request boundary inside the Compose
+  network. Edge blocking of public ``/api/*`` reduces exposure but does not
+  replace API authentication for a future authenticated-owner FastAPI path.
+- Existing database source rows may still store absolute paths from outside
+  ``/app/data``.
+- Live HTTPS/Cognito WebSocket smoke on EC2 remains pending.
 
 ### Next exact action
 
-- Start Docker locally or on a staging EC2 host, run ``docker compose build``,
-  then verify mock-mode startup, internal health checks, public HTTPS routing,
-  Cognito callback/logout, source upload/retrieval, and restart persistence.
+- Redeploy or reload Caddy on EC2, then verify:
+  ``/api/v1/health`` succeeds, logout callback still clears cookies,
+  ``/api/v1/threads`` returns 404 at Caddy, and Streamlit continues to serve
+  the UI.
 
 ## Previous completed work
+
+**Single-EC2 production Docker deployment preparation complete**
+
+Python 3.12 app image, supervised dual-process entrypoint, Compose with
+internal ``8000``/``8501``, and Caddy on ``80``/``443`` for
+``cde2300chatbot.duckdns.org``. Persistent ``./data``, read-only secrets mount,
+and fail-closed bind sources. The subsequent Caddy allow-list change above
+narrows public FastAPI exposure without changing that topology.
 
 **Cognito login redesign complete — same-tab local logout fixed**
 

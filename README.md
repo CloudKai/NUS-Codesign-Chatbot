@@ -251,12 +251,16 @@ The production-only stack keeps the local launcher unchanged:
 
 ```text
 Internet :80/:443 -> Caddy
-  /api/*           -> app:8000 (FastAPI, prefix preserved)
-  everything else  -> app:8501 (Streamlit)
+  /api/v1/auth/logout/callback -> app:8000 (browser logout only)
+  /api/v1/health               -> app:8000 (optional public probe)
+  other /api/*                 -> 404 (never reaches FastAPI)
+  everything else              -> app:8501 (Streamlit)
 ```
 
 FastAPI and Streamlit share one `app` container and are not published to the
-host. Only Caddy maps host ports. Caddy obtains and renews HTTPS certificates for
+host. Only Caddy maps host ports. Inside the container, Streamlit may still
+reach FastAPI on `http://127.0.0.1:8000`; that loopback path is not published.
+Caddy obtains and renews HTTPS certificates for
 `cde2300chatbot.duckdns.org`; the DuckDNS record must already resolve to the
 EC2 Elastic IP, and the EC2 security group must allow inbound TCP 80 and 443.
 
@@ -321,11 +325,11 @@ tar -czf "co-design-data-$(date +%Y%m%d-%H%M%S).tar.gz" data/
 Do not run `docker compose down -v` unless removing Caddy's certificate/config
 volumes is intentional. `docker compose down` alone does not delete `./data`.
 
-> Security boundary: FastAPI routes currently have no authenticated request
-> boundary. Although Cognito-authenticated Streamlit sessions use owner-scoped
-> in-process services, `/api/*` is publicly routed as requested. Do not treat
-> this deployment as production-safe for sensitive student data until API
-> authentication and authorization are implemented in a separate phase.
+> Security boundary: FastAPI still has no authenticated request boundary, so
+> Caddy publicly exposes only `/api/v1/auth/logout/callback` and
+> `/api/v1/health`. Cognito-authenticated Streamlit sessions continue to use
+> owner-scoped in-process services. Other `/api/*` paths return 404 at Caddy and
+> never reach FastAPI on the public hostname.
 
 ---
 
