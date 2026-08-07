@@ -138,3 +138,35 @@ def test_api_client_ready_stream_and_graph(tmp_path):
         assert graph["steps"] == ["load_context", "assess", "recommend", "format"]
     finally:
         client.close()
+
+
+def test_api_client_auth_me_returns_user_or_none(tmp_path):
+    """LocalApiClient.auth_me maps /auth/me success and 401 without raising."""
+    from datetime import datetime, timezone
+
+    from backend.app_sessions import AppSessionService
+
+    store = StudentStore(tmp_path / "client-auth-me.sqlite3")
+    fixed = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
+    sessions = AppSessionService(store, clock=lambda: fixed)
+    app = create_app(store, session_service=sessions)
+    client = LocalApiClient("http://testserver", session=TestClient(app))
+    try:
+        assert client.auth_me("") is None
+        assert client.auth_me("not-a-session") is None
+
+        user = store.upsert_cognito_user(
+            cognito_sub="sub-client",
+            identifier="cognito:sub-client",
+            email="client@example.edu",
+            display_name="Client",
+        )
+        created = sessions.create_session(user["id"])
+        profile = client.auth_me(created.raw_token)
+        assert profile is not None
+        assert profile["cognito_sub"] == "sub-client"
+        assert profile["email"] == "client@example.edu"
+        assert "access_token" not in profile
+        assert created.raw_token not in str(profile)
+    finally:
+        client.close()

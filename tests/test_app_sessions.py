@@ -565,6 +565,8 @@ def test_cognito_redirect_uri_precedence(monkeypatch, tmp_path):
         == "https://cde2300chatbot.duckdns.org/api/v1/auth/callback"
     )
 
+
+
     monkeypatch.delenv("COGNITO_REDIRECT_URI", raising=False)
     monkeypatch.setattr(
         "backend.cognito_config._secrets_auth_table",
@@ -574,3 +576,71 @@ def test_cognito_redirect_uri_precedence(monkeypatch, tmp_path):
         load_cognito_auth_config().redirect_uri
         == "https://cde2300chatbot.duckdns.org/api/v1/auth/callback"
     )
+
+
+def test_callback_cognito_error_clears_oauth_state_cookie_without_session(
+    tmp_path, monkeypatch
+):
+    store = StudentStore(tmp_path / "callback-error.sqlite3")
+    monkeypatch.setattr(settings, "ui_base_url", "http://127.0.0.1:8501")
+    client = TestClient(
+        create_app(
+            store,
+            session_service=AppSessionService(store, clock=lambda: FIXED_NOW),
+            oidc_client=CognitoOIDCClient(
+                _config(),
+                store=store,
+                metadata_loader=lambda _url: _metadata(),
+                clock=lambda: FIXED_NOW,
+            ),
+        )
+    )
+    response = client.get(
+        "/api/v1/auth/callback",
+        params={"error": "access_denied", "state": "any"},
+        cookies={_oauth_cookie_name(): "any"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert "auth_error=1" in response.headers["location"]
+    oauth_clear = next(
+        h
+        for h in response.headers.get_list("set-cookie")
+        if h.lower().startswith(f"{_oauth_cookie_name().lower()}=")
+    )
+    assert "max-age=0" in oauth_clear.lower()
+    with store._connect() as connection:
+        count = connection.execute("SELECT COUNT(*) AS n FROM app_sessions").fetchone()
+    assert int(count["n"]) == 0
+
+
+def test_logout_accepts_post_and_cleanup_expired_sessions(tmp_path, monkeypatch):
+    store = StudentStore(tmp_path / "logout-post.sqlite3")
+    monkeypatch.setattr(settings, "ui_base_url", "http://127.0.0.1:8501")
+    sessions = AppSessionService(store, ttl_seconds=60, clock=lambda: FIXED_NOW)
+    client = TestClient(create_app(store, session_service=sessions))
+    user = store.upsert_cognito_user(
+        cognito_sub="sub-post",
+        identifier="cognito:sub-post",
+        email="post@example.edu",
+        display_name="Post",
+    )
+    created = sessions.create_session(user["id"])
+    response = client.post(
+        "/api/v1/auth/logout",
+        cookies={settings.app_session_cookie_name: created.raw_token},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert "signed_out=1" in response.headers["location"]
+    assert sessions.get_session_user(created.raw_token) is None
+
+    expired = sessions.create_session(user["id"])
+    later = AppSessionService(
+        store,
+        ttl_seconds=60,
+        clock=lambda: FIXED_NOW + timedelta(seconds=120),
+    )
+    deleted = later.cleanup_expired_sessions()
+    assert deleted >= 1
+    assert later.get_session_user(expired.raw_token) is None

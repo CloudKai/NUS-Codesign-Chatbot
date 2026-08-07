@@ -131,6 +131,34 @@ def test_auth_gate_uses_parent_link_click_not_location_replace():
     assert "location.replace(" not in login_source
 
 
+def test_auth_config_error_shows_gap_and_hides_sign_in(logged_out_user, monkeypatch):
+    monkeypatch.setattr(auth_gate, "auth_login_url", lambda: None)
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    assert not app.exception
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert "cd-auth-gap-after-course-notice--spacer" in rendered
+    assert any("temporarily unavailable" in (err.value or "") for err in app.error)
+    assert not any(
+        button.label == "Sign in or create an account" for button in app.button
+    )
+
+
+def test_auth_gate_handles_auth_error_query_param():
+    source = Path("ui/auth_gate.py").read_text(encoding="utf-8")
+    assert 'query_params.get("auth_error") == "1"' in source
+    assert "Sign-in did not complete" in source
+    assert "auth-config-error" in source
+
+
+def test_env_example_documents_app_session_and_fastapi_callback():
+    example = Path(".env.example").read_text(encoding="utf-8")
+    assert "APP_SESSION_TTL_SECONDS=2592000" in example
+    assert "APP_SESSION_COOKIE_NAME=co_design_session" in example
+    assert "APP_SESSION_COOKIE_SECURE=false" in example
+    assert "COGNITO_REDIRECT_URI=http://127.0.0.1:8000/api/v1/auth/callback" in example
+    assert "CO_DESIGN_PUBLIC_API_URL=http://127.0.0.1:8000" in example
+
+
 def test_authenticated_users_see_full_application(logged_in_user, monkeypatch):
     from ui import profile as profile_ui
 

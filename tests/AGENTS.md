@@ -36,8 +36,12 @@ default `StudentStore()` path.
 
 | File | Covers |
 |---|---|
-| `test_api.py` | FastAPI `/api/v1` health, coaching turn, transitions, integrity guards |
-| `test_api_client.py` | Typed `LocalApiClient` confirmation + auto-advance contracts |
+| `test_api.py` | FastAPI `/api/v1` health, coaching turn, transitions, integrity guards; legacy Streamlit-cookie logout callback |
+| `test_api_client.py` | Typed `LocalApiClient` confirmation + auto-advance contracts; `/auth/me` session mapping |
+| `test_app_sessions.py` | Opaque app sessions, OAuth state binder cookie, Cognito callback/logout, redirect URI precedence |
+| `test_auth_gate.py` | Streamlit auth gate, Redirecting UX, Cognito profile upsert, owner binding, no `st.login`/`st.user` authority |
+| `test_deployment_config.py` | Compose/Caddy/Dockerfile production auth route allow-list and Cognito redirect URI |
+| `test_runtime_auth.py` | Cognito owner isolation vs single-owner local API |
 | `test_workspace_api.py` | Notebook/source/preference CRUD API and path redaction |
 | `test_primary_path.py` | All six stages, stale/reject, restart, notebook isolation, schema |
 | `test_workflow.py` | LangGraph workflow routing and structured output |
@@ -49,7 +53,7 @@ default `StudentStore()` path.
 | `test_files_and_engine.py` | Upload processing and chat engine behavior |
 | `test_models_and_support.py` | Model registry and support-mode helpers |
 | `test_streamlit_ui.py` | AppTest smoke against `streamlit_app.py` (legacy path) |
-| `test_theme_styles.py` | Ordered CSS partial manifest and assembled stylesheet contracts |
+| `test_theme_styles.py` | Ordered CSS partial manifest and assembled stylesheet contracts (incl. auth) |
 | `test_streamlit_api_mode.py` | AppTest API confirmation + auto-advance; one legacy fallback |
 | `test_rename.py` | Enter-only rename draft helpers and epochs |
 | `test_init_db.py` | Safe `init_db.py` refuse-existing / `--force` behavior |
