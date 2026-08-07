@@ -1,0 +1,13 @@
+cde2300chatbot.duckdns.org {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy app:8000 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		reverse_proxy app:8501
+	}
+}

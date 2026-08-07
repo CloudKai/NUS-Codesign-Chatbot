@@ -1,0 +1,69 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      USE_LOCAL_API: "true"
+      CO_DESIGN_API_URL: "http://127.0.0.1:8000"
+      CO_DESIGN_PUBLIC_API_URL: "https://cde2300chatbot.duckdns.org"
+      CO_DESIGN_UI_URL: "https://cde2300chatbot.duckdns.org"
+      APP_DATA_DIR: "/app/data"
+      APP_DATABASE_PATH: "/app/data/co_design.sqlite3"
+      APP_FILES_DIR: "/app/data/files"
+      APP_WORKSPACES_DIR: "/app/data/workspaces"
+      LECTURE_NOTES_DIR: "/app/lecture_notes"
+    expose:
+      - "8000"
+      - "8501"
+    volumes:
+      - type: bind
+        source: ./data
+        target: /app/data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./.streamlit/secrets.toml
+        target: /app/.streamlit/secrets.toml
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen("http://127.0.0.1:8000/api/v1/ready", timeout=2);
+          urllib.request.urlopen("http://127.0.0.1:8501/_stcore/health", timeout=2)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 30s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - type: bind
+        source: ./Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

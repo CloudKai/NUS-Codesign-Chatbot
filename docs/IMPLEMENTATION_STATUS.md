@@ -2,6 +2,88 @@
 
 ## Current phase
 
+**Single-EC2 production Docker deployment preparation complete**
+
+The unchanged local launcher still binds FastAPI and Streamlit to loopback.
+Production now has a Python 3.12 app image, supervised dual-process entrypoint,
+two-service Compose stack, and Caddy HTTPS routing for
+``cde2300chatbot.duckdns.org``. Only Caddy publishes host ports 80/443; app
+ports 8000/8501 stay on the Compose network.
+
+### Behavior implemented
+
+- Added ``Dockerfile``, ``.dockerignore``, ``compose.yaml``, ``Caddyfile``, and
+  ``scripts/start_prod.sh``.
+- The production entrypoint starts readiness-gated FastAPI and Streamlit on
+  ``0.0.0.0``, monitors both required processes, and terminates both on stop.
+- Compose loads private environment values at runtime, bind-mounts Streamlit
+  secrets read-only, bind-mounts ``./data`` for durable SQLite/uploads/workspaces,
+  and persists Caddy certificate/config state in named volumes. Bind sources
+  must already exist; Docker cannot silently create root-owned directories.
+- Caddy preserves ``/api`` while routing ``/api/*`` to ``app:8000`` and all
+  other requests (including Streamlit WebSockets/OIDC callback) to ``app:8501``.
+  API response flushing preserves public NDJSON streaming.
+- Production startup refuses a missing/unwritable data mount or a missing,
+  unreadable, or directory-valued Streamlit secrets mount with a clear error.
+- Added a backward-compatible ``CO_DESIGN_PUBLIC_API_URL`` so server-side API
+  calls stay on container loopback while browser logout uses the public HTTPS
+  origin. Local defaults and ``scripts/start.sh`` behavior are unchanged.
+- Course inputs under ``lecture_notes/`` remain in the image; private ``data/``,
+  ``.env``, secrets, virtual environments, and caches are excluded from builds.
+
+### Files changed
+
+- Added: ``Dockerfile``, ``.dockerignore``, ``compose.yaml``, ``Caddyfile``,
+  ``scripts/start_prod.sh``, ``tests/test_deployment_config.py``.
+- Updated: ``.env.example``, ``README.md``, ``backend/api.py``,
+  ``backend/settings.py``, ``ui/auth_gate.py``, ``tests/test_auth_gate.py``,
+  ``scripts/AGENTS.md``, this status file.
+
+### Commands run and results
+
+- ``docker compose config --quiet`` → passed.
+- ``sh -n scripts/start.sh scripts/start_prod.sh scripts/build.sh`` → passed.
+- Deployment/auth selection → **33 passed**.
+- Full deterministic mock suite → **157 passed**, one existing
+  Starlette/httpx deprecation warning.
+- ``compileall -q backend ui streamlit_app.py tests`` → passed.
+- IDE diagnostics and ``git diff --check`` → passed.
+- Docker image build could not run because the local Docker daemon was not
+  running. Caddy binary validation was unavailable; Caddy routing is covered by
+  static tests and Compose config validation.
+- Ruff is configured but not installed, so no Ruff result is claimed.
+
+### Migration / compatibility / rollback
+
+- No schema or data migration. ``./data`` remains the persistence boundary,
+  covering ``co_design.sqlite3`` (including SQLite WAL sidecars), ``files/``,
+  and ``workspaces/``. Container replacement does not remove this host path.
+- The app runs as uid/gid ``1000:1000``. Linux/EC2 operators must pre-create
+  and assign the data tree and secrets file to that identity.
+- Existing ``scripts/start.sh`` and its ``127.0.0.1`` bindings were not changed.
+- Rollback removes the production deployment files and public-URL setting;
+  no database, upload, private environment, or private Streamlit secret was
+  modified.
+
+### Risks / blockers
+
+- FastAPI has no authenticated request boundary. Publicly routing ``/api/*`` is
+  not safe for sensitive production student data; authentication/authorization
+  is intentionally deferred because this phase forbids changing auth semantics.
+- Existing database source rows store absolute paths. Data first created outside
+  the container may need a separately tested path-portability migration before
+  transfer; rebuilds of data first created at ``/app/data`` remain stable.
+- EC2/DuckDNS/Cognito settings and live HTTPS were not changed or tested in this
+  preparation-only phase.
+
+### Next exact action
+
+- Start Docker locally or on a staging EC2 host, run ``docker compose build``,
+  then verify mock-mode startup, internal health checks, public HTTPS routing,
+  Cognito callback/logout, source upload/retrieval, and restart persistence.
+
+## Previous completed work
+
 **Cognito login redesign complete — same-tab local logout fixed**
 
 Streamlit-native Amazon Cognito authorization-code login remains the identity

@@ -245,6 +245,90 @@ boundary.
 
 ---
 
+## Production Docker deployment (single EC2)
+
+The production-only stack keeps the local launcher unchanged:
+
+```text
+Internet :80/:443 -> Caddy
+  /api/*           -> app:8000 (FastAPI, prefix preserved)
+  everything else  -> app:8501 (Streamlit)
+```
+
+FastAPI and Streamlit share one `app` container and are not published to the
+host. Only Caddy maps host ports. Caddy obtains and renews HTTPS certificates for
+`cde2300chatbot.duckdns.org`; the DuckDNS record must already resolve to the
+EC2 Elastic IP, and the EC2 security group must allow inbound TCP 80 and 443.
+
+Before validating or starting the stack:
+
+```bash
+cp .env.example .env                         # then set private production values
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+mkdir -p data
+chmod 700 data .streamlit
+chmod 600 .env .streamlit/secrets.toml
+```
+
+The image runs as uid/gid `1000:1000`. On Linux/EC2, make the persistent data
+tree and mounted secrets file accessible to that account before startup:
+
+```bash
+sudo chown -R 1000:1000 data .streamlit/secrets.toml
+test -d data && test -f .streamlit/secrets.toml
+```
+
+Compose refuses to create either bind source automatically. This prevents a
+missing secrets file from silently becoming a directory and prevents a
+root-owned empty data directory from being created during startup.
+
+Set the private Cognito secrets file to use:
+
+- `redirect_uri = "https://cde2300chatbot.duckdns.org/oauth2callback"`
+- optional `logout_uri = "https://cde2300chatbot.duckdns.org/api/v1/auth/logout/callback"`
+
+Add those exact URLs to the Cognito app client. Do not put private values in the
+image or repository. Compose injects `.env` at runtime and bind-mounts
+`.streamlit/secrets.toml` read-only.
+
+Safe configuration/build checks (they do not start model providers):
+
+```bash
+docker compose config --quiet
+docker compose build
+sh -n scripts/start.sh scripts/start_prod.sh scripts/build.sh
+.venv/bin/python -m pytest -q
+```
+
+On EC2, after securely transferring the private configuration and any existing
+`data/` directory:
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 app caddy
+curl -fsS https://cde2300chatbot.duckdns.org/api/v1/health
+```
+
+The host `./data` bind mount persists the SQLite database, uploads, synced
+course-material copies, and optional generated workspaces across image rebuilds
+and container replacement. Back it up before deployment changes:
+
+```bash
+tar -czf "co-design-data-$(date +%Y%m%d-%H%M%S).tar.gz" data/
+```
+
+Do not run `docker compose down -v` unless removing Caddy's certificate/config
+volumes is intentional. `docker compose down` alone does not delete `./data`.
+
+> Security boundary: FastAPI routes currently have no authenticated request
+> boundary. Although Cognito-authenticated Streamlit sessions use owner-scoped
+> in-process services, `/api/*` is publicly routed as requested. Do not treat
+> this deployment as production-safe for sensitive student data until API
+> authentication and authorization are implemented in a separate phase.
+
+---
+
 ## Tests
 
 ```bash

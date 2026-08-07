@@ -18,6 +18,7 @@ logic.
 | Script | Purpose | Safety notes |
 |---|---|---|
 | `start.sh` | **Canonical launcher** — FastAPI `:8000` + Streamlit `:8501` with `USE_LOCAL_API=true` | Everyday path |
+| `start_prod.sh` | Docker app entrypoint — both services on `0.0.0.0`, supervised together | Production container only; ports stay internal to Compose |
 | `build.sh` | Validation-only: `compileall` + full mock `pytest` | **Does not** initialize or modify the live DB |
 | `init_db.py` | Explicit DB schema setup | Refuses existing DB unless `--force`; prefer `--database PATH` for new files |
 
@@ -27,6 +28,10 @@ logic.
 
 - `USE_LOCAL_API=true`
 - `CO_DESIGN_API_URL` (default `http://127.0.0.1:8000`)
+
+`start_prod.sh` also forces `USE_LOCAL_API=true`; Compose keeps
+`CO_DESIGN_API_URL` on container loopback and supplies the public HTTPS origins
+for browser logout and UI redirects.
 
 Other paths come from `backend/settings.py` and `.env` (see `.env.example`).
 Repository defaults are `MODEL_PROVIDER=mock` and `AUTO_ADVANCE_STAGES=false`.
@@ -63,6 +68,7 @@ Syntax-check shell scripts:
 
 ```sh
 sh -n scripts/start.sh
+sh -n scripts/start_prod.sh
 sh -n scripts/build.sh
 ```
 

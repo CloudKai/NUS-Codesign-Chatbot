@@ -345,11 +345,16 @@ def cognito_logout_url() -> str | None:
 def app_logout_url() -> str | None:
     """Return the local API logout callback used by profile Logout.
 
-    Clears Streamlit auth cookies on ``CO_DESIGN_API_URL``, then redirects to
-    the UI login gate with ``?signed_out=1``. See ``backend/api.py``
+    Clears Streamlit auth cookies on ``CO_DESIGN_PUBLIC_API_URL`` (falling back
+    to ``CO_DESIGN_API_URL`` for local compatibility), then redirects to the UI
+    login gate with ``?signed_out=1``. See ``backend/api.py``
     ``auth_logout_callback``.
     """
-    base = str(getattr(settings, "api_base_url", "") or "").rstrip("/")
+    base = str(
+        getattr(settings, "public_api_base_url", "")
+        or getattr(settings, "api_base_url", "")
+        or ""
+    ).rstrip("/")
     parsed = urlparse(base)
     if (
         not _is_allowed_http_origin(parsed)
@@ -377,7 +382,8 @@ def logout_user() -> None:
     url = app_logout_url()
     if not url:
         st.session_state["_auth_config_error"] = (
-            "Sign-out requires the local API (CO_DESIGN_API_URL). "
+            "Sign-out requires the local API callback "
+            "(CO_DESIGN_PUBLIC_API_URL or CO_DESIGN_API_URL). "
             "Start the app with scripts/start.sh."
         )
         return

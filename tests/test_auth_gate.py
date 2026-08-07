@@ -412,19 +412,24 @@ def test_cognito_logout_url_rejects_unsafe_or_unordered_values(
     assert auth_gate.cognito_logout_url() is None
 
 
-def test_app_logout_url_accepts_loopback_and_rejects_unsafe_base(monkeypatch):
+def test_app_logout_url_uses_public_origin_and_rejects_unsafe_base(monkeypatch):
     monkeypatch.setattr(
         auth_gate.settings,
         "api_base_url",
-        "http://127.0.0.1:8000",
+        "http://app:8000",
+    )
+    monkeypatch.setattr(
+        auth_gate.settings,
+        "public_api_base_url",
+        "https://coach.example.edu",
     )
     assert auth_gate.app_logout_url() == (
-        "http://127.0.0.1:8000/api/v1/auth/logout/callback"
+        "https://coach.example.edu/api/v1/auth/logout/callback"
     )
 
     monkeypatch.setattr(
         auth_gate.settings,
-        "api_base_url",
+        "public_api_base_url",
         "https://coach.example.edu@evil.test",
     )
     assert auth_gate.app_logout_url() is None

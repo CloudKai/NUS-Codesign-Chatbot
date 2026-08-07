@@ -117,9 +117,10 @@ def create_app(
 
         Entry point for profile Logout (``ui.auth_gate.app_logout_url`` / same-tab
         ``<a target="_self">``). Browser cookies are host-scoped (not port), so
-        this FastAPI response on ``CO_DESIGN_API_URL`` can clear HttpOnly cookies
-        set by Streamlit on ``CO_DESIGN_UI_URL``, then 302 to
-        ``{CO_DESIGN_UI_URL}/?signed_out=1``.
+        this FastAPI response on ``CO_DESIGN_PUBLIC_API_URL`` can clear HttpOnly
+        cookies set by Streamlit on ``CO_DESIGN_UI_URL``, then 302 to
+        ``{CO_DESIGN_UI_URL}/?signed_out=1``. Local deployments fall back to
+        ``CO_DESIGN_API_URL``.
 
         Do not send the browser through Cognito hosted ``/logout`` here:
         Streamlit's OIDC end-session params are rejected as "Invalid request".
