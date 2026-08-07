@@ -21,6 +21,7 @@ from joserfc import jwt
 from joserfc.jwk import KeySet
 
 from backend.cognito_config import CognitoAuthConfig, load_cognito_auth_config
+from backend.persistence.factory import create_student_store
 from backend.session_tokens import generate_oauth_state, generate_pkce_verifier
 from backend.student_store import StudentStore, utc_now
 
@@ -63,7 +64,7 @@ class CognitoOIDCClient:
         jwks_loader: Callable[[str], Mapping[str, Any]] | None = None,
     ) -> None:
         self._config = config or load_cognito_auth_config()
-        self._store = store or StudentStore()
+        self._store = store or create_student_store()
         self._transport = transport
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._metadata_loader = metadata_loader

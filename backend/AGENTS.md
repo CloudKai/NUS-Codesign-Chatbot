@@ -40,6 +40,7 @@ FastAPI (api.py)
 | `student_journey.py` | Six thinking stages, journey normalization, review helpers, stage questions |
 | `learning_service.py` | Confirmation-gated phase transitions and learning progression |
 | `student_store.py` | SQLite store for notebooks, folders, messages, sources, metadata |
+| `persistence/` | Storage ports + factories: SQLite/DSQL student stores, local/S3 file storage |
 | `repositories.py` | Narrow repository adapters over `StudentStore` |
 | `chat_service.py` | Legacy/direct chat engine (`StudentChatEngine`) for non-API Streamlit path |
 | `providers.py` | Ollama and OpenAI coach provider adapters |
@@ -67,8 +68,9 @@ FastAPI (api.py)
   status in one SQLite transaction).
 - **Structured provider failures** map to HTTP 503 at the API boundary.
 - **Mock-first testing**. Automated tests must not require paid APIs or internet.
-- **No AWS runtime dependencies** unless explicitly requested. Keep ports
-  replaceable for future adapters.
+- **AWS production adapters are opt-in** via ``DATABASE_PROVIDER=dsql`` and
+  ``FILE_STORAGE_PROVIDER=s3``. Keep ports replaceable; never bake credentials
+  into images; tests must use mocks/fakes only.
 - **Notebook isolation**. Retrieval and citations must stay scoped to the active
   notebook and selected sources.
 

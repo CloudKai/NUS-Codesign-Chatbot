@@ -19,6 +19,7 @@ Do not create parallel architecture documents. Extend or amend the files here.
 |---|---|---|
 | [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md) | Architecture authority: layers, ports, workflow, providers, verification phases | Before any backend, API, persistence, workflow, or migration task |
 | [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) | Living handoff log: current phase, completed work, validation evidence, risks, next action | At session start to resume; at phase end to record evidence |
+| [`deploy/AWS_STATELESS_EC2.md`](deploy/AWS_STATELESS_EC2.md) | Production ECR + DSQL + S3 + DuckDNS host topology | Before AWS/EC2 cutover work |
 
 Related product docs outside `docs/`:
 

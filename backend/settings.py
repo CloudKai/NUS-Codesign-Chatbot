@@ -3,19 +3,24 @@ from __future__ import annotations
 """Application settings loaded from the project ``.env`` file.
 
 Fallback defaults match ``.env.example``: mock provider, confirmation-mode
-stage progression, and project-root-relative data paths so a missing ``.env``
-stays cost-safe.
+stage progression, SQLite + local files, and project-root-relative data paths
+so a missing ``.env`` stays cost-safe. Production selects Aurora DSQL and S3
+via ``DATABASE_PROVIDER`` / ``FILE_STORAGE_PROVIDER``.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(PROJECT_ROOT / ".env")
+try:
+    load_dotenv(PROJECT_ROOT / ".env")
+except OSError:
+    # Private .env may be unreadable in some sandboxed test environments.
+    pass
 
 
 def _boolean(name: str, default: bool = False) -> bool:
@@ -36,6 +41,31 @@ class Settings:
     files_dir: Path = _project_path("APP_FILES_DIR", "data/files")
     workspaces_dir: Path = _project_path("APP_WORKSPACES_DIR", "data/workspaces")
     lecture_notes_dir: Path = _project_path("LECTURE_NOTES_DIR", "lecture_notes")
+    # Storage providers: local defaults keep SQLite + filesystem for development.
+    database_provider: str = field(
+        default_factory=lambda: os.getenv("DATABASE_PROVIDER", "sqlite").strip().lower()
+    )
+    file_storage_provider: str = field(
+        default_factory=lambda: os.getenv(
+            "FILE_STORAGE_PROVIDER", "local"
+        ).strip().lower()
+    )
+    aws_region: str = field(
+        default_factory=lambda: os.getenv("AWS_REGION", "us-west-2").strip()
+    )
+    dsql_endpoint: str = field(
+        default_factory=lambda: os.getenv("DSQL_ENDPOINT", "").strip()
+    )
+    dsql_database: str = field(
+        default_factory=lambda: os.getenv("DSQL_DATABASE", "postgres").strip()
+        or "postgres"
+    )
+    dsql_user: str = field(
+        default_factory=lambda: os.getenv("DSQL_USER", "admin").strip() or "admin"
+    )
+    user_uploads_bucket: str = field(
+        default_factory=lambda: os.getenv("USER_UPLOADS_BUCKET", "").strip()
+    )
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     enable_local_code_execution: bool = _boolean("ENABLE_LOCAL_CODE_EXECUTION", False)
     mock_openai: bool = _boolean("MOCK_OPENAI", True)
@@ -77,13 +107,34 @@ class Settings:
     default_reasoning_effort: str = os.getenv("DEFAULT_REASONING_EFFORT", "low")
     image_model: str = os.getenv("IMAGE_MODEL", "gpt-image-2")
 
+    @property
+    def uses_local_database(self) -> bool:
+        """Return True when structured state is stored in SQLite."""
+        return self.database_provider == "sqlite"
+
+    @property
+    def uses_local_files(self) -> bool:
+        """Return True when uploads are stored on the local filesystem."""
+        return self.file_storage_provider == "local"
+
     def ensure_directories(self) -> None:
-        for directory in (
-            self.data_dir,
-            self.files_dir,
-            self.workspaces_dir,
-            self.lecture_notes_dir,
-        ):
+        """Create local data directories when the local providers are active.
+
+        Production DSQL/S3 deployments must not require ``/app/data``. Lecture
+        notes remain optional host/content input and are created only for local
+        file mode.
+        """
+        directories: list[Path] = []
+        if self.uses_local_database or self.uses_local_files:
+            directories.append(self.data_dir)
+        if self.uses_local_files:
+            directories.extend((self.files_dir, self.workspaces_dir))
+        if self.uses_local_files or self.lecture_notes_dir.exists():
+            directories.append(self.lecture_notes_dir)
+        # Always ensure lecture_notes for local lecture sync when path is default.
+        if self.file_storage_provider != "s3":
+            directories.append(self.lecture_notes_dir)
+        for directory in directories:
             directory.mkdir(parents=True, exist_ok=True)
 
 

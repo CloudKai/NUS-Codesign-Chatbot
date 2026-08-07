@@ -44,7 +44,9 @@ def resources(
     LearningProgressService,
 ]:
     """Create the shared store, workspace service, and coaching application service."""
-    store = StudentStore(identifier=identifier)
+    from backend.persistence.factory import create_student_store
+
+    store = create_student_store(identifier=identifier)
     service = WorkspaceService(store, CourseMaterialSyncCoordinator())
     notebooks = SQLiteNotebookRepository(store)
     transitions = SQLitePhaseTransitionRepository(store)

@@ -74,7 +74,13 @@ def create_app(
     oidc_client=None,
 ) -> FastAPI:
     """Create a local API application with injectable progression behavior."""
-    active_store = store or StudentStore()
+    from backend.persistence.factory import (
+        create_student_store,
+        validate_storage_configuration,
+    )
+
+    validate_storage_configuration()
+    active_store = store or create_student_store()
     workspace_service = workspace or WorkspaceService(
         active_store, CourseMaterialSyncCoordinator()
     )
@@ -179,8 +185,15 @@ def create_app(
             )
         return {
             "status": "ready",
-            "mode": "local",
+            "mode": (
+                "production"
+                if settings.database_provider == "dsql"
+                or settings.file_storage_provider == "s3"
+                else "local"
+            ),
             "provider": provider,
+            "database_provider": settings.database_provider,
+            "file_storage_provider": settings.file_storage_provider,
         }
 
     @app.get("/api/v1/preferences")

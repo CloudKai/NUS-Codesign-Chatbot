@@ -40,7 +40,8 @@ default `StudentStore()` path.
 | `test_api_client.py` | Typed `LocalApiClient` confirmation + auto-advance contracts; `/auth/me` session mapping |
 | `test_app_sessions.py` | Opaque app sessions, OAuth state binder cookie, Cognito callback/logout, redirect URI precedence |
 | `test_auth_gate.py` | Streamlit auth gate, Redirecting UX, Cognito profile upsert, owner binding, no `st.login`/`st.user` authority |
-| `test_deployment_config.py` | Compose/Caddy/Dockerfile production auth route allow-list and Cognito redirect URI |
+| `test_deployment_config.py` | Compose/Caddy/Dockerfile production auth route allow-list, Cognito redirect, stateless prod compose |
+| `test_storage_providers.py` | SQLite/local defaults, DSQL/S3 provider selection, mocked DSQL auth + S3 (no AWS calls) |
 | `test_runtime_auth.py` | Cognito owner isolation vs single-owner local API |
 | `test_workspace_api.py` | Notebook/source/preference CRUD API and path redaction |
 | `test_primary_path.py` | All six stages, stale/reject, restart, notebook isolation, schema |

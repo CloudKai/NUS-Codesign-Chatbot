@@ -16,5 +16,9 @@ python-pptx==1.0.2
 openpyxl==3.1.5
 matplotlib==3.11.1
 
+# Production AWS adapters (lazy-imported; not required for local mock tests)
+boto3>=1.35.0
+psycopg[binary]>=3.2.0
+
 # Tests
 pytest==9.0.2

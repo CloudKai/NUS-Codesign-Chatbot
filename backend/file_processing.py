@@ -39,10 +39,25 @@ class StoredUpload:
     size: int
     supported: bool
     extracted_text: str = ""
+    storage_key: str | None = None
+    storage_provider: str = "local"
 
     @property
     def is_image(self) -> bool:
-        return self.path.suffix.lower() in IMAGE_SUFFIXES
+        suffix = (
+            Path(self.name).suffix.lower()
+            if self.storage_key
+            else self.path.suffix.lower()
+        )
+        return suffix in IMAGE_SUFFIXES
+
+    def read_bytes(self) -> bytes:
+        """Return upload bytes from local path or configured object storage."""
+        if self.storage_key and self.storage_provider != "local":
+            from backend.persistence.factory import get_file_storage
+
+            return get_file_storage().get_bytes(self.storage_key)
+        return self.path.read_bytes()
 
 
 def _safe_name(name: str) -> str:
@@ -276,6 +291,7 @@ def save_uploads(
     *,
     max_file_size_mb: int | None = None,
     compress: bool = True,
+    owner_id: str = "local-student",
 ) -> list[StoredUpload]:
     """Validate, optionally compress, and store uploads.
 
@@ -285,32 +301,70 @@ def save_uploads(
 
     Pass ``compress=False`` for trusted copies (for example already-prepared
     lecture-note sync) so notebook create does not re-encode large PDFs.
+
+    Local development keeps the existing ``files_dir/threads/.../uploads``
+    layout. Production ``FILE_STORAGE_PROVIDER=s3`` stores bytes in object
+    storage under generated keys and leaves only disposable temp paths locally.
     """
     items = list(uploads)
     if len(items) > settings.max_files:
         raise ValueError(f"Upload at most {settings.max_files} files per message.")
-    root = _upload_root(thread_id)
     size_limit_mb = max_file_size_mb or settings.max_file_size_mb
+    use_object_storage = settings.file_storage_provider != "local"
+    root = None if use_object_storage else _upload_root(thread_id)
     stored: list[StoredUpload] = []
     for name, content, supplied_mime in items:
         if len(content) > size_limit_mb * 1024 * 1024:
             raise ValueError(f"{name} exceeds the {size_limit_mb} MB limit.")
         payload = compress_upload_bytes(name, content) if compress else content
         safe_name = _safe_name(name)
+        mime = (
+            supplied_mime
+            or mimetypes.guess_type(safe_name)[0]
+            or "application/octet-stream"
+        )
+        suffix = Path(safe_name).suffix.lower()
+        supported = suffix in SUPPORTED_SUFFIXES
+        extracted = ""
+        if supported and suffix not in IMAGE_SUFFIXES:
+            try:
+                extracted = _extract_text_from_bytes(safe_name, payload)
+            except Exception as exc:
+                extracted = f"[Could not extract {safe_name}: {type(exc).__name__}]"
+
+        if use_object_storage:
+            from backend.persistence.factory import get_file_storage
+            from backend.persistence.object_keys import build_upload_object_key
+
+            key = build_upload_object_key(
+                user_id=owner_id,
+                thread_id=thread_id,
+                filename=safe_name,
+            )
+            get_file_storage().put_bytes(key=key, data=payload, content_type=mime)
+            temp_path = Path(tempfile.gettempdir()) / safe_name
+            stored.append(
+                StoredUpload(
+                    name=safe_name,
+                    path=temp_path,
+                    mime=mime,
+                    size=len(payload),
+                    supported=supported,
+                    extracted_text=extracted[:120_000],
+                    storage_key=key,
+                    storage_provider=settings.file_storage_provider,
+                )
+            )
+            continue
+
+        assert root is not None
         candidate = root / safe_name
         counter = 2
         while candidate.exists():
             candidate = root / f"{Path(safe_name).stem}-{counter}{Path(safe_name).suffix}"
             counter += 1
         candidate.write_bytes(payload)
-        mime = (
-            supplied_mime
-            or mimetypes.guess_type(candidate.name)[0]
-            or "application/octet-stream"
-        )
-        supported = candidate.suffix.lower() in SUPPORTED_SUFFIXES
-        extracted = ""
-        if supported and candidate.suffix.lower() not in IMAGE_SUFFIXES:
+        if supported and suffix not in IMAGE_SUFFIXES and not extracted:
             try:
                 extracted = extract_text(candidate)
             except Exception as exc:
@@ -331,7 +385,7 @@ def save_uploads(
 
 
 def image_input(upload: StoredUpload) -> dict[str, str]:
-    encoded = base64.b64encode(upload.path.read_bytes()).decode("ascii")
+    encoded = base64.b64encode(upload.read_bytes()).decode("ascii")
     return {
         "type": "input_image",
         "image_url": f"data:{upload.mime};base64,{encoded}",

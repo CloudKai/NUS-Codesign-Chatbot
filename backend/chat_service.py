@@ -14,6 +14,7 @@ from openai import APIConnectionError, APIStatusError, OpenAI, RateLimitError
 from .analysis_tool import PYTHON_TOOL, run_analysis_tool
 from .file_processing import StoredUpload
 from .models import ModelDefinition, get_model, validate_reasoning
+from .persistence.factory import create_student_store
 from .settings import settings
 from .source_library import (
     add_file_sources,
@@ -145,7 +146,7 @@ def _sources_from_response(response: Any) -> list[dict[str, str]]:
 
 class StudentChatEngine:
     def __init__(self, store: StudentStore | None = None):
-        self.store = store or StudentStore()
+        self.store = store or create_student_store()
 
     def submit(
         self,

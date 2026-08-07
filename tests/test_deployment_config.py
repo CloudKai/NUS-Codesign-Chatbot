@@ -1,4 +1,4 @@
-"""Static safety checks for the single-EC2 Docker deployment files."""
+"""Static safety checks for local and production Docker deployment files."""
 
 from pathlib import Path
 
@@ -34,6 +34,7 @@ def test_app_ports_are_internal_and_only_caddy_publishes_http_ports():
 
 
 def test_compose_persists_data_and_mounts_private_secrets_read_only():
+    """Local compose keeps the data mount for SQLite/dev; prod does not."""
     compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
     app = _service_block(compose, "app")
 
@@ -43,6 +44,36 @@ def test_compose_persists_data_and_mounts_private_secrets_read_only():
     assert "target: /app/.streamlit/secrets.toml" in app
     assert "read_only: true" in app
     assert app.count("create_host_path: false") == 2
+    assert 'DATABASE_PROVIDER: "sqlite"' in app
+    assert 'FILE_STORAGE_PROVIDER: "local"' in app
+
+
+def test_production_compose_is_stateless_and_uses_prebuilt_image():
+    compose = (ROOT / "compose.prod.yaml").read_text(encoding="utf-8")
+    app = _service_block(compose, "app")
+    caddy = _service_block(compose, "caddy")
+
+    assert "image: ${APP_IMAGE}" in app
+    assert "build:" not in app
+    assert "source: ./data" not in app
+    assert "target: /app/data" not in app
+    assert 'DATABASE_PROVIDER: "dsql"' in app
+    assert 'FILE_STORAGE_PROVIDER: "s3"' in app
+    assert 'AWS_REGION: "us-west-2"' in app
+    assert "ports:" not in app
+    assert '"8000"' in app
+    assert '"8501"' in app
+    assert '"80:80"' in caddy
+    assert '"443:443"' in caddy
+    assert "8000:8000" not in compose
+    assert "8501:8501" not in compose
+    assert (
+        'COGNITO_REDIRECT_URI: "https://cde2300chatbot.duckdns.org/api/v1/auth/callback"'
+        in app
+    )
+    assert 'CO_DESIGN_PUBLIC_API_URL: "https://cde2300chatbot.duckdns.org"' in app
+    assert 'CO_DESIGN_UI_URL: "https://cde2300chatbot.duckdns.org"' in app
+    assert "source: ./.streamlit/secrets.toml" in app
 
 
 def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
@@ -100,6 +131,7 @@ def test_compose_sets_production_cognito_redirect_uri():
     assert "127.0.0.1:8000/api/v1/auth/callback" not in app
     assert 'APP_SESSION_COOKIE_SECURE: "true"' in app
 
+
 def test_docker_context_excludes_secrets_state_and_development_artifacts():
     ignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
 
@@ -114,22 +146,26 @@ def test_docker_context_excludes_secrets_state_and_development_artifacts():
         ".pytest_cache/",
         ".git",
         "data/",
+        "*.sqlite3",
         "*.log",
+        "**/duck.env",
     ):
         assert required in ignore
     assert ".streamlit/secrets.toml.example" not in ignore
     assert "lecture_notes/" not in ignore
 
 
-def test_dockerfile_uses_python_312_and_production_entrypoint():
+def test_dockerfile_is_architecture_neutral():
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
 
     assert "FROM python:3.12-slim" in dockerfile
+    assert "--platform=linux/arm64" not in dockerfile
+    assert "--platform=linux/amd64" not in dockerfile
     assert "python -m pip install -r requirements.txt" in dockerfile
     assert 'ENTRYPOINT ["sh", "scripts/start_prod.sh"]' in dockerfile
 
 
-def test_production_script_binds_both_services_to_container_network():
+def test_production_script_validates_provider_config_without_requiring_data_for_dsql():
     script = (ROOT / "scripts" / "start_prod.sh").read_text(encoding="utf-8")
 
     assert "backend.api:app" in script
@@ -138,5 +174,20 @@ def test_production_script_binds_both_services_to_container_network():
     assert "--server.headless true" in script
     assert "USE_LOCAL_API" in script
     assert "kill -0" in script
-    assert "Application data directory must exist and be writable" in script
+    assert "DATABASE_PROVIDER=dsql requires DSQL_ENDPOINT" in script
+    assert "FILE_STORAGE_PROVIDER=s3 requires USER_UPLOADS_BUCKET" in script
     assert "Streamlit secrets must be a readable file" in script
+    assert 'DATABASE_PROVIDER" = "sqlite"' in script
+    assert 'FILE_STORAGE_PROVIDER" = "local"' in script
+    assert "Application data directory must exist and be writable" in script
+
+
+def test_duckdns_stays_on_host_not_in_application_modules():
+    duck = (ROOT / "scripts" / "host" / "duck.sh").read_text(encoding="utf-8")
+    assert "duckdns.org/update" in duck
+    assert "DUCKDNS_TOKEN" in duck
+    assert 'echo "$DUCKDNS_TOKEN"' not in duck
+    for path in (ROOT / "backend").rglob("*.py"):
+        text = path.read_text(encoding="utf-8")
+        assert "duckdns.org/update" not in text
+        assert "DUCKDNS_TOKEN" not in text

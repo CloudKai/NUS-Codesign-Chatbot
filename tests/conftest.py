@@ -29,6 +29,8 @@ os.environ["APP_DATABASE_PATH"] = str(_BOOTSTRAP_ROOT / "co_design.sqlite3")
 os.environ["APP_FILES_DIR"] = str(_BOOTSTRAP_ROOT / "files")
 os.environ["APP_WORKSPACES_DIR"] = str(_BOOTSTRAP_ROOT / "workspaces")
 os.environ["LECTURE_NOTES_DIR"] = str(_BOOTSTRAP_ROOT / "lecture_notes")
+os.environ["DATABASE_PROVIDER"] = "sqlite"
+os.environ["FILE_STORAGE_PROVIDER"] = "local"
 
 
 def _clear_streamlit_runtime_caches() -> None:
@@ -66,9 +68,13 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("APP_FILES_DIR", str(files_dir))
     monkeypatch.setenv("APP_WORKSPACES_DIR", str(workspaces_dir))
     monkeypatch.setenv("LECTURE_NOTES_DIR", str(lecture_notes_dir))
+    monkeypatch.setenv("DATABASE_PROVIDER", "sqlite")
+    monkeypatch.setenv("FILE_STORAGE_PROVIDER", "local")
 
     from backend import settings as settings_module
+    from backend.persistence.factory import reset_file_storage_cache
 
+    reset_file_storage_cache()
     monkeypatch.setattr(settings_module.settings, "data_dir", root.resolve())
     monkeypatch.setattr(settings_module.settings, "database_path", database.resolve())
     monkeypatch.setattr(settings_module.settings, "files_dir", files_dir.resolve())
@@ -78,6 +84,8 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(
         settings_module.settings, "lecture_notes_dir", lecture_notes_dir.resolve()
     )
+    monkeypatch.setattr(settings_module.settings, "database_provider", "sqlite")
+    monkeypatch.setattr(settings_module.settings, "file_storage_provider", "local")
     monkeypatch.setattr(settings_module.settings, "openai_api_key", "")
     monkeypatch.setattr(settings_module.settings, "mock_openai", True)
     monkeypatch.setattr(settings_module.settings, "model_provider", "mock")

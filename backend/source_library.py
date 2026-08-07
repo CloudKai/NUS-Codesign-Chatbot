@@ -359,6 +359,7 @@ def add_file_sources(
         upload_items,
         max_file_size_mb=max_file_size_mb,
         compress=compress,
+        owner_id=getattr(store, "owner_id", "local-student"),
     )
     created: list[dict[str, Any]] = []
     for index, upload in enumerate(stored_uploads):
@@ -373,7 +374,7 @@ def add_file_sources(
             kind=kind,
             title=display_title,
             mime=upload.mime,
-            path=str(upload.path),
+            path=upload.storage_key or str(upload.path),
             extracted_text=upload.extracted_text,
             size=upload.size,
             selected=True,
@@ -382,6 +383,12 @@ def add_file_sources(
                 "managed_file": True,
                 "supported": upload.supported,
                 "origin": origin,
+                "storage_provider": upload.storage_provider,
+                **(
+                    {"object_key": upload.storage_key}
+                    if upload.storage_key
+                    else {}
+                ),
             },
         )
         source = store.get_source(thread_id, source_id)
@@ -651,8 +658,12 @@ def safe_source_file_path(source: dict[str, Any]) -> Path | None:
 
     Returns:
         Absolute path when the file exists and is owned by the configured files
-        root; otherwise ``None`` (missing path, missing file, or traversal).
+        root; otherwise ``None`` (missing path, missing file, object storage,
+        or traversal).
     """
+    metadata = source.get("metadata") or {}
+    if metadata.get("storage_provider") in {"s3", "memory"}:
+        return None
     path_value = source.get("path")
     if not path_value:
         return None
@@ -663,6 +674,27 @@ def safe_source_file_path(source: dict[str, Any]) -> Path | None:
     return path
 
 
+def read_source_bytes(source: dict[str, Any]) -> bytes | None:
+    """Return source file bytes from local disk or configured object storage."""
+    metadata = source.get("metadata") or {}
+    object_key = metadata.get("object_key") or (
+        source.get("path")
+        if metadata.get("storage_provider") in {"s3", "memory"}
+        else None
+    )
+    if object_key:
+        from backend.persistence.factory import get_file_storage
+
+        try:
+            return get_file_storage().get_bytes(str(object_key))
+        except FileNotFoundError:
+            return None
+    path = safe_source_file_path(source)
+    if path is None:
+        return None
+    return path.read_bytes()
+
+
 def source_image_input(source: dict[str, Any]) -> dict[str, str] | None:
     """Build an OpenAI-style ``input_image`` part for a notebook image source.
 
@@ -671,11 +703,16 @@ def source_image_input(source: dict[str, Any]) -> dict[str, str] | None:
     """
     if source.get("kind") != "image":
         return None
-    path = safe_source_file_path(source)
-    if path is None:
+    payload = read_source_bytes(source)
+    if payload is None:
         return None
-    mime = str(source.get("mime") or mimetypes.guess_type(path.name)[0] or "image/png")
-    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    name = str(source.get("title") or source.get("path") or "image.png")
+    mime = str(
+        source.get("mime")
+        or mimetypes.guess_type(name)[0]
+        or "image/png"
+    )
+    encoded = base64.b64encode(payload).decode("ascii")
     return {
         "type": "input_image",
         "image_url": f"data:{mime};base64,{encoded}",

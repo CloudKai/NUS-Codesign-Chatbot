@@ -701,7 +701,7 @@ class StudentStore:
                          FROM steps recent
                          WHERE recent.threadId=t.id
                            AND recent.type='user_message'
-                         ORDER BY recent.createdAt DESC, recent.rowid DESC
+                         ORDER BY recent.createdAt DESC, recent.id DESC
                          LIMIT 1
                        ) AS latestUserMessage,
                        MAX(COALESCE(s.createdAt, t.createdAt)) AS lastActivity
@@ -755,6 +755,18 @@ class StudentStore:
             connection.execute(
                 "DELETE FROM threads WHERE id=? AND userId=?", (thread_id, self.owner_id)
             )
+        self._cleanup_thread_files(thread_id)
+
+    def _cleanup_thread_files(self, thread_id: str) -> None:
+        """Remove local and object-storage files owned by a deleted notebook."""
+        from backend.persistence.factory import get_file_storage
+        from backend.persistence.object_keys import thread_prefix
+
+        if settings.file_storage_provider != "local":
+            get_file_storage().delete_prefix(
+                thread_prefix(user_id=self.owner_id, thread_id=thread_id)
+            )
+            return
         for root, allowed in (
             (settings.files_dir / "threads" / thread_id, settings.files_dir),
             (settings.workspaces_dir / thread_id, settings.workspaces_dir),
@@ -847,7 +859,7 @@ class StudentStore:
         with self._lock, self._connect() as connection:
             target = connection.execute(
                 """
-                SELECT s.rowid, s.type
+                SELECT s.id, s.type, s.createdAt
                 FROM steps s
                 JOIN threads t ON t.id=s.threadId
                 WHERE s.id=? AND s.threadId=? AND t.userId=?
@@ -857,13 +869,18 @@ class StudentStore:
             if not target or target["type"] != "user_message":
                 raise ValueError("User message not found")
 
+            target_created = str(target["createdAt"] or "")
             later_rows = connection.execute(
                 """
                 SELECT id FROM steps
-                WHERE threadId=? AND rowid>?
+                WHERE threadId=?
                   AND type IN ('user_message','assistant_message')
+                  AND (
+                    createdAt > ?
+                    OR (createdAt = ? AND id > ?)
+                  )
                 """,
-                (thread_id, target["rowid"]),
+                (thread_id, target_created, target_created, message_id),
             ).fetchall()
             discarded_ids = [str(row["id"]) for row in later_rows]
             turn_message_ids = [message_id, *discarded_ids]
@@ -880,8 +897,15 @@ class StudentStore:
                 (thread_id, *turn_message_ids, *turn_message_ids),
             )
             connection.execute(
-                "DELETE FROM steps WHERE threadId=? AND rowid>?",
-                (thread_id, target["rowid"]),
+                """
+                DELETE FROM steps
+                WHERE threadId=?
+                  AND (
+                    createdAt > ?
+                    OR (createdAt = ? AND id > ?)
+                  )
+                """,
+                (thread_id, target_created, target_created, message_id),
             )
             next_metadata = {**metadata, "model": model_id}
             connection.execute(
@@ -896,11 +920,15 @@ class StudentStore:
             prior_rows = connection.execute(
                 """
                 SELECT type, output FROM steps
-                WHERE threadId=? AND rowid<?
+                WHERE threadId=?
                   AND type IN ('user_message','assistant_message')
-                ORDER BY createdAt ASC, rowid ASC
+                  AND (
+                    createdAt < ?
+                    OR (createdAt = ? AND id < ?)
+                  )
+                ORDER BY createdAt ASC, id ASC
                 """,
-                (thread_id, target["rowid"]),
+                (thread_id, target_created, target_created, message_id),
             ).fetchall()
             history = [
                 {
@@ -952,7 +980,7 @@ class StudentStore:
                 FROM steps s
                 LEFT JOIN feedbacks f ON f.forId=s.id
                 WHERE s.threadId=? AND s.type IN ('user_message','assistant_message')
-                ORDER BY s.createdAt ASC, s.rowid ASC
+                ORDER BY s.createdAt ASC, s.id ASC
                 """,
                 (thread_id,),
             ).fetchall()
@@ -1336,11 +1364,17 @@ class StudentStore:
         if not normalized_title:
             raise ValueError("Source title is required")
         if path:
-            resolved_path = Path(path).resolve()
-            allowed_root = (settings.files_dir / "threads" / thread_id).resolve()
-            if allowed_root not in resolved_path.parents:
-                raise ValueError("Unsafe source path")
-            path = str(resolved_path)
+            metadata_dict = metadata or {}
+            storage_provider = str(metadata_dict.get("storage_provider") or "local")
+            if storage_provider in {"s3", "memory"} or metadata_dict.get("object_key"):
+                # Object-storage keys are not filesystem paths.
+                path = str(path)
+            else:
+                resolved_path = Path(path).resolve()
+                allowed_root = (settings.files_dir / "threads" / thread_id).resolve()
+                if allowed_root not in resolved_path.parents:
+                    raise ValueError("Unsafe source path")
+                path = str(resolved_path)
         source_id = source_id or str(uuid.uuid4())
         now = utc_now()
         with self._lock, self._connect() as connection:
@@ -1384,7 +1418,7 @@ class StudentStore:
                 f"""
                 SELECT * FROM notebook_sources
                 WHERE threadId=? AND ownerId=?{selected_clause}
-                ORDER BY createdAt ASC, rowid ASC
+                ORDER BY createdAt ASC, id ASC
                 """,
                 (thread_id, self.owner_id),
             ).fetchall()
@@ -1502,6 +1536,14 @@ class StudentStore:
             )
         path_value = source.get("path")
         if not path_value or not metadata.get("managed_file"):
+            return
+        if metadata.get("storage_provider") in {"s3", "memory"} or metadata.get(
+            "object_key"
+        ):
+            from backend.persistence.factory import get_file_storage
+
+            key = str(metadata.get("object_key") or path_value)
+            get_file_storage().delete(key)
             return
         path = Path(path_value).resolve()
         allowed_root = (settings.files_dir / "threads" / thread_id).resolve()

@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from backend.persistence.factory import create_student_store
 from backend.student_store import StudentStore
 
 STUDENT_ROLE = "student"
@@ -79,7 +80,7 @@ def sync_authenticated_user(
     email_raw = str(claims.get("email") or "").strip() or None
     display_name = resolve_display_name(claims)
     identifier = store_identifier_for_sub(cognito_sub)
-    active_store = store or StudentStore(identifier=identifier)
+    active_store = store or create_student_store(identifier=identifier)
     result = active_store.upsert_cognito_user(
         cognito_sub=cognito_sub,
         identifier=identifier,

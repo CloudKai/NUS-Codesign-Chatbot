@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
+from backend.persistence.factory import create_student_store
 from backend.session_tokens import generate_session_token, hash_session_token
 from backend.settings import settings
 from backend.student_store import StudentStore
@@ -34,7 +35,7 @@ class AppSessionService:
         ttl_seconds: int | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        self._store = store or StudentStore()
+        self._store = store or create_student_store()
         self._ttl_seconds = int(
             settings.app_session_ttl_seconds if ttl_seconds is None else ttl_seconds
         )
