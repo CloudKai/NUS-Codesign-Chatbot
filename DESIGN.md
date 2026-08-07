@@ -50,6 +50,19 @@ copy.
 Potentially consequential actions require clear confirmation. Students can choose response
 length, language, theme, model, sources, and when to manually move to the next journey step.
 
+### Authentication and course transparency
+
+The signed-out gate uses the same Source Serif wordmark, IBM Plex interface
+type, teal accent, spacing, radii, and light/dark tokens as the workspace.
+Credentials, account creation, confirmation, and password recovery stay in
+Amazon Cognito Managed Login; never recreate password fields in Streamlit.
+
+Before redirecting, state plainly that chatbot work is never graded and has no
+association with course grades. Also explain that the companion is used for the
+course and that researchers want to understand how students use it and whether
+it benefits learning. Keep this notice visible but calm, not hidden in legal
+copy or presented as a warning.
+
 ## 3. Information architecture
 
 ```text

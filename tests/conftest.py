@@ -89,6 +89,48 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert settings_module.settings.openai_api_key == ""
     assert os.environ.get("OPENAI_API_KEY") == ""
 
+    # Default UI tests run as an authenticated Cognito student so existing
+    # AppTest suites keep exercising the full application. Auth-gate tests
+    # override ``st.user`` / ``is_logged_in`` explicitly.
+    import streamlit as st
+
+    from ui import auth_gate as auth_gate_module
+
+    class _DefaultUser:
+        is_logged_in = True
+
+        def get(self, key, default=None):
+            return {
+                "sub": "test-cognito-sub",
+                "email": "test.student@example.edu",
+                "given_name": "Test",
+                "name": "Test Student",
+            }.get(key, default)
+
+        def __getattr__(self, key):
+            value = self.get(key)
+            if value is None:
+                raise AttributeError(key)
+            return value
+
+    monkeypatch.setattr(st, "user", _DefaultUser(), raising=False)
+    monkeypatch.setattr(auth_gate_module, "is_logged_in", lambda: True)
+
+    # App data is scoped to cognito:{sub}; keep direct StudentStore() helpers
+    # in tests on the same owner as the authenticated UI.
+    from backend.student_store import StudentStore
+
+    _student_store_init = StudentStore.__init__
+
+    def _patched_student_store_init(
+        self,
+        path=None,
+        identifier="cognito:test-cognito-sub",
+    ):
+        _student_store_init(self, path=path, identifier=identifier)
+
+    monkeypatch.setattr(StudentStore, "__init__", _patched_student_store_init)
+
     _clear_streamlit_runtime_caches()
     yield root
     _clear_streamlit_runtime_caches()

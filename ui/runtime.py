@@ -21,22 +21,30 @@ from backend.domain import (
     MessageCreateRequest,
     NotebookCreateRequest,
     NotebookUpdateRequest,
+    PendingPhaseTransition,
     SourceUpdateRequest,
 )
 from backend.learning_service import LearningProgressService
 from backend.providers import configured_coach_provider
 from backend.repositories import SQLiteNotebookRepository, SQLitePhaseTransitionRepository
 from backend.settings import settings
-from backend.source_library import CourseMaterialSyncCoordinator
+from backend.source_library import CourseMaterialSyncCoordinator, LectureNotesSyncResult
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
 from backend.workspace_service import SourceContent, WorkspaceService
 
 
 @st.cache_resource
-def resources() -> tuple[StudentStore, WorkspaceService, CoachApplicationService]:
+def resources(
+    identifier: str = "local-student",
+) -> tuple[
+    StudentStore,
+    WorkspaceService,
+    CoachApplicationService,
+    LearningProgressService,
+]:
     """Create the shared store, workspace service, and coaching application service."""
-    store = StudentStore()
+    store = StudentStore(identifier=identifier)
     service = WorkspaceService(store, CourseMaterialSyncCoordinator())
     notebooks = SQLiteNotebookRepository(store)
     transitions = SQLitePhaseTransitionRepository(store)
@@ -49,18 +57,37 @@ def resources() -> tuple[StudentStore, WorkspaceService, CoachApplicationService
         learning,
         auto_advance_stages=bool(getattr(settings, "auto_advance_stages", False)),
     )
-    return store, service, coach
+    return store, service, coach, learning
 
 
-def _resolve_resources() -> tuple[StudentStore, WorkspaceService, CoachApplicationService]:
+def owner_identifier() -> str:
+    """Return the active StudentStore owner identifier for this browser session."""
+    return str(st.session_state.get("_auth_store_identifier") or "local-student")
+
+
+def bind_owner_identifier(identifier: str) -> None:
+    """Bind this browser session to a Cognito-scoped store cache key."""
+    cleaned = str(identifier or "").strip() or "local-student"
+    st.session_state["_auth_store_identifier"] = cleaned
+
+
+def _resolve_resources() -> tuple[
+    StudentStore,
+    WorkspaceService,
+    CoachApplicationService,
+    LearningProgressService,
+]:
     """Return store/service/coach, refreshing if hot-reload left a stale class."""
-    store, service, coach = resources()
+    store, service, coach, learning = resources(owner_identifier())
     if not hasattr(store, "get_user_preferences") or not hasattr(
         store, "update_user_preferences"
     ):
         resources.clear()
-        store, service, coach = resources()
-    return store, service, coach
+        store, service, coach, learning = resources(owner_identifier())
+    if getattr(store, "identifier", None) != owner_identifier():
+        resources.clear()
+        store, service, coach, learning = resources(owner_identifier())
+    return store, service, coach, learning
 
 
 @st.cache_resource
@@ -78,20 +105,25 @@ def local_api_client() -> LocalApiClient:
 
 
 def local_api_enabled() -> bool:
-    """Read API mode safely across Streamlit's cached-module hot reloads.
+    """Return whether the single-owner local API is safe for this session.
 
-    Streamlit can rerun this script while retaining an older ``Settings``
-    instance. ``getattr`` keeps that transition recoverable and a normal full
-    restart will load the current settings schema.
+    The current FastAPI demo owns one ``local-student`` store and has no
+    authenticated request boundary. Cognito users therefore stay on the
+    equivalent in-process application services, which are keyed by
+    ``cognito:{sub}``, instead of collapsing multiple users into that shared
+    API owner. The API remains available for its original single-user local
+    demo and deterministic contract tests.
     """
-    return bool(getattr(settings, "use_local_api", False))
+    return bool(getattr(settings, "use_local_api", False)) and (
+        owner_identifier() == "local-student"
+    )
 
 
 def submit_coach_turn(request: CoachRequest) -> CoachTurn:
     """Run one student coaching turn via the local API or in-process service."""
     if local_api_enabled():
         return local_api_client().coach_turn(request)
-    _, _, coach = _resolve_resources()
+    _, _, coach, _ = _resolve_resources()
     return coach.submit(request)
 
 
@@ -104,7 +136,7 @@ def stream_coach_turn_events(request: CoachRequest) -> Iterator[dict[str, Any]]:
     if local_api_enabled():
         yield from local_api_client().stream_coach_turn(request)
         return
-    _, _, coach = _resolve_resources()
+    _, _, coach, _ = _resolve_resources()
     yield {
         "event": "started",
         "thread_id": request.thread_id,
@@ -122,11 +154,11 @@ class WorkspaceFacade:
     """UI persistence facade over the typed API or in-process workspace service."""
 
     def _service(self) -> WorkspaceService:
-        _, service, _ = _resolve_resources()
+        _, service, _, _ = _resolve_resources()
         return service
 
     def _backend_store(self) -> StudentStore:
-        store, _, _ = _resolve_resources()
+        store, _, _, _ = _resolve_resources()
         return store
 
     def get_user_preferences(self) -> dict[str, Any]:
@@ -311,13 +343,59 @@ class WorkspaceFacade:
             return local_api_client().backfill_legacy_sources(thread_id)
         return self._service().backfill_legacy_sources(thread_id)
 
+    def pending_transition(self, thread_id: str) -> PendingPhaseTransition | None:
+        """Return the unresolved stage recommendation for the owned notebook."""
+        if local_api_enabled():
+            return local_api_client().pending_transition(thread_id)
+        _, _, _, learning = _resolve_resources()
+        return learning.get_pending(thread_id)
+
+    def resolve_transition(
+        self,
+        thread_id: str,
+        transition_id: str,
+        *,
+        accepted: bool,
+    ) -> PendingPhaseTransition:
+        """Persist the student's decision through the active application path."""
+        if local_api_enabled():
+            return local_api_client().resolve_transition(
+                thread_id,
+                transition_id,
+                accepted,
+            )
+        _, _, _, learning = _resolve_resources()
+        return learning.resolve(thread_id, transition_id, accepted)
+
     def request_course_material_sync(self, thread_id: str):
         """Start or join course-material sync for the active notebook.
 
-        Uses the shared in-process coordinator against the cached SQLite store so
-        the Sources fragment can poll without blocking on large lecture PDFs.
-        The HTTP sync endpoint remains available for non-UI callers and tests.
+        Single-user local API sessions sync through FastAPI. Cognito sessions
+        use the owner-scoped in-process store selected by ``local_api_enabled``.
+
+        Otherwise uses the shared in-process coordinator so the Sources
+        fragment can poll without blocking on large lecture PDFs.
         """
+        if local_api_enabled():
+            api_base = str(getattr(settings, "api_base_url", "http://127.0.0.1:8000"))
+
+            def _sync_via_api() -> LectureNotesSyncResult:
+                payload = local_api_client().sync_course_materials(thread_id)
+                errors = payload.get("errors") or []
+                return LectureNotesSyncResult(
+                    added=int(payload.get("added") or 0),
+                    updated=int(payload.get("updated") or 0),
+                    removed=int(payload.get("removed") or 0),
+                    unchanged=int(payload.get("unchanged") or 0),
+                    skipped=int(payload.get("skipped") or 0),
+                    errors=tuple(str(item) for item in errors),
+                )
+
+            return course_material_sync().request_api(
+                api_base,
+                thread_id,
+                _sync_via_api,
+            )
         return course_material_sync().request(self._backend_store(), thread_id)
 
 

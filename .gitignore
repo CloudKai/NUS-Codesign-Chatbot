@@ -8,3 +8,4 @@ data/
 .files/
 output/
 .cursorignore
+.streamlit/secrets.toml

@@ -24,6 +24,7 @@ def test_confirmed_recommendation_is_the_only_way_to_advance(tmp_path):
     assert pending is not None
 
     service = LearningProgressService(store, notebooks, transitions)
+    assert service.get_pending(thread_id) == pending
     resolved = service.resolve(thread_id, pending.id, accepted=True)
 
     assert resolved.status is TransitionStatus.CONFIRMED

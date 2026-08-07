@@ -21,6 +21,12 @@ class LearningProgressService:
         self._notebooks = notebooks
         self._transitions = transitions
 
+    def get_pending(self, thread_id: str) -> PendingPhaseTransition | None:
+        """Return the unresolved recommendation for one owned notebook."""
+        if not self._notebooks.get_thread(thread_id):
+            raise ValueError("Notebook not found")
+        return self._transitions.get_pending(thread_id)
+
     def resolve(
         self,
         thread_id: str,

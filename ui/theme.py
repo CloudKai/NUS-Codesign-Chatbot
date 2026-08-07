@@ -21,6 +21,7 @@ _STYLE_PARTIALS: tuple[str, ...] = (
     "30-chat.css",
     "40-sources.css",
     "50-dialogs-notebooks.css",
+    "55-auth.css",
     "60-profile-topbar.css",
     "90-responsive.css",
 )

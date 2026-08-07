@@ -28,6 +28,7 @@ fi
 
 export USE_LOCAL_API="true"
 export CO_DESIGN_API_URL="${CO_DESIGN_API_URL:-http://127.0.0.1:8000}"
+export CO_DESIGN_UI_URL="${CO_DESIGN_UI_URL:-http://127.0.0.1:8501}"
 
 echo "Starting Co-design Chatbot"
 echo "  API:  http://127.0.0.1:8000/api/v1/health"

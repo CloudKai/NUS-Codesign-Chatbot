@@ -10,7 +10,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -144,6 +144,39 @@ class CourseMaterialSyncCoordinator:
                 return completed
 
             future = self._executor.submit(sync_lecture_notes_folder, store, thread_id)
+            self._jobs[key] = (fingerprint, future)
+            return future
+
+    def request_api(
+        self,
+        channel: str,
+        thread_id: str,
+        worker: Callable[[], LectureNotesSyncResult],
+    ) -> Future[LectureNotesSyncResult]:
+        """Share one remote (HTTP) course-material sync per notebook snapshot.
+
+        Used when the Streamlit UI creates notebooks via the local API
+        (``local-student`` ownership) while the UI process may be bound to a
+        Cognito-scoped in-process store. Sync must hit the API so the notebook
+        owner matches.
+        """
+        fingerprint = course_material_fingerprint()
+        key = (str(channel), "__api__", str(thread_id))
+        with self._lock:
+            existing = self._jobs.get(key)
+            if existing and existing[0] == fingerprint:
+                future = existing[1]
+                if not future.done():
+                    return future
+                try:
+                    result = future.result()
+                except Exception:
+                    result = None
+                # Retry when the prior remote sync reported per-file errors.
+                if result is not None and not result.errors:
+                    return future
+
+            future = self._executor.submit(worker)
             self._jobs[key] = (fingerprint, future)
             return future
 

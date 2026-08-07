@@ -9,3 +9,4 @@ RESPONSE_LANGUAGES = ("English", "中文", "Bahasa Melayu", "தமிழ்")
 
 # Appearance modes for theme CSS; ``System`` follows the device preference.
 APPEARANCE_MODES = ("System", "Light", "Dark")
+DEFAULT_APPEARANCE = "System"

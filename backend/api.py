@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from .application import CoachApplicationService
@@ -35,11 +35,33 @@ from .workspace_service import WorkspaceService
 
 logger = logging.getLogger(__name__)
 
+# Streamlit OIDC cookie names (and numeric chunks) cleared by the logout callback.
+# Profile Logout / ui.auth_gate.app_logout_url() navigates here; not Cognito /logout.
+_STREAMLIT_AUTH_COOKIES = ("_streamlit_user", "_streamlit_user_tokens")
+
 
 class TransitionResolution(BaseModel):
     """Student decision submitted for one pending phase recommendation."""
 
     accepted: bool
+
+
+def _expire_streamlit_auth_cookie(response: RedirectResponse, cookie_name: str) -> None:
+    """Expire one Streamlit auth cookie with attributes that match how it was set.
+
+    Streamlit signs cookies with ``HttpOnly`` and ``SameSite=Lax`` (no Secure on
+    loopback). Browsers only clear those cookies when the expiry response
+    repeats the same flags — see Streamlit ``starlette_auth_routes``.
+    """
+    response.set_cookie(
+        key=cookie_name,
+        value="",
+        max_age=0,
+        expires=0,
+        path="/",
+        httponly=True,
+        samesite="lax",
+    )
 
 
 def create_app(
@@ -88,6 +110,50 @@ def create_app(
     def health() -> dict[str, str]:
         """Return a lightweight process-health response."""
         return {"status": "ok", "mode": "local"}
+
+    @app.get("/api/v1/auth/logout/callback")
+    def auth_logout_callback(request: Request) -> RedirectResponse:
+        """Expire Streamlit auth cookies and return to the signed-out login gate.
+
+        Entry point for profile Logout (``ui.auth_gate.app_logout_url`` / same-tab
+        ``<a target="_self">``). Browser cookies are host-scoped (not port), so
+        this FastAPI response on ``CO_DESIGN_API_URL`` can clear HttpOnly cookies
+        set by Streamlit on ``CO_DESIGN_UI_URL``, then 302 to
+        ``{CO_DESIGN_UI_URL}/?signed_out=1``.
+
+        Do not send the browser through Cognito hosted ``/logout`` here:
+        Streamlit's OIDC end-session params are rejected as "Invalid request".
+        """
+        target = str(settings.ui_base_url or "").rstrip("/")
+        parsed = urlparse(target)
+        local_http = parsed.scheme == "http" and parsed.hostname in {
+            "127.0.0.1",
+            "localhost",
+        }
+        if (
+            not parsed.netloc
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+            or (parsed.scheme != "https" and not local_http)
+        ):
+            raise HTTPException(status_code=500, detail="Invalid configured UI URL")
+
+        # Land on the login gate; ui.auth_gate.render_login_gate consumes signed_out.
+        response = RedirectResponse(f"{target}/?signed_out=1", status_code=302)
+        for cookie_name in _STREAMLIT_AUTH_COOKIES:
+            _expire_streamlit_auth_cookie(response, cookie_name)
+        for cookie_name in request.cookies:
+            is_auth_chunk = any(
+                cookie_name.startswith(f"{base}_")
+                and cookie_name[len(base) + 1 :].isdigit()
+                for base in _STREAMLIT_AUTH_COOKIES
+            )
+            if is_auth_chunk:
+                _expire_streamlit_auth_cookie(response, cookie_name)
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.get("/api/v1/ready")
     def ready() -> dict[str, str]:

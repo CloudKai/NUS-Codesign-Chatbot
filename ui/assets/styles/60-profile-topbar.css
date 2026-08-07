@@ -147,6 +147,46 @@
     }
 
     [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile-logout {
+        padding-top:10px !important;
+        width:100% !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .cd-profile-logout-link {
+        display:flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        width:100% !important;
+        box-sizing:border-box !important;
+        min-height:2.5rem !important;
+        padding:.55rem .9rem !important;
+        border-radius:.55rem !important;
+        border:1px solid var(--cd-border) !important;
+        /* Use real theme tokens (--cd-surface-2 does not exist; light fallbacks
+           left dark-mode text on a pale background). */
+        background:var(--cd-subtle) !important;
+        color:var(--cd-text) !important;
+        -webkit-text-fill-color:var(--cd-text) !important;
+        font-size:.9rem !important;
+        font-weight:600 !important;
+        line-height:1.2 !important;
+        text-decoration:none !important;
+        cursor:pointer !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .cd-profile-logout-link:hover,
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .cd-profile-logout-link:focus-visible {
+        background:var(--cd-panel) !important;
+        border-color:var(--cd-accent) !important;
+        color:var(--cd-text) !important;
+        -webkit-text-fill-color:var(--cd-text) !important;
+        outline:none !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stTextInput"] input,
     [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
     [data-testid="stTextInputRootElement"] input {

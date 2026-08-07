@@ -3,8 +3,70 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from backend.api import create_app
+from backend.settings import settings
 from backend.source_library import add_text_source
 from backend.student_store import StudentStore
+
+
+def test_auth_logout_callback_clears_streamlit_cookies(tmp_path, monkeypatch):
+    store = StudentStore(tmp_path / "logout.sqlite3")
+    monkeypatch.setattr(settings, "ui_base_url", "http://127.0.0.1:8501")
+    client = TestClient(create_app(store))
+    client.cookies.update(
+        {
+            "_streamlit_user": "signed-user",
+            "_streamlit_user_0": "user-chunk",
+            "_streamlit_user_tokens": "signed-tokens",
+            "_streamlit_user_tokens_1": "token-chunk",
+            "unrelated": "keep",
+        }
+    )
+
+    response = client.get(
+        "/api/v1/auth/logout/callback",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "http://127.0.0.1:8501/?signed_out=1"
+    assert response.headers["cache-control"] == "no-store"
+    cookies = response.headers.get_list("set-cookie")
+    assert len(cookies) == 4
+    assert all("Max-Age=0" in value for value in cookies)
+    assert all("HttpOnly" in value for value in cookies)
+    assert all("SameSite=lax" in value for value in cookies)
+    assert not any("unrelated=" in value for value in cookies)
+
+
+def test_auth_logout_callback_rejects_unsafe_redirect_target(tmp_path, monkeypatch):
+    store = StudentStore(tmp_path / "unsafe-logout.sqlite3")
+    monkeypatch.setattr(settings, "ui_base_url", "https://example.edu@evil.test")
+    client = TestClient(create_app(store))
+
+    response = client.get(
+        "/api/v1/auth/logout/callback",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 500
+
+
+def test_auth_logout_callback_always_expires_base_auth_cookies(tmp_path, monkeypatch):
+    store = StudentStore(tmp_path / "empty-cookie-logout.sqlite3")
+    monkeypatch.setattr(settings, "ui_base_url", "http://127.0.0.1:8501")
+    client = TestClient(create_app(store))
+
+    response = client.get(
+        "/api/v1/auth/logout/callback",
+        follow_redirects=False,
+    )
+
+    cookies = response.headers.get_list("set-cookie")
+    assert len(cookies) == 2
+    assert any(value.startswith("_streamlit_user=") for value in cookies)
+    assert any(value.startswith("_streamlit_user_tokens=") for value in cookies)
+    assert all("Max-Age=0" in value for value in cookies)
+    assert all("SameSite=lax" in value for value in cookies)
 
 
 def test_local_api_runs_a_mock_turn_and_auto_advances(tmp_path):

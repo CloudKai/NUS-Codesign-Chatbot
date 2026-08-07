@@ -47,6 +47,7 @@ class Settings:
     ollama_embedding_model: str = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
     openai_chat_model: str = os.getenv("OPENAI_CHAT_MODEL", "gpt-5.6-luna")
     api_base_url: str = os.getenv("CO_DESIGN_API_URL", "http://127.0.0.1:8000")
+    ui_base_url: str = os.getenv("CO_DESIGN_UI_URL", "http://127.0.0.1:8501")
     use_local_api: bool = _boolean("USE_LOCAL_API", True)
     max_tool_iterations: int = int(os.getenv("MAX_TOOL_ITERATIONS", "3"))
     max_files: int = int(os.getenv("MAX_FILES_PER_MESSAGE", "5"))

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+import threading
 
 import pytest
 
 from backend.chat_service import ChatOptions, StudentChatEngine, response_input_for_model
 from backend.source_library import (
     CourseMaterialSyncCoordinator,
+    LectureNotesSyncResult,
     SourceImportError,
     add_file_sources,
     add_text_source,
@@ -298,6 +300,35 @@ def test_course_sync_coordinator_reuses_an_inflight_refresh(
     assert second is first
     release.set()
     assert first.result(timeout=3).added == 1
+
+
+def test_course_material_sync_coordinator_shares_api_jobs(monkeypatch):
+    """Remote sync futures are shared per channel/thread until fingerprint changes."""
+    from backend import source_library
+
+    monkeypatch.setattr(
+        source_library,
+        "course_material_fingerprint",
+        lambda: (("lectureNotes/a.pdf", 1, 2),),
+    )
+    calls = {"n": 0}
+    started = threading.Event()
+    release = threading.Event()
+
+    def worker():
+        calls["n"] += 1
+        started.set()
+        assert release.wait(timeout=2)
+        return LectureNotesSyncResult(added=2)
+
+    coordinator = CourseMaterialSyncCoordinator()
+    first = coordinator.request_api("http://127.0.0.1:8000", "thread-1", worker)
+    assert started.wait(timeout=2)
+    second = coordinator.request_api("http://127.0.0.1:8000", "thread-1", worker)
+    assert second is first
+    release.set()
+    assert first.result(timeout=3).added == 2
+    assert calls["n"] == 1
 
 
 def test_public_url_validation_blocks_private_networks():

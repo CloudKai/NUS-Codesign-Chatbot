@@ -229,8 +229,40 @@ def _sources_expander_changed(section: str, widget_key: str) -> None:
     """Persist as soon as the student expands or collapses a Sources section."""
     _persist_sources_expander_state(section, widget_key)
 
-@st.fragment(run_every="1s")
 def render_sources_panel() -> None:
+    """Render the Sources column.
+
+    Auto-refresh (``run_every``) runs only while course-material sync is in
+    progress. A permanent 1s timer leaves stale fragment IDs after full-app
+    reruns (auth gate, logout, notebook switches) and Streamlit logs
+    "The fragment with id … does not exist anymore".
+    """
+    sync_future = store.request_course_material_sync(st.session_state.thread_id)
+    if sync_future.done():
+        _render_sources_panel_stable()
+    else:
+        _render_sources_panel_polling()
+
+
+@st.fragment
+def _render_sources_panel_stable() -> None:
+    """Sources UI without a client auto-refresh timer."""
+    _render_sources_panel_body()
+    if not store.request_course_material_sync(st.session_state.thread_id).done():
+        rerun()
+
+
+@st.fragment(run_every="1s")
+def _render_sources_panel_polling() -> None:
+    """Sources UI that refreshes every second until course sync finishes."""
+    _render_sources_panel_body()
+    if store.request_course_material_sync(st.session_state.thread_id).done():
+        # Remount the stable fragment so the browser drops the 1s timer.
+        rerun()
+
+
+def _render_sources_panel_body() -> None:
+    """Shared Sources panel body used by the stable and polling fragments."""
     store.backfill_legacy_sources(st.session_state.thread_id)
     sync_future = store.request_course_material_sync(st.session_state.thread_id)
     sync_loading = not sync_future.done()

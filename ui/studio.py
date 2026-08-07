@@ -1,7 +1,7 @@
 """Thinking Path studio panel and learning review.
 
 Renders the six-stage journey, confirmation-gated pending transitions (when
-auto-advance is off and the local API is available), and Review cards. Review
+auto-advance is off), and Review cards. Review
 summary and Facione scores come from the latest coach assessment when present;
 strengths and improvement areas nest one expander per Thinking Path stage,
 with only the student's current stage open by default.
@@ -30,7 +30,7 @@ from ui.components import (
     review_card_html,
     review_feedback_items_html,
 )
-from ui.runtime import local_api_client, local_api_enabled, rerun, store
+from ui.runtime import rerun, store
 
 
 def _review_fingerprint(review: dict[str, Any]) -> str:
@@ -378,22 +378,22 @@ def render_pending_transition() -> None:
 
 
 def _fetch_pending_transition():
-    """Return the pending transition when the local API confirmation path is on."""
-    if settings.auto_advance_stages or not local_api_enabled():
+    """Return the pending transition through the active application path."""
+    if settings.auto_advance_stages:
         return None
     try:
-        return local_api_client().pending_transition(st.session_state.thread_id)
+        return store.pending_transition(st.session_state.thread_id)
     except Exception:
         return None
 
 
 def _resolve_pending_transition(transition_id: str, accepted: bool) -> None:
-    """Persist a student decision via the local API and refresh the journey."""
+    """Persist a student decision and refresh the journey."""
     try:
-        local_api_client().resolve_transition(
+        store.resolve_transition(
             st.session_state.thread_id,
             transition_id,
-            accepted,
+            accepted=accepted,
         )
         updated = store.get_thread(st.session_state.thread_id) or {}
         st.session_state.learning_journey = normalize_journey(
@@ -442,7 +442,7 @@ def render_thinking_path_footer() -> None:
 
     pending = _fetch_pending_transition()
     _, next_column = st.columns([0.72, 0.28], gap="small")
-    next_disabled = pending is None or not local_api_enabled()
+    next_disabled = pending is None
     next_help = (
         "Available when the coach recommends moving on."
         if next_disabled

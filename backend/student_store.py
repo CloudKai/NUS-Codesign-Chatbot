@@ -195,6 +195,7 @@ class StudentStore:
                 "groundingMode",
                 "TEXT NOT NULL DEFAULT 'source_first'",
             )
+            self._ensure_cognito_user_columns(connection)
         self.owner_id = self._ensure_user()
 
     @staticmethod
@@ -210,6 +211,155 @@ class StudentStore:
         }
         if column not in columns:
             connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    def _ensure_cognito_user_columns(self, connection: sqlite3.Connection) -> None:
+        """Add Cognito profile columns without destroying existing rows."""
+        self._ensure_column(connection, "users", "cognitoSub", "TEXT")
+        self._ensure_column(connection, "users", "email", "TEXT")
+        self._ensure_column(connection, "users", "displayName", "TEXT")
+        self._ensure_column(connection, "users", "role", "TEXT NOT NULL DEFAULT 'student'")
+        self._ensure_column(connection, "users", "updatedAt", "TEXT")
+        self._ensure_column(connection, "users", "lastLoginAt", "TEXT")
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_cognito_sub "
+            "ON users(cognitoSub) WHERE cognitoSub IS NOT NULL"
+        )
+
+    def upsert_cognito_user(
+        self,
+        *,
+        cognito_sub: str,
+        identifier: str,
+        email: str | None,
+        display_name: str,
+    ) -> dict[str, Any]:
+        """Create or update a user row keyed by Cognito ``sub``.
+
+        Never elevates role from client input. Preserves lecturer/admin roles.
+        Does not store Cognito tokens.
+        """
+        from backend.auth_profiles import STUDENT_ROLE, resolve_role
+
+        sub = str(cognito_sub or "").strip()
+        if not sub:
+            raise ValueError("cognito_sub is required")
+        now = utc_now()
+        safe_name = (display_name or "Student").strip()[:80] or "Student"
+        safe_email = (email or "").strip() or None
+        with self._lock, self._connect() as connection:
+            self._ensure_cognito_user_columns(connection)
+            row = connection.execute(
+                "SELECT id, role, displayName, email, metadata, cognitoSub FROM users "
+                "WHERE cognitoSub = ?",
+                (sub,),
+            ).fetchone()
+            created = False
+            if row is None:
+                row = connection.execute(
+                    "SELECT id, role, displayName, email, metadata, cognitoSub FROM users "
+                    "WHERE identifier = ?",
+                    (identifier,),
+                ).fetchone()
+                if row is not None:
+                    created = not bool(row["cognitoSub"])
+            if row:
+                existing_role = str(row["role"] or STUDENT_ROLE)
+                role = resolve_role(existing_role)
+                connection.execute(
+                    "UPDATE users SET identifier = ?, cognitoSub = ?, email = ?, "
+                    "displayName = ?, role = ?, updatedAt = ?, lastLoginAt = ? WHERE id = ?",
+                    (
+                        identifier,
+                        sub,
+                        safe_email,
+                        safe_name,
+                        role,
+                        now,
+                        now,
+                        str(row["id"]),
+                    ),
+                )
+                return {
+                    "id": str(row["id"]),
+                    "display_name": safe_name,
+                    "role": role,
+                    "created": created,
+                }
+            owner_id = str(uuid.uuid4())
+            role = STUDENT_ROLE
+            inserted = connection.execute(
+                "INSERT OR IGNORE INTO users ("
+                "id, identifier, metadata, createdAt, cognitoSub, email, "
+                "displayName, role, updatedAt, lastLoginAt"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    owner_id,
+                    identifier,
+                    _dump({"role": role, "auth": "cognito"}),
+                    now,
+                    sub,
+                    safe_email,
+                    safe_name,
+                    role,
+                    now,
+                    now,
+                ),
+            )
+            # Another app worker can win the first-login insert between our
+            # SELECT and INSERT. Resolve the unique Cognito subject back to the
+            # one canonical row instead of surfacing an intermittent 500.
+            canonical = connection.execute(
+                "SELECT id, role FROM users WHERE cognitoSub = ?",
+                (sub,),
+            ).fetchone()
+            if canonical is None:
+                raise ValueError("Cognito identity could not be linked safely")
+            role = resolve_role(str(canonical["role"] or STUDENT_ROLE))
+            connection.execute(
+                "UPDATE users SET identifier = ?, email = ?, displayName = ?, "
+                "role = ?, updatedAt = ?, lastLoginAt = ? WHERE id = ?",
+                (
+                    identifier,
+                    safe_email,
+                    safe_name,
+                    role,
+                    now,
+                    now,
+                    str(canonical["id"]),
+                ),
+            )
+            return {
+                "id": str(canonical["id"]),
+                "display_name": safe_name,
+                "role": role,
+                "created": inserted.rowcount == 1,
+            }
+
+    def get_user_by_cognito_sub(self, cognito_sub: str) -> dict[str, Any] | None:
+        """Return a user profile dict for the Cognito subject, if present."""
+        sub = str(cognito_sub or "").strip()
+        if not sub:
+            return None
+        with self._lock, self._connect() as connection:
+            self._ensure_cognito_user_columns(connection)
+            row = connection.execute(
+                "SELECT id, identifier, cognitoSub, email, displayName, role, "
+                "createdAt, updatedAt, lastLoginAt FROM users WHERE cognitoSub = ?",
+                (sub,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": str(row["id"]),
+            "identifier": str(row["identifier"]),
+            "cognito_sub": row["cognitoSub"],
+            "email": row["email"],
+            "display_name": row["displayName"],
+            "role": row["role"] or "student",
+            "created_at": row["createdAt"],
+            "updated_at": row["updatedAt"],
+            "last_login_at": row["lastLoginAt"],
+        }
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=30)

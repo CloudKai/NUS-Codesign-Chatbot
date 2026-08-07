@@ -23,7 +23,7 @@ from backend.student_journey import default_journey, normalize_journey
 from backend.student_support import DEFAULT_SUPPORT_MODE
 
 from ui.coach_welcome import seed_coach_welcome
-from ui.constants import APPEARANCE_MODES, RESPONSE_LANGUAGES
+from ui.constants import APPEARANCE_MODES, DEFAULT_APPEARANCE, RESPONSE_LANGUAGES
 from ui.layout.column_resize import set_side_panel_collapsed
 from ui.rename import bump_rename_epoch, discard_rename_draft
 from ui.runtime import rerun, store
@@ -52,7 +52,7 @@ def initialize_session() -> None:
         "allow_model_knowledge": False,
         "response_detail": "short",
         "response_language": "English",
-        "appearance": "Light",
+        "appearance": DEFAULT_APPEARANCE,
         "learning_journey": default_journey(),
         "assignment": {"title": "", "course": "", "brief": "", "rubric": ""},
         "composer_nonce": 0,
@@ -78,8 +78,13 @@ def initialize_session() -> None:
     apply_selected_model(st.session_state.selected_model)
     preferences = store.get_user_preferences() or {}
     stored_appearance = str(preferences.get("appearance") or "").strip()
+    # Prefer an explicit saved choice; otherwise force the app default.
+    # Do not keep a leftover session value (e.g. old "Light" default) when the
+    # preference store has no appearance key yet.
     if stored_appearance in APPEARANCE_MODES:
         st.session_state.appearance = stored_appearance
+    else:
+        st.session_state.appearance = DEFAULT_APPEARANCE
     # Always realign the widget key from persisted appearance so a stale
     # popover value cannot rewrite the database on the next sync.
     st.session_state.setting_appearance = st.session_state.appearance

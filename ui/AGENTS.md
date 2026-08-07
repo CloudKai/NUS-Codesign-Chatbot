@@ -9,8 +9,9 @@ helpers (`submit_coach_turn` / `stream_coach_turn_events`); it does not implemen
 educational or persistence logic and must not open SQLite or source files directly.
 
 [`streamlit_app.py`](../streamlit_app.py) is the thin entrypoint: page config,
-CSS injection, session init, top bar, workspace layout, and pending dialog
-triggers.
+CSS injection, Cognito OIDC gate (`ui/auth_gate.py`), session init, top bar,
+workspace layout, and pending dialog triggers. Unauthenticated visitors never
+reach `initialize_session()` or protected notebook/source data.
 
 ## Read first
 
@@ -27,6 +28,7 @@ Only read that for UI tasks that touch API migration or coaching flow.
 
 | Module | Responsibility |
 |---|---|
+| `auth_gate.py` | Signed-out shell, Cognito login dialog, logout helpers |
 | `constants.py` | Response languages and appearance modes |
 | `components.py` | Shared HTML helpers for progress, empty states, review cards |
 | `toasts.py` | Corner toast helper (timed slide-in; falls back to `st.toast`) |

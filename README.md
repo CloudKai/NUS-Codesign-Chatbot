@@ -2,17 +2,18 @@
 
 Local critical-thinking coach for university students. The app is a **Streamlit**
 UI plus a **FastAPI** coaching API. Student data stays on your machine (SQLite +
-files under `data/`). There is no cloud auth in this prototype.
+files under `data/`). Amazon Cognito Managed Login authenticates students; the
+application stores the stable Cognito subject and profile fields, never passwords
+or refresh tokens.
 
 Use **one command** to start everything. That command starts both services with
-`USE_LOCAL_API=true`, which is required for:
+`USE_LOCAL_API=true`. The FastAPI process remains a single-owner local demo.
+Authenticated Cognito sessions automatically use equivalent owner-scoped
+in-process application services so one student's data cannot collapse into the
+API's shared `local-student` owner.
 
-- Thinking Path / progress-bar stage advancement
-- Structured coach assessments and Review personalization
-- Selected **image** sources being sent to the coach
-
-Starting Streamlit alone (without the API) leaves the Learning Path stuck and
-skips image grounding on the coaching path.
+Both paths support Thinking Path progression, structured assessments, Review
+personalization, and selected image grounding.
 
 ---
 
@@ -76,7 +77,35 @@ The example defaults are safe for local development:
 
 Do **not** commit `.env` (it may contain secrets later).
 
-### 4. Start the whole program (one command)
+### 4. Configure Cognito authentication
+
+```bash
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+```
+
+Fill the private file with the Cognito app-client values. In the Cognito app
+client, enable authorization-code grant, `openid email profile`, self-service
+sign-up and confirmation as required by the course, and allow these exact local
+URLs:
+
+- Callback: `http://127.0.0.1:8501/oauth2callback`
+
+Profile Logout clears Streamlit cookies through
+`http://127.0.0.1:8000/api/v1/auth/logout/callback` and returns to the login
+gate. Cognito hosted `/logout` is optional; only enable it after adding that
+exact callback under Cognito Allowed sign-out URLs (a missing entry shows
+Cognito's "Something went wrong" page).
+
+Use the same hostname in `redirect_uri` and any `logout_uri` (their ports differ
+locally); `localhost` and `127.0.0.1` are different hosts. Keep
+`.streamlit/secrets.toml` uncommitted.
+
+Streamlit 1.60 uses authorization code with PKCE when Cognito advertises it. Its
+signed HttpOnly identity cookie lasts 30 days. Streamlit does not retain Cognito
+refresh tokens, so Cognito refresh-token rotation does not control that cookie
+lifetime.
+
+### 5. Start the whole program (one command)
 
 ```bash
 sh scripts/start.sh
@@ -210,7 +239,9 @@ backend/ → domain, workflow, providers, SQLite, sources
 
 Prefer the API coaching path for all new behaviour. The legacy
 `StudentChatEngine` path exists only as a fallback when `USE_LOCAL_API` is off;
-do not use that for normal local development.
+do not add new behavior there. Cognito sessions use the same typed application
+services in process until FastAPI has its own verified authenticated-owner
+boundary.
 
 ---
 

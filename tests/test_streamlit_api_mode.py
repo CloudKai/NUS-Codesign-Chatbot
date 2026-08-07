@@ -22,8 +22,6 @@ def _install_inprocess_api(monkeypatch, *, auto_advance: bool) -> LocalApiClient
     )
     monkeypatch.setattr("ui.runtime.local_api_enabled", lambda: True)
     monkeypatch.setattr("ui.runtime.local_api_client", lambda bound=client: bound)
-    monkeypatch.setattr("ui.studio.local_api_enabled", lambda: True)
-    monkeypatch.setattr("ui.studio.local_api_client", lambda bound=client: bound)
     return client
 
 
@@ -38,6 +36,32 @@ def test_inprocess_streamlit_chat_path_still_smoke_tests():
     ).run()
     assert not app.exception
     assert len(app.chat_message) >= 2
+
+
+def test_authenticated_inprocess_path_confirms_pending_transition():
+    """Cognito-scoped sessions retain full Thinking Path confirmation behavior."""
+    assert settings.use_local_api is False
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+
+    app.chat_input[0].set_value(
+        "I want to evaluate a crossing design for older pedestrians."
+    ).run()
+    app.chat_input[0].set_value(
+        "Which design gives older pedestrians enough time and visibility?"
+    ).run()
+
+    next_button = next(
+        button for button in app.button if button.key == "thinking-path-next"
+    )
+    assert next_button.disabled is False
+    next_button.click().run()
+    confirm = next(
+        button for button in app.button if button.key == "confirm-next-stage"
+    )
+    confirm.click().run()
+
+    assert not app.exception
+    assert app.session_state["learning_journey"]["current_stage"] == "evidence"
 
 
 def test_streamlit_api_mode_confirmation_creates_pending_transition(monkeypatch):

@@ -11,6 +11,7 @@ import streamlit as st
 
 from backend.models import get_model, validate_reasoning
 
+from ui.constants import APPEARANCE_MODES, DEFAULT_APPEARANCE
 from ui.runtime import store
 
 
@@ -55,16 +56,14 @@ def persist_composer_model_choice() -> None:
 
 def persist_appearance() -> None:
     """Apply and persist the selected visual theme for this local user."""
-    from ui.constants import APPEARANCE_MODES
-
     if "setting_appearance" in st.session_state:
         chosen = str(st.session_state.setting_appearance)
     elif "appearance" in st.session_state:
         chosen = str(st.session_state.appearance)
     else:
-        chosen = "Light"
+        chosen = DEFAULT_APPEARANCE
     if chosen not in APPEARANCE_MODES:
-        chosen = "Light"
+        chosen = DEFAULT_APPEARANCE
     st.session_state.appearance = chosen
     st.session_state.setting_appearance = chosen
     store.update_user_preferences({"appearance": chosen})
@@ -76,8 +75,6 @@ def sync_appearance_from_widget() -> bool:
     Persists only when the widget is ahead of session state (for example when
     ``on_change`` did not run). Returns True when the theme value changed.
     """
-    from ui.constants import APPEARANCE_MODES
-
     if "setting_appearance" not in st.session_state:
         return False
     chosen = str(st.session_state.setting_appearance)

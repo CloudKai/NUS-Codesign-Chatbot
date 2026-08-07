@@ -23,6 +23,7 @@ from backend.student_journey import (
 )
 
 from ui.coach_welcome import COACH_WELCOME_KIND, seed_coach_welcome
+from ui.constants import DEFAULT_APPEARANCE
 from ui.layout.composer_layout import sync_composer_layout
 from ui.layout.user_message_edit_layout import (
     USER_MESSAGE_EDIT_HEIGHT_PX,
@@ -192,7 +193,7 @@ def _render_copy_control(text: str) -> None:
     ``ui/assets/styles/`` (muted icon on a soft surface wash).
     """
     encoded = base64.b64encode(text.encode("utf-8")).decode("ascii")
-    appearance = str(st.session_state.get("appearance") or "Light")
+    appearance = str(st.session_state.get("appearance") or DEFAULT_APPEARANCE)
     # Mirror [class*="st-key-user_message_actions_"] button tokens.
     if appearance == "Dark":
         icon = "#9AA8B5"

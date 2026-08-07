@@ -5,6 +5,7 @@ from __future__ import annotations
 import streamlit as st
 import streamlit.components.v1 as components
 
+from ui.auth_gate import app_logout_url, logout_user
 from ui.components import profile_initial
 from ui.constants import APPEARANCE_MODES, RESPONSE_LANGUAGES
 from ui.runtime import rerun, store
@@ -60,6 +61,27 @@ def render_profile_menu() -> None:
                     "</div>",
                     unsafe_allow_html=True,
                 )
+                st.divider()
+                # --- Logout (same-tab) ---
+                # Prefer a real <a target="_self"> to the local API logout callback.
+                # st.link_button opens a new tab; components.html top-navigation is
+                # sandboxed and was leaving the authenticated session stuck.
+                logout_url = app_logout_url()
+                with st.container(key="profile-logout"):
+                    if logout_url:
+                        st.markdown(
+                            f'<a class="cd-profile-logout-link" href="{logout_url}" '
+                            'target="_self" rel="noopener">Logout</a>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        if st.button(
+                            "Logout",
+                            key="profile-logout-fallback",
+                            use_container_width=True,
+                            type="secondary",
+                        ):
+                            logout_user()
 
 
 def _render_language_dropdown(current_language: str) -> None:

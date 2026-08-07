@@ -2,6 +2,92 @@
 
 ## Current phase
 
+**Cognito login redesign complete — same-tab local logout fixed**
+
+Streamlit-native Amazon Cognito authorization-code login remains the identity
+boundary. The signed-out gate now matches the product design, explains course
+research use, and states clearly that chatbot work is never graded. Cognito
+subjects use owner-scoped in-process application services instead of the
+unauthenticated single-owner local API. Logout stays in the current browser tab,
+uses a fixed FastAPI callback to expire Streamlit's HttpOnly cookies, and stops
+at the app's signed-out gate.
+
+## Latest completed work (Cognito review and redesign)
+
+### Behavior implemented
+
+- Unauthenticated and malformed-identity paths stop before notebook/session
+  initialization; logged-in identities without ``sub`` are cleared.
+- ``ui/auth_gate.py``: compact branded dialog, Cognito-managed account CTA,
+  student-safe configuration error, grade/research notice, strict logout URLs.
+- ``ui/assets/styles/55-auth.css``: token-based desktop and 390 px auth layout.
+- Login remains Streamlit-native authorization code with PKCE when advertised;
+  access/ID tokens are not exposed to app UI or logs.
+- ``backend/auth_profiles.py`` + ``StudentStore.upsert_cognito_user``: match by
+  ``cognitoSub``, default role ``student``, preserve lecturer/admin, converge
+  safely on concurrent first-login inserts.
+- Non-destructive SQLite columns: ``cognitoSub``, ``email``, ``displayName``,
+  ``role``, ``updatedAt``, ``lastLoginAt``.
+- Cognito users no longer route persistence through FastAPI's shared
+  ``local-student`` store; stage confirmation works on either application path.
+- Same-tab logout: the profile uses a regular button rather than
+  ``st.link_button`` (which opens an external URL in a second tab). The local
+  ``/api/v1/auth/logout/callback`` expires Streamlit auth cookies with matching
+  attributes and redirects only to the configured ``CO_DESIGN_UI_URL`` gate.
+- Logout never calls ``st.logout()`` because Streamlit sends Cognito's
+  ``/logout`` endpoint incompatible OIDC parameters, producing Cognito's
+  “Invalid request” page.
+- Secrets example now uses placeholders and documents the exact callback,
+  scopes, sign-out callback, and Streamlit session limitation.
+
+### Files changed
+
+- ``streamlit_app.py``, ``ui/auth_gate.py``, ``ui/profile.py``, ``ui/runtime.py``,
+  ``ui/studio.py``, ``ui/theme.py``, ``ui/assets/styles/55-auth.css``
+- ``backend/auth_profiles.py``, ``backend/student_store.py``,
+  ``backend/learning_service.py``, ``backend/api.py``, ``backend/settings.py``
+- ``requirements.txt``, ``.gitignore``, ``.streamlit/secrets.toml.example``
+- ``tests/conftest.py``, ``tests/test_auth_gate.py``,
+  ``tests/test_runtime_auth.py``, related API/learning/UI tests
+- ``README.md``, ``DESIGN.md``, ``docs/IMPLEMENTATION_STATUS.md``
+
+### Commands run and results
+
+- Focused auth/API/UI regression selection → **67 passed**
+- Full suite: ``.venv/bin/python -m pytest -q`` → **150 passed**
+- ``compileall -q backend ui streamlit_app.py tests`` → passed
+- ``sh -n scripts/start.sh`` and ``git diff --check`` → passed
+- Browser: signed-in app + logout initiation checked; redesigned gate checked at
+  desktop and 390 px with no horizontal overflow.
+- Latest logout regression selection → **13 passed**; restarted API/UI and
+  confirmed the signed-out gate remained stable with no delayed AWS redirect.
+
+### Migration / compatibility / rollback
+
+- Non-destructive ``ALTER TABLE`` / unique index on ``users``.
+- Existing ``local-student`` notebooks are not auto-attached to Cognito users.
+- Cognito sessions use owner-scoped in-process services until FastAPI gets a
+  verified authenticated-owner boundary; local API contract tests remain.
+- Rollback: revert the auth gate/owner binding and logout callback code. No
+  existing notebook, source, upload, or database row is deleted.
+
+### Risks / blockers
+
+- Streamlit 1.60 hard-codes a 30-day signed HttpOnly identity cookie and does
+  not retain Cognito refresh tokens. Refresh-token rotation and a configurable
+  app-cookie lifetime cannot be implemented without replacing native auth.
+- Local logout deliberately does not clear Cognito's hosted session. A later
+  sign-in may therefore use Cognito SSO without asking for credentials again.
+- Cognito Managed Login owns signup, confirmation, password reset, MFA, and
+  account-enumeration-safe messages; these require AWS configuration/manual QA.
+
+### Next exact action
+
+- Manually smoke one complete sign-in → same-tab logout → sign-in cycle, then
+  decide separately whether clearing the hosted Cognito SSO session is required.
+
+## Previous phase
+
 **UI stylesheet split complete — stop for review**
 
 Split the monolithic ``ui/assets/template.css`` into ordered component
