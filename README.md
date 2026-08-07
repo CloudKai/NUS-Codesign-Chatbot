@@ -2,15 +2,26 @@
 
 Local critical-thinking coach for university students. The app is a **Streamlit**
 UI plus a **FastAPI** coaching API. Student data stays on your machine (SQLite +
-files under `data/`). Amazon Cognito Managed Login authenticates students; the
-application stores the stable Cognito subject and profile fields, never passwords
-or refresh tokens.
+files under `data/`). Amazon Cognito Managed Login proves identity at sign-in;
+FastAPI then creates a 30-day opaque application session. Cognito access, ID,
+and refresh tokens are **not** persisted.
+
+```text
+Cognito authentication
+        ↓
+FastAPI /api/v1/auth/callback
+        ↓
+30-day application session (SQLite locally / PostgreSQL later)
+        ↓
+opaque HttpOnly co_design_session cookie
+        ↓
+Streamlit asks FastAPI /api/v1/auth/me
+```
 
 Use **one command** to start everything. That command starts both services with
-`USE_LOCAL_API=true`. The FastAPI process remains a single-owner local demo.
-Authenticated Cognito sessions automatically use equivalent owner-scoped
-in-process application services so one student's data cannot collapse into the
-API's shared `local-student` owner.
+`USE_LOCAL_API=true`. Authenticated students use owner-scoped in-process
+application services keyed by Cognito `sub`, so one student's data cannot
+collapse into the API's shared `local-student` owner.
 
 Both paths support Thinking Path progression, structured assessments, Review
 personalization, and selected image grounding.
@@ -83,27 +94,27 @@ Do **not** commit `.env` (it may contain secrets later).
 cp .streamlit/secrets.toml.example .streamlit/secrets.toml
 ```
 
-Fill the private file with the Cognito app-client values. In the Cognito app
-client, enable authorization-code grant, `openid email profile`, self-service
-sign-up and confirmation as required by the course, and allow these exact local
-URLs:
+Fill the private file (or equivalent env vars) with the Cognito app-client
+values. In the Cognito app client, enable authorization-code grant,
+`openid email profile`, self-service sign-up/confirmation as required by the
+course, and allow this exact local callback URL:
 
-- Callback: `http://127.0.0.1:8501/oauth2callback`
+- Callback: `http://127.0.0.1:8000/api/v1/auth/callback`
 
-Profile Logout clears Streamlit cookies through
-`http://127.0.0.1:8000/api/v1/auth/logout/callback` and returns to the login
-gate. Cognito hosted `/logout` is optional; only enable it after adding that
-exact callback under Cognito Allowed sign-out URLs (a missing entry shows
-Cognito's "Something went wrong" page).
+Sign-in starts at `http://127.0.0.1:8000/api/v1/auth/login`. Profile Logout
+revokes the application session at
+`http://127.0.0.1:8000/api/v1/auth/logout` and returns to the login gate with
+`?signed_out=1`.
 
-Use the same hostname in `redirect_uri` and any `logout_uri` (their ports differ
-locally); `localhost` and `127.0.0.1` are different hosts. Keep
-`.streamlit/secrets.toml` uncommitted.
+Keep every local URL on `127.0.0.1` (not `localhost`) so the host-only session
+cookie is shared across ports 8000 and 8501. Keep `.streamlit/secrets.toml`
+uncommitted.
 
-Streamlit 1.60 uses authorization code with PKCE when Cognito advertises it. Its
-signed HttpOnly identity cookie lasts 30 days. Streamlit does not retain Cognito
-refresh tokens, so Cognito refresh-token rotation does not control that cookie
-lifetime.
+Cognito tokens establish identity at sign-in. The application does not persist
+Cognito access, ID, or refresh tokens. Ongoing authentication is controlled by
+the FastAPI application session (`APP_SESSION_TTL_SECONDS`, default 30 days)
+stored as a SHA-256 hash in SQLite and exposed only as the HttpOnly
+`co_design_session` cookie (`Secure=false` locally).
 
 ### 5. Start the whole program (one command)
 
@@ -251,18 +262,21 @@ The production-only stack keeps the local launcher unchanged:
 
 ```text
 Internet :80/:443 -> Caddy
-  /api/v1/auth/logout/callback -> app:8000 (browser logout only)
+  /api/v1/auth/login           -> app:8000
+  /api/v1/auth/callback        -> app:8000
+  /api/v1/auth/logout          -> app:8000
   /api/v1/health               -> app:8000 (optional public probe)
   other /api/*                 -> 404 (never reaches FastAPI)
   everything else              -> app:8501 (Streamlit)
 ```
 
 FastAPI and Streamlit share one `app` container and are not published to the
-host. Only Caddy maps host ports. Inside the container, Streamlit may still
-reach FastAPI on `http://127.0.0.1:8000`; that loopback path is not published.
-Caddy obtains and renews HTTPS certificates for
-`cde2300chatbot.duckdns.org`; the DuckDNS record must already resolve to the
-EC2 Elastic IP, and the EC2 security group must allow inbound TCP 80 and 443.
+host. Only Caddy maps host ports. Inside the container, Streamlit reaches
+FastAPI on `http://127.0.0.1:8000` for `/api/v1/auth/me` and other internal
+calls; that loopback path is not published. Caddy obtains and renews HTTPS
+certificates for `cde2300chatbot.duckdns.org`; the DuckDNS record must already
+resolve to the EC2 Elastic IP, and the EC2 security group must allow inbound
+TCP 80 and 443.
 
 Before validating or starting the stack:
 
@@ -286,13 +300,13 @@ Compose refuses to create either bind source automatically. This prevents a
 missing secrets file from silently becoming a directory and prevents a
 root-owned empty data directory from being created during startup.
 
-Set the private Cognito secrets file to use:
+Set the private Cognito secrets file / env to use:
 
-- `redirect_uri = "https://cde2300chatbot.duckdns.org/oauth2callback"`
-- optional `logout_uri = "https://cde2300chatbot.duckdns.org/api/v1/auth/logout/callback"`
+- `redirect_uri = "https://cde2300chatbot.duckdns.org/api/v1/auth/callback"`
+- `APP_SESSION_COOKIE_SECURE=true` (Compose already overrides this)
 
-Add those exact URLs to the Cognito app client. Do not put private values in the
-image or repository. Compose injects `.env` at runtime and bind-mounts
+Add that exact callback URL to the Cognito app client. Do not put private values
+in the image or repository. Compose injects `.env` at runtime and bind-mounts
 `.streamlit/secrets.toml` read-only.
 
 Safe configuration/build checks (they do not start model providers):
@@ -325,11 +339,13 @@ tar -czf "co-design-data-$(date +%Y%m%d-%H%M%S).tar.gz" data/
 Do not run `docker compose down -v` unless removing Caddy's certificate/config
 volumes is intentional. `docker compose down` alone does not delete `./data`.
 
-> Security boundary: FastAPI still has no authenticated request boundary, so
-> Caddy publicly exposes only `/api/v1/auth/logout/callback` and
-> `/api/v1/health`. Cognito-authenticated Streamlit sessions continue to use
-> owner-scoped in-process services. Other `/api/*` paths return 404 at Caddy and
-> never reach FastAPI on the public hostname.
+> Security boundary: FastAPI coaching/CRUD routes still have no authenticated
+> request boundary, so Caddy publicly exposes only auth browser routes
+> (`/api/v1/auth/login`, `/callback`, `/logout`) and `/api/v1/health`.
+> `/api/v1/auth/me` stays on the container loopback. Cognito-authenticated
+> Streamlit sessions continue to use owner-scoped in-process services. Other
+> `/api/*` paths return 404 at Caddy and never reach FastAPI on the public
+> hostname.
 
 ---
 

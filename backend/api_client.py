@@ -82,6 +82,30 @@ class LocalApiClient:
         response.raise_for_status()
         return response.json()
 
+    def auth_me(self, session_token: str) -> dict[str, Any] | None:
+        """Return the authenticated user for an opaque session cookie, or ``None``.
+
+        Uses the internal FastAPI base URL. A 401 means unauthenticated.
+        """
+        token = str(session_token or "").strip()
+        if not token:
+            return None
+        from backend.settings import settings
+
+        cookie_name = settings.app_session_cookie_name
+        response = self._http.get(
+            f"{self._base_url}/api/v1/auth/me",
+            cookies={cookie_name: token},
+        )
+        if response.status_code == 401:
+            return None
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or not payload.get("authenticated"):
+            return None
+        user = payload.get("user")
+        return user if isinstance(user, dict) else None
+
     def graph_state(self, thread_id: str) -> dict[str, Any]:
         """Return the latest inspectable coach-graph summary."""
         response = self._http.get(f"{self._base_url}/api/v1/threads/{thread_id}/graph")

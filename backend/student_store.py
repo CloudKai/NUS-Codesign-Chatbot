@@ -170,6 +170,30 @@ CREATE TABLE IF NOT EXISTS phase_transitions (
 
 CREATE INDEX IF NOT EXISTS idx_phase_transitions_thread_status
 ON phase_transitions(threadId, status, createdAt);
+
+CREATE TABLE IF NOT EXISTS app_sessions (
+    id TEXT PRIMARY KEY,
+    tokenHash TEXT NOT NULL UNIQUE,
+    userId TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    expiresAt TEXT NOT NULL,
+    lastSeenAt TEXT,
+    revokedAt TEXT,
+    FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_sessions_token_hash
+ON app_sessions(tokenHash);
+
+CREATE INDEX IF NOT EXISTS idx_app_sessions_user
+ON app_sessions(userId);
+
+CREATE TABLE IF NOT EXISTS oauth_login_states (
+    state TEXT PRIMARY KEY,
+    codeVerifier TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    expiresAt TEXT NOT NULL
+);
 """
 
 
@@ -196,6 +220,7 @@ class StudentStore:
                 "TEXT NOT NULL DEFAULT 'source_first'",
             )
             self._ensure_cognito_user_columns(connection)
+            self._ensure_app_session_tables(connection)
         self.owner_id = self._ensure_user()
 
     @staticmethod
@@ -349,6 +374,27 @@ class StudentStore:
             ).fetchone()
         if not row:
             return None
+        return self._user_profile_dict(row)
+
+    def get_user_by_id(self, user_id: str) -> dict[str, Any] | None:
+        """Return a user profile dict for the internal user id, if present."""
+        owner_id = str(user_id or "").strip()
+        if not owner_id:
+            return None
+        with self._lock, self._connect() as connection:
+            self._ensure_cognito_user_columns(connection)
+            row = connection.execute(
+                "SELECT id, identifier, cognitoSub, email, displayName, role, "
+                "createdAt, updatedAt, lastLoginAt FROM users WHERE id = ?",
+                (owner_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return self._user_profile_dict(row)
+
+    @staticmethod
+    def _user_profile_dict(row: sqlite3.Row) -> dict[str, Any]:
+        """Normalize a users row into the public profile shape."""
         return {
             "id": str(row["id"]),
             "identifier": str(row["identifier"]),
@@ -360,6 +406,168 @@ class StudentStore:
             "updated_at": row["updatedAt"],
             "last_login_at": row["lastLoginAt"],
         }
+
+    def _ensure_app_session_tables(self, connection: sqlite3.Connection) -> None:
+        """Create application-session tables on existing databases."""
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS app_sessions (
+                id TEXT PRIMARY KEY,
+                tokenHash TEXT NOT NULL UNIQUE,
+                userId TEXT NOT NULL,
+                createdAt TEXT NOT NULL,
+                expiresAt TEXT NOT NULL,
+                lastSeenAt TEXT,
+                revokedAt TEXT,
+                FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_app_sessions_token_hash
+            ON app_sessions(tokenHash);
+            CREATE INDEX IF NOT EXISTS idx_app_sessions_user
+            ON app_sessions(userId);
+            CREATE TABLE IF NOT EXISTS oauth_login_states (
+                state TEXT PRIMARY KEY,
+                codeVerifier TEXT NOT NULL,
+                createdAt TEXT NOT NULL,
+                expiresAt TEXT NOT NULL
+            );
+            """
+        )
+
+    def create_app_session(
+        self,
+        *,
+        user_id: str,
+        token_hash: str,
+        created_at: str,
+        expires_at: str,
+    ) -> str:
+        """Persist a hashed application session and return its id."""
+        owner_id = str(user_id or "").strip()
+        digest = str(token_hash or "").strip()
+        if not owner_id or not digest:
+            raise ValueError("user_id and token_hash are required")
+        session_id = str(uuid.uuid4())
+        with self._lock, self._connect() as connection:
+            self._ensure_app_session_tables(connection)
+            connection.execute(
+                "INSERT INTO app_sessions ("
+                "id, tokenHash, userId, createdAt, expiresAt, lastSeenAt, revokedAt"
+                ") VALUES (?, ?, ?, ?, ?, ?, NULL)",
+                (session_id, digest, owner_id, created_at, expires_at, created_at),
+            )
+        return session_id
+
+    def get_user_for_session_hash(
+        self, token_hash: str, *, now_iso: str | None = None
+    ) -> dict[str, Any] | None:
+        """Return the user for a valid session hash, else ``None``.
+
+        Expired or revoked sessions never authenticate. ``lastSeenAt`` is
+        updated for valid sessions using UTC *now_iso*.
+        """
+        digest = str(token_hash or "").strip()
+        if not digest:
+            return None
+        now_value = now_iso or utc_now()
+        with self._lock, self._connect() as connection:
+            self._ensure_app_session_tables(connection)
+            self._ensure_cognito_user_columns(connection)
+            row = connection.execute(
+                "SELECT s.id AS session_id, s.expiresAt, s.revokedAt, "
+                "u.id, u.identifier, u.cognitoSub, u.email, u.displayName, u.role, "
+                "u.createdAt, u.updatedAt, u.lastLoginAt "
+                "FROM app_sessions s "
+                "JOIN users u ON u.id = s.userId "
+                "WHERE s.tokenHash = ?",
+                (digest,),
+            ).fetchone()
+            if row is None:
+                return None
+            if row["revokedAt"]:
+                return None
+            expires_at = str(row["expiresAt"] or "")
+            if expires_at and expires_at <= now_value:
+                return None
+            connection.execute(
+                "UPDATE app_sessions SET lastSeenAt = ? WHERE id = ?",
+                (now_value, str(row["session_id"])),
+            )
+            return self._user_profile_dict(row)
+
+    def revoke_app_session(
+        self, token_hash: str, *, revoked_at: str | None = None
+    ) -> bool:
+        """Mark a session revoked by token hash. Return whether a row changed."""
+        digest = str(token_hash or "").strip()
+        if not digest:
+            return False
+        when = revoked_at or utc_now()
+        with self._lock, self._connect() as connection:
+            self._ensure_app_session_tables(connection)
+            result = connection.execute(
+                "UPDATE app_sessions SET revokedAt = ? "
+                "WHERE tokenHash = ? AND revokedAt IS NULL",
+                (when, digest),
+            )
+            return int(result.rowcount or 0) > 0
+
+    def cleanup_expired_app_sessions(self, *, now_iso: str | None = None) -> int:
+        """Delete expired sessions and return the number removed."""
+        now_value = now_iso or utc_now()
+        with self._lock, self._connect() as connection:
+            self._ensure_app_session_tables(connection)
+            result = connection.execute(
+                "DELETE FROM app_sessions WHERE expiresAt <= ? OR "
+                "(revokedAt IS NOT NULL AND revokedAt <= ?)",
+                (now_value, now_value),
+            )
+            return int(result.rowcount or 0)
+
+    def save_oauth_login_state(
+        self,
+        *,
+        state: str,
+        code_verifier: str,
+        created_at: str,
+        expires_at: str,
+    ) -> None:
+        """Persist one-time OAuth state + PKCE verifier until callback."""
+        state_value = str(state or "").strip()
+        verifier = str(code_verifier or "").strip()
+        if not state_value or not verifier:
+            raise ValueError("state and code_verifier are required")
+        with self._lock, self._connect() as connection:
+            self._ensure_app_session_tables(connection)
+            connection.execute(
+                "INSERT OR REPLACE INTO oauth_login_states "
+                "(state, codeVerifier, createdAt, expiresAt) VALUES (?, ?, ?, ?)",
+                (state_value, verifier, created_at, expires_at),
+            )
+
+    def consume_oauth_login_state(
+        self, state: str, *, now_iso: str | None = None
+    ) -> str | None:
+        """Return and delete the PKCE verifier for *state*, or ``None`` if invalid."""
+        state_value = str(state or "").strip()
+        if not state_value:
+            return None
+        now_value = now_iso or utc_now()
+        with self._lock, self._connect() as connection:
+            self._ensure_app_session_tables(connection)
+            row = connection.execute(
+                "SELECT codeVerifier, expiresAt FROM oauth_login_states WHERE state = ?",
+                (state_value,),
+            ).fetchone()
+            connection.execute(
+                "DELETE FROM oauth_login_states WHERE state = ?",
+                (state_value,),
+            )
+            if row is None:
+                return None
+            if str(row["expiresAt"] or "") <= now_value:
+                return None
+            return str(row["codeVerifier"])
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=30)

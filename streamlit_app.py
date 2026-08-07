@@ -1,11 +1,11 @@
 """Streamlit entrypoint for the Co-design learning notebook.
 
-Startup order matters: inject static CSS, gate on Cognito OIDC identity, then
-initialize session (including appearance from the store), sync appearance,
-apply theme tokens, and render the top bar and three-column workspace.
-Unauthenticated visitors see only a static shell plus the login dialog.
-Prefer ``sh scripts/start.sh`` so the local coaching API is running with
-``USE_LOCAL_API=true``.
+Startup order matters: inject static CSS, gate on the FastAPI application
+session (``/api/v1/auth/me``), then initialize session (including appearance
+from the store), sync appearance, apply theme tokens, and render the top bar
+and three-column workspace. Unauthenticated visitors see only a static shell
+plus the login dialog. Prefer ``sh scripts/start.sh`` so the local API is
+running.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from __future__ import annotations
 import streamlit as st
 
 from ui.auth_gate import (
+    authenticated_user,
     current_user_claims,
     display_name_from_claims,
     is_logged_in,
@@ -30,7 +31,7 @@ from ui.theme import inject_template_css, render_theme_css
 from ui.topbar import render_topbar
 from ui.workspace import render_workspace
 
-from backend.auth_profiles import store_identifier_for_sub, sync_authenticated_user
+from backend.auth_profiles import store_identifier_for_sub
 
 st.set_page_config(
     page_title="Co-design · Learning Notebook",
@@ -50,35 +51,34 @@ if not is_logged_in():
     render_login_gate()
     st.stop()
 
+user = authenticated_user() or {}
 claims = current_user_claims()
-cognito_sub = str(claims.get("sub") or "").strip()
+cognito_sub = str(user.get("cognito_sub") or claims.get("sub") or "").strip()
 if not cognito_sub:
-    # A signed identity cookie without the stable Cognito subject cannot be
-    # mapped safely to application data. Clear it locally — never st.logout(),
-    # which sends Cognito OIDC end-session params Cognito rejects as Invalid
-    # request.
     logout_user()
     st.stop()
 
 bound_sub = str(st.session_state.get("_auth_bound_sub") or "")
+store_identifier = store_identifier_for_sub(cognito_sub)
+display_name = str(user.get("display_name") or "").strip() or display_name_from_claims(
+    claims
+)
 if bound_sub != cognito_sub:
-    profile = sync_authenticated_user(claims)
-    bind_owner_identifier(profile.store_identifier)
+    bind_owner_identifier(store_identifier)
     if bound_sub:
         # Defensive account-switch handling: never carry one student's local
         # profile label into another authenticated identity.
-        st.session_state.display_name = profile.display_name
+        st.session_state.display_name = display_name
         st.session_state.pop("profile_display_name", None)
     elif not str(st.session_state.get("display_name") or "").strip():
-        st.session_state.display_name = profile.display_name
+        st.session_state.display_name = display_name
     st.session_state["_auth_bound_sub"] = cognito_sub
 else:
-    # Resource caches are keyed by owner, so rebinding is cheap and avoids a
-    # database upsert on every Streamlit widget rerun.
-    bind_owner_identifier(store_identifier_for_sub(cognito_sub))
+    # Resource caches are keyed by owner, so rebinding is cheap.
+    bind_owner_identifier(store_identifier)
 
 if "display_name" not in st.session_state:
-    st.session_state.display_name = display_name_from_claims(claims)
+    st.session_state.display_name = display_name
 
 initialize_session()
 sync_appearance_from_widget()

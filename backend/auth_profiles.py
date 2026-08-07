@@ -63,8 +63,8 @@ def sync_authenticated_user(
     """Upsert the Cognito user profile and return the bound store identity.
 
     Args:
-        claims: Identity claims from ``st.user`` (must include ``sub``).
-        store: Optional store instance; defaults to a temporary admin connection
+        claims: Verified Cognito identity claims (must include ``sub``).
+        store: Optional store instance; defaults to a temporary connection
             used only for user-row upsert before the UI binds the owner store.
 
     Returns:

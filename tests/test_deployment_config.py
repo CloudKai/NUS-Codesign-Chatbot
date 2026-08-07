@@ -45,30 +45,31 @@ def test_compose_persists_data_and_mounts_private_secrets_read_only():
     assert app.count("create_host_path: false") == 2
 
 
-def test_caddy_exposes_only_logout_and_health_to_fastapi():
+def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     """Public Caddy must not forward arbitrary /api/* into FastAPI."""
     caddyfile = (ROOT / "Caddyfile").read_text(encoding="utf-8")
 
     assert "cde2300chatbot.duckdns.org" in caddyfile
-    assert "handle /api/v1/auth/logout/callback" in caddyfile
+    assert "handle /api/v1/auth/login" in caddyfile
+    assert "handle /api/v1/auth/callback" in caddyfile
+    assert "handle /api/v1/auth/logout" in caddyfile
     assert "handle /api/v1/health" in caddyfile
     assert "handle /api/*" in caddyfile
     assert 'respond "Not Found" 404' in caddyfile
     assert "reverse_proxy app:8501" in caddyfile
     assert "handle_path" not in caddyfile
+    assert "handle /api/v1/auth/me" not in caddyfile
 
-    logout_index = caddyfile.index("handle /api/v1/auth/logout/callback")
+    login_index = caddyfile.index("handle /api/v1/auth/login")
+    callback_index = caddyfile.index("handle /api/v1/auth/callback")
+    logout_index = caddyfile.index("handle /api/v1/auth/logout")
     health_index = caddyfile.index("handle /api/v1/health")
     block_index = caddyfile.index("handle /api/*")
     streamlit_index = caddyfile.index("handle {\n\t\treverse_proxy app:8501")
-    assert logout_index < health_index < block_index < streamlit_index
-
-    logout_block = caddyfile[logout_index:health_index]
-    health_block = caddyfile[health_index:block_index]
-    assert "reverse_proxy app:8000" in logout_block
-    assert "reverse_proxy app:8000" in health_block
-    assert "respond" not in logout_block
-    assert "respond" not in health_block
+    assert login_index < block_index
+    assert callback_index < block_index
+    assert logout_index < block_index
+    assert health_index < block_index < streamlit_index
 
     api_block = caddyfile[block_index:streamlit_index]
     assert "reverse_proxy app:8000" not in api_block

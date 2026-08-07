@@ -12,6 +12,7 @@ services:
       CO_DESIGN_API_URL: "http://127.0.0.1:8000"
       CO_DESIGN_PUBLIC_API_URL: "https://cde2300chatbot.duckdns.org"
       CO_DESIGN_UI_URL: "https://cde2300chatbot.duckdns.org"
+      APP_SESSION_COOKIE_SECURE: "true"
       APP_DATA_DIR: "/app/data"
       APP_DATABASE_PATH: "/app/data/co_design.sqlite3"
       APP_FILES_DIR: "/app/data/files"

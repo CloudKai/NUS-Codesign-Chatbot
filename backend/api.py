@@ -13,6 +13,7 @@ from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from .application import CoachApplicationService
+from .auth_routes import register_auth_routes
 from .domain import (
     CoachRequest,
     CoachTurn,
@@ -69,6 +70,8 @@ def create_app(
     *,
     auto_advance_stages: bool | None = None,
     workspace: WorkspaceService | None = None,
+    session_service=None,
+    oidc_client=None,
 ) -> FastAPI:
     """Create a local API application with injectable progression behavior."""
     active_store = store or StudentStore()
@@ -91,6 +94,12 @@ def create_app(
         ),
     )
     app = FastAPI(title="Co-design local API", version="0.1.0")
+    register_auth_routes(
+        app,
+        store=active_store,
+        sessions=session_service,
+        oidc=oidc_client,
+    )
 
     @app.middleware("http")
     async def attach_request_id(request: Request, call_next):
@@ -113,17 +122,11 @@ def create_app(
 
     @app.get("/api/v1/auth/logout/callback")
     def auth_logout_callback(request: Request) -> RedirectResponse:
-        """Expire Streamlit auth cookies and return to the signed-out login gate.
+        """Deprecated Streamlit-cookie clear path kept for migration only.
 
-        Entry point for profile Logout (``ui.auth_gate.app_logout_url`` / same-tab
-        ``<a target="_self">``). Browser cookies are host-scoped (not port), so
-        this FastAPI response on ``CO_DESIGN_PUBLIC_API_URL`` can clear HttpOnly
-        cookies set by Streamlit on ``CO_DESIGN_UI_URL``, then 302 to
-        ``{CO_DESIGN_UI_URL}/?signed_out=1``. Local deployments fall back to
-        ``CO_DESIGN_API_URL``.
-
-        Do not send the browser through Cognito hosted ``/logout`` here:
-        Streamlit's OIDC end-session params are rejected as "Invalid request".
+        Prefer ``GET/POST /api/v1/auth/logout``, which revokes the FastAPI
+        application session. This legacy route still expires old Streamlit OIDC
+        cookies and redirects to the signed-out gate.
         """
         target = str(settings.ui_base_url or "").rstrip("/")
         parsed = urlparse(target)

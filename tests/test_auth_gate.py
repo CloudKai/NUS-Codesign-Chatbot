@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -20,45 +19,42 @@ from backend.student_store import StudentStore
 from ui import auth_gate
 
 
-class FakeUser:
-    """Minimal ``st.user`` stand-in for AppTest and unit tests."""
-
-    def __init__(self, *, is_logged_in: bool = True, **claims):
-        self.is_logged_in = is_logged_in
-        self._claims = dict(claims)
-
-    def get(self, key, default=None):
-        return self._claims.get(key, default)
-
-    def __getattr__(self, key):
-        if key in self._claims:
-            return self._claims[key]
-        raise AttributeError(key)
-
-
 @pytest.fixture
-def logged_in_user(monkeypatch: pytest.MonkeyPatch) -> FakeUser:
-    """Authenticate Streamlit as a Cognito student for UI tests."""
-    user = FakeUser(
-        is_logged_in=True,
-        sub="cognito-sub-test-1",
-        email="student@example.edu",
-        given_name="Alex",
-        name="Alex Student",
-    )
-    monkeypatch.setattr(st, "user", user, raising=False)
+def logged_in_user(monkeypatch: pytest.MonkeyPatch) -> dict:
+    """Authenticate Streamlit via FastAPI session user profile."""
+    user = {
+        "id": "user-1",
+        "cognito_sub": "cognito-sub-test-1",
+        "email": "student@example.edu",
+        "display_name": "Alex",
+        "role": "student",
+    }
     monkeypatch.setattr(auth_gate, "is_logged_in", lambda: True)
+    monkeypatch.setattr(auth_gate, "authenticated_user", lambda: dict(user))
+    monkeypatch.setattr(
+        auth_gate,
+        "current_user_claims",
+        lambda: {
+            "sub": "cognito-sub-test-1",
+            "email": "student@example.edu",
+            "given_name": "Alex",
+            "name": "Alex Student",
+        },
+    )
     return user
 
 
 @pytest.fixture
-def logged_out_user(monkeypatch: pytest.MonkeyPatch) -> FakeUser:
+def logged_out_user(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force the signed-out authentication gate."""
-    user = FakeUser(is_logged_in=False)
-    monkeypatch.setattr(st, "user", user, raising=False)
     monkeypatch.setattr(auth_gate, "is_logged_in", lambda: False)
-    monkeypatch.setattr(st, "login", MagicMock(name="login"))
-    return user
+    monkeypatch.setattr(auth_gate, "authenticated_user", lambda: None)
+    monkeypatch.setattr(auth_gate, "current_user_claims", lambda: {})
+    monkeypatch.setattr(
+        auth_gate,
+        "auth_login_url",
+        lambda: "http://127.0.0.1:8000/api/v1/auth/login",
+    )
 
 
 def test_gitignore_excludes_secrets_toml():
@@ -66,15 +62,15 @@ def test_gitignore_excludes_secrets_toml():
     assert ".streamlit/secrets.toml" in ignore
 
 
-def test_secrets_example_uses_placeholders_and_oauth2callback():
+def test_secrets_example_documents_fastapi_callback():
     example = Path(".streamlit/secrets.toml.example").read_text(encoding="utf-8")
-    assert "oauth2callback" in example
+    assert "/api/v1/auth/callback" in example
     assert "<cognito-app-client-secret>" in example
-    assert "replace-with-persistent-strong-random-secret" in example
     assert "<user-pool-id>" in example
     assert 'prompt = "login"' in example
-    assert "/auth/logout" in example
+    assert "does not persist" in example.lower() or "application session" in example.lower()
     assert "sk-" not in example
+    assert "oauth2callback" not in example
 
 
 def test_unauthenticated_users_see_auth_gate(logged_out_user):
@@ -99,32 +95,25 @@ def test_auth_gate_is_non_dismissible(logged_out_user):
     assert 'dismissible=False' in source
     assert "@st.dialog(" in source
     assert 'width="small"' in source
+    assert "st.login(" not in source
+    assert "Streamlit native OIDC" in source or "session authority" in source.lower()
 
 
-def test_sign_in_button_wires_st_login(logged_out_user, monkeypatch):
-    login = MagicMock(name="login")
-    monkeypatch.setattr(st, "login", login)
-    monkeypatch.setattr(
-        auth_gate, "auth_credentials_configured", lambda: (True, None)
-    )
+def test_sign_in_button_navigates_to_fastapi_login(logged_out_user, monkeypatch):
+    start = MagicMock(name="start_login")
+    monkeypatch.setattr(auth_gate, "start_login", start)
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     sign_in = next(
         button for button in app.button if button.label == "Sign in or create an account"
     )
     assert sign_in.key == "auth-sign-in"
     sign_in.click().run()
-    login.assert_called_once_with()
+    start.assert_called_once_with()
 
 
-def test_start_login_reports_missing_secrets(monkeypatch):
-    login = MagicMock(name="login")
-    monkeypatch.setattr(st, "login", login)
-    monkeypatch.setattr(
-        auth_gate,
-        "auth_credentials_configured",
-        lambda: (False, "missing secrets.toml"),
-    )
-    state: dict[str, object] = {}
+def test_start_login_reports_missing_url(monkeypatch):
+    monkeypatch.setattr(auth_gate, "auth_login_url", lambda: None)
+    session: dict[str, object] = {}
 
     class _Session(dict):
         def __getattr__(self, key):
@@ -139,11 +128,10 @@ def test_start_login_reports_missing_secrets(monkeypatch):
         def pop(self, key, default=None):
             return dict.pop(self, key, default)
 
-    session = _Session()
-    monkeypatch.setattr(st, "session_state", session)
+    session_obj = _Session()
+    monkeypatch.setattr(st, "session_state", session_obj)
     auth_gate.start_login()
-    assert "missing secrets.toml" in str(session.get("_auth_config_error"))
-    login.assert_not_called()
+    assert "unavailable" in str(session_obj.get("_auth_config_error")).lower()
 
 
 def test_authenticated_users_see_full_application(logged_in_user, monkeypatch):
@@ -152,14 +140,14 @@ def test_authenticated_users_see_full_application(logged_in_user, monkeypatch):
     monkeypatch.setattr(
         profile_ui,
         "app_logout_url",
-        lambda: "http://127.0.0.1:8000/api/v1/auth/logout/callback",
+        lambda: "http://127.0.0.1:8000/api/v1/auth/logout",
     )
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     assert not app.exception
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "st-key-chat_composer" in rendered or len(app.chat_input) == 1
     assert 'class="cd-profile-logout-link"' in rendered
-    assert 'href="http://127.0.0.1:8000/api/v1/auth/logout/callback"' in rendered
+    assert 'href="http://127.0.0.1:8000/api/v1/auth/logout"' in rendered
     assert 'target="_self"' in rendered
     assert app.session_state["display_name"] == "Alex"
 
@@ -175,14 +163,30 @@ def test_authenticated_rerun_preserves_student_display_name(logged_in_user):
     assert app.session_state["display_name"] == "Preferred Name"
 
 
-def test_authenticated_subject_change_resets_identity_label(logged_in_user):
+def test_authenticated_subject_change_resets_identity_label(logged_in_user, monkeypatch):
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     app.session_state["display_name"] = "First Student"
     app.session_state["profile_display_name"] = "First Student"
-    logged_in_user._claims.update(
-        sub="cognito-sub-test-2",
-        given_name="Second",
-        name="Second Student",
+    monkeypatch.setattr(
+        auth_gate,
+        "authenticated_user",
+        lambda: {
+            "id": "user-2",
+            "cognito_sub": "cognito-sub-test-2",
+            "email": "second@example.edu",
+            "display_name": "Second",
+            "role": "student",
+        },
+    )
+    monkeypatch.setattr(
+        auth_gate,
+        "current_user_claims",
+        lambda: {
+            "sub": "cognito-sub-test-2",
+            "email": "second@example.edu",
+            "given_name": "Second",
+            "name": "Second Student",
+        },
     )
 
     app.run()
@@ -195,10 +199,14 @@ def test_authenticated_subject_change_resets_identity_label(logged_in_user):
 
 def test_logged_in_identity_without_sub_is_cleared(monkeypatch):
     """An unusable signed identity must not reach protected app initialization."""
-    user = FakeUser(is_logged_in=True, email="student@example.edu")
     local_logout = MagicMock(name="logout_user")
-    monkeypatch.setattr(st, "user", user, raising=False)
     monkeypatch.setattr(auth_gate, "is_logged_in", lambda: True)
+    monkeypatch.setattr(
+        auth_gate,
+        "authenticated_user",
+        lambda: {"id": "x", "cognito_sub": "", "display_name": "X"},
+    )
+    monkeypatch.setattr(auth_gate, "current_user_claims", lambda: {"email": "x@y.z"})
     monkeypatch.setattr(auth_gate, "logout_user", local_logout)
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
@@ -311,7 +319,7 @@ def test_missing_given_name_falls_back_safely(tmp_path):
     assert profile.display_name == "fallback"
 
 
-def test_logout_user_navigates_to_local_callback(monkeypatch):
+def test_logout_user_navigates_to_fastapi_logout(monkeypatch):
     html = MagicMock(name="components_html")
     link_button = MagicMock(name="link_button")
     stop = MagicMock(name="stop", side_effect=RuntimeError("stop"))
@@ -321,7 +329,7 @@ def test_logout_user_navigates_to_local_callback(monkeypatch):
     monkeypatch.setattr(
         auth_gate,
         "app_logout_url",
-        lambda: "http://127.0.0.1:8000/api/v1/auth/logout/callback",
+        lambda: "http://127.0.0.1:8000/api/v1/auth/logout",
     )
 
     try:
@@ -331,7 +339,7 @@ def test_logout_user_navigates_to_local_callback(monkeypatch):
 
     html.assert_called_once()
     markup = html.call_args.args[0]
-    assert "http://127.0.0.1:8000/api/v1/auth/logout/callback" in markup
+    assert "http://127.0.0.1:8000/api/v1/auth/logout" in markup
     assert "window.parent.location.replace" in markup
     link_button.assert_called_once()
     stop.assert_called_once_with()
@@ -343,73 +351,7 @@ def test_logout_user_never_calls_st_logout(monkeypatch):
     monkeypatch.setattr(auth_gate, "app_logout_url", lambda: None)
     auth_gate.logout_user()
     logout.assert_not_called()
-    assert "local API" in str(st.session_state.get("_auth_config_error") or "")
-
-
-def test_cognito_logout_url_requires_ordered_streamlit_callback(monkeypatch):
-    monkeypatch.setattr(
-        st,
-        "secrets",
-        {
-            "auth": {
-                "redirect_uri": "https://coach.example.edu/oauth2callback",
-                "client_id": "client-id",
-                "cognito_domain": "https://login.example.edu",
-                "logout_uri": (
-                    "https://coach.example.edu/api/v1/auth/logout/callback"
-                ),
-            }
-        },
-    )
-
-    url = auth_gate.cognito_logout_url()
-
-    assert url is not None
-    assert url.startswith("https://login.example.edu/logout?")
-    assert "client_id=client-id" in url
-    assert (
-        "logout_uri=https%3A%2F%2Fcoach.example.edu%2Fapi%2Fv1%2Fauth%2F"
-        "logout%2Fcallback"
-    ) in url
-
-
-@pytest.mark.parametrize(
-    ("domain", "logout_uri"),
-    [
-        (
-            "javascript:alert(1)",
-            "https://coach.example.edu/api/v1/auth/logout/callback",
-        ),
-        (
-            "http://login.example.edu",
-            "https://coach.example.edu/api/v1/auth/logout/callback",
-        ),
-        (
-            "https://login.example.edu",
-            "https://evil.example/api/v1/auth/logout/callback",
-        ),
-        ("https://login.example.edu", "https://coach.example.edu/"),
-    ],
-)
-def test_cognito_logout_url_rejects_unsafe_or_unordered_values(
-    monkeypatch,
-    domain,
-    logout_uri,
-):
-    monkeypatch.setattr(
-        st,
-        "secrets",
-        {
-            "auth": {
-                "redirect_uri": "https://coach.example.edu/oauth2callback",
-                "client_id": "client-id",
-                "cognito_domain": domain,
-                "logout_uri": logout_uri,
-            }
-        },
-    )
-
-    assert auth_gate.cognito_logout_url() is None
+    assert "application API" in str(st.session_state.get("_auth_config_error") or "")
 
 
 def test_app_logout_url_uses_public_origin_and_rejects_unsafe_base(monkeypatch):
@@ -424,7 +366,7 @@ def test_app_logout_url_uses_public_origin_and_rejects_unsafe_base(monkeypatch):
         "https://coach.example.edu",
     )
     assert auth_gate.app_logout_url() == (
-        "https://coach.example.edu/api/v1/auth/logout/callback"
+        "https://coach.example.edu/api/v1/auth/logout"
     )
 
     monkeypatch.setattr(
@@ -435,24 +377,16 @@ def test_app_logout_url_uses_public_origin_and_rejects_unsafe_base(monkeypatch):
     assert auth_gate.app_logout_url() is None
 
 
-def test_current_user_claims_never_exposes_tokens(monkeypatch):
-    user = FakeUser(
-        is_logged_in=True,
-        sub="safe-sub",
-        email="student@example.edu",
-        access_token="secret-access-token",
-        id_token="secret-id-token",
-        refresh_token="secret-refresh-token",
-    )
-    monkeypatch.setattr(st, "user", user, raising=False)
-
-    claims = auth_gate.current_user_claims()
-
-    assert claims == {"sub": "safe-sub", "email": "student@example.edu"}
-    assert not any("token" in key for key in claims)
+def test_auth_source_does_not_use_streamlit_oidc_authority():
+    source = Path("ui/auth_gate.py").read_text(encoding="utf-8")
+    assert "st.login(" not in source
+    assert "st.logout(" not in source
+    assert "is_logged_in" in source
+    assert "/api/v1/auth/me" in source
+    assert "co_design_session" in source or "app_session_cookie_name" in source
 
 
-def test_production_callback_documented_as_oauth2callback():
-    example = Path(".streamlit/secrets.toml.example").read_text(encoding="utf-8")
-    assert "https://<production-domain>/oauth2callback" in example
-    assert "https://<production-domain>/api/v1/auth/logout/callback" in example
+def test_owner_binding_remains_cognito_sub(logged_in_user):
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    assert app.session_state["_auth_bound_sub"] == "cognito-sub-test-1"
+    assert app.session_state["_auth_store_identifier"] == "cognito:cognito-sub-test-1"
