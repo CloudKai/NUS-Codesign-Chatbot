@@ -130,8 +130,24 @@ def auth_credentials_configured() -> tuple[bool, str | None]:
     return False, "Authentication is not configured."
 
 
+def _escape_attr(value: str) -> str:
+    """Escape a value for safe use inside an HTML attribute."""
+    return (
+        str(value)
+        .replace("&", "&amp;")
+        .replace('"', "&quot;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
 def start_login() -> None:
-    """Navigate the browser to FastAPI Cognito login (same tab)."""
+    """Arm the Redirecting UI on the next dialog render.
+
+    Navigation itself uses a real same-tab ``<a>`` rendered after this flag is
+    set. Sandboxed ``components.html`` ``location.replace`` is unreliable in
+    Streamlit dialogs.
+    """
     url = auth_login_url()
     if not url:
         st.session_state["_auth_config_error"] = (
@@ -142,18 +158,30 @@ def start_login() -> None:
         return
     st.session_state.pop("_auth_config_error", None)
     st.session_state["_auth_redirecting"] = True
-    safe_url = json.dumps(url)
+
+
+def _click_parent_login_link() -> None:
+    """Click the same-tab login ``<a>`` in the parent document after a short pause.
+
+    The pause lets the Redirecting status paint before Cognito navigation.
+    """
     components.html(
-        f"""
+        """
 <script>
-(() => {{
-  const url = {safe_url};
-  try {{
-    window.parent.location.replace(url);
-  }} catch (error) {{
-    window.location.replace(url);
-  }}
-}})();
+(() => {
+  const clickContinue = () => {
+    try {
+      const link = window.parent.document.querySelector(
+        'a.cd-auth-sign-in-link[data-cd-auth-continue="1"]'
+      );
+      if (link) {
+        link.click();
+      }
+    } catch (error) {
+    }
+  };
+  setTimeout(clickContinue, 280);
+})();
 </script>
 """,
         height=0,
@@ -167,7 +195,7 @@ def start_login() -> None:
 )
 def render_login_gate() -> None:
     """Non-dismissible Cognito sign-in dialog over the signed-out shell."""
-    redirecting = bool(st.session_state.pop("_auth_redirecting", None))
+    redirecting = bool(st.session_state.get("_auth_redirecting"))
     just_signed_out = False
     try:
         if st.query_params.get("signed_out") == "1":
@@ -205,12 +233,18 @@ def render_login_gate() -> None:
         config_error = st.session_state.get("_auth_config_error")
         login_url = auth_login_url()
         if config_error or not login_url:
-            st.error(
-                "Sign-in is temporarily unavailable. Check your network, then try "
-                "again. If it keeps failing, ask the course team to check the "
-                "authentication configuration."
-            )
-        elif redirecting:
+            with st.container(key="auth-config-error"):
+                st.markdown(
+                    '<div class="cd-auth-gap-after-course-notice--spacer" '
+                    'aria-hidden="true"></div>',
+                    unsafe_allow_html=True,
+                )
+                st.error(
+                    "Sign-in is temporarily unavailable. Check your network, then try "
+                    "again. If it keeps failing, ask the course team to check the "
+                    "authentication configuration."
+                )
+        elif redirecting and login_url:
             with st.container(key="auth-redirecting"):
                 st.markdown(
                     '<div class="cd-auth-gap-after-course-notice">'
@@ -219,14 +253,26 @@ def render_login_gate() -> None:
                     '<span class="cd-auth-redirecting-copy">'
                     "<strong>Redirecting...</strong>"
                     '<span class="cd-auth-redirecting-hint">'
-                    "(If Cognito did not open, you may have timed out)"
+                    "(If Cognito did not open, use Continue to sign-in below)"
                     "</span>"
                     "</span>"
                     "</div>"
                     "</div>",
                     unsafe_allow_html=True,
                 )
-        if just_signed_out and not redirecting:
+            with st.container(key="auth-sign-in"):
+                st.markdown(
+                    f'<a class="cd-auth-sign-in-link" data-cd-auth-continue="1" '
+                    f'href="{_escape_attr(login_url)}" target="_self" rel="noopener">'
+                    "Continue to sign-in"
+                    "</a>",
+                    unsafe_allow_html=True,
+                )
+            _click_parent_login_link()
+            # Keep flag until navigation leaves the page; clear on a later
+            # interaction so refresh can show the Sign in button again.
+            st.session_state.pop("_auth_redirecting", None)
+        if just_signed_out and not redirecting and login_url and not config_error:
             with st.container(key="auth-signed-out-notice"):
                 st.markdown(
                     '<div class="cd-auth-gap-after-course-notice '
@@ -235,19 +281,18 @@ def render_login_gate() -> None:
                     unsafe_allow_html=True,
                 )
                 st.success("You are signed out. Sign in again when you are ready.")
-        if login_url and not config_error:
-            st.button(
-                "Redirecting securely…" if redirecting else "Sign in or create an account",
-                type="primary",
-                use_container_width=True,
-                key="auth-sign-in",
-                on_click=start_login,
-                disabled=redirecting,
-            )
+        if login_url and not config_error and not redirecting:
+            with st.container(key="auth-sign-in"):
+                st.button(
+                    "Sign in or create an account",
+                    type="primary",
+                    use_container_width=True,
+                    key="auth-sign-in-button",
+                    on_click=start_login,
+                )
         st.caption(
             "Account creation, confirmation, and passwords are handled securely "
-            "by Amazon Cognito Managed Login. After sign-in, this app keeps you "
-            "signed in with its own 30-day session cookie — not Cognito tokens."
+            "by Amazon Cognito Managed Login."
         )
 
 

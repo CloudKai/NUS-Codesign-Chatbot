@@ -257,9 +257,19 @@
 }
 
 .cd-auth-gap-after-course-notice--spacer {
-    /* Empty spacer ahead of st.success (signed-out alert). */
+    /* Empty spacer ahead of st.success / st.error after the course notice. */
     padding-top:0;
     height:10px;
+}
+
+/* Config-error alert: keep Streamlit's outer gap from stacking on the spacer. */
+.st-key-auth_login_card .st-key-auth-config-error {
+    margin-top:0 !important;
+    padding-top:0 !important;
+}
+
+.st-key-auth_login_card .st-key-auth-config-error [data-testid="stAlert"] {
+    margin-top:0 !important;
 }
 
 /* Redirecting status box (spinner + "Redirecting..." + timeout hint) */
@@ -307,10 +317,45 @@
     to { transform:rotate(360deg); }
 }
 
-/* Sign in CTA: 10px gap under course notice (or under status blocks). */
+/* Sign in CTA container */
 .st-key-auth_login_card .st-key-auth-sign-in {
     margin-top:10px !important;
     padding-top:0 !important;
+}
+
+/* Continue-to-sign-in: real <a target="_self"> during Redirecting state */
+.cd-auth-sign-in-link {
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    width:100% !important;
+    box-sizing:border-box !important;
+    min-height:2.6rem !important;
+    padding:.65rem 1rem !important;
+    border-radius:.55rem !important;
+    border:1px solid transparent !important;
+    background:var(--cd-accent, #2f6fed) !important;
+    color:#fff !important;
+    -webkit-text-fill-color:#fff !important;
+    font-size:.95rem !important;
+    font-weight:600 !important;
+    line-height:1.2 !important;
+    text-decoration:none !important;
+    cursor:pointer !important;
+}
+
+.cd-auth-sign-in-link:hover,
+.cd-auth-sign-in-link:focus-visible {
+    filter:brightness(1.06);
+    outline:none !important;
+    text-decoration:none !important;
+    color:#fff !important;
+    -webkit-text-fill-color:#fff !important;
+}
+
+.st-key-auth_login_card [class*="st-key-auth-sign-in"] button,
+.st-key-auth_login_card button[kind="primary"] {
+    min-height:2.6rem !important;
 }
 
 /* Keep Streamlit's signed-out alert flush to the spacer above (no double gap). */
@@ -333,11 +378,6 @@
 
 .st-key-auth_login_card:has(.st-key-auth-signed-out-notice) .st-key-auth-sign-in {
     margin-top:5px !important;
-}
-
-.st-key-auth_login_card [class*="st-key-auth-sign-in"] button,
-.st-key-auth_login_card button[kind="primary"] {
-    min-height:2.6rem !important;
 }
 
 /* =========================================================================

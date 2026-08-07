@@ -103,39 +103,32 @@ def test_auth_gate_is_non_dismissible(logged_out_user):
     assert "Streamlit native OIDC" in source or "session authority" in source.lower()
 
 
-def test_sign_in_button_navigates_to_fastapi_login(logged_out_user, monkeypatch):
-    start = MagicMock(name="start_login")
-    monkeypatch.setattr(auth_gate, "start_login", start)
+def test_sign_in_button_arms_redirecting_ui(logged_out_user, monkeypatch):
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     sign_in = next(
         button for button in app.button if button.label == "Sign in or create an account"
     )
-    assert sign_in.key == "auth-sign-in"
+    assert sign_in.key == "auth-sign-in-button"
     sign_in.click().run()
-    start.assert_called_once_with()
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert "Redirecting..." in rendered
+    assert 'class="cd-auth-sign-in-link"' in rendered
+    assert 'data-cd-auth-continue="1"' in rendered
+    assert 'href="http://127.0.0.1:8000/api/v1/auth/login"' in rendered
+    assert 'target="_self"' in rendered
+    assert "Continue to sign-in" in rendered
 
 
-def test_start_login_reports_missing_url(monkeypatch):
-    monkeypatch.setattr(auth_gate, "auth_login_url", lambda: None)
-    session: dict[str, object] = {}
-
-    class _Session(dict):
-        def __getattr__(self, key):
-            try:
-                return self[key]
-            except KeyError as exc:
-                raise AttributeError(key) from exc
-
-        def __setattr__(self, key, value):
-            self[key] = value
-
-        def pop(self, key, default=None):
-            return dict.pop(self, key, default)
-
-    session_obj = _Session()
-    monkeypatch.setattr(st, "session_state", session_obj)
-    auth_gate.start_login()
-    assert "unavailable" in str(session_obj.get("_auth_config_error")).lower()
+def test_auth_gate_uses_parent_link_click_not_location_replace():
+    source = Path("ui/auth_gate.py").read_text(encoding="utf-8")
+    assert "def start_login" in source
+    assert "_auth_redirecting" in source
+    assert "cd-auth-sign-in-link" in source
+    assert 'target="_self"' in source
+    assert "data-cd-auth-continue" in source
+    assert "querySelector" in source
+    login_source = source.split("def logout_user", 1)[0]
+    assert "location.replace(" not in login_source
 
 
 def test_authenticated_users_see_full_application(logged_in_user, monkeypatch):
