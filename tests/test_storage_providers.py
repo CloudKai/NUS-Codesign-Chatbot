@@ -30,8 +30,17 @@ from backend.persistence.factory import (
 )
 from backend.persistence.local_files import LocalFileStorage
 from backend.persistence.memory_files import MemoryFileStorage
-from backend.persistence.object_keys import build_upload_object_key, sanitize_filename
-from backend.persistence.s3_files import S3FileStorage, is_missing_object_error
+from backend.persistence.object_keys import (
+    build_extracted_text_object_key,
+    build_upload_object_key,
+    notebook_prefix,
+    sanitize_filename,
+)
+from backend.persistence.s3_files import (
+    S3DeleteObjectsError,
+    S3FileStorage,
+    is_missing_object_error,
+)
 from backend.student_store import StudentStore
 
 _INIT_DSQL_PATH = Path(__file__).resolve().parents[1] / "scripts" / "init_dsql.py"
@@ -126,12 +135,20 @@ def test_sanitize_and_object_key_never_trust_raw_path():
     assert ".." not in sanitize_filename("../etc/passwd")
     key = build_upload_object_key(
         user_id="user-1",
-        thread_id="thread-1",
+        notebook_id="notebook-1",
         filename="../../secret.pdf",
-        object_id="oid",
+        object_id="../../oid",
     )
-    assert key.startswith("users/user-1/thread-1/oid/")
+    assert key.startswith("users/user-1/notebook-1/oid/")
     assert ".." not in key
+    assert notebook_prefix(
+        user_id="user-1", notebook_id="../notebook-1"
+    ) == "users/user-1/notebook-1/"
+    assert build_extracted_text_object_key(
+        user_id="user-1",
+        notebook_id="notebook-1",
+        source_id="source-1",
+    ) == "users/user-1/notebook-1/source-1/extracted.txt"
 
 
 def test_local_file_storage_round_trip(tmp_path: Path):
@@ -211,6 +228,49 @@ def test_s3_missing_vs_access_denied():
     with pytest.raises(Exception):
         s3.exists("denied")
     assert is_missing_object_error(type("NoSuchKey", (Exception,), {})()) is True
+
+
+def test_s3_delete_prefix_raises_on_returned_object_errors():
+    class _Paginator:
+        def paginate(self, **_kwargs):
+            yield {"Contents": [{"Key": "users/u/n/a"}, {"Key": "users/u/n/b"}]}
+
+    class _Client:
+        def __init__(self, *, fail: bool):
+            self.fail = fail
+
+        def get_paginator(self, name: str):
+            assert name == "list_objects_v2"
+            return _Paginator()
+
+        def delete_objects(self, **_kwargs):
+            if self.fail:
+                return {
+                    "Errors": [
+                        {
+                            "Key": "users/u/n/b",
+                            "Code": "AccessDenied",
+                            "Message": "denied",
+                        }
+                    ]
+                }
+            return {}
+
+    failing = S3FileStorage(
+        bucket="uploads-test",
+        region="us-west-2",
+        client=_Client(fail=True),
+    )
+    with pytest.raises(S3DeleteObjectsError, match="AccessDenied") as raised:
+        failing.delete_prefix("users/u/n/")
+    assert raised.value.errors[0]["Key"] == "users/u/n/b"
+
+    successful = S3FileStorage(
+        bucket="uploads-test",
+        region="us-west-2",
+        client=_Client(fail=False),
+    )
+    assert successful.delete_prefix("users/u/n/") == 2
 
 
 def test_create_file_storage_provider_selection(tmp_path: Path, monkeypatch):
@@ -298,6 +358,19 @@ def test_adapt_sqlite_sql_and_strip_foreign_keys():
     adapted = adapt_sqlite_sql("INSERT OR IGNORE INTO users (id) VALUES (?)")
     assert "%s" in adapted
     assert "ON CONFLICT DO NOTHING" in adapted
+    explicit_upsert = adapt_sqlite_sql(
+        "INSERT INTO oauth_login_states "
+        "(state, code_verifier, created_at, expires_at) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT (state) DO UPDATE SET "
+        "code_verifier=excluded.code_verifier"
+    )
+    assert "ON CONFLICT (state)" in explicit_upsert
+    assert explicit_upsert.count("%s") == 4
+    with pytest.raises(ValueError, match="explicit ON CONFLICT"):
+        adapt_sqlite_sql(
+            "INSERT OR REPLACE INTO oauth_login_states "
+            "(state, code_verifier) VALUES (?, ?)"
+        )
     ddl = strip_foreign_keys(
         "CREATE TABLE t (id TEXT PRIMARY KEY, "
         "FOREIGN KEY (id) REFERENCES users(id) ON DELETE CASCADE)"
@@ -351,11 +424,26 @@ def test_generate_dsql_admin_auth_token_uses_db_connect_admin():
 
 
 def test_dsql_schema_has_no_partial_index_where_predicate():
-    assert "WHERE cognitoSub" not in DSQL_SCHEMA
+    assert "WHERE cognito_sub" not in DSQL_SCHEMA
     assert "WHERE cognitosub" not in DSQL_SCHEMA.lower()
     assert "CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_users_cognito_sub" in DSQL_SCHEMA
-    assert "idx_app_sessions_token_hash" not in DSQL_SCHEMA
-    assert "idx_app_sessions_user" in DSQL_SCHEMA
+    assert "app_sessions" not in DSQL_SCHEMA
+    assert "CREATE TABLE IF NOT EXISTS notebooks" in DSQL_SCHEMA
+    assert "CREATE TABLE IF NOT EXISTS messages" in DSQL_SCHEMA
+    assert "CREATE TABLE IF NOT EXISTS sources" in DSQL_SCHEMA
+    assert "CREATE TABLE IF NOT EXISTS oauth_login_states" in DSQL_SCHEMA
+    for legacy in (
+        "threads",
+        "steps",
+        "folders",
+        "feedbacks",
+        "model_turns",
+        "openai_thread_state",
+        "notebook_sources",
+        "phase_transitions",
+        "app_sessions",
+    ):
+        assert f"CREATE TABLE IF NOT EXISTS {legacy}" not in DSQL_SCHEMA
     for statement in iter_dsql_ddl_statements():
         upper = statement.upper()
         if "INDEX" in upper:
@@ -631,8 +719,44 @@ def test_save_uploads_and_workspace_read_via_object_storage(tmp_path: Path, monk
     source = created[0]
     assert (source.get("metadata") or {}).get("storage_provider") == "memory"
     assert source["path"] in memory._objects or memory.exists(str(source["path"]))
+    assert source["object_key"]
+    assert source["extracted_text_key"]
+    assert memory.get_bytes(source["extracted_text_key"]) == b"hello-s3-bytes"
+    database_bytes = (tmp_path / "ws.sqlite3").read_bytes()
+    assert b"hello-s3-bytes" not in database_bytes
 
     service = WorkspaceService(store)
     content = service.read_source_content(thread_id, source["id"])
     assert content.data == b"hello-s3-bytes"
     assert content.filename
+    store.delete_source(thread_id, source["id"])
+    assert not memory.exists(source["object_key"])
+    assert not memory.exists(source["extracted_text_key"])
+
+
+def test_source_delete_propagates_storage_failures(tmp_path: Path, monkeypatch):
+    class _FailingDeleteStorage(MemoryFileStorage):
+        def delete(self, key: str) -> None:
+            raise PermissionError(f"AccessDenied: {key}")
+
+    storage = _FailingDeleteStorage()
+    storage.put_bytes(key="users/u/n/raw.txt", data=b"raw")
+    monkeypatch.setattr(
+        "backend.persistence.factory.get_file_storage",
+        lambda: storage,
+    )
+    store = StudentStore(tmp_path / "delete-failure.sqlite3", identifier="owner-1")
+    notebook_id = store.create_thread(name="n", model_id="m", support_mode="guided")
+    source_id = store.add_source(
+        notebook_id,
+        kind="file",
+        title="raw.txt",
+        path="users/u/n/raw.txt",
+        metadata={
+            "object_key": "users/u/n/raw.txt",
+            "storage_provider": "memory",
+        },
+    )
+
+    with pytest.raises(PermissionError, match="AccessDenied"):
+        store.delete_source(notebook_id, source_id)

@@ -55,7 +55,11 @@ def test_rejected_recommendation_keeps_current_stage(tmp_path):
     )
 
     assert resolved.status is TransitionStatus.REJECTED
-    assert "thinking_stage" not in (store.get_thread(thread_id) or {})["metadata"]
+    thread = store.get_thread(thread_id) or {}
+    assert (thread.get("metadata") or {}).get("thinking_stage", "focus") == "focus"
+    journey = (thread.get("metadata") or {}).get("learning_journey") or {}
+    assert journey.get("current_stage", "focus") == "focus"
+    assert journey.get("completed_stages") in (None, [])
 
 
 def test_accepted_transition_rolls_back_when_journey_write_fails(tmp_path, monkeypatch):
@@ -80,7 +84,8 @@ def test_accepted_transition_rolls_back_when_journey_write_fails(tmp_path, monke
     real_dump = student_store_module._dump
 
     def flaky_dump(value):
-        if isinstance(value, dict) and "learning_journey" in value:
+        # Progress blob written on accepted transition contains completed_stages.
+        if isinstance(value, dict) and "completed_stages" in value:
             raise RuntimeError("simulated journey write failure")
         return real_dump(value)
 

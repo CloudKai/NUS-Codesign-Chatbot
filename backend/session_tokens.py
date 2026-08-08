@@ -1,27 +1,13 @@
-"""Opaque application-session token helpers.
+"""OAuth state and PKCE verifier helpers for Cognito authorization-code login.
 
-Cognito proves identity at login. Ongoing authentication uses a random
-application session token that exists only in an HttpOnly cookie. The database
-stores a SHA-256 digest of that token, never the raw value.
+Ongoing authentication uses Cognito refresh/ID tokens in HttpOnly cookies.
+This module only generates high-entropy OAuth binder values — never app
+session tokens.
 """
 
 from __future__ import annotations
 
-import hashlib
 import secrets
-
-
-def generate_session_token() -> str:
-    """Return a URL-safe session token with at least 256 bits of entropy."""
-    return secrets.token_urlsafe(32)
-
-
-def hash_session_token(raw_token: str) -> str:
-    """Return the SHA-256 hex digest used for exact session lookup."""
-    token = str(raw_token or "").strip()
-    if not token:
-        raise ValueError("session token is required")
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def generate_oauth_state() -> str:

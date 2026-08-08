@@ -38,7 +38,7 @@ default `StudentStore()` path.
 |---|---|
 | `test_api.py` | FastAPI `/api/v1` health, coaching turn, transitions, integrity guards; legacy Streamlit-cookie logout callback |
 | `test_api_client.py` | Typed `LocalApiClient` confirmation + auto-advance contracts; `/auth/me` session mapping |
-| `test_app_sessions.py` | Opaque app sessions, OAuth state binder cookie, Cognito callback/logout, redirect URI precedence |
+| `test_app_sessions.py` | Cognito refresh/ID cookie sessions, OAuth state binder, callback/logout, redirect URI precedence |
 | `test_auth_gate.py` | Streamlit auth gate, Redirecting UX, Cognito profile upsert, owner binding, no `st.login`/`st.user` authority |
 | `test_deployment_config.py` | Compose/Caddy/Dockerfile production auth route allow-list, Cognito redirect, stateless prod compose |
 | `test_storage_providers.py` | SQLite/local defaults, DSQL/S3 provider selection, mocked DSQL auth + S3 (no AWS calls) |

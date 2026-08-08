@@ -338,7 +338,7 @@ def save_uploads(
 
             key = build_upload_object_key(
                 user_id=owner_id,
-                thread_id=thread_id,
+                notebook_id=thread_id,
                 filename=safe_name,
             )
             get_file_storage().put_bytes(key=key, data=payload, content_type=mime)

@@ -155,7 +155,8 @@ def test_mock_student_turn_streams_and_persists(tmp_path, monkeypatch):
     assert messages[-1]["metadata"]["model"] == DEFAULT_CHAT_MODEL_ID
     assert messages[-1]["metadata"]["thinking_stage"] == "evidence"
     assert messages[-1]["metadata"]["response_detail"] == "long"
-    assert store.get_state(thread_id)["modelId"] == DEFAULT_CHAT_MODEL_ID
+    # OpenAI continuation state is no longer persisted; messages are canonical.
+    assert "response_id" not in messages[-1]["metadata"]
 
 
 def test_mock_short_mode_is_concise_and_stage_specific(tmp_path, monkeypatch):
@@ -226,7 +227,7 @@ def test_edit_and_resend_replaces_later_turns_and_uses_revised_prompt(
     assert "Old prompt" not in rendered
     assert "Later prompt" not in rendered
     assert "Make this step more precise" in rendered or "a little more precise" in rendered
-    assert [item["content"] for item in store.get_state(thread_id)["history"]] == [
+    assert [item["content"] for item in messages] == [
         "Revised prompt",
         messages[1]["content"],
     ]
@@ -329,4 +330,6 @@ def test_responses_stream_web_sources_and_state_without_live_api(tmp_path, monke
     assert fake_responses.kwargs["model"] == DEFAULT_CHAT_MODEL_ID
     assert fake_responses.kwargs["tools"] == [{"type": "web_search"}]
     assert fake_responses.kwargs["include"] == ["web_search_call.action.sources"]
-    assert store.get_state(thread_id)["previousResponseId"] == "resp_streamed"
+    assistant = store.get_messages(thread_id)[-1]
+    assert assistant["content"] == "Evidence matters."
+    assert "response_id" not in assistant["metadata"]

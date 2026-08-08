@@ -84,12 +84,23 @@ class Settings:
     )
     ui_base_url: str = os.getenv("CO_DESIGN_UI_URL", "http://127.0.0.1:8501")
     use_local_api: bool = _boolean("USE_LOCAL_API", True)
-    # Opaque FastAPI application session (not Cognito token lifetime).
-    app_session_ttl_seconds: int = int(os.getenv("APP_SESSION_TTL_SECONDS", "2592000"))
-    app_session_cookie_name: str = os.getenv(
-        "APP_SESSION_COOKIE_NAME", "co_design_session"
-    ).strip() or "co_design_session"
-    app_session_cookie_secure: bool = _boolean("APP_SESSION_COOKIE_SECURE", False)
+    # Cognito owns the browser session via HttpOnly refresh + ID-token cookies.
+    # Cookie Max-Age for refresh defaults to 30d; Cognito app-client refresh
+    # token validity is authoritative (~30d when configured that way).
+    cognito_refresh_cookie_name: str = os.getenv(
+        "COGNITO_REFRESH_COOKIE_NAME", "co_design_refresh"
+    ).strip() or "co_design_refresh"
+    cognito_id_token_cookie_name: str = os.getenv(
+        "COGNITO_ID_TOKEN_COOKIE_NAME", "co_design_id"
+    ).strip() or "co_design_id"
+    cognito_refresh_cookie_max_age: int = int(
+        os.getenv("COGNITO_REFRESH_COOKIE_MAX_AGE", "2592000")
+    )
+    cognito_id_token_cookie_max_age: int = int(
+        os.getenv("COGNITO_ID_TOKEN_COOKIE_MAX_AGE", "3600")
+    )
+    # false for local HTTP on 127.0.0.1; production Compose sets true for HTTPS.
+    auth_cookie_secure: bool = _boolean("AUTH_COOKIE_SECURE", False)
     # Empty when unset so Cognito config can fall through to secrets.toml or
     # derive from CO_DESIGN_PUBLIC_API_URL (never hard-code a local override).
     cognito_redirect_uri: str = os.getenv("COGNITO_REDIRECT_URI", "").strip()

@@ -18,8 +18,10 @@ from ui.auth_gate import (
     display_name_from_claims,
     is_logged_in,
     logout_user,
+    redirect_to_session_refresh,
     render_login_gate,
     render_signed_out_shell,
+    should_attempt_session_refresh,
 )
 from ui.constants import DEFAULT_APPEARANCE
 from ui.toasts import show_corner_toasts
@@ -47,6 +49,9 @@ if not is_logged_in():
     # Overwrite leftovers from a prior logged-in session in this browser tab.
     st.session_state.appearance = DEFAULT_APPEARANCE
     render_theme_css()
+    if should_attempt_session_refresh():
+        redirect_to_session_refresh()
+        st.stop()
     render_signed_out_shell()
     render_login_gate()
     st.stop()

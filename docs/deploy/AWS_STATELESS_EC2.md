@@ -27,6 +27,64 @@ Students
 Persistent state lives in **Aurora DSQL** and **S3**. Replacing the app
 container must not destroy conversations, progress, or uploads.
 
+## Production data model
+
+```text
+users
+ └── notebooks
+      ├── messages
+      └── sources
+           ├── object_key → S3 raw/content object
+           └── extracted_text_key → S3 derived text
+
+oauth_login_states  (pre-auth, one-time, independent)
+```
+
+Cognito owns the browser session. The refresh token uses a Secure, HttpOnly,
+SameSite=Lax cookie scoped to ``Path=/api/v1/auth``; the short-lived ID token
+uses a Secure, HttpOnly, SameSite=Lax cookie at ``Path=/`` so server-rendered
+Streamlit can ask FastAPI to validate it. When the ID token expires, Streamlit
+redirects the browser through ``/api/v1/auth/refresh``; only the browser and
+FastAPI handle the refresh cookie. There is **no** ``app_sessions`` table.
+Refresh tokens are never sent to Streamlit, stored in DSQL, returned in API
+JSON, logged, or exposed to browser JavaScript.
+
+```text
+Browser → Cognito Managed Login → authorization code + PKCE → FastAPI callback
+        → Secure HttpOnly refresh cookie → Cognito refresh
+        → verified Cognito sub → DSQL application user
+```
+
+Cognito is authoritative for credentials, refresh-token validity, revocation,
+and login lifetime. DSQL owns only application identity/profile and learning
+data; S3 owns uploaded bytes and extracted large text.
+
+Local SQLite uses the same logical model. Existing developer
+``data/*.sqlite3`` files are **not** auto-migrated; create a fresh DB or use
+``scripts/init_db.py --database …`` for a new file.
+
+**Do not run ``scripts/init_dsql.py`` against the real cluster until this
+branch has been reviewed and the local suite is green.** A prior draft that
+included ``app_sessions`` must not be treated as the production schema.
+
+| Table | Purpose |
+|---|---|
+| `users` | Cognito-bound profile + `preferences_text` (+ retained `role` / `identifier`) |
+| `oauth_login_states` | One-time OAuth state + PKCE verifier |
+| `notebooks` | Conversation root; `current_stage`, `progress_text`, `settings_text` |
+| `messages` | Chat history, assessments, stage decisions |
+| `sources` | Source metadata and S3 object keys (not file bytes) |
+
+Removed from production: `app_sessions`, `threads`, `steps`, `folders`,
+`thread_folders`, `feedbacks`, `model_turns`, `openai_thread_state`,
+`notebook_sources`, `phase_transitions`.
+
+`sources.selected` is authoritative: application queries filter unselected
+sources before loading extracted text or invoking the coach/provider. Uploaded
+bytes and extracted text use generated notebook-scoped S3 keys. Notebook S3
+prefix deletion runs only after the DSQL transaction commits, and per-object
+`DeleteObjects` errors fail the operation rather than being counted as removed.
+
 ## Local vs production storage
 
 | Concern | Local / tests | Production |
@@ -64,8 +122,11 @@ The script authenticates with **DbConnectAdmin**
 (``generate_db_connect_admin_auth_token``), commits each DDL alone, and for
 async indexes waits on ``sys.wait_for_job`` only when a new ``job_id`` is
 returned (``IF NOT EXISTS`` re-runs that find an existing index skip wait).
-Runtime never uses DbConnectAdmin. ``app_sessions.tokenHash`` relies on its
-column ``UNIQUE`` constraint rather than a redundant secondary index.
+Runtime never uses DbConnectAdmin.
+Useful secondary indexes (ASYNC): ``users(cognito_sub)``,
+``notebooks(user_id, updated_at)``, ``messages(notebook_id, created_at, id)``,
+``messages(notebook_id, decision_status, created_at)``,
+``sources(notebook_id, created_at, id)``.
 Then grant runtime privileges (run as admin; no account ARNs in Git):
 
 ```sql
@@ -162,7 +223,12 @@ Do **not** place long-lived AWS access keys in `.env`.
 5. Run `scripts/init_dsql.py` as admin, then GRANT runtime privileges.
 6. Confirm Cognito callback remains
    `https://cde2300chatbot.duckdns.org/api/v1/auth/callback`.
-7. Pass the live smoke sequence above, then cut over DuckDNS.
+7. In the Cognito app client, set **Refresh token expiration** to approximately
+   **30 days** and keep token revocation enabled. This setting, not an
+   application DB timeout, controls long-lived login duration.
+8. Confirm authorization-code grant and the `openid email profile` scopes are
+   enabled. Keep the app-client secret only in the host secrets configuration.
+9. Pass the live smoke sequence above, then cut over DuckDNS.
 
 ## Aurora DSQL assumptions
 

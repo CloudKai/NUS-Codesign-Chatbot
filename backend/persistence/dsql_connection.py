@@ -104,8 +104,9 @@ def generate_dsql_admin_auth_token(
 def adapt_sqlite_sql(sql: str) -> str:
     """Translate SQLite-oriented SQL fragments to DSQL/PostgreSQL placeholders.
 
-    Converts ``?`` placeholders to ``%s``, maps ``INSERT OR IGNORE`` /
-    ``INSERT OR REPLACE``, and leaves ``ON CONFLICT`` clauses intact.
+    Converts ``?`` placeholders to ``%s`` and maps the generic SQLite
+    ``INSERT OR IGNORE`` form. Callers that need an upsert must provide an
+    explicit, table-specific ``ON CONFLICT`` clause.
     """
     text = sql.strip()
     upper = text.upper()
@@ -114,15 +115,9 @@ def adapt_sqlite_sql(sql: str) -> str:
         if "ON CONFLICT" not in text.upper():
             text = text.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
     elif upper.startswith("INSERT OR REPLACE INTO"):
-        text = "INSERT INTO" + text[len("INSERT OR REPLACE INTO") :]
-        if "ON CONFLICT" not in text.upper():
-            text = (
-                text.rstrip().rstrip(";")
-                + " ON CONFLICT (state) DO UPDATE SET "
-                + "codeVerifier = EXCLUDED.codeVerifier, "
-                + "createdAt = EXCLUDED.createdAt, "
-                + "expiresAt = EXCLUDED.expiresAt"
-            )
+        raise ValueError(
+            "INSERT OR REPLACE is not portable; use an explicit ON CONFLICT clause"
+        )
     return _qmark_to_percent(text)
 
 

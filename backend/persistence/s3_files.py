@@ -16,6 +16,26 @@ logger = logging.getLogger(__name__)
 _MISSING_CODES = frozenset({"NoSuchKey", "NotFound", "404"})
 
 
+class S3DeleteObjectsError(RuntimeError):
+    """Raised when S3 accepts a batch request but reports object-level failures."""
+
+    def __init__(self, prefix: str, errors: list[dict[str, Any]]):
+        self.prefix = prefix
+        self.errors = tuple(dict(error) for error in errors)
+        codes = sorted(
+            {
+                str(error.get("Code") or "Unknown")
+                for error in errors
+                if isinstance(error, dict)
+            }
+        )
+        detail = ", ".join(codes) or "Unknown"
+        super().__init__(
+            f"S3 failed to delete {len(errors)} object(s) under prefix "
+            f"{prefix!r}: {detail}"
+        )
+
+
 def is_missing_object_error(error: BaseException) -> bool:
     """Return True only when *error* indicates a missing S3 object.
 
@@ -143,7 +163,14 @@ class S3FileStorage:
             raise
 
     def delete_prefix(self, prefix: str) -> int:
-        """Delete every object under *prefix* using list+delete batches."""
+        """Delete every object under *prefix* using list+delete batches.
+
+        Raises:
+            S3DeleteObjectsError: when S3 returns per-object ``Errors`` from a
+                successful ``DeleteObjects`` request.
+            Exception: listing, credential, bucket, access, and transport
+                failures propagate unchanged.
+        """
         client = self._s3()
         paginator = client.get_paginator("list_objects_v2")
         removed = 0
@@ -154,9 +181,15 @@ class S3FileStorage:
             objects = [{"Key": item["Key"]} for item in contents if item.get("Key")]
             if not objects:
                 continue
-            client.delete_objects(
-                Bucket=self.bucket,
-                Delete={"Objects": objects, "Quiet": True},
+            result = (
+                client.delete_objects(
+                    Bucket=self.bucket,
+                    Delete={"Objects": objects, "Quiet": True},
+                )
+                or {}
             )
+            errors = result.get("Errors") or []
+            if errors:
+                raise S3DeleteObjectsError(prefix, list(errors))
             removed += len(objects)
         return removed

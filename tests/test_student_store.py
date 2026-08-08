@@ -1,85 +1,75 @@
-from pathlib import Path
+"""Deterministic tests for the six-table StudentStore model."""
+
+from __future__ import annotations
 
 from backend.student_store import StudentStore
 
 
-def make_store(tmp_path: Path) -> StudentStore:
-    return StudentStore(tmp_path / "student.sqlite3", identifier="test-student")
-
-
-def test_chat_history_folders_feedback_and_state(tmp_path):
-    store = make_store(tmp_path)
+def test_chat_history_and_notebook_state(tmp_path):
+    store = StudentStore(tmp_path / "store.sqlite3", identifier="student-a")
     thread_id = store.create_thread(
-        model_id="gpt-5.3-chat-latest",
+        name="Central question",
+        model_id="mock",
         support_mode="critical-thinking",
-        assignment={"title": "Essay"},
     )
     user_id = store.add_message(
-        thread_id,
-        "user",
-        "Evaluate my central claim",
-        model_id="gpt-5.3-chat-latest",
+        thread_id, "user", "What evidence supports longer crossing times?"
     )
     assistant_id = store.add_message(
         thread_id,
         "assistant",
-        "Start by separating the claim from its evidence.",
-        model_id="gpt-5.3-chat-latest",
+        "Consider signal timing studies.",
+        metadata={
+            "assessment": {
+                "current_stage": "focus",
+                "contribution_summary": "Crossing times",
+                "stage_assessment": "Clear focus",
+                "critical_understanding_level": "Emerging",
+                "confidence": 0.4,
+                "recommendation": "stay",
+                "recommendation_rationale": "Need more evidence",
+                "learning_summary": "Exploring crossing design.",
+            }
+        },
     )
-    store.set_feedback(thread_id, assistant_id, 1)
-    folder_id = store.create_folder("Semester 1")
-    store.move_thread(thread_id, folder_id)
-    store.save_state(
+    store.update_thread(
         thread_id,
-        previous_response_id="resp_1",
-        model_id="gpt-5.3-chat-latest",
-        history=[{"role": "user", "content": "Evaluate my central claim"}],
-    )
-    store.record_turn(
-        thread_id,
-        user_id,
-        assistant_id,
-        "gpt-5.3-chat-latest",
-        None,
-        {"input_tokens": 5},
+        metadata={
+            "learning_journey": {
+                "current_stage": "focus",
+                "completed_stages": [],
+                "response_detail": "short",
+            },
+            "selected_model": "mock",
+        },
     )
 
     thread = store.get_thread(thread_id)
-    assert thread["folderId"] == folder_id
-    assert thread["name"] == "Evaluate Central Claim"
+    assert thread is not None
+    assert thread["name"] == "Central question"
+    assert thread["metadata"]["thinking_stage"] == "focus"
+    assert thread["metadata"]["selected_model"] == "mock"
     assert store.list_threads("central")[0]["id"] == thread_id
-    overview = store.list_threads(folder_id=folder_id)[0]
-    assert overview["id"] == thread_id
-    assert overview["folderName"] == "Semester 1"
-    assert overview["messageCount"] == 2
-    assert overview["studentTurnCount"] == 1
-    assert overview["helpfulCount"] == 1
-    assert overview["needsReviewCount"] == 0
-    assert overview["latestUserMessage"] == "Evaluate my central claim"
+
     messages = store.get_messages(thread_id)
     assert [message["role"] for message in messages] == ["user", "assistant"]
-    assert messages[-1]["feedback"] == 1
-    assert store.get_state(thread_id)["previousResponseId"] == "resp_1"
-
-
-def test_folder_delete_moves_chat_to_unfiled(tmp_path):
-    store = make_store(tmp_path)
-    thread_id = store.create_thread(
-        model_id="gpt-5.4",
-        support_mode="assignment-planner",
+    assert messages[0]["id"] == user_id
+    assert messages[1]["id"] == assistant_id
+    assert messages[1]["metadata"]["assessment"]["learning_summary"].startswith(
+        "Exploring"
     )
-    folder_id = store.create_folder("Assignments")
-    store.move_thread(thread_id, folder_id)
-    store.delete_folder(folder_id)
-    assert store.get_thread(thread_id)["folderId"] is None
-    assert store.list_threads(folder_id="__unfiled__")[0]["id"] == thread_id
+    # Canonical history comes directly from messages; no legacy provider state API.
+    assert not hasattr(store, "get_state")
+    assert not hasattr(store, "save_state")
+    assert not hasattr(store, "record_turn")
 
 
-def test_thread_rename_edit_and_delete(tmp_path):
-    store = make_store(tmp_path)
+def test_delete_notebook_removes_messages_and_sources(tmp_path):
+    store = StudentStore(tmp_path / "delete.sqlite3")
     thread_id = store.create_thread(
-        model_id="gpt-5.4-mini",
-        support_mode="writing-feedback",
+        name="Draft",
+        model_id="mock",
+        support_mode="critical-thinking",
     )
     message_id = store.add_message(thread_id, "user", "Original")
     store.update_message(message_id, "Revised")
@@ -90,52 +80,33 @@ def test_thread_rename_edit_and_delete(tmp_path):
     assert store.get_thread(thread_id) is None
 
 
-def test_revise_user_message_truncates_later_turns_and_resets_state(tmp_path):
-    store = make_store(tmp_path)
+def test_revise_user_message_discards_later_turns(tmp_path):
+    store = StudentStore(tmp_path / "revise.sqlite3")
     thread_id = store.create_thread(
-        model_id="gpt-5.4",
+        name="Revise",
+        model_id="mock",
         support_mode="critical-thinking",
     )
     first_user = store.add_message(thread_id, "user", "Old first prompt")
-    first_assistant = store.add_message(thread_id, "assistant", "Old answer")
-    second_user = store.add_message(thread_id, "user", "Later prompt")
-    second_assistant = store.add_message(thread_id, "assistant", "Later answer")
-    store.record_turn(thread_id, first_user, first_assistant, "gpt-5.4", None, {})
-    store.record_turn(thread_id, second_user, second_assistant, "gpt-5.4", None, {})
-    store.save_state(
-        thread_id,
-        previous_response_id="resp_old",
-        model_id="gpt-5.4",
-        history=[
-            {"role": "user", "content": "Old first prompt"},
-            {"role": "assistant", "content": "Old answer"},
-            {"role": "user", "content": "Later prompt"},
-            {"role": "assistant", "content": "Later answer"},
-        ],
-    )
+    store.add_message(thread_id, "assistant", "Old answer")
+    store.add_message(thread_id, "user", "Later prompt")
+    store.add_message(thread_id, "assistant", "Later answer")
 
     history = store.revise_user_message(
         thread_id,
         first_user,
         "Revised first prompt",
-        model_id="gpt-5.4-mini",
-        metadata={"thinking_stage": "focus"},
+        model_id="mock",
+        metadata={},
     )
-
     assert history == []
     messages = store.get_messages(thread_id)
     assert len(messages) == 1
-    assert messages[0]["id"] == first_user
     assert messages[0]["content"] == "Revised first prompt"
-    assert messages[0]["metadata"]["model"] == "gpt-5.4-mini"
-    state = store.get_state(thread_id)
-    assert state["previousResponseId"] is None
-    assert state["modelId"] is None
-    assert state["history"] == []
 
 
-def test_user_preferences_merge_and_persist(tmp_path):
-    store = make_store(tmp_path)
+def test_user_preferences_round_trip(tmp_path):
+    store = StudentStore(tmp_path / "prefs.sqlite3")
     assert store.get_user_preferences().get("role") == "student"
 
     store.update_user_preferences({"appearance": "Dark"})
@@ -147,7 +118,108 @@ def test_user_preferences_merge_and_persist(tmp_path):
     prefs = store.get_user_preferences()
     assert prefs["appearance"] == "System"
     assert prefs["extra"] is True
-    assert prefs["role"] == "student"
 
-    reloaded = StudentStore(tmp_path / "student.sqlite3", identifier="test-student")
+    reloaded = StudentStore(tmp_path / "prefs.sqlite3")
     assert reloaded.get_user_preferences()["appearance"] == "System"
+
+
+def test_stage_decision_lives_on_assistant_message(tmp_path):
+    store = StudentStore(tmp_path / "decision.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    created = store.create_phase_transition(
+        {
+            "thread_id": thread_id,
+            "from_stage": "focus",
+            "to_stage": "evidence",
+            "assessment": {
+                "current_stage": "focus",
+                "contribution_summary": "Ready",
+                "stage_assessment": "Clear",
+                "critical_understanding_level": "Emerging",
+                "confidence": 0.5,
+                "recommendation": "advance",
+                "recommendation_rationale": "Enough focus",
+                "learning_summary": "Summary",
+            },
+        }
+    )
+    pending = store.get_pending_phase_transition(thread_id)
+    assert pending is not None
+    assert pending["id"] == created["id"]
+    assert pending["to_stage"] == "evidence"
+
+    store.add_message(
+        thread_id,
+        "user",
+        "I clarified the focus.",
+    )
+    store.add_message(
+        thread_id,
+        "assistant",
+        "Ready for evidence.",
+        message_id=created["id"],
+    )
+    messages = store.get_messages(thread_id)
+    assert [message["role"] for message in messages] == ["user", "assistant"]
+    assert messages[1]["id"] == created["id"]
+
+    resolved = store.apply_phase_transition_decision(
+        thread_id,
+        created["id"],
+        accepted=True,
+        metadata_patch={
+            "learning_journey": {
+                "current_stage": "evidence",
+                "completed_stages": ["focus"],
+                "stage_notes": {"focus": "Done"},
+                "response_detail": "short",
+            },
+            "thinking_stage": "evidence",
+        },
+        expected_from_stage="focus",
+    )
+    assert resolved["status"] == "confirmed"
+    thread = store.get_thread(thread_id) or {}
+    assert thread["metadata"]["thinking_stage"] == "evidence"
+    assert store.get_pending_phase_transition(thread_id) is None
+
+
+def test_owner_isolation_for_notebooks(tmp_path):
+    first = StudentStore(tmp_path / "iso.sqlite3", identifier="student-a")
+    second = StudentStore(tmp_path / "iso.sqlite3", identifier="student-b")
+    thread_id = first.create_thread(model_id="mock", support_mode="critical-thinking")
+    assert first.get_thread(thread_id) is not None
+    assert second.get_thread(thread_id) is None
+
+
+def test_six_table_schema_has_no_legacy_tables(tmp_path):
+    store = StudentStore(tmp_path / "schema.sqlite3")
+    with store._connect() as connection:
+        names = {
+            str(row["name"])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+    expected = {
+        "users",
+        "oauth_login_states",
+        "notebooks",
+        "messages",
+        "sources",
+    }
+    assert expected <= names
+    assert "app_sessions" not in names
+    legacy = {
+        "threads",
+        "steps",
+        "folders",
+        "thread_folders",
+        "feedbacks",
+        "model_turns",
+        "openai_thread_state",
+        "notebook_sources",
+        "phase_transitions",
+        "app_sessions",
+    }
+    assert names.isdisjoint(legacy)

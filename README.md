@@ -2,18 +2,15 @@
 
 Local critical-thinking coach for university students. The app is a **Streamlit**
 UI plus a **FastAPI** coaching API. Student data stays on your machine (SQLite +
-files under `data/`). Amazon Cognito Managed Login proves identity at sign-in;
-FastAPI then creates a 30-day opaque application session. Cognito access, ID,
-and refresh tokens are **not** persisted.
+files under `data/`). Amazon Cognito Managed Login proves identity; FastAPI
+keeps Cognito refresh + ID tokens in HttpOnly cookies (never DB / localStorage).
 
 ```text
 Cognito authentication
         ↓
 FastAPI /api/v1/auth/callback
         ↓
-30-day application session (SQLite locally / PostgreSQL later)
-        ↓
-opaque HttpOnly co_design_session cookie
+HttpOnly Cognito refresh + ID-token cookies (Path=/api/v1/auth)
         ↓
 Streamlit asks FastAPI /api/v1/auth/me
 ```
@@ -102,19 +99,17 @@ course, and allow this exact local callback URL:
 - Callback: `http://127.0.0.1:8000/api/v1/auth/callback`
 
 Sign-in starts at `http://127.0.0.1:8000/api/v1/auth/login`. Profile Logout
-revokes the application session at
-`http://127.0.0.1:8000/api/v1/auth/logout` and returns to the login gate with
-`?signed_out=1`.
+revokes the Cognito refresh token (best-effort) at
+`http://127.0.0.1:8000/api/v1/auth/logout`, clears auth cookies, and returns to
+the login gate with `?signed_out=1`.
 
-Keep every local URL on `127.0.0.1` (not `localhost`) so the host-only session
-cookie is shared across ports 8000 and 8501. Keep `.streamlit/secrets.toml`
-uncommitted.
+Keep every local URL on `127.0.0.1` (not `localhost`) so host-only cookies stay
+consistent. Keep `.streamlit/secrets.toml` uncommitted.
 
-Cognito tokens establish identity at sign-in. The application does not persist
-Cognito access, ID, or refresh tokens. Ongoing authentication is controlled by
-the FastAPI application session (`APP_SESSION_TTL_SECONDS`, default 30 days)
-stored as a SHA-256 hash in SQLite and exposed only as the HttpOnly
-`co_design_session` cookie (`Secure=false` locally).
+Cognito owns the browser session via HttpOnly refresh + ID-token cookies
+(`AUTH_COOKIE_SECURE=false` locally; Compose sets `true` in production).
+Refresh cookie Max-Age defaults to 30 days; Cognito app-client refresh validity
+is authoritative. Tokens are never stored in SQLite or returned in API JSON.
 
 ### 5. Start the whole program (one command)
 
@@ -303,7 +298,7 @@ root-owned empty data directory from being created during startup.
 Set the private Cognito secrets file / env to use:
 
 - `redirect_uri = "https://cde2300chatbot.duckdns.org/api/v1/auth/callback"`
-- `APP_SESSION_COOKIE_SECURE=true` (Compose already overrides this)
+- `AUTH_COOKIE_SECURE=true` (Compose already overrides this)
 
 Add that exact callback URL to the Cognito app client. Do not put private values
 in the image or repository. Compose injects `.env` at runtime and bind-mounts

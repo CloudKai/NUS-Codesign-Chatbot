@@ -213,11 +213,11 @@ def test_sources_and_history_stay_isolated_across_notebooks(tmp_path):
     assert len(store.get_messages(thread_a)) >= 2
 
 
-def test_phase_transitions_schema_is_compatible_on_existing_database(tmp_path):
+def test_phase_transitions_persist_on_messages_across_reopen(tmp_path):
     database = tmp_path / "schema.sqlite3"
     store = StudentStore(database)
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
-    # Re-open the same file to ensure additive schema initialization is idempotent.
+    # Re-open the same file to ensure schema initialization is idempotent.
     reopened = StudentStore(database)
     assert reopened.get_thread(thread_id) is not None
     assert reopened.get_pending_phase_transition(thread_id) is None
@@ -240,3 +240,13 @@ def test_phase_transitions_schema_is_compatible_on_existing_database(tmp_path):
     )
     assert created["status"] == "pending"
     assert reopened.get_pending_phase_transition(thread_id)["id"] == created["id"]
+    with reopened._connect() as connection:
+        tables = {
+            str(row["name"])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+    assert "phase_transitions" not in tables
+    assert "messages" in tables
+    assert "notebooks" in tables

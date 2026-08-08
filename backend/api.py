@@ -70,7 +70,6 @@ def create_app(
     *,
     auto_advance_stages: bool | None = None,
     workspace: WorkspaceService | None = None,
-    session_service=None,
     oidc_client=None,
 ) -> FastAPI:
     """Create a local API application with injectable progression behavior."""
@@ -103,7 +102,6 @@ def create_app(
     register_auth_routes(
         app,
         store=active_store,
-        sessions=session_service,
         oidc=oidc_client,
     )
 
@@ -130,9 +128,9 @@ def create_app(
     def auth_logout_callback(request: Request) -> RedirectResponse:
         """Deprecated Streamlit-cookie clear path kept for migration only.
 
-        Prefer ``GET/POST /api/v1/auth/logout``, which revokes the FastAPI
-        application session. This legacy route still expires old Streamlit OIDC
-        cookies and redirects to the signed-out gate.
+        Prefer ``GET/POST /api/v1/auth/logout``, which clears Cognito auth
+        cookies (and best-effort revokes the refresh token). This legacy route
+        still expires old Streamlit OIDC cookies and redirects to the gate.
         """
         target = str(settings.ui_base_url or "").rstrip("/")
         parsed = urlparse(target)

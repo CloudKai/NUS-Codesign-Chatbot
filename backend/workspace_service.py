@@ -33,8 +33,19 @@ class SourceContent:
 
 def public_source(source: dict[str, Any]) -> dict[str, Any]:
     """Return a source record safe for API/UI consumers (no filesystem path)."""
-    payload = {key: value for key, value in source.items() if key != "path"}
-    payload["has_file"] = bool(source.get("path"))
+    payload = {
+        key: value
+        for key, value in source.items()
+        if key not in {"path", "object_key", "extracted_text_key", "local_path"}
+    }
+    # Keep extracted text for grounding/UI; strip storage keys only.
+    meta = dict(payload.get("metadata") or {})
+    meta.pop("object_key", None)
+    meta.pop("local_path", None)
+    payload["metadata"] = meta
+    payload["has_file"] = bool(
+        source.get("path") or source.get("object_key") or meta.get("local_path")
+    )
     return payload
 
 

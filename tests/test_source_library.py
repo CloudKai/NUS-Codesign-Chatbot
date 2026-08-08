@@ -479,6 +479,7 @@ def test_mock_turn_persists_source_snapshot_without_forcing_citations(tmp_path, 
     rendered = "".join(stream)
     assert "[S1] Evidence note" not in rendered
     assert "Your question:" not in rendered
-    assert store.get_state(thread_id)["sourceSnapshot"] == [source["id"]]
+    # Source selection remains on the canonical assistant message.
     assistant = store.get_messages(thread_id)[-1]
+    assert assistant["metadata"]["source_ids"] == [source["id"]]
     assert assistant["metadata"]["source_refs"] == []

@@ -39,10 +39,10 @@ FastAPI (api.py)
 | `workflow.py` | Single LangGraph coach workflow wrapper (not six agents) |
 | `student_journey.py` | Six thinking stages, journey normalization, review helpers, stage questions |
 | `learning_service.py` | Confirmation-gated phase transitions and learning progression |
-| `student_store.py` | SQLite store for notebooks, folders, messages, sources, metadata |
+| `student_store.py` | Five-table SQLite/DSQL-compatible store for users, OAuth state, notebooks, messages, sources |
 | `persistence/` | Storage ports + factories: SQLite/DSQL student stores, local/S3 file storage |
 | `repositories.py` | Narrow repository adapters over `StudentStore` |
-| `chat_service.py` | Legacy/direct chat engine (`StudentChatEngine`) for non-API Streamlit path |
+| `chat_service.py` | Legacy/direct chat engine (`StudentChatEngine`); OpenAI continuation state is not persisted |
 | `providers.py` | Ollama and OpenAI coach provider adapters |
 | `mock_provider.py` | Deterministic provider for tests and offline demo |
 | `source_library.py` | Source CRUD helpers, lecture-notes sync, URL import, citation context |

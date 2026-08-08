@@ -12,47 +12,36 @@ import logging
 import threading
 from typing import Any, Callable
 
-from backend.student_store import StudentStore
+from backend.student_store import NOTEBOOK_CHILD_TABLES, StudentStore
 
 from .dsql_connection import (
     DsqlConnectionProxy,
     connect_dsql,
     run_dsql_transaction,
 )
-from .dsql_schema import RUNTIME_ROLE_NAME, THREAD_CHILD_TABLES
+from .dsql_schema import RUNTIME_ROLE_NAME
 
 logger = logging.getLogger(__name__)
 
 # StudentStore write methods re-executed as a whole on SQLSTATE 40001.
 _OCC_WRITE_METHODS = (
     "upsert_cognito_user",
-    "create_app_session",
-    "get_user_for_session_hash",
-    "revoke_app_session",
-    "cleanup_expired_app_sessions",
     "save_oauth_login_state",
     "consume_oauth_login_state",
     "update_user_preferences",
     "create_thread",
     "update_thread",
-    # delete_thread is overridden below with DSQL cascade + post-commit S3 cleanup.
-    "add_message",    "update_message",
+    "add_message",
+    "update_message",
     "revise_user_message",
-    "set_feedback",
-    "create_folder",
-    "rename_folder",
-    "delete_folder",
-    "move_thread",
     "create_phase_transition",
     "resolve_phase_transition",
     "apply_phase_transition_decision",
-    "save_state",
     "add_source",
     "set_source_selected",
     "set_all_sources_selected",
     "rename_source",
     "delete_source",
-    "record_turn",
 )
 
 
@@ -133,24 +122,6 @@ class DsqlStudentStore(StudentStore):
             user=self._user,
         )
 
-    def _ensure_column(
-        self,
-        connection: Any,
-        table: str,
-        column: str,
-        definition: str,
-    ) -> None:
-        """No-op: runtime must not ALTER TABLE (admin bootstrap owns DDL)."""
-        return
-
-    def _ensure_cognito_user_columns(self, connection: Any) -> None:
-        """No-op: Cognito columns are created by ``scripts/init_dsql.py``."""
-        return
-
-    def _ensure_app_session_tables(self, connection: Any) -> None:
-        """No-op: app session tables are created by ``scripts/init_dsql.py``."""
-        return
-
     def delete_thread(self, thread_id: str) -> None:
         """Delete a notebook and all child rows, then purge stored files."""
         if not self.get_thread(thread_id):
@@ -158,39 +129,29 @@ class DsqlStudentStore(StudentStore):
 
         def _delete() -> None:
             with self._lock, self._connect() as connection:
-                for table in THREAD_CHILD_TABLES:
-                    if table == "thread_folders":
-                        connection.execute(
-                            "DELETE FROM thread_folders WHERE threadId = ? AND ownerId = ?",
-                            (thread_id, self.owner_id),
-                        )
-                    else:
-                        connection.execute(
-                            f"DELETE FROM {table} WHERE threadId = ?",
-                            (thread_id,),
-                        )
+                for table in NOTEBOOK_CHILD_TABLES:
+                    connection.execute(
+                        f"DELETE FROM {table} WHERE notebook_id = ?",
+                        (thread_id,),
+                    )
                 connection.execute(
-                    "DELETE FROM threads WHERE id = ? AND userId = ?",
+                    "DELETE FROM notebooks WHERE id = ? AND user_id = ?",
                     (thread_id, self.owner_id),
                 )
 
-        # OCC wrapper already wraps delete_thread; when called via wrapper this
-        # body runs inside one attempt. Call _delete directly from the unbound
-        # path below — the installed wrapper targets StudentStore.delete_thread,
-        # so override fully here with its own retry.
         run_dsql_transaction(_delete)
-        self._cleanup_thread_files(thread_id)
+        self._cleanup_notebook_files(thread_id)
 
-    def _cleanup_thread_files(self, thread_id: str) -> None:
+    def _cleanup_notebook_files(self, notebook_id: str) -> None:
         """Remove persisted upload objects for a deleted notebook.
 
         Runs after the DB transaction commits so S3 deletes are not retried as
         part of OCC (avoid non-idempotent coupling inside the DB retry loop).
         """
         from backend.persistence.factory import get_file_storage
-        from backend.persistence.object_keys import thread_prefix
+        from backend.persistence.object_keys import notebook_prefix
 
         storage = get_file_storage()
         storage.delete_prefix(
-            thread_prefix(user_id=self.owner_id, thread_id=thread_id)
+            notebook_prefix(user_id=self.owner_id, notebook_id=notebook_id)
         )

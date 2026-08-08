@@ -79,6 +79,43 @@ class CoachApplicationService:
             }
         )
         transition_id = turn.pending_transition.id if turn.pending_transition else None
+        user_id = self._store.add_message(
+            prepared_request.thread_id,
+            "user",
+            prepared_request.student_message,
+            metadata={
+                "thinking_stage": prepared_request.current_stage,
+                "source_ids": prepared_request.source_ids,
+                "workflow": "langgraph",
+            },
+        )
+        # When a recommendation exists, create_phase_transition already inserted
+        # the assistant message row (id == transition_id). Fill in the reply.
+        self._store.add_message(
+            prepared_request.thread_id,
+            "assistant",
+            turn.response_text,
+            message_id=transition_id,
+            metadata={
+                "thinking_stage": prepared_request.current_stage,
+                "assessment": turn.assessment.model_dump(mode="json"),
+                "pending_transition_id": transition_id,
+                "proposed_stage": (
+                    turn.pending_transition.to_stage if turn.pending_transition else None
+                ),
+                "decision_status": "pending" if turn.pending_transition else None,
+                "workflow": "langgraph",
+                "source_ids": prepared_request.source_ids,
+                "source_refs": [
+                    {
+                        "id": citation.source_id,
+                        "label": citation.label,
+                        "title": citation.title,
+                    }
+                    for citation in turn.assessment.citations
+                ],
+            },
+        )
         if (
             self._auto_advance_stages
             and self._progress is not None
@@ -112,37 +149,28 @@ class CoachApplicationService:
                     "auto_advanced_to": next_stage_id,
                 }
             )
-        user_id = self._store.add_message(
-            prepared_request.thread_id,
-            "user",
-            prepared_request.student_message,
-            metadata={
-                "thinking_stage": prepared_request.current_stage,
-                "source_ids": prepared_request.source_ids,
-                "workflow": "langgraph",
-            },
-        )
-        self._store.add_message(
-            prepared_request.thread_id,
-            "assistant",
-            turn.response_text,
-            metadata={
-                "thinking_stage": turn.auto_advanced_to or prepared_request.current_stage,
-                "assessment": turn.assessment.model_dump(mode="json"),
-                "pending_transition_id": transition_id,
-                "auto_advanced_to": turn.auto_advanced_to,
-                "workflow": "langgraph",
-                "source_ids": prepared_request.source_ids,
-                "source_refs": [
-                    {
-                        "id": citation.source_id,
-                        "label": citation.label,
-                        "title": citation.title,
-                    }
-                    for citation in turn.assessment.citations
-                ],
-            },
-        )
+            self._store.add_message(
+                prepared_request.thread_id,
+                "assistant",
+                turn.response_text,
+                message_id=transition_id,
+                metadata={
+                    "thinking_stage": next_stage_id,
+                    "assessment": turn.assessment.model_dump(mode="json"),
+                    "pending_transition_id": transition_id,
+                    "auto_advanced_to": next_stage_id,
+                    "workflow": "langgraph",
+                    "source_ids": prepared_request.source_ids,
+                    "source_refs": [
+                        {
+                            "id": citation.source_id,
+                            "label": citation.label,
+                            "title": citation.title,
+                        }
+                        for citation in turn.assessment.citations
+                    ],
+                },
+            )
         self._store.update_thread(
             prepared_request.thread_id,
             metadata={

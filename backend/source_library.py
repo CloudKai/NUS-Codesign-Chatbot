@@ -6,6 +6,7 @@ import mimetypes
 import re
 import socket
 import threading
+import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -342,6 +343,53 @@ def fetch_public_webpage(
     return title[:180] or fallback_title, extracted[:MAX_SOURCE_TEXT], final_url, len(payload)
 
 
+def _add_source_with_extracted_text(
+    store: StudentStore,
+    notebook_id: str,
+    *,
+    extracted_text: str = "",
+    **source_values: Any,
+) -> str:
+    """Store extracted text before the retryable source-metadata DB write.
+
+    Object storage is deliberately outside ``StudentStore.add_source`` so an
+    Aurora DSQL OCC retry never repeats S3 writes.
+    """
+    source_id = str(source_values.pop("source_id", "") or uuid.uuid4())
+    cleaned = (extracted_text or "")[:MAX_SOURCE_TEXT]
+    extracted_text_key: str | None = None
+    storage = None
+    if cleaned:
+        from backend.persistence.factory import get_file_storage
+        from backend.persistence.object_keys import build_extracted_text_object_key
+
+        storage = get_file_storage()
+        extracted_text_key = build_extracted_text_object_key(
+            user_id=store.owner_id,
+            notebook_id=notebook_id,
+            source_id=source_id,
+        )
+        storage.put_bytes(
+            key=extracted_text_key,
+            data=cleaned.encode("utf-8"),
+            content_type="text/plain; charset=utf-8",
+        )
+    try:
+        return store.add_source(
+            notebook_id,
+            source_id=source_id,
+            extracted_text_key=extracted_text_key,
+            **source_values,
+        )
+    except Exception as database_error:
+        if storage is not None and extracted_text_key:
+            try:
+                storage.delete(extracted_text_key)
+            except Exception as cleanup_error:
+                raise cleanup_error from database_error
+        raise
+
+
 def add_file_sources(
     store: StudentStore,
     thread_id: str,
@@ -369,7 +417,8 @@ def add_file_sources(
             if preserve_display_names
             else upload.name
         )
-        source_id = store.add_source(
+        source_id = _add_source_with_extracted_text(
+            store,
             thread_id,
             kind=kind,
             title=display_title,
@@ -533,7 +582,8 @@ def add_text_source(
     cleaned = text.strip()
     if not cleaned:
         raise SourceImportError("Paste some source text first.")
-    source_id = store.add_source(
+    source_id = _add_source_with_extracted_text(
+        store,
         thread_id,
         kind="text",
         title=title or "Pasted text",
@@ -554,7 +604,8 @@ def add_url_source(
     opener: Any | None = None,
 ) -> dict[str, Any]:
     title, text, final_url, size = fetch_public_webpage(url, opener=opener)
-    source_id = store.add_source(
+    source_id = _add_source_with_extracted_text(
+        store,
         thread_id,
         kind="url",
         title=title,
@@ -589,7 +640,8 @@ def backfill_legacy_sources(store: StudentStore, thread_id: str) -> int:
                     extracted = extract_text(path)[:MAX_SOURCE_TEXT]
                 except Exception:
                     extracted = ""
-            store.add_source(
+            _add_source_with_extracted_text(
+                store,
                 thread_id,
                 kind="image" if suffix in IMAGE_SUFFIXES else "file",
                 title=str(upload.get("name") or path.name),
@@ -664,7 +716,12 @@ def safe_source_file_path(source: dict[str, Any]) -> Path | None:
     metadata = source.get("metadata") or {}
     if metadata.get("storage_provider") in {"s3", "memory"}:
         return None
-    path_value = source.get("path")
+    if source.get("object_key") and metadata.get("storage_provider") in {
+        "s3",
+        "memory",
+    }:
+        return None
+    path_value = source.get("path") or metadata.get("local_path")
     if not path_value:
         return None
     path = Path(str(path_value)).resolve()
@@ -677,10 +734,14 @@ def safe_source_file_path(source: dict[str, Any]) -> Path | None:
 def read_source_bytes(source: dict[str, Any]) -> bytes | None:
     """Return source file bytes from local disk or configured object storage."""
     metadata = source.get("metadata") or {}
-    object_key = metadata.get("object_key") or (
-        source.get("path")
-        if metadata.get("storage_provider") in {"s3", "memory"}
-        else None
+    object_key = (
+        source.get("object_key")
+        or metadata.get("object_key")
+        or (
+            source.get("path")
+            if metadata.get("storage_provider") in {"s3", "memory"}
+            else None
+        )
     )
     if object_key:
         from backend.persistence.factory import get_file_storage
@@ -691,6 +752,13 @@ def read_source_bytes(source: dict[str, Any]) -> bytes | None:
             return None
     path = safe_source_file_path(source)
     if path is None:
+        # Compatibility: path may be a local_path stored only in metadata.
+        local_path = metadata.get("local_path")
+        if local_path:
+            candidate = {**source, "path": local_path, "metadata": metadata}
+            path = safe_source_file_path(candidate)
+            if path is not None:
+                return path.read_bytes()
         return None
     return path.read_bytes()
 

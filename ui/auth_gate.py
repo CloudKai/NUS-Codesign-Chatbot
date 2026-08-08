@@ -1,11 +1,12 @@
-"""Signed-out shell and FastAPI application-session login gate for Streamlit.
+"""Signed-out shell and Cognito cookie-session login gate for Streamlit.
 
 Unauthenticated visitors see a static layout preview plus a non-dismissible
 login dialog. Protected notebook/source data must never be loaded on this path.
 
-Authentication authority is FastAPI ``/api/v1/auth/me`` validated against the
-opaque ``co_design_session`` cookie. Cognito tokens are not used after login.
-Streamlit native OIDC helpers are not the session authority.
+Authentication authority is FastAPI ``/api/v1/auth/me``. Streamlit receives
+only the short-lived HttpOnly Cognito ID-token cookie; the refresh cookie is
+scoped to FastAPI's auth path and never reaches Streamlit or browser
+JavaScript. Tokens are never stored in ``st.session_state`` or localStorage.
 """
 
 from __future__ import annotations
@@ -32,9 +33,8 @@ def _is_allowed_http_origin(parsed: ParseResult) -> bool:
     }
 
 
-def _session_cookie_value() -> str | None:
-    """Read the opaque application-session cookie from Streamlit context."""
-    name = str(getattr(settings, "app_session_cookie_name", "co_design_session"))
+def _cookie_value(name: str) -> str | None:
+    """Read one cookie from Streamlit context when the browser sent it."""
     try:
         cookies = getattr(st, "context", None)
         cookie_map = getattr(cookies, "cookies", None) if cookies is not None else None
@@ -48,35 +48,37 @@ def _session_cookie_value() -> str | None:
 
 
 def authenticated_user() -> dict[str, Any] | None:
-    """Return the FastAPI ``/auth/me`` user for the current cookie, if valid.
+    """Return the FastAPI ``/auth/me`` user for the current Cognito cookies.
 
-    Always revalidates against FastAPI on each Streamlit rerun. The opaque
-    session cookie is read from the browser context and is never stored in
-    ``st.session_state``; FastAPI remains the authentication authority for
-    expiry and revocation.
+    Always revalidates against FastAPI on each Streamlit rerun. Cookie values
+    are read from the browser context and never stored in ``st.session_state``.
+    FastAPI remains the authentication authority for expiry and refresh.
     """
-    token = _session_cookie_value()
-    if not token:
+    id_token = _cookie_value(
+        str(getattr(settings, "cognito_id_token_cookie_name", "co_design_id"))
+    )
+    if not id_token:
         return None
     try:
         from ui.runtime import local_api_client
 
-        user = local_api_client().auth_me(token)
+        user = local_api_client().auth_me(id_token)
     except Exception:
         return None
     if not user or not str(user.get("cognito_sub") or "").strip():
         return None
+    st.session_state.pop("_auth_refresh_attempted", None)
     return user
 
 
 def is_logged_in() -> bool:
-    """Return whether FastAPI validates the opaque application-session cookie."""
+    """Return whether FastAPI validates the Cognito auth cookies."""
     return authenticated_user() is not None
 
 
-def current_user_claims() -> dict[str, Any]:
+def current_user_claims(user: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return identity claims derived from the FastAPI session user (no tokens)."""
-    user = authenticated_user()
+    user = user or authenticated_user()
     if not user:
         return {}
     claims: dict[str, Any] = {"sub": str(user.get("cognito_sub") or "").strip()}
@@ -123,6 +125,63 @@ def auth_login_url() -> str | None:
     return f"{base}/api/v1/auth/login"
 
 
+def auth_refresh_url() -> str | None:
+    """Return the browser-only Cognito refresh bridge URL."""
+    base = str(
+        getattr(settings, "public_api_base_url", "")
+        or getattr(settings, "api_base_url", "")
+        or ""
+    ).rstrip("/")
+    parsed = urlparse(base)
+    if (
+        not _is_allowed_http_origin(parsed)
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+    return f"{base}/api/v1/auth/refresh"
+
+
+def should_attempt_session_refresh() -> bool:
+    """Return whether a signed-out render should try the browser refresh bridge."""
+    if bool(st.session_state.get("_auth_refresh_attempted")):
+        return False
+    try:
+        return not any(
+            st.query_params.get(key) == "1"
+            for key in ("auth_required", "auth_error", "signed_out")
+        )
+    except Exception:
+        return False
+
+
+def redirect_to_session_refresh() -> None:
+    """Navigate to FastAPI refresh without exposing the refresh token to JS."""
+    url = auth_refresh_url()
+    if not url:
+        return
+    st.session_state["_auth_refresh_attempted"] = True
+    safe_url = json.dumps(url)
+    components.html(
+        f"""
+<script>
+(() => {{
+  const url = {safe_url};
+  try {{
+    window.parent.location.replace(url);
+    return;
+  }} catch (error) {{
+  }}
+  window.location.replace(url);
+}})();
+</script>
+""",
+        height=0,
+    )
+
+
 def auth_credentials_configured() -> tuple[bool, str | None]:
     """Return whether a login URL can be built for Cognito via FastAPI."""
     if auth_login_url():
@@ -157,6 +216,7 @@ def start_login() -> None:
         st.session_state.pop("_auth_redirecting", None)
         return
     st.session_state.pop("_auth_config_error", None)
+    st.session_state.pop("_auth_refresh_attempted", None)
     st.session_state["_auth_redirecting"] = True
 
 
@@ -203,6 +263,12 @@ def render_login_gate() -> None:
             del st.query_params["signed_out"]
     except Exception:
         just_signed_out = bool(st.session_state.pop("_just_signed_out", None))
+    try:
+        if st.query_params.get("auth_required") == "1":
+            st.session_state["_auth_refresh_attempted"] = True
+            del st.query_params["auth_required"]
+    except Exception:
+        pass
     try:
         if st.query_params.get("auth_error") == "1":
             st.session_state["_auth_config_error"] = (

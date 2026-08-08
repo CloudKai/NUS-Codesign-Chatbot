@@ -61,7 +61,6 @@ class ChatStream:
     options: ChatOptions
     text: str = ""
     assistant_message_id: str | None = None
-    response_id: str | None = None
     sources: list[dict[str, str]] = field(default_factory=list)
     artifacts: list[Path] = field(default_factory=list)
     usage: dict[str, Any] = field(default_factory=dict)
@@ -81,7 +80,7 @@ def _safe_history_item(item: dict[str, Any]) -> dict[str, Any]:
                 normalized.append(
                     {"type": "input_text", "text": "[Student included an image in this turn.]"}
                 )
-            elif "<notebook_sources>" in text or text.startswith(
+            elif "<selected_sources>" in text or text.startswith(
                 "The student attached the following assignment material."
             ):
                 continue
@@ -315,10 +314,10 @@ class StudentChatEngine:
                 {
                     "type": "input_text",
                     "text": (
-                        "<notebook_sources>\n"
+                        "<selected_sources>\n"
                         "Use these selected notebook sources for this turn. Cite factual claims "
                         "with their exact bracketed labels, such as [S1].\n\n"
-                        f"{context}\n</notebook_sources>"
+                        f"{context}\n</selected_sources>"
                     ),
                 }
             )
@@ -443,7 +442,6 @@ class StudentChatEngine:
                     "response_language": stream.options.response_language,
                     "sources": stream.sources,
                     "artifacts": [str(path) for path in stream.artifacts],
-                    "response_id": stream.response_id,
                     "source_ids": stream.options.source_ids,
                     "source_refs": cited_references,
                     "allow_model_knowledge": stream.options.allow_model_knowledge,
@@ -451,14 +449,6 @@ class StudentChatEngine:
                     "next_thinking_stage": next_stage,
                 },
                 is_error=bool(stream.error),
-            )
-            self.store.record_turn(
-                stream.thread_id,
-                stream.user_message_id,
-                stream.assistant_message_id,
-                model.id,
-                stream.options.reasoning_effort,
-                stream.usage,
             )
 
     def _mock_stream(self, stream: ChatStream, model: ModelDefinition) -> Iterator[str]:
@@ -496,42 +486,27 @@ class StudentChatEngine:
         for chunk in self._chunk(answer):
             stream.text += chunk
             yield chunk
-        state = self.store.get_state(stream.thread_id)
-        history = list(state.get("history", []))
-        history.extend(
-            [
-                {"role": "user", "content": stream.prompt},
-                {"role": "assistant", "content": stream.text},
-            ]
-        )
-        self.store.save_state(
-            stream.thread_id,
-            previous_response_id=None,
-            model_id=model.id,
-            history=history,
-            source_snapshot=stream.options.source_ids,
-            grounding_mode=(
-                "hybrid" if stream.options.allow_model_knowledge else "source_first"
-            ),
-        )
         stream.usage = {"mock": True}
 
     def _openai_stream(self, stream: ChatStream, model: ModelDefinition) -> Iterator[str]:
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is not configured. Use MOCK_OPENAI=true to preview.")
         client = OpenAI(api_key=settings.openai_api_key)
-        state = self.store.get_state(stream.thread_id)
-        history = list(state.get("history", []))
+        history = [
+            {"role": message["role"], "content": message["content"]}
+            for message in self.store.get_messages(stream.thread_id)
+            if str(message.get("content") or "").strip()
+        ]
         user_item = self._user_item(stream, model)
         current_input, previous_response_id = response_input_for_model(
             history,
             user_item,
-            previous_model=state.get("modelId"),
+            previous_model=None,
             selected_model=model.id,
-            previous_response_id=state.get("previousResponseId"),
-            previous_source_snapshot=state.get("sourceSnapshot"),
+            previous_response_id=None,
+            previous_source_snapshot=None,
             selected_source_snapshot=stream.options.source_ids,
-            previous_grounding_mode=state.get("groundingMode"),
+            previous_grounding_mode=None,
             selected_grounding_mode=(
                 "hybrid" if stream.options.allow_model_knowledge else "source_first"
             ),
@@ -609,29 +584,11 @@ class StudentChatEngine:
             stream.text += warning
             yield warning
 
-        stream.response_id = final_response_id
         if completed_response:
             stream.sources = _sources_from_response(completed_response)
         if not stream.text and stream.artifacts:
             stream.text = "I generated the requested output. Review the file below."
             yield stream.text
-        history.extend(
-            [
-                {"role": "user", "content": stream.prompt},
-                {"role": "assistant", "content": stream.text},
-            ]
-        )
-        self.store.save_state(
-            stream.thread_id,
-            previous_response_id=final_response_id,
-            model_id=model.id,
-            history=history,
-            vector_store_id=state.get("vectorStoreId"),
-            source_snapshot=stream.options.source_ids,
-            grounding_mode=(
-                "hybrid" if stream.options.allow_model_knowledge else "source_first"
-            ),
-        )
 
     def _mock_image(self, thread_id: str, prompt: str) -> Path:
         workspace = (settings.workspaces_dir / thread_id).resolve()

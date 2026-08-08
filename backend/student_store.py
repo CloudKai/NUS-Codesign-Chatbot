@@ -1,3 +1,18 @@
+"""Student persistence shared by FastAPI, Streamlit, and DSQL.
+
+Logical production schema (Cognito owns the browser session; no app_sessions):
+
+    users
+     └── notebooks
+          ├── messages
+          └── sources → S3 object keys
+
+    oauth_login_states  (pre-auth, transient)
+
+Public method names such as ``create_thread`` / ``thread_id`` remain as
+compatibility wrappers over ``notebooks`` so API and UI churn stays limited.
+"""
+
 from __future__ import annotations
 
 import json
@@ -13,14 +28,17 @@ from .settings import settings
 
 
 def utc_now() -> str:
+    """Return an ISO-8601 UTC timestamp string."""
     return datetime.now(timezone.utc).isoformat()
 
 
 def _dump(value: Any) -> str:
+    """Serialize *value* as JSON text for TEXT columns."""
     return json.dumps(value, ensure_ascii=False)
 
 
 def _load(value: str | None, default: Any) -> Any:
+    """Deserialize a JSON TEXT column, returning *default* on empty/invalid."""
     if not value:
         return default
     try:
@@ -29,226 +47,137 @@ def _load(value: str | None, default: Any) -> Any:
         return default
 
 
+# Progress blob keys (never include current_stage — that is notebooks.current_stage).
+_PROGRESS_KEYS = frozenset(
+    {
+        "completed_stages",
+        "stage_notes",
+        "working_conclusion",
+        "critical_reflection",
+        "response_detail",
+        "learning_summary",
+        "understanding_change",
+        "critical_understanding",
+    }
+)
+
+# Notebook settings blob keys.
+_SETTINGS_KEYS = frozenset(
+    {
+        "selected_model",
+        "reasoning_effort",
+        "support_mode",
+        "assignment",
+        "response_language",
+        "allow_model_knowledge",
+        "display_name",
+        "last_workflow_user_message_id",
+        "tags",
+    }
+)
+
+
 SCHEMA = """
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     identifier TEXT NOT NULL UNIQUE,
-    metadata TEXT NOT NULL DEFAULT '{}',
-    createdAt TEXT NOT NULL
+    cognito_sub TEXT,
+    email TEXT,
+    display_name TEXT,
+    role TEXT NOT NULL DEFAULT 'student',
+    preferences_text TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT,
+    last_login_at TEXT
 );
 
-CREATE TABLE IF NOT EXISTS threads (
-    id TEXT PRIMARY KEY,
-    createdAt TEXT NOT NULL,
-    name TEXT,
-    userId TEXT,
-    userIdentifier TEXT,
-    tags TEXT NOT NULL DEFAULT '[]',
-    metadata TEXT NOT NULL DEFAULT '{}',
-    FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS steps (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    type TEXT NOT NULL,
-    threadId TEXT NOT NULL,
-    parentId TEXT,
-    streaming INTEGER NOT NULL DEFAULT 0,
-    waitForAnswer INTEGER,
-    isError INTEGER,
-    metadata TEXT NOT NULL DEFAULT '{}',
-    tags TEXT NOT NULL DEFAULT '[]',
-    input TEXT,
-    output TEXT,
-    createdAt TEXT,
-    command TEXT,
-    start TEXT,
-    end TEXT,
-    generation TEXT NOT NULL DEFAULT '{}',
-    showInput TEXT,
-    language TEXT,
-    indent INTEGER,
-    defaultOpen INTEGER,
-    modes TEXT NOT NULL DEFAULT '{}',
-    FOREIGN KEY (threadId) REFERENCES threads(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_steps_thread_created ON steps(threadId, createdAt);
-
-CREATE TABLE IF NOT EXISTS folders (
-    id TEXT PRIMARY KEY,
-    ownerId TEXT NOT NULL,
-    name TEXT NOT NULL,
-    color TEXT NOT NULL DEFAULT '#6d5dfc',
-    position INTEGER NOT NULL DEFAULT 0,
-    createdAt TEXT NOT NULL,
-    updatedAt TEXT NOT NULL,
-    UNIQUE(ownerId, name),
-    FOREIGN KEY (ownerId) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS thread_folders (
-    threadId TEXT PRIMARY KEY,
-    folderId TEXT NOT NULL,
-    ownerId TEXT NOT NULL,
-    createdAt TEXT NOT NULL,
-    FOREIGN KEY (threadId) REFERENCES threads(id) ON DELETE CASCADE,
-    FOREIGN KEY (folderId) REFERENCES folders(id) ON DELETE CASCADE,
-    FOREIGN KEY (ownerId) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS feedbacks (
-    id TEXT PRIMARY KEY,
-    forId TEXT NOT NULL UNIQUE,
-    threadId TEXT NOT NULL,
-    value INTEGER NOT NULL,
-    comment TEXT,
-    FOREIGN KEY (threadId) REFERENCES threads(id) ON DELETE CASCADE,
-    FOREIGN KEY (forId) REFERENCES steps(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS model_turns (
-    id TEXT PRIMARY KEY,
-    threadId TEXT NOT NULL,
-    userMessageId TEXT,
-    assistantMessageId TEXT,
-    modelId TEXT NOT NULL,
-    reasoningEffort TEXT,
-    usage TEXT NOT NULL DEFAULT '{}',
-    createdAt TEXT NOT NULL,
-    FOREIGN KEY (threadId) REFERENCES threads(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS openai_thread_state (
-    threadId TEXT PRIMARY KEY,
-    previousResponseId TEXT,
-    modelId TEXT,
-    history TEXT NOT NULL DEFAULT '[]',
-    vectorStoreId TEXT,
-    sourceSnapshot TEXT NOT NULL DEFAULT '[]',
-    groundingMode TEXT NOT NULL DEFAULT 'source_first',
-    updatedAt TEXT NOT NULL,
-    FOREIGN KEY (threadId) REFERENCES threads(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS notebook_sources (
-    id TEXT PRIMARY KEY,
-    threadId TEXT NOT NULL,
-    ownerId TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    title TEXT NOT NULL,
-    mime TEXT NOT NULL DEFAULT 'text/plain',
-    path TEXT,
-    sourceUrl TEXT,
-    extractedText TEXT NOT NULL DEFAULT '',
-    size INTEGER NOT NULL DEFAULT 0,
-    selected INTEGER NOT NULL DEFAULT 1,
-    metadata TEXT NOT NULL DEFAULT '{}',
-    createdAt TEXT NOT NULL,
-    updatedAt TEXT NOT NULL,
-    FOREIGN KEY (threadId) REFERENCES threads(id) ON DELETE CASCADE,
-    FOREIGN KEY (ownerId) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_notebook_sources_thread
-ON notebook_sources(threadId, createdAt);
-
-CREATE TABLE IF NOT EXISTS phase_transitions (
-    id TEXT PRIMARY KEY,
-    threadId TEXT NOT NULL,
-    fromStage TEXT NOT NULL,
-    toStage TEXT NOT NULL,
-    assessment TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    createdAt TEXT NOT NULL,
-    resolvedAt TEXT,
-    FOREIGN KEY (threadId) REFERENCES threads(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_phase_transitions_thread_status
-ON phase_transitions(threadId, status, createdAt);
-
-CREATE TABLE IF NOT EXISTS app_sessions (
-    id TEXT PRIMARY KEY,
-    tokenHash TEXT NOT NULL UNIQUE,
-    userId TEXT NOT NULL,
-    createdAt TEXT NOT NULL,
-    expiresAt TEXT NOT NULL,
-    lastSeenAt TEXT,
-    revokedAt TEXT,
-    FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_app_sessions_token_hash
-ON app_sessions(tokenHash);
-
-CREATE INDEX IF NOT EXISTS idx_app_sessions_user
-ON app_sessions(userId);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_cognito_sub
+ON users(cognito_sub);
 
 CREATE TABLE IF NOT EXISTS oauth_login_states (
     state TEXT PRIMARY KEY,
-    codeVerifier TEXT NOT NULL,
-    createdAt TEXT NOT NULL,
-    expiresAt TEXT NOT NULL
+    code_verifier TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS notebooks (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    title TEXT,
+    current_stage TEXT NOT NULL DEFAULT 'focus',
+    progress_text TEXT NOT NULL DEFAULT '{}',
+    settings_text TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_notebooks_user_updated
+ON notebooks(user_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY,
+    notebook_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    is_error INTEGER NOT NULL DEFAULT 0,
+    assessment_text TEXT,
+    cited_source_ids_text TEXT,
+    proposed_stage TEXT,
+    decision_status TEXT,
+    decision_at TEXT,
+    metadata_text TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (notebook_id) REFERENCES notebooks(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_notebook_created
+ON messages(notebook_id, created_at, id);
+
+CREATE INDEX IF NOT EXISTS idx_messages_notebook_decision
+ON messages(notebook_id, decision_status, created_at);
+
+CREATE TABLE IF NOT EXISTS sources (
+    id TEXT PRIMARY KEY,
+    notebook_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content_type TEXT,
+    byte_size INTEGER NOT NULL DEFAULT 0,
+    object_key TEXT,
+    extracted_text_key TEXT,
+    source_url TEXT,
+    selected INTEGER NOT NULL DEFAULT 1,
+    metadata_text TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (notebook_id) REFERENCES notebooks(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_sources_notebook_created
+ON sources(notebook_id, created_at, id);
 """
 
 
+# Child tables deleted explicitly when a notebook is removed (DSQL has no FK cascade).
+NOTEBOOK_CHILD_TABLES = ("messages", "sources")
+
+
 class StudentStore:
-    """Framework-neutral SQLite store shared by the Streamlit frontend and OpenAI engine."""
+    """Framework-neutral store for notebooks, messages, sources, and auth users."""
 
     def __init__(self, path: Path | None = None, identifier: str = "local-student"):
+        """Open (or create) the local SQLite database for *identifier*."""
         self.path = (path or settings.database_path).resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.identifier = identifier
         self._lock = threading.RLock()
         with self._connect() as connection:
             connection.executescript(SCHEMA)
-            self._ensure_column(
-                connection,
-                "openai_thread_state",
-                "sourceSnapshot",
-                "TEXT NOT NULL DEFAULT '[]'",
-            )
-            self._ensure_column(
-                connection,
-                "openai_thread_state",
-                "groundingMode",
-                "TEXT NOT NULL DEFAULT 'source_first'",
-            )
-            self._ensure_cognito_user_columns(connection)
-            self._ensure_app_session_tables(connection)
         self.owner_id = self._ensure_user()
-
-    @staticmethod
-    def _ensure_column(
-        connection: sqlite3.Connection,
-        table: str,
-        column: str,
-        definition: str,
-    ) -> None:
-        columns = {
-            str(row["name"])
-            for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
-        }
-        if column not in columns:
-            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
-
-    def _ensure_cognito_user_columns(self, connection: sqlite3.Connection) -> None:
-        """Add Cognito profile columns without destroying existing rows."""
-        self._ensure_column(connection, "users", "cognitoSub", "TEXT")
-        self._ensure_column(connection, "users", "email", "TEXT")
-        self._ensure_column(connection, "users", "displayName", "TEXT")
-        self._ensure_column(connection, "users", "role", "TEXT NOT NULL DEFAULT 'student'")
-        self._ensure_column(connection, "users", "updatedAt", "TEXT")
-        self._ensure_column(connection, "users", "lastLoginAt", "TEXT")
-        connection.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_cognito_sub "
-            "ON users(cognitoSub) WHERE cognitoSub IS NOT NULL"
-        )
 
     def upsert_cognito_user(
         self,
@@ -272,27 +201,27 @@ class StudentStore:
         safe_name = (display_name or "Student").strip()[:80] or "Student"
         safe_email = (email or "").strip() or None
         with self._lock, self._connect() as connection:
-            self._ensure_cognito_user_columns(connection)
             row = connection.execute(
-                "SELECT id, role, displayName, email, metadata, cognitoSub FROM users "
-                "WHERE cognitoSub = ?",
+                "SELECT id, role, display_name, email, preferences_text, cognito_sub "
+                "FROM users WHERE cognito_sub = ?",
                 (sub,),
             ).fetchone()
             created = False
             if row is None:
                 row = connection.execute(
-                    "SELECT id, role, displayName, email, metadata, cognitoSub FROM users "
-                    "WHERE identifier = ?",
+                    "SELECT id, role, display_name, email, preferences_text, cognito_sub "
+                    "FROM users WHERE identifier = ?",
                     (identifier,),
                 ).fetchone()
                 if row is not None:
-                    created = not bool(row["cognitoSub"])
+                    created = not bool(row["cognito_sub"])
             if row:
                 existing_role = str(row["role"] or STUDENT_ROLE)
                 role = resolve_role(existing_role)
                 connection.execute(
-                    "UPDATE users SET identifier = ?, cognitoSub = ?, email = ?, "
-                    "displayName = ?, role = ?, updatedAt = ?, lastLoginAt = ? WHERE id = ?",
+                    "UPDATE users SET identifier = ?, cognito_sub = ?, email = ?, "
+                    "display_name = ?, role = ?, updated_at = ?, last_login_at = ? "
+                    "WHERE id = ?",
                     (
                         identifier,
                         sub,
@@ -312,37 +241,35 @@ class StudentStore:
                 }
             owner_id = str(uuid.uuid4())
             role = STUDENT_ROLE
+            prefs = _dump({"role": role, "auth": "cognito"})
             inserted = connection.execute(
                 "INSERT OR IGNORE INTO users ("
-                "id, identifier, metadata, createdAt, cognitoSub, email, "
-                "displayName, role, updatedAt, lastLoginAt"
+                "id, identifier, cognito_sub, email, display_name, role, "
+                "preferences_text, created_at, updated_at, last_login_at"
                 ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     owner_id,
                     identifier,
-                    _dump({"role": role, "auth": "cognito"}),
-                    now,
                     sub,
                     safe_email,
                     safe_name,
                     role,
+                    prefs,
+                    now,
                     now,
                     now,
                 ),
             )
-            # Another app worker can win the first-login insert between our
-            # SELECT and INSERT. Resolve the unique Cognito subject back to the
-            # one canonical row instead of surfacing an intermittent 500.
             canonical = connection.execute(
-                "SELECT id, role FROM users WHERE cognitoSub = ?",
+                "SELECT id, role FROM users WHERE cognito_sub = ?",
                 (sub,),
             ).fetchone()
             if canonical is None:
                 raise ValueError("Cognito identity could not be linked safely")
             role = resolve_role(str(canonical["role"] or STUDENT_ROLE))
             connection.execute(
-                "UPDATE users SET identifier = ?, email = ?, displayName = ?, "
-                "role = ?, updatedAt = ?, lastLoginAt = ? WHERE id = ?",
+                "UPDATE users SET identifier = ?, email = ?, display_name = ?, "
+                "role = ?, updated_at = ?, last_login_at = ? WHERE id = ?",
                 (
                     identifier,
                     safe_email,
@@ -365,11 +292,10 @@ class StudentStore:
         sub = str(cognito_sub or "").strip()
         if not sub:
             return None
-        with self._lock, self._connect() as connection:
-            self._ensure_cognito_user_columns(connection)
+        with self._connect() as connection:
             row = connection.execute(
-                "SELECT id, identifier, cognitoSub, email, displayName, role, "
-                "createdAt, updatedAt, lastLoginAt FROM users WHERE cognitoSub = ?",
+                "SELECT id, identifier, cognito_sub, email, display_name, role, "
+                "created_at, updated_at, last_login_at FROM users WHERE cognito_sub = ?",
                 (sub,),
             ).fetchone()
         if not row:
@@ -381,11 +307,10 @@ class StudentStore:
         owner_id = str(user_id or "").strip()
         if not owner_id:
             return None
-        with self._lock, self._connect() as connection:
-            self._ensure_cognito_user_columns(connection)
+        with self._connect() as connection:
             row = connection.execute(
-                "SELECT id, identifier, cognitoSub, email, displayName, role, "
-                "createdAt, updatedAt, lastLoginAt FROM users WHERE id = ?",
+                "SELECT id, identifier, cognito_sub, email, display_name, role, "
+                "created_at, updated_at, last_login_at FROM users WHERE id = ?",
                 (owner_id,),
             ).fetchone()
         if not row:
@@ -393,136 +318,19 @@ class StudentStore:
         return self._user_profile_dict(row)
 
     @staticmethod
-    def _user_profile_dict(row: sqlite3.Row) -> dict[str, Any]:
+    def _user_profile_dict(row: Any) -> dict[str, Any]:
         """Normalize a users row into the public profile shape."""
         return {
             "id": str(row["id"]),
             "identifier": str(row["identifier"]),
-            "cognito_sub": row["cognitoSub"],
+            "cognito_sub": row["cognito_sub"],
             "email": row["email"],
-            "display_name": row["displayName"],
+            "display_name": row["display_name"],
             "role": row["role"] or "student",
-            "created_at": row["createdAt"],
-            "updated_at": row["updatedAt"],
-            "last_login_at": row["lastLoginAt"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "last_login_at": row["last_login_at"],
         }
-
-    def _ensure_app_session_tables(self, connection: sqlite3.Connection) -> None:
-        """Create application-session tables on existing databases."""
-        connection.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS app_sessions (
-                id TEXT PRIMARY KEY,
-                tokenHash TEXT NOT NULL UNIQUE,
-                userId TEXT NOT NULL,
-                createdAt TEXT NOT NULL,
-                expiresAt TEXT NOT NULL,
-                lastSeenAt TEXT,
-                revokedAt TEXT,
-                FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
-            );
-            CREATE INDEX IF NOT EXISTS idx_app_sessions_token_hash
-            ON app_sessions(tokenHash);
-            CREATE INDEX IF NOT EXISTS idx_app_sessions_user
-            ON app_sessions(userId);
-            CREATE TABLE IF NOT EXISTS oauth_login_states (
-                state TEXT PRIMARY KEY,
-                codeVerifier TEXT NOT NULL,
-                createdAt TEXT NOT NULL,
-                expiresAt TEXT NOT NULL
-            );
-            """
-        )
-
-    def create_app_session(
-        self,
-        *,
-        user_id: str,
-        token_hash: str,
-        created_at: str,
-        expires_at: str,
-    ) -> str:
-        """Persist a hashed application session and return its id."""
-        owner_id = str(user_id or "").strip()
-        digest = str(token_hash or "").strip()
-        if not owner_id or not digest:
-            raise ValueError("user_id and token_hash are required")
-        session_id = str(uuid.uuid4())
-        with self._lock, self._connect() as connection:
-            self._ensure_app_session_tables(connection)
-            connection.execute(
-                "INSERT INTO app_sessions ("
-                "id, tokenHash, userId, createdAt, expiresAt, lastSeenAt, revokedAt"
-                ") VALUES (?, ?, ?, ?, ?, ?, NULL)",
-                (session_id, digest, owner_id, created_at, expires_at, created_at),
-            )
-        return session_id
-
-    def get_user_for_session_hash(
-        self, token_hash: str, *, now_iso: str | None = None
-    ) -> dict[str, Any] | None:
-        """Return the user for a valid session hash, else ``None``.
-
-        Expired or revoked sessions never authenticate. ``lastSeenAt`` is
-        updated for valid sessions using UTC *now_iso*.
-        """
-        digest = str(token_hash or "").strip()
-        if not digest:
-            return None
-        now_value = now_iso or utc_now()
-        with self._lock, self._connect() as connection:
-            self._ensure_app_session_tables(connection)
-            self._ensure_cognito_user_columns(connection)
-            row = connection.execute(
-                "SELECT s.id AS session_id, s.expiresAt, s.revokedAt, "
-                "u.id, u.identifier, u.cognitoSub, u.email, u.displayName, u.role, "
-                "u.createdAt, u.updatedAt, u.lastLoginAt "
-                "FROM app_sessions s "
-                "JOIN users u ON u.id = s.userId "
-                "WHERE s.tokenHash = ?",
-                (digest,),
-            ).fetchone()
-            if row is None:
-                return None
-            if row["revokedAt"]:
-                return None
-            expires_at = str(row["expiresAt"] or "")
-            if expires_at and expires_at <= now_value:
-                return None
-            connection.execute(
-                "UPDATE app_sessions SET lastSeenAt = ? WHERE id = ?",
-                (now_value, str(row["session_id"])),
-            )
-            return self._user_profile_dict(row)
-
-    def revoke_app_session(
-        self, token_hash: str, *, revoked_at: str | None = None
-    ) -> bool:
-        """Mark a session revoked by token hash. Return whether a row changed."""
-        digest = str(token_hash or "").strip()
-        if not digest:
-            return False
-        when = revoked_at or utc_now()
-        with self._lock, self._connect() as connection:
-            self._ensure_app_session_tables(connection)
-            result = connection.execute(
-                "UPDATE app_sessions SET revokedAt = ? "
-                "WHERE tokenHash = ? AND revokedAt IS NULL",
-                (when, digest),
-            )
-            return int(result.rowcount or 0) > 0
-
-    def cleanup_expired_app_sessions(self, *, now_iso: str | None = None) -> int:
-        """Delete expired sessions and return the number removed."""
-        now_value = now_iso or utc_now()
-        with self._lock, self._connect() as connection:
-            self._ensure_app_session_tables(connection)
-            result = connection.execute(
-                "DELETE FROM app_sessions WHERE expiresAt <= ? OR "
-                "(revokedAt IS NOT NULL AND revokedAt <= ?)",
-                (now_value, now_value),
-            )
-            return int(result.rowcount or 0)
 
     def save_oauth_login_state(
         self,
@@ -538,10 +346,16 @@ class StudentStore:
         if not state_value or not verifier:
             raise ValueError("state and code_verifier are required")
         with self._lock, self._connect() as connection:
-            self._ensure_app_session_tables(connection)
             connection.execute(
-                "INSERT OR REPLACE INTO oauth_login_states "
-                "(state, codeVerifier, createdAt, expiresAt) VALUES (?, ?, ?, ?)",
+                """
+                INSERT INTO oauth_login_states
+                  (state, code_verifier, created_at, expires_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT (state) DO UPDATE SET
+                  code_verifier=excluded.code_verifier,
+                  created_at=excluded.created_at,
+                  expires_at=excluded.expires_at
+                """,
                 (state_value, verifier, created_at, expires_at),
             )
 
@@ -554,9 +368,8 @@ class StudentStore:
             return None
         now_value = now_iso or utc_now()
         with self._lock, self._connect() as connection:
-            self._ensure_app_session_tables(connection)
             row = connection.execute(
-                "SELECT codeVerifier, expiresAt FROM oauth_login_states WHERE state = ?",
+                "SELECT code_verifier, expires_at FROM oauth_login_states WHERE state = ?",
                 (state_value,),
             ).fetchone()
             connection.execute(
@@ -565,9 +378,9 @@ class StudentStore:
             )
             if row is None:
                 return None
-            if str(row["expiresAt"] or "") <= now_value:
+            if str(row["expires_at"] or "") <= now_value:
                 return None
-            return str(row["codeVerifier"])
+            return str(row["code_verifier"])
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=30)
@@ -585,39 +398,45 @@ class StudentStore:
                 return str(row["id"])
             owner_id = str(uuid.uuid4())
             connection.execute(
-                "INSERT INTO users (id, identifier, metadata, createdAt) VALUES (?, ?, ?, ?)",
-                (owner_id, self.identifier, _dump({"role": "student", "auth": "none"}), utc_now()),
+                "INSERT INTO users (id, identifier, preferences_text, created_at, role) "
+                "VALUES (?, ?, ?, ?, 'student')",
+                (
+                    owner_id,
+                    self.identifier,
+                    _dump({"role": "student", "auth": "none"}),
+                    utc_now(),
+                ),
             )
             return owner_id
 
     def get_user_preferences(self) -> dict[str, Any]:
         """Return the local user's preference metadata blob."""
-        with self._lock, self._connect() as connection:
+        with self._connect() as connection:
             row = connection.execute(
-                "SELECT metadata FROM users WHERE id = ?",
+                "SELECT preferences_text FROM users WHERE id = ?",
                 (self.owner_id,),
             ).fetchone()
         if not row:
             return {}
-        metadata = _load(row["metadata"], {})
+        metadata = _load(row["preferences_text"], {})
         return metadata if isinstance(metadata, dict) else {}
 
     def update_user_preferences(self, patch: dict[str, Any]) -> None:
-        """Merge preference keys into the local user's metadata."""
+        """Merge preference keys into the local user's preferences_text."""
         if not patch:
             return
         with self._lock, self._connect() as connection:
             row = connection.execute(
-                "SELECT metadata FROM users WHERE id = ?",
+                "SELECT preferences_text FROM users WHERE id = ?",
                 (self.owner_id,),
             ).fetchone()
-            current = _load(row["metadata"] if row else None, {})
+            current = _load(row["preferences_text"] if row else None, {})
             if not isinstance(current, dict):
                 current = {}
             next_metadata = {**current, **patch}
             connection.execute(
-                "UPDATE users SET metadata = ? WHERE id = ?",
-                (_dump(next_metadata), self.owner_id),
+                "UPDATE users SET preferences_text = ?, updated_at = ? WHERE id = ?",
+                (_dump(next_metadata), utc_now(), self.owner_id),
             )
 
     def create_thread(
@@ -628,8 +447,12 @@ class StudentStore:
         support_mode: str,
         assignment: dict[str, str] | None = None,
     ) -> str:
-        thread_id = str(uuid.uuid4())
-        metadata = {
+        """Create a notebook and return its id (``thread_id`` compatibility)."""
+        from backend.student_journey import DEFAULT_STAGE
+
+        notebook_id = str(uuid.uuid4())
+        now = utc_now()
+        settings_blob = {
             "selected_model": model_id,
             "support_mode": support_mode,
             "assignment": assignment or {},
@@ -637,31 +460,30 @@ class StudentStore:
         with self._lock, self._connect() as connection:
             connection.execute(
                 """
-                INSERT INTO threads
-                  (id, createdAt, name, userId, userIdentifier, tags, metadata)
-                VALUES (?, ?, ?, ?, ?, '[]', ?)
+                INSERT INTO notebooks
+                  (id, user_id, title, current_stage, progress_text, settings_text,
+                   created_at, updated_at)
+                VALUES (?, ?, ?, ?, '{}', ?, ?, ?)
                 """,
                 (
-                    thread_id,
-                    utc_now(),
-                    name,
+                    notebook_id,
                     self.owner_id,
-                    self.identifier,
-                    _dump(metadata),
+                    name,
+                    DEFAULT_STAGE,
+                    _dump(settings_blob),
+                    now,
+                    now,
                 ),
             )
-        return thread_id
+        return notebook_id
 
     def get_thread(self, thread_id: str) -> dict[str, Any] | None:
+        """Return one owned notebook in the legacy thread-shaped dict."""
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT t.*, tf.folderId, folder.name AS folderName,
-                       folder.color AS folderColor
-                FROM threads t
-                LEFT JOIN thread_folders tf ON tf.threadId = t.id
-                LEFT JOIN folders folder ON folder.id=tf.folderId
-                WHERE t.id = ? AND t.userId = ?
+                SELECT * FROM notebooks
+                WHERE id = ? AND user_id = ?
                 """,
                 (thread_id, self.owner_id),
             ).fetchone()
@@ -670,58 +492,97 @@ class StudentStore:
     def list_threads(
         self, search: str = "", folder_id: str | None = None
     ) -> list[dict[str, Any]]:
-        clauses = ["t.userId = ?"]
+        """List owned notebooks ordered by recent activity.
+
+        *folder_id* is ignored (folder organization was removed).
+        """
+        del folder_id
+        clauses = ["n.user_id = ?"]
         parameters: list[Any] = [self.owner_id]
         if search.strip():
             clauses.append(
-                "(LOWER(COALESCE(t.name, '')) LIKE ? OR EXISTS "
-                "(SELECT 1 FROM steps s WHERE s.threadId=t.id AND LOWER(COALESCE(s.output,'')) LIKE ?))"
+                "(LOWER(COALESCE(n.title, '')) LIKE ? OR EXISTS "
+                "(SELECT 1 FROM messages m WHERE m.notebook_id=n.id AND "
+                "LOWER(COALESCE(m.content,'')) LIKE ?))"
             )
             needle = f"%{search.strip().lower()}%"
             parameters.extend([needle, needle])
-        if folder_id == "__unfiled__":
-            clauses.append("tf.folderId IS NULL")
-        elif folder_id:
-            clauses.append("tf.folderId = ?")
-            parameters.append(folder_id)
         with self._connect() as connection:
             rows = connection.execute(
                 f"""
-                SELECT t.*, tf.folderId, folder.name AS folderName,
-                       folder.color AS folderColor,
-                       COUNT(s.id) AS messageCount,
-                       SUM(CASE WHEN s.type='user_message' THEN 1 ELSE 0 END)
+                SELECT n.*,
+                       COUNT(m.id) AS messageCount,
+                       SUM(CASE WHEN m.role='user' THEN 1 ELSE 0 END)
                          AS studentTurnCount,
-                       SUM(CASE WHEN feedback.value=1 THEN 1 ELSE 0 END)
-                         AS helpfulCount,
-                       SUM(CASE WHEN feedback.value=-1 THEN 1 ELSE 0 END)
-                         AS needsReviewCount,
                        (
-                         SELECT recent.output
-                         FROM steps recent
-                         WHERE recent.threadId=t.id
-                           AND recent.type='user_message'
-                         ORDER BY recent.createdAt DESC, recent.id DESC
+                         SELECT recent.content
+                         FROM messages recent
+                         WHERE recent.notebook_id=n.id
+                           AND recent.role='user'
+                         ORDER BY recent.created_at DESC, recent.id DESC
                          LIMIT 1
                        ) AS latestUserMessage,
-                       MAX(COALESCE(s.createdAt, t.createdAt)) AS lastActivity
-                FROM threads t
-                LEFT JOIN thread_folders tf ON tf.threadId=t.id
-                LEFT JOIN folders folder ON folder.id=tf.folderId
-                LEFT JOIN steps s ON s.threadId=t.id
-                LEFT JOIN feedbacks feedback ON feedback.forId=s.id
+                       MAX(COALESCE(m.created_at, n.updated_at, n.created_at))
+                         AS lastActivity
+                FROM notebooks n
+                LEFT JOIN messages m ON m.notebook_id=n.id
                 WHERE {' AND '.join(clauses)}
-                GROUP BY t.id
+                GROUP BY n.id
                 ORDER BY lastActivity DESC
                 """,
                 parameters,
             ).fetchall()
         return [self._thread_dict(row) for row in rows]
 
-    def _thread_dict(self, row: sqlite3.Row) -> dict[str, Any]:
-        value = dict(row)
-        value["metadata"] = _load(value.get("metadata"), {})
-        value["tags"] = _load(value.get("tags"), [])
+    def _thread_dict(self, row: Any) -> dict[str, Any]:
+        """Map a notebooks row to the thread-shaped dict expected by callers."""
+        progress = _load(row["progress_text"], {})
+        if not isinstance(progress, dict):
+            progress = {}
+        settings_blob = _load(row["settings_text"], {})
+        if not isinstance(settings_blob, dict):
+            settings_blob = {}
+        current_stage = str(row["current_stage"] or "focus")
+        journey = {
+            **{key: progress[key] for key in _PROGRESS_KEYS if key in progress},
+            "current_stage": current_stage,
+            "completed_stages": progress.get("completed_stages") or [],
+            "stage_notes": progress.get("stage_notes") or {},
+            "working_conclusion": progress.get("working_conclusion") or "",
+            "critical_reflection": progress.get("critical_reflection") or "",
+            "response_detail": progress.get("response_detail") or "short",
+        }
+        metadata: dict[str, Any] = {
+            **settings_blob,
+            "learning_journey": journey,
+            "thinking_stage": current_stage,
+            "response_detail": journey["response_detail"],
+        }
+        for key in (
+            "learning_summary",
+            "working_conclusion",
+            "understanding_change",
+            "critical_understanding",
+        ):
+            if key in progress and progress[key] not in (None, ""):
+                metadata[key] = progress[key]
+        value = {
+            "id": str(row["id"]),
+            "name": row["title"],
+            "createdAt": row["created_at"],
+            "userId": row["user_id"],
+            "userIdentifier": self.identifier,
+            "tags": settings_blob.get("tags") or [],
+            "metadata": metadata,
+        }
+        for key in (
+            "messageCount",
+            "studentTurnCount",
+            "latestUserMessage",
+            "lastActivity",
+        ):
+            if key in row.keys():
+                value[key] = row[key]
         return value
 
     def update_thread(
@@ -731,45 +592,126 @@ class StudentStore:
         name: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
+        """Rename a notebook and/or merge progress/settings metadata."""
         thread = self.get_thread(thread_id)
         if not thread:
             raise ValueError("Chat not found")
-        next_metadata = thread["metadata"]
+        current_meta = dict(thread.get("metadata") or {})
         if metadata:
-            next_metadata = {**next_metadata, **metadata}
+            current_meta = {**current_meta, **metadata}
+            if "learning_journey" in metadata and isinstance(
+                metadata.get("learning_journey"), dict
+            ):
+                # Nested journey merge: patch replaces journey object intentionally.
+                current_meta["learning_journey"] = metadata["learning_journey"]
+        current_stage, progress_text, settings_text = self._split_notebook_metadata(
+            current_meta
+        )
+        title = (
+            name.strip()[:120]
+            if name is not None
+            else thread.get("name")
+        )
         with self._lock, self._connect() as connection:
             connection.execute(
-                "UPDATE threads SET name=?, metadata=? WHERE id=? AND userId=?",
+                """
+                UPDATE notebooks
+                SET title=?, current_stage=?, progress_text=?, settings_text=?,
+                    updated_at=?
+                WHERE id=? AND user_id=?
+                """,
                 (
-                    name.strip()[:120] if name is not None else thread.get("name"),
-                    _dump(next_metadata),
+                    title,
+                    current_stage,
+                    progress_text,
+                    settings_text,
+                    utc_now(),
                     thread_id,
                     self.owner_id,
                 ),
             )
 
+    @staticmethod
+    def _split_notebook_metadata(
+        metadata: dict[str, Any],
+    ) -> tuple[str, str, str]:
+        """Split a legacy metadata blob into stage + progress + settings TEXT."""
+        from backend.student_journey import DEFAULT_STAGE, STAGE_BY_ID
+
+        journey_raw = metadata.get("learning_journey")
+        journey = journey_raw if isinstance(journey_raw, dict) else {}
+        stage = (
+            journey.get("current_stage")
+            or metadata.get("thinking_stage")
+            or DEFAULT_STAGE
+        )
+        stage = str(stage) if str(stage) in STAGE_BY_ID else DEFAULT_STAGE
+
+        progress: dict[str, Any] = {}
+        for key in _PROGRESS_KEYS:
+            if key in journey:
+                progress[key] = journey[key]
+            elif key in metadata:
+                progress[key] = metadata[key]
+        if "response_detail" not in progress:
+            progress["response_detail"] = (
+                journey.get("response_detail")
+                or metadata.get("response_detail")
+                or "short"
+            )
+        if "completed_stages" not in progress:
+            progress["completed_stages"] = journey.get("completed_stages") or []
+        if "stage_notes" not in progress:
+            progress["stage_notes"] = journey.get("stage_notes") or {}
+
+        settings_blob: dict[str, Any] = {}
+        for key in _SETTINGS_KEYS:
+            if key in metadata and key != "tags":
+                settings_blob[key] = metadata[key]
+        if "tags" in metadata:
+            settings_blob["tags"] = metadata["tags"]
+        if "assignment" not in settings_blob and isinstance(
+            metadata.get("assignment"), dict
+        ):
+            settings_blob["assignment"] = metadata["assignment"]
+        return stage, _dump(progress), _dump(settings_blob)
+
     def delete_thread(self, thread_id: str) -> None:
+        """Delete a notebook and its child rows, then purge stored files."""
         if not self.get_thread(thread_id):
             return
         with self._lock, self._connect() as connection:
+            for table in NOTEBOOK_CHILD_TABLES:
+                connection.execute(
+                    f"DELETE FROM {table} WHERE notebook_id = ?",
+                    (thread_id,),
+                )
             connection.execute(
-                "DELETE FROM threads WHERE id=? AND userId=?", (thread_id, self.owner_id)
+                "DELETE FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
             )
-        self._cleanup_thread_files(thread_id)
+        self._cleanup_notebook_files(thread_id)
 
-    def _cleanup_thread_files(self, thread_id: str) -> None:
+    def _cleanup_notebook_files(self, notebook_id: str) -> None:
         """Remove local and object-storage files owned by a deleted notebook."""
         from backend.persistence.factory import get_file_storage
-        from backend.persistence.object_keys import thread_prefix
+        from backend.persistence.object_keys import notebook_prefix
 
         if settings.file_storage_provider != "local":
             get_file_storage().delete_prefix(
-                thread_prefix(user_id=self.owner_id, thread_id=thread_id)
+                notebook_prefix(user_id=self.owner_id, notebook_id=notebook_id)
             )
             return
+        # Local provider: remove both object-key tree (if used) and legacy dirs.
+        try:
+            get_file_storage().delete_prefix(
+                notebook_prefix(user_id=self.owner_id, notebook_id=notebook_id)
+            )
+        except Exception:  # noqa: BLE001 - best-effort local cleanup
+            pass
         for root, allowed in (
-            (settings.files_dir / "threads" / thread_id, settings.files_dir),
-            (settings.workspaces_dir / thread_id, settings.workspaces_dir),
+            (settings.files_dir / "threads" / notebook_id, settings.files_dir),
+            (settings.workspaces_dir / notebook_id, settings.workspaces_dir),
         ):
             resolved = root.resolve()
             if resolved.exists() and allowed in resolved.parents:
@@ -786,35 +728,102 @@ class StudentStore:
         message_id: str | None = None,
         is_error: bool = False,
     ) -> str:
+        """Persist one chat message; upsert when *message_id* already exists."""
         if not self.get_thread(thread_id):
             raise ValueError("Chat not found")
+        if role not in {"user", "assistant"}:
+            raise ValueError("role must be user or assistant")
         message_id = message_id or str(uuid.uuid4())
-        step_type = "user_message" if role == "user" else "assistant_message"
-        step_metadata = {**(metadata or {})}
+        meta = {**(metadata or {})}
         if model_id:
-            step_metadata["model"] = model_id
+            meta["model"] = model_id
+        assessment = meta.pop("assessment", None)
+        assessment_text = (
+            _dump(assessment) if isinstance(assessment, dict) else None
+        )
+        cited = meta.pop("source_refs", None)
+        if cited is None:
+            cited = meta.pop("cited_source_ids", None)
+        cited_text = _dump(cited) if cited is not None else None
+        proposed_stage = meta.pop("proposed_stage", None)
+        decision_status = meta.pop("decision_status", None)
+        decision_at = meta.pop("decision_at", None)
+        pending_id = meta.pop("pending_transition_id", None)
+        if pending_id and not proposed_stage:
+            # Compatibility: pending transition id names the assistant message.
+            message_id = str(pending_id)
+        now = utc_now()
         with self._lock, self._connect() as connection:
-            connection.execute(
+            existing = connection.execute(
                 """
-                INSERT INTO steps
-                  (id, name, type, threadId, streaming, isError, metadata, tags,
-                   input, output, createdAt, generation, modes)
-                VALUES (?, ?, ?, ?, 0, ?, ?, '[]', '', ?, ?, '{}', '{}')
+                SELECT m.id FROM messages m
+                JOIN notebooks n ON n.id = m.notebook_id
+                WHERE m.id=? AND m.notebook_id=? AND n.user_id=?
                 """,
-                (
-                    message_id,
-                    "You" if role == "user" else "Co-design",
-                    step_type,
-                    thread_id,
-                    int(is_error),
-                    _dump(step_metadata),
-                    content,
-                    utc_now(),
-                ),
-            )
+                (message_id, thread_id, self.owner_id),
+            ).fetchone()
+            if existing:
+                # Bump created_at when materializing a pending-transition skeleton
+                # so the assistant reply sorts after the user turn.
+                connection.execute(
+                    """
+                    UPDATE messages
+                    SET content=?, is_error=?,
+                        assessment_text=COALESCE(?, assessment_text),
+                        cited_source_ids_text=COALESCE(?, cited_source_ids_text),
+                        proposed_stage=COALESCE(?, proposed_stage),
+                        decision_status=COALESCE(?, decision_status),
+                        decision_at=COALESCE(?, decision_at),
+                        metadata_text=?,
+                        created_at=CASE
+                            WHEN content = '' AND ? != '' THEN ?
+                            ELSE created_at
+                        END
+                    WHERE id=? AND notebook_id=?
+                    """,
+                    (
+                        content,
+                        int(is_error),
+                        assessment_text,
+                        cited_text,
+                        proposed_stage,
+                        decision_status,
+                        decision_at,
+                        _dump(meta),
+                        content,
+                        now,
+                        message_id,
+                        thread_id,
+                    ),
+                )
+            else:
+                connection.execute(
+                    """
+                    INSERT INTO messages
+                      (id, notebook_id, role, content, is_error, assessment_text,
+                       cited_source_ids_text, proposed_stage, decision_status,
+                       decision_at, metadata_text, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        message_id,
+                        thread_id,
+                        role,
+                        content,
+                        int(is_error),
+                        assessment_text,
+                        cited_text,
+                        proposed_stage,
+                        decision_status,
+                        decision_at,
+                        _dump(meta),
+                        now,
+                    ),
+                )
             if role == "user":
                 count = connection.execute(
-                    "SELECT COUNT(*) AS total FROM steps WHERE threadId=? AND type='user_message'",
+                    "SELECT COUNT(*) AS total FROM messages "
+                    "WHERE notebook_id=? AND role='user'",
                     (thread_id,),
                 ).fetchone()["total"]
                 if count == 1:
@@ -823,25 +832,46 @@ class StudentStore:
                     title = NotebookTitleService.generate(content)
                     connection.execute(
                         """
-                        UPDATE threads SET name=?
-                        WHERE id=? AND (name IS NULL OR name IN (?, ?))
+                        UPDATE notebooks SET title=?, updated_at=?
+                        WHERE id=? AND (title IS NULL OR title IN (?, ?))
                         """,
-                        (title, thread_id, "Untitled notebook", "New assignment chat"),
+                        (
+                            title,
+                            now,
+                            thread_id,
+                            "Untitled notebook",
+                            "New assignment chat",
+                        ),
                     )
+                else:
+                    connection.execute(
+                        "UPDATE notebooks SET updated_at=? WHERE id=? AND user_id=?",
+                        (now, thread_id, self.owner_id),
+                    )
+            else:
+                connection.execute(
+                    "UPDATE notebooks SET updated_at=? WHERE id=? AND user_id=?",
+                    (now, thread_id, self.owner_id),
+                )
         return message_id
 
     def update_message(self, message_id: str, content: str) -> None:
+        """Replace the content of an owned message."""
         with self._lock, self._connect() as connection:
             owned = connection.execute(
                 """
-                SELECT s.id FROM steps s JOIN threads t ON t.id=s.threadId
-                WHERE s.id=? AND t.userId=?
+                SELECT m.id FROM messages m
+                JOIN notebooks n ON n.id=m.notebook_id
+                WHERE m.id=? AND n.user_id=?
                 """,
                 (message_id, self.owner_id),
             ).fetchone()
             if not owned:
                 raise ValueError("Message not found")
-            connection.execute("UPDATE steps SET output=? WHERE id=?", (content, message_id))
+            connection.execute(
+                "UPDATE messages SET content=? WHERE id=?",
+                (content, message_id),
+            )
 
     def revise_user_message(
         self,
@@ -852,57 +882,31 @@ class StudentStore:
         model_id: str,
         metadata: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        """Replace a user turn and discard every later turn and stale response state."""
+        """Replace a user turn and discard every later turn."""
         cleaned = content.strip()
         if not cleaned:
             raise ValueError("Message cannot be empty")
         with self._lock, self._connect() as connection:
             target = connection.execute(
                 """
-                SELECT s.id, s.type, s.createdAt
-                FROM steps s
-                JOIN threads t ON t.id=s.threadId
-                WHERE s.id=? AND s.threadId=? AND t.userId=?
+                SELECT m.id, m.role, m.created_at
+                FROM messages m
+                JOIN notebooks n ON n.id=m.notebook_id
+                WHERE m.id=? AND m.notebook_id=? AND n.user_id=?
                 """,
                 (message_id, thread_id, self.owner_id),
             ).fetchone()
-            if not target or target["type"] != "user_message":
+            if not target or target["role"] != "user":
                 raise ValueError("User message not found")
 
-            target_created = str(target["createdAt"] or "")
-            later_rows = connection.execute(
-                """
-                SELECT id FROM steps
-                WHERE threadId=?
-                  AND type IN ('user_message','assistant_message')
-                  AND (
-                    createdAt > ?
-                    OR (createdAt = ? AND id > ?)
-                  )
-                """,
-                (thread_id, target_created, target_created, message_id),
-            ).fetchall()
-            discarded_ids = [str(row["id"]) for row in later_rows]
-            turn_message_ids = [message_id, *discarded_ids]
-            placeholders = ",".join("?" for _ in turn_message_ids)
-            connection.execute(
-                f"""
-                DELETE FROM model_turns
-                WHERE threadId=?
-                  AND (
-                    userMessageId IN ({placeholders})
-                    OR assistantMessageId IN ({placeholders})
-                  )
-                """,
-                (thread_id, *turn_message_ids, *turn_message_ids),
-            )
+            target_created = str(target["created_at"] or "")
             connection.execute(
                 """
-                DELETE FROM steps
-                WHERE threadId=?
+                DELETE FROM messages
+                WHERE notebook_id=?
                   AND (
-                    createdAt > ?
-                    OR (createdAt = ? AND id > ?)
+                    created_at > ?
+                    OR (created_at = ? AND id > ?)
                   )
                 """,
                 (thread_id, target_created, target_created, message_id),
@@ -910,206 +914,86 @@ class StudentStore:
             next_metadata = {**metadata, "model": model_id}
             connection.execute(
                 """
-                UPDATE steps
-                SET output=?, metadata=?, isError=0
-                WHERE id=? AND threadId=?
+                UPDATE messages
+                SET content=?, metadata_text=?, is_error=0,
+                    assessment_text=NULL, cited_source_ids_text=NULL,
+                    proposed_stage=NULL, decision_status=NULL, decision_at=NULL
+                WHERE id=? AND notebook_id=?
                 """,
                 (cleaned, _dump(next_metadata), message_id, thread_id),
             )
-
             prior_rows = connection.execute(
                 """
-                SELECT type, output FROM steps
-                WHERE threadId=?
-                  AND type IN ('user_message','assistant_message')
+                SELECT role, content FROM messages
+                WHERE notebook_id=?
                   AND (
-                    createdAt < ?
-                    OR (createdAt = ? AND id < ?)
+                    created_at < ?
+                    OR (created_at = ? AND id < ?)
                   )
-                ORDER BY createdAt ASC, id ASC
+                ORDER BY created_at ASC, id ASC
                 """,
                 (thread_id, target_created, target_created, message_id),
             ).fetchall()
             history = [
                 {
-                    "role": (
-                        "user" if row["type"] == "user_message" else "assistant"
-                    ),
-                    "content": str(row["output"] or ""),
+                    "role": str(row["role"]),
+                    "content": str(row["content"] or ""),
                 }
                 for row in prior_rows
             ]
-            current_state = connection.execute(
-                "SELECT vectorStoreId FROM openai_thread_state WHERE threadId=?",
-                (thread_id,),
-            ).fetchone()
-            vector_store_id = (
-                current_state["vectorStoreId"] if current_state else None
-            )
             connection.execute(
-                """
-                INSERT INTO openai_thread_state
-                  (threadId, previousResponseId, modelId, history, vectorStoreId,
-                   sourceSnapshot, groundingMode, updatedAt)
-                VALUES (?, NULL, NULL, ?, ?, '[]', 'source_first', ?)
-                ON CONFLICT(threadId) DO UPDATE SET
-                  previousResponseId=NULL,
-                  modelId=NULL,
-                  history=excluded.history,
-                  vectorStoreId=excluded.vectorStoreId,
-                  sourceSnapshot='[]',
-                  groundingMode='source_first',
-                  updatedAt=excluded.updatedAt
-                """,
-                (
-                    thread_id,
-                    _dump(history),
-                    vector_store_id,
-                    utc_now(),
-                ),
+                "UPDATE notebooks SET updated_at=? WHERE id=? AND user_id=?",
+                (utc_now(), thread_id, self.owner_id),
             )
         return history
 
     def get_messages(self, thread_id: str) -> list[dict[str, Any]]:
+        """Return canonical chronological messages for an owned notebook."""
         if not self.get_thread(thread_id):
             return []
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT s.*, f.value AS feedbackValue
-                FROM steps s
-                LEFT JOIN feedbacks f ON f.forId=s.id
-                WHERE s.threadId=? AND s.type IN ('user_message','assistant_message')
-                ORDER BY s.createdAt ASC, s.id ASC
+                SELECT * FROM messages
+                WHERE notebook_id=?
+                ORDER BY created_at ASC, id ASC
                 """,
                 (thread_id,),
             ).fetchall()
         messages = []
         for row in rows:
-            value = dict(row)
+            meta = _load(row["metadata_text"], {})
+            if not isinstance(meta, dict):
+                meta = {}
+            assessment = _load(row["assessment_text"], None)
+            if isinstance(assessment, dict):
+                meta["assessment"] = assessment
+            cited = _load(row["cited_source_ids_text"], None)
+            if cited is not None:
+                meta["source_refs"] = cited
+            if row["proposed_stage"]:
+                meta["proposed_stage"] = row["proposed_stage"]
+                meta["pending_transition_id"] = str(row["id"])
+            if row["decision_status"]:
+                meta["decision_status"] = row["decision_status"]
             messages.append(
                 {
-                    "id": value["id"],
-                    "role": "user" if value["type"] == "user_message" else "assistant",
-                    "content": value.get("output") or "",
-                    "metadata": _load(value.get("metadata"), {}),
-                    "created_at": value.get("createdAt"),
-                    "is_error": bool(value.get("isError")),
-                    "feedback": value.get("feedbackValue"),
+                    "id": str(row["id"]),
+                    "role": str(row["role"]),
+                    "content": row["content"] or "",
+                    "metadata": meta,
+                    "created_at": row["created_at"],
+                    "is_error": bool(row["is_error"]),
+                    "feedback": None,
                 }
             )
         return messages
 
-    def set_feedback(self, thread_id: str, message_id: str, value: int) -> None:
-        if value not in (-1, 0, 1):
-            raise ValueError("Feedback must be -1, 0, or 1")
-        with self._lock, self._connect() as connection:
-            owned = connection.execute(
-                """
-                SELECT s.id FROM steps s JOIN threads t ON t.id=s.threadId
-                WHERE s.id=? AND s.threadId=? AND t.userId=?
-                """,
-                (message_id, thread_id, self.owner_id),
-            ).fetchone()
-            if not owned:
-                raise ValueError("Message not found")
-            connection.execute(
-                """
-                INSERT INTO feedbacks (id, forId, threadId, value, comment)
-                VALUES (?, ?, ?, ?, NULL)
-                ON CONFLICT(forId) DO UPDATE SET value=excluded.value
-                """,
-                (str(uuid.uuid4()), message_id, thread_id, value),
-            )
-
-    def list_folders(self) -> list[dict[str, Any]]:
-        with self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT f.*, COUNT(tf.threadId) AS threadCount
-                FROM folders f
-                LEFT JOIN thread_folders tf ON tf.folderId=f.id
-                WHERE f.ownerId=?
-                GROUP BY f.id
-                ORDER BY f.position ASC, f.createdAt ASC
-                """,
-                (self.owner_id,),
-            ).fetchall()
-        return [dict(row) for row in rows]
-
-    def create_folder(self, name: str, color: str = "#6d5dfc") -> str:
-        folder_id = str(uuid.uuid4())
-        with self._lock, self._connect() as connection:
-            next_position = connection.execute(
-                "SELECT COALESCE(MAX(position), -1)+1 AS value FROM folders WHERE ownerId=?",
-                (self.owner_id,),
-            ).fetchone()["value"]
-            now = utc_now()
-            connection.execute(
-                """
-                INSERT INTO folders
-                  (id, ownerId, name, color, position, createdAt, updatedAt)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    folder_id,
-                    self.owner_id,
-                    name.strip()[:80],
-                    color,
-                    next_position,
-                    now,
-                    now,
-                ),
-            )
-        return folder_id
-
-    def rename_folder(self, folder_id: str, name: str) -> None:
-        with self._lock, self._connect() as connection:
-            changed = connection.execute(
-                "UPDATE folders SET name=?, updatedAt=? WHERE id=? AND ownerId=?",
-                (name.strip()[:80], utc_now(), folder_id, self.owner_id),
-            ).rowcount
-        if not changed:
-            raise ValueError("Folder not found")
-
-    def delete_folder(self, folder_id: str) -> None:
-        with self._lock, self._connect() as connection:
-            connection.execute(
-                "DELETE FROM folders WHERE id=? AND ownerId=?",
-                (folder_id, self.owner_id),
-            )
-
-    def move_thread(self, thread_id: str, folder_id: str | None) -> None:
-        if not self.get_thread(thread_id):
-            raise ValueError("Chat not found")
-        with self._lock, self._connect() as connection:
-            if folder_id is None:
-                connection.execute(
-                    "DELETE FROM thread_folders WHERE threadId=? AND ownerId=?",
-                    (thread_id, self.owner_id),
-                )
-                return
-            folder = connection.execute(
-                "SELECT id FROM folders WHERE id=? AND ownerId=?",
-                (folder_id, self.owner_id),
-            ).fetchone()
-            if not folder:
-                raise ValueError("Folder not found")
-            connection.execute(
-                """
-                INSERT INTO thread_folders (threadId, folderId, ownerId, createdAt)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(threadId) DO UPDATE SET
-                  folderId=excluded.folderId, ownerId=excluded.ownerId
-                """,
-                (thread_id, folder_id, self.owner_id, utc_now()),
-            )
-
     def create_phase_transition(self, transition: dict[str, Any]) -> dict[str, Any]:
-        """Persist one model recommendation that awaits a student decision.
+        """Persist a pending stage recommendation on a new assistant message row.
 
-        This method deliberately does not alter the notebook journey. A separate
-        confirmation service applies an accepted transition after validation.
+        The transition id becomes the assistant message id. Content is filled in
+        later when the coach reply is stored via ``add_message``.
         """
         thread_id = str(transition.get("thread_id") or "")
         if not self.get_thread(thread_id):
@@ -1126,49 +1010,59 @@ class StudentStore:
         }
         if not record["from_stage"] or not record["to_stage"]:
             raise ValueError("Transition stages are required")
+        assessment = record["assessment"]
+        if hasattr(assessment, "model_dump"):
+            assessment = assessment.model_dump(mode="json")
         with self._lock, self._connect() as connection:
             connection.execute(
                 """
-                UPDATE phase_transitions
-                SET status='rejected', resolvedAt=?
-                WHERE threadId=? AND status='pending'
+                UPDATE messages
+                SET decision_status='rejected', decision_at=?
+                WHERE notebook_id=? AND decision_status='pending'
                 """,
                 (utc_now(), thread_id),
             )
             connection.execute(
                 """
-                INSERT INTO phase_transitions
-                  (id, threadId, fromStage, toStage, assessment, status, createdAt, resolvedAt)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO messages
+                  (id, notebook_id, role, content, is_error, assessment_text,
+                   cited_source_ids_text, proposed_stage, decision_status,
+                   decision_at, metadata_text, created_at)
+                VALUES (?, ?, 'assistant', '', 0, ?, NULL, ?, 'pending', NULL, ?, ?)
                 """,
                 (
                     record["id"],
                     record["thread_id"],
-                    record["from_stage"],
+                    _dump(assessment if isinstance(assessment, dict) else {}),
                     record["to_stage"],
-                    _dump(record["assessment"]),
-                    record["status"],
+                    _dump(
+                        {
+                            "from_stage": record["from_stage"],
+                            "workflow": "langgraph",
+                            "pending_transition_id": record["id"],
+                        }
+                    ),
                     record["created_at"],
-                    record["resolved_at"],
                 ),
             )
         return record
 
     def get_pending_phase_transition(self, thread_id: str) -> dict[str, Any] | None:
-        """Return the newest unresolved transition for an owned notebook."""
+        """Return the newest unresolved stage recommendation for a notebook."""
         if not self.get_thread(thread_id):
             return None
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT * FROM phase_transitions
-                WHERE threadId=? AND status='pending'
-                ORDER BY createdAt DESC
+                SELECT * FROM messages
+                WHERE notebook_id=? AND decision_status='pending'
+                  AND proposed_stage IS NOT NULL
+                ORDER BY created_at DESC, id DESC
                 LIMIT 1
                 """,
                 (thread_id,),
             ).fetchone()
-        return self._phase_transition_dict(row) if row else None
+        return self._phase_transition_from_message(row) if row else None
 
     def resolve_phase_transition(
         self,
@@ -1176,15 +1070,16 @@ class StudentStore:
         transition_id: str,
         status: str,
     ) -> dict[str, Any]:
-        """Record a student's confirmation or rejection without advancing the journey."""
+        """Record a student's confirmation or rejection without advancing journey."""
         if status not in {"confirmed", "rejected"}:
             raise ValueError("Transition status must be confirmed or rejected")
         with self._lock, self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT pt.* FROM phase_transitions pt
-                JOIN threads t ON t.id=pt.threadId
-                WHERE pt.id=? AND pt.threadId=? AND t.userId=? AND pt.status='pending'
+                SELECT m.* FROM messages m
+                JOIN notebooks n ON n.id=m.notebook_id
+                WHERE m.id=? AND m.notebook_id=? AND n.user_id=?
+                  AND m.decision_status='pending'
                 """,
                 (transition_id, thread_id, self.owner_id),
             ).fetchone()
@@ -1192,13 +1087,13 @@ class StudentStore:
                 raise ValueError("Pending transition not found")
             resolved_at = utc_now()
             connection.execute(
-                "UPDATE phase_transitions SET status=?, resolvedAt=? WHERE id=?",
+                "UPDATE messages SET decision_status=?, decision_at=? WHERE id=?",
                 (status, resolved_at, transition_id),
             )
             value = dict(row)
-            value["status"] = status
-            value["resolvedAt"] = resolved_at
-        return self._phase_transition_dict_from_value(value)
+            value["decision_status"] = status
+            value["decision_at"] = resolved_at
+        return self._phase_transition_from_message(value)
 
     def apply_phase_transition_decision(
         self,
@@ -1209,137 +1104,119 @@ class StudentStore:
         metadata_patch: dict[str, Any] | None = None,
         expected_from_stage: str | None = None,
     ) -> dict[str, Any]:
-        """Confirm or reject a transition and optionally advance journey atomically.
-
-        Transition status and notebook metadata update in one SQLite connection so
-        a failure cannot leave a confirmed transition without matching journey
-        state (or a journey advance without a resolved transition).
-        """
+        """Confirm or reject a transition and optionally advance journey atomically."""
         status = "confirmed" if accepted else "rejected"
         if accepted and not metadata_patch:
             raise ValueError("Accepted transitions require a journey metadata patch")
         with self._lock, self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT pt.* FROM phase_transitions pt
-                JOIN threads t ON t.id=pt.threadId
-                WHERE pt.id=? AND pt.threadId=? AND t.userId=? AND pt.status='pending'
+                SELECT m.* FROM messages m
+                JOIN notebooks n ON n.id=m.notebook_id
+                WHERE m.id=? AND m.notebook_id=? AND n.user_id=?
+                  AND m.decision_status='pending'
                 """,
                 (transition_id, thread_id, self.owner_id),
             ).fetchone()
             if not row:
                 raise ValueError("Pending transition not found")
-            thread_row = connection.execute(
-                "SELECT metadata FROM threads WHERE id=? AND userId=?",
+            notebook = connection.execute(
+                "SELECT current_stage, progress_text, settings_text FROM notebooks "
+                "WHERE id=? AND user_id=?",
                 (thread_id, self.owner_id),
             ).fetchone()
-            if not thread_row:
+            if not notebook:
                 raise ValueError("Notebook not found")
-            current_metadata = _load(thread_row["metadata"], {})
-            if not isinstance(current_metadata, dict):
-                current_metadata = {}
             if accepted and expected_from_stage is not None:
-                journey = current_metadata.get("learning_journey")
-                journey_stage = (
-                    journey.get("current_stage")
-                    if isinstance(journey, dict)
-                    else None
-                )
-                thinking_stage = current_metadata.get("thinking_stage")
-                active_stage = journey_stage or thinking_stage or "focus"
+                active_stage = str(notebook["current_stage"] or "focus")
                 if active_stage != expected_from_stage:
                     raise ValueError(
                         "The notebook stage changed; request a new recommendation"
                     )
             resolved_at = utc_now()
             connection.execute(
-                "UPDATE phase_transitions SET status=?, resolvedAt=? WHERE id=?",
+                "UPDATE messages SET decision_status=?, decision_at=? WHERE id=?",
                 (status, resolved_at, transition_id),
             )
             if accepted and metadata_patch:
-                next_metadata = {**current_metadata, **metadata_patch}
+                progress = _load(notebook["progress_text"], {})
+                if not isinstance(progress, dict):
+                    progress = {}
+                settings_blob = _load(notebook["settings_text"], {})
+                if not isinstance(settings_blob, dict):
+                    settings_blob = {}
+                current_meta = {
+                    **settings_blob,
+                    "learning_journey": {
+                        **progress,
+                        "current_stage": notebook["current_stage"],
+                    },
+                    "thinking_stage": notebook["current_stage"],
+                }
+                next_meta = {**current_meta, **metadata_patch}
+                if isinstance(metadata_patch.get("learning_journey"), dict):
+                    next_meta["learning_journey"] = metadata_patch["learning_journey"]
+                stage, progress_text, settings_text = self._split_notebook_metadata(
+                    next_meta
+                )
                 connection.execute(
-                    "UPDATE threads SET metadata=? WHERE id=? AND userId=?",
-                    (_dump(next_metadata), thread_id, self.owner_id),
+                    """
+                    UPDATE notebooks
+                    SET current_stage=?, progress_text=?, settings_text=?, updated_at=?
+                    WHERE id=? AND user_id=?
+                    """,
+                    (
+                        stage,
+                        progress_text,
+                        settings_text,
+                        resolved_at,
+                        thread_id,
+                        self.owner_id,
+                    ),
                 )
             value = dict(row)
-            value["status"] = status
-            value["resolvedAt"] = resolved_at
-        return self._phase_transition_dict_from_value(value)
+            value["decision_status"] = status
+            value["decision_at"] = resolved_at
+        return self._phase_transition_from_message(value)
 
-    @staticmethod
-    def _phase_transition_dict(row: sqlite3.Row) -> dict[str, Any]:
-        """Convert a SQLite transition row into the domain-facing snake-case form."""
-        return StudentStore._phase_transition_dict_from_value(dict(row))
-
-    @staticmethod
-    def _phase_transition_dict_from_value(value: dict[str, Any]) -> dict[str, Any]:
-        """Normalize persisted JSON and camel-case storage columns for consumers."""
+    def _phase_transition_from_message(self, row: Any) -> dict[str, Any]:
+        """Convert a messages row carrying a decision into PendingPhaseTransition shape."""
+        meta = _load(row["metadata_text"], {})
+        if not isinstance(meta, dict):
+            meta = {}
+        assessment = _load(row["assessment_text"], {})
+        if not isinstance(assessment, dict):
+            assessment = {}
+        from_stage = str(
+            meta.get("from_stage")
+            or assessment.get("current_stage")
+            or ""
+        )
         return {
-            "id": str(value["id"]),
-            "thread_id": str(value["threadId"]),
-            "from_stage": str(value["fromStage"]),
-            "to_stage": str(value["toStage"]),
-            "assessment": _load(value.get("assessment"), {}),
-            "status": str(value["status"]),
-            "created_at": str(value["createdAt"]),
-            "resolved_at": value.get("resolvedAt"),
+            "id": str(row["id"]),
+            "thread_id": str(row["notebook_id"]),
+            "from_stage": from_stage,
+            "to_stage": str(row["proposed_stage"] or ""),
+            "assessment": assessment,
+            "status": str(row["decision_status"] or "pending"),
+            "created_at": str(row["created_at"]),
+            "resolved_at": row["decision_at"],
         }
 
-    def get_state(self, thread_id: str) -> dict[str, Any]:
-        with self._connect() as connection:
-            row = connection.execute(
-                "SELECT * FROM openai_thread_state WHERE threadId=?", (thread_id,)
-            ).fetchone()
-        if not row:
-            return {
-                "history": [],
-                "sourceSnapshot": [],
-                "groundingMode": "source_first",
-            }
-        value = dict(row)
-        value["history"] = _load(value.get("history"), [])
-        value["sourceSnapshot"] = _load(value.get("sourceSnapshot"), [])
-        return value
+    def _load_extracted_text(self, extracted_text_key: str | None) -> str:
+        """Load extracted text bytes from object storage."""
+        if not extracted_text_key:
+            return ""
+        from backend.persistence.factory import get_file_storage
 
-    def save_state(
-        self,
-        thread_id: str,
-        *,
-        previous_response_id: str | None,
-        model_id: str,
-        history: list[dict[str, Any]],
-        vector_store_id: str | None = None,
-        source_snapshot: list[str] | None = None,
-        grounding_mode: str = "source_first",
-    ) -> None:
-        with self._lock, self._connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO openai_thread_state
-                  (threadId, previousResponseId, modelId, history, vectorStoreId,
-                   sourceSnapshot, groundingMode, updatedAt)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(threadId) DO UPDATE SET
-                  previousResponseId=excluded.previousResponseId,
-                  modelId=excluded.modelId,
-                  history=excluded.history,
-                  vectorStoreId=excluded.vectorStoreId,
-                  sourceSnapshot=excluded.sourceSnapshot,
-                  groundingMode=excluded.groundingMode,
-                  updatedAt=excluded.updatedAt
-                """,
-                (
-                    thread_id,
-                    previous_response_id,
-                    model_id,
-                    _dump(history),
-                    vector_store_id,
-                    _dump(source_snapshot or []),
-                    grounding_mode,
-                    utc_now(),
-                ),
-            )
+        try:
+            data = get_file_storage().get_bytes(str(extracted_text_key))
+        except FileNotFoundError:
+            return ""
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            return data.decode("utf-8", errors="replace")
 
     def add_source(
         self,
@@ -1350,12 +1227,18 @@ class StudentStore:
         mime: str = "text/plain",
         path: str | None = None,
         source_url: str | None = None,
-        extracted_text: str = "",
+        extracted_text_key: str | None = None,
         size: int = 0,
         selected: bool = True,
         metadata: dict[str, Any] | None = None,
         source_id: str | None = None,
     ) -> str:
+        """Add source metadata whose extracted text is already in file storage.
+
+        This method performs database work only so DSQL may safely retry the
+        whole write transaction. Source services must store extracted text
+        first and pass its deterministic object key.
+        """
         if not self.get_thread(thread_id):
             raise ValueError("Notebook not found")
         if kind not in {"file", "image", "text", "url"}:
@@ -1363,44 +1246,52 @@ class StudentStore:
         normalized_title = " ".join(title.strip().split())[:180]
         if not normalized_title:
             raise ValueError("Source title is required")
+        metadata_dict = dict(metadata or {})
+        object_key = metadata_dict.get("object_key") or None
+        storage_provider = str(metadata_dict.get("storage_provider") or "local")
         if path:
-            metadata_dict = metadata or {}
-            storage_provider = str(metadata_dict.get("storage_provider") or "local")
-            if storage_provider in {"s3", "memory"} or metadata_dict.get("object_key"):
-                # Object-storage keys are not filesystem paths.
-                path = str(path)
+            if storage_provider in {"s3", "memory"} or object_key:
+                object_key = str(object_key or path)
+                path = None
             else:
                 resolved_path = Path(path).resolve()
                 allowed_root = (settings.files_dir / "threads" / thread_id).resolve()
                 if allowed_root not in resolved_path.parents:
                     raise ValueError("Unsafe source path")
-                path = str(resolved_path)
+                # Local filesystem path kept in metadata for compatibility.
+                metadata_dict["local_path"] = str(resolved_path)
+                path = None
         source_id = source_id or str(uuid.uuid4())
+        stored_text_key = str(extracted_text_key or "").strip() or None
         now = utc_now()
         with self._lock, self._connect() as connection:
             connection.execute(
                 """
-                INSERT INTO notebook_sources
-                  (id, threadId, ownerId, kind, title, mime, path, sourceUrl,
-                   extractedText, size, selected, metadata, createdAt, updatedAt)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO sources
+                  (id, notebook_id, kind, title, content_type, byte_size,
+                   object_key, extracted_text_key, source_url, selected,
+                   metadata_text, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     source_id,
                     thread_id,
-                    self.owner_id,
                     kind,
                     normalized_title,
                     mime or "application/octet-stream",
-                    path,
-                    source_url,
-                    extracted_text[:120_000],
                     max(0, int(size)),
+                    object_key,
+                    stored_text_key,
+                    source_url,
                     int(selected),
-                    _dump(metadata or {}),
+                    _dump(metadata_dict),
                     now,
                     now,
                 ),
+            )
+            connection.execute(
+                "UPDATE notebooks SET updated_at=? WHERE id=? AND user_id=?",
+                (now, thread_id, self.owner_id),
             )
         return source_id
 
@@ -1410,26 +1301,30 @@ class StudentStore:
         *,
         selected_only: bool = False,
     ) -> list[dict[str, Any]]:
+        """List owned sources for a notebook."""
         if not self.get_thread(thread_id):
             return []
         selected_clause = " AND selected=1" if selected_only else ""
         with self._connect() as connection:
             rows = connection.execute(
                 f"""
-                SELECT * FROM notebook_sources
-                WHERE threadId=? AND ownerId=?{selected_clause}
-                ORDER BY createdAt ASC, id ASC
+                SELECT s.* FROM sources s
+                JOIN notebooks n ON n.id=s.notebook_id
+                WHERE s.notebook_id=? AND n.user_id=?{selected_clause}
+                ORDER BY s.created_at ASC, s.id ASC
                 """,
                 (thread_id, self.owner_id),
             ).fetchall()
         return [self._source_dict(row) for row in rows]
 
     def get_source(self, thread_id: str, source_id: str) -> dict[str, Any] | None:
+        """Return one owned source or ``None``."""
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT * FROM notebook_sources
-                WHERE id=? AND threadId=? AND ownerId=?
+                SELECT s.* FROM sources s
+                JOIN notebooks n ON n.id=s.notebook_id
+                WHERE s.id=? AND s.notebook_id=? AND n.user_id=?
                 """,
                 (source_id, thread_id, self.owner_id),
             ).fetchone()
@@ -1440,22 +1335,64 @@ class StudentStore:
         thread_id: str,
         path: str,
     ) -> dict[str, Any] | None:
+        """Find a source by object key or legacy local path."""
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT * FROM notebook_sources
-                WHERE threadId=? AND ownerId=? AND path=?
+                SELECT s.* FROM sources s
+                JOIN notebooks n ON n.id=s.notebook_id
+                WHERE s.notebook_id=? AND n.user_id=?
+                  AND (s.object_key=? OR s.metadata_text LIKE ?)
                 """,
-                (thread_id, self.owner_id, path),
+                (thread_id, self.owner_id, path, f'%{path}%'),
             ).fetchone()
-        return self._source_dict(row) if row else None
+        if not row:
+            return None
+        source = self._source_dict(row)
+        if source.get("path") == path or source.get("object_key") == path:
+            return source
+        # Fallback: check local_path in metadata.
+        if (source.get("metadata") or {}).get("local_path") == path:
+            return source
+        return None
 
-    @staticmethod
-    def _source_dict(row: sqlite3.Row) -> dict[str, Any]:
-        value = dict(row)
-        value["selected"] = bool(value.get("selected"))
-        value["metadata"] = _load(value.get("metadata"), {})
-        return value
+    def _source_dict(self, row: Any) -> dict[str, Any]:
+        """Normalize a sources row for callers (legacy keys preserved)."""
+        metadata = _load(row["metadata_text"], {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        object_key = row["object_key"]
+        local_path = metadata.get("local_path")
+        extracted = self._load_extracted_text(row["extracted_text_key"])
+        path_value = object_key or local_path
+        if object_key and metadata.get("storage_provider") not in {"s3", "memory"}:
+            # Object key present implies object storage for readers.
+            if settings.file_storage_provider != "local":
+                metadata.setdefault(
+                    "storage_provider", settings.file_storage_provider
+                )
+                metadata.setdefault("object_key", object_key)
+        return {
+            "id": str(row["id"]),
+            "threadId": str(row["notebook_id"]),
+            "notebook_id": str(row["notebook_id"]),
+            "ownerId": self.owner_id,
+            "kind": row["kind"],
+            "title": row["title"],
+            "mime": row["content_type"] or "application/octet-stream",
+            "content_type": row["content_type"],
+            "path": path_value,
+            "object_key": object_key,
+            "extracted_text_key": row["extracted_text_key"],
+            "sourceUrl": row["source_url"],
+            "extractedText": extracted,
+            "size": int(row["byte_size"] or 0),
+            "byte_size": int(row["byte_size"] or 0),
+            "selected": bool(row["selected"]),
+            "metadata": metadata,
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+        }
 
     def set_source_selected(
         self,
@@ -1463,27 +1400,38 @@ class StudentStore:
         source_id: str,
         selected: bool,
     ) -> None:
+        """Toggle one source selection flag."""
         with self._lock, self._connect() as connection:
             changed = connection.execute(
                 """
-                UPDATE notebook_sources SET selected=?, updatedAt=?
-                WHERE id=? AND threadId=? AND ownerId=?
+                UPDATE sources SET selected=?, updated_at=?
+                WHERE id=? AND notebook_id=? AND notebook_id IN (
+                  SELECT id FROM notebooks WHERE id=? AND user_id=?
+                )
                 """,
-                (int(selected), utc_now(), source_id, thread_id, self.owner_id),
+                (
+                    int(selected),
+                    utc_now(),
+                    source_id,
+                    thread_id,
+                    thread_id,
+                    self.owner_id,
+                ),
             ).rowcount
         if not changed:
             raise ValueError("Source not found")
 
     def set_all_sources_selected(self, thread_id: str, selected: bool) -> None:
+        """Select or deselect every source in an owned notebook."""
         if not self.get_thread(thread_id):
             raise ValueError("Notebook not found")
         with self._lock, self._connect() as connection:
             connection.execute(
                 """
-                UPDATE notebook_sources SET selected=?, updatedAt=?
-                WHERE threadId=? AND ownerId=?
+                UPDATE sources SET selected=?, updated_at=?
+                WHERE notebook_id=?
                 """,
-                (int(selected), utc_now(), thread_id, self.owner_id),
+                (int(selected), utc_now(), thread_id),
             )
 
     def rename_source(self, thread_id: str, source_id: str, title: str) -> None:
@@ -1500,11 +1448,10 @@ class StudentStore:
         with self._lock, self._connect() as connection:
             connection.execute(
                 """
-                UPDATE notebook_sources
-                SET title=?, updatedAt=?
-                WHERE id=? AND threadId=? AND ownerId=?
+                UPDATE sources SET title=?, updated_at=?
+                WHERE id=? AND notebook_id=?
                 """,
-                (normalized_title, utc_now(), source_id, thread_id, self.owner_id),
+                (normalized_title, utc_now(), source_id, thread_id),
             )
 
     def delete_source(
@@ -1514,12 +1461,7 @@ class StudentStore:
         *,
         force: bool = False,
     ) -> None:
-        """Delete a notebook source unless it is managed course material.
-
-        The synchronizer may use ``force`` to refresh a managed copy after its
-        read-only source file changes. Interactive callers cannot remove course
-        materials from a notebook.
-        """
+        """Delete a notebook source unless it is managed course material."""
         source = self.get_source(thread_id, source_id)
         if not source:
             return
@@ -1528,53 +1470,18 @@ class StudentStore:
             raise ValueError("Course materials cannot be removed from the app.")
         with self._lock, self._connect() as connection:
             connection.execute(
-                """
-                DELETE FROM notebook_sources
-                WHERE id=? AND threadId=? AND ownerId=?
-                """,
-                (source_id, thread_id, self.owner_id),
+                "DELETE FROM sources WHERE id=? AND notebook_id=?",
+                (source_id, thread_id),
             )
-        path_value = source.get("path")
-        if not path_value or not metadata.get("managed_file"):
-            return
-        if metadata.get("storage_provider") in {"s3", "memory"} or metadata.get(
-            "object_key"
-        ):
-            from backend.persistence.factory import get_file_storage
+        from backend.persistence.factory import get_file_storage
 
-            key = str(metadata.get("object_key") or path_value)
-            get_file_storage().delete(key)
-            return
-        path = Path(path_value).resolve()
-        allowed_root = (settings.files_dir / "threads" / thread_id).resolve()
-        if path.is_file() and allowed_root in path.parents:
-            path.unlink(missing_ok=True)
-
-    def record_turn(
-        self,
-        thread_id: str,
-        user_message_id: str,
-        assistant_message_id: str,
-        model_id: str,
-        reasoning_effort: str | None,
-        usage: dict[str, Any],
-    ) -> None:
-        with self._lock, self._connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO model_turns
-                  (id, threadId, userMessageId, assistantMessageId, modelId,
-                   reasoningEffort, usage, createdAt)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    str(uuid.uuid4()),
-                    thread_id,
-                    user_message_id,
-                    assistant_message_id,
-                    model_id,
-                    reasoning_effort,
-                    _dump(usage),
-                    utc_now(),
-                ),
-            )
+        storage = get_file_storage()
+        for key in (source.get("object_key"), source.get("extracted_text_key")):
+            if key:
+                storage.delete(str(key))
+        local_path = metadata.get("local_path")
+        if local_path and metadata.get("managed_file"):
+            path = Path(str(local_path)).resolve()
+            allowed_root = (settings.files_dir / "threads" / thread_id).resolve()
+            if path.is_file() and allowed_root in path.parents:
+                path.unlink(missing_ok=True)

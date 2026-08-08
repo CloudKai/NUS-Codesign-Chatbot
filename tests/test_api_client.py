@@ -140,33 +140,69 @@ def test_api_client_ready_stream_and_graph(tmp_path):
         client.close()
 
 
-def test_api_client_auth_me_returns_user_or_none(tmp_path):
+def test_api_client_auth_me_returns_user_or_none(tmp_path, monkeypatch):
     """LocalApiClient.auth_me maps /auth/me success and 401 without raising."""
     from datetime import datetime, timezone
 
-    from backend.app_sessions import AppSessionService
+    from joserfc import jwt
+    from joserfc.jwk import OctKey
+
+    from backend.auth_oidc import CognitoIdentity, CognitoOIDCClient, CognitoOIDCError
+    from backend.cognito_config import CognitoAuthConfig
 
     store = StudentStore(tmp_path / "client-auth-me.sqlite3")
     fixed = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
-    sessions = AppSessionService(store, clock=lambda: fixed)
-    app = create_app(store, session_service=sessions)
+    key = OctKey.generate_key(256, parameters={"alg": "HS256", "kid": "client"})
+    claims = {
+        "sub": "sub-client",
+        "email": "client@example.edu",
+        "iss": "https://cognito-idp.example.test/pool",
+        "aud": "test-client",
+        "exp": int((fixed.timestamp()) + 3600),
+        "iat": int(fixed.timestamp()),
+    }
+    id_token = jwt.encode({"alg": "HS256", "kid": "client"}, claims, key)
+
+    class _OIDC(CognitoOIDCClient):
+        def verify_id_token(self, token: str):
+            if token != id_token:
+                raise CognitoOIDCError("bad")
+            return CognitoIdentity(
+                sub="sub-client",
+                email="client@example.edu",
+                claims=dict(claims),
+            )
+
+        def refresh(self, refresh_token: str):
+            raise CognitoOIDCError("no refresh in this test")
+
+    store.upsert_cognito_user(
+        cognito_sub="sub-client",
+        identifier="cognito:sub-client",
+        email="client@example.edu",
+        display_name="Client",
+    )
+    oidc = _OIDC(
+        CognitoAuthConfig(
+            client_id="test-client",
+            client_secret="test-secret",
+            server_metadata_url="https://example.test/.well-known/openid-configuration",
+            redirect_uri="http://127.0.0.1:8000/api/v1/auth/callback",
+        ),
+        store=store,
+        clock=lambda: fixed,
+    )
+    app = create_app(store, oidc_client=oidc)
     client = LocalApiClient("http://testserver", session=TestClient(app))
     try:
         assert client.auth_me("") is None
-        assert client.auth_me("not-a-session") is None
+        assert client.auth_me("not-a-token") is None
 
-        user = store.upsert_cognito_user(
-            cognito_sub="sub-client",
-            identifier="cognito:sub-client",
-            email="client@example.edu",
-            display_name="Client",
-        )
-        created = sessions.create_session(user["id"])
-        profile = client.auth_me(created.raw_token)
+        profile = client.auth_me(id_token)
         assert profile is not None
         assert profile["cognito_sub"] == "sub-client"
         assert profile["email"] == "client@example.edu"
         assert "access_token" not in profile
-        assert created.raw_token not in str(profile)
+        assert id_token not in str(profile)
     finally:
         client.close()

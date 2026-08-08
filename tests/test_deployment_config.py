@@ -85,22 +85,24 @@ def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     assert "cde2300chatbot.duckdns.org" in caddyfile
     assert "handle /api/v1/auth/login" in caddyfile
     assert "handle /api/v1/auth/callback" in caddyfile
+    assert "handle /api/v1/auth/me" in caddyfile
     assert "handle /api/v1/auth/logout" in caddyfile
     assert "handle /api/v1/health" in caddyfile
     assert "handle /api/*" in caddyfile
     assert 'respond "Not Found" 404' in caddyfile
     assert "reverse_proxy app:8501" in caddyfile
     assert "handle_path" not in caddyfile
-    assert "handle /api/v1/auth/me" not in caddyfile
 
     login_index = caddyfile.index("handle /api/v1/auth/login")
     callback_index = caddyfile.index("handle /api/v1/auth/callback")
+    me_index = caddyfile.index("handle /api/v1/auth/me")
     logout_index = caddyfile.index("handle /api/v1/auth/logout")
     health_index = caddyfile.index("handle /api/v1/health")
     block_index = caddyfile.index("handle /api/*")
     streamlit_index = caddyfile.index("handle {\n\t\treverse_proxy app:8501")
     assert login_index < block_index
     assert callback_index < block_index
+    assert me_index < block_index
     assert logout_index < block_index
     assert health_index < block_index < streamlit_index
 
@@ -131,7 +133,7 @@ def test_compose_sets_production_cognito_redirect_uri():
     )
     assert 'COGNITO_REDIRECT_URI: "http://127.0.0.1' not in app
     assert "127.0.0.1:8000/api/v1/auth/callback" not in app
-    assert 'APP_SESSION_COOKIE_SECURE: "true"' in app
+    assert 'AUTH_COOKIE_SECURE: "true"' in app
 
 
 def test_docker_context_excludes_secrets_state_and_development_artifacts():

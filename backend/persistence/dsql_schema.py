@@ -1,14 +1,25 @@
-"""Aurora DSQL schema for structured application state.
+"""Aurora DSQL schema for the production data model.
 
-Differences from the SQLite schema in ``student_store.SCHEMA``:
+Tables:
+
+    users
+     └── notebooks
+          ├── messages
+          └── sources
+
+    oauth_login_states  (pre-auth, transient)
+
+Cognito owns the browser session (HttpOnly refresh + ID-token cookies). There
+is no ``app_sessions`` table.
+
+Differences from local SQLite:
 
 - No FOREIGN KEY constraints (unsupported in Aurora DSQL; enforce in app code).
 - No ON DELETE CASCADE (delete child rows explicitly in the store).
-- JSON-shaped fields remain TEXT (DSQL does not use JSON/JSONB columns here).
+- JSON-shaped fields remain TEXT.
 - UUID primary keys stay application-generated TEXT ids.
-- Unique index on ``users(cognitoSub)`` uses ``CREATE UNIQUE INDEX ASYNC``
-  without a partial ``WHERE`` predicate (DSQL NULLS DISTINCT allows multiple
-  NULL cognitoSub values). Admin bootstrap waits for each ASYNC index job.
+- Secondary indexes use ``CREATE INDEX ASYNC`` / ``CREATE UNIQUE INDEX ASYNC``.
+- Admin bootstrap waits for each ASYNC index job.
 
 Do not auto-create or destroy DSQL clusters from application startup. Schema
 application is explicit via ``scripts/init_dsql.py`` (admin only). Runtime
@@ -23,174 +34,87 @@ DSQL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     identifier TEXT NOT NULL UNIQUE,
-    metadata TEXT NOT NULL DEFAULT '{}',
-    createdAt TEXT NOT NULL,
-    cognitoSub TEXT,
+    cognito_sub TEXT,
     email TEXT,
-    displayName TEXT,
+    display_name TEXT,
     role TEXT NOT NULL DEFAULT 'student',
-    updatedAt TEXT,
-    lastLoginAt TEXT
-);
-
-CREATE TABLE IF NOT EXISTS threads (
-    id TEXT PRIMARY KEY,
-    createdAt TEXT NOT NULL,
-    name TEXT,
-    userId TEXT,
-    userIdentifier TEXT,
-    tags TEXT NOT NULL DEFAULT '[]',
-    metadata TEXT NOT NULL DEFAULT '{}'
-);
-
-CREATE TABLE IF NOT EXISTS steps (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    type TEXT NOT NULL,
-    threadId TEXT NOT NULL,
-    parentId TEXT,
-    streaming INTEGER NOT NULL DEFAULT 0,
-    waitForAnswer INTEGER,
-    isError INTEGER,
-    metadata TEXT NOT NULL DEFAULT '{}',
-    tags TEXT NOT NULL DEFAULT '[]',
-    input TEXT,
-    output TEXT,
-    createdAt TEXT,
-    command TEXT,
-    start TEXT,
-    end TEXT,
-    generation TEXT NOT NULL DEFAULT '{}',
-    showInput TEXT,
-    language TEXT,
-    indent INTEGER,
-    defaultOpen INTEGER,
-    modes TEXT NOT NULL DEFAULT '{}'
-);
-
-CREATE INDEX ASYNC IF NOT EXISTS idx_steps_thread_created ON steps(threadId, createdAt);
-
-CREATE TABLE IF NOT EXISTS folders (
-    id TEXT PRIMARY KEY,
-    ownerId TEXT NOT NULL,
-    name TEXT NOT NULL,
-    color TEXT NOT NULL DEFAULT '#6d5dfc',
-    position INTEGER NOT NULL DEFAULT 0,
-    createdAt TEXT NOT NULL,
-    updatedAt TEXT NOT NULL,
-    UNIQUE(ownerId, name)
-);
-
-CREATE TABLE IF NOT EXISTS thread_folders (
-    threadId TEXT PRIMARY KEY,
-    folderId TEXT NOT NULL,
-    ownerId TEXT NOT NULL,
-    createdAt TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS feedbacks (
-    id TEXT PRIMARY KEY,
-    forId TEXT NOT NULL UNIQUE,
-    threadId TEXT NOT NULL,
-    value INTEGER NOT NULL,
-    comment TEXT
-);
-
-CREATE TABLE IF NOT EXISTS model_turns (
-    id TEXT PRIMARY KEY,
-    threadId TEXT NOT NULL,
-    userMessageId TEXT,
-    assistantMessageId TEXT,
-    modelId TEXT NOT NULL,
-    reasoningEffort TEXT,
-    usage TEXT NOT NULL DEFAULT '{}',
-    createdAt TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS openai_thread_state (
-    threadId TEXT PRIMARY KEY,
-    previousResponseId TEXT,
-    modelId TEXT,
-    history TEXT NOT NULL DEFAULT '[]',
-    vectorStoreId TEXT,
-    sourceSnapshot TEXT NOT NULL DEFAULT '[]',
-    groundingMode TEXT NOT NULL DEFAULT 'source_first',
-    updatedAt TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS notebook_sources (
-    id TEXT PRIMARY KEY,
-    threadId TEXT NOT NULL,
-    ownerId TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    title TEXT NOT NULL,
-    mime TEXT NOT NULL DEFAULT 'text/plain',
-    path TEXT,
-    sourceUrl TEXT,
-    extractedText TEXT NOT NULL DEFAULT '',
-    size INTEGER NOT NULL DEFAULT 0,
-    selected INTEGER NOT NULL DEFAULT 1,
-    metadata TEXT NOT NULL DEFAULT '{}',
-    createdAt TEXT NOT NULL,
-    updatedAt TEXT NOT NULL,
-    objectKey TEXT,
-    contentType TEXT,
-    fileSize INTEGER,
-    uploadedAt TEXT
-);
-
-CREATE INDEX ASYNC IF NOT EXISTS idx_notebook_sources_thread
-ON notebook_sources(threadId, createdAt);
-
-CREATE TABLE IF NOT EXISTS phase_transitions (
-    id TEXT PRIMARY KEY,
-    threadId TEXT NOT NULL,
-    fromStage TEXT NOT NULL,
-    toStage TEXT NOT NULL,
-    assessment TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    createdAt TEXT NOT NULL,
-    resolvedAt TEXT
-);
-
-CREATE INDEX ASYNC IF NOT EXISTS idx_phase_transitions_thread_status
-ON phase_transitions(threadId, status, createdAt);
-
-CREATE TABLE IF NOT EXISTS app_sessions (
-    id TEXT PRIMARY KEY,
-    tokenHash TEXT NOT NULL UNIQUE,
-    userId TEXT NOT NULL,
-    createdAt TEXT NOT NULL,
-    expiresAt TEXT NOT NULL,
-    lastSeenAt TEXT,
-    revokedAt TEXT
-);
-
-CREATE INDEX ASYNC IF NOT EXISTS idx_app_sessions_user
-ON app_sessions(userId);
-
-CREATE TABLE IF NOT EXISTS oauth_login_states (
-    state TEXT PRIMARY KEY,
-    codeVerifier TEXT NOT NULL,
-    createdAt TEXT NOT NULL,
-    expiresAt TEXT NOT NULL
+    preferences_text TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT,
+    last_login_at TEXT
 );
 
 CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_users_cognito_sub
-ON users(cognitoSub);
+ON users(cognito_sub);
+
+CREATE TABLE IF NOT EXISTS oauth_login_states (
+    state TEXT PRIMARY KEY,
+    code_verifier TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS notebooks (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    title TEXT,
+    current_stage TEXT NOT NULL DEFAULT 'focus',
+    progress_text TEXT NOT NULL DEFAULT '{}',
+    settings_text TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_notebooks_user_updated
+ON notebooks(user_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY,
+    notebook_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    is_error INTEGER NOT NULL DEFAULT 0,
+    assessment_text TEXT,
+    cited_source_ids_text TEXT,
+    proposed_stage TEXT,
+    decision_status TEXT,
+    decision_at TEXT,
+    metadata_text TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_messages_notebook_created
+ON messages(notebook_id, created_at, id);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_messages_notebook_decision
+ON messages(notebook_id, decision_status, created_at);
+
+CREATE TABLE IF NOT EXISTS sources (
+    id TEXT PRIMARY KEY,
+    notebook_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content_type TEXT,
+    byte_size INTEGER NOT NULL DEFAULT 0,
+    object_key TEXT,
+    extracted_text_key TEXT,
+    source_url TEXT,
+    selected INTEGER NOT NULL DEFAULT 1,
+    metadata_text TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_sources_notebook_created
+ON sources(notebook_id, created_at, id);
 """
 
 
-# Child tables deleted explicitly when a thread is removed (no FK cascade).
-THREAD_CHILD_TABLES = (
-    "steps",
-    "feedbacks",
-    "model_turns",
-    "openai_thread_state",
-    "notebook_sources",
-    "phase_transitions",
-    "thread_folders",
-)
+# Child tables deleted explicitly when a notebook is removed (no FK cascade).
+NOTEBOOK_CHILD_TABLES = ("messages", "sources")
+
+# Backwards-compatible alias used by older call sites during the refactor.
+THREAD_CHILD_TABLES = NOTEBOOK_CHILD_TABLES
 
 # Printed by admin bootstrap; map the EC2 instance role to this DB user in IAM.
 # Do not embed account ARNs in Git.

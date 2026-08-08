@@ -42,11 +42,16 @@ def test_workflow_requires_student_confirmation_before_stage_change(tmp_path):
     assert turn.pending_transition is not None
     assert turn.pending_transition.from_stage == "focus"
     assert turn.pending_transition.to_stage == "evidence"
-    assert (store.get_thread(thread_id) or {})["metadata"].get("thinking_stage") is None
+    metadata = (store.get_thread(thread_id) or {})["metadata"]
+    # resolve() alone must not advance the notebook stage.
+    assert metadata.get("thinking_stage") == "focus"
+    assert (metadata.get("learning_journey") or {}).get("completed_stages") == []
 
     resolved = repository.resolve(thread_id, turn.pending_transition.id, accepted=True)
     assert resolved.status is TransitionStatus.CONFIRMED
-    assert (store.get_thread(thread_id) or {})["metadata"].get("thinking_stage") is None
+    metadata = (store.get_thread(thread_id) or {})["metadata"]
+    assert metadata.get("thinking_stage") == "focus"
+    assert (metadata.get("learning_journey") or {}).get("completed_stages") == []
 
 
 def test_guided_mock_changes_its_question_then_recommends_progress(tmp_path):

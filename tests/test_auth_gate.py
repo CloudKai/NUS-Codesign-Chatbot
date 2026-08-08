@@ -54,6 +54,7 @@ def logged_out_user(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(auth_gate, "is_logged_in", lambda: False)
     monkeypatch.setattr(auth_gate, "authenticated_user", lambda: None)
     monkeypatch.setattr(auth_gate, "current_user_claims", lambda: {})
+    monkeypatch.setattr(auth_gate, "should_attempt_session_refresh", lambda: False)
     monkeypatch.setattr(
         auth_gate,
         "auth_login_url",
@@ -100,7 +101,7 @@ def test_auth_gate_is_non_dismissible(logged_out_user):
     assert "@st.dialog(" in source
     assert 'width="small"' in source
     assert "st.login(" not in source
-    assert "Streamlit native OIDC" in source or "session authority" in source.lower()
+    assert "authentication authority" in source.lower()
 
 
 def test_sign_in_button_arms_redirecting_ui(logged_out_user, monkeypatch):
@@ -127,7 +128,9 @@ def test_auth_gate_uses_parent_link_click_not_location_replace():
     assert 'target="_self"' in source
     assert "data-cd-auth-continue" in source
     assert "querySelector" in source
-    login_source = source.split("def logout_user", 1)[0]
+    login_source = source.split("def _click_parent_login_link", 1)[1].split(
+        "@st.dialog", 1
+    )[0]
     assert "location.replace(" not in login_source
 
 
@@ -150,13 +153,16 @@ def test_auth_gate_handles_auth_error_query_param():
     assert "auth-config-error" in source
 
 
-def test_env_example_documents_app_session_and_fastapi_callback():
+def test_env_example_documents_cognito_cookies_and_fastapi_callback():
     example = Path(".env.example").read_text(encoding="utf-8")
-    assert "APP_SESSION_TTL_SECONDS=2592000" in example
-    assert "APP_SESSION_COOKIE_NAME=co_design_session" in example
-    assert "APP_SESSION_COOKIE_SECURE=false" in example
+    assert "COGNITO_REFRESH_COOKIE_NAME=co_design_refresh" in example
+    assert "COGNITO_ID_TOKEN_COOKIE_NAME=co_design_id" in example
+    assert "COGNITO_REFRESH_COOKIE_MAX_AGE=2592000" in example
+    assert "AUTH_COOKIE_SECURE=false" in example
+    assert "APP_SESSION_" not in example
     assert "COGNITO_REDIRECT_URI=http://127.0.0.1:8000/api/v1/auth/callback" in example
     assert "CO_DESIGN_PUBLIC_API_URL=http://127.0.0.1:8000" in example
+    assert "authoritative" in example.lower() or "app-client" in example.lower()
 
 
 def test_authenticated_users_see_full_application(logged_in_user, monkeypatch):
@@ -408,17 +414,17 @@ def test_auth_source_does_not_use_streamlit_oidc_authority():
     assert "st.logout(" not in source
     assert "is_logged_in" in source
     assert "/api/v1/auth/me" in source
-    assert "co_design_session" in source or "app_session_cookie_name" in source
+    assert "co_design_id" in source or "cognito_id_token_cookie_name" in source
     assert "_auth_me_token" not in source
     assert "_auth_me_user" not in source
 
 
 def test_authenticated_user_revalidates_without_caching_raw_token(monkeypatch):
-    """Revoked/expired sessions must not keep authenticating via Streamlit state."""
+    """Expired Cognito cookies must not keep authenticating via Streamlit state."""
     # Undo the suite-wide authenticated_user stub from conftest.
     monkeypatch.setattr(auth_gate, "authenticated_user", _REAL_AUTHENTICATED_USER)
 
-    calls: list[str] = []
+    calls: list[str | None] = []
     responses: list[dict | None] = [
         {
             "id": "u1",
@@ -434,11 +440,16 @@ def test_authenticated_user_revalidates_without_caching_raw_token(monkeypatch):
         pass
 
     class _Context:
-        cookies = _Cookies({settings.app_session_cookie_name: "raw-session-token"})
+        cookies = _Cookies(
+            {
+                settings.cognito_id_token_cookie_name: "raw-id-token",
+                settings.cognito_refresh_cookie_name: "raw-refresh-token",
+            }
+        )
 
     class _Client:
-        def auth_me(self, session_token: str):
-            calls.append(session_token)
+        def auth_me(self, id_token: str | None = None):
+            calls.append(id_token)
             return responses[min(len(calls) - 1, len(responses) - 1)]
 
     class _Session(dict):
@@ -467,14 +478,14 @@ def test_authenticated_user_revalidates_without_caching_raw_token(monkeypatch):
     assert first["cognito_sub"] == "sub-live"
     assert "_auth_me_token" not in session_obj
     assert "_auth_me_user" not in session_obj
-    assert "raw-session-token" not in session_obj.values()
-    assert "raw-session-token" not in session_obj
+    assert "raw-id-token" not in session_obj.values()
+    assert "raw-refresh-token" not in session_obj.values()
 
     second = auth_gate.authenticated_user()
     assert second is None
-    assert calls == ["raw-session-token", "raw-session-token"]
+    assert calls == ["raw-id-token", "raw-id-token"]
     assert "_auth_me_token" not in session_obj
-    assert "raw-session-token" not in session_obj
+    assert "raw-id-token" not in session_obj
 
 
 def test_owner_binding_remains_cognito_sub(logged_in_user):

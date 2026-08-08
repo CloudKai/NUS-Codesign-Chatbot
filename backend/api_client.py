@@ -82,20 +82,24 @@ class LocalApiClient:
         response.raise_for_status()
         return response.json()
 
-    def auth_me(self, session_token: str) -> dict[str, Any] | None:
-        """Return the authenticated user for an opaque session cookie, or ``None``.
+    def auth_me(
+        self,
+        id_token: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the authenticated user for Cognito auth cookies, or ``None``.
 
         Uses the internal FastAPI base URL. A 401 means unauthenticated.
+        Only the short-lived ID-token cookie is forwarded. The refresh token is
+        scoped to the browser-facing auth path and never reaches Streamlit.
         """
-        token = str(session_token or "").strip()
-        if not token:
+        id_value = str(id_token or "").strip()
+        if not id_value:
             return None
         from backend.settings import settings
 
-        cookie_name = settings.app_session_cookie_name
         response = self._http.get(
             f"{self._base_url}/api/v1/auth/me",
-            cookies={cookie_name: token},
+            cookies={settings.cognito_id_token_cookie_name: id_value},
         )
         if response.status_code == 401:
             return None
