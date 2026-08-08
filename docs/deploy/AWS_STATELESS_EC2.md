@@ -62,8 +62,10 @@ DSQL_ENDPOINT=<hostname> AWS_REGION=us-west-2 \
 
 The script authenticates with **DbConnectAdmin**
 (``generate_db_connect_admin_auth_token``), commits each DDL alone, and for
-async indexes waits on ``sys.wait_for_job`` before the next statement.
-Runtime never uses DbConnectAdmin.
+async indexes waits on ``sys.wait_for_job`` only when a new ``job_id`` is
+returned (``IF NOT EXISTS`` re-runs that find an existing index skip wait).
+Runtime never uses DbConnectAdmin. ``app_sessions.tokenHash`` relies on its
+column ``UNIQUE`` constraint rather than a redundant secondary index.
 Then grant runtime privileges (run as admin; no account ARNs in Git):
 
 ```sql

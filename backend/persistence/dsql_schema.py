@@ -166,9 +166,6 @@ CREATE TABLE IF NOT EXISTS app_sessions (
     revokedAt TEXT
 );
 
-CREATE INDEX ASYNC IF NOT EXISTS idx_app_sessions_token_hash
-ON app_sessions(tokenHash);
-
 CREATE INDEX ASYNC IF NOT EXISTS idx_app_sessions_user
 ON app_sessions(userId);
 

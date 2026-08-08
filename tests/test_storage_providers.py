@@ -41,6 +41,7 @@ _INIT_DSQL = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_INIT_DSQL)
 apply_dsql_schema = _INIT_DSQL.apply_dsql_schema
 is_async_index_ddl = _INIT_DSQL.is_async_index_ddl
+_job_id_from_result = _INIT_DSQL._job_id_from_result
 
 
 class _OccError(Exception):
@@ -353,6 +354,8 @@ def test_dsql_schema_has_no_partial_index_where_predicate():
     assert "WHERE cognitoSub" not in DSQL_SCHEMA
     assert "WHERE cognitosub" not in DSQL_SCHEMA.lower()
     assert "CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_users_cognito_sub" in DSQL_SCHEMA
+    assert "idx_app_sessions_token_hash" not in DSQL_SCHEMA
+    assert "idx_app_sessions_user" in DSQL_SCHEMA
     for statement in iter_dsql_ddl_statements():
         upper = statement.upper()
         if "INDEX" in upper:
@@ -450,7 +453,6 @@ def test_init_dsql_commits_each_ddl_separately_and_waits_for_async_index():
     assert is_async_index_ddl(statements[1])
     assert not is_async_index_ddl(statements[0])
 
-    # Default token_provider would call admin token; inject a static token.
     admin_tokens: list[str] = []
 
     def token_provider():
@@ -469,8 +471,7 @@ def test_init_dsql_commits_each_ddl_separately_and_waits_for_async_index():
     assert applied == statements
     assert commits.count("COMMIT") == 3
     assert waited == ["job-1"]
-    assert admin_tokens  # admin bootstrap minted tokens
-    # Table DDL, then async index, then next table — wait happened between index and t2.
+    assert admin_tokens
     index_pos = next(
         i for i, sql in enumerate(commits) if "INDEX ASYNC" in sql.upper()
     )
@@ -479,6 +480,94 @@ def test_init_dsql_commits_each_ddl_separately_and_waits_for_async_index():
     )
     t2_pos = next(i for i, sql in enumerate(commits) if "t2" in sql.lower())
     assert commit_after_index < t2_pos
+
+
+def test_init_dsql_skips_wait_when_async_index_already_exists():
+    """IF NOT EXISTS with no job_id row must not wait or fail."""
+    commits: list[str] = []
+    waited: list[str] = []
+    index_calls = {"n": 0}
+
+    def connect_fn(**kwargs):
+        class _Raw:
+            def cursor(self):
+                class _Cur:
+                    description = None
+                    rowcount = 0
+                    _rows: list = []
+
+                    def execute(self, sql, params=None):
+                        commits.append(sql)
+                        upper = sql.upper()
+                        if "CREATE" in upper and "INDEX ASYNC" in upper:
+                            index_calls["n"] += 1
+                            # First call submits a job; second finds existing index.
+                            if index_calls["n"] == 1:
+                                self.description = [
+                                    type("Col", (), {"name": "job_id"})()
+                                ]
+                                self._rows = [("job-new",)]
+                            else:
+                                self.description = [
+                                    type("Col", (), {"name": "job_id"})()
+                                ]
+                                self._rows = []
+                        else:
+                            self.description = None
+                            self._rows = []
+
+                    def fetchall(self):
+                        rows = self._rows
+                        self._rows = []
+                        return rows
+
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, *a):
+                        return None
+
+                return _Cur()
+
+            def commit(self):
+                commits.append("COMMIT")
+
+            def rollback(self):
+                commits.append("ROLLBACK")
+
+            def close(self):
+                return None
+
+        return _Raw()
+
+    def wait_for_job(**kwargs):
+        waited.append(kwargs["job_id"])
+
+    statements = [
+        "CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_t1 ON t1(id)",
+        "CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_t1 ON t1(id)",
+        "CREATE TABLE IF NOT EXISTS t2 (id TEXT PRIMARY KEY)",
+    ]
+    applied = apply_dsql_schema(
+        endpoint="ep.example",
+        region="us-west-2",
+        admin_user="admin",
+        connect_fn=connect_fn,
+        token_provider=lambda: "tok",
+        statements=statements,
+        wait_for_job=wait_for_job,
+    )
+    assert applied == statements
+    assert waited == ["job-new"]
+    assert commits.count("COMMIT") == 3
+    assert any("t2" in sql.lower() for sql in commits)
+    assert _job_id_from_result(None) is None
+
+    class _Empty:
+        def fetchone(self):
+            return None
+
+    assert _job_id_from_result(_Empty()) is None
 
 
 def test_s3_nosuchbucket_propagates():

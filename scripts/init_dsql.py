@@ -53,11 +53,17 @@ def is_async_index_ddl(statement: str) -> bool:
     return upper.startswith("CREATE") and " INDEX ASYNC " in f" {upper} "
 
 
-def _job_id_from_result(result: Any) -> str:
-    """Extract the async index ``job_id`` from a CREATE INDEX ASYNC result."""
+def _job_id_from_result(result: Any) -> str | None:
+    """Extract the async index ``job_id`` from a CREATE INDEX ASYNC result.
+
+    Returns:
+        The job id string when a new index build was submitted, or ``None`` when
+        ``CREATE INDEX ASYNC IF NOT EXISTS`` finds an existing index and returns
+        no row (idempotent re-run).
+    """
     row = result.fetchone() if result is not None else None
     if row is None:
-        raise RuntimeError("CREATE INDEX ASYNC returned no job_id row")
+        return None
     if hasattr(row, "get"):
         value = row.get("job_id")
         if value is None:
@@ -71,9 +77,7 @@ def _job_id_from_result(result: Any) -> str:
     else:
         value = row
     job_id = str(value or "").strip()
-    if not job_id:
-        raise RuntimeError("CREATE INDEX ASYNC returned an empty job_id")
-    return job_id
+    return job_id or None
 
 
 def _connect_admin(
@@ -247,7 +251,8 @@ def apply_dsql_schema(
 
     Reconnects after every statement so catalog changes are visible and DSQL's
     one-DDL-per-transaction rule is respected. For ``CREATE INDEX ASYNC``,
-    captures ``job_id``, commits, then waits for the job before the next DDL.
+    captures ``job_id`` when present, commits, then waits only when a new
+    non-empty job id was returned (existing ``IF NOT EXISTS`` indexes skip wait).
 
     Returns:
         The list of statements that were executed.
@@ -279,7 +284,7 @@ def apply_dsql_schema(
             raise
         else:
             connection.close()
-        if job_id is not None:
+        if job_id:
             waiter(
                 job_id=job_id,
                 endpoint=endpoint,
