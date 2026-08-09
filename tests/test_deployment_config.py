@@ -170,6 +170,7 @@ def test_dockerfile_is_architecture_neutral():
     assert "FROM python:3.12-slim" in dockerfile
     assert "--platform=linux/arm64" not in dockerfile
     assert "--platform=linux/amd64" not in dockerfile
+    assert "ca-certificates" in dockerfile
     assert "python -m pip install -r requirements.txt" in dockerfile
     assert 'ENTRYPOINT ["sh", "scripts/start_prod.sh"]' in dockerfile
 

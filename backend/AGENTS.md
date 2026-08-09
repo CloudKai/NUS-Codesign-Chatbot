@@ -43,7 +43,8 @@ FastAPI (api.py)
 | `persistence/` | Storage ports + factories: SQLite/DSQL student stores, local/S3 file storage |
 | `repositories.py` | Narrow repository adapters over `StudentStore` |
 | `chat_service.py` | Legacy/direct chat engine (`StudentChatEngine`); OpenAI continuation state is not persisted |
-| `providers.py` | Ollama and OpenAI coach provider adapters |
+| `providers.py` | Ollama and OpenAI coach provider adapters (consume composed prompts) |
+| `prompts/` | Framework-neutral stage prompt files, loader, and composer |
 | `mock_provider.py` | Deterministic provider for tests and offline demo |
 | `source_library.py` | Source CRUD helpers, lecture-notes sync, URL import, citation context |
 | `file_processing.py` | Upload storage, text extraction, safe paths |

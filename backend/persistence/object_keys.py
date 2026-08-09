@@ -44,6 +44,22 @@ def notebook_prefix(*, user_id: str, notebook_id: str) -> str:
     return f"users/{safe_user}/notebooks/{safe_notebook}/"
 
 
+def source_prefix(*, user_id: str, notebook_id: str, source_id: str) -> str:
+    """Return the key prefix for every object belonging to one source.
+
+    Example:
+        ``users/<user-id>/notebooks/<notebook-id>/sources/<source-id>/``
+
+    Uses the same sanitization and owner/notebook/source components as
+    ``build_upload_object_key`` / ``build_extracted_text_object_key``. Callers
+    must pass the authenticated owner id — never a metadata-supplied user.
+    """
+    safe_user = sanitize_filename(user_id) or "user"
+    safe_notebook = sanitize_filename(notebook_id) or "notebook"
+    safe_source = sanitize_filename(source_id) or "source"
+    return f"users/{safe_user}/notebooks/{safe_notebook}/sources/{safe_source}/"
+
+
 def build_extracted_text_object_key(
     *,
     user_id: str,

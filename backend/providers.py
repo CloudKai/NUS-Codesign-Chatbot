@@ -1,8 +1,10 @@
 """Local and optional OpenAI model adapters for structured coaching output.
 
-Providers return validated ``ProviderCoachOutput`` JSON. When
-``CoachRequest.image_inputs`` is present, Ollama receives base64 ``images`` and
-OpenAI receives multimodal ``input_image`` parts alongside the text prompt.
+Providers consume a server-composed prompt from ``backend.prompts`` and focus on
+invocation, structured output, model arguments, and error translation. They do
+not own six-stage educational wording. When ``CoachRequest.image_inputs`` is
+present, Ollama receives base64 ``images`` and OpenAI receives multimodal
+``input_image`` parts alongside the composed text prompt.
 """
 
 from __future__ import annotations
@@ -14,8 +16,8 @@ from openai import OpenAI
 
 from .domain import CoachRequest, ProviderCoachOutput, StageDecision, openai_strict_schema
 from .mock_provider import DeterministicCoachProvider
+from .prompts import compose_coach_prompt
 from .settings import settings
-from .student_journey import STAGE_BY_ID
 
 
 class ProviderUnavailableError(RuntimeError):
@@ -45,7 +47,7 @@ class OllamaCoachProvider:
     def assess(self, request: CoachRequest) -> tuple[str, Any]:
         """Generate a JSON turn from Ollama without exposing provider details upstream."""
         schema = openai_strict_schema(ProviderCoachOutput)
-        prompt = self._prompt(request)
+        prompt = compose_coach_prompt(request).composed_text
         user_message: dict[str, Any] = {"role": "user", "content": prompt}
         image_payloads = _image_data_payloads(request)
         if image_payloads:
@@ -85,111 +87,6 @@ class OllamaCoachProvider:
         )
         return turn.response_text, assessment
 
-    @staticmethod
-    def _prompt(request: CoachRequest) -> str:
-        """Create a compact, history-aware prompt for one structured coaching turn."""
-        stage = STAGE_BY_ID[request.current_stage]
-        recent_history = "\n".join(
-            f"{str(message.get('role', 'unknown')).title()}: "
-            f"{' '.join(str(message.get('content', '')).split())[:800]}"
-            for message in request.history[-6:]
-            if str(message.get("content", "")).strip()
-        )
-        image_note = ""
-        if request.image_inputs:
-            labels = ", ".join(image.source_id for image in request.image_inputs)
-            image_note = (
-                f"Attached notebook images ({len(request.image_inputs)}): {labels}. "
-                "Inspect the image content as selected evidence."
-            )
-        return "\n\n".join(
-            part
-            for part in (
-                (
-                    "You are a warm, Socratic university critical-thinking coach having a "
-                    "natural conversation with a student. Reply like a supportive design "
-                    "coach, not like a rigid form or chatbot checklist. Return only the "
-                    "required structured JSON result."
-                    + (
-                        " When you recommend advance, the application will automatically move "
-                        "the student to the next stage—write as if already coaching that next "
-                        "skill, with no confirmation language."
-                        if settings.auto_advance_stages
-                        else " A recommendation to advance waits for student confirmation."
-                    )
-                ),
-                f"Current stage: {stage.short_label} — {stage.description}",
-                f"Stage question: {stage.reflection_prompt}",
-                f"Response detail: {request.response_detail}",
-                f"Recent conversation:\n{recent_history}" if recent_history else "",
-                f"Student contribution: {request.student_message}",
-                f"Selected source context:\n{request.source_context}" if request.source_context else "",
-                image_note,
-                (
-                    "Broader knowledge is allowed when sources do not answer the question."
-                    if request.allow_model_knowledge
-                    else "Use selected sources as the factual evidence base when they matter."
-                ),
-                (
-                    "Conversation style for response_text:\n"
-                    "- Briefly and specifically acknowledge useful progress without quoting "
-                    "or paraphrasing the student's words.\n"
-                    "- Ask one focused Socratic question at a time; use at most two questions "
-                    "only when advancing into a new stage.\n"
-                    "- Build on what the student has already answered; never repeat a generic "
-                    "stage template they already addressed.\n"
-                    "- Do not use emoji.\n"
-                    "- Avoid robotic phrases such as 'ready for the next part', 'state your "
-                    "claim', 'You're exploring', 'I understand your contribution as', or "
-                    "'You've made this step clearer'.\n"
-                    "- Do not narrate internal stage movement or ask the student to confirm a "
-                    "transition.\n"
-                    "- Cite a source with [S#] only when a claim comes from that source or the "
-                    "student should inspect a specific passage or file. Do not announce that "
-                    "sources are available, and do not invent citations."
-                ),
-                (
-                    "Guidance mode: Quick. Recommend advance once the student has a "
-                    "workable answer for this stage's core purpose, even if details "
-                    "are still thin. Prefer progress, and keep follow-up questions light."
-                    if request.response_detail == "short"
-                    else (
-                        "Guidance mode: Complex. Recommend advance only when the "
-                        "contribution is thorough for this stage—specific claims, clear "
-                        "reasoning, and limited ambiguity. Prefer stay when important "
-                        "elements are still missing."
-                    )
-                ),
-                (
-                    "Stage-specific advance rule for Focus: recommend advance once the "
-                    "student states a workable research question that names the group or "
-                    "setting and the outcome of interest. Do not keep them on Focus only "
-                    "because a measure is imperfectly defined; that belongs in Evidence. "
-                    "For later stages, advance only when the contribution clearly addresses "
-                    "that stage's purpose."
-                    if request.current_stage == "focus"
-                    else (
-                        "Advance only when the contribution clearly addresses this stage's "
-                        "purpose; otherwise stay with one precise missing element."
-                    )
-                ),
-                (
-                    "In the same JSON result include:\n"
-                    "- facione_scores for all six dimensions (analysis, interpretation, "
-                    "inference, evaluation, explanation, self_regulation) using 0=not "
-                    "started, 1=Weak, 2=Unacceptable, 3=Acceptable, 4=Strong.\n"
-                    "- learning_summary as a short synthesized overview—never paste prompts.\n"
-                    "- review_strengths: 0–3 short supportive strengths for this stage only; "
-                    "leave empty when evidence is still too thin.\n"
-                    "- review_improvements: 0–3 concrete, encouraging next actions for this "
-                    "stage only; leave empty when there is nothing useful yet.\n"
-                    "Strengths and improvements must be specific, never generic praise, and "
-                    "must not copy the student's wording."
-                ),
-            )
-            if part
-        )
-
 
 class OpenAICoachProvider:
     """Call the OpenAI Responses API for a validated structured coaching assessment."""
@@ -210,7 +107,7 @@ class OpenAICoachProvider:
         if not settings.openai_api_key:
             raise ProviderUnavailableError("OPENAI_API_KEY is not configured")
         try:
-            prompt = OllamaCoachProvider._prompt(request)
+            prompt = compose_coach_prompt(request).composed_text
             if request.image_inputs:
                 content: list[dict[str, Any]] = [
                     {"type": "input_text", "text": prompt}

@@ -2,45 +2,64 @@
 
 ## Current phase
 
-**Final pre-AWS hardening (Cognito / DSQL / student S3)**
+**Final pre-AWS Cognito / DSQL / student-S3 hardening plus local stage-prompt
+architecture** — integrated on ``Production-RemoveData``. This phase adds no
+Bedrock resources and made no live paid-provider or AWS calls.
 
-Branch ``Production-RemoveData``. No Bedrock/KB/OCR/course-material-S3 work.
+### Behavior and architecture
 
-### Hardening landed
+1. Cognito accepts only verified ID tokens (``token_use=id``); JWKS is cached
+   in process with TTL refresh and one unknown-``kid`` refresh.
+2. DSQL runtime/admin connections use ``verify-full`` plus system roots.
+   Readiness uses ``SELECT 1`` and does not create a production
+   ``local-student`` row. Child ownership checks and writes share one unit.
+3. Production course-material sync is disabled; lecture PDFs are excluded
+   from the image. Failed upload metadata writes clean raw/derived objects.
+4. Source/notebook deletes commit DB work first, then delete deterministic
+   authenticated-owner prefixes outside DSQL OCC. An absent-row retry repeats
+   cleanup safely while FastAPI preserves not-found semantics.
+5. ``backend/prompts/`` provides cached UTF-8 shared/stage prompt files and a
+   framework-neutral bounded composer. The application supplies the
+   DSQL-authoritative stage, assignment context, learning summary, and current
+   selected-source context. Providers retain structured-output invocation.
+6. ``scripts/preview_prompt.py`` previews fake local prompts; the future
+   Bedrock seam replaces only the ``retrieved_course_context`` producer.
 
-1. Cognito ID tokens require ``token_use == "id"``.
-2. In-process JWKS/KeySet cache with TTL + one refresh on unknown ``kid``.
-3. DSQL runtime + admin connections use ``sslmode=verify-full`` and
-   ``sslrootcert=system``.
-4. ``COURSE_MATERIAL_SYNC_ENABLED`` gate (production compose ``false``) so
-   lecture PDFs are not copied into ``USER_UPLOADS_BUCKET``.
-5. Raw + extracted object keys cleaned when source metadata insert fails.
-6. Production DSQL bootstrap uses ``__auth_bootstrap__`` with
-   ``ensure_owner=False`` (no ``local-student`` row); readiness uses ``ping()``.
-7. ``add_message`` / ``add_source`` / ``create_phase_transition`` verify notebook
-   ownership inside the same DB unit of work as the child write.
+### Validation evidence
 
-### Commands run and results
-
-- ``.venv/bin/python -m pytest -q`` → **212 passed**
+- Integrated focused suite (prompt, delete retry, workspace API, ownership,
+  storage) → 50 passed.
+- ``.venv/bin/python -m pytest -q`` → 232 passed.
 - ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m
-  compileall -q backend ui streamlit_app.py tests`` → exit 0
-- ``docker compose config --quiet`` → exit 0
-- ``APP_IMAGE=co-design:local docker compose -f compose.prod.yaml config --quiet``
-  → exit 0
-- No live Cognito / DSQL / S3 / OpenAI / Bedrock calls
-- Not committed unless requested
+  compileall -q backend ui streamlit_app.py tests`` → exit 0.
+- Local and production ``docker compose ... config --quiet`` → exit 0.
+- ``git diff --check`` → exit 0.
+- No live OpenAI, Cognito, DSQL, S3, or Bedrock calls.
+
+### Compatibility, rollback, and known risks
+
+- No schema/data migration; existing entrypoints and five-table schema remain.
+- Production no longer auto-copies bundled lecture notes into student S3.
+  Local development keeps sync enabled by default.
+- Rollback is a code/config revert; no persisted data was rewritten.
+- Optional expired ``oauth_login_states`` cleanup was intentionally skipped
+  because it was not an isolated safe change.
+- Test output has existing Starlette/httpx deprecation warnings only.
+- Changes are not committed or pushed.
 
 ### Next exact action
 
-1. Review this hardening pass.
-2. Confirm Cognito refresh-token validity (~30d).
-3. Run ``scripts/init_dsql.py`` as admin when ready.
-4. GRANT ``co_design_app``; map EC2 IAM role; set ``USER_UPLOADS_BUCKET``.
-5. Deploy ``compose.prod.yaml`` and smoke-test.
-6. Hand off course-material S3 / Bedrock / KB / OCR to the other developer.
+With an explicit request/token cost cap, run one optional live OpenAI smoke
+using ``MODEL_PROVIDER=openai``. Otherwise proceed to AWS deployment wiring;
+future Knowledge Base work should replace only the retrieved-course-context
+producer documented in ``docs/PROMPT_ARCHITECTURE.md``.
 
 ## Previous completed work
+
+**Final pre-AWS hardening (Cognito / DSQL / student S3)** — deletion
+idempotency, Cognito ID ``token_use``, JWKS cache, DSQL ``verify-full``,
+course-sync gate, orphan object cleanup, ownership-in-write checks, mock CI
+compose validation, ``ca-certificates`` in image.
 
 **Multi-user FastAPI ownership + student S3 key isolation**
 

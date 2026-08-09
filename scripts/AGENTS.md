@@ -24,6 +24,7 @@ logic.
 | `build.sh` | Validation-only: `compileall` + full mock `pytest` | **Does not** initialize or modify the live DB |
 | `init_db.py` | Explicit SQLite schema setup | Refuses existing DB unless `--force`; prefer `--database PATH` for new files |
 | `init_dsql.py` | Admin-only Aurora DSQL schema bootstrap | One DDL per transaction; never app startup; not `co_design_app` |
+| `preview_prompt.py` | Demo-only composed stage-prompt preview | No DB, student data, tokens, or provider calls |
 
 ## Environment variables
 

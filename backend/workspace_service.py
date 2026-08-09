@@ -128,10 +128,18 @@ class WorkspaceService:
         return thread
 
     def delete_thread(self, thread_id: str) -> None:
-        """Delete a notebook and its owned files."""
-        if not self._store.get_thread(thread_id):
-            raise ValueError("Notebook not found")
+        """Idempotently delete a notebook and retry its owned-file cleanup.
+
+        The store derives cleanup prefixes from its authenticated owner context.
+        Calling through when the row is already absent lets a repeated API
+        DELETE retry object-storage cleanup that failed after the DB commit.
+        The public API still reports an absent/foreign notebook as not found
+        after that safe owner-scoped cleanup attempt.
+        """
+        existed = self._store.get_thread(thread_id) is not None
         self._store.delete_thread(thread_id)
+        if not existed:
+            raise ValueError("Notebook not found")
 
     def get_messages(self, thread_id: str) -> list[dict[str, Any]]:
         """Return canonical chat history for a notebook."""
@@ -209,10 +217,17 @@ class WorkspaceService:
         return source
 
     def delete_source(self, thread_id: str, source_id: str) -> None:
-        """Delete a non-locked source."""
-        if not self._store.get_source(thread_id, source_id):
-            raise ValueError("Source not found")
+        """Idempotently delete a source and retry owner-scoped prefix cleanup.
+
+        Existing source metadata still enforces ownership and locked-course
+        rules in the store. An absent row is treated as a cleanup retry, then
+        reported as not found so cross-user deletes keep their existing API
+        semantics.
+        """
+        existed = self._store.get_source(thread_id, source_id) is not None
         self._store.delete_source(thread_id, source_id)
+        if not existed:
+            raise ValueError("Source not found")
 
     def read_source_content(self, thread_id: str, source_id: str) -> SourceContent:
         """Read source file bytes for preview/download via local or object storage."""

@@ -46,6 +46,7 @@ default `StudentStore()` path.
 | `test_workspace_api.py` | Notebook/source/preference CRUD API and path redaction |
 | `test_primary_path.py` | All six stages, stale/reject, restart, notebook isolation, schema |
 | `test_workflow.py` | LangGraph workflow routing and structured output |
+| `test_prompt_architecture.py` | Stage prompt files, composer ordering, authoritative stage selection, no raw prompts in API |
 | `test_learning_service.py` | Phase transition confirmation, resolution, atomic rollback |
 | `test_student_store.py` | Notebook, folder, message, source persistence |
 | `test_student_journey.py` | Stage normalization, journey helpers, review |

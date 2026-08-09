@@ -686,19 +686,23 @@ class StudentStore:
         return stage, _dump(progress), _dump(settings_blob)
 
     def delete_thread(self, thread_id: str) -> None:
-        """Delete a notebook and its child rows, then purge stored files."""
-        if not self.get_thread(thread_id):
-            return
-        with self._lock, self._connect() as connection:
-            for table in NOTEBOOK_CHILD_TABLES:
+        """Delete a notebook and its child rows, then purge stored files.
+
+        When the notebook row is already gone (retry after a committed delete),
+        still run authenticated-owner prefix cleanup so object storage stays
+        consistent. Repeated cleanup is harmless.
+        """
+        if self.get_thread(thread_id):
+            with self._lock, self._connect() as connection:
+                for table in NOTEBOOK_CHILD_TABLES:
+                    connection.execute(
+                        f"DELETE FROM {table} WHERE notebook_id = ?",
+                        (thread_id,),
+                    )
                 connection.execute(
-                    f"DELETE FROM {table} WHERE notebook_id = ?",
-                    (thread_id,),
+                    "DELETE FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
                 )
-            connection.execute(
-                "DELETE FROM notebooks WHERE id=? AND user_id=?",
-                (thread_id, self.owner_id),
-            )
         self._cleanup_notebook_files(thread_id)
 
     def _cleanup_notebook_files(self, notebook_id: str) -> None:
@@ -1482,33 +1486,68 @@ class StudentStore:
         *,
         force: bool = False,
     ) -> None:
-        """Delete a notebook source unless it is managed course material."""
-        source = self.get_source(thread_id, source_id)
-        if not source:
-            return
-        metadata = source.get("metadata") or {}
-        if metadata.get("locked_source") and not force:
-            raise ValueError("Course materials cannot be removed from the app.")
-        with self._lock, self._connect() as connection:
-            connection.execute(
-                """
-                DELETE FROM sources
-                WHERE id=? AND notebook_id=?
-                  AND notebook_id IN (
-                    SELECT id FROM notebooks WHERE id=? AND user_id=?
-                  )
-                """,
-                (source_id, thread_id, thread_id, self.owner_id),
-            )
-        from backend.persistence.factory import get_file_storage
+        """Delete a notebook source unless it is managed course material.
 
-        storage = get_file_storage()
-        for key in (source.get("object_key"), source.get("extracted_text_key")):
-            if key:
-                storage.delete(str(key))
+        While metadata exists, ownership and locked-course checks apply and the
+        DB delete runs first. After a successful DB unit (or when the row is
+        already absent on retry), always purge the deterministic
+        authenticated-owner source object prefix. Never uses metadata-supplied
+        keys for that cleanup. Repeated successful deletes are harmless.
+        """
+        source = self.get_source(thread_id, source_id)
+        if source:
+            metadata = source.get("metadata") or {}
+            if metadata.get("locked_source") and not force:
+                raise ValueError("Course materials cannot be removed from the app.")
+            with self._lock, self._connect() as connection:
+                connection.execute(
+                    """
+                    DELETE FROM sources
+                    WHERE id=? AND notebook_id=?
+                      AND notebook_id IN (
+                        SELECT id FROM notebooks WHERE id=? AND user_id=?
+                      )
+                    """,
+                    (source_id, thread_id, thread_id, self.owner_id),
+                )
+            self._cleanup_source_local_file(source, thread_id=thread_id)
+        self._cleanup_source_object_prefix(thread_id, source_id)
+
+    def _cleanup_source_object_prefix(self, thread_id: str, source_id: str) -> None:
+        """Delete object-storage keys under the authenticated owner's source prefix.
+
+        Always derived from ``self.owner_id`` plus the requested notebook/source
+        ids — never from metadata ``object_key`` values — so retries cannot
+        target another user's prefix.
+        """
+        from backend.persistence.factory import get_file_storage
+        from backend.persistence.object_keys import source_prefix
+
+        get_file_storage().delete_prefix(
+            source_prefix(
+                user_id=self.owner_id,
+                notebook_id=thread_id,
+                source_id=source_id,
+            )
+        )
+
+    def _cleanup_source_local_file(
+        self,
+        source: dict[str, Any],
+        *,
+        thread_id: str,
+    ) -> None:
+        """Remove a managed legacy local file when metadata still named one.
+
+        Only runs when the source row was present (so a trusted ``local_path``
+        is known). Absent-row retries rely solely on object-prefix cleanup and
+        do not guess unrelated local paths.
+        """
+        metadata = source.get("metadata") or {}
         local_path = metadata.get("local_path")
-        if local_path and metadata.get("managed_file"):
-            path = Path(str(local_path)).resolve()
-            allowed_root = (settings.files_dir / "threads" / thread_id).resolve()
-            if path.is_file() and allowed_root in path.parents:
-                path.unlink(missing_ok=True)
+        if not (local_path and metadata.get("managed_file")):
+            return
+        path = Path(str(local_path)).resolve()
+        allowed_root = (settings.files_dir / "threads" / thread_id).resolve()
+        if path.is_file() and allowed_root in path.parents:
+            path.unlink(missing_ok=True)

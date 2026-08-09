@@ -28,6 +28,11 @@ jobs:
           sh -n scripts/start.sh
           sh -n scripts/build.sh
 
+      - name: Compose config
+        run: |
+          docker compose config --quiet
+          APP_IMAGE=co-design:test docker compose -f compose.prod.yaml config --quiet
+
       - name: Compile sources
         env:
           PYTHONPYCACHEPREFIX: /tmp/co-design-pycache

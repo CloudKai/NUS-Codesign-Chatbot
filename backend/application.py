@@ -34,6 +34,24 @@ def _history_signature(messages: list[dict[str, Any]]) -> list[tuple[str, str]]:
     return signature
 
 
+def _project_context_from_metadata(metadata: dict[str, Any]) -> str:
+    """Build a short server-side project context from notebook assignment fields."""
+    assignment = metadata.get("assignment")
+    if not isinstance(assignment, dict):
+        assignment = {}
+    parts: list[str] = []
+    for key, label in (
+        ("title", "Title"),
+        ("course", "Course"),
+        ("brief", "Brief"),
+        ("rubric", "Rubric"),
+    ):
+        value = " ".join(str(assignment.get(key) or "").split()).strip()
+        if value:
+            parts.append(f"{label}: {value}")
+    return "\n".join(parts)
+
+
 class CoachApplicationService:
     """Persist complete typed coaching turns without exposing infrastructure to callers."""
 
@@ -237,6 +255,8 @@ class CoachApplicationService:
                     "source_ids must match the notebook's currently selected sources"
                 )
 
+        # Selected-source text is the current retrieved_course_context producer.
+        # A future Knowledge Base adapter should replace only this assembly step.
         source_context, _ = selected_source_context(selected_sources)
         if request.source_context and request.source_context.strip() != source_context:
             raise ValueError("source_context does not match the selected notebook sources")
@@ -260,12 +280,18 @@ class CoachApplicationService:
             if request.reasoning_effort is not None
             else metadata.get("reasoning_effort"),
         )
+        project_context = _project_context_from_metadata(metadata)
+        conversation_summary = " ".join(
+            str(metadata.get("learning_summary") or "").split()
+        ).strip()
         return request.model_copy(
             update={
                 "current_stage": authoritative_stage,
                 "history": store_history,
                 "source_ids": authoritative_ids,
                 "source_context": source_context,
+                "student_project_context": project_context,
+                "conversation_summary": conversation_summary,
                 "image_inputs": image_inputs,
                 "model_id": selected_model.id,
                 "reasoning_effort": selected_effort,

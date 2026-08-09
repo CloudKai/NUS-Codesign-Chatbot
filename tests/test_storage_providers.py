@@ -42,6 +42,7 @@ from backend.persistence.s3_files import (
     S3FileStorage,
     is_missing_object_error,
 )
+from backend.settings import settings
 from backend.student_store import StudentStore
 
 _INIT_DSQL_PATH = Path(__file__).resolve().parents[1] / "scripts" / "init_dsql.py"
@@ -777,11 +778,12 @@ def test_save_uploads_and_workspace_read_via_object_storage(tmp_path: Path, monk
 
 def test_source_delete_propagates_storage_failures(tmp_path: Path, monkeypatch):
     class _FailingDeleteStorage(MemoryFileStorage):
-        def delete(self, key: str) -> None:
-            raise PermissionError(f"AccessDenied: {key}")
+        def delete_prefix(self, prefix: str) -> int:
+            raise PermissionError(f"AccessDenied: {prefix}")
 
     storage = _FailingDeleteStorage()
-    storage.put_bytes(key="users/u/n/raw.txt", data=b"raw")
+    monkeypatch.setattr(settings, "file_storage_provider", "memory")
+    reset_file_storage_cache()
     monkeypatch.setattr(
         "backend.persistence.factory.get_file_storage",
         lambda: storage,
@@ -792,12 +794,16 @@ def test_source_delete_propagates_storage_failures(tmp_path: Path, monkeypatch):
         notebook_id,
         kind="file",
         title="raw.txt",
-        path="users/u/n/raw.txt",
-        metadata={
-            "object_key": "users/u/n/raw.txt",
-            "storage_provider": "memory",
-        },
+        path="users/placeholder",
+        metadata={"storage_provider": "memory"},
     )
+    prefix = (
+        f"users/{sanitize_filename(store.owner_id)}/notebooks/"
+        f"{sanitize_filename(notebook_id)}/sources/{sanitize_filename(source_id)}/"
+    )
+    storage.put_bytes(key=f"{prefix}raw.txt", data=b"raw")
 
     with pytest.raises(PermissionError, match="AccessDenied"):
         store.delete_source(notebook_id, source_id)
+    assert store.get_source(notebook_id, source_id) is None
+    assert storage.exists(f"{prefix}raw.txt")

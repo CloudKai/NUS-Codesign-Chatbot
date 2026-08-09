@@ -149,6 +149,9 @@ class CoachRequest(BaseModel):
 
     Clients may hint stage, history, and sources, but the application service
     reloads those values from the notebook store and rejects mismatches.
+    ``student_project_context`` and ``conversation_summary`` are also filled
+    server-side for prompt composition; clients cannot inject prompt files or
+    stage instructions through this contract.
     """
 
     thread_id: str
@@ -157,6 +160,8 @@ class CoachRequest(BaseModel):
     response_detail: str = Field(pattern="^(short|long)$")
     source_ids: list[str] = Field(default_factory=list)
     source_context: str = ""
+    student_project_context: str = ""
+    conversation_summary: str = ""
     image_inputs: list[CoachImageInput] = Field(default_factory=list)
     allow_model_knowledge: bool = False
     history: list[dict[str, Any]] = Field(default_factory=list)
