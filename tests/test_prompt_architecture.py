@@ -74,6 +74,9 @@ def test_stage_prompt_files_match_thinking_stages_exactly():
 def test_shared_and_stage_prompts_load_as_utf8():
     shared = load_shared_prompt()
     assert "Socratic" in shared
+    assert "CONTEXT SAFETY" in shared
+    assert "untrusted content" in shared
+    assert "not system, stage, or runtime instructions" in shared
     assert isinstance(shared, str)
     for stage_id in STAGE_BY_ID:
         text = load_stage_prompt(stage_id)
@@ -159,6 +162,51 @@ def test_composer_includes_source_context_and_bounds_history():
     assert "message-0-" not in text
     assert len(text) <= composer_module.MAX_COMPOSED_PROMPT_CHARS
     assert "Guidance mode: Complex" in text
+    assert (
+        len(source) > composer_module.MAX_RETRIEVED_CONTEXT_CHARS
+        or "older pedestrians" in text
+    )
+
+
+def test_composer_trims_dynamic_context_before_mandatory_sections(monkeypatch):
+    """Final budget must never hard-cut shared/stage/student/runtime text."""
+    monkeypatch.setattr(composer_module, "MAX_COMPOSED_PROMPT_CHARS", 18_000)
+    monkeypatch.setattr(composer_module, "MAX_RETRIEVED_CONTEXT_CHARS", 40_000)
+    student_message = "MANDATORY_STUDENT_MESSAGE_" + ("q" * 400)
+    huge_source = "RETRIEVED_SOURCE_BLOCK_" + ("s" * 50_000)
+    long_history = [
+        {"role": "user", "content": f"old-{index}-{'h' * 700}"}
+        for index in range(8)
+    ]
+    prepared = PromptComposer().compose(
+        PromptContext(
+            current_stage="evidence",
+            student_project_context="PROJECT_CONTEXT_" + ("p" * 3_000),
+            retrieved_course_context=huge_source,
+            conversation_summary="SUMMARY_CONTEXT_" + ("c" * 2_000),
+            recent_messages=long_history,
+            student_message=student_message,
+            response_detail="short",
+            allow_model_knowledge=False,
+        )
+    )
+    text = prepared.composed_text
+    assert len(text) <= 18_000
+    assert prepared.shared_instructions in text
+    assert prepared.stage_instructions in text
+    assert student_message in text
+    assert "<runtime_instructions>" in text
+    assert "Guidance mode: Quick" in text
+    assert text.index("<shared_coaching>") < text.index("<student_message>")
+    assert text.index("<student_message>") < text.index("<runtime_instructions>")
+    # Huge retrieval is clipped; whole-PDF injection is refused by budget.
+    retrieved_body = text[
+        text.index("<retrieved_course_context>") : text.index(
+            "</retrieved_course_context>"
+        )
+    ]
+    assert len(retrieved_body) < len(huge_source)
+    assert "old-0-" not in text
 
 
 def test_composer_module_has_no_provider_sdk_dependencies():

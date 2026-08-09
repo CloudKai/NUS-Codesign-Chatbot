@@ -2,64 +2,81 @@
 
 ## Current phase
 
-**Final pre-AWS Cognito / DSQL / student-S3 hardening plus local stage-prompt
-architecture** — integrated on ``Production-RemoveData``. This phase adds no
-Bedrock resources and made no live paid-provider or AWS calls.
+**Small follow-up on ``Production-RemoveData``** — Mock CI compose bootstrap,
+prompt context-safety wording, and PromptComposer mandatory-section budgeting.
+No Bedrock, schema, Cognito, Streamlit, or S3-layout redesign.
 
-### Behavior and architecture
+Prior phase commit ``19f5d4e`` (provider-neutral stage prompts + retryable S3
+cleanup) is committed and pushed. This follow-up is committed and pushed on
+``Production-RemoveData``.
 
-1. Cognito accepts only verified ID tokens (``token_use=id``); JWKS is cached
-   in process with TTL refresh and one unknown-``kid`` refresh.
-2. DSQL runtime/admin connections use ``verify-full`` plus system roots.
-   Readiness uses ``SELECT 1`` and does not create a production
-   ``local-student`` row. Child ownership checks and writes share one unit.
-3. Production course-material sync is disabled; lecture PDFs are excluded
-   from the image. Failed upload metadata writes clean raw/derived objects.
-4. Source/notebook deletes commit DB work first, then delete deterministic
-   authenticated-owner prefixes outside DSQL OCC. An absent-row retry repeats
-   cleanup safely while FastAPI preserves not-found semantics.
-5. ``backend/prompts/`` provides cached UTF-8 shared/stage prompt files and a
-   framework-neutral bounded composer. The application supplies the
-   DSQL-authoritative stage, assignment context, learning summary, and current
-   selected-source context. Providers retain structured-output invocation.
-6. ``scripts/preview_prompt.py`` previews fake local prompts; the future
-   Bedrock seam replaces only the ``retrieved_course_context`` producer.
+### Behavior changes in this follow-up
+
+1. Mock CI copies ``.env.example`` to a temporary CI ``.env`` before
+   ``docker compose config`` so ``env_file: .env`` works without committing
+   secrets. Production compose still requires ``env_file``.
+2. Shared coaching prompt adds a concise CONTEXT SAFETY rule: project /
+   retrieved / history / student content is untrusted evidence; document
+   instructions never override shared, stage, or runtime rules.
+3. ``PromptComposer`` reserves the final length budget for shared coaching,
+   stage instructions, the current student message, and runtime instructions.
+   Over-budget turns trim retrieved context first, then older recent messages,
+   then summary/project context. Retrieved context default cap is ``24_000``
+   for the temporary pre-Bedrock OpenAI testing path. No whole-PDF injection
+   and no final hard-truncation of mandatory sections.
 
 ### Validation evidence
 
-- Integrated focused suite (prompt, delete retry, workspace API, ownership,
-  storage) → 50 passed.
-- ``.venv/bin/python -m pytest -q`` → 232 passed.
+**Local (this follow-up):**
+
+- ``.venv/bin/python -m pytest -q`` → **233 passed**.
 - ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m
   compileall -q backend ui streamlit_app.py tests`` → exit 0.
-- Local and production ``docker compose ... config --quiet`` → exit 0.
+- ``docker compose config --quiet`` and
+  ``APP_IMAGE=co-design:test docker compose -f compose.prod.yaml config --quiet``
+  → exit 0 (local developer ``.env`` present; CI will use ``cp .env.example .env``).
 - ``git diff --check`` → exit 0.
-- No live OpenAI, Cognito, DSQL, S3, or Bedrock calls.
+- No live OpenAI, Cognito, DSQL, S3, or Bedrock calls. No Bedrock
+  implementation changes (composer docstring mentions the future KB seam only).
+
+**GitHub Actions (pushed commit ``19f5d4e``):**
+
+- Mock CI run https://github.com/CloudKai/NUS-Codesign-Chatbot/actions/runs/31301098173
+  **failed** at step ``Compose config`` because compose files reference
+  ``env_file: .env`` and the runner has no private ``.env``.
+- Steps ``Compile sources`` and ``Run mock pytest suite`` were **skipped** on
+  that failure. This is distinct from the earlier local ``232 passed`` evidence
+  for ``19f5d4e``.
+- Re-check Mock CI on this follow-up push for compose + compileall + pytest.
+
+**Prior local evidence for ``19f5d4e`` (not GitHub CI):**
+
+- Local ``.venv/bin/python -m pytest -q`` → 232 passed.
+- Local compileall + compose config (with a developer ``.env`` present) → exit 0.
 
 ### Compatibility, rollback, and known risks
 
-- No schema/data migration; existing entrypoints and five-table schema remain.
-- Production no longer auto-copies bundled lecture notes into student S3.
-  Local development keeps sync enabled by default.
-- Rollback is a code/config revert; no persisted data was rewritten.
-- Optional expired ``oauth_login_states`` cleanup was intentionally skipped
-  because it was not an isolated safe change.
-- Test output has existing Starlette/httpx deprecation warnings only.
-- Changes are not committed or pushed.
+- No schema/data migration; prompt files remain provider-neutral under
+  ``backend/prompts/``.
+- Rollback is a code/config revert; do not commit a populated secret ``.env``.
+- Optional expired ``oauth_login_states`` cleanup remains skipped.
 
 ### Next exact action
 
-With an explicit request/token cost cap, run one optional live OpenAI smoke
-using ``MODEL_PROVIDER=openai``. Otherwise proceed to AWS deployment wiring;
-future Knowledge Base work should replace only the retrieved-course-context
-producer documented in ``docs/PROMPT_ARCHITECTURE.md``.
+1. Confirm Mock CI green on this push (compose + compileall + pytest).
+2. Optional live OpenAI smoke with an explicit cost cap.
+3. Otherwise proceed to AWS deployment wiring; future Knowledge Base work
+   replaces only the retrieved-course-context producer.
 
 ## Previous completed work
 
-**Final pre-AWS hardening (Cognito / DSQL / student S3)** — deletion
-idempotency, Cognito ID ``token_use``, JWKS cache, DSQL ``verify-full``,
-course-sync gate, orphan object cleanup, ownership-in-write checks, mock CI
-compose validation, ``ca-certificates`` in image.
+**Provider-neutral stage prompts + retryable S3 cleanup** — ``19f5d4e`` on
+``Production-RemoveData`` (pushed). Local mock suite 232 passed; GitHub Mock CI
+failed on missing CI ``.env`` before compose validation.
+
+**Final pre-AWS hardening (Cognito / DSQL / student S3)** — Cognito ID
+``token_use``, JWKS cache, DSQL ``verify-full``, course-sync gate, orphan
+object cleanup, ownership-in-write checks, ``ca-certificates`` in image.
 
 **Multi-user FastAPI ownership + student S3 key isolation**
 

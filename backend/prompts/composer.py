@@ -39,14 +39,21 @@ EMPTY_RETRIEVED_COURSE_CONTEXT = (
 )
 
 # Bound dynamic sections so composition never injects whole PDFs or unbounded history.
+# Retrieved context is capped economically for the temporary pre-Bedrock OpenAI
+# testing path; a future KB producer should still respect this budget or replace it.
 MAX_PROJECT_CONTEXT_CHARS = 8_000
-MAX_RETRIEVED_CONTEXT_CHARS = 160_000
+MAX_RETRIEVED_CONTEXT_CHARS = 24_000
 MAX_CONVERSATION_SUMMARY_CHARS = 4_000
 MAX_RECENT_MESSAGES = 6
 MAX_RECENT_MESSAGE_CHARS = 800
 MAX_STUDENT_MESSAGE_CHARS = 12_000
 MAX_RUNTIME_CHARS = 4_000
 MAX_COMPOSED_PROMPT_CHARS = 200_000
+
+_EMPTY_PROJECT = "No student project context was provided for this turn."
+_EMPTY_SUMMARY = "No conversation summary was provided for this turn."
+_EMPTY_RECENT = "No recent messages were provided for this turn."
+_EMPTY_STUDENT = "(empty student message)"
 
 
 class PromptContext(BaseModel):
@@ -78,16 +85,29 @@ class PreparedCoachPrompt(BaseModel):
 def _clip(text: str, limit: int) -> str:
     """Trim whitespace-normalized text to ``limit`` characters."""
     cleaned = str(text or "").strip()
+    if limit <= 0:
+        return ""
     if len(cleaned) <= limit:
         return cleaned
+    if limit == 1:
+        return "…"
     return cleaned[: max(0, limit - 1)].rstrip() + "…"
 
 
-def _format_recent_messages(messages: list[dict[str, Any]]) -> str:
-    """Render a bounded recent-history block for the model."""
+def _format_recent_messages(
+    messages: list[dict[str, Any]],
+    *,
+    max_messages: int = MAX_RECENT_MESSAGES,
+) -> str:
+    """Render a bounded recent-history block for the model.
+
+    Older messages are dropped first when ``max_messages`` shrinks for budget.
+    """
+    if max_messages <= 0:
+        return ""
     lines: list[str] = []
-    for message in messages[-MAX_RECENT_MESSAGES:]:
-        content = " ".join(str(message.get("content", "")).split()).strip()
+    for message in messages[-max_messages:]:
+        content = " ".join(str(message.get("content", "")).strip().split())
         if not content:
             continue
         role = str(message.get("role", "unknown")).title()
@@ -148,11 +168,48 @@ def _section(tag: str, body: str, *, attrs: str = "") -> str:
     return f"{open_tag}\n{body.strip()}\n{close_tag}"
 
 
+def _join_sections(
+    *,
+    shared: str,
+    stage: str,
+    stage_id: str,
+    project: str,
+    retrieved: str,
+    summary: str,
+    recent: str,
+    student: str,
+    runtime: str,
+) -> str:
+    """Assemble the ordered prompt with explicit section delimiters."""
+    return "\n\n".join(
+        [
+            _section("shared_coaching", shared),
+            _section(
+                "stage_instructions",
+                stage,
+                attrs=f' stage="{stage_id}"',
+            ),
+            _section("student_project_context", project or _EMPTY_PROJECT),
+            _section("retrieved_course_context", retrieved),
+            _section("conversation_summary", summary or _EMPTY_SUMMARY),
+            _section("recent_messages", recent or _EMPTY_RECENT),
+            _section("student_message", student or _EMPTY_STUDENT),
+            _section("runtime_instructions", runtime),
+        ]
+    )
+
+
 class PromptComposer:
     """Assemble shared + stage + turn context without calling a model provider."""
 
     def compose(self, context: PromptContext) -> PreparedCoachPrompt:
         """Compose one provider-ready prompt for the authoritative stage.
+
+        Mandatory sections (shared coaching, stage instructions, current student
+        message, runtime instructions) are never cut by the final length budget.
+        When the total would exceed ``MAX_COMPOSED_PROMPT_CHARS``, lower-priority
+        dynamic context is trimmed first: retrieved source text, then older
+        recent messages, then conversation summary / project context.
 
         Args:
             context: Server-built turn context. ``retrieved_course_context`` is
@@ -164,47 +221,101 @@ class PromptComposer:
 
         Raises:
             PromptLoadError: Propagated when stage or shared files are invalid.
+            ValueError: When mandatory sections alone exceed the total budget.
         """
         shared = load_shared_prompt()
         stage = load_stage_prompt(context.current_stage)
-        project = _clip(context.student_project_context, MAX_PROJECT_CONTEXT_CHARS)
-        retrieved_raw = str(context.retrieved_course_context or "").strip()
-        retrieved = (
-            _clip(retrieved_raw, MAX_RETRIEVED_CONTEXT_CHARS)
-            if retrieved_raw
-            else EMPTY_RETRIEVED_COURSE_CONTEXT
-        )
-        summary = _clip(context.conversation_summary, MAX_CONVERSATION_SUMMARY_CHARS)
-        recent = _format_recent_messages(list(context.recent_messages))
         student = _clip(context.student_message, MAX_STUDENT_MESSAGE_CHARS)
         runtime = _runtime_instructions(context)
 
-        blocks = [
-            _section("shared_coaching", shared),
-            _section(
-                "stage_instructions",
-                stage,
-                attrs=f' stage="{context.current_stage}"',
-            ),
-            _section(
-                "student_project_context",
-                project or "No student project context was provided for this turn.",
-            ),
-            _section("retrieved_course_context", retrieved),
-            _section(
-                "conversation_summary",
-                summary or "No conversation summary was provided for this turn.",
-            ),
-            _section(
-                "recent_messages",
-                recent or "No recent messages were provided for this turn.",
-            ),
-            _section("student_message", student or "(empty student message)"),
-            _section("runtime_instructions", runtime),
-        ]
-        composed = "\n\n".join(blocks)
+        project = _clip(context.student_project_context, MAX_PROJECT_CONTEXT_CHARS)
+        retrieved_raw = str(context.retrieved_course_context or "").strip()
+        has_retrieved = bool(retrieved_raw)
+        retrieved = (
+            _clip(retrieved_raw, MAX_RETRIEVED_CONTEXT_CHARS)
+            if has_retrieved
+            else EMPTY_RETRIEVED_COURSE_CONTEXT
+        )
+        summary = _clip(context.conversation_summary, MAX_CONVERSATION_SUMMARY_CHARS)
+        recent_limit = MAX_RECENT_MESSAGES
+        recent = _format_recent_messages(
+            list(context.recent_messages),
+            max_messages=recent_limit,
+        )
+
+        def build() -> str:
+            return _join_sections(
+                shared=shared,
+                stage=stage,
+                stage_id=context.current_stage,
+                project=project,
+                retrieved=retrieved,
+                summary=summary,
+                recent=recent,
+                student=student,
+                runtime=runtime,
+            )
+
+        composed = build()
+        if len(composed) <= MAX_COMPOSED_PROMPT_CHARS:
+            return PreparedCoachPrompt(
+                shared_instructions=shared,
+                stage_instructions=stage,
+                composed_text=composed,
+            )
+
+        # 1) Shrink retrieved source text first (never inject whole PDFs).
+        retrieved_budget = len(retrieved) if has_retrieved else 0
+        while (
+            len(composed) > MAX_COMPOSED_PROMPT_CHARS
+            and has_retrieved
+            and retrieved_budget > 0
+        ):
+            overflow = len(composed) - MAX_COMPOSED_PROMPT_CHARS
+            retrieved_budget = max(
+                0,
+                retrieved_budget - max(overflow, retrieved_budget // 2 or 1),
+            )
+            if retrieved_budget:
+                retrieved = _clip(retrieved_raw, retrieved_budget)
+            else:
+                retrieved = EMPTY_RETRIEVED_COURSE_CONTEXT
+                has_retrieved = False
+            composed = build()
+
+        # 2) Drop older recent messages next.
+        while len(composed) > MAX_COMPOSED_PROMPT_CHARS and recent_limit > 0:
+            recent_limit -= 1
+            recent = _format_recent_messages(
+                list(context.recent_messages),
+                max_messages=recent_limit,
+            )
+            composed = build()
+
+        # 3) Trim conversation summary, then project context.
+        for label in ("summary", "project"):
+            while len(composed) > MAX_COMPOSED_PROMPT_CHARS:
+                current = summary if label == "summary" else project
+                if not current:
+                    break
+                overflow = len(composed) - MAX_COMPOSED_PROMPT_CHARS
+                next_limit = max(0, len(current) - max(overflow, len(current) // 2 or 1))
+                trimmed = _clip(current, next_limit) if next_limit else ""
+                if label == "summary":
+                    summary = trimmed
+                else:
+                    project = trimmed
+                composed = build()
+                if trimmed == current:
+                    break
+
         if len(composed) > MAX_COMPOSED_PROMPT_CHARS:
-            composed = composed[: MAX_COMPOSED_PROMPT_CHARS - 1].rstrip() + "…"
+            raise ValueError(
+                "Composed coaching prompt exceeds the length budget even after "
+                "trimming dynamic context; mandatory shared/stage/student/runtime "
+                "sections alone are too large."
+            )
+
         return PreparedCoachPrompt(
             shared_instructions=shared,
             stage_instructions=stage,
