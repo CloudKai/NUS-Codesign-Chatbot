@@ -132,8 +132,10 @@ DSQL_ENDPOINT=<hostname> AWS_REGION=us-west-2 \
 
 The script authenticates with **DbConnectAdmin**
 (``generate_db_connect_admin_auth_token``), commits each DDL alone, and for
-async indexes waits on ``sys.wait_for_job`` only when a new ``job_id`` is
-returned (``IF NOT EXISTS`` re-runs that find an existing index skip wait).
+async indexes runs ``CALL sys.wait_for_job(?)`` on a dedicated admin connection
+with autocommit enabled, only when a new ``job_id`` is returned. The procedure
+cannot run in a transaction block; ``IF NOT EXISTS`` re-runs that find an
+existing index return no job and skip the call.
 Runtime never uses DbConnectAdmin.
 Useful secondary indexes (ASYNC): ``users(identifier)``, ``users(cognito_sub)``,
 ``notebooks(user_id, updated_at)``, ``messages(notebook_id, created_at, id)``,
@@ -142,9 +144,13 @@ Useful secondary indexes (ASYNC): ``users(identifier)``, ``users(cognito_sub)``,
 Then grant runtime privileges (run as admin; no account ARNs in Git):
 
 ```sql
-GRANT USAGE ON SCHEMA public TO co_design_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO co_design_app;
 ```
+
+Do not grant ``USAGE`` on the built-in ``public`` schema. Aurora DSQL manages
+that schema as a system entity and rejects that grant. The object-level table
+grant above is the required runtime grant while application tables remain in
+``public``.
 
 ## Build and push (CI or developer machine)
 

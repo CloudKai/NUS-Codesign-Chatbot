@@ -3,8 +3,8 @@
 Aurora DSQL allows only one DDL statement per transaction. This script opens a
 fresh admin connection for each CREATE TABLE / CREATE INDEX statement, commits,
 and reconnects. Asynchronous index builds return a ``job_id``; after commit the
-script waits for ``sys.wait_for_job`` before continuing. It never runs at
-application startup.
+script calls the ``sys.wait_for_job`` procedure on a dedicated autocommit
+connection before continuing. It never runs at application startup.
 
 Admin auth uses ``generate_db_connect_admin_auth_token`` (DbConnectAdmin).
 Runtime traffic must use ``DSQL_USER=co_design_app`` with DbConnect only.
@@ -20,7 +20,6 @@ After success, grant runtime privileges (map the EC2 IAM role to co_design_app
 in IAM; do not commit account ARNs):
 
 ```sql
-GRANT USAGE ON SCHEMA public TO co_design_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO co_design_app;
 ```
 """
@@ -88,8 +87,9 @@ def _connect_admin(
     admin_user: str,
     connect_fn: Callable[..., Any] | None = None,
     token_provider: Callable[[], str] | None = None,
+    autocommit: bool = False,
 ) -> DsqlConnectionProxy:
-    """Open one admin connection for a single DDL or wait transaction."""
+    """Open one verify-full admin connection for a DDL or procedure call."""
     if not endpoint.strip():
         raise ValueError("DSQL_ENDPOINT is required")
     token = (
@@ -119,6 +119,7 @@ def _connect_admin(
         password=token,
         sslmode="verify-full",
         sslrootcert="system",
+        autocommit=autocommit,
     )
     return DsqlConnectionProxy(raw)
 
@@ -135,8 +136,9 @@ def wait_for_async_index_job(
 ) -> None:
     """Block until a DSQL async index job completes; raise on failure.
 
-    Opens a fresh admin connection (separate transaction from the CREATE INDEX
-    ASYNC statement) and calls ``sys.wait_for_job``.
+    Opens a fresh autocommit admin connection, separate from the CREATE INDEX
+    ASYNC transaction. Aurora DSQL exposes ``sys.wait_for_job`` as a procedure
+    and rejects it inside a transaction block.
     """
     connection = _connect_admin(
         endpoint=endpoint,
@@ -145,96 +147,15 @@ def wait_for_async_index_job(
         admin_user=admin_user,
         connect_fn=connect_fn,
         token_provider=token_provider,
+        autocommit=True,
     )
     try:
-        result = connection.execute(
-            "SELECT sys.wait_for_job(?)",
+        connection.execute(
+            "CALL sys.wait_for_job(?)",
             (job_id,),
         )
-        row = result.fetchone()
-        connection.commit()
-    except Exception:
-        try:
-            connection.rollback()
-        except Exception:  # noqa: BLE001
-            pass
-        connection.close()
-        raise
-    else:
-        connection.close()
-
-    success = True
-    if row is not None:
-        if hasattr(row, "get"):
-            # First column / value from wait_for_job boolean.
-            values = list(row.values()) if hasattr(row, "values") else []
-            if values:
-                success = bool(values[0])
-            else:
-                success = bool(row)
-        elif isinstance(row, (tuple, list)):
-            success = bool(row[0])
-        else:
-            success = bool(row)
-    if success:
-        return
-
-    detail = _async_job_failure_detail(
-        job_id=job_id,
-        endpoint=endpoint,
-        region=region,
-        database=database,
-        admin_user=admin_user,
-        connect_fn=connect_fn,
-        token_provider=token_provider,
-    )
-    raise RuntimeError(
-        f"DSQL async index job {job_id!r} failed"
-        + (f": {detail}" if detail else "")
-    )
-
-
-def _async_job_failure_detail(
-    *,
-    job_id: str,
-    endpoint: str,
-    region: str,
-    database: str,
-    admin_user: str,
-    connect_fn: Callable[..., Any] | None = None,
-    token_provider: Callable[[], str] | None = None,
-) -> str:
-    """Best-effort read of ``sys.jobs.details`` for a failed async index job."""
-    connection = _connect_admin(
-        endpoint=endpoint,
-        region=region,
-        database=database,
-        admin_user=admin_user,
-        connect_fn=connect_fn,
-        token_provider=token_provider,
-    )
-    try:
-        result = connection.execute(
-            "SELECT status, details FROM sys.jobs WHERE job_id = ?",
-            (job_id,),
-        )
-        row = result.fetchone()
-        connection.commit()
-    except Exception:  # noqa: BLE001 - details are optional
-        try:
-            connection.rollback()
-        except Exception:  # noqa: BLE001
-            pass
-        return ""
     finally:
         connection.close()
-    if row is None:
-        return ""
-    if hasattr(row, "get"):
-        status = row.get("status")
-        details = row.get("details")
-        return f"status={status!s} details={details!s}"
-    return str(row)
 
 
 def apply_dsql_schema(

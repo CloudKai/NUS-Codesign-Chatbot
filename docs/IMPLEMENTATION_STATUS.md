@@ -50,12 +50,17 @@ provider path. Bedrock remains explicitly out of scope.
    focus on matching evidence. Application code rebuilds prompt context only
    from validated chunks and rejects source IDs/labels outside the selected
    notebook, preserving the future Bedrock adapter boundary.
+11. Live Aurora DSQL bootstrap corrections: async index waits now execute
+   ``CALL sys.wait_for_job(?)`` on a dedicated verify-full admin connection
+   with ``autocommit=True``; DDL remains one transaction per connection. The
+   unsupported ``GRANT USAGE ON SCHEMA public`` was removed, leaving only
+   SELECT/INSERT/UPDATE/DELETE on all application tables in ``public``.
 
 ### Validation evidence
 
 **Local (this phase):**
 
-- ``.venv/bin/python -m pytest -q`` → **253 passed**.
+- ``.venv/bin/python -m pytest -q`` → **255 passed**.
 - ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m
   compileall -q backend ui streamlit_app.py tests`` → exit 0.
 - ``docker compose config --quiet`` and
@@ -75,6 +80,9 @@ provider path. Bedrock remains explicitly out of scope.
 - DSQL bootstrap schema changed before live initialization. If an earlier
   draft schema was already applied, inspect existing uniqueness/index state
   before rerunning bootstrap; never drop production objects automatically.
+- This DSQL bootstrap correction changes no table or index DDL. An earlier
+  failed public-schema ``USAGE`` grant needs no rollback; rerun bootstrap, then
+  apply only the documented object-level runtime grant.
 - Public clients that sent unrestricted notebook/message metadata now receive
   422 and must use the typed settings or internal coaching endpoints.
 - RAG requires no schema migration. New assistant/user metadata may include
@@ -94,7 +102,8 @@ provider path. Bedrock remains explicitly out of scope.
    Access; attach bucket list plus ``users/*`` object permissions to
    the EC2 instance role.
 2. Finish Aurora DSQL, map the EC2 role to ``co_design_app``, run
-   ``scripts/init_dsql.py`` as admin, and grant the five runtime tables.
+   ``scripts/init_dsql.py`` as admin, then grant SELECT/INSERT/UPDATE/DELETE on
+   all tables in ``public`` to ``co_design_app``. Do not grant schema ``USAGE``.
 3. Deploy the immutable ECR image with ``scripts/deploy_ecr.sh`` and require
    ``/api/v1/ready`` to return 200.
 4. Run the Cognito → notebook → message → S3 upload/download → container

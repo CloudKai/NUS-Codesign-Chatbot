@@ -19,6 +19,7 @@ from backend.persistence.dsql_connection import (
 )
 from backend.persistence.dsql_schema import (
     DSQL_SCHEMA,
+    RUNTIME_GRANT_SQL,
     RUNTIME_ROLE_NAME,
     iter_dsql_ddl_statements,
 )
@@ -53,6 +54,7 @@ _SPEC.loader.exec_module(_INIT_DSQL)
 apply_dsql_schema = _INIT_DSQL.apply_dsql_schema
 is_async_index_ddl = _INIT_DSQL.is_async_index_ddl
 _job_id_from_result = _INIT_DSQL._job_id_from_result
+wait_for_async_index_job = _INIT_DSQL.wait_for_async_index_job
 
 
 class _OccError(Exception):
@@ -546,6 +548,7 @@ def test_init_dsql_commits_each_ddl_separately_and_waits_for_async_index():
         assert kwargs["user"] == "admin"
         assert kwargs["sslmode"] == "verify-full"
         assert kwargs["sslrootcert"] == "system"
+        assert kwargs["autocommit"] is False
 
         class _Raw:
             def cursor(self):
@@ -563,11 +566,6 @@ def test_init_dsql_commits_each_ddl_separately_and_waits_for_async_index():
                                 type("Col", (), {"name": "job_id"})()
                             ]
                             self._rows = [(f"job-{job_counter['n']}",)]
-                        elif "WAIT_FOR_JOB" in upper:
-                            self.description = [
-                                type("Col", (), {"name": "wait_for_job"})()
-                            ]
-                            self._rows = [(True,)]
                         else:
                             self.description = None
                             self._rows = []
@@ -634,6 +632,72 @@ def test_init_dsql_commits_each_ddl_separately_and_waits_for_async_index():
     )
     t2_pos = next(i for i, sql in enumerate(commits) if "t2" in sql.lower())
     assert commit_after_index < t2_pos
+
+
+def test_wait_for_async_index_job_calls_procedure_on_autocommit_connection():
+    connections: list[dict[str, Any]] = []
+    executed: list[tuple[str, tuple[Any, ...]]] = []
+    closed: list[bool] = []
+
+    def connect_fn(**kwargs):
+        connections.append(kwargs)
+
+        class _Raw:
+            def cursor(self):
+                class _Cur:
+                    description = None
+                    rowcount = 0
+
+                    def execute(self, sql, params=None):
+                        executed.append((sql, tuple(params or ())))
+
+                    def fetchall(self):  # pragma: no cover - no CALL result set
+                        raise AssertionError("CALL must not be treated as SELECT")
+
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, *args):
+                        return None
+
+                return _Cur()
+
+            def commit(self):  # pragma: no cover - autocommit CALL only
+                raise AssertionError("wait procedure must not commit a transaction")
+
+            def rollback(self):  # pragma: no cover - autocommit CALL only
+                raise AssertionError("wait procedure must not roll back a transaction")
+
+            def close(self):
+                closed.append(True)
+
+        return _Raw()
+
+    wait_for_async_index_job(
+        job_id="job-live-shape",
+        endpoint="ep.example",
+        region="us-west-2",
+        database="postgres",
+        admin_user="admin",
+        connect_fn=connect_fn,
+        token_provider=lambda: "admin-token",
+    )
+
+    assert len(connections) == 1
+    assert connections[0]["autocommit"] is True
+    assert connections[0]["sslmode"] == "verify-full"
+    assert connections[0]["sslrootcert"] == "system"
+    assert executed == [("CALL sys.wait_for_job(%s)", ("job-live-shape",))]
+    assert closed == [True]
+
+
+def test_dsql_runtime_grant_excludes_public_schema_usage():
+    normalized = " ".join(RUNTIME_GRANT_SQL.split())
+    assert "GRANT USAGE ON SCHEMA public" not in RUNTIME_GRANT_SQL
+    assert normalized == (
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public "
+        "TO co_design_app;"
+    )
 
 
 def test_init_dsql_skips_wait_when_async_index_already_exists():
