@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 from backend.student_store import StudentStore
 
 
@@ -237,7 +239,140 @@ def test_saving_oauth_state_prunes_expired_rows(tmp_path):
                 "SELECT state FROM oauth_login_states ORDER BY state"
             ).fetchall()
         }
-    assert states == {"current"}
+        assert states == {"current"}
+
+
+def test_legacy_camelcase_oauth_login_states_are_migrated(tmp_path):
+    """Older local DBs used camelCase OAuth columns; login needs snake_case."""
+    db_path = tmp_path / "oauth-legacy.sqlite3"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE oauth_login_states (
+                state TEXT PRIMARY KEY,
+                codeVerifier TEXT NOT NULL,
+                createdAt TEXT NOT NULL,
+                expiresAt TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO oauth_login_states
+              (state, codeVerifier, createdAt, expiresAt)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                "legacy-state",
+                "legacy-verifier",
+                "2026-08-01T00:00:00+00:00",
+                "2026-08-01T00:05:00+00:00",
+            ),
+        )
+        connection.commit()
+
+    store = StudentStore(db_path)
+    with store._connect() as connection:
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(oauth_login_states)")
+        }
+        assert columns == {
+            "state",
+            "code_verifier",
+            "created_at",
+            "expires_at",
+        }
+        row = connection.execute(
+            "SELECT code_verifier, expires_at FROM oauth_login_states WHERE state = ?",
+            ("legacy-state",),
+        ).fetchone()
+        assert row is not None
+        assert str(row["code_verifier"]) == "legacy-verifier"
+        assert str(row["expires_at"]) == "2026-08-01T00:05:00+00:00"
+
+    store.save_oauth_login_state(
+        state="fresh",
+        code_verifier="fresh-verifier",
+        created_at="2030-01-01T00:00:00+00:00",
+        expires_at="2030-01-01T00:05:00+00:00",
+    )
+    assert store.consume_oauth_login_state("fresh") == "fresh-verifier"
+
+
+def test_legacy_camelcase_users_table_is_migrated(tmp_path):
+    """Older local DBs used camelCase users columns; Cognito upsert needs snake_case."""
+    db_path = tmp_path / "users-legacy.sqlite3"
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE users (
+                id TEXT PRIMARY KEY,
+                identifier TEXT NOT NULL UNIQUE,
+                metadata TEXT NOT NULL DEFAULT '{}',
+                createdAt TEXT NOT NULL,
+                cognitoSub TEXT,
+                email TEXT,
+                displayName TEXT,
+                role TEXT NOT NULL DEFAULT 'student',
+                updatedAt TEXT,
+                lastLoginAt TEXT
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO users (
+                id, identifier, metadata, createdAt, cognitoSub, email,
+                displayName, role, updatedAt, lastLoginAt
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "user-1",
+                "cognito:sub-1",
+                '{"appearance":"System"}',
+                "2026-08-01T00:00:00+00:00",
+                "sub-1",
+                "a@example.edu",
+                "Alex",
+                "student",
+                "2026-08-01T00:01:00+00:00",
+                "2026-08-01T00:02:00+00:00",
+            ),
+        )
+        connection.commit()
+
+    store = StudentStore(db_path, identifier="cognito:sub-1")
+    with store._connect() as connection:
+        columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(users)")
+        }
+        assert {
+            "cognito_sub",
+            "display_name",
+            "preferences_text",
+            "created_at",
+            "updated_at",
+            "last_login_at",
+        }.issubset(columns)
+        row = connection.execute(
+            "SELECT cognito_sub, display_name, preferences_text, created_at "
+            "FROM users WHERE id = ?",
+            ("user-1",),
+        ).fetchone()
+        assert row is not None
+        assert str(row["cognito_sub"]) == "sub-1"
+        assert str(row["display_name"]) == "Alex"
+        assert "appearance" in str(row["preferences_text"])
+
+    updated = store.upsert_cognito_user(
+        cognito_sub="sub-1",
+        identifier="cognito:sub-1",
+        email="a@example.edu",
+        display_name="Alex",
+    )
+    assert updated["id"] == "user-1"
+    assert updated["display_name"] == "Alex"
 
 
 def test_six_table_schema_has_no_legacy_tables(tmp_path):

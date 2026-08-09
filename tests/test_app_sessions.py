@@ -332,7 +332,7 @@ def test_browser_refresh_bridge_keeps_refresh_token_out_of_streamlit(
     )
 
     assert response.status_code == 302
-    assert response.headers["location"] == "http://127.0.0.1:8501/"
+    assert response.headers["location"] == "http://127.0.0.1:8501/?auth_refreshed=1"
     assert oidc.refresh_calls == ["refresh-bridge"]
     assert response.text.find(session.refresh_token) == -1
     id_header = next(

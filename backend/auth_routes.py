@@ -130,7 +130,19 @@ def register_auth_routes(
         try:
             authorize_url, state = oidc_client.begin_login()
         except CognitoOIDCError as error:
-            raise HTTPException(status_code=503, detail=str(error)) from error
+            logger.warning("Cognito login start unavailable: %s", error)
+            response = RedirectResponse(
+                _safe_ui_redirect("/?auth_error=1"), status_code=302
+            )
+            response.headers["Cache-Control"] = "no-store"
+            return response
+        except Exception:
+            logger.exception("Cognito login start failed unexpectedly")
+            response = RedirectResponse(
+                _safe_ui_redirect("/?auth_error=1"), status_code=302
+            )
+            response.headers["Cache-Control"] = "no-store"
+            return response
         response = RedirectResponse(authorize_url, status_code=302)
         _set_oauth_state_cookie(response, state)
         response.headers["Cache-Control"] = "no-store"
@@ -209,7 +221,11 @@ def register_auth_routes(
             response.headers["Cache-Control"] = "no-store"
             return response
 
-        response = RedirectResponse(_safe_ui_redirect("/"), status_code=302)
+        # Mark the return so Streamlit does not immediately re-enter this
+        # bridge when the ID cookie is not yet readable on the first paint.
+        response = RedirectResponse(
+            _safe_ui_redirect("/?auth_refreshed=1"), status_code=302
+        )
         _set_auth_cookies(response, session)
         response.headers["Cache-Control"] = "no-store"
         return response

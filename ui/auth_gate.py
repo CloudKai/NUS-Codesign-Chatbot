@@ -145,37 +145,90 @@ def auth_refresh_url() -> str | None:
 
 
 def should_attempt_session_refresh() -> bool:
-    """Return whether a signed-out render should try the browser refresh bridge."""
+    """Return whether a signed-out render should try the browser refresh bridge.
+
+    Full-page navigation clears Streamlit ``session_state``, so loop prevention
+    relies on query markers returned by FastAPI (``auth_required``,
+    ``auth_refreshed``, ``auth_error``, ``signed_out``) as well as the in-tab
+    ``_auth_refresh_attempted`` flag.
+
+    When the browser has no ID-token cookie at all, skip the bridge and show
+    the login gate immediately. The refresh cookie is path-scoped to FastAPI
+    and invisible here; attempting the bridge on every cold visit only caused
+    a stuck "Checking your session…" page when the iframe redirect failed.
+    """
     if bool(st.session_state.get("_auth_refresh_attempted")):
+        return False
+    id_cookie = _cookie_value(
+        str(getattr(settings, "cognito_id_token_cookie_name", "co_design_id"))
+    )
+    if not id_cookie:
         return False
     try:
         return not any(
             st.query_params.get(key) == "1"
-            for key in ("auth_required", "auth_error", "signed_out")
+            for key in (
+                "auth_required",
+                "auth_refreshed",
+                "auth_error",
+                "signed_out",
+            )
         )
     except Exception:
         return False
 
 
-def redirect_to_session_refresh() -> None:
-    """Navigate to FastAPI refresh without exposing the refresh token to JS."""
+def redirect_to_session_refresh() -> bool:
+    """Navigate to FastAPI refresh without exposing the refresh token to JS.
+
+    Uses a real parent-document ``<a>`` plus a best-effort auto-click. Sandboxed
+    ``components.html`` ``location.replace`` alone often fails in Streamlit and
+    leaves the page stuck on a blank "Checking your session…" state.
+
+    Returns:
+        ``True`` when the bridge UI was armed and the caller should ``st.stop()``.
+    """
     url = auth_refresh_url()
     if not url:
-        return
+        return False
     st.session_state["_auth_refresh_attempted"] = True
-    safe_url = json.dumps(url)
+    st.markdown(
+        '<div class="cd-auth-session-check" role="status" aria-live="polite">'
+        "<p><strong>Checking your session…</strong></p>"
+        "<p>If nothing happens, continue below.</p>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'<a class="cd-auth-refresh-link" data-cd-auth-refresh="1" '
+        f'href="{_escape_attr(url)}" target="_self" rel="noopener">'
+        "Continue"
+        "</a>",
+        unsafe_allow_html=True,
+    )
+    _click_parent_refresh_link()
+    return True
+
+
+def _click_parent_refresh_link() -> None:
+    """Click the parent-document refresh ``<a>`` after a short paint delay."""
     components.html(
-        f"""
+        """
 <script>
-(() => {{
-  const url = {safe_url};
-  try {{
-    window.parent.location.replace(url);
-    return;
-  }} catch (error) {{
-  }}
-  window.location.replace(url);
-}})();
+(() => {
+  const clickContinue = () => {
+    try {
+      const link = window.parent.document.querySelector(
+        'a.cd-auth-refresh-link[data-cd-auth-refresh="1"]'
+      );
+      if (link) {
+        link.click();
+      }
+    } catch (error) {
+    }
+  };
+  setTimeout(clickContinue, 120);
+})();
 </script>
 """,
         height=0,
@@ -267,6 +320,14 @@ def render_login_gate() -> None:
         if st.query_params.get("auth_required") == "1":
             st.session_state["_auth_refresh_attempted"] = True
             del st.query_params["auth_required"]
+    except Exception:
+        pass
+    try:
+        if st.query_params.get("auth_refreshed") == "1":
+            # Refresh bridge already ran for this browser navigation. Keep the
+            # one-shot flag so a still-signed-out paint cannot loop forever.
+            st.session_state["_auth_refresh_attempted"] = True
+            del st.query_params["auth_refreshed"]
     except Exception:
         pass
     try:

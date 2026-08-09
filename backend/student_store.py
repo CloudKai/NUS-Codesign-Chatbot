@@ -93,9 +93,6 @@ CREATE TABLE IF NOT EXISTS users (
     last_login_at TEXT
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_cognito_sub
-ON users(cognito_sub);
-
 CREATE TABLE IF NOT EXISTS oauth_login_states (
     state TEXT PRIMARY KEY,
     code_verifier TEXT NOT NULL,
@@ -181,12 +178,168 @@ class StudentStore:
         self._lock = threading.RLock()
         with self._connect() as connection:
             connection.executescript(SCHEMA)
+            self._migrate_oauth_login_states(connection)
+            self._migrate_users_table(connection)
+            # Index after users migration so legacy camelCase DBs can rebuild first.
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_cognito_sub "
+                "ON users(cognito_sub)"
+            )
         self.owner_id = self._ensure_user() if ensure_owner else ""
 
     def ping(self) -> None:
         """Verify the database connection without creating or reading a user row."""
         with self._connect() as connection:
             connection.execute("SELECT 1").fetchone()
+
+    @staticmethod
+    def _migrate_oauth_login_states(connection: sqlite3.Connection) -> None:
+        """Rebuild legacy camelCase ``oauth_login_states`` to snake_case columns.
+
+        Older local DBs still have Streamlit-era ``codeVerifier`` / ``expiresAt``
+        columns. ``CREATE TABLE IF NOT EXISTS`` does not rename them, so login
+        then fails with ``no such column: expires_at`` and the browser sees a
+        blank/white page. Rows are one-time PKCE state and safe to remap or drop.
+        """
+        rows = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+            ("oauth_login_states",),
+        ).fetchall()
+        if not rows:
+            return
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(oauth_login_states)")
+        }
+        if {"state", "code_verifier", "created_at", "expires_at"}.issubset(columns):
+            return
+        connection.execute(
+            "ALTER TABLE oauth_login_states RENAME TO oauth_login_states_legacy"
+        )
+        connection.execute(
+            """
+            CREATE TABLE oauth_login_states (
+                state TEXT PRIMARY KEY,
+                code_verifier TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            )
+            """
+        )
+        legacy = {
+            str(row[1])
+            for row in connection.execute(
+                "PRAGMA table_info(oauth_login_states_legacy)"
+            )
+        }
+        if {
+            "state",
+            "codeVerifier",
+            "createdAt",
+            "expiresAt",
+        }.issubset(legacy):
+            connection.execute(
+                """
+                INSERT INTO oauth_login_states
+                  (state, code_verifier, created_at, expires_at)
+                SELECT state, codeVerifier, createdAt, expiresAt
+                FROM oauth_login_states_legacy
+                """
+            )
+        connection.execute("DROP TABLE oauth_login_states_legacy")
+
+    @staticmethod
+    def _migrate_users_table(connection: sqlite3.Connection) -> None:
+        """Rebuild legacy camelCase ``users`` columns to the five-table schema.
+
+        Local demo DBs often still have ``displayName`` / ``cognitoSub`` /
+        ``createdAt`` / ``metadata`` from the pre-Cognito store. Cognito
+        callback upserts require snake_case columns; without this migration
+        sign-in completes at Cognito then fails with ``auth_error=1``.
+        """
+        rows = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+            ("users",),
+        ).fetchall()
+        if not rows:
+            return
+        columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(users)")
+        }
+        expected = {
+            "id",
+            "identifier",
+            "cognito_sub",
+            "email",
+            "display_name",
+            "role",
+            "preferences_text",
+            "created_at",
+            "updated_at",
+            "last_login_at",
+        }
+        if expected.issubset(columns):
+            return
+
+        def _col(*names: str, default_sql: str) -> str:
+            for name in names:
+                if name in columns:
+                    return name
+            return default_sql
+
+        connection.execute("ALTER TABLE users RENAME TO users_legacy")
+        connection.execute(
+            """
+            CREATE TABLE users (
+                id TEXT PRIMARY KEY,
+                identifier TEXT NOT NULL UNIQUE,
+                cognito_sub TEXT,
+                email TEXT,
+                display_name TEXT,
+                role TEXT NOT NULL DEFAULT 'student',
+                preferences_text TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT,
+                last_login_at TEXT
+            )
+            """
+        )
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_cognito_sub "
+            "ON users(cognito_sub)"
+        )
+        select_sql = f"""
+            INSERT INTO users (
+                id, identifier, cognito_sub, email, display_name, role,
+                preferences_text, created_at, updated_at, last_login_at
+            )
+            SELECT
+                id,
+                identifier,
+                {_col("cognito_sub", "cognitoSub", default_sql="NULL")},
+                {_col("email", default_sql="NULL")},
+                COALESCE(
+                    NULLIF(TRIM({_col("display_name", "displayName", default_sql="NULL")}), ''),
+                    'Student'
+                ),
+                COALESCE(
+                    NULLIF(TRIM({_col("role", default_sql="NULL")}), ''),
+                    'student'
+                ),
+                COALESCE(
+                    NULLIF(TRIM({_col("preferences_text", "metadata", default_sql="NULL")}), ''),
+                    '{{}}'
+                ),
+                COALESCE(
+                    {_col("created_at", "createdAt", default_sql="NULL")},
+                    ''
+                ),
+                {_col("updated_at", "updatedAt", default_sql="NULL")},
+                {_col("last_login_at", "lastLoginAt", default_sql="NULL")}
+            FROM users_legacy
+        """
+        connection.execute(select_sql)
+        connection.execute("DROP TABLE users_legacy")
 
     def upsert_cognito_user(
         self,

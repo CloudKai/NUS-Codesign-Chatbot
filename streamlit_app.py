@@ -50,8 +50,8 @@ if not user:
     st.session_state.appearance = DEFAULT_APPEARANCE
     render_theme_css()
     if should_attempt_session_refresh():
-        redirect_to_session_refresh()
-        st.stop()
+        if redirect_to_session_refresh():
+            st.stop()
     render_signed_out_shell()
     render_login_gate()
     st.stop()
