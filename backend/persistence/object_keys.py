@@ -26,13 +26,13 @@ def build_upload_object_key(
     """Build a generated object key that never trusts the raw user filename path.
 
     Example:
-        ``users/<user-id>/notebooks/<notebook-id>/sources/<source-id>/<safe-filename>``
+        ``users/<user-id>/notebooks/<notebook-id>/sources/<source-id>/raw/<safe-filename>``
     """
     safe_user = sanitize_filename(user_id) or "user"
     safe_notebook = sanitize_filename(notebook_id) or "notebook"
     safe_source = sanitize_filename(source_id) or "source"
     return (
-        f"users/{safe_user}/notebooks/{safe_notebook}/sources/{safe_source}/"
+        f"users/{safe_user}/notebooks/{safe_notebook}/sources/{safe_source}/raw/"
         f"{sanitize_filename(filename)}"
     )
 
@@ -69,12 +69,12 @@ def build_extracted_text_object_key(
     """Build a deterministic object key for derived extracted text.
 
     Example:
-        ``users/<user-id>/notebooks/<notebook-id>/sources/<source-id>/extracted.txt``
+        ``users/<user-id>/notebooks/<notebook-id>/sources/<source-id>/derived/extracted.txt``
     """
     safe_user = sanitize_filename(user_id) or "user"
     safe_notebook = sanitize_filename(notebook_id) or "notebook"
     safe_source = sanitize_filename(source_id) or "source"
     return (
         f"users/{safe_user}/notebooks/{safe_notebook}/sources/{safe_source}/"
-        "extracted.txt"
+        "derived/extracted.txt"
     )

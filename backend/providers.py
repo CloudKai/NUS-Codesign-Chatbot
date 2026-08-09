@@ -56,7 +56,7 @@ class OllamaCoachProvider:
             response = httpx.post(
                 f"{self._base_url}/api/chat",
                 json={
-                    "model": request.model_id or self._model,
+                    "model": self._model,
                     "stream": False,
                     "format": schema,
                     "messages": [
@@ -124,7 +124,7 @@ class OpenAICoachProvider:
             else:
                 model_input = prompt
             create_kwargs: dict[str, Any] = {
-                "model": request.model_id or self._model,
+                "model": self._model,
                 "input": model_input,
                 "text": {
                     "format": {

@@ -47,6 +47,7 @@ FastAPI (api.py)
 | `prompts/` | Framework-neutral stage prompt files, loader, and composer |
 | `mock_provider.py` | Deterministic provider for tests and offline demo |
 | `source_library.py` | Source CRUD helpers, lecture-notes sync, URL import, citation context |
+| `retrieval.py` | Provider-neutral retrieval port + deterministic local selected-source chunk retriever |
 | `file_processing.py` | Upload storage, text extraction, safe paths |
 | `settings.py` | Environment-driven configuration (`Settings`) |
 | `models.py` | Model registry and allowed model IDs |

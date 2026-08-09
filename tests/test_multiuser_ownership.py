@@ -310,6 +310,6 @@ def test_unsafe_filenames_are_sanitized_in_object_keys():
         filename="../../evil name.pdf",
     )
     # Path.name strips directory segments before sanitizing.
-    assert key == "users/x/notebooks/y/sources/z/evil_name.pdf"
+    assert key == "users/x/notebooks/y/sources/z/raw/evil_name.pdf"
     assert ".." not in key
     assert sanitize_filename("evil name.pdf") == "evil_name.pdf"

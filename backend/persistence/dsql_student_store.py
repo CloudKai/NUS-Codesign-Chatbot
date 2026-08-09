@@ -34,6 +34,7 @@ _OCC_WRITE_METHODS = (
     "create_thread",
     "update_thread",
     "add_message",
+    "persist_coach_turn",
     "update_message",
     "revise_user_message",
     "create_phase_transition",
@@ -100,11 +101,18 @@ class DsqlStudentStore(StudentStore):
         )
 
     def ping(self) -> None:
-        """Verify DSQL connectivity without creating a user row."""
+        """Verify connectivity plus all required runtime table privileges."""
 
         def _ping() -> None:
             with self._connect() as connection:
-                connection.execute("SELECT 1").fetchone()
+                for table in (
+                    "users",
+                    "oauth_login_states",
+                    "notebooks",
+                    "messages",
+                    "sources",
+                ):
+                    connection.execute(f"SELECT * FROM {table} LIMIT 0").fetchall()
 
         run_dsql_transaction(_ping)
 

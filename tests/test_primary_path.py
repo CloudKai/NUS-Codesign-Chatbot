@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.api import create_app
@@ -169,6 +170,39 @@ def test_restart_recovers_messages_journey_and_pending_transition(tmp_path):
     )
     assert pending_response.status_code == 200
     assert pending_response.json()["id"] == pending_id
+
+
+def test_completed_turn_rolls_back_without_phantom_pending_message(
+    tmp_path, monkeypatch
+):
+    """Failure after the user INSERT leaves no partial coaching turn."""
+    import backend.student_store as student_store_module
+
+    store = StudentStore(tmp_path / "turn-rollback.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = TestClient(create_app(store, auto_advance_stages=False))
+    real_dump = student_store_module._dump
+
+    def fail_on_assessment(value):
+        if isinstance(value, dict) and "learning_summary" in value:
+            raise RuntimeError("simulated assistant persistence failure")
+        return real_dump(value)
+
+    monkeypatch.setattr(student_store_module, "_dump", fail_on_assessment)
+
+    with pytest.raises(RuntimeError, match="assistant persistence failure"):
+        client.post(
+            "/api/v1/coach/turn",
+            json={
+                "thread_id": thread_id,
+                "student_message": _advance_message("focus"),
+                "current_stage": "focus",
+                "response_detail": "short",
+            },
+        )
+
+    assert store.get_messages(thread_id) == []
+    assert store.get_pending_phase_transition(thread_id) is None
 
 
 def test_sources_and_history_stay_isolated_across_notebooks(tmp_path):

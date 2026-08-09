@@ -20,12 +20,21 @@ Students
        │           ├── Cognito
        │           ├── Aurora DSQL (structured state, role co_design_app)
        │           ├── S3 (user uploads)
-       │           └── Bedrock (us-west-2)
+       │           └── OpenAI (temporary configured provider)
        └── DuckDNS cron on the host (not in the app container)
 ```
 
 Persistent state lives in **Aurora DSQL** and **S3**. Replacing the app
 container must not destroy conversations, progress, or uploads.
+Bedrock and shared course-material retrieval are a later workstream and are not
+required to validate this production path.
+
+During pre-Bedrock testing, student-upload RAG is still functional: extracted
+text is read from the selected S3-backed sources, chunked and ranked in the app
+container for each turn, and passed to the provider through the same bounded
+prompt contract. `COURSE_MATERIAL_SYNC_ENABLED=false` prevents repository
+lecture files from being copied into the student uploads bucket; it does not
+disable retrieval over sources the student uploads or pastes into a notebook.
 
 ## Production data model
 
@@ -80,10 +89,13 @@ Removed from production: `app_sessions`, `threads`, `steps`, `folders`,
 `notebook_sources`, `phase_transitions`.
 
 `sources.selected` is authoritative: application queries filter unselected
-sources before loading extracted text or invoking the coach/provider. Uploaded
-bytes and extracted text use generated notebook-scoped S3 keys. Notebook S3
-prefix deletion runs only after the DSQL transaction commits, and per-object
-`DeleteObjects` errors fail the operation rather than being counted as removed.
+sources before loading extracted text or invoking the coach/provider. New
+uploads use separate notebook-scoped key namespaces:
+`users/<user>/notebooks/<notebook>/sources/<source>/raw/<filename>` and
+`.../derived/extracted.txt`. This prevents a raw file named `extracted.txt`
+from being overwritten by derived text. Notebook S3 prefix deletion runs only
+after the DSQL transaction commits, and per-object `DeleteObjects` errors fail
+the operation rather than being counted as removed.
 
 ## Local vs production storage
 
@@ -123,7 +135,7 @@ The script authenticates with **DbConnectAdmin**
 async indexes waits on ``sys.wait_for_job`` only when a new ``job_id`` is
 returned (``IF NOT EXISTS`` re-runs that find an existing index skip wait).
 Runtime never uses DbConnectAdmin.
-Useful secondary indexes (ASYNC): ``users(cognito_sub)``,
+Useful secondary indexes (ASYNC): ``users(identifier)``, ``users(cognito_sub)``,
 ``notebooks(user_id, updated_at)``, ``messages(notebook_id, created_at, id)``,
 ``messages(notebook_id, decision_status, created_at)``,
 ``sources(notebook_id, created_at, id)``.
@@ -174,6 +186,57 @@ Required production `.env` keys (host-only):
 - `USER_UPLOADS_BUCKET=<bucket>`
 - Cognito + public URL values already set in `compose.prod.yaml`
 
+`/api/v1/ready` checks configuration, queries all five required DSQL tables,
+and performs a bounded read-only S3 list against the `users/` prefix. A missing
+schema, missing table grant, missing bucket, wrong region, or denied S3 list
+permission therefore keeps the app unhealthy instead of failing on the first
+student action.
+
+### S3 uploads bucket (required before the live smoke)
+
+Create a dedicated private bucket in `us-west-2`, enable Block Public Access,
+and keep object ownership private to the account. The EC2 role needs bucket
+list access and object access beneath `users/*`; no public ACL or
+website hosting is used. Set only the bucket name in the host `.env`:
+
+```dotenv
+USER_UPLOADS_BUCKET=<private-bucket-name>
+FILE_STORAGE_PROVIDER=s3
+AWS_REGION=us-west-2
+```
+
+The application creates object prefixes automatically. Do not pre-create
+folders and do not copy local course materials into this student-uploads
+bucket. Once the role policy is attached, verify the readiness endpoint; then
+perform upload, preview, download, restart, and delete from the smoke sequence.
+Replace both bucket placeholders in this EC2 role policy before attaching it:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ListStudentUploads",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::<private-bucket-name>",
+      "Condition": {
+        "StringLike": {"s3:prefix": ["users", "users/*"]}
+      }
+    },
+    {
+      "Sid": "ManageStudentUploadObjects",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::<private-bucket-name>/users/*"
+    }
+  ]
+}
+```
+
+If the bucket uses a customer-managed KMS key, add only the corresponding KMS
+permissions for that key; the default S3-managed encryption needs no KMS grant.
+
 ## Live smoke test (required before cutover)
 
 1. Admin runs `scripts/init_dsql.py --admin-user admin`.
@@ -208,11 +271,13 @@ Grant least privilege for:
 
 - `ecr:GetAuthorizationToken` + repository pull
 - Aurora DSQL DbConnect for `co_design_app` (not admin)
-- S3 read/write/delete on the uploads bucket prefix
-- Bedrock invoke (existing model access)
+- S3 bucket list plus read/write/delete on the uploads bucket's
+  `users/*` objects
 - Optional CloudWatch logs
 
 Do **not** place long-lived AWS access keys in `.env`.
+Bedrock invoke permission is intentionally not required in this phase; add it
+only with the future Bedrock/course-material implementation.
 
 ## Manual AWS Console steps still required
 

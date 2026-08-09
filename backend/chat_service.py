@@ -15,11 +15,16 @@ from .analysis_tool import PYTHON_TOOL, run_analysis_tool
 from .file_processing import StoredUpload
 from .models import ModelDefinition, get_model, validate_reasoning
 from .persistence.factory import create_student_store
+from .retrieval import (
+    LocalChunkRetriever,
+    RetrievalQuery,
+    focused_excerpt,
+    retrieval_sources_from_notebook,
+)
 from .settings import settings
 from .source_library import (
     add_file_sources,
     backfill_legacy_sources,
-    selected_source_context,
     source_image_input,
 )
 from .student_journey import (
@@ -57,6 +62,7 @@ class ChatStream:
     prompt: str
     uploads: list[StoredUpload]
     grounding_sources: list[dict[str, Any]]
+    retrieval_context: str
     source_references: list[dict[str, Any]]
     options: ChatOptions
     text: str = ""
@@ -207,7 +213,37 @@ class StudentChatEngine:
         options.source_ids = [source["id"] for source in available_sources]
         if not available_sources:
             options.allow_model_knowledge = True
-        _, source_references = selected_source_context(available_sources)
+        retrieval_result = LocalChunkRetriever().retrieve(
+            RetrievalQuery(
+                current_message=prompt,
+                current_stage=options.thinking_stage,
+                sources=retrieval_sources_from_notebook(available_sources),
+                project_context="\n".join(
+                    str(value or "")
+                    for value in options.assignment.values()
+                    if str(value or "").strip()
+                ),
+                recent_messages=tuple(self.store.get_messages(thread_id)),
+            )
+        )
+        sources_by_id = {str(source["id"]): source for source in available_sources}
+        source_references: list[dict[str, Any]] = []
+        seen_reference_ids: set[str] = set()
+        for chunk in retrieval_result.chunks:
+            if chunk.source_id in seen_reference_ids:
+                continue
+            seen_reference_ids.add(chunk.source_id)
+            source = sources_by_id[chunk.source_id]
+            source_references.append(
+                {
+                    "id": chunk.source_id,
+                    "label": chunk.label,
+                    "title": chunk.title,
+                    "kind": source.get("kind", "file"),
+                    "mime": source.get("mime", "application/octet-stream"),
+                    "url": source.get("sourceUrl"),
+                }
+            )
         upload_metadata = [
             {
                 "name": upload.name,
@@ -234,6 +270,17 @@ class StudentChatEngine:
             "response_language": options.response_language,
             "uploads": upload_metadata,
             "source_ids": options.source_ids,
+            "retrieval_refs": [
+                {
+                    "source_id": chunk.source_id,
+                    "label": chunk.label,
+                    "title": chunk.title,
+                    "chunk_id": chunk.chunk_id,
+                    "excerpt": focused_excerpt(chunk.text, prompt, limit=600),
+                    "score": chunk.score,
+                }
+                for chunk in retrieval_result.chunks
+            ],
             "source_refs": source_references,
             "allow_model_knowledge": options.allow_model_knowledge,
         }
@@ -279,6 +326,7 @@ class StudentChatEngine:
             prompt=prompt,
             uploads=stored_uploads,
             grounding_sources=available_sources,
+            retrieval_context=retrieval_result.context,
             source_references=source_references,
             options=options,
         )
@@ -307,8 +355,7 @@ class StudentChatEngine:
 
     def _user_item(self, stream: ChatStream, model: ModelDefinition) -> dict[str, Any]:
         content: list[dict[str, Any]] = [{"type": "input_text", "text": stream.prompt}]
-        context, references = selected_source_context(stream.grounding_sources)
-        stream.source_references = references
+        context = stream.retrieval_context
         if context:
             content.append(
                 {

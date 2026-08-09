@@ -3,15 +3,15 @@
 Composition only: no Streamlit, model-provider SDKs, cloud retrieval SDKs,
 or persistence imports.
 
-Current seam (selected sources → composer → provider)::
+Current seam (selected sources → local chunk retrieval → composer → provider)::
 
-    Selected notebook source context
+    Query-ranked excerpts from selected notebook sources
             ↓
     PromptComposer.compose / compose_coach_prompt
             ↓
     configured generation provider (local OpenAI test path today)
 
-Future seam (Knowledge Base replaces only the retrieved-context producer)::
+Future seam (Knowledge Base replaces only the retriever implementation)::
 
     Bedrock Knowledge Base retrieved chunks
             ↓  (becomes PromptContext.retrieved_course_context)
@@ -40,7 +40,7 @@ EMPTY_RETRIEVED_COURSE_CONTEXT = (
 
 # Bound dynamic sections so composition never injects whole PDFs or unbounded history.
 # Retrieved context is capped economically for the temporary pre-Bedrock OpenAI
-# testing path; a future KB producer should still respect this budget or replace it.
+# testing path; a future KB adapter must respect the same composition budget.
 MAX_PROJECT_CONTEXT_CHARS = 8_000
 MAX_RETRIEVED_CONTEXT_CHARS = 24_000
 MAX_CONVERSATION_SUMMARY_CHARS = 4_000
@@ -69,6 +69,7 @@ class PromptContext(BaseModel):
     student_message: str = ""
     response_detail: str = "short"
     allow_model_knowledge: bool = False
+    response_language: str = "English"
     image_note: str = ""
 
 
@@ -139,6 +140,10 @@ def _runtime_instructions(context: PromptContext) -> str:
         parts.append(
             "Use selected sources as the factual evidence base when they matter."
         )
+    language = " ".join(str(context.response_language or "English").split())[:50]
+    parts.append(
+        f"Respond to the student in {language}. Keep source labels such as [S1] unchanged."
+    )
     if settings.auto_advance_stages:
         parts.append(
             "When you recommend advance, the application will automatically move "
@@ -151,6 +156,13 @@ def _runtime_instructions(context: PromptContext) -> str:
         )
     if context.image_note.strip():
         parts.append(context.image_note.strip())
+    if context.retrieved_course_context.strip():
+        parts.append(
+            "Grounding mode: retrieved blocks are query-ranked excerpts, not "
+            "complete documents. Use only excerpt content that directly supports "
+            "the claim. Put the stable [S#] citation immediately after the "
+            "supported claim; do not expose internal excerpt/chunk identifiers."
+        )
     parts.append(
         "Return only the required structured JSON result. Include Facione scores "
         "for all six dimensions using 0=not started, 1=Weak, 2=Unacceptable, "
@@ -213,8 +225,8 @@ class PromptComposer:
 
         Args:
             context: Server-built turn context. ``retrieved_course_context`` is
-                currently selected-source text; a future KB producer may replace
-                only that field.
+                currently query-ranked local source chunks; a future KB adapter
+                may replace only that producer.
 
         Returns:
             Prepared shared/stage fragments plus the ordered composed text.
@@ -327,15 +339,22 @@ def prompt_context_from_request(request: CoachRequest) -> PromptContext:
     """Build ``PromptContext`` from a server-authoritative ``CoachRequest``.
 
     ``request.source_context`` maps to ``retrieved_course_context`` (current
-    selected-source producer). Future KB retrieval should replace only how that
-    string is produced before this helper runs.
+    query-ranked local retriever). Future KB retrieval replaces only how that
+    string and its audit references are produced before this helper runs.
     """
     image_note = ""
     if request.image_inputs:
-        labels = ", ".join(image.source_id for image in request.image_inputs)
+        labels_by_source = {
+            chunk.source_id: chunk.label for chunk in request.retrieved_chunks
+        }
+        labels = ", ".join(
+            labels_by_source.get(image.source_id, image.source_id)
+            for image in request.image_inputs
+        )
         image_note = (
             f"Attached notebook images ({len(request.image_inputs)}): {labels}. "
-            "Inspect the image content as selected evidence."
+            "Inspect the image content as selected evidence and use its [S#] "
+            "label only when the image supports the claim."
         )
     return PromptContext(
         current_stage=request.current_stage,
@@ -346,6 +365,7 @@ def prompt_context_from_request(request: CoachRequest) -> PromptContext:
         student_message=request.student_message,
         response_detail=request.response_detail,
         allow_model_knowledge=request.allow_model_knowledge,
+        response_language=request.response_language,
         image_note=image_note,
     )
 

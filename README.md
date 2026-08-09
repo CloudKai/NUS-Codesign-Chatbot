@@ -231,6 +231,19 @@ Trusted course files may be up to **50 MB**; student uploads remain **10 MB**
 (up to 5 files per add). Student-upload compression uses `pymupdf` and `Pillow`
 from `requirements.txt` when installed; lecture sync does not re-compress
 shared course files.
+
+### Local RAG behavior
+
+Selected notebook sources are retrieved per turn rather than concatenated into
+the prompt. The local retriever builds overlapping, sentence-aware chunks,
+ranks them against the student's current question and bounded notebook context,
+and sends only the strongest diverse excerpts to the coach. Source labels
+remain stable (`[S1]`, `[S2]`), while internal chunk IDs are stored only for
+audit/debugging. See
+[`docs/PROMPT_ARCHITECTURE.md`](docs/PROMPT_ARCHITECTURE.md) for the complete
+ingestion → retrieval → prompt → citation flow and the later Bedrock adapter
+contract.
+
 ---
 
 ## Architecture (local)
@@ -254,7 +267,12 @@ boundary.
 
 ## Production Docker deployment (single EC2)
 
-The production-only stack keeps the local launcher unchanged:
+Production is the stateless ECR + Aurora DSQL + S3 stack described in
+[`docs/deploy/AWS_STATELESS_EC2.md`](docs/deploy/AWS_STATELESS_EC2.md). The
+default `compose.yaml`, its `./data` mount, and `docker compose up --build` are
+for local development only; do not use them for the EC2 production service.
+
+The production network boundary is:
 
 ```text
 Internet :80/:443 -> Caddy
@@ -274,69 +292,66 @@ certificates for `cde2300chatbot.duckdns.org`; the DuckDNS record must already
 resolve to the EC2 Elastic IP, and the EC2 security group must allow inbound
 TCP 80 and 443.
 
-Before validating or starting the stack:
+On EC2, install a private `.env` and `.streamlit/secrets.toml`, set an immutable
+ECR image tag, and deploy with the production wrapper:
 
 ```bash
-cp .env.example .env                         # then set private production values
+export APP_IMAGE="<account>.dkr.ecr.us-west-2.amazonaws.com/cde2300-chatbot:<git-sha>"
+export ECR_REGISTRY="<account>.dkr.ecr.us-west-2.amazonaws.com"
+export AWS_REGION="us-west-2"
+sh scripts/deploy_ecr.sh
+docker compose -f compose.prod.yaml ps
+docker compose -f compose.prod.yaml logs --tail=100 app caddy
+```
+
+Production does not mount or transfer `data/`. Student state must be in DSQL
+and S3. Before deployment, the host-only configuration must include:
+
+```dotenv
+DATABASE_PROVIDER=dsql
+FILE_STORAGE_PROVIDER=s3
+AWS_REGION=us-west-2
+DSQL_ENDPOINT=<cluster-hostname>
+DSQL_USER=co_design_app
+USER_UPLOADS_BUCKET=<private-bucket-name>
+```
+
+Set the Cognito callback to
+`https://cde2300chatbot.duckdns.org/api/v1/auth/callback`, keep
+`AUTH_COOKIE_SECURE=true`, and do not put private values in the image or
+repository. The current model path is configured independently (OpenAI or
+mock); Bedrock/course-material integration is not required for this deployment
+phase.
+
+Safe pre-deployment checks, which do not call a model provider or AWS service:
+
+```bash
+docker compose config --quiet
+APP_IMAGE=co-design:test docker compose -f compose.prod.yaml config --quiet
+sh -n scripts/start.sh scripts/start_prod.sh scripts/build.sh scripts/deploy_ecr.sh
+.venv/bin/python -m pytest -q
+PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \
+  .venv/bin/python -m compileall -q backend ui streamlit_app.py tests
+```
+
+The production readiness endpoint verifies configuration, all required DSQL
+tables/grants, and read access to the S3 bucket. It will deliberately return
+503 until DSQL bootstrap/grants and the private S3 bucket/IAM permissions are
+complete.
+
+For local development only, use the stateful default Compose stack:
+
+```bash
+cp .env.example .env
 cp .streamlit/secrets.toml.example .streamlit/secrets.toml
 mkdir -p data
 chmod 700 data .streamlit
 chmod 600 .env .streamlit/secrets.toml
-```
-
-The image runs as uid/gid `1000:1000`. On Linux/EC2, make the persistent data
-tree and mounted secrets file accessible to that account before startup:
-
-```bash
 sudo chown -R 1000:1000 data .streamlit/secrets.toml
-test -d data && test -f .streamlit/secrets.toml
-```
-
-Compose refuses to create either bind source automatically. This prevents a
-missing secrets file from silently becoming a directory and prevents a
-root-owned empty data directory from being created during startup.
-
-Set the private Cognito secrets file / env to use:
-
-- `redirect_uri = "https://cde2300chatbot.duckdns.org/api/v1/auth/callback"`
-- `AUTH_COOKIE_SECURE=true` (Compose already overrides this)
-
-Add that exact callback URL to the Cognito app client. Do not put private values
-in the image or repository. Compose injects `.env` at runtime and bind-mounts
-`.streamlit/secrets.toml` read-only.
-
-Safe configuration/build checks (they do not start model providers):
-
-```bash
-docker compose config --quiet
-docker compose build
-sh -n scripts/start.sh scripts/start_prod.sh scripts/build.sh
-.venv/bin/python -m pytest -q
-```
-
-On EC2, after securely transferring the private configuration and any existing
-`data/` directory:
-
-```bash
 docker compose up -d --build
-docker compose ps
-docker compose logs --tail=100 app caddy
-curl -fsS https://cde2300chatbot.duckdns.org/api/v1/health
 ```
 
-The host `./data` bind mount persists the SQLite database, uploads, synced
-course-material copies, and optional generated workspaces across image rebuilds
-and container replacement. Back it up before deployment changes:
-
-```bash
-tar -czf "co-design-data-$(date +%Y%m%d-%H%M%S).tar.gz" data/
-```
-
-Do not run `docker compose down -v` unless removing Caddy's certificate/config
-volumes is intentional. `docker compose down` alone does not delete `./data`.
-
-> Security boundary: FastAPI coaching/CRUD routes still have no authenticated
-> request boundary, so Caddy publicly exposes only auth browser routes
+> Security boundary: Caddy publicly exposes only auth browser routes
 > (`/api/v1/auth/login`, `/callback`, `/logout`) and `/api/v1/health`.
 > `/api/v1/auth/me` stays on the container loopback. Cognito-authenticated
 > Streamlit sessions continue to use owner-scoped in-process services. Other

@@ -158,6 +158,8 @@ def test_composer_includes_source_context_and_bounds_history():
     )
     text = prepared.composed_text
     assert "--- [S1] Lecture ---" in text
+    assert "query-ranked excerpts" in text
+    assert "do not expose internal excerpt/chunk identifiers" in text
     assert "message-19-" in text
     assert "message-0-" not in text
     assert len(text) <= composer_module.MAX_COMPOSED_PROMPT_CHARS

@@ -23,6 +23,9 @@ class StoredObject:
 class FileStorage(Protocol):
     """Byte-oriented object storage for user uploads and managed copies."""
 
+    def ping(self) -> None:
+        """Verify that the configured storage target is readable."""
+
     def put_bytes(
         self,
         *,

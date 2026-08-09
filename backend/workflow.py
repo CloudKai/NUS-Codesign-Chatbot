@@ -2,7 +2,8 @@
 
 The workflow is deliberately provider-agnostic. A provider creates a validated
 assessment; the workflow decides whether a recommendation must await student
-confirmation and persists that recommendation through a repository port.
+confirmation. The application persists the completed turn and recommendation
+together after provider work finishes.
 
 When LangGraph is available, ``run`` executes the documented multi-step graph
 (load → assess → recommend → format) with an in-memory checkpointer so graph
@@ -34,19 +35,41 @@ class AssessmentProvider(Protocol):
         """Return student-facing coaching text and a structured assessment."""
 
 
-def _next_stage(stage_id: str) -> str:
-    """Return the following stage, keeping the conclusion stage terminal."""
+def _next_stage(stage_id: str) -> str | None:
+    """Return the following stage, or ``None`` for terminal Conclusion."""
     stage_ids = [stage.id for stage in THINKING_STAGES]
     try:
         index = stage_ids.index(stage_id)
     except ValueError as error:
         raise ValueError(f"Unknown Thinking Path stage: {stage_id}") from error
-    return stage_ids[min(index + 1, len(stage_ids) - 1)]
+    if index == len(stage_ids) - 1:
+        return None
+    return stage_ids[index + 1]
+
+
+def _normalize_terminal_assessment(
+    request: CoachRequest, assessment: EducationalAssessment
+) -> EducationalAssessment:
+    """Prevent a provider from recommending advancement beyond Conclusion."""
+    if (
+        request.current_stage == THINKING_STAGES[-1].id
+        and assessment.recommendation is StageDecision.ADVANCE
+    ):
+        return assessment.model_copy(
+            update={
+                "recommendation": StageDecision.STAY,
+                "recommendation_rationale": (
+                    "Conclusion is the terminal Thinking Path stage; the student's "
+                    "work remains here for final calibration or completion."
+                ),
+            }
+        )
+    return assessment
 
 
 @dataclass
 class CoachWorkflow:
-    """Run one student turn and persist a confirmation-gated recommendation."""
+    """Run one student turn and return a confirmation-gated recommendation."""
 
     provider: AssessmentProvider
     transitions: PhaseTransitionRepository
@@ -61,26 +84,32 @@ class CoachWorkflow:
         back to the portable sequential implementation otherwise.
         """
         try:
-            return self._run_graph(request)
-        except RuntimeError:
+            self._ensure_graph()
+        except RuntimeError as error:
+            if not isinstance(error.__cause__, ImportError):
+                raise
             return self._run_sequential(request)
+        return self._run_graph(request)
 
     def _run_sequential(self, request: CoachRequest) -> CoachTurn:
         """Portable non-graph path used when LangGraph is unavailable."""
         response_text, assessment = self.provider.assess(request)
+        assessment = _normalize_terminal_assessment(request, assessment)
         if assessment.current_stage != request.current_stage:
             raise ValueError("Assessment stage does not match the active journey stage")
         pending: PendingPhaseTransition | None = None
         if assessment.recommendation is StageDecision.ADVANCE:
+            next_stage = _next_stage(request.current_stage)
+            if next_stage is None:
+                raise ValueError("Conclusion cannot advance to another stage")
             pending = PendingPhaseTransition(
                 id=str(uuid4()),
                 thread_id=request.thread_id,
                 from_stage=request.current_stage,
-                to_stage=_next_stage(request.current_stage),
+                to_stage=next_stage,
                 assessment=assessment,
                 created_at=datetime.now(timezone.utc).isoformat(),
             )
-            pending = self.transitions.create(pending)
         turn = CoachTurn(
             response_text=response_text,
             assessment=assessment,
@@ -164,6 +193,7 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
     def assess(state: dict) -> dict:
         request = CoachRequest.model_validate(state["request"])
         response_text, assessment = workflow.provider.assess(request)
+        assessment = _normalize_terminal_assessment(request, assessment)
         if assessment.current_stage != request.current_stage:
             raise ValueError(
                 "Assessment stage does not match the active journey stage"
@@ -182,15 +212,17 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
         assessment = EducationalAssessment.model_validate(state["assessment"])
         pending: PendingPhaseTransition | None = None
         if assessment.recommendation is StageDecision.ADVANCE:
+            next_stage = _next_stage(request.current_stage)
+            if next_stage is None:
+                raise ValueError("Conclusion cannot advance to another stage")
             pending = PendingPhaseTransition(
                 id=str(uuid4()),
                 thread_id=request.thread_id,
                 from_stage=request.current_stage,
-                to_stage=_next_stage(request.current_stage),
+                to_stage=next_stage,
                 assessment=assessment,
                 created_at=datetime.now(timezone.utc).isoformat(),
             )
-            pending = workflow.transitions.create(pending)
         steps = list(state.get("steps_completed") or [])
         steps.append("recommend")
         return {

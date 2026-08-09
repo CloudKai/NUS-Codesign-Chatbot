@@ -383,21 +383,12 @@ def render_message(message: dict[str, Any]) -> None:
                     unsafe_allow_html=True,
                 )
                 with st.container(key=f"user_message_actions_{safe_id}"):
-                    _, copy_column, edit_column = st.columns(
-                        [0.76, 0.12, 0.12],
+                    _, copy_column = st.columns(
+                        [0.88, 0.12],
                         gap="small",
                     )
                     with copy_column:
                         _render_copy_control(content)
-                    if edit_column.button(
-                        "",
-                        icon=":material/edit:",
-                        key=f"edit-{message['id']}",
-                        help="Edit",
-                        type="tertiary",
-                    ):
-                        st.session_state.editing_message = message["id"]
-                        rerun()
             return
 
         st.markdown(
@@ -503,6 +494,7 @@ def handle_prompt(
             current_stage=journey["current_stage"],
             response_detail=journey["response_detail"],
             allow_model_knowledge=allow_model_knowledge,
+            response_language=st.session_state.get("response_language", "English"),
             model_id=model_id,
             reasoning_effort=reasoning_effort,
         )
@@ -533,16 +525,10 @@ def handle_prompt(
                     "Coaching is unavailable. Prefer `sh scripts/start.sh` for "
                     f"API mode, or check the local provider. ({exc})"
                 )
-                if st.button(
-                    "Retry",
-                    icon=":material/refresh:",
-                    key="retry-coach-api",
-                ):
-                    st.session_state.pending_edit = {
-                        "message_id": existing_user_message_id,
-                        "prompt": prompt,
-                    }
-                    rerun()
+                st.caption(
+                    "Reload the notebook before resubmitting; the completed turn "
+                    "may already be present if the connection ended late."
+                )
                 return
     updated_thread = store.get_thread(st.session_state.thread_id) or {}
     updated_metadata = updated_thread.get("metadata") or {}
@@ -572,26 +558,6 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
     with chat_log:
         for message in messages:
             render_message(message)
-        if messages and messages[-1]["role"] == "assistant":
-            previous_user = next(
-                (
-                    message
-                    for message in reversed(messages[:-1])
-                    if message["role"] == "user"
-                ),
-                None,
-            )
-            if previous_user and st.button(
-                "Regenerate",
-                icon=":material/refresh:",
-                type="tertiary",
-                key="regenerate-response",
-            ):
-                st.session_state.pending_edit = {
-                    "message_id": previous_user["id"],
-                    "prompt": previous_user["content"],
-                }
-                rerun()
     with st.container(key="chat_composer"):
         _render_composer_model_picker()
         composer_value = st.chat_input(
@@ -604,10 +570,7 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
             height="content",
         )
         sync_composer_layout()
-    pending_edit = st.session_state.pop("pending_edit", None)
-    prompt, uploads = normalize_composer_value(
-        (pending_edit or {}).get("prompt") or composer_value
-    )
+    prompt, uploads = normalize_composer_value(composer_value)
     if prompt:
         handle_prompt(
             prompt,
@@ -615,5 +578,5 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
             model_id,
             reasoning_effort,
             chat_log,
-            existing_user_message_id=(pending_edit or {}).get("message_id"),
+            existing_user_message_id=None,
         )

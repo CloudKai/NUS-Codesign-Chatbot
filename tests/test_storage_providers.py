@@ -141,7 +141,7 @@ def test_sanitize_and_object_key_never_trust_raw_path():
         source_id="../../oid",
         filename="../../secret.pdf",
     )
-    assert key == "users/user-1/notebooks/notebook-1/sources/oid/secret.pdf"
+    assert key == "users/user-1/notebooks/notebook-1/sources/oid/raw/secret.pdf"
     assert ".." not in key
     assert notebook_prefix(
         user_id="user-1", notebook_id="../notebook-1"
@@ -150,7 +150,7 @@ def test_sanitize_and_object_key_never_trust_raw_path():
         user_id="user-1",
         notebook_id="notebook-1",
         source_id="source-1",
-    ) == "users/user-1/notebooks/notebook-1/sources/source-1/extracted.txt"
+    ) == "users/user-1/notebooks/notebook-1/sources/source-1/derived/extracted.txt"
 
 
 def test_local_file_storage_round_trip(tmp_path: Path):
@@ -331,6 +331,21 @@ def test_dsql_student_store_rejects_admin_runtime(monkeypatch):
         )
 
 
+def test_dsql_readiness_checks_all_five_tables_and_runtime_grants():
+    recorder: list[str] = []
+    store = DsqlStudentStore(
+        identifier="__readiness__",
+        ensure_owner=False,
+        connection_factory=lambda: _FakeDsqlConnection(recorder),
+    )
+
+    store.ping()
+
+    joined = "\n".join(recorder).lower()
+    for table in ("users", "oauth_login_states", "notebooks", "messages", "sources"):
+        assert f"select * from {table} limit 0" in joined
+
+
 def test_validate_storage_configuration_requires_production_fields(monkeypatch):
     monkeypatch.setattr("backend.persistence.factory.settings.database_provider", "dsql")
     monkeypatch.setattr("backend.persistence.factory.settings.dsql_endpoint", "")
@@ -463,6 +478,8 @@ def test_generate_dsql_admin_auth_token_uses_db_connect_admin():
 def test_dsql_schema_has_no_partial_index_where_predicate():
     assert "WHERE cognito_sub" not in DSQL_SCHEMA
     assert "WHERE cognitosub" not in DSQL_SCHEMA.lower()
+    assert "identifier TEXT NOT NULL UNIQUE" not in DSQL_SCHEMA
+    assert "CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_users_identifier" in DSQL_SCHEMA
     assert "CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_users_cognito_sub" in DSQL_SCHEMA
     assert "app_sessions" not in DSQL_SCHEMA
     assert "CREATE TABLE IF NOT EXISTS notebooks" in DSQL_SCHEMA
@@ -486,6 +503,16 @@ def test_dsql_schema_has_no_partial_index_where_predicate():
         if "INDEX" in upper:
             assert " WHERE " not in upper
             assert "ASYNC" in upper
+
+
+def test_dsql_non_primary_uniqueness_uses_async_indexes():
+    """Keep DSQL secondary uniqueness explicit so bootstrap waits for each job."""
+    table_statements = [
+        statement
+        for statement in iter_dsql_ddl_statements()
+        if statement.lstrip().upper().startswith("CREATE TABLE")
+    ]
+    assert all(" UNIQUE" not in statement.upper() for statement in table_statements)
 
 
 def test_run_dsql_transaction_retries_occ_then_succeeds():
@@ -762,7 +789,10 @@ def test_save_uploads_and_workspace_read_via_object_storage(tmp_path: Path, monk
     assert f"/sources/{source['id']}/" in source["object_key"]
     assert "/notebooks/" in source["object_key"]
     assert source["extracted_text_key"]
-    assert f"/sources/{source['id']}/extracted.txt" in source["extracted_text_key"]
+    assert (
+        f"/sources/{source['id']}/derived/extracted.txt"
+        in source["extracted_text_key"]
+    )
     assert memory.get_bytes(source["extracted_text_key"]) == b"hello-s3-bytes"
     database_bytes = (tmp_path / "ws.sqlite3").read_bytes()
     assert b"hello-s3-bytes" not in database_bytes
@@ -774,6 +804,91 @@ def test_save_uploads_and_workspace_read_via_object_storage(tmp_path: Path, monk
     store.delete_source(thread_id, source["id"])
     assert not memory.exists(source["object_key"])
     assert not memory.exists(source["extracted_text_key"])
+
+
+def test_raw_extracted_txt_never_collides_with_derived_text(tmp_path: Path, monkeypatch):
+    """Raw bytes remain byte-perfect when the filename is ``extracted.txt``."""
+    from backend import file_processing
+    from backend.source_library import add_file_sources
+
+    memory = MemoryFileStorage()
+    monkeypatch.setattr(file_processing.settings, "file_storage_provider", "memory")
+    monkeypatch.setattr(
+        "backend.persistence.factory.get_file_storage",
+        lambda: memory,
+    )
+    store = StudentStore(tmp_path / "key-collision.sqlite3", identifier="owner-1")
+    notebook_id = store.create_thread(model_id="mock", support_mode="guided")
+    original = b"a" * 130_000
+
+    source = add_file_sources(
+        store,
+        notebook_id,
+        [("extracted.txt", original, "text/plain")],
+        compress=False,
+    )[0]
+
+    assert source["object_key"] != source["extracted_text_key"]
+    assert "/raw/extracted.txt" in source["object_key"]
+    assert "/derived/extracted.txt" in source["extracted_text_key"]
+    assert memory.get_bytes(source["object_key"]) == original
+
+
+def test_object_upload_batch_is_prevalidated_and_cleans_failed_puts(
+    tmp_path: Path, monkeypatch
+):
+    """A later invalid file or object-store error leaves no partial batch."""
+    from backend import file_processing
+
+    memory = MemoryFileStorage()
+    monkeypatch.setattr(file_processing.settings, "file_storage_provider", "memory")
+    monkeypatch.setattr(
+        "backend.persistence.factory.get_file_storage",
+        lambda: memory,
+    )
+
+    with pytest.raises(ValueError, match="exceeds"):
+        file_processing.save_uploads(
+            "notebook-1",
+            [
+                ("first.txt", b"ok", "text/plain"),
+                ("too-large.txt", b"x" * (1024 * 1024 + 1), "text/plain"),
+            ],
+            max_file_size_mb=1,
+            compress=False,
+            owner_id="owner-1",
+            source_ids=["source-1", "source-2"],
+        )
+    assert memory._objects == {}
+
+    class FailSecondPutStorage(MemoryFileStorage):
+        def __init__(self) -> None:
+            super().__init__()
+            self.put_count = 0
+
+        def put_bytes(self, **kwargs):
+            self.put_count += 1
+            if self.put_count == 2:
+                raise PermissionError("AccessDenied")
+            return super().put_bytes(**kwargs)
+
+    failing = FailSecondPutStorage()
+    monkeypatch.setattr(
+        "backend.persistence.factory.get_file_storage",
+        lambda: failing,
+    )
+    with pytest.raises(PermissionError, match="AccessDenied"):
+        file_processing.save_uploads(
+            "notebook-1",
+            [
+                ("first.txt", b"one", "text/plain"),
+                ("second.txt", b"two", "text/plain"),
+            ],
+            compress=False,
+            owner_id="owner-1",
+            source_ids=["source-1", "source-2"],
+        )
+    assert failing._objects == {}
 
 
 def test_source_delete_propagates_storage_failures(tmp_path: Path, monkeypatch):

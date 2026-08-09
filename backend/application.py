@@ -5,10 +5,24 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .domain import CitationReference, CoachImageInput, CoachRequest, CoachTurn
+from .domain import (
+    CitationReference,
+    CoachImageInput,
+    CoachRequest,
+    CoachTurn,
+    RetrievalChunkReference,
+)
 from .learning_service import LearningProgressService
 from .models import DEFAULT_CHAT_MODEL_ID, get_model, validate_reasoning
 from .repositories import NotebookRepository
+from .retrieval import (
+    ContextRetriever,
+    LocalChunkRetriever,
+    RetrievalQuery,
+    bounded_retrieval_result,
+    focused_excerpt,
+    retrieval_sources_from_notebook,
+)
 from .source_library import image_inputs_for_source_ids, selected_source_context
 from .student_journey import (
     advanced_stage_response,
@@ -63,12 +77,14 @@ class CoachApplicationService:
         progress: LearningProgressService | None = None,
         *,
         auto_advance_stages: bool = False,
+        retriever: ContextRetriever | None = None,
     ) -> None:
         self._store = store
         self._notebooks = notebooks
         self._workflow = workflow
         self._progress = progress
         self._auto_advance_stages = auto_advance_stages
+        self._retriever = retriever or LocalChunkRetriever()
 
     def submit(self, request: CoachRequest) -> CoachTurn:
         """Run and persist one turn, optionally applying its recommendation.
@@ -97,24 +113,34 @@ class CoachApplicationService:
             }
         )
         transition_id = turn.pending_transition.id if turn.pending_transition else None
-        user_id = self._store.add_message(
+        source_refs = [
+            {
+                "id": citation.source_id,
+                "label": citation.label,
+                "title": citation.title,
+            }
+            for citation in turn.assessment.citations
+        ]
+        retrieval_refs = [
+            chunk.model_dump(mode="json") for chunk in prepared_request.retrieved_chunks
+        ]
+        generated_title = (
+            NotebookTitleService.generate(turn.assessment.contribution_summary)
+            if should_generate_title
+            else None
+        )
+        self._store.persist_coach_turn(
             prepared_request.thread_id,
-            "user",
-            prepared_request.student_message,
-            metadata={
+            expected_stage=prepared_request.current_stage,
+            user_content=prepared_request.student_message,
+            user_metadata={
                 "thinking_stage": prepared_request.current_stage,
                 "source_ids": prepared_request.source_ids,
                 "workflow": "langgraph",
             },
-        )
-        # When a recommendation exists, create_phase_transition already inserted
-        # the assistant message row (id == transition_id). Fill in the reply.
-        self._store.add_message(
-            prepared_request.thread_id,
-            "assistant",
-            turn.response_text,
-            message_id=transition_id,
-            metadata={
+            assistant_content=turn.response_text,
+            assistant_message_id=transition_id,
+            assistant_metadata={
                 "thinking_stage": prepared_request.current_stage,
                 "assessment": turn.assessment.model_dump(mode="json"),
                 "pending_transition_id": transition_id,
@@ -122,17 +148,23 @@ class CoachApplicationService:
                     turn.pending_transition.to_stage if turn.pending_transition else None
                 ),
                 "decision_status": "pending" if turn.pending_transition else None,
+                "from_stage": (
+                    turn.pending_transition.from_stage
+                    if turn.pending_transition
+                    else None
+                ),
                 "workflow": "langgraph",
                 "source_ids": prepared_request.source_ids,
-                "source_refs": [
-                    {
-                        "id": citation.source_id,
-                        "label": citation.label,
-                        "title": citation.title,
-                    }
-                    for citation in turn.assessment.citations
-                ],
+                "retrieval_refs": retrieval_refs,
+                "source_refs": source_refs,
             },
+            summary_metadata={
+                "learning_summary": turn.assessment.learning_summary,
+                "working_conclusion": turn.assessment.working_conclusion,
+                "understanding_change": turn.assessment.understanding_change,
+                "critical_understanding": turn.assessment.critical_understanding_level,
+            },
+            generated_title=generated_title,
         )
         if (
             self._auto_advance_stages
@@ -179,6 +211,7 @@ class CoachApplicationService:
                     "auto_advanced_to": next_stage_id,
                     "workflow": "langgraph",
                     "source_ids": prepared_request.source_ids,
+                    "retrieval_refs": retrieval_refs,
                     "source_refs": [
                         {
                             "id": citation.source_id,
@@ -188,21 +221,6 @@ class CoachApplicationService:
                         for citation in turn.assessment.citations
                     ],
                 },
-            )
-        self._store.update_thread(
-            prepared_request.thread_id,
-            metadata={
-                "learning_summary": turn.assessment.learning_summary,
-                "working_conclusion": turn.assessment.working_conclusion,
-                "understanding_change": turn.assessment.understanding_change,
-                "critical_understanding": turn.assessment.critical_understanding_level,
-                "last_workflow_user_message_id": user_id,
-            },
-        )
-        if should_generate_title:
-            self._store.update_thread(
-                prepared_request.thread_id,
-                name=NotebookTitleService.generate(turn.assessment.contribution_summary),
             )
         return turn
 
@@ -255,20 +273,36 @@ class CoachApplicationService:
                     "source_ids must match the notebook's currently selected sources"
                 )
 
-        # Selected-source text is the current retrieved_course_context producer.
-        # A future Knowledge Base adapter should replace only this assembly step.
-        source_context, _ = selected_source_context(selected_sources)
-        if request.source_context and request.source_context.strip() != source_context:
+        # Preserve compatibility with older clients that sent the full selected-
+        # source snapshot only as an integrity hint. The query-aware context used
+        # by the provider is always generated server-side below.
+        legacy_source_context, _ = selected_source_context(selected_sources)
+        if (
+            request.source_context
+            and request.source_context.strip() != legacy_source_context
+        ):
             raise ValueError("source_context does not match the selected notebook sources")
+        if request.retrieved_chunks:
+            raise ValueError("retrieved_chunks must be resolved server-side")
         if request.image_inputs:
             raise ValueError("image_inputs must be resolved server-side from source_ids")
 
+        selected_image_ids = [
+            str(source["id"])
+            for source in selected_sources
+            if str(source.get("kind") or "").lower() == "image"
+            or str(source.get("mime") or "").lower().startswith("image/")
+        ]
+        if len(selected_image_ids) > 5:
+            raise ValueError(
+                "Select at most 5 image sources for one coaching turn"
+            )
         image_inputs = [
             CoachImageInput.model_validate(item)
             for item in image_inputs_for_source_ids(
                 self._store,
                 request.thread_id,
-                authoritative_ids,
+                selected_image_ids,
             )
         ]
         selected_model = get_model(
@@ -284,17 +318,65 @@ class CoachApplicationService:
         conversation_summary = " ".join(
             str(metadata.get("learning_summary") or "").split()
         ).strip()
+        retrieval_sources = retrieval_sources_from_notebook(selected_sources)
+        retrieval_result = self._retriever.retrieve(
+            RetrievalQuery(
+                current_message=request.student_message,
+                current_stage=authoritative_stage,
+                sources=retrieval_sources,
+                project_context=project_context,
+                conversation_summary=conversation_summary,
+                recent_messages=tuple(store_history),
+            )
+        )
+        expected_labels = {
+            source.source_id: source.label for source in retrieval_sources
+        }
+        retrieved_chunks: list[RetrievalChunkReference] = []
+        for chunk in retrieval_result.chunks:
+            if expected_labels.get(chunk.source_id) != chunk.label:
+                raise ValueError(
+                    "Retriever returned a source outside the selected notebook scope"
+                )
+        # Rebuild context solely from the validated chunks. Do not trust an
+        # adapter-provided opaque context string, even from future Bedrock code.
+        retrieval_result = bounded_retrieval_result(retrieval_result.chunks)
+        for chunk in retrieval_result.chunks:
+            excerpt = focused_excerpt(
+                chunk.text,
+                request.student_message,
+                limit=600,
+            )
+            retrieved_chunks.append(
+                RetrievalChunkReference(
+                    source_id=chunk.source_id,
+                    label=chunk.label,
+                    title=chunk.title,
+                    chunk_id=chunk.chunk_id,
+                    excerpt=excerpt,
+                    score=chunk.score,
+                )
+            )
+        response_language = " ".join(
+            str(metadata.get("response_language") or "English").split()
+        )[:50]
+        allow_model_knowledge = bool(metadata.get("allow_model_knowledge", False))
+        if authoritative_ids:
+            allow_model_knowledge = False
         return request.model_copy(
             update={
                 "current_stage": authoritative_stage,
                 "history": store_history,
                 "source_ids": authoritative_ids,
-                "source_context": source_context,
+                "source_context": retrieval_result.context,
                 "student_project_context": project_context,
                 "conversation_summary": conversation_summary,
+                "retrieved_chunks": retrieved_chunks,
                 "image_inputs": image_inputs,
                 "model_id": selected_model.id,
                 "reasoning_effort": selected_effort,
+                "response_language": response_language or "English",
+                "allow_model_knowledge": allow_model_knowledge,
             }
         )
 
@@ -303,16 +385,27 @@ class CoachApplicationService:
     ) -> dict[str, CitationReference]:
         """Map ``S#`` labels to selected notebook sources for citation resolution."""
         catalog: dict[str, CitationReference] = {}
+        retrieved_by_source: dict[str, RetrievalChunkReference] = {}
+        for chunk in request.retrieved_chunks:
+            # Retrieval order is relevance order; keep the strongest excerpt
+            # for the student-visible citation preview.
+            retrieved_by_source.setdefault(chunk.source_id, chunk)
         for index, source_id in enumerate(request.source_ids, start=1):
             source = self._store.get_source(request.thread_id, source_id)
             if not source:
                 continue
-            excerpt = " ".join(str(source.get("extractedText") or "").split())[:240]
+            retrieved = retrieved_by_source.get(source_id)
+            if retrieved is None:
+                continue
             catalog[f"S{index}"] = CitationReference(
                 source_id=source_id,
                 label=f"S{index}",
                 title=str(source.get("title") or "Untitled source"),
-                excerpt=excerpt,
+                excerpt=focused_excerpt(
+                    retrieved.excerpt,
+                    request.student_message,
+                    limit=240,
+                ),
             )
         return catalog
 

@@ -22,6 +22,7 @@ def test_confirmed_recommendation_is_the_only_way_to_advance(tmp_path):
     )
     pending = workflow.run(request).pending_transition
     assert pending is not None
+    pending = transitions.create(pending)
 
     service = LearningProgressService(store, notebooks, transitions)
     assert service.get_pending(thread_id) == pending
@@ -49,6 +50,7 @@ def test_rejected_recommendation_keeps_current_stage(tmp_path):
         )
     ).pending_transition
     assert pending is not None
+    pending = transitions.create(pending)
 
     resolved = LearningProgressService(store, notebooks, transitions).resolve(
         thread_id, pending.id, accepted=False
@@ -80,6 +82,7 @@ def test_accepted_transition_rolls_back_when_journey_write_fails(tmp_path, monke
         )
     ).pending_transition
     assert pending is not None
+    pending = transitions.create(pending)
 
     real_dump = student_store_module._dump
 

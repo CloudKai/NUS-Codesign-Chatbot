@@ -16,7 +16,6 @@ from ui.auth_gate import (
     authenticated_user,
     current_user_claims,
     display_name_from_claims,
-    is_logged_in,
     logout_user,
     redirect_to_session_refresh,
     render_login_gate,
@@ -44,7 +43,8 @@ st.set_page_config(
 
 inject_template_css()
 
-if not is_logged_in():
+user = authenticated_user()
+if not user:
     # Auth gate has no preference store; always use the app default (System).
     # Overwrite leftovers from a prior logged-in session in this browser tab.
     st.session_state.appearance = DEFAULT_APPEARANCE
@@ -56,7 +56,8 @@ if not is_logged_in():
     render_login_gate()
     st.stop()
 
-user = authenticated_user() or {}
+# Keep the helper no-argument call compatible with AppTest auth fixtures. The
+# entrypoint already avoids the former separate ``is_logged_in`` probe.
 claims = current_user_claims()
 cognito_sub = str(user.get("cognito_sub") or claims.get("sub") or "").strip()
 if not cognito_sub:

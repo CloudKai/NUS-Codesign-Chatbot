@@ -15,7 +15,7 @@ from base64 import urlsafe_b64decode, urlsafe_b64encode
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Mapping
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import httpx
 from authlib.integrations.httpx_client import OAuth2Client
@@ -87,12 +87,13 @@ class CognitoOIDCClient:
         self._metadata_loader = metadata_loader
         self._jwks_loader = jwks_loader
         self._metadata_cache: dict[str, Any] | None = None
-        # Prevent concurrent refresh grants from racing within one API process.
-        # Cognito remains authoritative; no token is cached or persisted here.
-        self._refresh_lock = threading.Lock()
         self._jwks_lock = threading.Lock()
         # jwks_uri -> (expires_at_epoch, KeySet)
         self._jwks_cache: dict[str, tuple[float, KeySet]] = {}
+        # Bound unknown-kid rotation refreshes across all attacker-controlled
+        # kid values; Cognito token verification itself remains per request.
+        self._jwks_forced_refresh_at: dict[str, float] = {}
+        self._jwks_forced_refresh_cooldown_seconds = 60.0
         self._jwks_cache_ttl_seconds = float(
             getattr(
                 settings,
@@ -248,20 +249,19 @@ class CognitoOIDCClient:
             raise CognitoOIDCError("Cognito discovery metadata is incomplete")
 
         try:
-            with self._refresh_lock:
-                with self._http() as client:
-                    response = client.post(
-                        token_endpoint,
-                        data={
-                            "grant_type": "refresh_token",
-                            "client_id": config.client_id,
-                            "client_secret": config.client_secret,
-                            "refresh_token": raw_refresh,
-                        },
-                        headers={"Content-Type": "application/x-www-form-urlencoded"},
-                    )
-                    response.raise_for_status()
-                    token = response.json()
+            with self._http() as client:
+                response = client.post(
+                    token_endpoint,
+                    data={
+                        "grant_type": "refresh_token",
+                        "client_id": config.client_id,
+                        "client_secret": config.client_secret,
+                        "refresh_token": raw_refresh,
+                    },
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                )
+                response.raise_for_status()
+                token = response.json()
         except Exception as error:  # pragma: no cover - network/provider failures
             logger.warning("Cognito refresh token grant failed")
             raise CognitoOIDCError("Cognito refresh failed") from error
@@ -277,7 +277,7 @@ class CognitoOIDCClient:
         )
 
     def revoke(self, refresh_token: str) -> bool:
-        """Best-effort revoke *refresh_token* via discovery ``revocation_endpoint``.
+        """Best-effort revoke *refresh_token* via Cognito ``/oauth2/revoke``.
 
         Returns ``True`` when a revocation request was accepted, ``False`` when
         the endpoint is missing or the call fails. Never raises for revoke
@@ -291,7 +291,7 @@ class CognitoOIDCClient:
             metadata = self.discovery()
         except CognitoOIDCError:
             return False
-        revoke_endpoint = str(metadata.get("revocation_endpoint") or "").strip()
+        revoke_endpoint = self._trusted_revocation_endpoint(metadata)
         if not revoke_endpoint:
             return False
         try:
@@ -312,6 +312,45 @@ class CognitoOIDCClient:
         except Exception:
             logger.warning("Cognito token revocation failed")
             return False
+
+    def _trusted_revocation_endpoint(self, metadata: Mapping[str, Any]) -> str:
+        """Resolve a revoke URL on the validated token-endpoint HTTPS origin."""
+        token_endpoint = str(metadata.get("token_endpoint") or "").strip()
+        token_parts = urlsplit(token_endpoint)
+        if (
+            token_parts.scheme.lower() != "https"
+            or not token_parts.hostname
+            or token_parts.username
+            or token_parts.password
+        ):
+            return ""
+        candidate = str(
+            metadata.get("revocation_endpoint")
+            or self._config.revocation_endpoint
+            or urlunsplit(
+                (token_parts.scheme, token_parts.netloc, "/oauth2/revoke", "", "")
+            )
+        ).strip()
+        candidate_parts = urlsplit(candidate)
+        trusted_origin = (
+            token_parts.scheme.lower(),
+            token_parts.hostname.lower(),
+            token_parts.port,
+        )
+        candidate_origin = (
+            candidate_parts.scheme.lower(),
+            (candidate_parts.hostname or "").lower(),
+            candidate_parts.port,
+        )
+        if (
+            candidate_origin != trusted_origin
+            or candidate_parts.username
+            or candidate_parts.password
+            or candidate_parts.path != "/oauth2/revoke"
+        ):
+            logger.warning("Ignoring untrusted Cognito revocation endpoint")
+            return ""
+        return candidate
 
     def _session_from_token_response(
         self,
@@ -376,6 +415,13 @@ class CognitoOIDCClient:
         now = self._clock().timestamp()
         with self._jwks_lock:
             cached = self._jwks_cache.get(jwks_uri)
+            if force_refresh and cached is not None:
+                last_refresh = self._jwks_forced_refresh_at.get(jwks_uri, 0.0)
+                if (
+                    now - last_refresh
+                    < self._jwks_forced_refresh_cooldown_seconds
+                ):
+                    return cached[1]
             if (
                 not force_refresh
                 and cached is not None
@@ -384,6 +430,8 @@ class CognitoOIDCClient:
                 return cached[1]
             payload = self._fetch_jwks_payload(jwks_uri)
             key_set = KeySet.import_key_set(dict(payload))
+            if force_refresh:
+                self._jwks_forced_refresh_at[jwks_uri] = now
             self._jwks_cache[jwks_uri] = (
                 now + max(60.0, self._jwks_cache_ttl_seconds),
                 key_set,

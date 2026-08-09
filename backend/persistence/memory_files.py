@@ -11,6 +11,9 @@ class MemoryFileStorage:
     def __init__(self) -> None:
         self._objects: dict[str, tuple[bytes, str]] = {}
 
+    def ping(self) -> None:
+        """Memory storage is always ready after construction."""
+
     def put_bytes(
         self,
         *,

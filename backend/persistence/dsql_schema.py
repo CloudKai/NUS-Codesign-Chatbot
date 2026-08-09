@@ -33,7 +33,7 @@ from backend.persistence.dsql_connection import split_sql_statements
 DSQL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
-    identifier TEXT NOT NULL UNIQUE,
+    identifier TEXT NOT NULL,
     cognito_sub TEXT,
     email TEXT,
     display_name TEXT,
@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TEXT,
     last_login_at TEXT
 );
+
+CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_users_identifier
+ON users(identifier);
 
 CREATE UNIQUE INDEX ASYNC IF NOT EXISTS idx_users_cognito_sub
 ON users(cognito_sub);

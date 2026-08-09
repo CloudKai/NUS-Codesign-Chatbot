@@ -25,6 +25,11 @@ class LocalFileStorage:
             raise ValueError("Unsafe storage key")
         return path
 
+    def ping(self) -> None:
+        """Verify that the configured local storage root exists."""
+        if not self.root.is_dir():
+            raise FileNotFoundError(self.root)
+
     def put_bytes(
         self,
         *,

@@ -115,6 +115,15 @@ def test_jwks_is_cached_and_unknown_kid_refreshes_once(tmp_path):
     assert identity.sub == "sub-b"
     assert len(fetches) == 2
 
+    for unknown_kid in ("attacker-kid-1", "attacker-kid-2", "attacker-kid-3"):
+        with pytest.raises(CognitoOIDCError):
+            oidc.verify_id_token(
+                _mint(sub="unknown", key=_KEY_V1, kid=unknown_kid)
+            )
+    # A persistently unknown attacker-controlled kid does not bypass the
+    # process cache after the controlled rotation refresh.
+    assert len(fetches) == 2
+
     with pytest.raises(CognitoOIDCError):
         oidc.verify_id_token("not-a-jwt")
     # Invalid tokens must not keep refetching JWKS forever.

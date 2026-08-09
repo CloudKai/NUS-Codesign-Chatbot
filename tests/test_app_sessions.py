@@ -402,7 +402,12 @@ def test_oidc_refresh_grant_and_revocation_are_mocked_without_token_logs(
         _config(),
         store=store,
         transport=httpx.MockTransport(handler),
-        metadata_loader=lambda _url: _metadata(),
+        # Cognito discovery does not normally advertise revocation_endpoint.
+        metadata_loader=lambda _url: {
+            key: value
+            for key, value in _metadata().items()
+            if key != "revocation_endpoint"
+        },
     )
     monkeypatch.setattr(
         oidc,

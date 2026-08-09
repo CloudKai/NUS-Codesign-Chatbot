@@ -78,6 +78,7 @@ def create_app(
     """
     from backend.persistence.factory import (
         create_student_store,
+        get_file_storage,
         validate_storage_configuration,
     )
 
@@ -204,6 +205,12 @@ def create_app(
             raise HTTPException(
                 status_code=503, detail=f"Database not ready: {error}"
             ) from error
+        try:
+            get_file_storage().ping()
+        except Exception as error:  # pragma: no cover - defensive startup guard
+            raise HTTPException(
+                status_code=503, detail=f"File storage not ready: {error}"
+            ) from error
         provider = settings.model_provider
         if provider not in {"mock", "ollama", "openai"}:
             raise HTTPException(
@@ -263,7 +270,7 @@ def create_app(
                 model_id=request.model_id,
                 support_mode=request.support_mode,
                 assignment=request.assignment,
-                metadata=request.metadata or None,
+                metadata=request.metadata.model_dump(exclude_none=True) or None,
             )
         except ValueError as error:
             raise _value_error(error) from error
@@ -288,7 +295,13 @@ def create_app(
         """Rename an owned notebook and/or merge metadata."""
         try:
             return owner.workspace.update_thread(
-                thread_id, name=request.name, metadata=request.metadata
+                thread_id,
+                name=request.name,
+                metadata=(
+                    request.metadata.model_dump(exclude_none=True)
+                    if request.metadata is not None
+                    else None
+                ),
             )
         except ValueError as error:
             raise _value_error(error) from error
@@ -328,7 +341,7 @@ def create_app(
                 thread_id,
                 request.role,
                 request.content,
-                metadata=request.metadata,
+                metadata=request.metadata.model_dump(),
             )
         except ValueError as error:
             raise _value_error(error) from error

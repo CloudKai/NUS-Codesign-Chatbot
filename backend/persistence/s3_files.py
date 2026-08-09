@@ -101,6 +101,14 @@ class S3FileStorage:
         self._client = boto3.client("s3", region_name=self.region)
         return self._client
 
+    def ping(self) -> None:
+        """Verify bucket existence and role access without mutating objects."""
+        self._s3().list_objects_v2(
+            Bucket=self.bucket,
+            Prefix="users/",
+            MaxKeys=1,
+        )
+
     def put_bytes(
         self,
         *,

@@ -355,6 +355,12 @@ class StudentStore:
         if not state_value or not verifier:
             raise ValueError("state and code_verifier are required")
         with self._lock, self._connect() as connection:
+            # Login is the natural bounded cleanup point; no scheduler is needed
+            # for transient states abandoned before the callback.
+            connection.execute(
+                "DELETE FROM oauth_login_states WHERE expires_at <= ?",
+                (created_at,),
+            )
             connection.execute(
                 """
                 INSERT INTO oauth_login_states
@@ -601,27 +607,42 @@ class StudentStore:
         name: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        """Rename a notebook and/or merge progress/settings metadata."""
-        thread = self.get_thread(thread_id)
-        if not thread:
-            raise ValueError("Chat not found")
-        current_meta = dict(thread.get("metadata") or {})
-        if metadata:
-            current_meta = {**current_meta, **metadata}
-            if "learning_journey" in metadata and isinstance(
-                metadata.get("learning_journey"), dict
-            ):
-                # Nested journey merge: patch replaces journey object intentionally.
-                current_meta["learning_journey"] = metadata["learning_journey"]
-        current_stage, progress_text, settings_text = self._split_notebook_metadata(
-            current_meta
-        )
-        title = (
-            name.strip()[:120]
-            if name is not None
-            else thread.get("name")
-        )
+        """Rename and/or merge metadata in one retryable database transaction.
+
+        The owned-row SELECT, Python merge, and UPDATE deliberately share one
+        connection. Aurora DSQL can therefore detect an OCC conflict instead of
+        allowing a stale settings write to overwrite a newly confirmed stage.
+        """
         with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not row:
+                raise ValueError("Chat not found")
+            thread = self._thread_dict(row)
+            current_meta = dict(thread.get("metadata") or {})
+            if metadata:
+                current_meta = {**current_meta, **metadata}
+                if "learning_journey" in metadata and isinstance(
+                    metadata.get("learning_journey"), dict
+                ):
+                    # Trusted internal journey updates replace the normalized
+                    # journey snapshot. Public API models exclude this field.
+                    current_meta["learning_journey"] = metadata["learning_journey"]
+                journey_meta = dict(current_meta.get("learning_journey") or {})
+                for key in _PROGRESS_KEYS:
+                    if key in metadata:
+                        journey_meta[key] = metadata[key]
+                current_meta["learning_journey"] = journey_meta
+            current_stage, progress_text, settings_text = self._split_notebook_metadata(
+                current_meta
+            )
+            title = (
+                name.strip()[:120]
+                if name is not None
+                else thread.get("name")
+            )
             connection.execute(
                 """
                 UPDATE notebooks
@@ -871,6 +892,133 @@ class StudentStore:
                     (now, thread_id, self.owner_id),
                 )
         return message_id
+
+    def persist_coach_turn(
+        self,
+        thread_id: str,
+        *,
+        expected_stage: str,
+        user_content: str,
+        user_metadata: dict[str, Any],
+        assistant_content: str,
+        assistant_metadata: dict[str, Any],
+        summary_metadata: dict[str, Any],
+        assistant_message_id: str | None = None,
+        generated_title: str | None = None,
+    ) -> tuple[str, str]:
+        """Persist one completed coaching turn in a single DB transaction.
+
+        Provider, retrieval, and object-storage work must finish before this
+        method is called. The user row, assistant assessment/citations/pending
+        decision, and notebook summary either commit together or roll back.
+        """
+        cleaned_user = user_content.strip()
+        cleaned_assistant = assistant_content.strip()
+        if not cleaned_user or not cleaned_assistant:
+            raise ValueError("Completed coach turns require both messages")
+        user_id = str(uuid.uuid4())
+        assistant_id = assistant_message_id or str(uuid.uuid4())
+        assistant_meta = dict(assistant_metadata)
+        assessment = assistant_meta.pop("assessment", None)
+        cited = assistant_meta.pop("source_refs", None)
+        proposed_stage = assistant_meta.pop("proposed_stage", None)
+        decision_status = assistant_meta.pop("decision_status", None)
+        assistant_meta.pop("pending_transition_id", None)
+        if decision_status and decision_status != "pending":
+            raise ValueError("New coach transition status must be pending")
+        if bool(proposed_stage) != bool(decision_status):
+            raise ValueError("Pending coach transitions require a proposed stage")
+
+        with self._lock, self._connect() as connection:
+            notebook = connection.execute(
+                "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not notebook:
+                raise ValueError("Chat not found")
+            active_stage = str(notebook["current_stage"] or "focus")
+            if active_stage != expected_stage:
+                raise ValueError(
+                    "The notebook stage changed before the coaching turn was saved"
+                )
+
+            user_created_at = utc_now()
+            assistant_created_at = utc_now()
+            connection.execute(
+                """
+                INSERT INTO messages
+                  (id, notebook_id, role, content, is_error, assessment_text,
+                   cited_source_ids_text, proposed_stage, decision_status,
+                   decision_at, metadata_text, created_at)
+                VALUES (?, ?, 'user', ?, 0, NULL, NULL, NULL, NULL, NULL, ?, ?)
+                """,
+                (user_id, thread_id, cleaned_user, _dump(user_metadata), user_created_at),
+            )
+            if decision_status == "pending":
+                connection.execute(
+                    """
+                    UPDATE messages
+                    SET decision_status='rejected', decision_at=?
+                    WHERE notebook_id=? AND decision_status='pending'
+                    """,
+                    (assistant_created_at, thread_id),
+                )
+            connection.execute(
+                """
+                INSERT INTO messages
+                  (id, notebook_id, role, content, is_error, assessment_text,
+                   cited_source_ids_text, proposed_stage, decision_status,
+                   decision_at, metadata_text, created_at)
+                VALUES (?, ?, 'assistant', ?, 0, ?, ?, ?, ?, NULL, ?, ?)
+                """,
+                (
+                    assistant_id,
+                    thread_id,
+                    cleaned_assistant,
+                    _dump(assessment) if isinstance(assessment, dict) else None,
+                    _dump(cited) if cited is not None else None,
+                    proposed_stage,
+                    decision_status,
+                    _dump(assistant_meta),
+                    assistant_created_at,
+                ),
+            )
+
+            thread = self._thread_dict(notebook)
+            current_meta = {
+                **dict(thread.get("metadata") or {}),
+                **summary_metadata,
+                "last_workflow_user_message_id": user_id,
+            }
+            journey_meta = dict(current_meta.get("learning_journey") or {})
+            for key in _PROGRESS_KEYS:
+                if key in summary_metadata:
+                    journey_meta[key] = summary_metadata[key]
+            current_meta["learning_journey"] = journey_meta
+            stage, progress_text, settings_text = self._split_notebook_metadata(
+                current_meta
+            )
+            if stage != expected_stage:
+                raise ValueError("Coach summary cannot change the notebook stage")
+            title = generated_title or notebook["title"]
+            connection.execute(
+                """
+                UPDATE notebooks
+                SET title=?, current_stage=?, progress_text=?, settings_text=?,
+                    updated_at=?
+                WHERE id=? AND user_id=?
+                """,
+                (
+                    title,
+                    stage,
+                    progress_text,
+                    settings_text,
+                    assistant_created_at,
+                    thread_id,
+                    self.owner_id,
+                ),
+            )
+        return user_id, assistant_id
 
     def update_message(self, message_id: str, content: str) -> None:
         """Replace the content of an owned message."""

@@ -27,6 +27,7 @@ class CognitoAuthConfig:
     client_secret: str
     server_metadata_url: str
     redirect_uri: str
+    revocation_endpoint: str = ""
     scopes: str = "openid email profile"
     prompt: str = "login"
 
@@ -102,6 +103,11 @@ def load_cognito_auth_config() -> CognitoAuthConfig:
             or ""
         ).strip(),
         redirect_uri=_resolve_redirect_uri(auth),
+        revocation_endpoint=str(
+            os.getenv("COGNITO_REVOCATION_ENDPOINT")
+            or auth.get("revocation_endpoint")
+            or ""
+        ).strip(),
         scopes=scopes,
         prompt=prompt,
     )

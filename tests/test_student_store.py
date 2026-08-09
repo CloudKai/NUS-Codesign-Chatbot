@@ -64,6 +64,28 @@ def test_chat_history_and_notebook_state(tmp_path):
     assert not hasattr(store, "record_turn")
 
 
+def test_notebook_update_reads_and_writes_on_one_connection(tmp_path, monkeypatch):
+    """The merge must be one OCC-visible unit for Aurora DSQL."""
+    store = StudentStore(tmp_path / "atomic-update.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="guided")
+    real_connect = store._connect
+    connection_count = 0
+
+    def counting_connect():
+        nonlocal connection_count
+        connection_count += 1
+        return real_connect()
+
+    monkeypatch.setattr(store, "_connect", counting_connect)
+
+    store.update_thread(thread_id, metadata={"response_detail": "long"})
+
+    assert connection_count == 1
+    thread = store.get_thread(thread_id) or {}
+    assert thread["metadata"]["thinking_stage"] == "focus"
+    assert thread["metadata"]["response_detail"] == "long"
+
+
 def test_delete_notebook_removes_messages_and_sources(tmp_path):
     store = StudentStore(tmp_path / "delete.sqlite3")
     thread_id = store.create_thread(
@@ -190,6 +212,32 @@ def test_owner_isolation_for_notebooks(tmp_path):
     thread_id = first.create_thread(model_id="mock", support_mode="critical-thinking")
     assert first.get_thread(thread_id) is not None
     assert second.get_thread(thread_id) is None
+
+
+def test_saving_oauth_state_prunes_expired_rows(tmp_path):
+    store = StudentStore(tmp_path / "oauth-cleanup.sqlite3")
+    store.save_oauth_login_state(
+        state="expired",
+        code_verifier="old-verifier",
+        created_at="2026-08-01T00:00:00+00:00",
+        expires_at="2026-08-01T00:05:00+00:00",
+    )
+
+    store.save_oauth_login_state(
+        state="current",
+        code_verifier="new-verifier",
+        created_at="2026-08-01T00:06:00+00:00",
+        expires_at="2026-08-01T00:11:00+00:00",
+    )
+
+    with store._connect() as connection:
+        states = {
+            str(row["state"])
+            for row in connection.execute(
+                "SELECT state FROM oauth_login_states ORDER BY state"
+            ).fetchall()
+        }
+    assert states == {"current"}
 
 
 def test_six_table_schema_has_no_legacy_tables(tmp_path):

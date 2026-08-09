@@ -551,3 +551,24 @@ def test_local_api_ready_request_id_stream_and_graph(tmp_path):
     payload = graph.json()
     assert payload["steps"] == ["load_context", "assess", "recommend", "format"]
     assert payload["mode"] in {"langgraph", "sequential"}
+
+
+def test_readiness_fails_when_file_storage_is_unavailable(tmp_path, monkeypatch):
+    """Compose must not route traffic before the configured bucket is usable."""
+
+    class UnavailableStorage:
+        def ping(self) -> None:
+            raise PermissionError("AccessDenied")
+
+    monkeypatch.setattr(
+        "backend.persistence.factory.get_file_storage",
+        lambda: UnavailableStorage(),
+    )
+    store = StudentStore(tmp_path / "ready-storage.sqlite3")
+    client = TestClient(create_app(store))
+
+    response = client.get("/api/v1/ready")
+
+    assert response.status_code == 503
+    assert "File storage not ready" in response.json()["detail"]
+    assert "AccessDenied" in response.json()["detail"]
