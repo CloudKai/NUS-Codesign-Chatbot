@@ -405,7 +405,10 @@ def connect_dsql(
         user=role,
         password=token,
         sslmode="verify-full",
-        sslrootcert="system",
+        sslrootcert=os.getenv(
+            "DSQL_SSLROOTCERT",
+            "system",
+        ),
     )
     return DsqlConnectionProxy(raw)
 

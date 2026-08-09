@@ -75,6 +75,13 @@ class Settings:
         default_factory=lambda: os.getenv("DSQL_USER", "co_design_app").strip()
         or "co_design_app"
     )
+    dsql_sslrootcert: str = field(
+        default_factory=lambda: os.getenv(
+            "DSQL_SSLROOTCERT",
+            "system",
+        ).strip()
+        or "system"
+    )
     user_uploads_bucket: str = field(
         default_factory=lambda: os.getenv("USER_UPLOADS_BUCKET", "").strip()
     )
