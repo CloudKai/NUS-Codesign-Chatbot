@@ -339,6 +339,20 @@ tables/grants, and read access to the S3 bucket. It will deliberately return
 503 until DSQL bootstrap/grants and the private S3 bucket/IAM permissions are
 complete.
 
+After DSQL is ready, and only with separate approval for live writes, check
+runtime-role idempotency with the deterministic smoke:
+
+```bash
+DATABASE_PROVIDER=dsql DSQL_USER=co_design_app \
+  .venv/bin/python scripts/smoke_dsql_idempotency.py \
+  --confirm-live --identifier 'cognito:<sub>'
+```
+
+The command uses two independent runtime connections and the mock coach,
+creates one disposable notebook, performs no DDL/S3/Bedrock/provider calls,
+and removes its rows in `finally`. Do not run it until Aurora DSQL is ready and
+the live operation has been explicitly approved.
+
 For local development only, use the stateful default Compose stack:
 
 ```bash
@@ -368,6 +382,25 @@ python -m pytest -q
 PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \
   python -m compileall -q backend ui streamlit_app.py
 ```
+
+### Headed Cognito browser smoke
+
+The deterministic suite covers the authenticated API critical path with an
+in-memory Cognito verifier and object store. A real browser cannot perform the
+protected workspace flow without either real Cognito authentication or a test
+cookie bypass, and the application deliberately has no such bypass. After
+explicitly approving a real Cognito smoke test, start the local stack and run:
+
+```bash
+sh scripts/start.sh
+sh scripts/browser_e2e_smoke.sh
+```
+
+The runner captures the signed-out desktop shell, pauses for a manual Hosted
+UI login and disposable-notebook check, then captures the authenticated 390 px
+mobile layout and browser console errors. It stores ignored artifacts under
+`output/playwright/browser-smoke/`; do not enter credentials into scripts or
+commit those artifacts.
 
 ---
 

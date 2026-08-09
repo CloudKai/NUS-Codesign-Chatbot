@@ -30,6 +30,7 @@ from ui.layout.user_message_edit_layout import (
     sync_user_message_edit_layout,
 )
 from ui.runtime import rerun, store, stream_coach_turn_events
+from ui.retry_keys import get_retry_key, remove_retry_key
 from ui.settings import apply_selected_model, persist_composer_model_choice
 from ui.sources import source_viewer_dialog
 
@@ -468,10 +469,6 @@ def handle_prompt(
     )
     allow_model_knowledge = not selected_sources and not uploads
     st.session_state.allow_model_knowledge = allow_model_knowledge
-    upload_tuples = [
-        (upload.name, upload.getvalue(), getattr(upload, "type", None))
-        for upload in uploads
-    ]
     with target:
         if existing_user_message_id is None:
             with st.chat_message("user", avatar=":material/person:"):
@@ -481,12 +478,36 @@ def handle_prompt(
                         "Adding to Sources · "
                         + ", ".join(upload.name for upload in uploads)
                     )
-        if upload_tuples:
-            store.upload_sources(
-                st.session_state.thread_id,
-                upload_tuples,
-                origin="chat_composer",
-            )
+        if uploads:
+            try:
+                store.upload_sources(
+                    st.session_state.thread_id,
+                    [
+                        (
+                            upload.name,
+                            upload.getvalue(),
+                            getattr(upload, "type", None),
+                        )
+                        for upload in uploads
+                    ],
+                    origin="chat_composer",
+                )
+            except Exception:
+                # The source service owns transactional/file cleanup. Do not
+                # submit a coach request when its prerequisite upload failed.
+                # Avoid surfacing raw exception text (paths, internals) in the UI.
+                st.error("The attachment could not be added, so no message was sent.")
+                st.caption("Remove or replace the attachment and try again.")
+                return
+        # Preserve this key only while the same submitted text is unresolved.
+        # The session helper stores a SHA-256 scope, never the prompt itself.
+        idempotency_key = get_retry_key(
+            st.session_state,
+            thread_id=st.session_state.thread_id,
+            stage=journey["current_stage"],
+            prompt=prompt,
+        )
+
         # Leave source_ids/context empty so the application service loads them.
         request = CoachRequest(
             thread_id=st.session_state.thread_id,
@@ -497,6 +518,7 @@ def handle_prompt(
             response_language=st.session_state.get("response_language", "English"),
             model_id=model_id,
             reasoning_effort=reasoning_effort,
+            idempotency_key=idempotency_key,
         )
         with st.chat_message("assistant", avatar=":material/auto_awesome:"):
             try:
@@ -516,14 +538,20 @@ def handle_prompt(
                             raise RuntimeError(f"{detail} (status={status})")
 
                 st.write_stream(token_stream())
+                remove_retry_key(
+                    st.session_state,
+                    thread_id=st.session_state.thread_id,
+                    stage=journey["current_stage"],
+                    prompt=prompt,
+                )
                 if turn and turn.pending_transition:
                     st.caption(
                         "The coach has recommended a next step in Thinking Path."
                     )
-            except Exception as exc:
+            except Exception:
                 st.error(
                     "Coaching is unavailable. Prefer `sh scripts/start.sh` for "
-                    f"API mode, or check the local provider. ({exc})"
+                    "API mode, or check the local provider."
                 )
                 st.caption(
                     "Reload the notebook before resubmitting; the completed turn "

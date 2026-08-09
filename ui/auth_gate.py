@@ -12,13 +12,19 @@ JavaScript. Tokens are never stored in ``st.session_state`` or localStorage.
 from __future__ import annotations
 
 import json
+import math
+import time
 from typing import Any
 from urllib.parse import ParseResult, urlparse
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 from backend.settings import settings
+
+
+_SIGNIN_COOLDOWN_SECONDS = 5.0
+_SIGNIN_COOLDOWN_QUERY_PARAM = "signin_cooldown_until"
+_SIGNIN_COOLDOWN_RESTORE_GRACE_SECONDS = 30.0
 
 
 def _is_allowed_http_origin(parsed: ParseResult) -> bool:
@@ -68,6 +74,7 @@ def authenticated_user() -> dict[str, Any] | None:
     if not user or not str(user.get("cognito_sub") or "").strip():
         return None
     st.session_state.pop("_auth_refresh_attempted", None)
+    _clear_signin_pending_state()
     return user
 
 
@@ -155,7 +162,7 @@ def should_attempt_session_refresh() -> bool:
     When the browser has no ID-token cookie at all, skip the bridge and show
     the login gate immediately. The refresh cookie is path-scoped to FastAPI
     and invisible here; attempting the bridge on every cold visit only caused
-    a stuck "Checking your session…" page when the iframe redirect failed.
+    a stuck "Checking your session…" page when scripted navigation failed.
     """
     if bool(st.session_state.get("_auth_refresh_attempted")):
         return False
@@ -181,9 +188,8 @@ def should_attempt_session_refresh() -> bool:
 def redirect_to_session_refresh() -> bool:
     """Navigate to FastAPI refresh without exposing the refresh token to JS.
 
-    Uses a real parent-document ``<a>`` plus a best-effort auto-click. Sandboxed
-    ``components.html`` ``location.replace`` alone often fails in Streamlit and
-    leaves the page stuck on a blank "Checking your session…" state.
+    Uses a real same-document ``<a>`` plus a best-effort auto-click. The link
+    remains available if the scripted navigation does not run.
 
     Returns:
         ``True`` when the bridge UI was armed and the caller should ``st.stop()``.
@@ -206,19 +212,19 @@ def redirect_to_session_refresh() -> bool:
         "</a>",
         unsafe_allow_html=True,
     )
-    _click_parent_refresh_link()
+    _click_refresh_link()
     return True
 
 
-def _click_parent_refresh_link() -> None:
-    """Click the parent-document refresh ``<a>`` after a short paint delay."""
-    components.html(
+def _click_refresh_link() -> None:
+    """Click the trusted same-document refresh link after a short paint delay."""
+    st.html(
         """
 <script>
 (() => {
   const clickContinue = () => {
     try {
-      const link = window.parent.document.querySelector(
+      const link = document.querySelector(
         'a.cd-auth-refresh-link[data-cd-auth-refresh="1"]'
       );
       if (link) {
@@ -231,7 +237,7 @@ def _click_parent_refresh_link() -> None:
 })();
 </script>
 """,
-        height=0,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -254,11 +260,11 @@ def _escape_attr(value: str) -> str:
 
 
 def start_login() -> None:
-    """Arm the Redirecting UI on the next dialog render.
+    """Start Cognito sign-in and arm the 5s button cooldown.
 
-    Navigation itself uses a real same-tab ``<a>`` rendered after this flag is
-    set. Sandboxed ``components.html`` ``location.replace`` is unreliable in
-    Streamlit dialogs.
+    The next dialog render keeps the original Sign in button in place,
+    disables it for ``_SIGNIN_COOLDOWN_SECONDS``, and auto-clicks a hidden
+    same-document link for reliable same-tab Cognito navigation.
     """
     url = auth_login_url()
     if not url:
@@ -266,38 +272,192 @@ def start_login() -> None:
             "Sign-in is temporarily unavailable. Ask the course team to check "
             "the authentication configuration."
         )
-        st.session_state.pop("_auth_redirecting", None)
+        _clear_signin_pending_state()
         return
     st.session_state.pop("_auth_config_error", None)
     st.session_state.pop("_auth_refresh_attempted", None)
-    st.session_state["_auth_redirecting"] = True
+    deadline = time.time() + _SIGNIN_COOLDOWN_SECONDS
+    st.session_state["_auth_launch_cognito"] = True
+    st.session_state["_auth_signin_redirecting"] = True
+    st.session_state["_auth_signin_cooldown_until"] = deadline
+    _set_signin_cooldown_query_marker(deadline)
 
 
-def _click_parent_login_link() -> None:
-    """Click the same-tab login ``<a>`` in the parent document after a short pause.
+def _clear_signin_pending_state() -> None:
+    """Remove one-shot redirect and cooldown state from this browser session."""
+    for key in (
+        "_auth_launch_cognito",
+        "_auth_signin_cooldown_until",
+        "_auth_signin_redirecting",
+    ):
+        st.session_state.pop(key, None)
+    _clear_signin_cooldown_query_marker()
 
-    The pause lets the Redirecting status paint before Cognito navigation.
+
+def _set_signin_cooldown_query_marker(deadline: float) -> None:
+    """Keep a non-sensitive deadline in this tab's URL for one Back recovery."""
+    try:
+        st.query_params[_SIGNIN_COOLDOWN_QUERY_PARAM] = f"{deadline:.6f}"
+    except Exception:
+        # A missing query-parameter context only loses the optional Back
+        # recovery; the in-session, server-rendered cooldown remains intact.
+        return
+
+
+def _clear_signin_cooldown_query_marker() -> None:
+    """Remove the one-tab cooldown marker without touching other query state."""
+    try:
+        if _SIGNIN_COOLDOWN_QUERY_PARAM in st.query_params:
+            del st.query_params[_SIGNIN_COOLDOWN_QUERY_PARAM]
+    except Exception:
+        return
+
+
+def _restore_signin_pending_state_from_query_marker() -> None:
+    """Restore a signed-out cooldown after Cognito navigation starts a new session.
+
+    The marker is UI-only and holds a server-created epoch deadline. Invalid,
+    stale, or implausibly future values are ignored. It never authorizes a user
+    or affects the Cognito/OAuth flow, and is consumed after one fresh render.
     """
-    components.html(
-        """
+    if any(
+        key in st.session_state
+        for key in (
+            "_auth_launch_cognito",
+            "_auth_signin_cooldown_until",
+            "_auth_signin_redirecting",
+        )
+    ):
+        return
+    try:
+        raw_deadline = st.query_params.get(_SIGNIN_COOLDOWN_QUERY_PARAM)
+    except Exception:
+        return
+    _clear_signin_cooldown_query_marker()
+    try:
+        deadline = float(raw_deadline)
+    except (TypeError, ValueError):
+        return
+    now = time.time()
+    if (
+        not math.isfinite(deadline)
+        or deadline < now - _SIGNIN_COOLDOWN_RESTORE_GRACE_SECONDS
+        or deadline > now + _SIGNIN_COOLDOWN_SECONDS + 1
+    ):
+        return
+    st.session_state["_auth_signin_redirecting"] = True
+    if deadline > now:
+        st.session_state["_auth_signin_cooldown_until"] = deadline
+
+
+def _signin_cooldown_active() -> bool:
+    """Return whether the sign-in button should stay disabled."""
+    try:
+        until = float(st.session_state.get("_auth_signin_cooldown_until") or 0.0)
+    except (TypeError, ValueError):
+        st.session_state.pop("_auth_signin_cooldown_until", None)
+        return False
+    return time.time() < until
+
+
+def _render_signin_button(*, disabled: bool) -> bool:
+    """Render the original sign-in button and return whether it was clicked."""
+    with st.container(key="auth-sign-in"):
+        return bool(
+            st.button(
+                "Sign in or create an account",
+                type="primary",
+                use_container_width=True,
+                key="auth-sign-in-button",
+                disabled=disabled,
+            )
+        )
+
+
+@st.fragment(run_every=0.5)
+def _render_signin_cooldown_fragment() -> None:
+    """Rerender only the disabled sign-in button until its server deadline.
+
+    The fragment exists only while a cooldown is active.  On expiry it requests
+    one app-scoped rerun, which replaces this fragment with the normal enabled
+    button. The absolute deadline in session state makes remounts and
+    intervening reruns unable to extend the five-second window.
+    """
+    if _signin_cooldown_active():
+        _render_signin_button(disabled=True)
+        return
+    st.session_state.pop("_auth_signin_cooldown_until", None)
+    st.rerun()
+
+
+def _render_redirecting_status() -> None:
+    """Render the stable redirect status directly above the original button."""
+    with st.container(key="auth-redirecting"):
+        st.markdown(
+            '<div class="cd-auth-gap-after-course-notice">'
+            '<div class="cd-auth-redirecting" role="status" aria-live="polite">'
+            '<span class="cd-auth-spinner" aria-hidden="true"></span>'
+            '<span class="cd-auth-redirecting-copy">'
+            "<strong>Redirecting...</strong>"
+            '<span class="cd-auth-redirecting-hint">'
+            "(If Cognito does not open, this button will be available again in 5 seconds)"
+            "</span>"
+            "</span>"
+            "</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+
+def _launch_cognito_redirect(login_url: str) -> None:
+    """Launch the hidden same-document Cognito redirect link exactly once."""
+    # Keep this fallback link out of the visual UI while preserving a reliable
+    # same-tab navigation target for the trusted delayed script.
+    st.markdown(
+        f'<a data-cd-auth-redirect="1" href="{_escape_attr(login_url)}" '
+        'target="_self" rel="noopener" aria-hidden="true" tabindex="-1" '
+        'style="display:none !important">Sign in</a>',
+        unsafe_allow_html=True,
+    )
+    _click_login_link(login_url)
+
+
+def _click_login_link(login_url: str) -> None:
+    """Navigate this tab to Cognito after a short paint delay.
+
+    Prefer clicking the hidden same-document ``<a>``. Fall back to
+    ``location.replace`` when the link is no longer available.
+    """
+    safe_url = json.dumps(login_url)
+    st.html(
+        f"""
 <script>
-(() => {
-  const clickContinue = () => {
-    try {
-      const link = window.parent.document.querySelector(
-        'a.cd-auth-sign-in-link[data-cd-auth-continue="1"]'
+(() => {{
+  const url = {safe_url};
+  const go = () => {{
+    try {{
+      const link = document.querySelector(
+        'a[data-cd-auth-redirect="1"]'
       );
-      if (link) {
+      if (link) {{
         link.click();
-      }
-    } catch (error) {
-    }
-  };
-  setTimeout(clickContinue, 280);
-})();
+        return;
+      }}
+    }} catch (error) {{
+    }}
+    if (!url) {{
+      return;
+    }}
+    try {{
+      window.location.replace(url);
+    }} catch (error) {{
+    }}
+  }};
+  setTimeout(go, 280);
+}})();
 </script>
 """,
-        height=0,
+        unsafe_allow_javascript=True,
     )
 
 
@@ -308,14 +468,19 @@ def _click_parent_login_link() -> None:
 )
 def render_login_gate() -> None:
     """Non-dismissible Cognito sign-in dialog over the signed-out shell."""
-    redirecting = bool(st.session_state.get("_auth_redirecting"))
+    # Consume the launch flag once. Leaving it set would auto-redirect again
+    # on every later rerun (including browser Back from Cognito).
+    launch_cognito = bool(st.session_state.pop("_auth_launch_cognito", False))
     just_signed_out = False
     try:
         if st.query_params.get("signed_out") == "1":
             just_signed_out = True
             del st.query_params["signed_out"]
+            _clear_signin_pending_state()
     except Exception:
         just_signed_out = bool(st.session_state.pop("_just_signed_out", None))
+        if just_signed_out:
+            _clear_signin_pending_state()
     try:
         if st.query_params.get("auth_required") == "1":
             st.session_state["_auth_refresh_attempted"] = True
@@ -336,9 +501,12 @@ def render_login_gate() -> None:
                 "Sign-in did not complete. Try again. If it keeps failing, ask "
                 "the course team to check the authentication configuration."
             )
+            _clear_signin_pending_state()
             del st.query_params["auth_error"]
     except Exception:
         pass
+    if not just_signed_out and not st.session_state.get("_auth_config_error"):
+        _restore_signin_pending_state_from_query_marker()
     with st.container(key="auth_login_card"):
         st.markdown(
             '<div class="cd-auth-card">'
@@ -360,6 +528,7 @@ def render_login_gate() -> None:
         config_error = st.session_state.get("_auth_config_error")
         login_url = auth_login_url()
         if config_error or not login_url:
+            _clear_signin_pending_state()
             with st.container(key="auth-config-error"):
                 st.markdown(
                     '<div class="cd-auth-gap-after-course-notice--spacer" '
@@ -371,52 +540,30 @@ def render_login_gate() -> None:
                     "again. If it keeps failing, ask the course team to check the "
                     "authentication configuration."
                 )
-        elif redirecting and login_url:
-            with st.container(key="auth-redirecting"):
-                st.markdown(
-                    '<div class="cd-auth-gap-after-course-notice">'
-                    '<div class="cd-auth-redirecting" role="status" aria-live="polite">'
-                    '<span class="cd-auth-spinner" aria-hidden="true"></span>'
-                    '<span class="cd-auth-redirecting-copy">'
-                    "<strong>Redirecting...</strong>"
-                    '<span class="cd-auth-redirecting-hint">'
-                    "(If Cognito did not open, use Continue to sign-in below)"
-                    "</span>"
-                    "</span>"
-                    "</div>"
-                    "</div>",
-                    unsafe_allow_html=True,
-                )
-            with st.container(key="auth-sign-in"):
-                st.markdown(
-                    f'<a class="cd-auth-sign-in-link" data-cd-auth-continue="1" '
-                    f'href="{_escape_attr(login_url)}" target="_self" rel="noopener">'
-                    "Continue to sign-in"
-                    "</a>",
-                    unsafe_allow_html=True,
-                )
-            _click_parent_login_link()
-            # Keep flag until navigation leaves the page; clear on a later
-            # interaction so refresh can show the Sign in button again.
-            st.session_state.pop("_auth_redirecting", None)
-        if just_signed_out and not redirecting and login_url and not config_error:
-            with st.container(key="auth-signed-out-notice"):
-                st.markdown(
-                    '<div class="cd-auth-gap-after-course-notice '
-                    'cd-auth-gap-after-course-notice--spacer" '
-                    'aria-hidden="true"></div>',
-                    unsafe_allow_html=True,
-                )
-                st.success("You are signed out. Sign in again when you are ready.")
-        if login_url and not config_error and not redirecting:
-            with st.container(key="auth-sign-in"):
-                st.button(
-                    "Sign in or create an account",
-                    type="primary",
-                    use_container_width=True,
-                    key="auth-sign-in-button",
-                    on_click=start_login,
-                )
+        else:
+            if just_signed_out and not launch_cognito:
+                with st.container(key="auth-signed-out-notice"):
+                    st.markdown(
+                        '<div class="cd-auth-gap-after-course-notice '
+                        'cd-auth-gap-after-course-notice--spacer" '
+                        'aria-hidden="true"></div>',
+                        unsafe_allow_html=True,
+                    )
+                    st.success(
+                        "You are signed out. Sign in again when you are ready."
+                    )
+            if launch_cognito or st.session_state.get("_auth_signin_redirecting"):
+                _render_redirecting_status()
+            if launch_cognito:
+                _launch_cognito_redirect(login_url)
+            if _signin_cooldown_active():
+                _render_signin_cooldown_fragment()
+            elif _render_signin_button(disabled=False):
+                # A fragment-local button interaction otherwise reruns only the
+                # fragment.  Always request one app rerun so the launch flag is
+                # consumed by this gate and the redirect starts once.
+                start_login()
+                st.rerun()
         st.caption(
             "Account creation, confirmation, and passwords are handled securely "
             "by Amazon Cognito Managed Login."
@@ -493,6 +640,7 @@ def app_logout_url() -> str | None:
 
 def logout_user() -> None:
     """Send the browser to FastAPI logout; never use Streamlit native logout."""
+    _clear_signin_pending_state()
     url = app_logout_url()
     if not url:
         st.session_state["_auth_config_error"] = (
@@ -502,21 +650,19 @@ def logout_user() -> None:
         )
         return
     safe_url = json.dumps(url)
-    components.html(
+    st.html(
         f"""
 <script>
 (() => {{
   const url = {safe_url};
   try {{
-    window.parent.location.replace(url);
-    return;
+    window.location.replace(url);
   }} catch (error) {{
   }}
-  window.location.replace(url);
 }})();
 </script>
 """,
-        height=0,
+        unsafe_allow_javascript=True,
     )
     st.link_button("Continue sign-out", url, type="primary")
     st.stop()

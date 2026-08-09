@@ -117,7 +117,7 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(
         auth_gate_module,
         "current_user_claims",
-        lambda: {
+        lambda _user=None: {
             "sub": "test-cognito-sub",
             "email": "test.student@example.edu",
             "given_name": "Test",

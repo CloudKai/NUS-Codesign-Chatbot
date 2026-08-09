@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from .auth_oidc import CognitoOIDCClient
 from .auth_routes import register_auth_routes
+from .cognito_config import validate_cognito_readiness
 from .domain import (
     CoachRequest,
     CoachTurn,
@@ -26,10 +27,21 @@ from .domain import (
     SourceUpdateRequest,
 )
 from .owner_context import OwnerResolver, OwnerServices
+from .operational_metrics import (
+    record_coach_turn,
+    record_http_request,
+    record_stage_transition,
+    started_at,
+)
 from .providers import ProviderUnavailableError
 from .settings import settings
 from .source_library import CourseMaterialSyncCoordinator
-from .student_store import StudentStore
+from .student_store import (
+    CoachIdempotencyConflictError,
+    CoachRequestInProgressError,
+    CoachRequestLeaseLostError,
+    StudentStore,
+)
 from .workspace_service import WorkspaceService
 
 logger = logging.getLogger(__name__)
@@ -140,17 +152,104 @@ def create_app(
 
     @app.middleware("http")
     async def attach_request_id(request: Request, call_next):
-        """Stamp every response with a request id for local observability."""
+        """Stamp responses and emit privacy-safe latency/status telemetry."""
         request_id = request.headers.get("x-request-id") or str(uuid4())
         request.state.request_id = request_id
-        response = await call_next(request)
+        started = started_at()
+        try:
+            response = await call_next(request)
+        except Exception:
+            route = getattr(request.scope.get("route"), "path", None) or "<unmatched>"
+            record_http_request(
+                method=request.method,
+                route=route,
+                status_code=500,
+                started=started,
+            )
+            raise
         response.headers["X-Request-ID"] = request_id
+        route = getattr(request.scope.get("route"), "path", None) or "<unmatched>"
+        record_http_request(
+            method=request.method,
+            route=route,
+            status_code=response.status_code,
+            started=started,
+        )
         return response
 
     def _value_error(error: ValueError) -> HTTPException:
         detail = str(error)
         status = 404 if "not found" in detail.lower() else 400
         return HTTPException(status_code=status, detail=detail)
+
+    def _with_idempotency_header(
+        coach_request: CoachRequest,
+        http_request: Request,
+    ) -> CoachRequest:
+        """Merge the standard retry header into the typed request body."""
+        header_key = http_request.headers.get("idempotency-key")
+        if header_key is None:
+            return coach_request
+        if (
+            coach_request.idempotency_key
+            and coach_request.idempotency_key != header_key
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Idempotency-Key header does not match the request body",
+            )
+        try:
+            return CoachRequest.model_validate(
+                {
+                    **coach_request.model_dump(mode="json"),
+                    "idempotency_key": header_key,
+                }
+            )
+        except ValueError as error:
+            raise HTTPException(
+                status_code=400,
+                detail="Idempotency-Key header is invalid",
+            ) from error
+
+    def _selected_source_count(owner: OwnerServices, thread_id: str) -> int:
+        """Return the notebook's selected-source count for aggregate metrics.
+
+        Streamlit leaves ``CoachRequest.source_ids`` empty so the application
+        service can load the authoritative selection. Metrics must therefore
+        read the store, not the client payload, or every UI turn looks
+        ungrounded.
+        """
+        try:
+            return len(owner.store.list_sources(thread_id, selected_only=True))
+        except Exception:
+            return 0
+
+    def _emit_coach_metric(
+        *,
+        outcome: str,
+        selected_source_count: int,
+        turn: CoachTurn | None = None,
+    ) -> None:
+        """Record one privacy-safe coach metric for success or failure paths."""
+        if turn is None:
+            record_coach_turn(
+                provider=settings.model_provider,
+                outcome=outcome,
+                selected_source_count=selected_source_count,
+            )
+            return
+        record_coach_turn(
+            provider=settings.model_provider,
+            outcome=outcome,
+            selected_source_count=selected_source_count,
+            citation_count=len(turn.assessment.citations),
+            recommendation=turn.assessment.recommendation.value,
+            transition_outcome=(
+                "auto_advanced"
+                if turn.auto_advanced_to
+                else ("pending" if turn.pending_transition else "none")
+            ),
+        )
 
     @app.get("/api/v1/health")
     def health() -> dict[str, str]:
@@ -198,18 +297,34 @@ def create_app(
 
     @app.get("/api/v1/ready")
     def ready() -> dict[str, str]:
-        """Return readiness once the local database and provider config are usable."""
+        """Return readiness once dependencies and production config are usable."""
+        production_mode = (
+            settings.database_provider == "dsql"
+            or settings.file_storage_provider == "s3"
+        )
         try:
             active_store.ping()
         except Exception as error:  # pragma: no cover - defensive startup guard
+            logger.warning("Database readiness check failed")
             raise HTTPException(
-                status_code=503, detail=f"Database not ready: {error}"
+                status_code=503,
+                detail=(
+                    "Database not ready"
+                    if production_mode
+                    else f"Database not ready: {error}"
+                ),
             ) from error
         try:
             get_file_storage().ping()
         except Exception as error:  # pragma: no cover - defensive startup guard
+            logger.warning("File storage readiness check failed")
             raise HTTPException(
-                status_code=503, detail=f"File storage not ready: {error}"
+                status_code=503,
+                detail=(
+                    "File storage not ready"
+                    if production_mode
+                    else f"File storage not ready: {error}"
+                ),
             ) from error
         provider = settings.model_provider
         if provider not in {"mock", "ollama", "openai"}:
@@ -220,6 +335,19 @@ def create_app(
             raise HTTPException(
                 status_code=503, detail="OPENAI_API_KEY is not configured"
             )
+        if production_mode:
+            try:
+                validate_cognito_readiness(require_https=True)
+            except ValueError as error:
+                # Validation never does OIDC discovery and error text is
+                # category-only, so readiness cannot disclose auth secrets.
+                raise HTTPException(status_code=503, detail=str(error)) from error
+            except Exception as error:  # pragma: no cover - defensive config guard
+                logger.warning("Cognito readiness validation failed", exc_info=True)
+                raise HTTPException(
+                    status_code=503,
+                    detail="Cognito authentication configuration is unavailable",
+                ) from error
         return {
             "status": "ready",
             "mode": (
@@ -234,6 +362,7 @@ def create_app(
             "course_material_sync_enabled": (
                 "true" if settings.course_material_sync_enabled else "false"
             ),
+            "cognito_configured": "true" if production_mode else "not_required",
         }
 
     @app.get("/api/v1/preferences")
@@ -515,45 +644,85 @@ def create_app(
     @app.post("/api/v1/coach/turn", response_model=CoachTurn)
     def coach_turn(
         request: CoachRequest,
+        http_request: Request,
         owner: OwnerServices = Depends(current_owner),
     ) -> CoachTurn:
         """Run the typed coaching workflow for an owned notebook."""
+        request = _with_idempotency_header(request, http_request)
+        if not owner.store.get_thread(request.thread_id):
+            raise HTTPException(status_code=404, detail="Notebook not found")
+        selected_source_count = _selected_source_count(owner, request.thread_id)
         logger.info(
             "coach_turn request thread_id=%s stage=%s sources=%s",
             request.thread_id,
             request.current_stage,
-            len(request.source_ids),
+            selected_source_count,
         )
-        if not owner.store.get_thread(request.thread_id):
-            raise HTTPException(status_code=404, detail="Notebook not found")
         try:
             turn = owner.coach.submit(request)
+        except CoachIdempotencyConflictError as error:
+            _emit_coach_metric(
+                outcome="idempotency_conflict",
+                selected_source_count=selected_source_count,
+            )
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except (CoachRequestInProgressError, CoachRequestLeaseLostError) as error:
+            _emit_coach_metric(
+                outcome="idempotency_in_progress",
+                selected_source_count=selected_source_count,
+            )
+            raise HTTPException(status_code=409, detail=str(error)) from error
         except ProviderUnavailableError as error:
+            _emit_coach_metric(
+                outcome="provider_unavailable",
+                selected_source_count=selected_source_count,
+            )
             logger.warning(
                 "coach_turn provider unavailable thread_id=%s", request.thread_id
             )
             raise HTTPException(status_code=503, detail=str(error)) from error
         except ValueError as error:
+            _emit_coach_metric(
+                outcome="rejected",
+                selected_source_count=selected_source_count,
+            )
             logger.info(
                 "coach_turn rejected thread_id=%s reason=%s",
                 request.thread_id,
                 error,
             )
             raise HTTPException(status_code=400, detail=str(error)) from error
+        except Exception:
+            _emit_coach_metric(
+                outcome="failed",
+                selected_source_count=selected_source_count,
+            )
+            raise
         logger.info(
             "coach_turn ok thread_id=%s recommendation=%s auto_advanced_to=%s",
             request.thread_id,
             turn.assessment.recommendation.value,
             turn.auto_advanced_to,
         )
+        _emit_coach_metric(
+            outcome="ok",
+            selected_source_count=selected_source_count,
+            turn=turn,
+        )
         return turn
 
     @app.post("/api/v1/coach/turn/stream")
     def coach_turn_stream(
         request: CoachRequest,
+        http_request: Request,
         owner: OwnerServices = Depends(current_owner),
     ) -> StreamingResponse:
         """Stream one coaching turn as NDJSON progress + token events."""
+
+        request = _with_idempotency_header(request, http_request)
+        if not owner.store.get_thread(request.thread_id):
+            raise HTTPException(status_code=404, detail="Notebook not found")
+        selected_source_count = _selected_source_count(owner, request.thread_id)
 
         def events():
             yield json.dumps(
@@ -565,12 +734,49 @@ def create_app(
             ) + "\n"
             try:
                 turn = owner.coach.submit(request)
+            except CoachIdempotencyConflictError as error:
+                _emit_coach_metric(
+                    outcome="idempotency_conflict",
+                    selected_source_count=selected_source_count,
+                )
+                yield json.dumps(
+                    {"event": "error", "detail": str(error), "status": 409}
+                ) + "\n"
+                return
+            except (CoachRequestInProgressError, CoachRequestLeaseLostError) as error:
+                _emit_coach_metric(
+                    outcome="idempotency_in_progress",
+                    selected_source_count=selected_source_count,
+                )
+                yield json.dumps(
+                    {"event": "error", "detail": str(error), "status": 409}
+                ) + "\n"
+                return
             except ProviderUnavailableError as error:
+                _emit_coach_metric(
+                    outcome="provider_unavailable",
+                    selected_source_count=selected_source_count,
+                )
                 yield json.dumps({"event": "error", "detail": str(error), "status": 503}) + "\n"
                 return
             except ValueError as error:
+                _emit_coach_metric(
+                    outcome="rejected",
+                    selected_source_count=selected_source_count,
+                )
                 yield json.dumps({"event": "error", "detail": str(error), "status": 400}) + "\n"
                 return
+            except Exception:
+                _emit_coach_metric(
+                    outcome="failed",
+                    selected_source_count=selected_source_count,
+                )
+                raise
+            _emit_coach_metric(
+                outcome="ok",
+                selected_source_count=selected_source_count,
+                turn=turn,
+            )
             graph = owner.workflow.inspect_thread(request.thread_id) or {}
             yield json.dumps(
                 {
@@ -589,8 +795,6 @@ def create_app(
                 {"event": "done", "turn": turn.model_dump(mode="json")}
             ) + "\n"
 
-        if not owner.store.get_thread(request.thread_id):
-            raise HTTPException(status_code=404, detail="Notebook not found")
         return StreamingResponse(events(), media_type="application/x-ndjson")
 
     @app.get("/api/v1/threads/{thread_id}/graph")
@@ -624,9 +828,15 @@ def create_app(
             request.accepted,
         )
         try:
-            return owner.learning.resolve(thread_id, transition_id, request.accepted)
+            resolved = owner.learning.resolve(
+                thread_id, transition_id, request.accepted
+            )
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
+        record_stage_transition(
+            outcome="accepted" if request.accepted else "rejected"
+        )
+        return resolved
 
     return app
 

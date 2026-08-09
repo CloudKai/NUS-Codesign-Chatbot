@@ -43,7 +43,7 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
     """
     panel = st.radio(
         "Workspace panel",
-        ["Sources", "Chat", "Studio"],
+        ["Studio", "Chat", "Sources"],
         format_func=lambda value: {
             "Sources": "Sources",
             "Chat": "Chat",

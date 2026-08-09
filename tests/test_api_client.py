@@ -206,3 +206,46 @@ def test_api_client_auth_me_returns_user_or_none(tmp_path, monkeypatch):
         assert id_token not in str(profile)
     finally:
         client.close()
+
+
+def test_course_sync_uses_explicit_cookie_snapshot_without_worker_provider_call():
+    """A background sync can reuse main-thread auth without rereading context."""
+    provider_calls = 0
+
+    def cookie_provider():
+        nonlocal provider_calls
+        provider_calls += 1
+        return {"co_design_id": "short-lived-id-token"}
+
+    class _Session:
+        received_cookies: dict[str, str] | None = None
+
+        def post(self, url, **kwargs):
+            self.received_cookies = kwargs.get("cookies")
+            return httpx.Response(
+                200,
+                json={
+                    "added": 0,
+                    "updated": 0,
+                    "removed": 0,
+                    "unchanged": 0,
+                    "skipped": 0,
+                    "errors": [],
+                },
+                request=httpx.Request("POST", url),
+            )
+
+    session = _Session()
+    client = LocalApiClient(
+        "http://testserver",
+        session=session,
+        cookie_provider=cookie_provider,
+    )
+    snapshot = client.auth_cookie_snapshot()
+
+    client.sync_course_materials("notebook-1", auth_cookies=snapshot)
+
+    assert provider_calls == 1
+    assert session.received_cookies == {
+        "co_design_id": "short-lived-id-token"
+    }

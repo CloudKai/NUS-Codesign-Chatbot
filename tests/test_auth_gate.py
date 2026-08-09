@@ -38,7 +38,7 @@ def logged_in_user(monkeypatch: pytest.MonkeyPatch) -> dict:
     monkeypatch.setattr(
         auth_gate,
         "current_user_claims",
-        lambda: {
+        lambda _user=None: {
             "sub": "cognito-sub-test-1",
             "email": "student@example.edu",
             "given_name": "Alex",
@@ -53,7 +53,7 @@ def logged_out_user(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force the signed-out authentication gate."""
     monkeypatch.setattr(auth_gate, "is_logged_in", lambda: False)
     monkeypatch.setattr(auth_gate, "authenticated_user", lambda: None)
-    monkeypatch.setattr(auth_gate, "current_user_claims", lambda: {})
+    monkeypatch.setattr(auth_gate, "current_user_claims", lambda _user=None: {})
     monkeypatch.setattr(auth_gate, "should_attempt_session_refresh", lambda: False)
     monkeypatch.setattr(
         auth_gate,
@@ -105,6 +105,8 @@ def test_auth_gate_is_non_dismissible(logged_out_user):
 
 
 def test_sign_in_button_arms_redirecting_ui(logged_out_user, monkeypatch):
+    clock = [1_000.0]
+    monkeypatch.setattr(auth_gate.time, "time", lambda: clock[0])
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     sign_in = next(
         button for button in app.button if button.label == "Sign in or create an account"
@@ -113,25 +115,221 @@ def test_sign_in_button_arms_redirecting_ui(logged_out_user, monkeypatch):
     sign_in.click().run()
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Redirecting..." in rendered
-    assert 'class="cd-auth-sign-in-link"' in rendered
-    assert 'data-cd-auth-continue="1"' in rendered
+    assert 'data-cd-auth-redirect="1"' in rendered
     assert 'href="http://127.0.0.1:8000/api/v1/auth/login"' in rendered
     assert 'target="_self"' in rendered
-    assert "Continue to sign-in" in rendered
+    assert rendered.count('<a data-cd-auth-redirect="1"') == 1
+    assert "Continue to sign-in" not in rendered
+    assert sum(
+        button.label == "Sign in or create an account" for button in app.button
+    ) == 1
+    assert rendered.index("Redirecting...") < rendered.index(
+        "data-cd-auth-redirect"
+    )
+    cooled = next(
+        button for button in app.button if button.label == "Sign in or create an account"
+    )
+    assert cooled.disabled is True
+    assert app.session_state["_auth_signin_cooldown_until"] == 1_005.0
+
+    # An ordinary rerun/remount does not move the absolute server deadline.
+    app.run()
+    assert app.session_state["_auth_signin_cooldown_until"] == 1_005.0
+
+    # Once expired, the original button is enabled, while Redirecting remains.
+    clock[0] = 1_005.01
+    app.run()
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert "Redirecting..." in rendered
+    retry = next(
+        button for button in app.button if button.label == "Sign in or create an account"
+    )
+    assert retry.disabled is False
+
+    # A deliberate retry arms exactly one new launch with a fresh deadline.
+    retry.click().run()
+    assert app.session_state["_auth_signin_cooldown_until"] == 1_010.01
+    retrying = next(
+        button for button in app.button if button.label == "Sign in or create an account"
+    )
+    assert retrying.disabled is True
 
 
-def test_auth_gate_uses_parent_link_click_not_location_replace():
+def test_sign_in_button_cooldown_reenable_helpers(monkeypatch):
+    """The cooldown should disable immediately and clear after the window."""
+    monkeypatch.setattr(auth_gate.time, "time", lambda: 1_000.0)
+    st.session_state.clear()
+    monkeypatch.setattr(
+        auth_gate,
+        "auth_login_url",
+        lambda: "http://127.0.0.1:8000/api/v1/auth/login",
+    )
+    auth_gate.start_login()
+    assert st.session_state.get("_auth_launch_cognito") is True
+    assert auth_gate._signin_cooldown_active() is True
+    monkeypatch.setattr(auth_gate.time, "time", lambda: 1_000.0 + 5.01)
+    assert auth_gate._signin_cooldown_active() is False
+
+
+def test_signin_cooldown_restores_after_a_fresh_streamlit_session(monkeypatch):
+    """A Cognito Back navigation restores and consumes its tab-local deadline."""
+    clock = [1_000.0]
+    monkeypatch.setattr(auth_gate.time, "time", lambda: clock[0])
+    marker = {auth_gate._SIGNIN_COOLDOWN_QUERY_PARAM: "1004.5"}
+    monkeypatch.setattr(
+        auth_gate.st, "query_params", marker, raising=False
+    )
+    st.session_state.clear()
+
+    auth_gate._restore_signin_pending_state_from_query_marker()
+
+    assert st.session_state["_auth_signin_redirecting"] is True
+    assert st.session_state["_auth_signin_cooldown_until"] == 1004.5
+    assert auth_gate._signin_cooldown_active() is True
+    assert marker == {}
+
+    # Repeated render/remount keeps the original server deadline unchanged.
+    auth_gate._restore_signin_pending_state_from_query_marker()
+    assert st.session_state["_auth_signin_cooldown_until"] == 1004.5
+
+
+def test_signin_cooldown_restore_keeps_status_after_expiry(monkeypatch):
+    """An expired but valid marker enables retry without hiding status."""
+    monkeypatch.setattr(auth_gate.time, "time", lambda: 1_006.0)
+    marker = {auth_gate._SIGNIN_COOLDOWN_QUERY_PARAM: "1005.0"}
+    monkeypatch.setattr(auth_gate.st, "query_params", marker, raising=False)
+    st.session_state.clear()
+
+    auth_gate._restore_signin_pending_state_from_query_marker()
+
+    assert st.session_state["_auth_signin_redirecting"] is True
+    assert "_auth_signin_cooldown_until" not in st.session_state
+    assert auth_gate._signin_cooldown_active() is False
+    assert marker == {}
+
+
+@pytest.mark.parametrize(
+    "value", ["not-a-deadline", "nan", "inf", "969.99", "1006.01"]
+)
+def test_signin_cooldown_restore_rejects_malformed_stale_or_future_marker(
+    monkeypatch, value
+):
+    """Invalid or non-server-plausible markers cannot disable the button."""
+    monkeypatch.setattr(auth_gate.time, "time", lambda: 1_000.0)
+    marker = {auth_gate._SIGNIN_COOLDOWN_QUERY_PARAM: value}
+    monkeypatch.setattr(auth_gate.st, "query_params", marker, raising=False)
+    st.session_state.clear()
+
+    auth_gate._restore_signin_pending_state_from_query_marker()
+
+    assert "_auth_signin_redirecting" not in st.session_state
+    assert "_auth_signin_cooldown_until" not in st.session_state
+    assert marker == {}
+
+
+def test_start_login_writes_exact_deadline_marker_until_a_fresh_session_consumes_it(
+    monkeypatch,
+):
+    """The current launch retains one exact marker for the Cognito Back path."""
+    marker: dict[str, str] = {}
+    monkeypatch.setattr(auth_gate.st, "query_params", marker, raising=False)
+    monkeypatch.setattr(auth_gate.time, "time", lambda: 1_000.0)
+    monkeypatch.setattr(
+        auth_gate,
+        "auth_login_url",
+        lambda: "http://127.0.0.1:8000/api/v1/auth/login",
+    )
+    st.session_state.clear()
+
+    auth_gate.start_login()
+
+    assert st.session_state["_auth_signin_cooldown_until"] == 1005.0
+    assert marker == {auth_gate._SIGNIN_COOLDOWN_QUERY_PARAM: "1005.000000"}
+
+    # The launch render owns pending state, so it must not consume the marker
+    # before Cognito has a chance to navigate away and the user returns.
+    auth_gate._restore_signin_pending_state_from_query_marker()
+    assert marker == {auth_gate._SIGNIN_COOLDOWN_QUERY_PARAM: "1005.000000"}
+
+
+def test_auth_gate_uses_server_authoritative_cooldown_and_same_document_redirect():
     source = Path("ui/auth_gate.py").read_text(encoding="utf-8")
     assert "def start_login" in source
-    assert "_auth_redirecting" in source
-    assert "cd-auth-sign-in-link" in source
+    assert "_auth_launch_cognito" in source
+    assert 'pop("_auth_launch_cognito"' in source
+    assert "data-cd-auth-redirect" in source
     assert 'target="_self"' in source
-    assert "data-cd-auth-continue" in source
     assert "querySelector" in source
-    login_source = source.split("def _click_parent_login_link", 1)[1].split(
+    assert "@st.fragment(run_every=0.5)" in source
+    assert "def _render_signin_cooldown_fragment" in source
+    assert "st.rerun()" in source
+    assert "removeAttribute('disabled')" not in source
+    assert "removeAttribute('aria-disabled')" not in source
+    assert "button.disabled = false" not in source
+    assert "streamlit.components.v1" not in source
+    assert "components.html" not in source
+    assert source.count("st.html(") == 3
+    assert source.count("unsafe_allow_javascript=True") == 3
+    login_source = source.split("def _click_login_link", 1)[1].split(
         "@st.dialog", 1
     )[0]
-    assert "location.replace(" not in login_source
+    assert "link.click()" in login_source
+    assert "location.replace(" in login_source
+    assert "setTimeout(go, 280)" in login_source
+    assert "window.parent" not in login_source
+
+
+def test_signin_pending_state_is_cleared_on_success_logout_and_config_failure(
+    monkeypatch,
+):
+    """Transient sign-in state cannot survive a completed or failed flow."""
+    monkeypatch.setattr(auth_gate, "authenticated_user", _REAL_AUTHENTICATED_USER)
+    st.session_state.clear()
+    st.session_state.update(
+        {
+            "_auth_launch_cognito": True,
+            "_auth_signin_cooldown_until": 1234.0,
+            "_auth_signin_redirecting": True,
+        }
+    )
+    monkeypatch.setattr(
+        auth_gate,
+        "_cookie_value",
+        lambda _name: "validated-cookie",
+    )
+    monkeypatch.setattr("ui.runtime.local_api_client", lambda: MagicMock(
+        auth_me=lambda _token: {"cognito_sub": "accepted-sub"}
+    ))
+
+    assert auth_gate.authenticated_user() == {"cognito_sub": "accepted-sub"}
+    assert "_auth_launch_cognito" not in st.session_state
+    assert "_auth_signin_cooldown_until" not in st.session_state
+    assert "_auth_signin_redirecting" not in st.session_state
+
+    st.session_state.update(
+        {
+            "_auth_launch_cognito": True,
+            "_auth_signin_cooldown_until": 1234.0,
+            "_auth_signin_redirecting": True,
+        }
+    )
+    monkeypatch.setattr(auth_gate, "auth_login_url", lambda: None)
+    auth_gate.start_login()
+    assert "_auth_launch_cognito" not in st.session_state
+    assert "_auth_signin_cooldown_until" not in st.session_state
+    assert "_auth_signin_redirecting" not in st.session_state
+
+    st.session_state.update(
+        {
+            "_auth_launch_cognito": True,
+            "_auth_signin_cooldown_until": 1234.0,
+            "_auth_signin_redirecting": True,
+        }
+    )
+    auth_gate.logout_user()
+    assert "_auth_launch_cognito" not in st.session_state
+    assert "_auth_signin_cooldown_until" not in st.session_state
+    assert "_auth_signin_redirecting" not in st.session_state
 
 
 def test_auth_config_error_shows_gap_and_hides_sign_in(logged_out_user, monkeypatch):
@@ -212,7 +410,7 @@ def test_authenticated_subject_change_resets_identity_label(logged_in_user, monk
     monkeypatch.setattr(
         auth_gate,
         "current_user_claims",
-        lambda: {
+        lambda _user=None: {
             "sub": "cognito-sub-test-2",
             "email": "second@example.edu",
             "given_name": "Second",
@@ -237,7 +435,11 @@ def test_logged_in_identity_without_sub_is_cleared(monkeypatch):
         "authenticated_user",
         lambda: {"id": "x", "cognito_sub": "", "display_name": "X"},
     )
-    monkeypatch.setattr(auth_gate, "current_user_claims", lambda: {"email": "x@y.z"})
+    monkeypatch.setattr(
+        auth_gate,
+        "current_user_claims",
+        lambda _user=None: {"email": "x@y.z"},
+    )
     monkeypatch.setattr(auth_gate, "logout_user", local_logout)
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
@@ -351,10 +553,10 @@ def test_missing_given_name_falls_back_safely(tmp_path):
 
 
 def test_logout_user_navigates_to_fastapi_logout(monkeypatch):
-    html = MagicMock(name="components_html")
+    html = MagicMock(name="streamlit_html")
     link_button = MagicMock(name="link_button")
     stop = MagicMock(name="stop", side_effect=RuntimeError("stop"))
-    monkeypatch.setattr(auth_gate.components, "html", html)
+    monkeypatch.setattr(st, "html", html)
     monkeypatch.setattr(st, "link_button", link_button)
     monkeypatch.setattr(st, "stop", stop)
     monkeypatch.setattr(
@@ -371,7 +573,8 @@ def test_logout_user_navigates_to_fastapi_logout(monkeypatch):
     html.assert_called_once()
     markup = html.call_args.args[0]
     assert "http://127.0.0.1:8000/api/v1/auth/logout" in markup
-    assert "window.parent.location.replace" in markup
+    assert "window.location.replace" in markup
+    assert html.call_args.kwargs == {"unsafe_allow_javascript": True}
     link_button.assert_called_once()
     stop.assert_called_once_with()
 

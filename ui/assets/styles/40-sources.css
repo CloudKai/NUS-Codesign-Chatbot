@@ -343,6 +343,33 @@
         transform:translateY(.12rem);
     }
 
+    /* Streamlit only renders its checkmark SVG when checked. Draw the mixed
+     * bar centered on the control box (label > div:nth-child(2)), not the
+     * whole stCheckbox row — otherwise left offsets land between box and text. */
+    .st-key-sources_select_all[data-cd-select-all-state="indeterminate"]
+    [data-testid="stCheckbox"] > label > div:nth-child(2),
+    .st-key-sources_select_all:has(.cd-select-all-state[data-state="indeterminate"])
+    [data-testid="stCheckbox"] > label > div:nth-child(2) {
+        position:relative !important;
+    }
+
+    .st-key-sources_select_all[data-cd-select-all-state="indeterminate"]
+    [data-testid="stCheckbox"] > label > div:nth-child(2)::after,
+    .st-key-sources_select_all:has(.cd-select-all-state[data-state="indeterminate"])
+    [data-testid="stCheckbox"] > label > div:nth-child(2)::after {
+        content:"";
+        position:absolute;
+        left:50%;
+        top:50%;
+        width:.62rem;
+        height:.14rem;
+        border-radius:.1rem;
+        transform:translate(-50%, -50%);
+        background:var(--cd-accent, #2f6fed);
+        pointer-events:none;
+        z-index:1;
+    }
+
     .st-key-sources_header [data-testid="stWidgetLabel"] p {
         margin-bottom:.15rem !important;
         font-size:.78rem !important;
@@ -944,4 +971,3 @@
         font-size:.78rem;
         font-weight:700;
     }
-

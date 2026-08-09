@@ -389,9 +389,18 @@ class WorkspaceFacade:
         """
         if local_api_enabled():
             api_base = str(getattr(settings, "api_base_url", "http://127.0.0.1:8000"))
+            client = local_api_client()
+            # Streamlit's cookie context is script-thread local. Capture the
+            # short-lived ID cookie before handing work to the sync executor;
+            # reading it inside that worker resolves the fallback owner and
+            # causes an endless authenticated-notebook 404 retry loop.
+            auth_cookies = client.auth_cookie_snapshot()
 
             def _sync_via_api() -> LectureNotesSyncResult:
-                payload = local_api_client().sync_course_materials(thread_id)
+                payload = client.sync_course_materials(
+                    thread_id,
+                    auth_cookies=auth_cookies,
+                )
                 errors = payload.get("errors") or []
                 return LectureNotesSyncResult(
                     added=int(payload.get("added") or 0),

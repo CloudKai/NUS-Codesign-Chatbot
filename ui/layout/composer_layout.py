@@ -129,13 +129,14 @@ def sync_composer_layout() -> None:
   }
 
   function watchModelMenu() {
-    if (doc.body.dataset.cdModelMenuWatch === "1") return;
-    doc.body.dataset.cdModelMenuWatch = "1";
+    const body = doc.body;
+    if (!body || body.dataset.cdModelMenuWatch === "1") return;
+    body.dataset.cdModelMenuWatch = "1";
     const observer = new win.MutationObserver(() => {
       bindModelMenu();
       if (modelMenuBody()) scheduleMenuPlacement();
     });
-    observer.observe(doc.body, { childList: true, subtree: true });
+    observer.observe(body, { childList: true, subtree: true });
   }
 
   function modelPopover(composer) {

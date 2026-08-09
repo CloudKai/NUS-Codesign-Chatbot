@@ -2,10 +2,11 @@
 
 ## Current phase
 
-**Production-test + provider-neutral RAG hardening on
-``Production-RemoveData``** — Cognito, stateless EC2, Aurora DSQL,
-student-upload S3, query-aware local retrieval, and the temporary OpenAI
-provider path. Bedrock remains explicitly out of scope.
+**Production must-have hardening on ``Production-RemoveData``** — durable coach
+retry safety, dependency readiness, privacy-safe operations, and an
+authenticated production-parity regression now protect the existing
+Cognito/DSQL/S3 five-table design. Bedrock and true provider streaming remain
+explicitly out of scope.
 
 ### Behavior changes
 
@@ -34,9 +35,9 @@ provider path. Bedrock remains explicitly out of scope.
    language reaches the prompt, reasoning effort restores per notebook, and
    selected sources force model-knowledge fallback off. Request/image limits
    are enforced at the API/application boundary.
-7. UI edit, regenerate, and ambiguous retry controls are disabled until there
-   is an idempotent server-side replacement contract. This prevents duplicate
-   turns and accidental repeated model calls during production testing.
+7. UI edit and regenerate controls remain disabled until there is a
+   transactional server-side replacement contract. Normal send/stream retries
+   now use the durable idempotency contract described below.
 8. Production documentation now uses ``compose.prod.yaml``/ECR and makes S3
    setup/readiness explicit. The default stateful Compose stack is labelled
    local-only; Bedrock permissions are not required in this phase.
@@ -55,22 +56,118 @@ provider path. Bedrock remains explicitly out of scope.
    with ``autocommit=True``; DDL remains one transaction per connection. The
    unsupported ``GRANT USAGE ON SCHEMA public`` was removed, leaving only
    SELECT/INSERT/UPDATE/DELETE on all application tables in ``public``.
+12. Local legacy SQLite upgrades are additive and idempotent. The migration no
+    longer renames/drops ``users`` (which previously cascaded deletion into
+    legacy tables); it copies old threads, chat steps, source rows, stage state,
+    and extracted source text into the five application tables while retaining
+    the legacy rows as a rollback source. Legacy local source paths still
+    preview/download, and copied extracted text remains available to the same
+    provider-neutral local retriever used by new sources.
+13. Cognito-scoped stores reconcile legacy/noncanonical identities and repair
+    the earlier split-owner layout without dropping notebooks. Streamlit also
+    reuses the first verified ``/auth/me`` result instead of making a second
+    authentication request on every rerun.
+14. Sign-in now uses a dialog-owned button callback instead of a fragment-owned
+    callback. After the click, the original button remains the only visible
+    sign-in control, is disabled for five seconds while the visible
+    ``Redirecting...`` status is shown, and automatically becomes a retry
+    button if Cognito navigation stalls.
+15. Local startup repairs the broken ``notebooks.user_id -> users_legacy``
+    foreign key left by the retired destructive user migration. The SQLite-only
+    rebuild is transactional, preserves notebook/message/source IDs, checks for
+    orphaned notebooks before commit, and is idempotent. DSQL schema SQL is not
+    changed.
+16. The deterministic mock provider now makes retrieved grounding visible in
+    its normal reply by quoting one bounded validated chunk and emitting its
+    stable ``[S#]`` label. The existing citation resolver persists and renders
+    the corresponding source reference without test-only monkeypatching.
+17. Chat-composer attachment failures render a recoverable in-chat error and do
+    not submit a coaching turn. Authoritative source selection now enables
+    broader model knowledge only when no source is selected, so stale notebook
+    metadata cannot contradict the visible UI mode.
+18. API-mode course-material sync snapshots the short-lived Cognito ID cookie
+    on Streamlit's render thread before starting its background worker. This
+    prevents the worker losing browser context, resolving the fallback owner,
+    and retrying a protected notebook sync with 404 every second.
+19. Coach submission now accepts a validated idempotency key in the typed body
+    and standard HTTP header. A durable owner/notebook-scoped reservation in
+    the existing ``messages`` table prevents concurrent/restarted retries from
+    calling the provider or inserting the turn twice, replays the exact
+    completed ``CoachTurn``, rejects changed-input key reuse with HTTP 409, and
+    releases provider failures for a real retry. Lease ownership is verified in
+    the same transaction that persists the user/assistant pair. No sixth table
+    or DSQL schema change was introduced.
+20. Production ``/api/v1/ready`` now also validates non-secret Cognito callback
+    and metadata configuration locally, requires an HTTPS callback, and redacts
+    DSQL/S3 exception details. Structured internal operational events cover
+    route latency/status, provider/retrieval/citation results, coach stage
+    recommendations, and accepted/rejected progression without prompts, source
+    text, user/notebook/source/transition IDs, emails, or tokens.
+21. A deterministic authenticated FastAPI production-parity regression covers
+    Cognito cookie verification, notebook/source upload-selection-preview,
+    grounded ``[S1]`` replies, idempotent replay/conflict, stage confirmation,
+    process restart, object cleanup, and logout/revocation. A headed Playwright
+    smoke runner preserves the real Cognito boundary and captures desktop,
+    390 px mobile, and console evidence after a manually completed Hosted UI
+    sign-in; it never installs a production auth bypass.
+22. Streamlit retry keys now retain only a SHA-256 request scope, UUID, notebook
+    id, and timestamp for one hour. The helper reuses unresolved retries, removes
+    completed/deleted/expired entries, keeps at most eight per notebook and 24
+    globally, preserves valid entries across notebook switches, and migrates
+    only the active valid legacy entry without retaining raw prompt text.
+23. The Cognito sign-in retry cooldown is server-authoritative. An absolute
+    five-second deadline and a temporary 0.5-second Streamlit fragment keep the
+    original button disabled without client-side DOM mutation. A bounded,
+    non-sensitive per-tab query marker carries that exact deadline across a
+    fresh Streamlit session after browser Back, then is consumed once; malformed,
+    stale, or implausibly future values are rejected. The launch flag remains
+    one-shot, and success, sign-out, logout, or configuration failure clears all
+    transient state. Trusted auth navigation now uses Streamlit 1.60's
+    non-iframed ``st.html`` API instead of the deprecated components helper.
+24. DSQL idempotency tests now exercise two independent adapter instances,
+    exact replay after restart, changed-payload conflict, provider-failure
+    release, expired-lease takeover, stale-worker rejection, and whole-operation
+    SQLSTATE ``40001`` retry without AWS. The guarded live runner requires
+    ``--confirm-live``, the DSQL provider, ``co_design_app``, and an explicit
+    ``cognito:<sub>`` owner; it uses runtime DML and the mock provider only.
 
 ### Validation evidence
 
 **Local (this phase):**
 
-- ``.venv/bin/python -m pytest -q`` → **255 passed**.
+- ``.venv/bin/python -m pytest -q`` → **305 passed**.
+- Focused auth/UI/production-path validation → **57 passed**.
 - ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m
   compileall -q backend ui streamlit_app.py tests`` → exit 0.
 - ``docker compose config --quiet`` and
   ``APP_IMAGE=co-design:test docker compose -f compose.prod.yaml config --quiet``
   → exit 0.
 - ``sh -n scripts/start.sh scripts/start_prod.sh scripts/build.sh
-  scripts/deploy_ecr.sh`` → exit 0.
+  scripts/deploy_ecr.sh scripts/browser_e2e_smoke.sh`` → exit 0; the Python
+  DSQL runner compiled, displayed ``--help``, and refused a missing
+  ``--confirm-live`` before any connection attempt.
 - ``git diff --check`` → exit 0.
-- No live OpenAI, Cognito, DSQL, S3, or Bedrock calls. No Bedrock
-  implementation changes.
+- No live OpenAI, DSQL, S3, or Bedrock calls. No Bedrock implementation
+  changes.
+- The approved live-click smoke performed no credential entry: two clicks
+  produced exactly two FastAPI login redirects and two Cognito Hosted UI GETs.
+  Browser Back was invoked 2.7 seconds after the first click; the slow Streamlit
+  reconnect completed after the five-second window with ``Redirecting...``
+  retained and the original button enabled, proving the deadline was not
+  restarted. The retry remained visible at 390 px and redirected exactly once.
+  AppTest covers the complementary fast-remount case where Back completes before
+  expiry and the same button must remain disabled.
+- With the developer-authorized test account, the in-app browser completed the
+  real Cognito Hosted UI PKCE login and callback, created/renamed a notebook,
+  synchronized 7 lecture notes and 3 readings, displayed a grounded mock reply
+  and ``[S1]`` citation preview, confirmed Focus → Evidence, restored the chat
+  and stage after refresh, rendered Review scores, deleted the disposable
+  notebook, and logged out.
+- The live run reproduced and then verified the local foreign-key repair and
+  authenticated background-sync fix. After cleanup, the test owner again had
+  zero notebooks, messages, and sources.
+- ``data/backups/co_design.pre-fk-repair-20260809.sqlite3`` is the pre-migration
+  SQLite backup. It is local data and must never be committed.
 
 ### Compatibility, rollback, and known risks
 
@@ -91,25 +188,87 @@ provider path. Bedrock remains explicitly out of scope.
   query time. This is deterministic and suitable for the bounded development
   corpus, but it is lexical rather than embedding-semantic and is not the
   long-term large-corpus index. Bedrock Knowledge Bases replaces this adapter.
-- UI edit/regenerate stays unavailable until a transactional idempotency and
-  replacement design is implemented.
+- UI edit/regenerate stays unavailable until a transactional replacement
+  design is implemented; the new request key protects retries of normal turns
+  but does not define edit-in-place semantics.
+- Existing local legacy tables are intentionally retained and left unchanged;
+  rollback is a code revert because the older application ignores the added
+  snake_case columns and the new five-table copies. A pre-existing database
+  that already ran the earlier destructive users-table migration cannot have
+  deleted legacy rows reconstructed from SQLite metadata; restore such rows
+  from a pre-upgrade backup if available. Local upload files themselves are not
+  deleted or rewritten by this migration.
+- Split-owner repair preserves the authenticated Cognito row, moves any
+  five-table notebooks onto it, merges preferences, and retains the obsolete
+  empty row under a ``legacy-orphan:<id>`` identifier for inspection rather
+  than deleting it.
+- The SQLite foreign-key repair applies only when ``notebooks.user_id`` targets
+  a table other than ``users`` and only when the known eight-column notebook
+  layout matches. An unknown layout stops with a clear error instead of losing
+  data. Restore the pre-repair backup to roll back the local database.
+- This local compatibility phase changes no DSQL schema/bootstrap SQL, IAM,
+  S3, Cognito infrastructure, EC2, paid-provider, or Bedrock behavior.
+- Provider-token streaming is still simulated after a complete persisted turn
+  and graph inspection state is process-local. Durable request idempotency now
+  makes a disconnected stream safe to retry, but it does not turn the buffered
+  response into upstream token streaming or persist graph inspection state.
+- Completed idempotency reservations are stored as hidden internal rows in the
+  existing ``messages`` table. No migration is required and current code omits
+  them from chat/history/counts/activity. Rolling back to code that predates
+  this filter can expose blank internal assistant rows; back up first and remove
+  only rows explicitly marked ``_internal_type=coach_idempotency`` under an
+  approved rollback procedure.
+- Fully automated protected-browser CI remains blocked by the deliberate lack
+  of a production authentication bypass and by the uncached Playwright CLI.
+  ``scripts/browser_e2e_smoke.sh`` therefore pauses for a human to complete the
+  real Cognito Hosted UI before mobile/console capture. The deterministic
+  authenticated HTTP regression and Streamlit AppTests run without live AWS.
+- UI retry-key records are session-only and require no migration. Reverting the
+  helper drops retry reuse after a disconnected Streamlit submission but does
+  not change durable notebook/chat data or the HTTP idempotency contract.
+- The DSQL concurrency suite uses independent ``DsqlStudentStore`` instances
+  over an isolated SQLite transaction proxy, so it deterministically checks the
+  adapter/lease/OCC contract without claiming wire-level Aurora behavior. The
+  guarded live runner remains deliberately unexecuted until DSQL is ready and a
+  separate live-write approval is given.
+- Fresh Streamlit loads and ordinary reloads have a clean browser console. The
+  in-app browser records React hydration errors ``#418``/``#423`` while restoring
+  Streamlit itself from cross-origin browser history; the recovered page remains
+  functional and no new error is emitted after it settles. The deprecated auth
+  components iframe was removed, but eliminating this framework-level history
+  artifact requires an upstream Streamlit/browser fix rather than more auth
+  state mutation.
+- The cooldown query marker contains only an epoch deadline, is scoped to one
+  tab's URL, is accepted for at most a 30-second restore grace, and never
+  authorizes a user or changes OAuth state. No API, cookie, schema, or data
+  migration is required; rollback is limited to the two auth UI/test files.
 - Rollback is a code/config revert. Do not commit `.env`, secrets, database
   files, or uploaded content. No live AWS resource was created or modified.
 
 ### Next exact action
 
-1. Create the private S3 uploads bucket in ``us-west-2`` with Block Public
+1. If an older local database should contain notebooks but its retained
+   ``threads`` table is already empty, stop and restore a pre-five-table backup;
+   do not infer notebook metadata from orphaned upload files automatically.
+2. Create the private S3 uploads bucket in ``us-west-2`` with Block Public
    Access; attach bucket list plus ``users/*`` object permissions to
    the EC2 instance role.
-2. Finish Aurora DSQL, map the EC2 role to ``co_design_app``, run
+3. Finish Aurora DSQL, map the EC2 role to ``co_design_app``, run
    ``scripts/init_dsql.py`` as admin, then grant SELECT/INSERT/UPDATE/DELETE on
    all tables in ``public`` to ``co_design_app``. Do not grant schema ``USAGE``.
-3. Deploy the immutable ECR image with ``scripts/deploy_ecr.sh`` and require
+4. With separate live-write approval, run
+   ``scripts/smoke_dsql_idempotency.py --confirm-live --identifier
+   'cognito:<sub>'`` under ``DATABASE_PROVIDER=dsql`` and
+   ``DSQL_USER=co_design_app``. It must pass before storage cutover.
+5. Deploy the immutable ECR image with ``scripts/deploy_ecr.sh`` and require
    ``/api/v1/ready`` to return 200.
-4. Run the Cognito → notebook → message → S3 upload/download → container
-   replacement → delete live smoke sequence. Use mock mode first; make an
-   OpenAI request only with explicit approval and a cost cap.
-5. Integrate Bedrock later by implementing ``ContextRetriever`` from
+6. Run ``sh scripts/browser_e2e_smoke.sh`` for headed desktop/mobile/console
+   evidence, then run the Cognito → notebook → message → S3 upload/download →
+   container replacement → delete live smoke sequence. Use mock mode first;
+   make an OpenAI request only with explicit approval and a cost cap.
+7. After the live storage smoke is green, replace simulated chunks with a
+   durable provider stream and persist graph inspection summaries.
+8. Integrate Bedrock later by implementing ``ContextRetriever`` from
    ``backend/retrieval.py`` with Knowledge Base ``Retrieve`` and selected
    user/notebook/source metadata filters. Keep the existing composer,
    citations, workflow, and persistence boundaries unchanged.

@@ -56,9 +56,10 @@ if not user:
     render_login_gate()
     st.stop()
 
-# Keep the helper no-argument call compatible with AppTest auth fixtures. The
-# entrypoint already avoids the former separate ``is_logged_in`` probe.
-claims = current_user_claims()
+# Reuse the verified /auth/me result. Calling the helper without it performs a
+# second network request on every Streamlit rerun and can strand a valid local
+# session when that duplicate request fails transiently.
+claims = current_user_claims(user)
 cognito_sub = str(user.get("cognito_sub") or claims.get("sub") or "").strip()
 if not cognito_sub:
     logout_user()

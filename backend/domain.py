@@ -182,6 +182,12 @@ class CoachRequest(BaseModel):
     history: list[dict[str, Any]] = Field(default_factory=list)
     model_id: str | None = None
     reasoning_effort: str | None = None
+    idempotency_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
 
     @field_validator("current_stage")
     @classmethod

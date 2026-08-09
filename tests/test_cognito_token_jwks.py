@@ -10,7 +10,7 @@ from joserfc import jwt
 from joserfc.jwk import OctKey
 
 from backend.auth_oidc import CognitoOIDCClient, CognitoOIDCError
-from backend.cognito_config import CognitoAuthConfig
+from backend.cognito_config import CognitoAuthConfig, validate_cognito_readiness
 from backend.student_store import StudentStore
 
 
@@ -37,6 +37,43 @@ def _metadata() -> dict[str, Any]:
         "jwks_uri": "https://login.example.test/oauth2/jwks",
         "revocation_endpoint": "https://login.example.test/oauth2/revoke",
     }
+
+
+def test_production_cognito_readiness_is_local_and_requires_https_callback():
+    """Readiness validates config shape only; it must not fetch discovery."""
+    production_config = CognitoAuthConfig(
+        client_id="test-client",
+        client_secret="test-secret",
+        server_metadata_url="https://cognito-idp.us-west-2.amazonaws.com/pool/.well-known/openid-configuration",
+        redirect_uri="https://coach.example.edu/api/v1/auth/callback",
+    )
+
+    assert validate_cognito_readiness(production_config, require_https=True) is None
+
+    insecure = CognitoAuthConfig(
+        **{
+            **production_config.__dict__,
+            "redirect_uri": "http://coach.example.edu/api/v1/auth/callback",
+        }
+    )
+    with pytest.raises(ValueError, match="must use HTTPS"):
+        validate_cognito_readiness(insecure, require_https=True)
+
+
+def test_cognito_readiness_errors_do_not_echo_credentials():
+    """Configuration failures remain safe to return from internal readiness."""
+    secret = "do-not-log-this-client-secret"
+    invalid = CognitoAuthConfig(
+        client_id="client-id-that-must-not-appear",
+        client_secret=secret,
+        server_metadata_url="not-a-url",
+        redirect_uri="https://coach.example.edu/api/v1/auth/callback",
+    )
+
+    with pytest.raises(ValueError) as raised:
+        validate_cognito_readiness(invalid, require_https=True)
+    assert secret not in str(raised.value)
+    assert invalid.client_id not in str(raised.value)
 
 
 def _mint(

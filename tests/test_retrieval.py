@@ -193,7 +193,7 @@ def test_application_retrieval_is_selected_notebook_scoped_and_audited(tmp_path)
         LearningProgressService(store, notebooks, transitions),
     )
 
-    service.submit(
+    turn = service.submit(
         CoachRequest(
             thread_id=notebook,
             student_message="What thermal battery evidence is available?",
@@ -212,11 +212,23 @@ def test_application_retrieval_is_selected_notebook_scoped_and_audited(tmp_path)
     assert retrieval_refs[0]["source_id"] == selected["id"]
     assert retrieval_refs[0]["label"] == "S1"
     assert retrieval_refs[0]["chunk_id"].startswith("S1-C")
+    assert (
+        "Thermal battery evidence reports 18 percent capacity loss."
+        in turn.response_text
+    )
+    assert "[S1]" in turn.response_text
+    assert turn.assessment.citations[0].source_id == selected["id"]
+    assert assistant["metadata"]["source_refs"] == [
+        {
+            "id": selected["id"],
+            "label": "S1",
+            "title": "Selected battery study",
+        }
+    ]
 
 
 def test_citation_preview_uses_retrieved_excerpt_not_document_beginning(
     tmp_path,
-    monkeypatch,
 ):
     store = StudentStore(tmp_path / "retrieved-citation.sqlite3")
     notebook = store.create_thread(model_id="mock", support_mode="critical-thinking")
@@ -227,13 +239,6 @@ def test_citation_preview_uses_retrieved_excerpt_not_document_beginning(
         ("Unrelated background material. " * 160)
         + "Thermal degradation caused exactly 18 percent capacity loss after 500 cycles.",
     )
-    original_assess = DeterministicCoachProvider.assess
-
-    def _cited_assessment(self, request):
-        response, assessment = original_assess(self, request)
-        return response + " The reported loss is documented [S1].", assessment
-
-    monkeypatch.setattr(DeterministicCoachProvider, "assess", _cited_assessment)
     notebooks = SQLiteNotebookRepository(store)
     transitions = SQLitePhaseTransitionRepository(store)
     service = CoachApplicationService(
@@ -254,6 +259,8 @@ def test_citation_preview_uses_retrieved_excerpt_not_document_beginning(
 
     assert len(turn.assessment.citations) == 1
     assert "18 percent capacity loss" in turn.assessment.citations[0].excerpt
+    assert "18 percent capacity loss" in turn.response_text
+    assert "[S1]" in turn.response_text
 
 
 def test_application_rejects_out_of_scope_retriever_result(tmp_path):

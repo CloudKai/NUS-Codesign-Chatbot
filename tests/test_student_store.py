@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import sqlite3
 
+from backend.retrieval import (
+    LocalChunkRetriever,
+    RetrievalQuery,
+    retrieval_sources_from_notebook,
+)
+from backend.settings import settings
 from backend.student_store import StudentStore
+from backend.workspace_service import WorkspaceService
 
 
 def test_chat_history_and_notebook_state(tmp_path):
@@ -373,6 +380,336 @@ def test_legacy_camelcase_users_table_is_migrated(tmp_path):
     )
     assert updated["id"] == "user-1"
     assert updated["display_name"] == "Alex"
+
+
+def test_legacy_workspace_is_preserved_and_copied_into_five_tables(tmp_path):
+    """Local schema upgrade keeps old rows and makes them usable by new APIs/RAG."""
+    db_path = tmp_path / "workspace-legacy.sqlite3"
+    legacy_file = (
+        settings.files_dir
+        / "threads"
+        / "legacy-thread"
+        / "uploads"
+        / "evidence.txt"
+    )
+    legacy_file.parent.mkdir(parents=True, exist_ok=True)
+    legacy_file.write_bytes(b"original local source bytes")
+    with sqlite3.connect(db_path) as connection:
+        connection.executescript(
+            """
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE users (
+                id TEXT PRIMARY KEY,
+                identifier TEXT NOT NULL UNIQUE,
+                metadata TEXT NOT NULL DEFAULT '{}',
+                createdAt TEXT NOT NULL,
+                cognitoSub TEXT,
+                email TEXT,
+                displayName TEXT,
+                role TEXT NOT NULL DEFAULT 'student',
+                updatedAt TEXT,
+                lastLoginAt TEXT
+            );
+            CREATE TABLE threads (
+                id TEXT PRIMARY KEY,
+                createdAt TEXT NOT NULL,
+                name TEXT,
+                userId TEXT,
+                userIdentifier TEXT,
+                tags TEXT NOT NULL DEFAULT '[]',
+                metadata TEXT NOT NULL DEFAULT '{}',
+                FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+            );
+            CREATE TABLE steps (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                type TEXT NOT NULL,
+                threadId TEXT NOT NULL,
+                isError INTEGER,
+                metadata TEXT NOT NULL DEFAULT '{}',
+                output TEXT,
+                createdAt TEXT,
+                FOREIGN KEY (threadId) REFERENCES threads(id) ON DELETE CASCADE
+            );
+            CREATE TABLE notebook_sources (
+                id TEXT PRIMARY KEY,
+                threadId TEXT NOT NULL,
+                ownerId TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                title TEXT NOT NULL,
+                mime TEXT,
+                path TEXT,
+                sourceUrl TEXT,
+                extractedText TEXT,
+                size INTEGER,
+                selected INTEGER,
+                metadata TEXT,
+                createdAt TEXT,
+                updatedAt TEXT,
+                FOREIGN KEY (threadId) REFERENCES threads(id) ON DELETE CASCADE,
+                FOREIGN KEY (ownerId) REFERENCES users(id) ON DELETE CASCADE
+            );
+            CREATE TABLE phase_transitions (
+                id TEXT PRIMARY KEY,
+                threadId TEXT NOT NULL,
+                fromStage TEXT NOT NULL,
+                toStage TEXT NOT NULL,
+                assessment TEXT NOT NULL,
+                status TEXT NOT NULL,
+                createdAt TEXT NOT NULL,
+                resolvedAt TEXT
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "legacy-user",
+                "legacy-login-key",
+                '{"appearance":"Dark"}',
+                "2026-01-01T00:00:00+00:00",
+                "legacy-sub",
+                "legacy@example.edu",
+                "Legacy Student",
+                "student",
+                None,
+                None,
+            ),
+        )
+        connection.execute(
+            "INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                "legacy-thread",
+                "2026-01-02T00:00:00+00:00",
+                "Preserved notebook",
+                "legacy-user",
+                "legacy-login-key",
+                '["research"]',
+                '{"thinking_stage":"evidence","response_detail":"long"}',
+            ),
+        )
+        connection.execute(
+            "INSERT INTO steps VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "legacy-message",
+                "You",
+                "user_message",
+                "legacy-thread",
+                0,
+                '{}',
+                "What does the evidence show?",
+                "2026-01-03T00:00:00+00:00",
+            ),
+        )
+        connection.execute(
+            "INSERT INTO notebook_sources VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "legacy-source",
+                "legacy-thread",
+                "legacy-user",
+                "file",
+                "evidence.txt",
+                "text/plain",
+                str(legacy_file),
+                None,
+                "Crossing times were too short for older pedestrians.",
+                52,
+                1,
+                '{}',
+                "2026-01-02T00:00:00+00:00",
+                "2026-01-02T00:00:00+00:00",
+            ),
+        )
+
+    store = StudentStore(db_path, identifier="cognito:legacy-sub")
+
+    assert store.owner_id == "legacy-user"
+    assert store.get_thread("legacy-thread")["metadata"]["thinking_stage"] == (
+        "evidence"
+    )
+    assert store.get_messages("legacy-thread")[0]["content"] == (
+        "What does the evidence show?"
+    )
+    source = store.get_source("legacy-thread", "legacy-source")
+    assert source is not None
+    assert "older pedestrians" in source["extractedText"]
+    assert "_legacy_extracted_text" not in source["metadata"]
+    assert WorkspaceService(store).read_source_content(
+        "legacy-thread", "legacy-source"
+    ).data == b"original local source bytes"
+    retrieval = LocalChunkRetriever().retrieve(
+        RetrievalQuery(
+            current_message="What evidence concerns older pedestrians?",
+            current_stage="evidence",
+            sources=retrieval_sources_from_notebook([source]),
+        )
+    )
+    assert "older pedestrians" in retrieval.context
+
+    # The compatibility source remains intact for rollback and a retry does not
+    # duplicate any production-table row.
+    StudentStore(db_path, identifier="cognito:legacy-sub")
+    with store._connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM threads").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM notebooks").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM sources").fetchone()[0] == 1
+
+
+def test_cognito_store_reuses_legacy_subject_row_instead_of_splitting_owner(tmp_path):
+    db_path = tmp_path / "legacy-owner.sqlite3"
+    bootstrap = StudentStore(db_path, identifier="local-student")
+    created = bootstrap.upsert_cognito_user(
+        cognito_sub="legacy-sub",
+        identifier="legacy-login-key",
+        email="legacy@example.edu",
+        display_name="Legacy Student",
+    )
+
+    owner_store = StudentStore(db_path, identifier="cognito:legacy-sub")
+
+    assert owner_store.owner_id == created["id"]
+    with owner_store._connect() as connection:
+        rows = connection.execute(
+            "SELECT id, identifier, cognito_sub FROM users WHERE cognito_sub=? "
+            "OR identifier=?",
+            ("legacy-sub", "cognito:legacy-sub"),
+        ).fetchall()
+    assert len(rows) == 1
+    assert str(rows[0]["identifier"]) == "cognito:legacy-sub"
+
+
+def test_cognito_store_repairs_preexisting_split_owner_without_losing_notebooks(
+    tmp_path,
+):
+    db_path = tmp_path / "split-owner.sqlite3"
+    bootstrap = StudentStore(db_path, identifier="local-student")
+    profile = bootstrap.upsert_cognito_user(
+        cognito_sub="split-sub",
+        identifier="legacy-login-key",
+        email="legacy@example.edu",
+        display_name="Legacy Student",
+    )
+    with bootstrap._connect() as connection:
+        connection.execute(
+            "INSERT INTO users "
+            "(id, identifier, preferences_text, created_at, role) "
+            "VALUES (?, ?, ?, ?, 'student')",
+            (
+                "split-duplicate",
+                "cognito:split-sub",
+                '{"active_thread_id":"split-notebook"}',
+                "2026-01-01T00:00:00+00:00",
+            ),
+        )
+        connection.execute(
+            "INSERT INTO notebooks "
+            "(id, user_id, title, current_stage, progress_text, settings_text, "
+            "created_at, updated_at) VALUES (?, ?, ?, 'focus', '{}', '{}', ?, ?)",
+            (
+                "split-notebook",
+                "split-duplicate",
+                "Do not lose me",
+                "2026-01-02T00:00:00+00:00",
+                "2026-01-02T00:00:00+00:00",
+            ),
+        )
+
+    repaired = StudentStore(db_path, identifier="cognito:split-sub")
+
+    assert repaired.owner_id == profile["id"]
+    assert repaired.get_thread("split-notebook") is not None
+    assert repaired.get_user_preferences()["active_thread_id"] == "split-notebook"
+    with repaired._connect() as connection:
+        duplicate = connection.execute(
+            "SELECT identifier FROM users WHERE id='split-duplicate'"
+        ).fetchone()
+        canonical = connection.execute(
+            "SELECT identifier FROM users WHERE id=?", (profile["id"],)
+        ).fetchone()
+    assert str(duplicate["identifier"]).startswith("legacy-orphan:")
+    assert str(canonical["identifier"]) == "cognito:split-sub"
+
+
+def test_startup_repairs_users_legacy_notebook_foreign_key_without_data_loss(
+    tmp_path,
+):
+    """The retired user-table rebuild must not strand local notebook writes."""
+    db_path = tmp_path / "misbound-foreign-key.sqlite3"
+    original = StudentStore(db_path, identifier="cognito:repair-sub")
+    notebook_id = original.create_thread(
+        name="Existing notebook",
+        model_id="mock",
+        support_mode="critical-thinking",
+    )
+    message_id = original.add_message(notebook_id, "user", "Keep this message")
+    source_id = original.add_source(
+        notebook_id,
+        kind="text",
+        title="Keep this source",
+        source_id="existing-source",
+    )
+
+    # Reproduce the on-disk state left by the old destructive users migration:
+    # users_legacy is absent but notebooks.user_id still targets that name.
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("PRAGMA foreign_keys = OFF")
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            """
+            CREATE TABLE notebooks_broken (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                title TEXT,
+                current_stage TEXT NOT NULL DEFAULT 'focus',
+                progress_text TEXT NOT NULL DEFAULT '{}',
+                settings_text TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users_legacy(id)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO notebooks_broken SELECT * FROM notebooks"
+        )
+        connection.execute("DROP TABLE notebooks")
+        connection.execute("ALTER TABLE notebooks_broken RENAME TO notebooks")
+        connection.execute(
+            "CREATE INDEX idx_notebooks_user_updated "
+            "ON notebooks(user_id, updated_at)"
+        )
+        connection.commit()
+
+    repaired = StudentStore(db_path, identifier="cognito:repair-sub")
+
+    with repaired._connect() as connection:
+        notebook_parent = next(
+            row
+            for row in connection.execute("PRAGMA foreign_key_list(notebooks)")
+            if str(row["from"]) == "user_id"
+        )
+        assert str(notebook_parent["table"]) == "users"
+        assert connection.execute(
+            "PRAGMA foreign_key_check(notebooks)"
+        ).fetchall() == []
+        assert connection.execute(
+            "SELECT COUNT(*) FROM messages WHERE id=?", (message_id,)
+        ).fetchone()[0] == 1
+        assert connection.execute(
+            "SELECT COUNT(*) FROM sources WHERE id=?", (source_id,)
+        ).fetchone()[0] == 1
+
+    assert repaired.get_thread(notebook_id)["name"] == "Existing notebook"
+    assert repaired.create_thread(
+        name="Notebook after repair",
+        model_id="mock",
+        support_mode="critical-thinking",
+    )
+
+    # A second startup is a no-op and proves the migration is idempotent.
+    StudentStore(db_path, identifier="cognito:repair-sub")
 
 
 def test_six_table_schema_has_no_legacy_tables(tmp_path):

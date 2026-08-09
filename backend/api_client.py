@@ -99,6 +99,16 @@ class LocalApiClient:
             kwargs["cookies"] = merged
         return kwargs
 
+    def auth_cookie_snapshot(self) -> dict[str, str]:
+        """Capture the current short-lived auth cookie for a worker request.
+
+        Streamlit's cookie context is bound to its script thread. Background
+        course-material synchronization must therefore take this snapshot on
+        the render thread instead of invoking ``cookie_provider`` later from a
+        worker where the browser context is unavailable.
+        """
+        return self._auth_cookies()
+
     def health(self) -> dict[str, str]:
         """Return the local API health response or raise an HTTP error."""
         response = self._http.get(
@@ -337,11 +347,27 @@ class LocalApiClient:
         response.raise_for_status()
         return int(response.json().get("created") or 0)
 
-    def sync_course_materials(self, thread_id: str) -> dict[str, Any]:
-        """Synchronize course materials into the notebook."""
+    def sync_course_materials(
+        self,
+        thread_id: str,
+        *,
+        auth_cookies: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Synchronize course materials using an optional cookie snapshot."""
+        request_kwargs = (
+            self._request_kwargs()
+            if auth_cookies is None
+            else {
+                "cookies": {
+                    str(key): str(value).strip()
+                    for key, value in auth_cookies.items()
+                    if str(value or "").strip()
+                }
+            }
+        )
         response = self._http.post(
             f"{self._base_url}/api/v1/threads/{thread_id}/sources/sync-course-materials",
-            **self._request_kwargs(),
+            **request_kwargs,
         )
         response.raise_for_status()
         return response.json()
@@ -382,12 +408,21 @@ class LocalApiClient:
         response.raise_for_status()
         return PendingPhaseTransition.model_validate(response.json())
 
+    def _idempotency_request_kwargs(self, request: CoachRequest) -> dict[str, Any]:
+        """Attach auth cookies and the optional Idempotency-Key header."""
+        headers = (
+            {"Idempotency-Key": request.idempotency_key}
+            if request.idempotency_key
+            else None
+        )
+        return self._request_kwargs(**({"headers": headers} if headers else {}))
+
     def coach_turn(self, request: CoachRequest) -> CoachTurn:
         """Submit one typed coaching turn to the local backend."""
         response = self._http.post(
             f"{self._base_url}/api/v1/coach/turn",
             json=request.model_dump(mode="json"),
-            **self._request_kwargs(),
+            **self._idempotency_request_kwargs(request),
         )
         response.raise_for_status()
         return CoachTurn.model_validate(response.json())
@@ -398,7 +433,7 @@ class LocalApiClient:
             "POST",
             f"{self._base_url}/api/v1/coach/turn/stream",
             json=request.model_dump(mode="json"),
-            **self._request_kwargs(),
+            **self._idempotency_request_kwargs(request),
         ) as response:
             response.raise_for_status()
             for line in response.iter_lines():

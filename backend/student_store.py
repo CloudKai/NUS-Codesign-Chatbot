@@ -20,11 +20,37 @@ import shutil
 import sqlite3
 import threading
 import uuid
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from .settings import settings
+
+
+_COACH_IDEMPOTENCY_MARKER = "coach_idempotency"
+
+
+class CoachIdempotencyConflictError(ValueError):
+    """Raised when one idempotency key is reused for a different coach request."""
+
+
+class CoachRequestLeaseLostError(RuntimeError):
+    """Raised when an expired reservation was claimed by another worker."""
+
+
+class CoachRequestInProgressError(RuntimeError):
+    """Raised when another worker still owns an active coach request lease."""
+
+
+@dataclass(frozen=True)
+class CoachRequestReservation:
+    """Durable state returned while reserving one coach request key."""
+
+    state: str
+    marker_id: str
+    lease_token: str | None = None
+    turn_payload: dict[str, Any] | None = None
 
 
 def utc_now() -> str:
@@ -180,6 +206,8 @@ class StudentStore:
             connection.executescript(SCHEMA)
             self._migrate_oauth_login_states(connection)
             self._migrate_users_table(connection)
+            self._repair_misbound_local_foreign_keys(connection)
+            self._migrate_legacy_workspace(connection)
             # Index after users migration so legacy camelCase DBs can rebuild first.
             connection.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_cognito_sub "
@@ -250,12 +278,19 @@ class StudentStore:
 
     @staticmethod
     def _migrate_users_table(connection: sqlite3.Connection) -> None:
-        """Rebuild legacy camelCase ``users`` columns to the five-table schema.
+        """Extend legacy camelCase ``users`` rows for the five-table schema.
 
         Local demo DBs often still have ``displayName`` / ``cognitoSub`` /
         ``createdAt`` / ``metadata`` from the pre-Cognito store. Cognito
         callback upserts require snake_case columns; without this migration
         sign-in completes at Cognito then fails with ``auth_error=1``.
+
+        This migration is deliberately additive. Renaming and dropping the old
+        ``users`` table makes SQLite rewrite legacy foreign keys to
+        ``users_legacy`` and then cascade-delete old threads, sources, and
+        messages. Keeping the original table identity preserves those rows
+        while the compatibility migration copies them into the five-table
+        layout.
         """
         rows = connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -281,65 +316,322 @@ class StudentStore:
         if expected.issubset(columns):
             return
 
-        def _col(*names: str, default_sql: str) -> str:
-            for name in names:
-                if name in columns:
-                    return name
-            return default_sql
+        additions = {
+            "cognito_sub": "TEXT",
+            "email": "TEXT",
+            "display_name": "TEXT",
+            "role": "TEXT NOT NULL DEFAULT 'student'",
+            "preferences_text": "TEXT NOT NULL DEFAULT '{}'",
+            "created_at": "TEXT NOT NULL DEFAULT ''",
+            "updated_at": "TEXT",
+            "last_login_at": "TEXT",
+        }
+        for name, declaration in additions.items():
+            if name not in columns:
+                connection.execute(
+                    f"ALTER TABLE users ADD COLUMN {name} {declaration}"
+                )
 
-        connection.execute("ALTER TABLE users RENAME TO users_legacy")
-        connection.execute(
-            """
-            CREATE TABLE users (
-                id TEXT PRIMARY KEY,
-                identifier TEXT NOT NULL UNIQUE,
-                cognito_sub TEXT,
-                email TEXT,
-                display_name TEXT,
-                role TEXT NOT NULL DEFAULT 'student',
-                preferences_text TEXT NOT NULL DEFAULT '{}',
-                created_at TEXT NOT NULL,
-                updated_at TEXT,
-                last_login_at TEXT
+        # Copy old values only when their camelCase source columns exist.
+        copies = {
+            "cognito_sub": "cognitoSub",
+            "display_name": "displayName",
+            "preferences_text": "metadata",
+            "created_at": "createdAt",
+            "updated_at": "updatedAt",
+            "last_login_at": "lastLoginAt",
+        }
+        for target, source in copies.items():
+            if source not in columns:
+                continue
+            connection.execute(
+                f"UPDATE users SET {target}={source} "
+                f"WHERE {source} IS NOT NULL AND TRIM(CAST({source} AS TEXT)) != ''"
             )
-            """
+        connection.execute(
+            "UPDATE users SET display_name='Student' "
+            "WHERE display_name IS NULL OR TRIM(display_name)=''"
         )
         connection.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_cognito_sub "
-            "ON users(cognito_sub)"
+            "UPDATE users SET role='student' WHERE role IS NULL OR TRIM(role)=''"
         )
-        select_sql = f"""
-            INSERT INTO users (
-                id, identifier, cognito_sub, email, display_name, role,
-                preferences_text, created_at, updated_at, last_login_at
-            )
-            SELECT
-                id,
-                identifier,
-                {_col("cognito_sub", "cognitoSub", default_sql="NULL")},
-                {_col("email", default_sql="NULL")},
-                COALESCE(
-                    NULLIF(TRIM({_col("display_name", "displayName", default_sql="NULL")}), ''),
-                    'Student'
-                ),
-                COALESCE(
-                    NULLIF(TRIM({_col("role", default_sql="NULL")}), ''),
-                    'student'
-                ),
-                COALESCE(
-                    NULLIF(TRIM({_col("preferences_text", "metadata", default_sql="NULL")}), ''),
-                    '{{}}'
-                ),
-                COALESCE(
-                    {_col("created_at", "createdAt", default_sql="NULL")},
-                    ''
-                ),
-                {_col("updated_at", "updatedAt", default_sql="NULL")},
-                {_col("last_login_at", "lastLoginAt", default_sql="NULL")}
-            FROM users_legacy
+        connection.execute(
+            "UPDATE users SET preferences_text='{}' "
+            "WHERE preferences_text IS NULL OR TRIM(preferences_text)=''"
+        )
+
+    @staticmethod
+    def _repair_misbound_local_foreign_keys(
+        connection: sqlite3.Connection,
+    ) -> None:
+        """Repair notebooks created by the retired destructive user migration.
+
+        A previous local compatibility migration renamed ``users`` to
+        ``users_legacy`` before rebuilding it. SQLite consequently rewrote the
+        existing ``notebooks.user_id`` foreign key to reference that temporary
+        name. Dropping the temporary table left Cognito-authenticated notebook
+        creation failing with ``no such table: main.users_legacy``.
+
+        Rebuilding ``notebooks`` is SQLite-only, transactional, and preserves
+        its primary keys, so existing ``messages`` and ``sources`` continue to
+        reference the same notebooks. Production DSQL never invokes this
+        initializer and its schema is intentionally unchanged.
         """
-        connection.execute(select_sql)
-        connection.execute("DROP TABLE users_legacy")
+        foreign_keys = connection.execute(
+            "PRAGMA foreign_key_list(notebooks)"
+        ).fetchall()
+        user_key = next(
+            (row for row in foreign_keys if str(row["from"]) == "user_id"),
+            None,
+        )
+        if user_key is None or str(user_key["table"]) == "users":
+            return
+
+        expected_columns = (
+            "id",
+            "user_id",
+            "title",
+            "current_stage",
+            "progress_text",
+            "settings_text",
+            "created_at",
+            "updated_at",
+        )
+        actual_columns = tuple(
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(notebooks)")
+        )
+        if actual_columns != expected_columns:
+            raise RuntimeError(
+                "Cannot safely repair the local notebooks foreign key because "
+                f"its columns differ from the expected schema: {actual_columns!r}"
+            )
+
+        # PRAGMA foreign_keys is ignored inside an active transaction. Commit
+        # preceding additive migrations before entering this isolated rebuild.
+        connection.commit()
+        connection.execute("PRAGMA foreign_keys = OFF")
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                CREATE TABLE notebooks_fk_repair (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    title TEXT,
+                    current_stage TEXT NOT NULL DEFAULT 'focus',
+                    progress_text TEXT NOT NULL DEFAULT '{}',
+                    settings_text TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO notebooks_fk_repair
+                  (id, user_id, title, current_stage, progress_text,
+                   settings_text, created_at, updated_at)
+                SELECT id, user_id, title, current_stage, progress_text,
+                       settings_text, created_at, updated_at
+                FROM notebooks
+                """
+            )
+            connection.execute("DROP TABLE notebooks")
+            connection.execute(
+                "ALTER TABLE notebooks_fk_repair RENAME TO notebooks"
+            )
+            connection.execute(
+                "CREATE INDEX idx_notebooks_user_updated "
+                "ON notebooks(user_id, updated_at)"
+            )
+            violations = connection.execute(
+                "PRAGMA foreign_key_check(notebooks)"
+            ).fetchall()
+            if violations:
+                raise RuntimeError(
+                    "Cannot repair the local notebooks foreign key because "
+                    "one or more notebooks have no matching user"
+                )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.execute("PRAGMA foreign_keys = ON")
+
+    @staticmethod
+    def _migrate_legacy_workspace(connection: sqlite3.Connection) -> None:
+        """Copy legacy local workspace rows into the five production tables.
+
+        The old tables remain untouched as a rollback source. Inserts are
+        idempotent, so interrupted startup can safely retry. This compatibility
+        path is SQLite-only; production DSQL is bootstrapped directly with the
+        five-table schema.
+        """
+
+        def _table(name: str) -> bool:
+            return connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                (name,),
+            ).fetchone() is not None
+
+        if not _table("threads"):
+            return
+
+        user_ids = {
+            str(row[0])
+            for row in connection.execute("SELECT id FROM users").fetchall()
+        }
+        identifiers = {
+            str(row[1]): str(row[0])
+            for row in connection.execute("SELECT id, identifier FROM users").fetchall()
+        }
+        for row in connection.execute("SELECT * FROM threads").fetchall():
+            value = dict(row)
+            owner_id = str(value.get("userId") or "")
+            if owner_id not in user_ids:
+                owner_id = identifiers.get(str(value.get("userIdentifier") or ""), "")
+            if not owner_id:
+                continue
+            metadata = _load(value.get("metadata"), {})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            tags = _load(value.get("tags"), [])
+            if isinstance(tags, list):
+                metadata["tags"] = tags
+            stage, progress_text, settings_text = StudentStore._split_notebook_metadata(
+                metadata
+            )
+            created_at = str(value.get("createdAt") or utc_now())
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO notebooks
+                  (id, user_id, title, current_stage, progress_text,
+                   settings_text, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(value["id"]),
+                    owner_id,
+                    value.get("name"),
+                    stage,
+                    progress_text,
+                    settings_text,
+                    created_at,
+                    created_at,
+                ),
+            )
+
+        transition_by_id: dict[str, dict[str, Any]] = {}
+        if _table("phase_transitions"):
+            transition_by_id = {
+                str(value["id"]): value
+                for value in (
+                    dict(row)
+                    for row in connection.execute(
+                        "SELECT * FROM phase_transitions"
+                    ).fetchall()
+                )
+            }
+
+        if _table("steps"):
+            for row in connection.execute(
+                "SELECT * FROM steps WHERE type IN ('user_message','assistant_message')"
+            ).fetchall():
+                value = dict(row)
+                notebook_id = str(value.get("threadId") or "")
+                if connection.execute(
+                    "SELECT 1 FROM notebooks WHERE id=?", (notebook_id,)
+                ).fetchone() is None:
+                    continue
+                metadata = _load(value.get("metadata"), {})
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                assessment = metadata.pop("assessment", None)
+                cited = metadata.pop("source_refs", None)
+                transition_id = str(metadata.get("pending_transition_id") or "")
+                transition = transition_by_id.get(transition_id)
+                proposed_stage = transition.get("toStage") if transition else None
+                decision_status = transition.get("status") if transition else None
+                decision_at = transition.get("resolvedAt") if transition else None
+                if transition:
+                    metadata.setdefault("from_stage", transition.get("fromStage"))
+                    assessment = assessment or _load(transition.get("assessment"), {})
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO messages
+                      (id, notebook_id, role, content, is_error, assessment_text,
+                       cited_source_ids_text, proposed_stage, decision_status,
+                       decision_at, metadata_text, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(value["id"]),
+                        notebook_id,
+                        "user" if value.get("type") == "user_message" else "assistant",
+                        str(value.get("output") or ""),
+                        int(bool(value.get("isError"))),
+                        _dump(assessment) if isinstance(assessment, dict) else None,
+                        _dump(cited) if cited is not None else None,
+                        proposed_stage,
+                        decision_status,
+                        decision_at,
+                        _dump(metadata),
+                        str(value.get("createdAt") or utc_now()),
+                    ),
+                )
+
+        if _table("notebook_sources"):
+            for row in connection.execute("SELECT * FROM notebook_sources").fetchall():
+                value = dict(row)
+                notebook_id = str(value.get("threadId") or "")
+                if connection.execute(
+                    "SELECT 1 FROM notebooks WHERE id=?", (notebook_id,)
+                ).fetchone() is None:
+                    continue
+                metadata = _load(value.get("metadata"), {})
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                path = str(value.get("path") or "").strip()
+                storage_provider = str(metadata.get("storage_provider") or "local")
+                object_key = metadata.get("object_key")
+                if not object_key and (
+                    path.startswith("users/") or storage_provider in {"s3", "memory"}
+                ):
+                    object_key = path or None
+                elif path:
+                    metadata.setdefault("local_path", path)
+                extracted = str(value.get("extractedText") or "")
+                if extracted:
+                    # Kept inside the local compatibility row; _source_dict removes
+                    # this private key before returning metadata to API callers.
+                    metadata["_legacy_extracted_text"] = extracted
+                created_at = str(value.get("createdAt") or utc_now())
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO sources
+                      (id, notebook_id, kind, title, content_type, byte_size,
+                       object_key, extracted_text_key, source_url, selected,
+                       metadata_text, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(value["id"]),
+                        notebook_id,
+                        str(value.get("kind") or "file"),
+                        str(value.get("title") or "Untitled source"),
+                        str(value.get("mime") or "application/octet-stream"),
+                        max(0, int(value.get("size") or 0)),
+                        object_key,
+                        value.get("sourceUrl"),
+                        int(bool(value.get("selected", 1))),
+                        _dump(metadata),
+                        created_at,
+                        str(value.get("updatedAt") or created_at),
+                    ),
+                )
 
     def upsert_cognito_user(
         self,
@@ -559,11 +851,82 @@ class StudentStore:
 
     def _ensure_user(self) -> str:
         with self._lock, self._connect() as connection:
-            row = connection.execute(
-                "SELECT id FROM users WHERE identifier = ?", (self.identifier,)
+            identifier_row = connection.execute(
+                "SELECT id, cognito_sub, preferences_text FROM users "
+                "WHERE identifier = ?",
+                (self.identifier,),
             ).fetchone()
-            if row:
-                return str(row["id"])
+            if self.identifier.startswith("cognito:"):
+                cognito_sub = self.identifier.removeprefix("cognito:").strip()
+                if cognito_sub:
+                    subject_row = connection.execute(
+                        "SELECT id, cognito_sub, preferences_text FROM users "
+                        "WHERE cognito_sub = ?",
+                        (cognito_sub,),
+                    ).fetchone()
+                    if subject_row:
+                        subject_id = str(subject_row["id"])
+                        if (
+                            identifier_row
+                            and str(identifier_row["id"]) != subject_id
+                        ):
+                            # Repair the split-owner layout created by the first
+                            # five-table local build: the canonical identifier
+                            # row had no Cognito subject, while the authenticated
+                            # profile remained under its legacy identifier.
+                            duplicate_id = str(identifier_row["id"])
+                            duplicate_preferences = _load(
+                                identifier_row["preferences_text"], {}
+                            )
+                            subject_preferences = _load(
+                                subject_row["preferences_text"], {}
+                            )
+                            if not isinstance(duplicate_preferences, dict):
+                                duplicate_preferences = {}
+                            if not isinstance(subject_preferences, dict):
+                                subject_preferences = {}
+                            connection.execute(
+                                "UPDATE notebooks SET user_id=? WHERE user_id=?",
+                                (subject_id, duplicate_id),
+                            )
+                            connection.execute(
+                                "UPDATE users SET identifier=? WHERE id=?",
+                                (f"legacy-orphan:{duplicate_id}", duplicate_id),
+                            )
+                            connection.execute(
+                                "UPDATE users SET identifier=?, preferences_text=?, "
+                                "updated_at=? WHERE id=?",
+                                (
+                                    self.identifier,
+                                    _dump(
+                                        {
+                                            **duplicate_preferences,
+                                            **subject_preferences,
+                                        }
+                                    ),
+                                    utc_now(),
+                                    subject_id,
+                                ),
+                            )
+                            return subject_id
+                        connection.execute(
+                            "UPDATE users SET identifier=?, updated_at=? WHERE id=?",
+                            (self.identifier, utc_now(), subject_id),
+                        )
+                        return subject_id
+                    if identifier_row:
+                        existing_sub = str(identifier_row["cognito_sub"] or "").strip()
+                        if existing_sub and existing_sub != cognito_sub:
+                            raise ValueError(
+                                "Cognito store identifier is linked to another subject"
+                            )
+                        connection.execute(
+                            "UPDATE users SET cognito_sub=?, updated_at=? WHERE id=?",
+                            (cognito_sub, utc_now(), str(identifier_row["id"])),
+                        )
+                        return str(identifier_row["id"])
+            if identifier_row:
+                return str(identifier_row["id"])
             owner_id = str(uuid.uuid4())
             connection.execute(
                 "INSERT INTO users (id, identifier, preferences_text, created_at, role) "
@@ -679,7 +1042,10 @@ class StudentStore:
             rows = connection.execute(
                 f"""
                 SELECT n.*,
-                       COUNT(m.id) AS messageCount,
+                       COUNT(CASE
+                           WHEN m.metadata_text NOT LIKE '%"_internal_type": "coach_idempotency"%'
+                           THEN m.id
+                       END) AS messageCount,
                        SUM(CASE WHEN m.role='user' THEN 1 ELSE 0 END)
                          AS studentTurnCount,
                        (
@@ -690,8 +1056,14 @@ class StudentStore:
                          ORDER BY recent.created_at DESC, recent.id DESC
                          LIMIT 1
                        ) AS latestUserMessage,
-                       MAX(COALESCE(m.created_at, n.updated_at, n.created_at))
-                         AS lastActivity
+                       MAX(COALESCE(
+                           CASE
+                               WHEN m.metadata_text NOT LIKE '%"_internal_type": "coach_idempotency"%'
+                               THEN m.created_at
+                           END,
+                           n.updated_at,
+                           n.created_at
+                       )) AS lastActivity
                 FROM notebooks n
                 LEFT JOIN messages m ON m.notebook_id=n.id
                 WHERE {' AND '.join(clauses)}
@@ -1046,6 +1418,279 @@ class StudentStore:
                 )
         return message_id
 
+    def _coach_marker_id(self, thread_id: str, idempotency_key: str) -> str:
+        """Return a deterministic internal message id for one owned request key."""
+        return str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"co-design-coach-request:{self.owner_id}:{thread_id}:{idempotency_key}",
+            )
+        )
+
+    @staticmethod
+    def _coach_request_has_expired(metadata: dict[str, Any]) -> bool:
+        """Return whether an internal request lease is absent, invalid, or expired."""
+        raw_expiry = str(metadata.get("lease_expires_at") or "")
+        try:
+            expiry = datetime.fromisoformat(raw_expiry)
+        except ValueError:
+            return True
+        if expiry.tzinfo is None:
+            return True
+        return expiry <= datetime.now(timezone.utc)
+
+    def _recorded_coach_turn(
+        self,
+        connection: Any,
+        thread_id: str,
+        idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        """Recover a committed turn if a process stopped before marking it complete.
+
+        The user and assistant rows are committed atomically by
+        :meth:`persist_coach_turn`.  Keeping the request key on both rows lets a
+        restarted process promote that durable result without invoking the
+        provider again.
+        """
+        rows = connection.execute(
+            """
+            SELECT * FROM messages
+            WHERE notebook_id=? AND role='assistant'
+            ORDER BY created_at ASC, id ASC
+            """,
+            (thread_id,),
+        ).fetchall()
+        for row in rows:
+            metadata = _load(row["metadata_text"], {})
+            if not isinstance(metadata, dict) or metadata.get(
+                "coach_idempotency_key"
+            ) != idempotency_key:
+                continue
+            assessment = _load(row["assessment_text"], None)
+            if not isinstance(assessment, dict):
+                continue
+            pending_transition: dict[str, Any] | None = None
+            if (
+                row["proposed_stage"]
+                and row["decision_status"] == "pending"
+                and metadata.get("from_stage")
+            ):
+                pending_transition = {
+                    "id": str(row["id"]),
+                    "thread_id": thread_id,
+                    "from_stage": str(metadata["from_stage"]),
+                    "to_stage": str(row["proposed_stage"]),
+                    "assessment": assessment,
+                    "status": "pending",
+                    "created_at": str(row["created_at"]),
+                    "resolved_at": None,
+                }
+            return {
+                "response_text": str(row["content"] or ""),
+                "assessment": assessment,
+                "pending_transition": pending_transition,
+                "auto_advanced_to": metadata.get("auto_advanced_to"),
+            }
+        return None
+
+    def claim_coach_request(
+        self,
+        thread_id: str,
+        *,
+        idempotency_key: str,
+        request_fingerprint: str,
+        lease_seconds: int = 180,
+    ) -> CoachRequestReservation:
+        """Reserve or replay an owned coach request without running a provider.
+
+        An internal marker uses the existing ``messages`` primary key rather
+        than adding a sixth production table.  The deterministic id makes the
+        reservation unique for the owner, notebook, and caller-provided key on
+        both SQLite and Aurora DSQL.  Leases make a request recoverable after a
+        worker or container restart; they never represent a completed turn.
+        """
+        key = str(idempotency_key or "").strip()
+        fingerprint = str(request_fingerprint or "").strip()
+        if not key or not fingerprint:
+            raise ValueError("Coach idempotency key and fingerprint are required")
+        if lease_seconds < 1:
+            raise ValueError("Coach idempotency lease must be positive")
+        marker_id = self._coach_marker_id(thread_id, key)
+        with self._lock, self._connect() as connection:
+            owned = connection.execute(
+                "SELECT id FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not owned:
+                raise ValueError("Chat not found")
+            row = connection.execute(
+                "SELECT * FROM messages WHERE id=? AND notebook_id=?",
+                (marker_id, thread_id),
+            ).fetchone()
+            if row is None:
+                lease_token = str(uuid.uuid4())
+                metadata = {
+                    "_internal_type": _COACH_IDEMPOTENCY_MARKER,
+                    "idempotency_key": key,
+                    "request_fingerprint": fingerprint,
+                    "status": "pending",
+                    "lease_token": lease_token,
+                    "lease_expires_at": (
+                        datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
+                    ).isoformat(),
+                }
+                connection.execute(
+                    """
+                    INSERT INTO messages
+                      (id, notebook_id, role, content, is_error, assessment_text,
+                       cited_source_ids_text, proposed_stage, decision_status,
+                       decision_at, metadata_text, created_at)
+                    VALUES (?, ?, 'assistant', '', 0, NULL, NULL, NULL, NULL,
+                            NULL, ?, ?)
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    (marker_id, thread_id, _dump(metadata), utc_now()),
+                )
+                # A concurrent DSQL claimant may have committed the same
+                # deterministic primary key first. Read back the winner in the
+                # same retryable DB unit instead of relying on process-local
+                # locks or a non-portable JSON unique index.
+                row = connection.execute(
+                    "SELECT * FROM messages WHERE id=? AND notebook_id=?",
+                    (marker_id, thread_id),
+                ).fetchone()
+                inserted_metadata = _load(
+                    row["metadata_text"] if row else None, {}
+                )
+                if (
+                    isinstance(inserted_metadata, dict)
+                    and inserted_metadata.get("lease_token") == lease_token
+                    and inserted_metadata.get("request_fingerprint") == fingerprint
+                ):
+                    return CoachRequestReservation("claimed", marker_id, lease_token)
+
+            metadata = _load(row["metadata_text"], {})
+            if (
+                not isinstance(metadata, dict)
+                or metadata.get("_internal_type") != _COACH_IDEMPOTENCY_MARKER
+            ):
+                raise ValueError("Coach idempotency marker is invalid")
+            if metadata.get("request_fingerprint") != fingerprint:
+                raise CoachIdempotencyConflictError(
+                    "Idempotency key was already used for a different coach request"
+                )
+            recorded = self._recorded_coach_turn(connection, thread_id, key)
+            if recorded is not None:
+                metadata.update({"status": "completed", "turn": recorded})
+                metadata.pop("lease_token", None)
+                metadata.pop("lease_expires_at", None)
+                connection.execute(
+                    "UPDATE messages SET metadata_text=? WHERE id=? AND notebook_id=?",
+                    (_dump(metadata), marker_id, thread_id),
+                )
+                return CoachRequestReservation(
+                    "completed", marker_id, turn_payload=recorded
+                )
+            completed = metadata.get("turn")
+            if metadata.get("status") == "completed" and isinstance(completed, dict):
+                return CoachRequestReservation(
+                    "completed", marker_id, turn_payload=completed
+                )
+            if (
+                metadata.get("status") == "pending"
+                and not self._coach_request_has_expired(metadata)
+            ):
+                return CoachRequestReservation("in_progress", marker_id)
+
+            lease_token = str(uuid.uuid4())
+            metadata.update(
+                {
+                    "status": "pending",
+                    "lease_token": lease_token,
+                    "lease_expires_at": (
+                        datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
+                    ).isoformat(),
+                }
+            )
+            metadata.pop("turn", None)
+            connection.execute(
+                "UPDATE messages SET metadata_text=? WHERE id=? AND notebook_id=?",
+                (_dump(metadata), marker_id, thread_id),
+            )
+            return CoachRequestReservation("claimed", marker_id, lease_token)
+
+    def complete_coach_request(
+        self,
+        thread_id: str,
+        *,
+        marker_id: str,
+        idempotency_key: str,
+        request_fingerprint: str,
+        lease_token: str,
+        turn_payload: dict[str, Any],
+    ) -> None:
+        """Durably store the exact completed turn for a reserved request key."""
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT metadata_text FROM messages WHERE id=? AND notebook_id=?",
+                (marker_id, thread_id),
+            ).fetchone()
+            if not row:
+                raise ValueError("Coach idempotency marker was not found")
+            metadata = _load(row["metadata_text"], {})
+            if (
+                not isinstance(metadata, dict)
+                or metadata.get("_internal_type") != _COACH_IDEMPOTENCY_MARKER
+                or metadata.get("idempotency_key") != idempotency_key
+                or metadata.get("request_fingerprint") != request_fingerprint
+                or metadata.get("status") != "pending"
+                or metadata.get("lease_token") != lease_token
+            ):
+                raise CoachRequestLeaseLostError(
+                    "Coach request lease was claimed by another worker"
+                )
+            metadata.update({"status": "completed", "turn": turn_payload})
+            metadata.pop("lease_token", None)
+            metadata.pop("lease_expires_at", None)
+            metadata.pop("failure", None)
+            connection.execute(
+                "UPDATE messages SET metadata_text=? WHERE id=? AND notebook_id=?",
+                (_dump(metadata), marker_id, thread_id),
+            )
+
+    def fail_coach_request(
+        self,
+        thread_id: str,
+        *,
+        marker_id: str,
+        request_fingerprint: str,
+        lease_token: str,
+    ) -> None:
+        """Release a failed request so its key can retry instead of replaying failure."""
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT metadata_text FROM messages WHERE id=? AND notebook_id=?",
+                (marker_id, thread_id),
+            ).fetchone()
+            if not row:
+                return
+            metadata = _load(row["metadata_text"], {})
+            if (
+                not isinstance(metadata, dict)
+                or metadata.get("_internal_type") != _COACH_IDEMPOTENCY_MARKER
+                or metadata.get("request_fingerprint") != request_fingerprint
+                or metadata.get("status") == "completed"
+                or metadata.get("lease_token") != lease_token
+            ):
+                return
+            metadata.update({"status": "failed", "failure": "unavailable"})
+            metadata.pop("lease_token", None)
+            metadata.pop("lease_expires_at", None)
+            connection.execute(
+                "UPDATE messages SET metadata_text=? WHERE id=? AND notebook_id=?",
+                (_dump(metadata), marker_id, thread_id),
+            )
+
     def persist_coach_turn(
         self,
         thread_id: str,
@@ -1058,6 +1703,10 @@ class StudentStore:
         summary_metadata: dict[str, Any],
         assistant_message_id: str | None = None,
         generated_title: str | None = None,
+        idempotency_marker_id: str | None = None,
+        idempotency_key: str | None = None,
+        idempotency_lease_token: str | None = None,
+        idempotency_fingerprint: str | None = None,
     ) -> tuple[str, str]:
         """Persist one completed coaching turn in a single DB transaction.
 
@@ -1094,6 +1743,27 @@ class StudentStore:
                 raise ValueError(
                     "The notebook stage changed before the coaching turn was saved"
                 )
+            if idempotency_marker_id is not None:
+                marker = connection.execute(
+                    "SELECT metadata_text FROM messages WHERE id=? AND notebook_id=?",
+                    (idempotency_marker_id, thread_id),
+                ).fetchone()
+                marker_metadata = _load(
+                    marker["metadata_text"] if marker else None, {}
+                )
+                if (
+                    not isinstance(marker_metadata, dict)
+                    or marker_metadata.get("_internal_type")
+                    != _COACH_IDEMPOTENCY_MARKER
+                    or marker_metadata.get("status") != "pending"
+                    or marker_metadata.get("idempotency_key") != idempotency_key
+                    or marker_metadata.get("request_fingerprint")
+                    != idempotency_fingerprint
+                    or marker_metadata.get("lease_token") != idempotency_lease_token
+                ):
+                    raise CoachRequestLeaseLostError(
+                        "Coach request lease was claimed by another worker"
+                    )
 
             user_created_at = utc_now()
             assistant_created_at = utc_now()
@@ -1283,6 +1953,8 @@ class StudentStore:
             meta = _load(row["metadata_text"], {})
             if not isinstance(meta, dict):
                 meta = {}
+            if meta.get("_internal_type") == _COACH_IDEMPOTENCY_MARKER:
+                continue
             assessment = _load(row["assessment_text"], None)
             if isinstance(assessment, dict):
                 meta["assessment"] = assessment
@@ -1687,9 +2359,12 @@ class StudentStore:
         metadata = _load(row["metadata_text"], {})
         if not isinstance(metadata, dict):
             metadata = {}
+        legacy_extracted = str(metadata.pop("_legacy_extracted_text", "") or "")
         object_key = row["object_key"]
         local_path = metadata.get("local_path")
         extracted = self._load_extracted_text(row["extracted_text_key"])
+        if not extracted:
+            extracted = legacy_extracted
         path_value = object_key or local_path
         if object_key and metadata.get("storage_provider") not in {"s3", "memory"}:
             # Object key present implies object storage for readers.

@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from typing import Any, Mapping
+from urllib.parse import urlparse
 
 from backend.settings import PROJECT_ROOT, settings
 
@@ -111,3 +112,45 @@ def load_cognito_auth_config() -> CognitoAuthConfig:
         scopes=scopes,
         prompt=prompt,
     )
+
+
+def validate_cognito_readiness(
+    config: CognitoAuthConfig | None = None,
+    *,
+    require_https: bool = False,
+) -> None:
+    """Validate local Cognito configuration without discovery or network access.
+
+    The raised errors deliberately name configuration *categories*, never a
+    client ID, secret, metadata URL, or callback URL.  The API uses this only
+    for production readiness; normal local mock development remains usable
+    without a Cognito app client.
+    """
+    resolved = config or load_cognito_auth_config()
+    if not resolved.is_configured:
+        raise ValueError("Cognito authentication configuration is incomplete")
+
+    redirect = urlparse(resolved.redirect_uri)
+    if (
+        not redirect.scheme
+        or not redirect.netloc
+        or redirect.username
+        or redirect.password
+        or redirect.query
+        or redirect.fragment
+        or not redirect.path.endswith("/api/v1/auth/callback")
+    ):
+        raise ValueError("Cognito callback configuration is invalid")
+    if require_https and redirect.scheme != "https":
+        raise ValueError("Cognito callback must use HTTPS in production")
+
+    metadata = urlparse(resolved.server_metadata_url)
+    if (
+        metadata.scheme != "https"
+        or not metadata.netloc
+        or metadata.username
+        or metadata.password
+        or metadata.query
+        or metadata.fragment
+    ):
+        raise ValueError("Cognito metadata configuration is invalid")

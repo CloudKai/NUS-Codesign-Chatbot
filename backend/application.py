@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
+import time
 from typing import Any
 
 from .domain import (
@@ -30,7 +33,7 @@ from .student_journey import (
     normalize_journey,
     personalized_stage_questions,
 )
-from .student_store import StudentStore
+from .student_store import CoachRequestInProgressError, StudentStore
 from .title_service import NotebookTitleService
 from .workflow import CoachWorkflow
 
@@ -46,6 +49,21 @@ def _history_signature(messages: list[dict[str, Any]]) -> list[tuple[str, str]]:
             continue
         signature.append((str(message.get("role") or "").strip().lower(), content))
     return signature
+
+
+def _coach_request_fingerprint(request: CoachRequest) -> str:
+    """Return a stable digest for idempotency comparison without storing content.
+
+    The marker keeps only this digest, never the raw request or source/image
+    payload.  All request fields except the retry key are included so reusing a
+    key for a modified turn fails closed instead of returning a misleading
+    earlier answer.
+    """
+    payload = request.model_dump(mode="json", exclude={"idempotency_key"})
+    encoded = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _project_context_from_metadata(metadata: dict[str, Any]) -> str:
@@ -94,6 +112,66 @@ class CoachApplicationService:
         disagree are rejected. The workflow always writes an auditable
         transition first; automatic mode resolves it before the visible reply.
         """
+        idempotency_key = str(request.idempotency_key or "").strip()
+        if not idempotency_key:
+            return self._submit_once(request)
+
+        fingerprint = _coach_request_fingerprint(request)
+        deadline = time.monotonic() + 125.0
+        while True:
+            reservation = self._store.claim_coach_request(
+                request.thread_id,
+                idempotency_key=idempotency_key,
+                request_fingerprint=fingerprint,
+            )
+            if reservation.state == "completed":
+                if not isinstance(reservation.turn_payload, dict):
+                    raise ValueError("Completed coach idempotency result is invalid")
+                return CoachTurn.model_validate(reservation.turn_payload)
+            if reservation.state == "claimed":
+                try:
+                    turn = self._submit_once(
+                        request,
+                        idempotency_marker_id=reservation.marker_id,
+                        idempotency_lease_token=reservation.lease_token,
+                        idempotency_fingerprint=fingerprint,
+                    )
+                    self._store.complete_coach_request(
+                        request.thread_id,
+                        marker_id=reservation.marker_id,
+                        idempotency_key=idempotency_key,
+                        request_fingerprint=fingerprint,
+                        lease_token=str(reservation.lease_token or ""),
+                        turn_payload=turn.model_dump(mode="json"),
+                    )
+                    return turn
+                except Exception:
+                    # A provider/validation/persistence failure is deliberately
+                    # not cached as a completed reply. A retry with this same
+                    # key can acquire the released reservation.
+                    self._store.fail_coach_request(
+                        request.thread_id,
+                        marker_id=reservation.marker_id,
+                        request_fingerprint=fingerprint,
+                        lease_token=str(reservation.lease_token or ""),
+                    )
+                    raise
+            if time.monotonic() >= deadline:
+                raise CoachRequestInProgressError(
+                    "This coach request is still processing; retry with the same "
+                    "idempotency key to recover its completed turn."
+                )
+            time.sleep(0.05)
+
+    def _submit_once(
+        self,
+        request: CoachRequest,
+        *,
+        idempotency_marker_id: str | None = None,
+        idempotency_lease_token: str | None = None,
+        idempotency_fingerprint: str | None = None,
+    ) -> CoachTurn:
+        """Execute the original authoritative workflow path exactly once."""
         prepared_request = self._authoritative_request(request)
         initial_thread = self._notebooks.get_thread(prepared_request.thread_id)
         if not initial_thread:
@@ -137,6 +215,11 @@ class CoachApplicationService:
                 "thinking_stage": prepared_request.current_stage,
                 "source_ids": prepared_request.source_ids,
                 "workflow": "langgraph",
+                **(
+                    {"coach_idempotency_key": prepared_request.idempotency_key}
+                    if prepared_request.idempotency_key
+                    else {}
+                ),
             },
             assistant_content=turn.response_text,
             assistant_message_id=transition_id,
@@ -157,6 +240,11 @@ class CoachApplicationService:
                 "source_ids": prepared_request.source_ids,
                 "retrieval_refs": retrieval_refs,
                 "source_refs": source_refs,
+                **(
+                    {"coach_idempotency_key": prepared_request.idempotency_key}
+                    if prepared_request.idempotency_key
+                    else {}
+                ),
             },
             summary_metadata={
                 "learning_summary": turn.assessment.learning_summary,
@@ -165,6 +253,10 @@ class CoachApplicationService:
                 "critical_understanding": turn.assessment.critical_understanding_level,
             },
             generated_title=generated_title,
+            idempotency_marker_id=idempotency_marker_id,
+            idempotency_key=prepared_request.idempotency_key,
+            idempotency_lease_token=idempotency_lease_token,
+            idempotency_fingerprint=idempotency_fingerprint,
         )
         if (
             self._auto_advance_stages
@@ -212,6 +304,11 @@ class CoachApplicationService:
                     "workflow": "langgraph",
                     "source_ids": prepared_request.source_ids,
                     "retrieval_refs": retrieval_refs,
+                    **(
+                        {"coach_idempotency_key": prepared_request.idempotency_key}
+                        if prepared_request.idempotency_key
+                        else {}
+                    ),
                     "source_refs": [
                         {
                             "id": citation.source_id,
@@ -360,9 +457,12 @@ class CoachApplicationService:
         response_language = " ".join(
             str(metadata.get("response_language") or "English").split()
         )[:50]
-        allow_model_knowledge = bool(metadata.get("allow_model_knowledge", False))
-        if authoritative_ids:
-            allow_model_knowledge = False
+        # The selected-source set is server-authoritative. It is the only
+        # grounding switch exposed by the current UI, so stale compatibility
+        # metadata must not leave a source-free notebook in source-only mode.
+        # Conversely, a client cannot enable broader knowledge while any
+        # selected source exists.
+        allow_model_knowledge = not authoritative_ids
         return request.model_copy(
             update={
                 "current_stage": authoritative_stage,

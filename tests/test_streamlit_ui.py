@@ -5,6 +5,45 @@ from streamlit.testing.v1 import AppTest
 from backend.settings import settings
 
 
+def test_chat_composer_attachment_error_is_recoverable(monkeypatch):
+    """Rejecting a chat attachment leaves the notebook usable and unsent."""
+    from ui import chat
+
+    class FailedUpload:
+        """Minimal uploaded-file stand-in for the composer submission."""
+
+        name = "oversized.pdf"
+        type = "application/pdf"
+
+        @staticmethod
+        def getvalue() -> bytes:
+            """Return deterministic content if the UI reaches the upload adapter."""
+            return b"not actually uploaded"
+
+    def reject_upload(*_args, **_kwargs):
+        raise ValueError("Attachment exceeds the permitted size")
+
+    monkeypatch.setattr(
+        chat,
+        "normalize_composer_value",
+        lambda _value: ("Please review this attachment.", [FailedUpload()]),
+    )
+    monkeypatch.setattr(chat.store, "upload_sources", reject_upload)
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+
+    assert not app.exception
+    rendered_errors = "\n".join(error.value or "" for error in app.error)
+    assert "attachment could not be added" in rendered_errors.lower()
+    assert "no message was sent" in rendered_errors.lower()
+    thread_id = app.session_state["thread_id"]
+    from backend.student_store import StudentStore
+
+    assert [message["role"] for message in StudentStore().get_messages(thread_id)] == [
+        "assistant"
+    ]
+
+
 def test_streamlit_notebook_workspace_smoke():
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     assert not app.exception
@@ -25,7 +64,7 @@ def test_streamlit_notebook_workspace_smoke():
     workspace_panel = next(
         radio for radio in app.radio if radio.label == "Workspace panel"
     )
-    assert workspace_panel.options == ["Sources", "Chat", "Journey"]
+    assert workspace_panel.options == ["Journey", "Chat", "Sources"]
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Guidance Level:" in rendered
     assert any(button.label == "Quick" for button in app.button)
@@ -272,9 +311,37 @@ def test_add_pasted_source_then_chat_with_citation():
     assert not any(
         (expander.label or "").startswith("Sources used (") for expander in app.expander
     )
-    assert not any(
-        (button.label or "").startswith("[S1]") for button in app.button
+    assert any(
+        (button.label or "").startswith("[S1] Lecture evidence")
+        for button in app.button
     )
+
+
+def test_select_all_sources_renders_indeterminate_marker_for_partial_selection():
+    from backend.source_library import add_text_source
+    from backend.student_store import StudentStore
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    local_store = StudentStore()
+    thread_id = app.session_state["thread_id"]
+    add_text_source(local_store, thread_id, "First source", "First source text.")
+    add_text_source(local_store, thread_id, "Second source", "Second source text.")
+    app.run()
+
+    next(
+        checkbox
+        for checkbox in app.checkbox
+        if checkbox.label == "Use First source"
+    ).set_value(False).run()
+
+    assert not app.exception
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert 'class="cd-select-all-state"' in rendered
+    assert 'data-state="indeterminate"' in rendered
+    select_all = next(
+        checkbox for checkbox in app.checkbox if checkbox.label == "Select all sources"
+    )
+    assert select_all.value is False
 
 
 def test_multiple_selected_sources_do_not_force_sources_used_footer():

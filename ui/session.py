@@ -27,6 +27,7 @@ from ui.constants import APPEARANCE_MODES, DEFAULT_APPEARANCE, RESPONSE_LANGUAGE
 from ui.layout.column_resize import set_side_panel_collapsed
 from ui.rename import bump_rename_epoch, discard_rename_draft
 from ui.runtime import rerun, store
+from ui.retry_keys import purge_notebook_retry_keys
 from ui.settings import apply_selected_model
 
 
@@ -152,6 +153,7 @@ def delete_notebook(thread_id: str) -> None:
     st.session_state.pending_notebook_actions = None
     st.session_state.reopen_notebooks_dialog = True
     store.delete_thread(thread_id)
+    purge_notebook_retry_keys(st.session_state, thread_id)
     if thread_id == st.session_state.thread_id:
         st.session_state.thread_id = None
         _persist_active_thread(None)

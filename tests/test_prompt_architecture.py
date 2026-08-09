@@ -303,6 +303,53 @@ def test_all_six_authoritative_stages_select_correct_stage_prompt(tmp_path):
         assert "CLIENT INJECTED SUMMARY HACK" not in composed
 
 
+def test_authoritative_source_selection_controls_model_knowledge(tmp_path):
+    """No selected source permits broader knowledge; any selected source forbids it."""
+    store = StudentStore(tmp_path / "grounding-mode.sqlite3")
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    service = CoachApplicationService(
+        store,
+        notebooks,
+        CoachWorkflow(DeterministicCoachProvider(StageDecision.STAY), transitions),
+        LearningProgressService(store, notebooks, transitions),
+        auto_advance_stages=False,
+    )
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+
+    # A legacy false metadata flag and a client false hint must not override
+    # the source-free UI mode.
+    source_free = service._authoritative_request(  # noqa: SLF001
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="Help me frame this issue.",
+            current_stage="focus",
+            response_detail="short",
+            allow_model_knowledge=False,
+        )
+    )
+    assert source_free.allow_model_knowledge is True
+
+    source = add_text_source(
+        store,
+        thread_id,
+        "Lecture evidence",
+        "Older pedestrians may need longer crossing intervals.",
+    )
+    store.update_thread(thread_id, metadata={"allow_model_knowledge": True})
+    grounded = service._authoritative_request(  # noqa: SLF001
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="What does this evidence suggest?",
+            current_stage="focus",
+            response_detail="short",
+            source_ids=[source["id"]],
+            allow_model_knowledge=True,
+        )
+    )
+    assert grounded.allow_model_knowledge is False
+
+
 def test_client_cannot_override_stage_or_inject_prompt_fields(tmp_path, monkeypatch):
     store = StudentStore(tmp_path / "trust.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")

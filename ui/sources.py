@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from backend.settings import settings
 from backend.source_library import COURSE_MATERIAL_GROUPS, is_locked_course_source
@@ -229,6 +230,70 @@ def _sources_expander_changed(section: str, widget_key: str) -> None:
     """Persist as soon as the student expands or collapses a Sources section."""
     _persist_sources_expander_state(section, widget_key)
 
+
+def _select_all_checkbox_state(
+    selected_count: int,
+    total_count: int,
+) -> tuple[bool, bool]:
+    """Return ``(checked, indeterminate)`` for the source master checkbox."""
+    if total_count <= 0:
+        return False, False
+    if selected_count >= total_count:
+        return True, False
+    return False, selected_count > 0
+
+
+def _set_select_all_checkbox_state(*, checked: bool, indeterminate: bool) -> None:
+    """Apply the tri-state visual state to Streamlit's native checkbox.
+
+    Streamlit exposes a boolean checkbox value, so the partial-selection state
+    is applied to the rendered native input after the widget mounts. Clicking
+    an indeterminate checkbox follows the native browser behavior and selects
+    every source.
+    """
+    state = "indeterminate" if indeterminate else "checked" if checked else "unchecked"
+    aria_state = "mixed" if indeterminate else "true" if checked else "false"
+    components.html(
+        f"""
+<script>
+(() => {{
+  const state = {state!r};
+  const ariaState = {aria_state!r};
+  let attempts = 0;
+  const applyState = () => {{
+    try {{
+      const root = window.parent.document.querySelector(
+        '.st-key-sources_select_all'
+      );
+      const control = root && root.querySelector(
+        '[role="checkbox"], input[type="checkbox"]'
+      );
+      if (root) {{
+        root.dataset.cdSelectAllState = state;
+        if (control) {{
+          if ('indeterminate' in control) {{
+            control.indeterminate = state === 'indeterminate';
+          }}
+          control.setAttribute('aria-checked', ariaState);
+          const label = control.closest('label');
+          if (label) label.setAttribute('aria-checked', ariaState);
+        }}
+        if (control || attempts++ >= 20) return;
+        window.setTimeout(applyState, 50);
+        return;
+      }}
+    }} catch (error) {{
+    }}
+    if (attempts++ < 20) window.setTimeout(applyState, 50);
+  }};
+  window.setTimeout(applyState, 0);
+}})();
+</script>
+""",
+        height=0,
+    )
+
+
 def render_sources_panel() -> None:
     """Render the Sources column.
 
@@ -334,8 +399,23 @@ def _render_sources_panel_body() -> None:
             sort_mode="Recent",
         )
         if sources:
-            all_selected = selected_count == len(sources)
+            all_selected, select_all_indeterminate = _select_all_checkbox_state(
+                selected_count,
+                len(sources),
+            )
+            select_all_state = (
+                "indeterminate"
+                if select_all_indeterminate
+                else "checked"
+                if all_selected
+                else "unchecked"
+            )
             with st.container(key="sources_select_all"):
+                st.markdown(
+                    f'<span class="cd-select-all-state" '
+                    f'data-state="{select_all_state}" aria-hidden="true"></span>',
+                    unsafe_allow_html=True,
+                )
                 next_all = st.checkbox(
                     "Select all sources",
                     value=all_selected,
@@ -344,6 +424,10 @@ def _render_sources_panel_body() -> None:
                         f"{len(sources)}-{selected_count}"
                     ),
                 )
+            _set_select_all_checkbox_state(
+                checked=all_selected,
+                indeterminate=select_all_indeterminate,
+            )
             if next_all != all_selected:
                 store.set_all_sources_selected(st.session_state.thread_id, next_all)
                 if next_all:

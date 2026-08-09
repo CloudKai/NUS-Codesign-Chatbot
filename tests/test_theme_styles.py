@@ -39,7 +39,7 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
         "30-chat.css": ".chat-context-line",
         "40-sources.css": ".st-key-sources_panel",
         "50-dialogs-notebooks.css": ".st-key-notebook_library_scroll",
-        "55-auth.css": ".cd-auth-sign-in-link",
+        "55-auth.css": ".cd-auth-redirecting",
         "60-profile-topbar.css": ".st-key-profile_menu_root",
         "90-responsive.css": "@media (max-width:1050px)",
     }

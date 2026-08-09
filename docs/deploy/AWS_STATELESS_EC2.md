@@ -192,11 +192,24 @@ Required production `.env` keys (host-only):
 - `USER_UPLOADS_BUCKET=<bucket>`
 - Cognito + public URL values already set in `compose.prod.yaml`
 
-`/api/v1/ready` checks configuration, queries all five required DSQL tables,
-and performs a bounded read-only S3 list against the `users/` prefix. A missing
-schema, missing table grant, missing bucket, wrong region, or denied S3 list
-permission therefore keeps the app unhealthy instead of failing on the first
-student action.
+`/api/v1/ready` checks non-secret Cognito configuration locally (it does not
+perform OIDC discovery), queries all five required DSQL tables, and performs a
+bounded read-only S3 list against the `users/` prefix. A missing schema, table
+grant, bucket, wrong region, or Cognito callback configuration therefore
+keeps the app unhealthy instead of failing on the first student action. In
+production the Cognito callback must be HTTPS and end in
+`/api/v1/auth/callback`.
+
+The readiness endpoint is intentionally container-/host-internal: Caddy only
+publishes `/api/v1/health`. Monitor `/api/v1/ready` from Docker's healthcheck
+or a host-local monitor; never expose it as a public metrics endpoint.
+
+The application writes compact JSON operational events to its normal container
+logs: API route/method/status/latency and aggregate coach provider, selected
+source, retrieval, citation, recommendation, and accepted/rejected stage
+outcomes. These events omit prompts, source text, notebook/source/transition
+IDs, emails, and tokens. Ship only those logs to CloudWatch (or another
+protected log sink) with the normal retention policy.
 
 ### S3 uploads bucket (required before the live smoke)
 
@@ -250,12 +263,23 @@ permissions for that key; the default S3-managed encryption needs no KMS grant.
 3. EC2 IAM role mapped to `co_design_app` (DbConnect).
 4. Host `.env` has `DSQL_USER=co_design_app` (not admin).
 5. App connects via IAM DbConnect token.
-6. Create Cognito user/session; create notebook; save/reload messages.
-7. Upload a file (lands in S3); preview/download succeeds.
-8. Restart or remove/recreate the app container (no `/app/data` mount).
-9. Login again: notebook + messages still present; S3 upload still
+6. After separate approval for live writes, run the guarded runtime-role smoke:
+
+   ```sh
+   DATABASE_PROVIDER=dsql DSQL_USER=co_design_app \
+     .venv/bin/python scripts/smoke_dsql_idempotency.py \
+     --confirm-live --identifier 'cognito:<sub>'
+   ```
+
+   It uses two independent runtime connections and the deterministic mock
+   provider, performs no DDL/S3/Bedrock/provider calls, and removes its
+   disposable notebook rows in `finally`. Do not run it before DSQL is ready.
+7. Create Cognito user/session; create notebook; save/reload messages.
+8. Upload a file (lands in S3); preview/download succeeds.
+9. Restart or remove/recreate the app container (no `/app/data` mount).
+10. Login again: notebook + messages still present; S3 upload still
    previews/downloads.
-10. Delete notebook: DSQL rows and S3 objects under the thread prefix are gone.
+11. Delete notebook: DSQL rows and S3 objects under the thread prefix are gone.
 
 Until this smoke sequence passes against real DSQL/S3 in `us-west-2`, the
 migration is **not** complete.
