@@ -6,9 +6,10 @@ import io
 import logging
 import mimetypes
 import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from .settings import settings
 
@@ -41,6 +42,7 @@ class StoredUpload:
     extracted_text: str = ""
     storage_key: str | None = None
     storage_provider: str = "local"
+    source_id: str | None = None
 
     @property
     def is_image(self) -> bool:
@@ -292,6 +294,7 @@ def save_uploads(
     max_file_size_mb: int | None = None,
     compress: bool = True,
     owner_id: str = "local-student",
+    source_ids: Sequence[str] | None = None,
 ) -> list[StoredUpload]:
     """Validate, optionally compress, and store uploads.
 
@@ -303,17 +306,21 @@ def save_uploads(
     lecture-note sync) so notebook create does not re-encode large PDFs.
 
     Local development keeps the existing ``files_dir/threads/.../uploads``
-    layout. Production ``FILE_STORAGE_PROVIDER=s3`` stores bytes in object
-    storage under generated keys and leaves only disposable temp paths locally.
+    layout. Object storage stores bytes under generated keys that include a
+    server-generated ``source_id``:
+
+    ``users/<user-id>/notebooks/<notebook-id>/sources/<source-id>/<safe-filename>``
     """
     items = list(uploads)
     if len(items) > settings.max_files:
         raise ValueError(f"Upload at most {settings.max_files} files per message.")
+    if source_ids is not None and len(source_ids) != len(items):
+        raise ValueError("source_ids length must match uploads")
     size_limit_mb = max_file_size_mb or settings.max_file_size_mb
     use_object_storage = settings.file_storage_provider != "local"
     root = None if use_object_storage else _upload_root(thread_id)
     stored: list[StoredUpload] = []
-    for name, content, supplied_mime in items:
+    for index, (name, content, supplied_mime) in enumerate(items):
         if len(content) > size_limit_mb * 1024 * 1024:
             raise ValueError(f"{name} exceeds the {size_limit_mb} MB limit.")
         payload = compress_upload_bytes(name, content) if compress else content
@@ -336,9 +343,14 @@ def save_uploads(
             from backend.persistence.factory import get_file_storage
             from backend.persistence.object_keys import build_upload_object_key
 
+            source_id = str(
+                (source_ids[index] if source_ids is not None else None)
+                or uuid.uuid4()
+            )
             key = build_upload_object_key(
                 user_id=owner_id,
                 notebook_id=thread_id,
+                source_id=source_id,
                 filename=safe_name,
             )
             get_file_storage().put_bytes(key=key, data=payload, content_type=mime)
@@ -353,6 +365,7 @@ def save_uploads(
                     extracted_text=extracted[:120_000],
                     storage_key=key,
                     storage_provider=settings.file_storage_provider,
+                    source_id=source_id,
                 )
             )
             continue
@@ -371,6 +384,9 @@ def save_uploads(
                 extracted = (
                     f"[Could not extract {candidate.name}: {type(exc).__name__}]"
                 )
+        local_source_id = (
+            str(source_ids[index]) if source_ids is not None else None
+        )
         stored.append(
             StoredUpload(
                 name=candidate.name,
@@ -379,6 +395,8 @@ def save_uploads(
                 size=len(payload),
                 supported=supported,
                 extracted_text=extracted[:120_000],
+                storage_provider="local",
+                source_id=local_source_id,
             )
         )
     return stored

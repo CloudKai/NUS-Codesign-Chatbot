@@ -8,11 +8,11 @@ from typing import Any
 from urllib.parse import quote, urlparse
 from uuid import uuid4
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
-from .application import CoachApplicationService
+from .auth_oidc import CognitoOIDCClient
 from .auth_routes import register_auth_routes
 from .domain import (
     CoachRequest,
@@ -25,13 +25,11 @@ from .domain import (
     SourceSelectAllRequest,
     SourceUpdateRequest,
 )
-from .learning_service import LearningProgressService
-from .providers import ProviderUnavailableError, configured_coach_provider
-from .repositories import SQLiteNotebookRepository, SQLitePhaseTransitionRepository
+from .owner_context import OwnerResolver, OwnerServices
+from .providers import ProviderUnavailableError
 from .settings import settings
 from .source_library import CourseMaterialSyncCoordinator
 from .student_store import StudentStore
-from .workflow import CoachWorkflow
 from .workspace_service import WorkspaceService
 
 logger = logging.getLogger(__name__)
@@ -70,9 +68,14 @@ def create_app(
     *,
     auto_advance_stages: bool | None = None,
     workspace: WorkspaceService | None = None,
-    oidc_client=None,
+    oidc_client: CognitoOIDCClient | None = None,
 ) -> FastAPI:
-    """Create a local API application with injectable progression behavior."""
+    """Create a local API application with injectable progression behavior.
+
+    Application CRUD/coach routes resolve the owner from a verified Cognito
+    ID-token cookie. Injected *store* / *workspace* remain the local-demo and
+    test default when no Cognito cookie is present (SQLite + local/memory only).
+    """
     from backend.persistence.factory import (
         create_student_store,
         validate_storage_configuration,
@@ -80,30 +83,49 @@ def create_app(
 
     validate_storage_configuration()
     active_store = store or create_student_store()
-    workspace_service = workspace or WorkspaceService(
-        active_store, CourseMaterialSyncCoordinator()
+    course_sync = CourseMaterialSyncCoordinator()
+    # Optional injected workspace is only used as the anonymous/local default.
+    # Authenticated Cognito requests always receive a freshly owner-scoped
+    # WorkspaceService from OwnerResolver (never the shared local-student one).
+    if workspace is not None and workspace.store is not active_store:
+        raise ValueError("Injected workspace must use the same store instance")
+    advance = (
+        settings.auto_advance_stages
+        if auto_advance_stages is None
+        else auto_advance_stages
     )
-    notebooks = SQLiteNotebookRepository(active_store)
-    transitions = SQLitePhaseTransitionRepository(active_store)
-    workflow = CoachWorkflow(configured_coach_provider(), transitions)
-    learning_service = LearningProgressService(active_store, notebooks, transitions)
-    coach_service = CoachApplicationService(
+    oidc = oidc_client or CognitoOIDCClient(store=active_store)
+    resolver = OwnerResolver(
         active_store,
-        notebooks,
-        workflow,
-        learning_service,
-        auto_advance_stages=(
-            settings.auto_advance_stages
-            if auto_advance_stages is None
-            else auto_advance_stages
-        ),
+        oidc=oidc,
+        course_sync=course_sync,
+        auto_advance_stages=bool(advance),
     )
+    if workspace is not None:
+        # Replace the cached default workspace with the injected instance so
+        # tests that assert on a shared WorkspaceService keep working.
+        cached = resolver._cache[active_store.identifier]  # noqa: SLF001
+        resolver._cache[active_store.identifier] = OwnerServices(  # noqa: SLF001
+            store=cached.store,
+            workspace=workspace,
+            coach=cached.coach,
+            learning=cached.learning,
+            workflow=cached.workflow,
+            transitions=cached.transitions,
+            identifier=cached.identifier,
+            user_id=cached.user_id,
+        )
+
     app = FastAPI(title="Co-design local API", version="0.1.0")
     register_auth_routes(
         app,
         store=active_store,
-        oidc=oidc_client,
+        oidc=oidc,
     )
+
+    def current_owner(request: Request) -> OwnerServices:
+        """FastAPI dependency: Cognito-verified owner or local-student default."""
+        return resolver.resolve(request)
 
     @app.middleware("http")
     async def attach_request_id(request: Request, call_next):
@@ -195,26 +217,35 @@ def create_app(
         }
 
     @app.get("/api/v1/preferences")
-    def get_preferences() -> dict[str, Any]:
-        """Return local user preferences."""
-        return workspace_service.get_preferences()
+    def get_preferences(owner: OwnerServices = Depends(current_owner)) -> dict[str, Any]:
+        """Return preferences for the authenticated (or local demo) owner."""
+        return owner.workspace.get_preferences()
 
     @app.patch("/api/v1/preferences")
-    def patch_preferences(request: PreferencePatch) -> dict[str, Any]:
-        """Merge preference keys for the local user."""
+    def patch_preferences(
+        request: PreferencePatch,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> dict[str, Any]:
+        """Merge preference keys for the authenticated owner."""
         patch = request.model_dump(exclude_none=True)
-        return workspace_service.update_preferences(patch)
+        return owner.workspace.update_preferences(patch)
 
     @app.get("/api/v1/threads")
-    def list_threads(search: str = "") -> list[dict[str, Any]]:
-        """List notebooks for the local student."""
-        return workspace_service.list_threads(search)
+    def list_threads(
+        search: str = "",
+        owner: OwnerServices = Depends(current_owner),
+    ) -> list[dict[str, Any]]:
+        """List notebooks owned by the authenticated user."""
+        return owner.workspace.list_threads(search)
 
     @app.post("/api/v1/threads")
-    def create_thread(request: NotebookCreateRequest) -> dict[str, Any]:
-        """Create a notebook with optional initial metadata."""
+    def create_thread(
+        request: NotebookCreateRequest,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> dict[str, Any]:
+        """Create a notebook owned by the authenticated user."""
         try:
-            return workspace_service.create_thread(
+            return owner.workspace.create_thread(
                 name=request.name,
                 model_id=request.model_id,
                 support_mode=request.support_mode,
@@ -225,42 +256,62 @@ def create_app(
             raise _value_error(error) from error
 
     @app.get("/api/v1/threads/{thread_id}")
-    def get_thread(thread_id: str) -> dict[str, Any]:
-        """Return one notebook."""
-        thread = workspace_service.get_thread(thread_id)
+    def get_thread(
+        thread_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> dict[str, Any]:
+        """Return one owned notebook."""
+        thread = owner.workspace.get_thread(thread_id)
         if not thread:
             raise HTTPException(status_code=404, detail="Notebook not found")
         return thread
 
     @app.patch("/api/v1/threads/{thread_id}")
-    def update_thread(thread_id: str, request: NotebookUpdateRequest) -> dict[str, Any]:
-        """Rename a notebook and/or merge metadata."""
+    def update_thread(
+        thread_id: str,
+        request: NotebookUpdateRequest,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> dict[str, Any]:
+        """Rename an owned notebook and/or merge metadata."""
         try:
-            return workspace_service.update_thread(
+            return owner.workspace.update_thread(
                 thread_id, name=request.name, metadata=request.metadata
             )
         except ValueError as error:
             raise _value_error(error) from error
 
     @app.delete("/api/v1/threads/{thread_id}")
-    def delete_thread(thread_id: str) -> dict[str, str]:
-        """Delete a notebook."""
-        workspace_service.delete_thread(thread_id)
+    def delete_thread(
+        thread_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> dict[str, str]:
+        """Delete an owned notebook."""
+        try:
+            owner.workspace.delete_thread(thread_id)
+        except ValueError as error:
+            raise _value_error(error) from error
         return {"status": "deleted"}
 
     @app.get("/api/v1/threads/{thread_id}/messages")
-    def list_messages(thread_id: str) -> list[dict[str, Any]]:
-        """Return canonical chat history."""
+    def list_messages(
+        thread_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> list[dict[str, Any]]:
+        """Return canonical chat history for an owned notebook."""
         try:
-            return workspace_service.get_messages(thread_id)
+            return owner.workspace.get_messages(thread_id)
         except ValueError as error:
             raise _value_error(error) from error
 
     @app.post("/api/v1/threads/{thread_id}/messages")
-    def create_message(thread_id: str, request: MessageCreateRequest) -> dict[str, str]:
-        """Persist one message (welcome seeding and similar)."""
+    def create_message(
+        thread_id: str,
+        request: MessageCreateRequest,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> dict[str, str]:
+        """Persist one message on an owned notebook."""
         try:
-            message_id = workspace_service.add_message(
+            message_id = owner.workspace.add_message(
                 thread_id,
                 request.role,
                 request.content,
@@ -272,20 +323,26 @@ def create_app(
 
     @app.get("/api/v1/threads/{thread_id}/sources")
     def list_sources(
-        thread_id: str, selected_only: bool = False
+        thread_id: str,
+        selected_only: bool = False,
+        owner: OwnerServices = Depends(current_owner),
     ) -> list[dict[str, Any]]:
-        """List notebook sources without filesystem paths."""
+        """List owned notebook sources without filesystem paths."""
         try:
-            return workspace_service.list_sources(
+            return owner.workspace.list_sources(
                 thread_id, selected_only=selected_only
             )
         except ValueError as error:
             raise _value_error(error) from error
 
     @app.get("/api/v1/threads/{thread_id}/sources/{source_id}")
-    def get_source(thread_id: str, source_id: str) -> dict[str, Any]:
-        """Return one source without a filesystem path."""
-        source = workspace_service.get_source(thread_id, source_id)
+    def get_source(
+        thread_id: str,
+        source_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> dict[str, Any]:
+        """Return one owned source without a filesystem path."""
+        source = owner.workspace.get_source(thread_id, source_id)
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
         return source
@@ -294,8 +351,9 @@ def create_app(
     async def upload_sources(
         thread_id: str,
         files: list[UploadFile] = File(...),
+        owner: OwnerServices = Depends(current_owner),
     ) -> list[dict[str, Any]]:
-        """Upload one or more files into the notebook source library."""
+        """Upload files into an owned notebook's source library."""
         uploads: list[tuple[str, bytes, str | None]] = []
         for upload in files:
             payload = await upload.read()
@@ -303,23 +361,26 @@ def create_app(
                 (upload.filename or "upload.bin", payload, upload.content_type)
             )
         try:
-            return workspace_service.upload_sources(thread_id, uploads)
+            return owner.workspace.upload_sources(thread_id, uploads)
         except ValueError as error:
             raise _value_error(error) from error
 
     @app.patch("/api/v1/threads/{thread_id}/sources/{source_id}")
     def update_source(
-        thread_id: str, source_id: str, request: SourceUpdateRequest
+        thread_id: str,
+        source_id: str,
+        request: SourceUpdateRequest,
+        owner: OwnerServices = Depends(current_owner),
     ) -> dict[str, Any]:
-        """Rename and/or change selection for one source."""
+        """Rename and/or change selection for one owned source."""
         try:
             if request.title is not None:
-                workspace_service.rename_source(thread_id, source_id, request.title)
+                owner.workspace.rename_source(thread_id, source_id, request.title)
             if request.selected is not None:
-                workspace_service.set_source_selected(
+                owner.workspace.set_source_selected(
                     thread_id, source_id, request.selected
                 )
-            source = workspace_service.get_source(thread_id, source_id)
+            source = owner.workspace.get_source(thread_id, source_id)
             if not source:
                 raise ValueError("Source not found")
             return source
@@ -328,30 +389,40 @@ def create_app(
 
     @app.post("/api/v1/threads/{thread_id}/sources/select-all")
     def select_all_sources(
-        thread_id: str, request: SourceSelectAllRequest
+        thread_id: str,
+        request: SourceSelectAllRequest,
+        owner: OwnerServices = Depends(current_owner),
     ) -> list[dict[str, Any]]:
-        """Select or deselect every source in a notebook."""
+        """Select or deselect every source in an owned notebook."""
         try:
-            return workspace_service.set_all_sources_selected(
+            return owner.workspace.set_all_sources_selected(
                 thread_id, request.selected
             )
         except ValueError as error:
             raise _value_error(error) from error
 
     @app.delete("/api/v1/threads/{thread_id}/sources/{source_id}")
-    def delete_source(thread_id: str, source_id: str) -> dict[str, str]:
-        """Delete a non-locked source."""
+    def delete_source(
+        thread_id: str,
+        source_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> dict[str, str]:
+        """Delete a non-locked owned source."""
         try:
-            workspace_service.delete_source(thread_id, source_id)
+            owner.workspace.delete_source(thread_id, source_id)
         except ValueError as error:
             raise _value_error(error) from error
         return {"status": "deleted"}
 
     @app.get("/api/v1/threads/{thread_id}/sources/{source_id}/content")
-    def source_content(thread_id: str, source_id: str) -> Response:
-        """Return source file bytes for preview or download."""
+    def source_content(
+        thread_id: str,
+        source_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> Response:
+        """Return owned source file bytes for preview or download."""
         try:
-            content = workspace_service.read_source_content(thread_id, source_id)
+            content = owner.workspace.read_source_content(thread_id, source_id)
         except ValueError as error:
             raise _value_error(error) from error
         disposition = (
@@ -364,19 +435,25 @@ def create_app(
         )
 
     @app.post("/api/v1/threads/{thread_id}/sources/backfill-legacy")
-    def backfill_legacy(thread_id: str) -> dict[str, int]:
-        """Import legacy message attachments into the source library."""
+    def backfill_legacy(
+        thread_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> dict[str, int]:
+        """Import legacy message attachments into the owned source library."""
         try:
-            created = workspace_service.backfill_legacy_sources(thread_id)
+            created = owner.workspace.backfill_legacy_sources(thread_id)
         except ValueError as error:
             raise _value_error(error) from error
         return {"created": created}
 
     @app.post("/api/v1/threads/{thread_id}/sources/sync-course-materials")
-    def sync_course_materials(thread_id: str) -> dict[str, Any]:
-        """Synchronize lecture-note folder materials into the notebook."""
+    def sync_course_materials(
+        thread_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> dict[str, Any]:
+        """Synchronize lecture-note folder materials into the owned notebook."""
         try:
-            result = workspace_service.sync_course_materials(thread_id)
+            result = owner.workspace.sync_course_materials(thread_id)
         except ValueError as error:
             raise _value_error(error) from error
         return {
@@ -389,33 +466,42 @@ def create_app(
         }
 
     @app.get("/api/v1/threads/{thread_id}/learning-state")
-    def learning_state(thread_id: str) -> dict:
+    def learning_state(
+        thread_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> dict:
         """Return persisted notebook learning metadata for the owned thread."""
-        thread = active_store.get_thread(thread_id)
+        thread = owner.store.get_thread(thread_id)
         if not thread:
             raise HTTPException(status_code=404, detail="Notebook not found")
         return dict(thread.get("metadata") or {})
 
     @app.get("/api/v1/threads/{thread_id}/phase-transitions/pending")
-    def pending_transition(thread_id: str) -> PendingPhaseTransition | None:
+    def pending_transition(
+        thread_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> PendingPhaseTransition | None:
         """Return the student's unresolved stage transition recommendation."""
-        if not active_store.get_thread(thread_id):
+        if not owner.store.get_thread(thread_id):
             raise HTTPException(status_code=404, detail="Notebook not found")
-        return transitions.get_pending(thread_id)
+        return owner.transitions.get_pending(thread_id)
 
     @app.post("/api/v1/coach/turn", response_model=CoachTurn)
-    def coach_turn(request: CoachRequest) -> CoachTurn:
-        """Run the local typed coaching workflow for an existing notebook."""
+    def coach_turn(
+        request: CoachRequest,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> CoachTurn:
+        """Run the typed coaching workflow for an owned notebook."""
         logger.info(
             "coach_turn request thread_id=%s stage=%s sources=%s",
             request.thread_id,
             request.current_stage,
             len(request.source_ids),
         )
-        if not active_store.get_thread(request.thread_id):
+        if not owner.store.get_thread(request.thread_id):
             raise HTTPException(status_code=404, detail="Notebook not found")
         try:
-            turn = coach_service.submit(request)
+            turn = owner.coach.submit(request)
         except ProviderUnavailableError as error:
             logger.warning(
                 "coach_turn provider unavailable thread_id=%s", request.thread_id
@@ -437,7 +523,10 @@ def create_app(
         return turn
 
     @app.post("/api/v1/coach/turn/stream")
-    def coach_turn_stream(request: CoachRequest) -> StreamingResponse:
+    def coach_turn_stream(
+        request: CoachRequest,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> StreamingResponse:
         """Stream one coaching turn as NDJSON progress + token events."""
 
         def events():
@@ -449,14 +538,14 @@ def create_app(
                 }
             ) + "\n"
             try:
-                turn = coach_service.submit(request)
+                turn = owner.coach.submit(request)
             except ProviderUnavailableError as error:
                 yield json.dumps({"event": "error", "detail": str(error), "status": 503}) + "\n"
                 return
             except ValueError as error:
                 yield json.dumps({"event": "error", "detail": str(error), "status": 400}) + "\n"
                 return
-            graph = workflow.inspect_thread(request.thread_id) or {}
+            graph = owner.workflow.inspect_thread(request.thread_id) or {}
             yield json.dumps(
                 {
                     "event": "graph",
@@ -474,16 +563,19 @@ def create_app(
                 {"event": "done", "turn": turn.model_dump(mode="json")}
             ) + "\n"
 
-        if not active_store.get_thread(request.thread_id):
+        if not owner.store.get_thread(request.thread_id):
             raise HTTPException(status_code=404, detail="Notebook not found")
         return StreamingResponse(events(), media_type="application/x-ndjson")
 
     @app.get("/api/v1/threads/{thread_id}/graph")
-    def graph_inspection(thread_id: str) -> dict[str, Any]:
+    def graph_inspection(
+        thread_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> dict[str, Any]:
         """Return the latest inspectable coach-graph summary for a notebook."""
-        if not active_store.get_thread(thread_id):
+        if not owner.store.get_thread(thread_id):
             raise HTTPException(status_code=404, detail="Notebook not found")
-        summary = workflow.inspect_thread(thread_id)
+        summary = owner.workflow.inspect_thread(thread_id)
         if not summary:
             return {"thread_id": thread_id, "steps": [], "mode": None}
         return {"thread_id": thread_id, **summary}
@@ -496,6 +588,7 @@ def create_app(
         thread_id: str,
         transition_id: str,
         request: TransitionResolution,
+        owner: OwnerServices = Depends(current_owner),
     ) -> PendingPhaseTransition:
         """Persist the student's accept/reject decision for a transition."""
         logger.info(
@@ -505,7 +598,7 @@ def create_app(
             request.accepted,
         )
         try:
-            return learning_service.resolve(thread_id, transition_id, request.accepted)
+            return owner.learning.resolve(thread_id, transition_id, request.accepted)
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 

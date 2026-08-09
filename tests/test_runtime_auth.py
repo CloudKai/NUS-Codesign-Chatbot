@@ -8,8 +8,8 @@ from backend.settings import settings
 from ui import runtime
 
 
-def test_cognito_owner_disables_single_owner_local_api(monkeypatch):
-    """Authenticated users must not collapse into the API's local-student store."""
+def test_cognito_owner_uses_multi_user_local_api(monkeypatch):
+    """Cognito sessions call FastAPI; ownership is resolved from the ID cookie."""
     monkeypatch.setattr(settings, "use_local_api", True)
     monkeypatch.setattr(
         st,
@@ -17,7 +17,7 @@ def test_cognito_owner_disables_single_owner_local_api(monkeypatch):
         {"_auth_store_identifier": "cognito:student-a"},
     )
 
-    assert runtime.local_api_enabled() is False
+    assert runtime.local_api_enabled() is True
 
 
 def test_local_student_can_use_local_api(monkeypatch):
@@ -30,6 +30,18 @@ def test_local_student_can_use_local_api(monkeypatch):
     )
 
     assert runtime.local_api_enabled() is True
+
+
+def test_api_mode_can_be_disabled(monkeypatch):
+    """USE_LOCAL_API=false keeps the in-process fallback for tests/legacy."""
+    monkeypatch.setattr(settings, "use_local_api", False)
+    monkeypatch.setattr(
+        st,
+        "session_state",
+        {"_auth_store_identifier": "cognito:student-a"},
+    )
+
+    assert runtime.local_api_enabled() is False
 
 
 def test_cached_resources_are_isolated_by_cognito_subject():

@@ -100,25 +100,37 @@ def course_material_sync() -> CourseMaterialSyncCoordinator:
 
 @st.cache_resource
 def local_api_client() -> LocalApiClient:
-    """Create the typed client used when the optional local API mode is enabled."""
+    """Create the typed client used when the optional local API mode is enabled.
+
+    Forwards the short-lived Cognito ID-token cookie on each request so FastAPI
+    can resolve the authenticated owner. The refresh cookie never reaches
+    Streamlit and is not forwarded here.
+    """
+
+    def _id_cookie() -> dict[str, str]:
+        try:
+            from ui.auth_gate import _cookie_value
+        except Exception:
+            return {}
+        token = _cookie_value(str(settings.cognito_id_token_cookie_name))
+        if not token:
+            return {}
+        return {str(settings.cognito_id_token_cookie_name): token}
+
     return LocalApiClient(
-        str(getattr(settings, "api_base_url", "http://127.0.0.1:8000"))
+        str(getattr(settings, "api_base_url", "http://127.0.0.1:8000")),
+        cookie_provider=_id_cookie,
     )
 
 
 def local_api_enabled() -> bool:
-    """Return whether the single-owner local API is safe for this session.
+    """Return whether Streamlit should call FastAPI for application traffic.
 
-    The current FastAPI demo owns one ``local-student`` store and has no
-    authenticated request boundary. Cognito users therefore stay on the
-    equivalent in-process application services, which are keyed by
-    ``cognito:{sub}``, instead of collapsing multiple users into that shared
-    API owner. The API remains available for its original single-user local
-    demo and deterministic contract tests.
+    Cognito-authenticated students and the local ``local-student`` demo both use
+    the API when ``USE_LOCAL_API`` is enabled. FastAPI resolves the owner from
+    the verified Cognito ID cookie (or falls back to local-student for demos).
     """
-    return bool(getattr(settings, "use_local_api", False)) and (
-        owner_identifier() == "local-student"
-    )
+    return bool(getattr(settings, "use_local_api", False))
 
 
 def submit_coach_turn(request: CoachRequest) -> CoachTurn:
@@ -372,11 +384,8 @@ class WorkspaceFacade:
     def request_course_material_sync(self, thread_id: str):
         """Start or join course-material sync for the active notebook.
 
-        Single-user local API sessions sync through FastAPI. Cognito sessions
-        use the owner-scoped in-process store selected by ``local_api_enabled``.
-
-        Otherwise uses the shared in-process coordinator so the Sources
-        fragment can poll without blocking on large lecture PDFs.
+        API-mode sessions (including Cognito) sync through FastAPI so ownership
+        stays on the authenticated application user.
         """
         if local_api_enabled():
             api_base = str(getattr(settings, "api_base_url", "http://127.0.0.1:8000"))

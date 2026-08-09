@@ -156,10 +156,9 @@ class CourseMaterialSyncCoordinator:
     ) -> Future[LectureNotesSyncResult]:
         """Share one remote (HTTP) course-material sync per notebook snapshot.
 
-        Used when the Streamlit UI creates notebooks via the local API
-        (``local-student`` ownership) while the UI process may be bound to a
-        Cognito-scoped in-process store. Sync must hit the API so the notebook
-        owner matches.
+        Used when Streamlit creates notebooks via FastAPI. Sync must hit the
+        API so notebook ownership stays bound to the authenticated Cognito user
+        (or local-student demo owner) rather than any in-process fallback store.
         """
         fingerprint = course_material_fingerprint()
         key = (str(channel), "__api__", str(thread_id))
@@ -402,12 +401,15 @@ def add_file_sources(
     compress: bool = True,
 ) -> list[dict[str, Any]]:
     upload_items = list(uploads)
+    # Generate source ids server-side before object storage so keys include them.
+    source_ids = [str(uuid.uuid4()) for _ in upload_items]
     stored_uploads = save_uploads(
         thread_id,
         upload_items,
         max_file_size_mb=max_file_size_mb,
         compress=compress,
         owner_id=getattr(store, "owner_id", "local-student"),
+        source_ids=source_ids,
     )
     created: list[dict[str, Any]] = []
     for index, upload in enumerate(stored_uploads):
@@ -427,6 +429,7 @@ def add_file_sources(
             extracted_text=upload.extracted_text,
             size=upload.size,
             selected=True,
+            source_id=upload.source_id or source_ids[index],
             metadata={
                 **(extra_metadata or {}),
                 "managed_file": True,

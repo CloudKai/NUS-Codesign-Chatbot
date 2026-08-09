@@ -136,19 +136,19 @@ def test_sanitize_and_object_key_never_trust_raw_path():
     key = build_upload_object_key(
         user_id="user-1",
         notebook_id="notebook-1",
+        source_id="../../oid",
         filename="../../secret.pdf",
-        object_id="../../oid",
     )
-    assert key.startswith("users/user-1/notebook-1/oid/")
+    assert key == "users/user-1/notebooks/notebook-1/sources/oid/secret.pdf"
     assert ".." not in key
     assert notebook_prefix(
         user_id="user-1", notebook_id="../notebook-1"
-    ) == "users/user-1/notebook-1/"
+    ) == "users/user-1/notebooks/notebook-1/"
     assert build_extracted_text_object_key(
         user_id="user-1",
         notebook_id="notebook-1",
         source_id="source-1",
-    ) == "users/user-1/notebook-1/source-1/extracted.txt"
+    ) == "users/user-1/notebooks/notebook-1/sources/source-1/extracted.txt"
 
 
 def test_local_file_storage_round_trip(tmp_path: Path):
@@ -720,7 +720,10 @@ def test_save_uploads_and_workspace_read_via_object_storage(tmp_path: Path, monk
     assert (source.get("metadata") or {}).get("storage_provider") == "memory"
     assert source["path"] in memory._objects or memory.exists(str(source["path"]))
     assert source["object_key"]
+    assert f"/sources/{source['id']}/" in source["object_key"]
+    assert "/notebooks/" in source["object_key"]
     assert source["extracted_text_key"]
+    assert f"/sources/{source['id']}/extracted.txt" in source["extracted_text_key"]
     assert memory.get_bytes(source["extracted_text_key"]) == b"hello-s3-bytes"
     database_bytes = (tmp_path / "ws.sqlite3").read_bytes()
     assert b"hello-s3-bytes" not in database_bytes

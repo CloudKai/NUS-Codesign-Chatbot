@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import uuid
 from pathlib import Path
 
 
@@ -21,19 +20,19 @@ def build_upload_object_key(
     *,
     user_id: str,
     notebook_id: str,
+    source_id: str,
     filename: str,
-    object_id: str | None = None,
 ) -> str:
     """Build a generated object key that never trusts the raw user filename path.
 
     Example:
-        ``users/<user-id>/<notebook-id>/<uuid>/<sanitized-filename>``
+        ``users/<user-id>/notebooks/<notebook-id>/sources/<source-id>/<safe-filename>``
     """
     safe_user = sanitize_filename(user_id) or "user"
     safe_notebook = sanitize_filename(notebook_id) or "notebook"
-    safe_object = sanitize_filename(object_id or str(uuid.uuid4())) or "object"
+    safe_source = sanitize_filename(source_id) or "source"
     return (
-        f"users/{safe_user}/{safe_notebook}/{safe_object}/"
+        f"users/{safe_user}/notebooks/{safe_notebook}/sources/{safe_source}/"
         f"{sanitize_filename(filename)}"
     )
 
@@ -42,7 +41,7 @@ def notebook_prefix(*, user_id: str, notebook_id: str) -> str:
     """Return the key prefix for every object belonging to one notebook."""
     safe_user = sanitize_filename(user_id) or "user"
     safe_notebook = sanitize_filename(notebook_id) or "notebook"
-    return f"users/{safe_user}/{safe_notebook}/"
+    return f"users/{safe_user}/notebooks/{safe_notebook}/"
 
 
 def build_extracted_text_object_key(
@@ -54,9 +53,12 @@ def build_extracted_text_object_key(
     """Build a deterministic object key for derived extracted text.
 
     Example:
-        ``users/<user-id>/<notebook-id>/<source-id>/extracted.txt``
+        ``users/<user-id>/notebooks/<notebook-id>/sources/<source-id>/extracted.txt``
     """
     safe_user = sanitize_filename(user_id) or "user"
     safe_notebook = sanitize_filename(notebook_id) or "notebook"
     safe_source = sanitize_filename(source_id) or "source"
-    return f"users/{safe_user}/{safe_notebook}/{safe_source}/extracted.txt"
+    return (
+        f"users/{safe_user}/notebooks/{safe_notebook}/sources/{safe_source}/"
+        "extracted.txt"
+    )

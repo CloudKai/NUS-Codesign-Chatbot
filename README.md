@@ -16,9 +16,10 @@ Streamlit asks FastAPI /api/v1/auth/me
 ```
 
 Use **one command** to start everything. That command starts both services with
-`USE_LOCAL_API=true`. Authenticated students use owner-scoped in-process
-application services keyed by Cognito `sub`, so one student's data cannot
-collapse into the API's shared `local-student` owner.
+`USE_LOCAL_API=true`. Authenticated students call FastAPI with their Cognito
+ID-token cookie; FastAPI verifies Cognito `sub`, binds the application user,
+and scopes every notebook/source/message operation to that owner. The shared
+`local-student` owner remains only for explicit local/mock demos and tests.
 
 Both paths support Thinking Path progression, structured assessments, Review
 personalization, and selected image grounding.

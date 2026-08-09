@@ -129,6 +129,8 @@ class WorkspaceService:
 
     def delete_thread(self, thread_id: str) -> None:
         """Delete a notebook and its owned files."""
+        if not self._store.get_thread(thread_id):
+            raise ValueError("Notebook not found")
         self._store.delete_thread(thread_id)
 
     def get_messages(self, thread_id: str) -> list[dict[str, Any]]:
@@ -208,6 +210,8 @@ class WorkspaceService:
 
     def delete_source(self, thread_id: str, source_id: str) -> None:
         """Delete a non-locked source."""
+        if not self._store.get_source(thread_id, source_id):
+            raise ValueError("Source not found")
         self._store.delete_source(thread_id, source_id)
 
     def read_source_content(self, thread_id: str, source_id: str) -> SourceContent:

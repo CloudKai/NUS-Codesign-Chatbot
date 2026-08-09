@@ -24,6 +24,8 @@ from .dsql_schema import RUNTIME_ROLE_NAME
 logger = logging.getLogger(__name__)
 
 # StudentStore write methods re-executed as a whole on SQLSTATE 40001.
+# delete_source / delete_thread are overridden so object-storage cleanup runs
+# only after a successful DB commit (never inside the OCC retry callback).
 _OCC_WRITE_METHODS = (
     "upsert_cognito_user",
     "save_oauth_login_state",
@@ -41,7 +43,6 @@ _OCC_WRITE_METHODS = (
     "set_source_selected",
     "set_all_sources_selected",
     "rename_source",
-    "delete_source",
 )
 
 
@@ -141,6 +142,65 @@ class DsqlStudentStore(StudentStore):
 
         run_dsql_transaction(_delete)
         self._cleanup_notebook_files(thread_id)
+
+    def delete_source(
+        self,
+        thread_id: str,
+        source_id: str,
+        *,
+        force: bool = False,
+    ) -> None:
+        """Delete owned source metadata, then remove object-storage keys.
+
+        Object deletes run after the DSQL transaction commits so OCC retries
+        never repeat S3 side effects.
+        """
+        source = self.get_source(thread_id, source_id)
+        if not source:
+            return
+        metadata = source.get("metadata") or {}
+        if metadata.get("locked_source") and not force:
+            raise ValueError("Course materials cannot be removed from the app.")
+
+        def _delete() -> None:
+            with self._lock, self._connect() as connection:
+                connection.execute(
+                    """
+                    DELETE FROM sources
+                    WHERE id = ? AND notebook_id = ?
+                      AND notebook_id IN (
+                        SELECT id FROM notebooks WHERE id = ? AND user_id = ?
+                      )
+                    """,
+                    (source_id, thread_id, thread_id, self.owner_id),
+                )
+
+        run_dsql_transaction(_delete)
+        self._cleanup_source_files(source, thread_id=thread_id)
+
+    def _cleanup_source_files(
+        self,
+        source: dict[str, Any],
+        *,
+        thread_id: str,
+    ) -> None:
+        """Best-effort object/local cleanup after source metadata is deleted."""
+        from pathlib import Path
+
+        from backend.persistence.factory import get_file_storage
+        from backend.settings import settings
+
+        storage = get_file_storage()
+        for key in (source.get("object_key"), source.get("extracted_text_key")):
+            if key:
+                storage.delete(str(key))
+        metadata = source.get("metadata") or {}
+        local_path = metadata.get("local_path")
+        if local_path and metadata.get("managed_file"):
+            path = Path(str(local_path)).resolve()
+            allowed_root = (settings.files_dir / "threads" / thread_id).resolve()
+            if path.is_file() and allowed_root in path.parents:
+                path.unlink(missing_ok=True)
 
     def _cleanup_notebook_files(self, notebook_id: str) -> None:
         """Remove persisted upload objects for a deleted notebook.

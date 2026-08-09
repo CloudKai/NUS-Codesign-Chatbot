@@ -1470,8 +1470,14 @@ class StudentStore:
             raise ValueError("Course materials cannot be removed from the app.")
         with self._lock, self._connect() as connection:
             connection.execute(
-                "DELETE FROM sources WHERE id=? AND notebook_id=?",
-                (source_id, thread_id),
+                """
+                DELETE FROM sources
+                WHERE id=? AND notebook_id=?
+                  AND notebook_id IN (
+                    SELECT id FROM notebooks WHERE id=? AND user_id=?
+                  )
+                """,
+                (source_id, thread_id, thread_id, self.owner_id),
             )
         from backend.persistence.factory import get_file_storage
 
