@@ -123,7 +123,11 @@ def adapt_sqlite_sql(sql: str) -> str:
 
 
 def _qmark_to_percent(sql: str) -> str:
-    """Replace unbound ``?`` placeholders with ``%s`` outside string literals."""
+    """Replace unbound ``?`` placeholders with ``%s`` outside string literals.
+
+    Also escapes literal ``%`` as ``%%`` so psycopg does not treat LIKE/JSON
+    fragments such as ``LIKE '%"_internal_type"%'`` as placeholders.
+    """
     result: list[str] = []
     in_single = False
     in_double = False
@@ -136,6 +140,10 @@ def _qmark_to_percent(sql: str) -> str:
         elif char == '"' and not in_single:
             in_double = not in_double
             result.append(char)
+        elif char == "%":
+            # psycopg pyformat: every literal percent must be doubled, including
+            # those inside SQL string literals used by LIKE filters.
+            result.append("%%")
         elif char == "?" and not in_single and not in_double:
             result.append("%s")
         else:

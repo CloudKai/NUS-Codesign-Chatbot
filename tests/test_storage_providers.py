@@ -397,6 +397,21 @@ def test_adapt_sqlite_sql_and_strip_foreign_keys():
     assert "FOREIGN KEY" not in ddl.upper()
 
 
+def test_adapt_sqlite_sql_escapes_like_percent_literals_for_psycopg():
+    """Notebook list filters use LIKE '%%...%%' literals that psycopg must not parse."""
+    sql = (
+        "SELECT n.id, COUNT(CASE WHEN m.metadata_text NOT LIKE "
+        "'%\"_internal_type\": \"coach_idempotency\"%' THEN m.id END) AS c "
+        "FROM notebooks n LEFT JOIN messages m ON m.notebook_id=n.id "
+        "WHERE n.user_id = ?"
+    )
+    adapted = adapt_sqlite_sql(sql)
+    assert adapted.count("%s") == 1
+    assert '%%"_internal_type": "coach_idempotency"%%' in adapted
+    # Unescaped single-% before the quote must not remain (psycopg rejects '%"').
+    assert "%\"_internal_type\"" not in adapted.replace("%%", "")
+
+
 def test_generate_dsql_auth_token_uses_db_connect_not_admin():
     class _Client:
         def __init__(self) -> None:
