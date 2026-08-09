@@ -15,6 +15,7 @@ import pytest
 
 # Bootstrap paths before backend.settings is imported during collection.
 _BOOTSTRAP_ROOT = Path(tempfile.mkdtemp(prefix="co-design-tests-bootstrap-"))
+os.environ["APP_ENV"] = "development"
 os.environ["MOCK_OPENAI"] = "true"
 os.environ["MODEL_PROVIDER"] = "mock"
 os.environ["OPENAI_API_KEY"] = ""
@@ -58,6 +59,7 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     for directory in (files_dir, workspaces_dir, lecture_notes_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
+    monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("MOCK_OPENAI", "true")
     monkeypatch.setenv("MODEL_PROVIDER", "mock")
     monkeypatch.setenv("OPENAI_API_KEY", "")
@@ -73,8 +75,13 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
 
     from backend import settings as settings_module
     from backend.persistence.factory import reset_file_storage_cache
+    from backend.rate_limit import reset_coach_rate_limiter_for_tests
 
     reset_file_storage_cache()
+    # Drop process-local limiter state between tests so burst windows do not
+    # bleed across cases. Rate-limit tests inject their own ceilings.
+    reset_coach_rate_limiter_for_tests()
+    monkeypatch.setattr(settings_module.settings, "app_env", "development")
     monkeypatch.setattr(settings_module.settings, "data_dir", root.resolve())
     monkeypatch.setattr(settings_module.settings, "database_path", database.resolve())
     monkeypatch.setattr(settings_module.settings, "files_dir", files_dir.resolve())
@@ -91,7 +98,16 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(settings_module.settings, "model_provider", "mock")
     monkeypatch.setattr(settings_module.settings, "use_local_api", False)
     monkeypatch.setattr(settings_module.settings, "auto_advance_stages", False)
+    # Keep production defaults low; raise only in tests so multi-turn suites
+    # are not blocked by the process-local burst window.
+    monkeypatch.setattr(
+        settings_module.settings, "coach_requests_per_minute", 10_000
+    )
+    monkeypatch.setattr(
+        settings_module.settings, "max_concurrent_model_calls", 10_000
+    )
 
+    assert settings_module.settings.app_env == "development"
     assert settings_module.settings.model_provider == "mock"
     assert settings_module.settings.mock_openai is True
     assert settings_module.settings.openai_api_key == ""

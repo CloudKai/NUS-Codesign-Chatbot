@@ -60,6 +60,7 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert "build:" not in app
     assert "source: ./data" not in app
     assert "target: /app/data" not in app
+    assert 'APP_ENV: "production"' in app
     assert 'DATABASE_PROVIDER: "dsql"' in app
     assert 'FILE_STORAGE_PROVIDER: "s3"' in app
     assert 'DSQL_USER: "co_design_app"' in app
@@ -81,6 +82,13 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert 'CO_DESIGN_PUBLIC_API_URL: "https://cde2300chatbot.duckdns.org"' in app
     assert 'CO_DESIGN_UI_URL: "https://cde2300chatbot.duckdns.org"' in app
     assert "source: ./.streamlit/secrets.toml" in app
+    for block in (app, caddy):
+        assert "no-new-privileges:true" in block
+        assert "driver: json-file" in block
+        assert 'max-size: "10m"' in block
+        assert 'max-file: "3"' in block
+    # Do not force a read-only root filesystem on app/caddy without verifying
+    # Streamlit/Caddy writable paths; only the secrets bind mount is read_only.
 
 
 def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
@@ -97,6 +105,12 @@ def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     assert 'respond "Not Found" 404' in caddyfile
     assert "reverse_proxy app:8501" in caddyfile
     assert "handle_path" not in caddyfile
+    assert "Strict-Transport-Security" in caddyfile
+    assert "X-Content-Type-Options" in caddyfile
+    assert "nosniff" in caddyfile
+    assert "Referrer-Policy" in caddyfile
+    assert "Permissions-Policy" in caddyfile
+    assert "Content-Security-Policy" not in caddyfile
 
     login_index = caddyfile.index("handle /api/v1/auth/login")
     callback_index = caddyfile.index("handle /api/v1/auth/callback")

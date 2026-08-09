@@ -2,11 +2,41 @@
 
 ## Current phase
 
-**Production must-have hardening on ``Production-RemoveData``** — durable coach
-retry safety, dependency readiness, privacy-safe operations, and an
-authenticated production-parity regression now protect the existing
-Cognito/DSQL/S3 five-table design. Bedrock and true provider streaming remain
-explicitly out of scope.
+**Phases 1–13 complete on ``Production-RemoveData``; Phase 14 verdict:
+READY FOR CONTROLLED PILOT.** Mock suite, production fail-closed
+``APP_ENV``, readiness, compose/Caddy hardening, in-process rate limits,
+upload bounds, privacy-safer coach logs, pinned deps, Mock CI gates, load
+probe, AWS smoke docs, branch-protection docs, and public PDF governance are
+in place. Live Cognito/DSQL/S3 end-to-end smoke with ``--confirm-live`` remains
+a **separate release gate** and has not been executed in this pass. Bedrock
+and true provider streaming remain out of scope.
+
+### Behavior changes (Phases 1–13)
+
+1. Concurrent identical coach idempotency keys converge to one provider
+   execution; completed markers replay without false lease-lost errors.
+2. ``APP_ENV=production`` fail-closes via ``validate_production_configuration()``
+   at ``create_app`` and ``/api/v1/ready``.
+3. ``/api/v1/ready`` checks config, DB ping, file-store ping, provider
+   credential shape, and Cognito HTTPS config without paid LLM calls.
+4. ``compose.prod.yaml`` sets ``APP_ENV=production``, json-file log rotation
+   (10m × 3), and ``no-new-privileges`` on ``app``/``caddy``.
+5. ``backend/rate_limit.py`` provides single-EC2 in-process coach limits
+   (``MAX_ACTIVE_COACH_REQUESTS_PER_USER=1``, ``COACH_REQUESTS_PER_MINUTE=8``,
+   ``MAX_CONCURRENT_MODEL_CALLS=20``) wired into ``coach_turn`` /
+   ``coach_turn_stream`` using authenticated ``owner.store.owner_id``. HTTP
+   429 includes ``Retry-After``; slots release in ``finally``.
+6. Uploads: Streamlit ``maxUploadSize=10``; API rejects excess file count and
+   bounds each ``upload.read(max+1)``.
+7. Coach info logs omit notebook/thread ids and message text; request IDs and
+   aggregates remain.
+8. Caddy adds HSTS / nosniff / Referrer-Policy / Permissions-Policy (no CSP).
+   Curl checks live in ``docs/security/CADDY_PUBLIC_BOUNDARY.md``.
+9. ``requirements.txt`` uses exact pins; Mock CI runs shell/compose/compile,
+   production + idempotency gates, and full pytest.
+10. ``scripts/load_probe.py`` + ``docs/operations/LOAD_PROBE.md``; AWS smoke
+    checklist expanded; ``docs/deploy/GITHUB_BRANCH_PROTECTION.md``; public PDF
+    audit lists 10 normal-blob lecture/reading PDFs (no LFS).
 
 ### Behavior changes
 
@@ -130,10 +160,67 @@ explicitly out of scope.
     SQLSTATE ``40001`` retry without AWS. The guarded live runner requires
     ``--confirm-live``, the DSQL provider, ``co_design_app``, and an explicit
     ``cognito:<sub>`` owner; it uses runtime DML and the mock provider only.
+25. Coach idempotency ``complete_coach_request`` is now idempotent when a waiter
+    or restart already promoted the marker to ``completed`` from persisted
+    message rows after the lease owner committed ``persist_coach_turn`` but
+    before the owner completed. Matching key/fingerprint completed markers
+    return successfully; expired takeover, provider-failure release, stale
+    persist rejection, restart promotion, and DSQL OCC wrappers stay unchanged.
+26. ``APP_ENV`` defaults to ``development``. When ``APP_ENV=production``,
+    ``validate_production_configuration()`` fail-closes for mock provider,
+    ``MOCK_OPENAI`` masking, sqlite/local/memory storage, DSQL admin runtime,
+    insecure auth cookies, HTTP Cognito callbacks, incomplete Cognito/DSQL/S3/
+    OpenAI configuration, and loopback or non-HTTPS public API/UI URLs. It
+    reuses ``validate_storage_configuration`` and
+    ``validate_cognito_readiness(require_https=True)`` with no network/AWS
+    calls. ``create_app`` and ``/api/v1/ready`` both invoke it; readiness keeps
+    a dual-gate for legacy dsql/s3 Cognito HTTPS checks during cutover.
+    ``compose.prod.yaml`` and ``.env.example`` declare the env switch.
 
 ### Validation evidence
 
-**Local (this phase):**
+**Local (Phases 4–8 — this phase):**
+
+- ``.venv/bin/python -m pytest -q tests/test_rate_limit.py
+  tests/test_production_config.py tests/test_coach_idempotency.py
+  tests/test_api.py`` → **64 passed**. Upload hardening covered by
+  ``tests/test_upload_hardening.py``; compose/Caddy assertions in
+  ``tests/test_deployment_config.py``.
+- Branch ``Production-RemoveData``; no commit created in this phase.
+- Phase 1–2 uncommitted work preserved.
+
+**Local (Phase 2 — APP_ENV production fail-closed):**
+
+- Focused suite → **39 passed** (1 warning: Starlette TestClient deprecation):
+  ```sh
+  .venv/bin/python -m pytest \
+    tests/test_production_config.py \
+    tests/test_api.py::test_local_api_ready_request_id_stream_and_graph \
+    tests/test_api.py::test_readiness_fails_when_file_storage_is_unavailable \
+    tests/test_api.py::test_production_readiness_requires_local_cognito_configuration_check \
+    tests/test_api.py::test_production_readiness_redacts_dependency_error_details \
+    tests/test_api.py::test_production_readiness_reports_cognito_configured_without_discovery \
+    tests/test_deployment_config.py \
+    tests/test_storage_providers.py::test_validate_storage_configuration_requires_production_fields \
+    tests/test_cognito_token_jwks.py::test_production_cognito_readiness_is_local_and_requires_https_callback \
+    tests/test_cognito_token_jwks.py::test_cognito_readiness_errors_do_not_echo_credentials
+  ```
+- ``tests/test_production_config.py`` alone → **21 passed**.
+- ``tests/test_deployment_config.py`` alone → **10 passed**.
+- No live OpenAI, DSQL, S3, or Bedrock calls. No schema migration.
+- Branch ``Production-RemoveData``; no commit created in this phase.
+- Phase 1 uncommitted files (``backend/student_store.py``,
+  ``tests/test_coach_idempotency.py``) preserved.
+
+**Local (Phase 1 — promote-vs-complete idempotency):**
+
+- ``.venv/bin/python -m pytest -q tests/test_coach_idempotency.py`` → **15 passed**.
+- Focused coverage added for promote-between-persist-and-complete, five-way
+  concurrent same-key submissions, and API/stream HTTP 409 payload mismatch.
+- No live OpenAI, DSQL, S3, or Bedrock calls. No schema migration.
+- Branch ``Production-RemoveData``; no commit created in this phase.
+
+**Prior local (previous production hardening phase):**
 
 - ``.venv/bin/python -m pytest -q`` → **305 passed**.
 - Focused auth/UI/production-path validation → **57 passed**.
@@ -218,6 +305,13 @@ explicitly out of scope.
   this filter can expose blank internal assistant rows; back up first and remove
   only rows explicitly marked ``_internal_type=coach_idempotency`` under an
   approved rollback procedure.
+- The promote-vs-complete fix changes only ``complete_coach_request`` behavior
+  for already-completed same-key/fingerprint markers. No schema or data
+  migration is required; rollback is a code revert.
+- ``APP_ENV`` and ``validate_production_configuration`` are additive. Local
+  development remains the default; production Compose must set
+  ``APP_ENV=production``. Rollback is a code/config revert with no schema or
+  data migration.
 - Fully automated protected-browser CI remains blocked by the deliberate lack
   of a production authentication bypass and by the uncached Playwright CLI.
   ``scripts/browser_e2e_smoke.sh`` therefore pauses for a human to complete the
@@ -247,31 +341,29 @@ explicitly out of scope.
 
 ### Next exact action
 
-1. If an older local database should contain notebooks but its retained
-   ``threads`` table is already empty, stop and restore a pre-five-table backup;
-   do not infer notebook metadata from orphaned upload files automatically.
-2. Create the private S3 uploads bucket in ``us-west-2`` with Block Public
-   Access; attach bucket list plus ``users/*`` object permissions to
-   the EC2 instance role.
-3. Finish Aurora DSQL, map the EC2 role to ``co_design_app``, run
+1. Configure GitHub branch protection per
+   ``docs/deploy/GITHUB_BRANCH_PROTECTION.md``.
+2. Owner decision on public lecture PDFs per
+   ``docs/security/PUBLIC_REPOSITORY_CONTENT_AUDIT.md`` (do not delete/rewrite
+   without explicit approval).
+3. Create the private S3 uploads bucket in ``us-west-2`` with Block Public
+   Access; attach bucket list plus ``users/*`` object permissions to the EC2
+   instance role.
+4. Finish Aurora DSQL, map the EC2 role to ``co_design_app``, run
    ``scripts/init_dsql.py`` as admin, then grant SELECT/INSERT/UPDATE/DELETE on
    all tables in ``public`` to ``co_design_app``. Do not grant schema ``USAGE``.
-4. With separate live-write approval, run
+5. With separate live-write approval, run
    ``scripts/smoke_dsql_idempotency.py --confirm-live --identifier
    'cognito:<sub>'`` under ``DATABASE_PROVIDER=dsql`` and
-   ``DSQL_USER=co_design_app``. It must pass before storage cutover.
-5. Deploy the immutable ECR image with ``scripts/deploy_ecr.sh`` and require
-   ``/api/v1/ready`` to return 200.
-6. Run ``sh scripts/browser_e2e_smoke.sh`` for headed desktop/mobile/console
-   evidence, then run the Cognito → notebook → message → S3 upload/download →
-   container replacement → delete live smoke sequence. Use mock mode first;
-   make an OpenAI request only with explicit approval and a cost cap.
-7. After the live storage smoke is green, replace simulated chunks with a
-   durable provider stream and persist graph inspection summaries.
-8. Integrate Bedrock later by implementing ``ContextRetriever`` from
-   ``backend/retrieval.py`` with Knowledge Base ``Retrieve`` and selected
-   user/notebook/source metadata filters. Keep the existing composer,
-   citations, workflow, and persistence boundaries unchanged.
+   ``DSQL_USER=co_design_app``.
+6. Deploy the immutable ECR image with ``scripts/deploy_ecr.sh`` and require
+   internal ``/api/v1/ready`` 200. Verify Caddy edge curl checks in
+   ``docs/security/CADDY_PUBLIC_BOUNDARY.md``.
+7. Run the full Cognito → notebook → coach → upload → restart → isolation →
+   logout live smoke in ``docs/deploy/AWS_STATELESS_EC2.md``. Use mock mode
+   first; make an OpenAI request only with explicit approval and a cost cap.
+8. Only after that smoke is green: open class-wide traffic; then consider
+   durable provider streaming and Bedrock retrieval adapters.
 
 ## Previous completed work
 

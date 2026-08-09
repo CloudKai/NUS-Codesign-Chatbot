@@ -258,31 +258,79 @@ permissions for that key; the default S3-managed encryption needs no KMS grant.
 
 ## Live smoke test (required before cutover)
 
-1. Admin runs `scripts/init_dsql.py --admin-user admin`.
-2. Admin grants table privileges to `co_design_app` (SQL above).
-3. EC2 IAM role mapped to `co_design_app` (DbConnect).
-4. Host `.env` has `DSQL_USER=co_design_app` (not admin).
-5. App connects via IAM DbConnect token.
-6. After separate approval for live writes, run the guarded runtime-role smoke:
+Do **not** mark student cutover complete until every step below has been
+executed against real Cognito / Aurora DSQL / S3 in `us-west-2`. Live-write
+scripts require an explicit `--confirm-live` flag.
 
-   ```sh
-   DATABASE_PROVIDER=dsql DSQL_USER=co_design_app \
-     .venv/bin/python scripts/smoke_dsql_idempotency.py \
-     --confirm-live --identifier 'cognito:<sub>'
-   ```
+### Infrastructure prerequisites
 
-   It uses two independent runtime connections and the deterministic mock
-   provider, performs no DDL/S3/Bedrock/provider calls, and removes its
-   disposable notebook rows in `finally`. Do not run it before DSQL is ready.
-7. Create Cognito user/session; create notebook; save/reload messages.
-8. Upload a file (lands in S3); preview/download succeeds.
-9. Restart or remove/recreate the app container (no `/app/data` mount).
-10. Login again: notebook + messages still present; S3 upload still
-   previews/downloads.
-11. Delete notebook: DSQL rows and S3 objects under the thread prefix are gone.
+1. Create/confirm Aurora DSQL in `us-west-2`.
+2. Run admin schema initialization once (`scripts/init_dsql.py --admin-user admin`).
+3. Grant `co_design_app` SELECT/INSERT/UPDATE/DELETE on application tables.
+4. Verify the application runtime `.env` uses `DSQL_USER=co_design_app` (never admin)
+   and cannot perform DDL.
+5. Map the EC2 IAM instance profile to DSQL `DbConnect` for `co_design_app`.
+6. Create the private uploads bucket; enable Block Public Access.
+7. Attach least-privilege S3 list/read/write/delete for `users/*` only.
+8. Configure Cognito callbacks, logout, scopes, refresh lifetime, and revocation.
+9. Configure host-only production `.env` (`APP_ENV=production`, no secrets in Git).
+10. Build and push a `linux/arm64` immutable image tag to ECR; deploy that exact tag.
+11. Verify **internal** `/api/v1/ready` (Docker healthcheck / private network only).
 
-Until this smoke sequence passes against real DSQL/S3 in `us-west-2`, the
-migration is **not** complete.
+### Guarded DSQL concurrency smoke
+
+After separate approval for live writes:
+
+```sh
+DATABASE_PROVIDER=dsql DSQL_USER=co_design_app \
+  .venv/bin/python scripts/smoke_dsql_idempotency.py \
+  --confirm-live --identifier 'cognito:<sub>'
+```
+
+Uses two independent runtime connections and the deterministic mock provider.
+Performs no DDL/S3/Bedrock/provider-paid calls; removes disposable rows in
+`finally`.
+
+### End-to-end product smoke (real Cognito users)
+
+1. Cognito login.
+2. Create notebook.
+3. Send message / generate coach turn.
+4. Upload source; preview source.
+5. Confirm stage transition (recommend → student confirm).
+6. Restart/remove/recreate the application container (no `/app/data` mount).
+7. Log back in; confirm notebook, messages, progress, and source still exist.
+8. Delete source/notebook; confirm S3 cleanup under the owner prefix.
+9. Logout; confirm session invalidation (refresh rejected / auth cookies cleared).
+10. Two distinct real users cannot read or mutate each other's notebooks/sources.
+11. Simultaneous duplicate coach submission with the same idempotency key converges
+    to one provider execution and one persisted turn.
+
+Until this smoke sequence passes, the migration is **not** complete and the
+application remains **READY FOR CONTROLLED PILOT** at best.
+
+## Edge route checks (Caddy)
+
+Public Caddy terminates TLS and exposes only Cognito auth routes, health, and
+Streamlit. Coaching/CRUD `/api/*` paths must remain blocked at the edge.
+Security headers (HSTS, nosniff, Referrer-Policy, Permissions-Policy) are set
+in the site block; Content-Security-Policy is intentionally not configured.
+
+From a laptop (replace the host if the domain changes):
+
+```sh
+# Public auth/health should reach FastAPI (expect 2xx/3xx/401/403 — not 404).
+curl -sI https://cde2300chatbot.duckdns.org/api/v1/health | head -n 1
+curl -sI https://cde2300chatbot.duckdns.org/api/v1/auth/me | head -n 1
+
+# Coaching/CRUD must be blocked at Caddy (expect HTTP 404 Not Found).
+curl -sI https://cde2300chatbot.duckdns.org/api/v1/coach/turn | head -n 1
+curl -sI https://cde2300chatbot.duckdns.org/api/v1/threads | head -n 1
+curl -sI https://cde2300chatbot.duckdns.org/api/v1/ready | head -n 1
+```
+
+Readiness stays host-/container-internal via Docker healthcheck; do not publish
+`/api/v1/ready` publicly.
 
 ## DuckDNS (host)
 

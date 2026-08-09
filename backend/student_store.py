@@ -1629,7 +1629,15 @@ class StudentStore:
         lease_token: str,
         turn_payload: dict[str, Any],
     ) -> None:
-        """Durably store the exact completed turn for a reserved request key."""
+        """Durably store the exact completed turn for a reserved request key.
+
+        A waiter or restarted process may promote the marker to ``completed``
+        from already-persisted message rows after this worker's
+        :meth:`persist_coach_turn` commits but before this method runs. That
+        promotion clears the lease on purpose for restart recovery; treat the
+        matching completed marker as an idempotent success so the lease owner
+        does not raise a false :class:`CoachRequestLeaseLostError`.
+        """
         with self._lock, self._connect() as connection:
             row = connection.execute(
                 "SELECT metadata_text FROM messages WHERE id=? AND notebook_id=?",
@@ -1643,7 +1651,17 @@ class StudentStore:
                 or metadata.get("_internal_type") != _COACH_IDEMPOTENCY_MARKER
                 or metadata.get("idempotency_key") != idempotency_key
                 or metadata.get("request_fingerprint") != request_fingerprint
-                or metadata.get("status") != "pending"
+            ):
+                raise CoachRequestLeaseLostError(
+                    "Coach request lease was claimed by another worker"
+                )
+            # Waiter/restart promotion already recorded the durable turn.
+            if metadata.get("status") == "completed" and isinstance(
+                metadata.get("turn"), dict
+            ):
+                return
+            if (
+                metadata.get("status") != "pending"
                 or metadata.get("lease_token") != lease_token
             ):
                 raise CoachRequestLeaseLostError(

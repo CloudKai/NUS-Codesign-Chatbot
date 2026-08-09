@@ -5,12 +5,14 @@ from __future__ import annotations
 Fallback defaults match ``.env.example``: mock provider, confirmation-mode
 stage progression, SQLite + local files, and project-root-relative data paths
 so a missing ``.env`` stays cost-safe. Production selects Aurora DSQL and S3
-via ``DATABASE_PROVIDER`` / ``FILE_STORAGE_PROVIDER``.
+via ``DATABASE_PROVIDER`` / ``FILE_STORAGE_PROVIDER`` and must set
+``APP_ENV=production`` so ``validate_production_configuration`` fail-closes.
 """
 
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -21,6 +23,8 @@ try:
 except OSError:
     # Private .env may be unreadable in some sandboxed test environments.
     pass
+
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
 def _boolean(name: str, default: bool = False) -> bool:
@@ -33,6 +37,11 @@ def _project_path(name: str, default: str) -> Path:
     return (configured if configured.is_absolute() else PROJECT_ROOT / configured).resolve()
 
 
+def _default_app_env() -> str:
+    """Development-safe default; unknown values are rejected only in production validation."""
+    return (os.getenv("APP_ENV") or "development").strip().lower() or "development"
+
+
 @dataclass
 class Settings:
     project_root: Path = PROJECT_ROOT
@@ -41,6 +50,8 @@ class Settings:
     files_dir: Path = _project_path("APP_FILES_DIR", "data/files")
     workspaces_dir: Path = _project_path("APP_WORKSPACES_DIR", "data/workspaces")
     lecture_notes_dir: Path = _project_path("LECTURE_NOTES_DIR", "lecture_notes")
+    # development keeps local/mock defaults; production must be set explicitly.
+    app_env: str = field(default_factory=_default_app_env)
     # Storage providers: local defaults keep SQLite + filesystem for development.
     database_provider: str = field(
         default_factory=lambda: os.getenv("DATABASE_PROVIDER", "sqlite").strip().lower()
@@ -123,10 +134,23 @@ class Settings:
         os.getenv("MAX_COURSE_MATERIAL_SIZE_MB", "50")
     )
     max_file_size_mb: int = int(os.getenv("MAX_FILE_SIZE_MB", "10"))
+    # Single-EC2 in-process coach limits (see backend/rate_limit.py).
+    max_active_coach_requests_per_user: int = int(
+        os.getenv("MAX_ACTIVE_COACH_REQUESTS_PER_USER", "1")
+    )
+    coach_requests_per_minute: int = int(os.getenv("COACH_REQUESTS_PER_MINUTE", "8"))
+    max_concurrent_model_calls: int = int(
+        os.getenv("MAX_CONCURRENT_MODEL_CALLS", "20")
+    )
     python_timeout_seconds: int = int(os.getenv("PYTHON_TIMEOUT_SECONDS", "30"))
     default_model: str = os.getenv("DEFAULT_CHAT_MODEL", "gpt-5.6-luna")
     default_reasoning_effort: str = os.getenv("DEFAULT_REASONING_EFFORT", "low")
     image_model: str = os.getenv("IMAGE_MODEL", "gpt-image-2")
+
+    @property
+    def is_production(self) -> bool:
+        """Return True when ``APP_ENV=production`` (explicit production gate)."""
+        return self.app_env == "production"
 
     @property
     def uses_local_database(self) -> bool:
@@ -157,6 +181,76 @@ class Settings:
             directories.append(self.lecture_notes_dir)
         for directory in directories:
             directory.mkdir(parents=True, exist_ok=True)
+
+
+def _require_public_https_origin(label: str, value: str) -> None:
+    """Reject non-HTTPS or loopback browser-facing origins (category-only errors)."""
+    parsed = urlparse((value or "").strip())
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        raise ValueError(f"{label} must use HTTPS in production")
+    host = (parsed.hostname or "").strip().lower()
+    if not host or host in _LOOPBACK_HOSTS or host.endswith(".localhost"):
+        raise ValueError(f"{label} must not use a loopback host in production")
+
+
+def validate_production_configuration() -> None:
+    """Fail closed when ``APP_ENV=production`` and runtime config is unsafe.
+
+    No-op for ``development``. Reuses ``validate_storage_configuration`` and
+    ``validate_cognito_readiness`` without network or AWS calls. Error text is
+    category-only so readiness/startup responses stay secret-safe.
+    """
+    env = (settings.app_env or "").strip().lower() or "development"
+    if env == "development":
+        return
+    if env != "production":
+        raise ValueError("APP_ENV must be development or production")
+
+    if settings.model_provider == "mock":
+        raise ValueError("MODEL_PROVIDER=mock is not allowed in production")
+    if settings.mock_openai:
+        raise ValueError("MOCK_OPENAI masking is not allowed in production")
+    if settings.model_provider == "ollama":
+        raise ValueError("MODEL_PROVIDER=ollama is not allowed in production")
+    if settings.model_provider != "openai":
+        raise ValueError(
+            f"Unsupported MODEL_PROVIDER for production: {settings.model_provider}"
+        )
+    if not settings.openai_api_key.strip():
+        raise ValueError("OPENAI_API_KEY is not configured")
+
+    if settings.database_provider == "sqlite":
+        raise ValueError("DATABASE_PROVIDER=sqlite is not allowed in production")
+    if settings.database_provider != "dsql":
+        raise ValueError(
+            f"Unsupported DATABASE_PROVIDER for production: {settings.database_provider}"
+        )
+    if settings.file_storage_provider in {"local", "memory"}:
+        raise ValueError(
+            "FILE_STORAGE_PROVIDER=local is not allowed in production"
+            if settings.file_storage_provider == "local"
+            else "FILE_STORAGE_PROVIDER=memory is not allowed in production"
+        )
+    if settings.file_storage_provider != "s3":
+        raise ValueError(
+            "Unsupported FILE_STORAGE_PROVIDER for production: "
+            f"{settings.file_storage_provider}"
+        )
+
+    if not settings.auth_cookie_secure:
+        raise ValueError("AUTH_COOKIE_SECURE must be enabled in production")
+
+    _require_public_https_origin(
+        "CO_DESIGN_PUBLIC_API_URL", settings.public_api_base_url
+    )
+    _require_public_https_origin("CO_DESIGN_UI_URL", settings.ui_base_url)
+
+    # Lazy imports avoid cycles with factory/cognito_config which import settings.
+    from backend.persistence.factory import validate_storage_configuration
+    from backend.cognito_config import validate_cognito_readiness
+
+    validate_storage_configuration()
+    validate_cognito_readiness(require_https=True)
 
 
 settings = Settings()

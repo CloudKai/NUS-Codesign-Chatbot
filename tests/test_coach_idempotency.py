@@ -219,6 +219,39 @@ def test_api_maps_an_active_duplicate_to_retryable_conflict(tmp_path, monkeypatc
     }
 
 
+def test_api_maps_payload_mismatch_to_conflict(tmp_path):
+    """Reusing a key for a different body is an HTTP 409, not a silent replay."""
+    store = StudentStore(tmp_path / "idempotent-api-conflict.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = TestClient(create_app(store, auto_advance_stages=False))
+    payload = {
+        "thread_id": thread_id,
+        "student_message": "Assess this claim.",
+        "current_stage": "focus",
+        "response_detail": "short",
+        "idempotency_key": "payload-conflict-key",
+    }
+
+    first = client.post("/api/v1/coach/turn", json=payload)
+    conflict = client.post(
+        "/api/v1/coach/turn",
+        json={**payload, "student_message": "A different claim must not reuse the key."},
+    )
+    streamed = client.post(
+        "/api/v1/coach/turn/stream",
+        json={**payload, "student_message": "A different claim must not reuse the key."},
+    )
+
+    assert first.status_code == 200
+    assert conflict.status_code == 409
+    assert "different coach request" in conflict.json()["detail"]
+    stream_events = [json.loads(line) for line in streamed.text.splitlines()]
+    assert stream_events[-1]["event"] == "error"
+    assert stream_events[-1]["status"] == 409
+    assert "different coach request" in stream_events[-1]["detail"]
+    assert len(store.get_messages(thread_id)) == 2
+
+
 def test_concurrent_duplicate_waits_for_one_provider_execution(tmp_path):
     """Concurrent same-key submissions converge on one persisted turn."""
     store = StudentStore(tmp_path / "idempotent-concurrent.sqlite3")
@@ -240,6 +273,106 @@ def test_concurrent_duplicate_waits_for_one_provider_execution(tmp_path):
 
     assert first == second
     assert provider.calls == 1
+    assert len(store.get_messages(thread_id)) == 2
+
+
+def test_five_concurrent_duplicates_converge_on_one_provider_turn(tmp_path):
+    """Five same-key waiters must still share exactly one provider execution."""
+    store = StudentStore(tmp_path / "idempotent-five-way.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    provider = CountingProvider(delay_seconds=0.2)
+    service = _service(store, provider)
+    request = _request(thread_id, key="five-way-key")
+    workers = 5
+    barrier = threading.Barrier(workers)
+
+    def submit_after_barrier():
+        barrier.wait()
+        return service.submit(request)
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(submit_after_barrier) for _ in range(workers)]
+        turns = [future.result(timeout=8) for future in futures]
+
+    assert all(turn == turns[0] for turn in turns)
+    assert provider.calls == 1
+    assert len(store.get_messages(thread_id)) == 2
+
+
+def test_complete_is_idempotent_after_waiter_promotes_persisted_turn(tmp_path):
+    """Promotion between persist and complete must not fail the lease owner.
+
+    After the winner commits the user/assistant pair, a waiter may observe those
+    rows and mark the reservation completed before the winner calls
+    ``complete_coach_request``. That path remains valid restart recovery; the
+    owner's complete must become a no-op instead of ``CoachRequestLeaseLostError``.
+    """
+    store = StudentStore(tmp_path / "idempotent-promote-race.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    key = "promote-between-persist-complete"
+    fingerprint = "e" * 64
+    claimed = store.claim_coach_request(
+        thread_id,
+        idempotency_key=key,
+        request_fingerprint=fingerprint,
+        lease_seconds=60,
+    )
+    assert claimed.state == "claimed"
+    assert claimed.lease_token
+
+    store.persist_coach_turn(
+        thread_id,
+        expected_stage="focus",
+        user_content="Assess this claim.",
+        user_metadata={"coach_idempotency_key": key},
+        assistant_content="A durable assistant reply.",
+        assistant_metadata={
+            "assessment": {
+                "recommendation": "stay",
+                "contribution_summary": "Summary",
+                "learning_summary": "Learning",
+                "working_conclusion": "Conclusion",
+                "understanding_change": "Change",
+                "critical_understanding_level": "developing",
+                "guidance_questions": ["What next?"],
+                "citations": [],
+            },
+            "coach_idempotency_key": key,
+            "from_stage": "focus",
+        },
+        summary_metadata={},
+        idempotency_marker_id=claimed.marker_id,
+        idempotency_key=key,
+        idempotency_lease_token=claimed.lease_token,
+        idempotency_fingerprint=fingerprint,
+    )
+
+    promoted = store.claim_coach_request(
+        thread_id,
+        idempotency_key=key,
+        request_fingerprint=fingerprint,
+        lease_seconds=60,
+    )
+    assert promoted.state == "completed"
+    assert isinstance(promoted.turn_payload, dict)
+
+    store.complete_coach_request(
+        thread_id,
+        marker_id=claimed.marker_id,
+        idempotency_key=key,
+        request_fingerprint=fingerprint,
+        lease_token=str(claimed.lease_token),
+        turn_payload={"response_text": "Owner payload after promotion"},
+    )
+    replay = store.claim_coach_request(
+        thread_id,
+        idempotency_key=key,
+        request_fingerprint=fingerprint,
+        lease_seconds=60,
+    )
+
+    assert replay.state == "completed"
+    assert replay.turn_payload == promoted.turn_payload
     assert len(store.get_messages(thread_id)) == 2
 
 

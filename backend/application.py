@@ -104,6 +104,34 @@ class CoachApplicationService:
         self._auto_advance_stages = auto_advance_stages
         self._retriever = retriever or LocalChunkRetriever()
 
+    def _rate_limit_user_key(self) -> str:
+        """Return the authenticated store owner key for coach rate limiting."""
+        return str(getattr(self._store, "owner_id", "") or "").strip()
+
+    def _execute_rate_limited(
+        self,
+        request: CoachRequest,
+        *,
+        idempotency_marker_id: str | None = None,
+        idempotency_lease_token: str | None = None,
+        idempotency_fingerprint: str | None = None,
+    ) -> CoachTurn:
+        """Run one provider-backed turn under the process-local coach limiter.
+
+        Same-key waiters and completed replays never call this helper, so they
+        do not consume active/RPM slots. Only a newly claimed execution (or a
+        turn without an idempotency key) is limited.
+        """
+        from backend.rate_limit import get_coach_rate_limiter
+
+        with get_coach_rate_limiter().limit(self._rate_limit_user_key()):
+            return self._submit_once(
+                request,
+                idempotency_marker_id=idempotency_marker_id,
+                idempotency_lease_token=idempotency_lease_token,
+                idempotency_fingerprint=idempotency_fingerprint,
+            )
+
     def submit(self, request: CoachRequest) -> CoachTurn:
         """Run and persist one turn, optionally applying its recommendation.
 
@@ -114,7 +142,7 @@ class CoachApplicationService:
         """
         idempotency_key = str(request.idempotency_key or "").strip()
         if not idempotency_key:
-            return self._submit_once(request)
+            return self._execute_rate_limited(request)
 
         fingerprint = _coach_request_fingerprint(request)
         deadline = time.monotonic() + 125.0
@@ -130,7 +158,7 @@ class CoachApplicationService:
                 return CoachTurn.model_validate(reservation.turn_payload)
             if reservation.state == "claimed":
                 try:
-                    turn = self._submit_once(
+                    turn = self._execute_rate_limited(
                         request,
                         idempotency_marker_id=reservation.marker_id,
                         idempotency_lease_token=reservation.lease_token,
@@ -148,7 +176,9 @@ class CoachApplicationService:
                 except Exception:
                     # A provider/validation/persistence failure is deliberately
                     # not cached as a completed reply. A retry with this same
-                    # key can acquire the released reservation.
+                    # key can acquire the released reservation. Rate-limit
+                    # rejection also releases the lease so a later retry can
+                    # execute when capacity returns.
                     self._store.fail_coach_request(
                         request.thread_id,
                         marker_id=reservation.marker_id,

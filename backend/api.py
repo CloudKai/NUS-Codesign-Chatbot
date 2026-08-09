@@ -34,7 +34,8 @@ from .operational_metrics import (
     started_at,
 )
 from .providers import ProviderUnavailableError
-from .settings import settings
+from .rate_limit import RateLimitExceeded
+from .settings import settings, validate_production_configuration
 from .source_library import CourseMaterialSyncCoordinator
 from .student_store import (
     CoachIdempotencyConflictError,
@@ -95,6 +96,7 @@ def create_app(
     )
 
     validate_storage_configuration()
+    validate_production_configuration()
     if store is not None:
         active_store = store
     elif settings.database_provider == "dsql":
@@ -211,6 +213,14 @@ def create_app(
                 detail="Idempotency-Key header is invalid",
             ) from error
 
+    def _rate_limit_http_error(error: RateLimitExceeded) -> HTTPException:
+        """Build a 429 response with Retry-After for coach rate limits."""
+        return HTTPException(
+            status_code=429,
+            detail=error.detail,
+            headers={"Retry-After": str(max(1, int(error.retry_after_seconds)))},
+        )
+
     def _selected_source_count(owner: OwnerServices, thread_id: str) -> int:
         """Return the notebook's selected-source count for aggregate metrics.
 
@@ -298,10 +308,17 @@ def create_app(
     @app.get("/api/v1/ready")
     def ready() -> dict[str, str]:
         """Return readiness once dependencies and production config are usable."""
+        # Dual-gate: explicit APP_ENV=production plus legacy dsql/s3 inference so
+        # existing readiness probes keep Cognito HTTPS checks during cutover.
         production_mode = (
-            settings.database_provider == "dsql"
+            settings.is_production
+            or settings.database_provider == "dsql"
             or settings.file_storage_provider == "s3"
         )
+        try:
+            validate_production_configuration()
+        except ValueError as error:
+            raise HTTPException(status_code=503, detail=str(error)) from error
         try:
             active_store.ping()
         except Exception as error:  # pragma: no cover - defensive startup guard
@@ -350,12 +367,8 @@ def create_app(
                 ) from error
         return {
             "status": "ready",
-            "mode": (
-                "production"
-                if settings.database_provider == "dsql"
-                or settings.file_storage_provider == "s3"
-                else "local"
-            ),
+            "mode": "production" if production_mode else "local",
+            "app_env": settings.app_env,
             "provider": provider,
             "database_provider": settings.database_provider,
             "file_storage_provider": settings.file_storage_provider,
@@ -509,12 +522,28 @@ def create_app(
         owner: OwnerServices = Depends(current_owner),
     ) -> list[dict[str, Any]]:
         """Upload files into an owned notebook's source library."""
+        if len(files) > settings.max_files:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Upload at most {settings.max_files} files per message."
+                ),
+            )
+        max_bytes = max(1, int(settings.max_file_size_mb)) * 1024 * 1024
         uploads: list[tuple[str, bytes, str | None]] = []
         for upload in files:
-            payload = await upload.read()
-            uploads.append(
-                (upload.filename or "upload.bin", payload, upload.content_type)
-            )
+            # Read at most one byte past the limit so oversized bodies are rejected
+            # without buffering an arbitrary upload into memory.
+            payload = await upload.read(max_bytes + 1)
+            name = upload.filename or "upload.bin"
+            if len(payload) > max_bytes:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"{name} exceeds the {settings.max_file_size_mb} MB limit."
+                    ),
+                )
+            uploads.append((name, payload, upload.content_type))
         try:
             return owner.workspace.upload_sources(thread_id, uploads)
         except ValueError as error:
@@ -652,14 +681,19 @@ def create_app(
         if not owner.store.get_thread(request.thread_id):
             raise HTTPException(status_code=404, detail="Notebook not found")
         selected_source_count = _selected_source_count(owner, request.thread_id)
+        request_id = str(getattr(http_request.state, "request_id", None) or "-")
         logger.info(
-            "coach_turn request thread_id=%s stage=%s sources=%s",
-            request.thread_id,
+            "coach_turn request request_id=%s stage=%s sources=%s",
+            request_id,
             request.current_stage,
             selected_source_count,
         )
         try:
+            # Rate limits apply inside CoachApplicationService only when a new
+            # provider execution is claimed, so same-key waiters can converge.
             turn = owner.coach.submit(request)
+        except RateLimitExceeded as error:
+            raise _rate_limit_http_error(error) from error
         except CoachIdempotencyConflictError as error:
             _emit_coach_metric(
                 outcome="idempotency_conflict",
@@ -678,7 +712,7 @@ def create_app(
                 selected_source_count=selected_source_count,
             )
             logger.warning(
-                "coach_turn provider unavailable thread_id=%s", request.thread_id
+                "coach_turn provider unavailable request_id=%s", request_id
             )
             raise HTTPException(status_code=503, detail=str(error)) from error
         except ValueError as error:
@@ -687,9 +721,7 @@ def create_app(
                 selected_source_count=selected_source_count,
             )
             logger.info(
-                "coach_turn rejected thread_id=%s reason=%s",
-                request.thread_id,
-                error,
+                "coach_turn rejected request_id=%s", request_id
             )
             raise HTTPException(status_code=400, detail=str(error)) from error
         except Exception:
@@ -699,10 +731,10 @@ def create_app(
             )
             raise
         logger.info(
-            "coach_turn ok thread_id=%s recommendation=%s auto_advanced_to=%s",
-            request.thread_id,
+            "coach_turn ok request_id=%s recommendation=%s auto_advanced=%s",
+            request_id,
             turn.assessment.recommendation.value,
-            turn.auto_advanced_to,
+            bool(turn.auto_advanced_to),
         )
         _emit_coach_metric(
             outcome="ok",
@@ -728,12 +760,21 @@ def create_app(
             yield json.dumps(
                 {
                     "event": "started",
-                    "thread_id": request.thread_id,
                     "stage": request.current_stage,
                 }
             ) + "\n"
             try:
                 turn = owner.coach.submit(request)
+            except RateLimitExceeded as error:
+                yield json.dumps(
+                    {
+                        "event": "error",
+                        "detail": error.detail,
+                        "status": 429,
+                        "retry_after": max(1, int(error.retry_after_seconds)),
+                    }
+                ) + "\n"
+                return
             except CoachIdempotencyConflictError as error:
                 _emit_coach_metric(
                     outcome="idempotency_conflict",
@@ -757,14 +798,18 @@ def create_app(
                     outcome="provider_unavailable",
                     selected_source_count=selected_source_count,
                 )
-                yield json.dumps({"event": "error", "detail": str(error), "status": 503}) + "\n"
+                yield json.dumps(
+                    {"event": "error", "detail": str(error), "status": 503}
+                ) + "\n"
                 return
             except ValueError as error:
                 _emit_coach_metric(
                     outcome="rejected",
                     selected_source_count=selected_source_count,
                 )
-                yield json.dumps({"event": "error", "detail": str(error), "status": 400}) + "\n"
+                yield json.dumps(
+                    {"event": "error", "detail": str(error), "status": 400}
+                ) + "\n"
                 return
             except Exception:
                 _emit_coach_metric(
@@ -789,14 +834,16 @@ def create_app(
             chunk_size = 32
             for index in range(0, len(text), chunk_size):
                 yield json.dumps(
-                    {"event": "token", "text": text[index : index + chunk_size]}
+                    {
+                        "event": "token",
+                        "text": text[index : index + chunk_size],
+                    }
                 ) + "\n"
             yield json.dumps(
                 {"event": "done", "turn": turn.model_dump(mode="json")}
             ) + "\n"
 
         return StreamingResponse(events(), media_type="application/x-ndjson")
-
     @app.get("/api/v1/threads/{thread_id}/graph")
     def graph_inspection(
         thread_id: str,
@@ -822,9 +869,7 @@ def create_app(
     ) -> PendingPhaseTransition:
         """Persist the student's accept/reject decision for a transition."""
         logger.info(
-            "resolve_transition thread_id=%s transition_id=%s accepted=%s",
-            thread_id,
-            transition_id,
+            "resolve_transition accepted=%s",
             request.accepted,
         )
         try:

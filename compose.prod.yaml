@@ -3,9 +3,17 @@ services:
     image: ${APP_IMAGE}
     restart: unless-stopped
     init: true
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     env_file:
       - .env
     environment:
+      APP_ENV: "production"
       USE_LOCAL_API: "true"
       CO_DESIGN_API_URL: "http://127.0.0.1:8000"
       CO_DESIGN_PUBLIC_API_URL: "https://cde2300chatbot.duckdns.org"
@@ -55,6 +63,13 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
       app:
         condition: service_healthy
