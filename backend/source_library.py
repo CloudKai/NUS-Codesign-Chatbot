@@ -78,6 +78,20 @@ def course_material_fingerprint() -> tuple[tuple[str, int, int], ...]:
     return tuple(fingerprint)
 
 
+def course_material_sync_disabled_result() -> LectureNotesSyncResult:
+    """Return an immediate no-op result when course-material sync is disabled."""
+    return LectureNotesSyncResult()
+
+
+def _completed_sync_future(
+    result: LectureNotesSyncResult | None = None,
+) -> Future[LectureNotesSyncResult]:
+    """Return an already-finished sync future (no worker thread)."""
+    future: Future[LectureNotesSyncResult] = Future()
+    future.set_result(result or course_material_sync_disabled_result())
+    return future
+
+
 class CourseMaterialSyncCoordinator:
     """Run one course-material import per notebook and file-system snapshot.
 
@@ -120,6 +134,8 @@ class CourseMaterialSyncCoordinator:
         thread_id: str,
     ) -> Future[LectureNotesSyncResult]:
         """Return the shared import future for the notebook's current file snapshot."""
+        if not settings.course_material_sync_enabled:
+            return _completed_sync_future()
         fingerprint = course_material_fingerprint()
         key = self._key(store, thread_id)
         with self._lock:
@@ -139,8 +155,7 @@ class CourseMaterialSyncCoordinator:
                     return future
 
             if not fingerprint and self._matches_snapshot(store, thread_id, fingerprint):
-                completed: Future[LectureNotesSyncResult] = Future()
-                completed.set_result(LectureNotesSyncResult())
+                completed = _completed_sync_future(LectureNotesSyncResult())
                 self._jobs[key] = (fingerprint, completed)
                 return completed
 
@@ -160,6 +175,8 @@ class CourseMaterialSyncCoordinator:
         API so notebook ownership stays bound to the authenticated Cognito user
         (or local-student demo owner) rather than any in-process fallback store.
         """
+        if not settings.course_material_sync_enabled:
+            return _completed_sync_future()
         fingerprint = course_material_fingerprint()
         key = (str(channel), "__api__", str(thread_id))
         with self._lock:
@@ -342,6 +359,33 @@ def fetch_public_webpage(
     return title[:180] or fallback_title, extracted[:MAX_SOURCE_TEXT], final_url, len(payload)
 
 
+def _object_storage_key(value: str | None) -> str | None:
+    """Return *value* when it looks like a student-upload object key."""
+    key = str(value or "").strip()
+    if key.startswith("users/"):
+        return key
+    return None
+
+
+def _cleanup_object_keys(*keys: str | None) -> None:
+    """Best-effort delete of object-storage keys outside any DB OCC retry."""
+    to_delete = [_object_storage_key(key) for key in keys]
+    cleaned = [key for key in to_delete if key]
+    if not cleaned:
+        return
+    from backend.persistence.factory import get_file_storage
+
+    storage = get_file_storage()
+    errors: list[Exception] = []
+    for key in cleaned:
+        try:
+            storage.delete(key)
+        except Exception as error:  # noqa: BLE001 - surface after all deletes
+            errors.append(error)
+    if errors:
+        raise errors[0]
+
+
 def _add_source_with_extracted_text(
     store: StudentStore,
     notebook_id: str,
@@ -352,10 +396,16 @@ def _add_source_with_extracted_text(
     """Store extracted text before the retryable source-metadata DB write.
 
     Object storage is deliberately outside ``StudentStore.add_source`` so an
-    Aurora DSQL OCC retry never repeats S3 writes.
+    Aurora DSQL OCC retry never repeats S3 writes. On metadata failure, both the
+    raw upload key and extracted-text key are cleaned up.
     """
     source_id = str(source_values.pop("source_id", "") or uuid.uuid4())
     cleaned = (extracted_text or "")[:MAX_SOURCE_TEXT]
+    metadata = source_values.get("metadata")
+    metadata_dict = dict(metadata) if isinstance(metadata, dict) else {}
+    raw_object_key = _object_storage_key(
+        metadata_dict.get("object_key") or source_values.get("path")
+    )
     extracted_text_key: str | None = None
     storage = None
     if cleaned:
@@ -381,11 +431,10 @@ def _add_source_with_extracted_text(
             **source_values,
         )
     except Exception as database_error:
-        if storage is not None and extracted_text_key:
-            try:
-                storage.delete(extracted_text_key)
-            except Exception as cleanup_error:
-                raise cleanup_error from database_error
+        try:
+            _cleanup_object_keys(extracted_text_key, raw_object_key)
+        except Exception as cleanup_error:
+            raise cleanup_error from database_error
         raise
 
 
@@ -412,40 +461,52 @@ def add_file_sources(
         source_ids=source_ids,
     )
     created: list[dict[str, Any]] = []
-    for index, upload in enumerate(stored_uploads):
-        kind = "image" if upload.is_image else "file"
-        display_title = (
-            Path(upload_items[index][0]).name
-            if preserve_display_names
-            else upload.name
-        )
-        source_id = _add_source_with_extracted_text(
-            store,
-            thread_id,
-            kind=kind,
-            title=display_title,
-            mime=upload.mime,
-            path=upload.storage_key or str(upload.path),
-            extracted_text=upload.extracted_text,
-            size=upload.size,
-            selected=True,
-            source_id=upload.source_id or source_ids[index],
-            metadata={
-                **(extra_metadata or {}),
-                "managed_file": True,
-                "supported": upload.supported,
-                "origin": origin,
-                "storage_provider": upload.storage_provider,
-                **(
-                    {"object_key": upload.storage_key}
-                    if upload.storage_key
-                    else {}
-                ),
-            },
-        )
-        source = store.get_source(thread_id, source_id)
-        if source:
-            created.append(source)
+    pending_raw_keys: list[str] = []
+    for upload in stored_uploads:
+        raw_key = _object_storage_key(upload.storage_key)
+        if raw_key:
+            pending_raw_keys.append(raw_key)
+    try:
+        for index, upload in enumerate(stored_uploads):
+            kind = "image" if upload.is_image else "file"
+            display_title = (
+                Path(upload_items[index][0]).name
+                if preserve_display_names
+                else upload.name
+            )
+            source_id = _add_source_with_extracted_text(
+                store,
+                thread_id,
+                kind=kind,
+                title=display_title,
+                mime=upload.mime,
+                path=upload.storage_key or str(upload.path),
+                extracted_text=upload.extracted_text,
+                size=upload.size,
+                selected=True,
+                source_id=upload.source_id or source_ids[index],
+                metadata={
+                    **(extra_metadata or {}),
+                    "managed_file": True,
+                    "supported": upload.supported,
+                    "origin": origin,
+                    "storage_provider": upload.storage_provider,
+                    **(
+                        {"object_key": upload.storage_key}
+                        if upload.storage_key
+                        else {}
+                    ),
+                },
+            )
+            raw_key = _object_storage_key(upload.storage_key)
+            if raw_key and raw_key in pending_raw_keys:
+                pending_raw_keys.remove(raw_key)
+            source = store.get_source(thread_id, source_id)
+            if source:
+                created.append(source)
+    except Exception:
+        _cleanup_object_keys(*pending_raw_keys)
+        raise
     return created
 
 
@@ -454,6 +515,8 @@ def sync_lecture_notes_folder(
     thread_id: str,
 ) -> LectureNotesSyncResult:
     """Synchronize course files once, repairing duplicates from older races."""
+    if not settings.course_material_sync_enabled:
+        return course_material_sync_disabled_result()
     with _COURSE_MATERIAL_SYNC_LOCK:
         return _sync_lecture_notes_folder(store, thread_id)
 

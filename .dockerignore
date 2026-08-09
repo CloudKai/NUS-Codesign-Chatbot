@@ -33,6 +33,10 @@ logs/
 tmp/
 temp/
 
+# Keep large instructor PDFs out of runtime images. Local compose bind-mounts
+# ./lecture_notes for the demo; production disables course-material sync.
+lecture_notes/
+
 .DS_Store
 *.swp
 *.tmp

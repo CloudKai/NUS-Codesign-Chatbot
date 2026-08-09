@@ -43,9 +43,12 @@ def test_compose_persists_data_and_mounts_private_secrets_read_only():
     assert "source: ./.streamlit/secrets.toml" in app
     assert "target: /app/.streamlit/secrets.toml" in app
     assert "read_only: true" in app
-    assert app.count("create_host_path: false") == 2
+    assert app.count("create_host_path: false") == 3
     assert 'DATABASE_PROVIDER: "sqlite"' in app
     assert 'FILE_STORAGE_PROVIDER: "local"' in app
+    assert 'COURSE_MATERIAL_SYNC_ENABLED: "true"' in app
+    assert "source: ./lecture_notes" in app
+    assert "target: /app/lecture_notes" in app
 
 
 def test_production_compose_is_stateless_and_uses_prebuilt_image():
@@ -61,6 +64,8 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert 'FILE_STORAGE_PROVIDER: "s3"' in app
     assert 'DSQL_USER: "co_design_app"' in app
     assert 'AWS_REGION: "us-west-2"' in app
+    assert 'COURSE_MATERIAL_SYNC_ENABLED: "false"' in app
+    assert "LECTURE_NOTES_DIR" not in app
     assert "DSQL_USER: \"admin\"" not in app
     assert "ports:" not in app
     assert '"8000"' in app
@@ -156,7 +161,7 @@ def test_docker_context_excludes_secrets_state_and_development_artifacts():
     ):
         assert required in ignore
     assert ".streamlit/secrets.toml.example" not in ignore
-    assert "lecture_notes/" not in ignore
+    assert "lecture_notes/" in ignore
 
 
 def test_dockerfile_is_architecture_neutral():

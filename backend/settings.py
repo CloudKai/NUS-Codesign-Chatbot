@@ -99,6 +99,15 @@ class Settings:
     cognito_id_token_cookie_max_age: int = int(
         os.getenv("COGNITO_ID_TOKEN_COOKIE_MAX_AGE", "3600")
     )
+    cognito_jwks_cache_ttl_seconds: int = int(
+        os.getenv("COGNITO_JWKS_CACHE_TTL_SECONDS", str(6 * 60 * 60))
+    )
+    # Local demo copies lecture PDFs into notebook storage. Production DSQL+S3
+    # must keep this false until the separate course-material/Bedrock owner
+    # lands — otherwise student-upload S3 would receive duplicate course PDFs.
+    course_material_sync_enabled: bool = _boolean(
+        "COURSE_MATERIAL_SYNC_ENABLED", True
+    )
     # false for local HTTP on 127.0.0.1; production Compose sets true for HTTPS.
     auth_cookie_secure: bool = _boolean("AUTH_COOKIE_SECURE", False)
     # Empty when unset so Cognito config can fall through to secrets.toml or

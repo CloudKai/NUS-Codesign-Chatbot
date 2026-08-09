@@ -99,6 +99,7 @@ def _mint_id_token(
         "given_name": sub.replace("sub-", "").title(),
         "iss": _metadata()["issuer"],
         "aud": "test-client",
+        "token_use": "id",
         "exp": int((issued + exp_delta).timestamp()),
         "iat": int(issued.timestamp()),
     }

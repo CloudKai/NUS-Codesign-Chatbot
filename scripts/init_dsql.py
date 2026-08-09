@@ -117,7 +117,8 @@ def _connect_admin(
         dbname=database,
         user=admin_user,
         password=token,
-        sslmode="require",
+        sslmode="verify-full",
+        sslrootcert="system",
     )
     return DsqlConnectionProxy(raw)
 

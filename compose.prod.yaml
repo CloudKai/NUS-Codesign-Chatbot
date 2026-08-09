@@ -18,11 +18,14 @@ services:
       AWS_REGION: "us-west-2"
       # Runtime DSQL role (DbConnect). Never admin — schema uses scripts/init_dsql.py.
       DSQL_USER: "co_design_app"
+      # Course-material / Bedrock ownership is another developer's workstream.
+      # Keep this false so production never copies lecture PDFs into USER_UPLOADS_BUCKET.
+      COURSE_MATERIAL_SYNC_ENABLED: "false"
       # Runtime-configured; do not hard-code account IDs or bucket names in Git.
       # DSQL_ENDPOINT: set in host .env
       # USER_UPLOADS_BUCKET: set in host .env
       # APP_IMAGE: set on the host to the ECR image URI + immutable tag
-      LECTURE_NOTES_DIR: "/app/lecture_notes"
+      # Lecture notes are not bundled into the production image.
     expose:
       - "8000"
       - "8501"

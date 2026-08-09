@@ -8,9 +8,10 @@ cookie attachment — never logged or persisted to the database.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import threading
-from base64 import urlsafe_b64encode
+from base64 import urlsafe_b64decode, urlsafe_b64encode
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Mapping
@@ -24,12 +25,15 @@ from joserfc.jwk import KeySet
 from backend.cognito_config import CognitoAuthConfig, load_cognito_auth_config
 from backend.persistence.factory import create_student_store
 from backend.session_tokens import generate_oauth_state, generate_pkce_verifier
+from backend.settings import settings
 from backend.student_store import StudentStore
 
 logger = logging.getLogger(__name__)
 
 # Short-lived OAuth login CSRF binder (DB row + browser cookie Max-Age).
 OAUTH_STATE_TTL_SECONDS = 600
+# Successful JWKS responses are reused in-process; never cache tokens.
+DEFAULT_JWKS_CACHE_TTL_SECONDS = 6 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -86,6 +90,17 @@ class CognitoOIDCClient:
         # Prevent concurrent refresh grants from racing within one API process.
         # Cognito remains authoritative; no token is cached or persisted here.
         self._refresh_lock = threading.Lock()
+        self._jwks_lock = threading.Lock()
+        # jwks_uri -> (expires_at_epoch, KeySet)
+        self._jwks_cache: dict[str, tuple[float, KeySet]] = {}
+        self._jwks_cache_ttl_seconds = float(
+            getattr(
+                settings,
+                "cognito_jwks_cache_ttl_seconds",
+                DEFAULT_JWKS_CACHE_TTL_SECONDS,
+            )
+        )
+        self._jwks_fetch_count = 0
 
     @property
     def config(self) -> CognitoAuthConfig:
@@ -330,6 +345,51 @@ class CognitoOIDCClient:
             id_token=id_token,
         )
 
+    def _token_header_kid(self, id_token: str) -> str | None:
+        """Return the unverified JWT header ``kid`` when present."""
+        try:
+            header_segment = str(id_token).split(".", 1)[0]
+            padded = header_segment + "=" * (-len(header_segment) % 4)
+            header = json.loads(urlsafe_b64decode(padded.encode("ascii")))
+        except Exception:
+            return None
+        if not isinstance(header, dict):
+            return None
+        kid = str(header.get("kid") or "").strip()
+        return kid or None
+
+    def _fetch_jwks_payload(self, jwks_uri: str) -> Mapping[str, Any]:
+        """Load JWKS JSON via the injectable loader or HTTP (never caches tokens)."""
+        self._jwks_fetch_count += 1
+        if self._jwks_loader is not None:
+            return dict(self._jwks_loader(jwks_uri))
+        with self._http() as client:
+            response = client.get(jwks_uri)
+            response.raise_for_status()
+            payload = response.json()
+        if not isinstance(payload, Mapping):
+            raise CognitoOIDCError("Cognito JWKS payload is invalid")
+        return payload
+
+    def _get_key_set(self, jwks_uri: str, *, force_refresh: bool = False) -> KeySet:
+        """Return a cached Cognito JWKS KeySet, refreshing when stale or forced."""
+        now = self._clock().timestamp()
+        with self._jwks_lock:
+            cached = self._jwks_cache.get(jwks_uri)
+            if (
+                not force_refresh
+                and cached is not None
+                and cached[0] > now
+            ):
+                return cached[1]
+            payload = self._fetch_jwks_payload(jwks_uri)
+            key_set = KeySet.import_key_set(dict(payload))
+            self._jwks_cache[jwks_uri] = (
+                now + max(60.0, self._jwks_cache_ttl_seconds),
+                key_set,
+            )
+            return key_set
+
     def _verify_id_token(
         self,
         id_token: str,
@@ -338,16 +398,20 @@ class CognitoOIDCClient:
         issuer: str,
         audience: str,
     ) -> dict[str, Any]:
-        """Verify the Cognito ID token signature and standard claims."""
-        if self._jwks_loader is not None:
-            jwks_payload = dict(self._jwks_loader(jwks_uri))
-        else:
-            with self._http() as client:
-                response = client.get(jwks_uri)
-                response.raise_for_status()
-                jwks_payload = response.json()
+        """Verify Cognito ID token signature and required claims including token_use.
+
+        Successful JWKS responses are cached in-process. When the token ``kid`` is
+        absent from the cache, JWKS is refreshed once so signing-key rotation
+        still works. Tokens themselves are never cached or logged.
+        """
+        kid = self._token_header_kid(id_token)
+        key_set = self._get_key_set(jwks_uri)
+        if kid:
+            try:
+                key_set.get_by_kid(kid)
+            except Exception:
+                key_set = self._get_key_set(jwks_uri, force_refresh=True)
         try:
-            key_set = KeySet.import_key_set(jwks_payload)
             token = jwt.decode(id_token, key_set)
             claims = dict(token.claims)
             jwt.JWTClaimsRegistry(
@@ -355,7 +419,12 @@ class CognitoOIDCClient:
                 aud={"essential": True, "value": audience},
                 exp={"essential": True},
                 sub={"essential": True},
+                token_use={"essential": True, "value": "id"},
             ).validate(claims)
+        except CognitoOIDCError:
+            raise
         except Exception as error:
             raise CognitoOIDCError("Cognito ID token verification failed") from error
+        if str(claims.get("token_use") or "").strip() != "id":
+            raise CognitoOIDCError("Cognito ID token verification failed")
         return claims

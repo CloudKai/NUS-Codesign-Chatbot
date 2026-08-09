@@ -404,7 +404,8 @@ def connect_dsql(
         dbname=database,
         user=role,
         password=token,
-        sslmode="require",
+        sslmode="verify-full",
+        sslrootcert="system",
     )
     return DsqlConnectionProxy(raw)
 

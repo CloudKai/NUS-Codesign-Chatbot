@@ -22,6 +22,7 @@ services:
       APP_FILES_DIR: "/app/data/files"
       APP_WORKSPACES_DIR: "/app/data/workspaces"
       LECTURE_NOTES_DIR: "/app/lecture_notes"
+      COURSE_MATERIAL_SYNC_ENABLED: "true"
     expose:
       - "8000"
       - "8501"
@@ -29,6 +30,12 @@ services:
       - type: bind
         source: ./data
         target: /app/data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./lecture_notes
+        target: /app/lecture_notes
+        read_only: true
         bind:
           create_host_path: false
       - type: bind

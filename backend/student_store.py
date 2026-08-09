@@ -169,15 +169,24 @@ NOTEBOOK_CHILD_TABLES = ("messages", "sources")
 class StudentStore:
     """Framework-neutral store for notebooks, messages, sources, and auth users."""
 
-    def __init__(self, path: Path | None = None, identifier: str = "local-student"):
-        """Open (or create) the local SQLite database for *identifier*."""
+    def __init__(self, path: Path | None = None, identifier: str = "local-student", *, ensure_owner: bool = True):
+        """Open (or create) the local SQLite database for *identifier*.
+
+        When ``ensure_owner`` is False the store can run auth/OAuth helpers
+        without inserting a user row (used for production DSQL bootstrap).
+        """
         self.path = (path or settings.database_path).resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.identifier = identifier
         self._lock = threading.RLock()
         with self._connect() as connection:
             connection.executescript(SCHEMA)
-        self.owner_id = self._ensure_user()
+        self.owner_id = self._ensure_user() if ensure_owner else ""
+
+    def ping(self) -> None:
+        """Verify the database connection without creating or reading a user row."""
+        with self._connect() as connection:
+            connection.execute("SELECT 1").fetchone()
 
     def upsert_cognito_user(
         self,
@@ -729,8 +738,6 @@ class StudentStore:
         is_error: bool = False,
     ) -> str:
         """Persist one chat message; upsert when *message_id* already exists."""
-        if not self.get_thread(thread_id):
-            raise ValueError("Chat not found")
         if role not in {"user", "assistant"}:
             raise ValueError("role must be user or assistant")
         message_id = message_id or str(uuid.uuid4())
@@ -754,6 +761,12 @@ class StudentStore:
             message_id = str(pending_id)
         now = utc_now()
         with self._lock, self._connect() as connection:
+            owned = connection.execute(
+                "SELECT id FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not owned:
+                raise ValueError("Chat not found")
             existing = connection.execute(
                 """
                 SELECT m.id FROM messages m
@@ -996,8 +1009,6 @@ class StudentStore:
         later when the coach reply is stored via ``add_message``.
         """
         thread_id = str(transition.get("thread_id") or "")
-        if not self.get_thread(thread_id):
-            raise ValueError("Chat not found")
         record = {
             "id": str(transition.get("id") or uuid.uuid4()),
             "thread_id": thread_id,
@@ -1014,6 +1025,12 @@ class StudentStore:
         if hasattr(assessment, "model_dump"):
             assessment = assessment.model_dump(mode="json")
         with self._lock, self._connect() as connection:
+            owned = connection.execute(
+                "SELECT id FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not owned:
+                raise ValueError("Chat not found")
             connection.execute(
                 """
                 UPDATE messages
@@ -1239,8 +1256,6 @@ class StudentStore:
         whole write transaction. Source services must store extracted text
         first and pass its deterministic object key.
         """
-        if not self.get_thread(thread_id):
-            raise ValueError("Notebook not found")
         if kind not in {"file", "image", "text", "url"}:
             raise ValueError("Unsupported source type")
         normalized_title = " ".join(title.strip().split())[:180]
@@ -1265,6 +1280,12 @@ class StudentStore:
         stored_text_key = str(extracted_text_key or "").strip() or None
         now = utc_now()
         with self._lock, self._connect() as connection:
+            owned = connection.execute(
+                "SELECT id FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not owned:
+                raise ValueError("Notebook not found")
             connection.execute(
                 """
                 INSERT INTO sources

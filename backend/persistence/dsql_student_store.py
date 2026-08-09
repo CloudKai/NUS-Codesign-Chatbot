@@ -58,6 +58,7 @@ class DsqlStudentStore(StudentStore):
         region: str | None = None,
         database: str | None = None,
         user: str | None = None,
+        ensure_owner: bool = True,
     ):
         """Create a DSQL-backed store for *identifier*.
 
@@ -71,6 +72,7 @@ class DsqlStudentStore(StudentStore):
             region: AWS region (default from settings).
             database: Database name (DSQL currently exposes one).
             user: Runtime DB role (default ``co_design_app``; never ``admin``).
+            ensure_owner: When False, skip creating a user row (auth bootstrap).
         """
         from backend.settings import settings
 
@@ -93,7 +95,18 @@ class DsqlStudentStore(StudentStore):
                 f"use {RUNTIME_ROLE_NAME}"
             )
         self._install_occ_wrappers()
-        self.owner_id = run_dsql_transaction(self._ensure_user)
+        self.owner_id = (
+            run_dsql_transaction(self._ensure_user) if ensure_owner else ""
+        )
+
+    def ping(self) -> None:
+        """Verify DSQL connectivity without creating a user row."""
+
+        def _ping() -> None:
+            with self._connect() as connection:
+                connection.execute("SELECT 1").fetchone()
+
+        run_dsql_transaction(_ping)
 
     def _install_occ_wrappers(self) -> None:
         """Wrap inherited write methods so OCC conflicts retry the whole unit."""

@@ -10,6 +10,7 @@ import pytest
 
 from backend.persistence.dsql_connection import (
     adapt_sqlite_sql,
+    connect_dsql,
     generate_dsql_admin_auth_token,
     generate_dsql_auth_token,
     is_retryable_db_error,
@@ -401,6 +402,41 @@ def test_generate_dsql_auth_token_uses_db_connect_not_admin():
     assert client.called[1]["Hostname"] == "ep.example"
 
 
+def test_connect_dsql_uses_verify_full_system_ca():
+    captured: dict[str, object] = {}
+
+    def connect_fn(**kwargs):
+        captured.update(kwargs)
+
+        class _Raw:
+            def close(self):
+                return None
+
+            def commit(self):
+                return None
+
+            def rollback(self):
+                return None
+
+            def cursor(self):
+                raise AssertionError("connect_dsql should not query during open")
+
+        return _Raw()
+
+    proxy = connect_dsql(
+        endpoint="example.dsql.amazonaws.com",
+        region="us-west-2",
+        user="co_design_app",
+        token_provider=lambda: "tok",
+        connect_fn=connect_fn,
+    )
+    assert captured["sslmode"] == "verify-full"
+    assert captured["sslrootcert"] == "system"
+    assert captured["user"] == "co_design_app"
+    assert captured["password"] == "tok"
+    proxy.close()
+
+
 def test_generate_dsql_admin_auth_token_uses_db_connect_admin():
     class _Client:
         def __init__(self) -> None:
@@ -480,6 +516,8 @@ def test_init_dsql_commits_each_ddl_separately_and_waits_for_async_index():
 
     def connect_fn(**kwargs):
         assert kwargs["user"] == "admin"
+        assert kwargs["sslmode"] == "verify-full"
+        assert kwargs["sslrootcert"] == "system"
 
         class _Raw:
             def cursor(self):

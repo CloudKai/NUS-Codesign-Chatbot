@@ -82,7 +82,17 @@ def create_app(
     )
 
     validate_storage_configuration()
-    active_store = store or create_student_store()
+    if store is not None:
+        active_store = store
+    elif settings.database_provider == "dsql":
+        # Production bootstrap store is for auth/OAuth helpers and readiness only.
+        # It must not insert a shared local-student user row into DSQL.
+        active_store = create_student_store(
+            identifier="__auth_bootstrap__",
+            ensure_owner=False,
+        )
+    else:
+        active_store = create_student_store()
     course_sync = CourseMaterialSyncCoordinator()
     # Optional injected workspace is only used as the anonymous/local default.
     # Authenticated Cognito requests always receive a freshly owner-scoped
@@ -189,7 +199,7 @@ def create_app(
     def ready() -> dict[str, str]:
         """Return readiness once the local database and provider config are usable."""
         try:
-            active_store.get_user_preferences()
+            active_store.ping()
         except Exception as error:  # pragma: no cover - defensive startup guard
             raise HTTPException(
                 status_code=503, detail=f"Database not ready: {error}"
@@ -214,6 +224,9 @@ def create_app(
             "provider": provider,
             "database_provider": settings.database_provider,
             "file_storage_provider": settings.file_storage_provider,
+            "course_material_sync_enabled": (
+                "true" if settings.course_material_sync_enabled else "false"
+            ),
         }
 
     @app.get("/api/v1/preferences")

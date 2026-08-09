@@ -66,6 +66,7 @@ def _mint_id_token(*, sub: str, email: str | None = None) -> str:
         "given_name": sub,
         "iss": _metadata()["issuer"],
         "aud": "test-client",
+        "token_use": "id",
         "exp": int((issued + timedelta(hours=1)).timestamp()),
         "iat": int(issued.timestamp()),
     }
