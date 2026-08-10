@@ -134,6 +134,16 @@ def test_revise_user_message_discards_later_turns(tmp_path):
     messages = store.get_messages(thread_id)
     assert len(messages) == 1
     assert messages[0]["content"] == "Revised first prompt"
+    assert messages[0]["id"] != first_user
+    assert messages[0]["previous_message_id"] == first_user
+    # Original and later turns remain durable but superseded.
+    with store._connect() as connection:
+        total = connection.execute(
+            "SELECT COUNT(*) AS n FROM messages WHERE notebook_id=?",
+            (thread_id,),
+        ).fetchone()["n"]
+    assert int(total) == 5
+    assert store.get_messages_at_revision(thread_id, 0)[0]["id"] == first_user
 
 
 def test_user_preferences_round_trip(tmp_path):

@@ -70,6 +70,16 @@ def _coach_request_fingerprint(request: CoachRequest) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _coach_turn_from_payload(payload: dict[str, Any] | None) -> CoachTurn | None:
+    """Validate a durable coach turn payload, or return ``None`` when unusable."""
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return CoachTurn.model_validate(payload)
+    except Exception:
+        return None
+
+
 def _project_context_from_metadata(metadata: dict[str, Any]) -> str:
     """Build a short server-side project context from notebook assignment fields."""
     assignment = metadata.get("assignment")
@@ -136,6 +146,73 @@ class CoachApplicationService:
                 idempotency_fingerprint=idempotency_fingerprint,
             )
 
+    def _recover_durable_coach_turn(
+        self, thread_id: str, idempotency_key: str
+    ) -> CoachTurn | None:
+        """Replay a completed marker or a committed recorded coach turn.
+
+        Called before any revise mutation so a retry after persist-before-complete
+        cannot supersede another branch or bump ``conversation_revision``. The
+        store lookup is authoritative for completed markers; active-message
+        reconstruction covers a committed turn whose marker was not completed.
+        Never queries identity fields on messages.
+        """
+        key = str(idempotency_key or "").strip()
+        if not key:
+            return None
+        recovered = _coach_turn_from_payload(
+            self._store.lookup_completed_coach_request(
+                thread_id, idempotency_key=key
+            )
+        )
+        if recovered is not None:
+            return recovered
+
+        thread = self._notebooks.get_thread(thread_id)
+        if not thread:
+            return None
+        settings = dict(thread.get("metadata") or {})
+        revoked = settings.get("revoked_coach_idempotency_keys") or []
+        if isinstance(revoked, list) and key in {
+            str(item).strip() for item in revoked if str(item).strip()
+        }:
+            return None
+
+        for message in self._store.get_messages(thread_id):
+            if str(message.get("role") or "") != "assistant":
+                continue
+            metadata = dict(message.get("metadata") or {})
+            if str(metadata.get("coach_idempotency_key") or "").strip() != key:
+                continue
+            assessment = metadata.get("assessment")
+            if not isinstance(assessment, dict):
+                continue
+            pending_transition: dict[str, Any] | None = None
+            if (
+                metadata.get("proposed_stage")
+                and metadata.get("decision_status") == "pending"
+                and metadata.get("from_stage")
+            ):
+                pending_transition = {
+                    "id": str(message.get("id") or ""),
+                    "thread_id": thread_id,
+                    "from_stage": str(metadata["from_stage"]),
+                    "to_stage": str(metadata["proposed_stage"]),
+                    "assessment": assessment,
+                    "status": "pending",
+                    "created_at": str(message.get("created_at") or ""),
+                    "resolved_at": None,
+                }
+            return _coach_turn_from_payload(
+                {
+                    "response_text": str(message.get("content") or ""),
+                    "assessment": assessment,
+                    "pending_transition": pending_transition,
+                    "auto_advanced_to": metadata.get("auto_advanced_to"),
+                }
+            )
+        return None
+
     def submit(self, request: CoachRequest) -> CoachTurn:
         """Run and persist one turn, optionally applying its recommendation.
 
@@ -143,6 +220,9 @@ class CoachApplicationService:
         sources, source context, and image inputs. Client-supplied values that
         disagree are rejected. The workflow always writes an auditable
         transition first; automatic mode resolves it before the visible reply.
+
+        Stamps the current notebook ``conversation_revision`` onto the request
+        for store CAS/stamping; normal submit does not bump that revision.
         """
         thread = self._notebooks.get_thread(request.thread_id)
         if not thread:
@@ -395,9 +475,9 @@ class CoachApplicationService:
             )
 
         store_history = self._store.get_messages(request.thread_id)
-        # Revise persists the edited user row before the provider runs. Exclude
-        # that id so history matches a normal send (prior turns only); the
-        # current student_message remains the active turn input.
+        # Append-only revise persists the replacement user row before the
+        # provider runs. Exclude that id so history is prefix-only; the revised
+        # student_message remains the active turn input to the provider.
         revise_message_id = str(request.revise_user_message_id or "").strip()
         if revise_message_id:
             store_history = [
@@ -564,23 +644,24 @@ class CoachApplicationService:
         response_detail: str | None = None,
         response_language: str | None = None,
     ) -> CoachTurn:
-        """Atomically revise a user turn, then generate a replacement coach reply.
+        """Append-only revise a user turn, then generate a replacement coach reply.
+
+        Before any revision mutation, recovers either a completed idempotency
+        marker or a committed recorded coach turn for ``idempotency_key``. That
+        keeps a retry after persist-before-complete from superseding another
+        branch or bumping ``conversation_revision`` again.
 
         The revision transaction commits before the provider call. If the
-        provider fails afterward, truncated history remains and the client may
-        retry with a new idempotency key against the current revision.
-
-        A completed ``idempotency_key`` replays the cached turn without rewriting
-        history again, so safe HTTP retries do not double-bump revision.
+        provider fails afterward, the append-only supersede remains and the
+        client may retry with a new idempotency key against the current
+        revision. A durable turn for this key still replays without mutation.
         """
         cleaned_key = str(idempotency_key or "").strip()
         if not cleaned_key:
             raise ValueError("idempotency_key is required for revise-and-resubmit")
-        cached = self._store.lookup_completed_coach_request(
-            thread_id, idempotency_key=cleaned_key
-        )
+        cached = self._recover_durable_coach_turn(thread_id, cleaned_key)
         if cached is not None:
-            return CoachTurn.model_validate(cached)
+            return cached
         thread = self._notebooks.get_thread(thread_id)
         if not thread:
             raise ValueError("Notebook not found")
@@ -596,20 +677,29 @@ class CoachApplicationService:
         )
         if detail not in {"short", "long"}:
             detail = "short"
-        revision = self._store.revise_conversation_from_user_message(
-            thread_id,
-            message_id,
-            content,
-            model_id=model_id or str(metadata.get("selected_model") or ""),
-            metadata={
-                "response_detail": detail,
-                **(
-                    {"response_language": response_language}
-                    if response_language
-                    else {}
-                ),
-            },
-        )
+        resumed = None
+        resume_fn = getattr(self._store, "try_resume_revision_result", None)
+        if callable(resume_fn):
+            resumed = resume_fn(thread_id, message_id, content)
+        if resumed is not None:
+            revision = resumed
+        else:
+            revision = self._store.revise_conversation_from_user_message(
+                thread_id,
+                message_id,
+                content,
+                model_id=model_id or str(metadata.get("selected_model") or ""),
+                metadata={
+                    "response_detail": detail,
+                    **(
+                        {"response_language": response_language}
+                        if response_language
+                        else {}
+                    ),
+                },
+            )
+        # Store returns the replacement user row id as edited_message_id.
+        replacement_user_message_id = str(revision.edited_message_id)
         request = CoachRequest(
             thread_id=thread_id,
             student_message=content.strip(),
@@ -620,7 +710,7 @@ class CoachApplicationService:
             response_language=response_language or "English",
             idempotency_key=cleaned_key,
             conversation_revision=revision.conversation_revision,
-            revise_user_message_id=revision.edited_message_id,
+            revise_user_message_id=replacement_user_message_id,
         )
         return self.submit(request)
 

@@ -4,7 +4,10 @@ Aurora DSQL allows only one DDL statement per transaction. This script opens a
 fresh admin connection for each CREATE TABLE / CREATE INDEX statement, commits,
 and reconnects. Asynchronous index builds return a ``job_id``; after commit the
 script calls the ``sys.wait_for_job`` procedure on a dedicated autocommit
-connection before continuing. It never runs at application startup.
+connection before continuing. After CREATE/INDEX bootstrap it inspects
+``information_schema`` and ALTERs only missing revision columns on
+``notebooks`` and ``messages`` (additive, idempotent). It never runs at
+application startup.
 
 Admin auth uses ``generate_db_connect_admin_auth_token`` (DbConnectAdmin).
 Runtime traffic must use ``DSQL_USER=co_design_app`` with DbConnect only.
@@ -45,11 +48,121 @@ from backend.persistence.dsql_schema import (  # noqa: E402
 )
 from backend.settings import settings  # noqa: E402
 
+# Append-only revision columns. Aurora DSQL ADD COLUMN accepts only a name and
+# type (no NOT NULL / DEFAULT in the same statement). Defaults and NULL
+# backfills are separate statements after ADD — see
+# docs/deploy/AWS_STATELESS_EC2.md.
+_MESSAGE_REVISION_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("conversation_revision", "INTEGER"),
+    ("previous_message_id", "TEXT"),
+    ("superseded_at_revision", "INTEGER"),
+)
+
 
 def is_async_index_ddl(statement: str) -> bool:
     """Return True when *statement* is a CREATE [UNIQUE] INDEX ASYNC DDL."""
     upper = " ".join(statement.upper().split())
     return upper.startswith("CREATE") and " INDEX ASYNC " in f" {upper} "
+
+
+def plan_missing_notebooks_conversation_revision_statements(
+    existing_columns: set[str] | frozenset[str],
+) -> list[str]:
+    """Return additive notebooks CAS DDL/DML when ``conversation_revision`` is absent.
+
+    Each returned statement is one DDL or a single backfill UPDATE so callers
+    can commit one statement per transaction. Idempotent when the column
+    already exists.
+
+    Args:
+        existing_columns: Lower/mixed-case column names already on ``notebooks``.
+
+    Returns:
+        Ordered ADD / SET DEFAULT 0 / NULL-backfill statements, or ``[]``.
+    """
+    present = {str(name).lower() for name in existing_columns}
+    if "conversation_revision" in present:
+        return []
+    return [
+        "ALTER TABLE notebooks ADD COLUMN conversation_revision INTEGER",
+        "ALTER TABLE notebooks ALTER COLUMN conversation_revision SET DEFAULT 0",
+        "UPDATE notebooks SET conversation_revision = 0 "
+        "WHERE conversation_revision IS NULL",
+    ]
+
+
+def plan_missing_message_revision_statements(
+    existing_columns: set[str] | frozenset[str],
+) -> list[str]:
+    """Return additive message-revision DDL/DML for columns absent from catalog.
+
+    Each returned statement is one DDL (or a single backfill UPDATE) so callers
+    can commit one statement per transaction. Idempotent: already-present
+    columns produce no statements.
+
+    Args:
+        existing_columns: Lower/mixed-case column names already on ``messages``.
+
+    Returns:
+        Ordered statements to add missing revision columns and, when
+        ``conversation_revision`` is newly added, set DEFAULT 0 and backfill
+        NULLs (DSQL cannot combine ADD COLUMN with NOT NULL/DEFAULT).
+    """
+    present = {str(name).lower() for name in existing_columns}
+    planned: list[str] = []
+    for column_name, column_type in _MESSAGE_REVISION_COLUMNS:
+        if column_name.lower() in present:
+            continue
+        planned.append(
+            f"ALTER TABLE messages ADD COLUMN {column_name} {column_type}"
+        )
+        if column_name == "conversation_revision":
+            planned.append(
+                "ALTER TABLE messages ALTER COLUMN conversation_revision "
+                "SET DEFAULT 0"
+            )
+            planned.append(
+                "UPDATE messages SET conversation_revision = 0 "
+                "WHERE conversation_revision IS NULL"
+            )
+    return planned
+
+
+def fetch_table_columns(connection: Any, table_name: str) -> set[str]:
+    """Return column names for *table_name* from ``information_schema``.
+
+    Args:
+        connection: Admin ``DsqlConnectionProxy`` (or compatible execute API).
+        table_name: Unqualified table name in the ``public`` schema.
+
+    Returns:
+        Set of column names as reported by the catalog (case preserved).
+    """
+    result = connection.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = ?
+        """,
+        (table_name,),
+    )
+    columns: set[str] = set()
+    for row in result.fetchall():
+        if hasattr(row, "get"):
+            value = row.get("column_name")
+            if value is None:
+                for key in row:
+                    if str(key).lower() == "column_name":
+                        value = row[key]
+                        break
+        elif isinstance(row, (tuple, list)) and row:
+            value = row[0]
+        else:
+            value = row
+        name = str(value or "").strip()
+        if name:
+            columns.add(name)
+    return columns
 
 
 def _job_id_from_result(result: Any) -> str | None:
@@ -168,6 +281,7 @@ def apply_dsql_schema(
     token_provider: Callable[[], str] | None = None,
     statements: list[str] | None = None,
     wait_for_job: Callable[..., None] | None = None,
+    migrate_message_revisions: bool | None = None,
 ) -> list[str]:
     """Apply each DDL statement in its own committed transaction.
 
@@ -176,8 +290,15 @@ def apply_dsql_schema(
     captures ``job_id`` when present, commits, then waits only when a new
     non-empty job id was returned (existing ``IF NOT EXISTS`` indexes skip wait).
 
+    After the planned CREATE/INDEX statements (full schema bootstrap only),
+    inspects ``information_schema`` and ALTERs only missing revision columns:
+    ``notebooks.conversation_revision`` first (CAS prerequisite), then the
+    three message revision columns. Custom ``statements=`` lists skip that
+    catalog migration unless ``migrate_message_revisions=True``.
+
     Returns:
-        The list of statements that were executed.
+        The list of statements that were executed (CREATE/INDEX plus any
+        additive notebook/message revision migrations).
     """
     planned = statements if statements is not None else iter_dsql_ddl_statements()
     applied: list[str] = []
@@ -217,7 +338,122 @@ def apply_dsql_schema(
                 token_provider=token_provider,
             )
         applied.append(statement)
+
+    should_migrate = (
+        migrate_message_revisions
+        if migrate_message_revisions is not None
+        else statements is None
+    )
+    if should_migrate:
+        applied.extend(
+            apply_missing_revision_columns(
+                endpoint=endpoint,
+                region=region,
+                database=database,
+                admin_user=admin_user,
+                connect_fn=connect_fn,
+                token_provider=token_provider,
+            )
+        )
     return applied
+
+
+def _apply_admin_statements(
+    *,
+    planned: list[str],
+    endpoint: str,
+    region: str,
+    database: str,
+    admin_user: str,
+    connect_fn: Callable[..., Any] | None,
+    token_provider: Callable[[], str] | None,
+) -> list[str]:
+    """Execute each planned statement in its own committed admin transaction."""
+    applied: list[str] = []
+    for statement in planned:
+        connection = _connect_admin(
+            endpoint=endpoint,
+            region=region,
+            database=database,
+            admin_user=admin_user,
+            connect_fn=connect_fn,
+            token_provider=token_provider,
+        )
+        try:
+            connection.execute(statement)
+            connection.commit()
+        except Exception:
+            try:
+                connection.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+            connection.close()
+            raise
+        else:
+            connection.close()
+        applied.append(statement)
+    return applied
+
+
+def apply_missing_revision_columns(
+    *,
+    endpoint: str,
+    region: str,
+    database: str = "postgres",
+    admin_user: str = "admin",
+    connect_fn: Callable[..., Any] | None = None,
+    token_provider: Callable[[], str] | None = None,
+) -> list[str]:
+    """Inspect catalog and ALTER missing notebook/message revision columns.
+
+    Reads ``information_schema.columns`` for ``notebooks`` and ``messages`` on
+    one admin connection, plans additive statements (notebooks CAS column
+    first, then message revision columns), and applies each in its own
+    committed transaction. No-op when all columns already exist. Never runs
+    from application startup.
+
+    Returns:
+        Statements that were executed (empty when already up to date).
+    """
+    catalog_connection = _connect_admin(
+        endpoint=endpoint,
+        region=region,
+        database=database,
+        admin_user=admin_user,
+        connect_fn=connect_fn,
+        token_provider=token_provider,
+    )
+    try:
+        notebooks_columns = fetch_table_columns(catalog_connection, "notebooks")
+        messages_columns = fetch_table_columns(catalog_connection, "messages")
+        catalog_connection.commit()
+    except Exception:
+        try:
+            catalog_connection.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        catalog_connection.close()
+        raise
+    else:
+        catalog_connection.close()
+
+    planned = (
+        plan_missing_notebooks_conversation_revision_statements(notebooks_columns)
+        + plan_missing_message_revision_statements(messages_columns)
+    )
+    return _apply_admin_statements(
+        planned=planned,
+        endpoint=endpoint,
+        region=region,
+        database=database,
+        admin_user=admin_user,
+        connect_fn=connect_fn,
+        token_provider=token_provider,
+    )
+
+
+# Backwards-compatible alias used by earlier tests/call sites.
+apply_missing_message_revision_columns = apply_missing_revision_columns
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -226,6 +462,7 @@ def main(argv: list[str] | None = None) -> int:
         description=(
             "Admin-only Aurora DSQL schema bootstrap. "
             "One DDL per transaction; waits for ASYNC index jobs; "
+            "additive notebook/message revision ALTERs from catalog; "
             "not used by application startup."
         )
     )

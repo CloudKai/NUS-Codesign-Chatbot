@@ -405,7 +405,7 @@ class LocalApiClient:
         response_detail: str | None = None,
         response_language: str | None = None,
     ) -> CoachTurn:
-        """Revise a user message, truncate later turns, and regenerate the coach."""
+        """Revise a user message via append-only supersede and regenerate the coach."""
         body: dict[str, Any] = {
             "content": content,
             "idempotency_key": idempotency_key,

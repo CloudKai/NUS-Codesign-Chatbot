@@ -17,6 +17,11 @@ class NotebookRepository(Protocol):
     def get_messages(self, thread_id: str) -> list[dict]:
         """Return canonical messages in chronological order."""
 
+    def get_messages_at_revision(
+        self, thread_id: str, revision: int
+    ) -> list[dict]:
+        """Return messages active at a conversation revision snapshot."""
+
     def list_threads(self, search: str = "") -> list[dict]:
         """Return notebooks ordered by recent activity."""
 
@@ -93,6 +98,12 @@ class SQLiteNotebookRepository:
     def get_messages(self, thread_id: str) -> list[dict]:
         """Return the notebook's existing canonical message history."""
         return self._store.get_messages(thread_id)
+
+    def get_messages_at_revision(
+        self, thread_id: str, revision: int
+    ) -> list[dict]:
+        """Return messages active at a conversation revision snapshot."""
+        return self._store.get_messages_at_revision(thread_id, revision)
 
     def list_threads(self, search: str = "") -> list[dict]:
         """Return notebooks ordered by recent activity."""

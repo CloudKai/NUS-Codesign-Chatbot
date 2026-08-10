@@ -49,7 +49,12 @@ class ConversationRevisionConflictError(ValueError):
 
 @dataclass(frozen=True)
 class ConversationRevisionResult:
-    """Authoritative notebook state after a conversation rewrite/truncate."""
+    """Authoritative notebook state after an append-only conversation revision.
+
+    ``edited_message_id`` is the new replacement user-message id (not the
+    superseded original). ``surviving_history`` is the active branch at the
+    new notebook revision.
+    """
 
     thread_id: str
     edited_message_id: str
@@ -171,6 +176,9 @@ CREATE TABLE IF NOT EXISTS messages (
     decision_at TEXT,
     metadata_text TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
+    conversation_revision INTEGER NOT NULL DEFAULT 0,
+    previous_message_id TEXT,
+    superseded_at_revision INTEGER,
     FOREIGN KEY (notebook_id) REFERENCES notebooks(id) ON DELETE CASCADE
 );
 
@@ -224,6 +232,7 @@ class StudentStore:
             self._migrate_oauth_login_states(connection)
             self._migrate_users_table(connection)
             self._migrate_notebooks_conversation_revision(connection)
+            self._migrate_messages_revision_columns(connection)
             self._repair_misbound_local_foreign_keys(connection)
             self._migrate_legacy_workspace(connection)
             # Index after users migration so legacy camelCase DBs can rebuild first.
@@ -393,6 +402,144 @@ class StudentStore:
             "ALTER TABLE notebooks ADD COLUMN conversation_revision "
             "INTEGER NOT NULL DEFAULT 0"
         )
+
+    @staticmethod
+    def _migrate_messages_revision_columns(
+        connection: sqlite3.Connection,
+    ) -> None:
+        """Add append-only message revision columns on existing local DBs."""
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(messages)")
+        }
+        if "conversation_revision" not in columns:
+            connection.execute(
+                "ALTER TABLE messages ADD COLUMN conversation_revision "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        if "previous_message_id" not in columns:
+            connection.execute(
+                "ALTER TABLE messages ADD COLUMN previous_message_id TEXT"
+            )
+        if "superseded_at_revision" not in columns:
+            connection.execute(
+                "ALTER TABLE messages ADD COLUMN superseded_at_revision INTEGER"
+            )
+
+    @staticmethod
+    def _notebook_revision_value(row: Any) -> int:
+        """Return a notebook ``conversation_revision``, treating NULL as 0."""
+        try:
+            return int(row["conversation_revision"] or 0)
+        except (KeyError, IndexError, TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _message_revision_value(row: Any) -> int:
+        """Return a message ``conversation_revision``, treating NULL as 0."""
+        try:
+            return int(row["conversation_revision"] or 0)
+        except (KeyError, IndexError, TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _message_superseded_at(row: Any) -> int | None:
+        """Return ``superseded_at_revision`` or ``None`` when unset/invalid."""
+        try:
+            value = row["superseded_at_revision"]
+        except (KeyError, IndexError, TypeError):
+            return None
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _message_previous_id(row: Any) -> str | None:
+        """Return ``previous_message_id`` when present."""
+        try:
+            value = row["previous_message_id"]
+        except (KeyError, IndexError, TypeError):
+            return None
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+    @classmethod
+    def _is_active_at_revision(cls, row: Any, revision: int) -> bool:
+        """Return whether *row* is visible in conversation snapshot *revision*."""
+        if cls._message_revision_value(row) > revision:
+            return False
+        superseded = cls._message_superseded_at(row)
+        if superseded is not None and superseded <= revision:
+            return False
+        return True
+
+    @staticmethod
+    def _active_at_revision_sql(alias: str = "") -> str:
+        """SQL predicate for messages active at a bound revision parameter.
+
+        The predicate expects two identical revision bind values.
+        """
+        prefix = f"{alias}." if alias else ""
+        return (
+            f"COALESCE({prefix}conversation_revision, 0) <= ? "
+            f"AND ({prefix}superseded_at_revision IS NULL "
+            f"OR {prefix}superseded_at_revision > ?)"
+        )
+
+    @classmethod
+    def _public_message_dict(cls, row: Any) -> dict[str, Any]:
+        """Map a messages row to the public chat-message dict shape."""
+        meta = _load(row["metadata_text"], {})
+        if not isinstance(meta, dict):
+            meta = {}
+        assessment = _load(row["assessment_text"], None)
+        if isinstance(assessment, dict):
+            meta["assessment"] = assessment
+        cited = _load(row["cited_source_ids_text"], None)
+        if cited is not None:
+            meta["source_refs"] = cited
+        if row["proposed_stage"]:
+            meta["proposed_stage"] = row["proposed_stage"]
+            meta["pending_transition_id"] = str(row["id"])
+        if row["decision_status"]:
+            meta["decision_status"] = row["decision_status"]
+        return {
+            "id": str(row["id"]),
+            "role": str(row["role"]),
+            "content": row["content"] or "",
+            "metadata": meta,
+            "created_at": row["created_at"],
+            "is_error": bool(row["is_error"]),
+            "feedback": None,
+            "conversation_revision": cls._message_revision_value(row),
+            "previous_message_id": cls._message_previous_id(row),
+            "superseded_at_revision": cls._message_superseded_at(row),
+        }
+
+    @staticmethod
+    def _is_coach_idempotency_marker_meta(meta: Any) -> bool:
+        """Return whether *meta* is an internal coach idempotency marker."""
+        return (
+            isinstance(meta, dict)
+            and meta.get("_internal_type") == _COACH_IDEMPOTENCY_MARKER
+        )
+
+    @staticmethod
+    def _collect_idempotency_keys_from_meta(meta: Any) -> list[str]:
+        """Extract non-empty coach/request idempotency keys from message metadata."""
+        if not isinstance(meta, dict):
+            return []
+        keys: list[str] = []
+        for field in ("idempotency_key", "coach_idempotency_key"):
+            key = str(meta.get(field) or "").strip()
+            if key:
+                keys.append(key)
+        return keys
 
     @staticmethod
     def _repair_misbound_local_foreign_keys(
@@ -1068,12 +1215,16 @@ class StudentStore:
         clauses = ["n.user_id = ?"]
         parameters: list[Any] = [self.owner_id]
         if search.strip():
+            needle = f"%{search.strip().lower()}%"
             clauses.append(
                 "(LOWER(COALESCE(n.title, '')) LIKE ? OR EXISTS "
                 "(SELECT 1 FROM messages m WHERE m.notebook_id=n.id AND "
-                "LOWER(COALESCE(m.content,'')) LIKE ?))"
+                "COALESCE(m.conversation_revision, 0) <= "
+                "COALESCE(n.conversation_revision, 0) AND "
+                "(m.superseded_at_revision IS NULL OR "
+                "m.superseded_at_revision > COALESCE(n.conversation_revision, 0)) "
+                "AND LOWER(COALESCE(m.content,'')) LIKE ?))"
             )
-            needle = f"%{search.strip().lower()}%"
             parameters.extend([needle, needle])
         with self._connect() as connection:
             rows = connection.execute(
@@ -1081,21 +1232,51 @@ class StudentStore:
                 SELECT n.*,
                        COUNT(CASE
                            WHEN m.metadata_text NOT LIKE '%"_internal_type": "coach_idempotency"%'
+                            AND COALESCE(m.conversation_revision, 0) <=
+                                COALESCE(n.conversation_revision, 0)
+                            AND (
+                                m.superseded_at_revision IS NULL
+                                OR m.superseded_at_revision >
+                                   COALESCE(n.conversation_revision, 0)
+                            )
                            THEN m.id
                        END) AS messageCount,
-                       SUM(CASE WHEN m.role='user' THEN 1 ELSE 0 END)
-                         AS studentTurnCount,
+                       SUM(CASE
+                           WHEN m.role='user'
+                            AND COALESCE(m.conversation_revision, 0) <=
+                                COALESCE(n.conversation_revision, 0)
+                            AND (
+                                m.superseded_at_revision IS NULL
+                                OR m.superseded_at_revision >
+                                   COALESCE(n.conversation_revision, 0)
+                            )
+                           THEN 1 ELSE 0
+                       END) AS studentTurnCount,
                        (
                          SELECT recent.content
                          FROM messages recent
                          WHERE recent.notebook_id=n.id
                            AND recent.role='user'
+                           AND COALESCE(recent.conversation_revision, 0) <=
+                               COALESCE(n.conversation_revision, 0)
+                           AND (
+                               recent.superseded_at_revision IS NULL
+                               OR recent.superseded_at_revision >
+                                  COALESCE(n.conversation_revision, 0)
+                           )
                          ORDER BY recent.created_at DESC, recent.id DESC
                          LIMIT 1
                        ) AS latestUserMessage,
                        MAX(COALESCE(
                            CASE
                                WHEN m.metadata_text NOT LIKE '%"_internal_type": "coach_idempotency"%'
+                                AND COALESCE(m.conversation_revision, 0) <=
+                                    COALESCE(n.conversation_revision, 0)
+                                AND (
+                                    m.superseded_at_revision IS NULL
+                                    OR m.superseded_at_revision >
+                                       COALESCE(n.conversation_revision, 0)
+                                )
                                THEN m.created_at
                            END,
                            n.updated_at,
@@ -1416,11 +1597,13 @@ class StudentStore:
         now = utc_now()
         with self._lock, self._connect() as connection:
             owned = connection.execute(
-                "SELECT id FROM notebooks WHERE id=? AND user_id=?",
+                "SELECT id, conversation_revision FROM notebooks "
+                "WHERE id=? AND user_id=?",
                 (thread_id, self.owner_id),
             ).fetchone()
             if not owned:
                 raise ValueError("Chat not found")
+            stamp_revision = self._notebook_revision_value(owned)
             existing = connection.execute(
                 """
                 SELECT m.id FROM messages m
@@ -1431,7 +1614,8 @@ class StudentStore:
             ).fetchone()
             if existing:
                 # Bump created_at when materializing a pending-transition skeleton
-                # so the assistant reply sorts after the user turn.
+                # so the assistant reply sorts after the user turn. Preserve any
+                # existing revision stamp / predecessor / superseded markers.
                 connection.execute(
                     """
                     UPDATE messages
@@ -1469,8 +1653,10 @@ class StudentStore:
                     INSERT INTO messages
                       (id, notebook_id, role, content, is_error, assessment_text,
                        cited_source_ids_text, proposed_stage, decision_status,
-                       decision_at, metadata_text, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       decision_at, metadata_text, created_at,
+                       conversation_revision, previous_message_id,
+                       superseded_at_revision)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
                     """,
                     (
                         message_id,
@@ -1485,13 +1671,21 @@ class StudentStore:
                         decision_at,
                         _dump(meta),
                         now,
+                        stamp_revision,
                     ),
                 )
             if role == "user":
                 count = connection.execute(
-                    "SELECT COUNT(*) AS total FROM messages "
-                    "WHERE notebook_id=? AND role='user'",
-                    (thread_id,),
+                    """
+                    SELECT COUNT(*) AS total FROM messages
+                    WHERE notebook_id=? AND role='user'
+                      AND COALESCE(conversation_revision, 0) <= ?
+                      AND (
+                        superseded_at_revision IS NULL
+                        OR superseded_at_revision > ?
+                      )
+                    """,
+                    (thread_id, stamp_revision, stamp_revision),
                 ).fetchone()["total"]
                 if count == 1:
                     from .title_service import NotebookTitleService
@@ -1548,13 +1742,16 @@ class StudentStore:
         connection: Any,
         thread_id: str,
         idempotency_key: str,
+        *,
+        active_revision: int | None = None,
     ) -> dict[str, Any] | None:
         """Recover a committed turn if a process stopped before marking it complete.
 
         The user and assistant rows are committed atomically by
         :meth:`persist_coach_turn`.  Keeping the request key on both rows lets a
         restarted process promote that durable result without invoking the
-        provider again.
+        provider again. Superseded historical assistants are ignored when
+        *active_revision* is provided.
         """
         rows = connection.execute(
             """
@@ -1565,6 +1762,10 @@ class StudentStore:
             (thread_id,),
         ).fetchall()
         for row in rows:
+            if active_revision is not None and not self._is_active_at_revision(
+                row, active_revision
+            ):
+                continue
             metadata = _load(row["metadata_text"], {})
             if not isinstance(metadata, dict) or metadata.get(
                 "coach_idempotency_key"
@@ -1603,11 +1804,14 @@ class StudentStore:
         *,
         idempotency_key: str,
     ) -> dict[str, Any] | None:
-        """Return a completed coach turn payload for *idempotency_key*, if any.
+        """Return a completed or persist-recovered coach turn for *idempotency_key*.
 
         Used by revise-and-resubmit so safe retries replay without rewriting
-        history or bumping ``conversation_revision`` again. Revoked keys are
-        treated as absent so a later edit cannot resurrect a truncated turn.
+        history or bumping ``conversation_revision`` again. When the user and
+        assistant rows already committed but the marker was not yet marked
+        complete, promote the recorded active-branch turn onto the marker.
+        Revoked keys are treated as absent so a later edit cannot resurrect a
+        superseded turn.
         """
         key = str(idempotency_key or "").strip()
         if not key:
@@ -1615,7 +1819,8 @@ class StudentStore:
         marker_id = self._coach_marker_id(thread_id, key)
         with self._lock, self._connect() as connection:
             owned = connection.execute(
-                "SELECT id, settings_text FROM notebooks WHERE id=? AND user_id=?",
+                "SELECT id, settings_text, conversation_revision FROM notebooks "
+                "WHERE id=? AND user_id=?",
                 (thread_id, self.owner_id),
             ).fetchone()
             if not owned:
@@ -1628,21 +1833,48 @@ class StudentStore:
                 str(item).strip() for item in revoked if str(item).strip()
             }:
                 return None
+            active_revision = self._notebook_revision_value(owned)
             row = connection.execute(
                 "SELECT metadata_text FROM messages WHERE id=? AND notebook_id=?",
                 (marker_id, thread_id),
             ).fetchone()
-            if not row:
-                return None
-            metadata = _load(row["metadata_text"], {})
+            metadata = _load(row["metadata_text"] if row else None, {})
             if (
-                not isinstance(metadata, dict)
-                or metadata.get("_internal_type") != _COACH_IDEMPOTENCY_MARKER
-                or metadata.get("status") != "completed"
+                isinstance(metadata, dict)
+                and metadata.get("_internal_type") == _COACH_IDEMPOTENCY_MARKER
+                and metadata.get("status") == "completed"
             ):
+                turn = metadata.get("turn")
+                if isinstance(turn, dict):
+                    return turn
+            recorded = self._recorded_coach_turn(
+                connection,
+                thread_id,
+                key,
+                active_revision=active_revision,
+            )
+            if recorded is None:
                 return None
-            turn = metadata.get("turn")
-            return turn if isinstance(turn, dict) else None
+            if row is not None and isinstance(metadata, dict):
+                metadata.update({"status": "completed", "turn": recorded})
+                metadata.pop("lease_token", None)
+                metadata.pop("lease_expires_at", None)
+                connection.execute(
+                    "UPDATE messages SET metadata_text=? WHERE id=? AND notebook_id=?",
+                    (_dump(metadata), marker_id, thread_id),
+                )
+            return recorded
+
+    def lookup_completed_or_recorded_coach_request(
+        self,
+        thread_id: str,
+        *,
+        idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        """Compatibility alias for durable revise/submit recovery."""
+        return self.lookup_completed_coach_request(
+            thread_id, idempotency_key=idempotency_key
+        )
 
     def claim_coach_request(
         self,
@@ -1669,11 +1901,13 @@ class StudentStore:
         marker_id = self._coach_marker_id(thread_id, key)
         with self._lock, self._connect() as connection:
             owned = connection.execute(
-                "SELECT id, settings_text FROM notebooks WHERE id=? AND user_id=?",
+                "SELECT id, settings_text, conversation_revision FROM notebooks "
+                "WHERE id=? AND user_id=?",
                 (thread_id, self.owner_id),
             ).fetchone()
             if not owned:
                 raise ValueError("Chat not found")
+            stamp_revision = self._notebook_revision_value(owned)
             settings_blob = _load(owned["settings_text"], {})
             if not isinstance(settings_blob, dict):
                 settings_blob = {}
@@ -1705,12 +1939,20 @@ class StudentStore:
                     INSERT INTO messages
                       (id, notebook_id, role, content, is_error, assessment_text,
                        cited_source_ids_text, proposed_stage, decision_status,
-                       decision_at, metadata_text, created_at)
+                       decision_at, metadata_text, created_at,
+                       conversation_revision, previous_message_id,
+                       superseded_at_revision)
                     VALUES (?, ?, 'assistant', '', 0, NULL, NULL, NULL, NULL,
-                            NULL, ?, ?)
+                            NULL, ?, ?, ?, NULL, NULL)
                     ON CONFLICT (id) DO NOTHING
                     """,
-                    (marker_id, thread_id, _dump(metadata), utc_now()),
+                    (
+                        marker_id,
+                        thread_id,
+                        _dump(metadata),
+                        utc_now(),
+                        stamp_revision,
+                    ),
                 )
                 # A concurrent DSQL claimant may have committed the same
                 # deterministic primary key first. Read back the winner in the
@@ -1740,7 +1982,12 @@ class StudentStore:
                 raise CoachIdempotencyConflictError(
                     "Idempotency key was already used for a different coach request"
                 )
-            recorded = self._recorded_coach_turn(connection, thread_id, key)
+            recorded = self._recorded_coach_turn(
+                connection,
+                thread_id,
+                key,
+                active_revision=stamp_revision,
+            )
             if recorded is not None:
                 metadata.update({"status": "completed", "turn": recorded})
                 metadata.pop("lease_token", None)
@@ -1896,8 +2143,10 @@ class StudentStore:
         decision, and notebook summary either commit together or roll back.
 
         When ``existing_user_message_id`` is set (edit/revise path), the user
-        message is already durable from the revision transaction and only the
-        assistant row is inserted.
+        message is already durable from the revision transaction. Content is not
+        rewritten destructively; metadata may be refreshed without clearing
+        lineage columns. An assistant row stamped with the expected revision is
+        inserted.
         """
         cleaned_user = user_content.strip()
         cleaned_assistant = assistant_content.strip()
@@ -1928,10 +2177,7 @@ class StudentStore:
                 raise ValueError(
                     "The notebook stage changed before the coaching turn was saved"
                 )
-            try:
-                active_revision = int(notebook["conversation_revision"] or 0)
-            except (KeyError, TypeError, ValueError):
-                active_revision = 0
+            active_revision = self._notebook_revision_value(notebook)
             if active_revision != int(expected_conversation_revision):
                 raise ConversationRevisionConflictError(
                     "The conversation was revised before the coaching turn was saved"
@@ -1963,37 +2209,42 @@ class StudentStore:
             if existing_user_message_id:
                 owned_user = connection.execute(
                     """
-                    SELECT id, role FROM messages
+                    SELECT * FROM messages
                     WHERE id=? AND notebook_id=?
                     """,
                     (existing_user_message_id, thread_id),
                 ).fetchone()
-                if not owned_user or owned_user["role"] != "user":
+                if (
+                    not owned_user
+                    or owned_user["role"] != "user"
+                    or not self._is_active_at_revision(owned_user, active_revision)
+                ):
                     raise ValueError("User message not found")
+                if self._message_revision_value(owned_user) != active_revision:
+                    raise ConversationRevisionConflictError(
+                        "The conversation was revised before the coaching turn was saved"
+                    )
+                # Preserve content and lineage; refresh metadata only.
+                user_id = existing_user_message_id
                 connection.execute(
                     """
                     UPDATE messages
-                    SET content=?, metadata_text=?, is_error=0,
-                        assessment_text=NULL, cited_source_ids_text=NULL,
-                        proposed_stage=NULL, decision_status=NULL, decision_at=NULL
+                    SET metadata_text=?
                     WHERE id=? AND notebook_id=?
                     """,
-                    (
-                        cleaned_user,
-                        _dump(user_metadata),
-                        existing_user_message_id,
-                        thread_id,
-                    ),
+                    (_dump(user_metadata), existing_user_message_id, thread_id),
                 )
-                user_id = existing_user_message_id
             else:
                 connection.execute(
                     """
                     INSERT INTO messages
                       (id, notebook_id, role, content, is_error, assessment_text,
                        cited_source_ids_text, proposed_stage, decision_status,
-                       decision_at, metadata_text, created_at)
-                    VALUES (?, ?, 'user', ?, 0, NULL, NULL, NULL, NULL, NULL, ?, ?)
+                       decision_at, metadata_text, created_at,
+                       conversation_revision, previous_message_id,
+                       superseded_at_revision)
+                    VALUES (?, ?, 'user', ?, 0, NULL, NULL, NULL, NULL, NULL, ?, ?,
+                            ?, NULL, NULL)
                     """,
                     (
                         user_id,
@@ -2001,24 +2252,34 @@ class StudentStore:
                         cleaned_user,
                         _dump(user_metadata),
                         user_created_at,
+                        active_revision,
                     ),
                 )
             if decision_status == "pending":
                 connection.execute(
-                    """
+                    f"""
                     UPDATE messages
                     SET decision_status='rejected', decision_at=?
                     WHERE notebook_id=? AND decision_status='pending'
+                      AND {self._active_at_revision_sql()}
                     """,
-                    (assistant_created_at, thread_id),
+                    (
+                        assistant_created_at,
+                        thread_id,
+                        active_revision,
+                        active_revision,
+                    ),
                 )
             connection.execute(
                 """
                 INSERT INTO messages
                   (id, notebook_id, role, content, is_error, assessment_text,
                    cited_source_ids_text, proposed_stage, decision_status,
-                   decision_at, metadata_text, created_at)
-                VALUES (?, ?, 'assistant', ?, 0, ?, ?, ?, ?, NULL, ?, ?)
+                   decision_at, metadata_text, created_at,
+                   conversation_revision, previous_message_id,
+                   superseded_at_revision)
+                VALUES (?, ?, 'assistant', ?, 0, ?, ?, ?, ?, NULL, ?, ?,
+                        ?, NULL, NULL)
                 """,
                 (
                     assistant_id,
@@ -2030,6 +2291,7 @@ class StudentStore:
                     decision_status,
                     _dump(assistant_meta),
                     assistant_created_at,
+                    active_revision,
                 ),
             )
 
@@ -2051,7 +2313,7 @@ class StudentStore:
             if stage != expected_stage:
                 raise ValueError("Coach summary cannot change the notebook stage")
             title = generated_title or notebook["title"]
-            connection.execute(
+            updated = connection.execute(
                 """
                 UPDATE notebooks
                 SET title=?, current_stage=?, progress_text=?, settings_text=?,
@@ -2069,6 +2331,10 @@ class StudentStore:
                     active_revision,
                 ),
             )
+            if int(getattr(updated, "rowcount", 0) or 0) == 0:
+                raise ConversationRevisionConflictError(
+                    "The conversation was revised before the coaching turn was saved"
+                )
         return user_id, assistant_id
 
     def update_message(self, message_id: str, content: str) -> None:
@@ -2089,6 +2355,131 @@ class StudentStore:
                 (content, message_id),
             )
 
+    def _find_active_replacement_user(
+        self,
+        connection: Any,
+        thread_id: str,
+        original_message_id: str,
+        content: str,
+        revision: int,
+    ) -> Any | None:
+        """Return an active replacement user descended from *original_message_id*.
+
+        Walks ``previous_message_id`` edges so a provider-failure retry can resume
+        the already-inserted replacement without re-superseding or bumping again.
+        """
+        cleaned = content.strip()
+        frontier = [str(original_message_id)]
+        seen: set[str] = set()
+        while frontier:
+            current = frontier.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            children = connection.execute(
+                """
+                SELECT * FROM messages
+                WHERE notebook_id=? AND previous_message_id=?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (thread_id, current),
+            ).fetchall()
+            for child in children:
+                child_id = str(child["id"])
+                if self._is_active_at_revision(child, revision):
+                    if (
+                        child["role"] == "user"
+                        and str(child["content"] or "").strip() == cleaned
+                    ):
+                        return child
+                frontier.append(child_id)
+        return None
+
+    def _history_dicts_at_revision(
+        self,
+        connection: Any,
+        thread_id: str,
+        revision: int,
+    ) -> list[dict[str, Any]]:
+        """Return active non-marker messages at *revision* (connection-bound)."""
+        rows = connection.execute(
+            f"""
+            SELECT * FROM messages
+            WHERE notebook_id=?
+              AND {self._active_at_revision_sql()}
+            ORDER BY created_at ASC, id ASC
+            """,
+            (thread_id, revision, revision),
+        ).fetchall()
+        history: list[dict[str, Any]] = []
+        for row in rows:
+            meta = _load(row["metadata_text"], {})
+            if self._is_coach_idempotency_marker_meta(meta):
+                continue
+            if not isinstance(meta, dict):
+                meta = {}
+            history.append(
+                {
+                    "id": str(row["id"]),
+                    "role": str(row["role"]),
+                    "content": str(row["content"] or ""),
+                    "metadata": meta,
+                }
+            )
+        return history
+
+    def try_resume_revision_result(
+        self,
+        thread_id: str,
+        message_id: str,
+        content: str,
+    ) -> ConversationRevisionResult | None:
+        """Return an already-applied append-only edit tip, if one matches.
+
+        Used by revise-and-resubmit after a provider failure so retries can reuse
+        the replacement user without CAS-bumping again. Concurrent first-time
+        edits must still go through :meth:`revise_conversation_from_user_message`
+        so the loser observes a conflict / inactive target.
+        """
+        cleaned = content.strip()
+        if not cleaned:
+            return None
+        with self._lock, self._connect() as connection:
+            notebook = connection.execute(
+                "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not notebook:
+                return None
+            revision = self._notebook_revision_value(notebook)
+            target = connection.execute(
+                "SELECT * FROM messages WHERE id=? AND notebook_id=?",
+                (message_id, thread_id),
+            ).fetchone()
+            if not target or target["role"] != "user":
+                return None
+            if self._is_active_at_revision(target, revision):
+                return None
+            replacement = self._find_active_replacement_user(
+                connection, thread_id, message_id, cleaned, revision
+            )
+            if replacement is None:
+                return None
+            from backend.student_journey import STAGE_BY_ID
+
+            restored_stage = str(notebook["current_stage"] or "focus")
+            if restored_stage not in STAGE_BY_ID:
+                restored_stage = "focus"
+            return ConversationRevisionResult(
+                thread_id=thread_id,
+                edited_message_id=str(replacement["id"]),
+                conversation_revision=revision,
+                current_stage=restored_stage,
+                surviving_history=self._history_dicts_at_revision(
+                    connection, thread_id, revision
+                ),
+            )
+
     def revise_conversation_from_user_message(
         self,
         thread_id: str,
@@ -2098,11 +2489,13 @@ class StudentStore:
         model_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ConversationRevisionResult:
-        """Rewrite a user turn, truncate later history, and bump conversation_revision.
+        """Append-only revise a user turn and bump ``conversation_revision``.
 
-        Does not call the model. Pending transitions on deleted assistants are
-        removed with those rows. All coach idempotency markers for the notebook
-        are deleted so stale keys cannot replay truncated turns.
+        Supersedes the target user message and every currently-active later
+        message (rows retained; content unchanged). Inserts a replacement user
+        row at ``N+1``. Deletes coach idempotency marker rows only. Pending
+        decisions on superseded assistants are rejected in place. Raises
+        ``ConversationRevisionConflictError`` on CAS miss so SQLite rolls back.
         """
         from backend.student_journey import STAGE_BY_ID, THINKING_STAGES, normalize_journey
 
@@ -2116,6 +2509,8 @@ class StudentStore:
             ).fetchone()
             if not notebook:
                 raise ValueError("Notebook not found")
+            previous_revision = self._notebook_revision_value(notebook)
+            next_revision = previous_revision + 1
             target = connection.execute(
                 """
                 SELECT * FROM messages
@@ -2125,6 +2520,10 @@ class StudentStore:
             ).fetchone()
             if not target or target["role"] != "user":
                 raise ValueError("User message not found")
+            if not self._is_active_at_revision(target, previous_revision):
+                raise ConversationRevisionConflictError(
+                    "The conversation was revised before this edit could be saved"
+                )
 
             target_created = str(target["created_at"] or "")
             target_meta = _load(target["metadata_text"], {})
@@ -2138,85 +2537,135 @@ class StudentStore:
             if restored_stage not in STAGE_BY_ID:
                 restored_stage = "focus"
 
-            # Latest surviving assistant assessment (before truncation deletes).
+            # Latest active surviving assistant assessment before the target.
             prior_assistants = connection.execute(
-                """
+                f"""
                 SELECT assessment_text, metadata_text FROM messages
                 WHERE notebook_id=? AND role='assistant'
+                  AND {self._active_at_revision_sql()}
                   AND (
                     created_at < ?
                     OR (created_at = ? AND id < ?)
                   )
                 ORDER BY created_at DESC, id DESC
                 """,
-                (thread_id, target_created, target_created, message_id),
+                (
+                    thread_id,
+                    previous_revision,
+                    previous_revision,
+                    target_created,
+                    target_created,
+                    message_id,
+                ),
             ).fetchall()
             surviving_assessment: dict[str, Any] | None = None
             for row in prior_assistants:
                 meta = _load(row["metadata_text"], {})
-                if isinstance(meta, dict) and meta.get("_internal_type") == _COACH_IDEMPOTENCY_MARKER:
+                if self._is_coach_idempotency_marker_meta(meta):
                     continue
                 assessment = _load(row["assessment_text"], None)
                 if isinstance(assessment, dict):
                     surviving_assessment = assessment
                     break
 
-            # Collect idempotency keys from turns about to be truncated.
-            later_rows = connection.execute(
-                """
-                SELECT metadata_text FROM messages
+            # Collect keys from the branch being superseded, then delete markers.
+            superseded_candidates = connection.execute(
+                f"""
+                SELECT id, metadata_text FROM messages
                 WHERE notebook_id=?
+                  AND {self._active_at_revision_sql()}
                   AND (
-                    created_at > ?
+                    id = ?
+                    OR created_at > ?
                     OR (created_at = ? AND id > ?)
                   )
                 """,
-                (thread_id, target_created, target_created, message_id),
+                (
+                    thread_id,
+                    previous_revision,
+                    previous_revision,
+                    message_id,
+                    target_created,
+                    target_created,
+                    message_id,
+                ),
             ).fetchall()
             revoked_keys: list[str] = []
-            for row in later_rows:
-                meta = _load(row["metadata_text"], {})
-                if not isinstance(meta, dict):
-                    continue
-                for field in ("idempotency_key", "coach_idempotency_key"):
-                    key = str(meta.get(field) or "").strip()
-                    if key:
-                        revoked_keys.append(key)
+            for row in superseded_candidates:
+                revoked_keys.extend(
+                    self._collect_idempotency_keys_from_meta(
+                        _load(row["metadata_text"], {})
+                    )
+                )
 
-            connection.execute(
-                """
-                DELETE FROM messages
-                WHERE notebook_id=?
-                  AND (
-                    created_at > ?
-                    OR (created_at = ? AND id > ?)
-                  )
-                """,
-                (thread_id, target_created, target_created, message_id),
-            )
-            # Drop every remaining coach idempotency marker so truncated turns
-            # cannot be replayed by an old key after revision.
-            remaining = connection.execute(
+            marker_rows = connection.execute(
                 """
                 SELECT id, metadata_text FROM messages
                 WHERE notebook_id=?
                 """,
                 (thread_id,),
             ).fetchall()
-            for row in remaining:
+            for row in marker_rows:
                 meta = _load(row["metadata_text"], {})
-                if (
-                    isinstance(meta, dict)
-                    and meta.get("_internal_type") == _COACH_IDEMPOTENCY_MARKER
-                ):
-                    key = str(meta.get("idempotency_key") or "").strip()
-                    if key:
-                        revoked_keys.append(key)
-                    connection.execute(
-                        "DELETE FROM messages WHERE id=? AND notebook_id=?",
-                        (row["id"], thread_id),
-                    )
+                if not self._is_coach_idempotency_marker_meta(meta):
+                    continue
+                revoked_keys.extend(self._collect_idempotency_keys_from_meta(meta))
+                connection.execute(
+                    "DELETE FROM messages WHERE id=? AND notebook_id=?",
+                    (row["id"], thread_id),
+                )
 
+            now = utc_now()
+            # Reject pending decisions on the superseded branch, then mark it.
+            connection.execute(
+                f"""
+                UPDATE messages
+                SET decision_status='rejected', decision_at=?
+                WHERE notebook_id=?
+                  AND decision_status='pending'
+                  AND {self._active_at_revision_sql()}
+                  AND (
+                    id = ?
+                    OR created_at > ?
+                    OR (created_at = ? AND id > ?)
+                  )
+                """,
+                (
+                    now,
+                    thread_id,
+                    previous_revision,
+                    previous_revision,
+                    message_id,
+                    target_created,
+                    target_created,
+                    message_id,
+                ),
+            )
+            connection.execute(
+                f"""
+                UPDATE messages
+                SET superseded_at_revision=?
+                WHERE notebook_id=?
+                  AND {self._active_at_revision_sql()}
+                  AND (
+                    id = ?
+                    OR created_at > ?
+                    OR (created_at = ? AND id > ?)
+                  )
+                """,
+                (
+                    next_revision,
+                    thread_id,
+                    previous_revision,
+                    previous_revision,
+                    message_id,
+                    target_created,
+                    target_created,
+                    message_id,
+                ),
+            )
+
+            replacement_id = str(uuid.uuid4())
             next_metadata = {
                 **target_meta,
                 **(metadata or {}),
@@ -2226,13 +2675,24 @@ class StudentStore:
                 next_metadata["model"] = model_id
             connection.execute(
                 """
-                UPDATE messages
-                SET content=?, metadata_text=?, is_error=0,
-                    assessment_text=NULL, cited_source_ids_text=NULL,
-                    proposed_stage=NULL, decision_status=NULL, decision_at=NULL
-                WHERE id=? AND notebook_id=?
+                INSERT INTO messages
+                  (id, notebook_id, role, content, is_error, assessment_text,
+                   cited_source_ids_text, proposed_stage, decision_status,
+                   decision_at, metadata_text, created_at,
+                   conversation_revision, previous_message_id,
+                   superseded_at_revision)
+                VALUES (?, ?, 'user', ?, 0, NULL, NULL, NULL, NULL, NULL, ?, ?,
+                        ?, ?, NULL)
                 """,
-                (cleaned, _dump(next_metadata), message_id, thread_id),
+                (
+                    replacement_id,
+                    thread_id,
+                    cleaned,
+                    _dump(next_metadata),
+                    now,
+                    next_revision,
+                    message_id,
+                ),
             )
 
             thread = self._thread_dict(notebook)
@@ -2290,7 +2750,7 @@ class StudentStore:
 
             current_meta["learning_journey"] = journey
             current_meta["thinking_stage"] = restored_stage
-            current_meta["last_workflow_user_message_id"] = message_id
+            current_meta["last_workflow_user_message_id"] = replacement_id
             prior_revoked = current_meta.get("revoked_coach_idempotency_keys") or []
             if not isinstance(prior_revoked, list):
                 prior_revoked = []
@@ -2306,13 +2766,7 @@ class StudentStore:
             stage, progress_text, settings_text = self._split_notebook_metadata(
                 current_meta
             )
-            try:
-                previous_revision = int(notebook["conversation_revision"] or 0)
-            except (KeyError, TypeError, ValueError):
-                previous_revision = 0
-            next_revision = previous_revision + 1
-            now = utc_now()
-            connection.execute(
+            updated = connection.execute(
                 """
                 UPDATE notebooks
                 SET current_stage=?, progress_text=?, settings_text=?,
@@ -2330,38 +2784,34 @@ class StudentStore:
                     previous_revision,
                 ),
             )
+            if int(getattr(updated, "rowcount", 0) or 0) == 0:
+                raise ConversationRevisionConflictError(
+                    "The conversation was revised before this edit could be saved"
+                )
 
             surviving_rows = connection.execute(
-                """
+                f"""
                 SELECT * FROM messages
                 WHERE notebook_id=?
+                  AND {self._active_at_revision_sql()}
                 ORDER BY created_at ASC, id ASC
                 """,
-                (thread_id,),
+                (thread_id, next_revision, next_revision),
             ).fetchall()
             surviving_history: list[dict[str, Any]] = []
             for row in surviving_rows:
                 meta = _load(row["metadata_text"], {})
-                if not isinstance(meta, dict):
-                    meta = {}
-                if meta.get("_internal_type") == _COACH_IDEMPOTENCY_MARKER:
+                if self._is_coach_idempotency_marker_meta(meta):
                     continue
-                surviving_history.append(
-                    {
-                        "id": str(row["id"]),
-                        "role": str(row["role"]),
-                        "content": str(row["content"] or ""),
-                        "metadata": meta,
-                    }
-                )
+                surviving_history.append(self._public_message_dict(row))
 
-        return ConversationRevisionResult(
-            thread_id=thread_id,
-            edited_message_id=message_id,
-            conversation_revision=next_revision,
-            current_stage=restored_stage,
-            surviving_history=surviving_history,
-        )
+            return ConversationRevisionResult(
+                thread_id=thread_id,
+                edited_message_id=replacement_id,
+                conversation_revision=next_revision,
+                current_stage=restored_stage,
+                surviving_history=surviving_history,
+            )
 
     def revise_user_message(
         self,
@@ -2385,7 +2835,7 @@ class StudentStore:
         )
         prior: list[dict[str, Any]] = []
         for message in result.surviving_history:
-            if message.get("id") == message_id:
+            if message.get("id") == result.edited_message_id:
                 break
             prior.append(
                 {
@@ -2396,47 +2846,54 @@ class StudentStore:
         return prior
 
     def get_messages(self, thread_id: str) -> list[dict[str, Any]]:
-        """Return canonical chronological messages for an owned notebook."""
-        if not self.get_thread(thread_id):
+        """Return messages active at the notebook's current conversation revision."""
+        thread = self.get_thread(thread_id)
+        if not thread:
             return []
+        revision = int(thread.get("conversation_revision") or 0)
+        return self.get_messages_at_revision(thread_id, revision)
+
+    def get_messages_at_revision(
+        self,
+        thread_id: str,
+        revision: int,
+    ) -> list[dict[str, Any]]:
+        """Reconstruct messages active at a specific owned notebook revision.
+
+        Active rows satisfy ``COALESCE(conversation_revision,0) <= revision`` and
+        ``superseded_at_revision IS NULL OR superseded_at_revision > revision``.
+        Internal coach-idempotency markers are hidden.
+        """
         with self._connect() as connection:
+            notebook = connection.execute(
+                "SELECT conversation_revision FROM notebooks "
+                "WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not notebook:
+                raise ValueError("Notebook not found")
+            current_revision = self._notebook_revision_value(notebook)
+            try:
+                requested = int(revision)
+            except (TypeError, ValueError) as error:
+                raise ValueError("Invalid conversation revision") from error
+            if requested < 0 or requested > current_revision:
+                raise ValueError("Invalid conversation revision")
             rows = connection.execute(
-                """
+                f"""
                 SELECT * FROM messages
                 WHERE notebook_id=?
+                  AND {self._active_at_revision_sql()}
                 ORDER BY created_at ASC, id ASC
                 """,
-                (thread_id,),
+                (thread_id, requested, requested),
             ).fetchall()
-        messages = []
+        messages: list[dict[str, Any]] = []
         for row in rows:
             meta = _load(row["metadata_text"], {})
-            if not isinstance(meta, dict):
-                meta = {}
-            if meta.get("_internal_type") == _COACH_IDEMPOTENCY_MARKER:
+            if self._is_coach_idempotency_marker_meta(meta):
                 continue
-            assessment = _load(row["assessment_text"], None)
-            if isinstance(assessment, dict):
-                meta["assessment"] = assessment
-            cited = _load(row["cited_source_ids_text"], None)
-            if cited is not None:
-                meta["source_refs"] = cited
-            if row["proposed_stage"]:
-                meta["proposed_stage"] = row["proposed_stage"]
-                meta["pending_transition_id"] = str(row["id"])
-            if row["decision_status"]:
-                meta["decision_status"] = row["decision_status"]
-            messages.append(
-                {
-                    "id": str(row["id"]),
-                    "role": str(row["role"]),
-                    "content": row["content"] or "",
-                    "metadata": meta,
-                    "created_at": row["created_at"],
-                    "is_error": bool(row["is_error"]),
-                    "feedback": None,
-                }
-            )
+            messages.append(self._public_message_dict(row))
         return messages
 
     def create_phase_transition(self, transition: dict[str, Any]) -> dict[str, Any]:
@@ -2463,26 +2920,32 @@ class StudentStore:
             assessment = assessment.model_dump(mode="json")
         with self._lock, self._connect() as connection:
             owned = connection.execute(
-                "SELECT id FROM notebooks WHERE id=? AND user_id=?",
+                "SELECT id, conversation_revision FROM notebooks "
+                "WHERE id=? AND user_id=?",
                 (thread_id, self.owner_id),
             ).fetchone()
             if not owned:
                 raise ValueError("Chat not found")
+            stamp_revision = self._notebook_revision_value(owned)
             connection.execute(
-                """
+                f"""
                 UPDATE messages
                 SET decision_status='rejected', decision_at=?
                 WHERE notebook_id=? AND decision_status='pending'
+                  AND {self._active_at_revision_sql()}
                 """,
-                (utc_now(), thread_id),
+                (utc_now(), thread_id, stamp_revision, stamp_revision),
             )
             connection.execute(
                 """
                 INSERT INTO messages
                   (id, notebook_id, role, content, is_error, assessment_text,
                    cited_source_ids_text, proposed_stage, decision_status,
-                   decision_at, metadata_text, created_at)
-                VALUES (?, ?, 'assistant', '', 0, ?, NULL, ?, 'pending', NULL, ?, ?)
+                   decision_at, metadata_text, created_at,
+                   conversation_revision, previous_message_id,
+                   superseded_at_revision)
+                VALUES (?, ?, 'assistant', '', 0, ?, NULL, ?, 'pending', NULL, ?, ?,
+                        ?, NULL, NULL)
                 """,
                 (
                     record["id"],
@@ -2497,24 +2960,28 @@ class StudentStore:
                         }
                     ),
                     record["created_at"],
+                    stamp_revision,
                 ),
             )
         return record
 
     def get_pending_phase_transition(self, thread_id: str) -> dict[str, Any] | None:
         """Return the newest unresolved stage recommendation for a notebook."""
-        if not self.get_thread(thread_id):
+        thread = self.get_thread(thread_id)
+        if not thread:
             return None
+        revision = int(thread.get("conversation_revision") or 0)
         with self._connect() as connection:
             row = connection.execute(
-                """
+                f"""
                 SELECT * FROM messages
                 WHERE notebook_id=? AND decision_status='pending'
                   AND proposed_stage IS NOT NULL
+                  AND {self._active_at_revision_sql()}
                 ORDER BY created_at DESC, id DESC
                 LIMIT 1
                 """,
-                (thread_id,),
+                (thread_id, revision, revision),
             ).fetchone()
         return self._phase_transition_from_message(row) if row else None
 
@@ -2528,14 +2995,29 @@ class StudentStore:
         if status not in {"confirmed", "rejected"}:
             raise ValueError("Transition status must be confirmed or rejected")
         with self._lock, self._connect() as connection:
+            notebook = connection.execute(
+                "SELECT conversation_revision FROM notebooks "
+                "WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not notebook:
+                raise ValueError("Pending transition not found")
+            revision = self._notebook_revision_value(notebook)
             row = connection.execute(
-                """
+                f"""
                 SELECT m.* FROM messages m
                 JOIN notebooks n ON n.id=m.notebook_id
                 WHERE m.id=? AND m.notebook_id=? AND n.user_id=?
                   AND m.decision_status='pending'
+                  AND {self._active_at_revision_sql('m')}
                 """,
-                (transition_id, thread_id, self.owner_id),
+                (
+                    transition_id,
+                    thread_id,
+                    self.owner_id,
+                    revision,
+                    revision,
+                ),
             ).fetchone()
             if not row:
                 raise ValueError("Pending transition not found")
@@ -2563,24 +3045,33 @@ class StudentStore:
         if accepted and not metadata_patch:
             raise ValueError("Accepted transitions require a journey metadata patch")
         with self._lock, self._connect() as connection:
-            row = connection.execute(
-                """
-                SELECT m.* FROM messages m
-                JOIN notebooks n ON n.id=m.notebook_id
-                WHERE m.id=? AND m.notebook_id=? AND n.user_id=?
-                  AND m.decision_status='pending'
-                """,
-                (transition_id, thread_id, self.owner_id),
-            ).fetchone()
-            if not row:
-                raise ValueError("Pending transition not found")
             notebook = connection.execute(
-                "SELECT current_stage, progress_text, settings_text FROM notebooks "
+                "SELECT current_stage, progress_text, settings_text, "
+                "conversation_revision FROM notebooks "
                 "WHERE id=? AND user_id=?",
                 (thread_id, self.owner_id),
             ).fetchone()
             if not notebook:
                 raise ValueError("Notebook not found")
+            revision = self._notebook_revision_value(notebook)
+            row = connection.execute(
+                f"""
+                SELECT m.* FROM messages m
+                JOIN notebooks n ON n.id=m.notebook_id
+                WHERE m.id=? AND m.notebook_id=? AND n.user_id=?
+                  AND m.decision_status='pending'
+                  AND {self._active_at_revision_sql('m')}
+                """,
+                (
+                    transition_id,
+                    thread_id,
+                    self.owner_id,
+                    revision,
+                    revision,
+                ),
+            ).fetchone()
+            if not row:
+                raise ValueError("Pending transition not found")
             if accepted and expected_from_stage is not None:
                 active_stage = str(notebook["current_stage"] or "focus")
                 if active_stage != expected_from_stage:

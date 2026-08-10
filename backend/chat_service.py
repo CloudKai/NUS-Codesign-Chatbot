@@ -285,14 +285,14 @@ class StudentChatEngine:
             "allow_model_knowledge": options.allow_model_knowledge,
         }
         if options.existing_user_message_id:
-            self.store.revise_user_message(
+            revision = self.store.revise_conversation_from_user_message(
                 thread_id,
                 options.existing_user_message_id,
                 prompt,
                 model_id=model.id,
                 metadata=user_metadata,
             )
-            user_id = options.existing_user_message_id
+            user_id = revision.edited_message_id
             journey_options = self._journey_from_messages(
                 self.store.get_messages(thread_id),
                 response_detail=options.response_detail,

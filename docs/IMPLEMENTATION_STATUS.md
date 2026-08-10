@@ -2,6 +2,171 @@
 
 ## Current phase
 
+**Append-only conversation revision on ``Production-AddEditFunction``.**
+Edit is append-only (no DELETE truncate): revise bumps
+``notebooks.conversation_revision``, marks the edited user and later active
+turns with ``superseded_at_revision``, inserts a new user row linked by
+``previous_message_id``, and regenerates the coach on the active branch.
+``get_messages`` / ``get_messages_at_revision`` use
+``conversation_revision <= R`` and
+``(superseded_at_revision IS NULL OR superseded_at_revision > R)``. Ownership
+stays ``messages.notebook_id → notebooks.user_id → users.id`` (no denormalized
+user columns on messages). Student UI keeps inline bubble edit, shows
+``Conversation {revision + 1}`` (stored ``0`` → Conversation 01), and warns that
+later turns leave the active view but remain in revision history. Regenerate
+remains unavailable. ``tests/test_conversation_revision.py`` is rewritten for
+these semantics. The complete 381-test deterministic mock suite and compileall
+pass. Remaining gates: additive DSQL DDL on existing clusters, controlled DSQL
+smoke, live browser/upload/RAG QA, and ARM64 image deployment. Bedrock and true
+provider streaming remain out of scope.
+
+### Behavior changes (this append-only phase)
+
+1. **Active-branch chat.** Discussion renders only active messages for the
+   notebook's current ``conversation_revision``; superseded turns stay durable
+   for revision history / reporting.
+2. **Conversation label.** Chat panel shows a compact
+   ``Conversation {conversation_revision + 1}`` label from the current notebook
+   (do not renumber the stored value).
+3. **Edit confirm copy.** Editing an earlier user turn states that a new
+   conversation revision/branch is created; later turns leave the active view
+   but remain in revision history (no truncate/delete claims).
+4. **Post-edit reload.** Successful revise reloads journey state and reruns so
+   ``get_messages`` shows the new active branch.
+5. **Edit failure UX.** Failed ``pending_edit`` keeps rendering the chat panel
+   instead of blanking it.
+6. **Message revision columns (backend contract).** Messages carry
+   ``conversation_revision``, ``previous_message_id``, and
+   ``superseded_at_revision``; ownership stays
+   ``messages.notebook_id → notebooks.user_id → users.id``.
+7. **Assessment fields (expected).** User rows and the fixed coach welcome have
+   ``assessment_text = NULL``; assessed coach assistant replies store
+   ``assessment_text`` JSON. Do not treat welcome NULL assessment as a failure.
+
+### PART 1 root-cause evidence (“only welcome” on DSQL) — code inspection
+
+No live DSQL verification was run for this writeup.
+
+**Primary mechanism (code evidence):**
+
+- UI welcome seed (`ui/coach_welcome.py` → `store.add_message`) persists a fixed
+  assistant welcome through the workspace CRUD path **without** the coach
+  workflow / ``persist_coach_turn`` CAS.
+- Coach turns persist via ``CoachApplicationService`` → ``persist_coach_turn``.
+  At branch baseline ``6b54923``, this path required
+  ``notebooks.conversation_revision`` for CAS while the simpler welcome insert
+  did not.
+- **Welcome-only root cause from code inspection:** an older DSQL cluster
+  missing ``notebooks.conversation_revision`` could accept the independently
+  committed welcome, then roll back every real coaching turn when
+  ``persist_coach_turn`` reached its revision CAS.
+- The new implementation also reads/writes the three message revision columns
+  from normal and welcome inserts. Missing message columns are therefore a
+  deployment failure prerequisite, not evidence that the new app will still
+  seed a welcome successfully. Run admin ``scripts/init_dsql.py`` before
+  deploying the new image.
+
+**Secondary diagnostics (not claimed verified live):** wrong ``DSQL_ENDPOINT``,
+database name, runtime role/owner (``DSQL_USER`` not ``co_design_app``), or
+``.env``/Compose config mismatch can produce empty or partial notebooks and
+should be checked after confirming schema columns exist.
+
+### Owner reporting JOIN (do not denormalize messages)
+
+```sql
+SELECT
+  u.id AS user_pk,
+  u.identifier,
+  u.cognito_sub,
+  n.id AS notebook_id,
+  n.conversation_revision AS notebook_revision,
+  m.id AS message_id,
+  m.role,
+  m.conversation_revision AS message_revision,
+  m.previous_message_id,
+  m.superseded_at_revision,
+  m.assessment_text,
+  m.created_at
+FROM messages m
+JOIN notebooks n ON n.id = m.notebook_id
+JOIN users u ON u.id = n.user_id
+WHERE n.id = :notebook_id
+ORDER BY m.created_at, m.id;
+```
+
+### Files changed (this append-only phase)
+
+- ``backend/student_store.py``, ``backend/application.py``,
+  ``backend/chat_service.py``, ``backend/repositories.py``, and
+  ``backend/workspace_service.py`` — append-only persistence, snapshots, CAS,
+  retry recovery, and legacy compatibility.
+- ``backend/api.py``, ``backend/api_client.py``, and ``backend/domain.py`` —
+  append-only contract documentation.
+- ``backend/persistence/dsql_schema.py`` and ``scripts/init_dsql.py`` — fresh
+  schema plus catalog-driven additive DSQL migration.
+- ``ui/chat.py``, ``ui/assets/styles/30-chat.css``, and ``ui/AGENTS.md`` —
+  Conversation label, edit warning, and failure fall-through.
+- Revision, migration, idempotency, store, legacy-engine, and UI regression
+  tests were updated under ``tests/``.
+- ``docs/IMPLEMENTATION_STATUS.md`` and
+  ``docs/deploy/AWS_STATELESS_EC2.md`` — migration, reporting, evidence, and
+  deployment steps.
+
+``tests/test_conversation_revision.py`` asserts append-only semantics
+(``previous_message_id`` lineage, ``superseded_at_revision``, active
+``get_messages`` / ``get_messages_at_revision(0)`` = Conversation 01, provider-
+failure retention, stale CAS, revoked keys, pending supersede, API ownership,
+DSQL message columns, ``assessment_text`` on assessed assistants only).
+
+### Validation evidence
+
+- Integrated revision/storage/UI selection:
+  ``.venv/bin/python -m pytest -q tests/test_conversation_revision.py
+  tests/test_init_dsql.py tests/test_coach_idempotency.py
+  tests/test_streamlit_ui.py tests/test_student_store.py
+  tests/test_storage_providers.py tests/test_learning_service.py`` → **115
+  passed** (deterministic mocks; 2026-08-10).
+- Full suite: ``.venv/bin/python -m pytest -q`` → **381 passed**.
+- Compile: ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache
+  .venv/bin/python -m compileall -q backend ui streamlit_app.py tests scripts``
+  → passed.
+- Patch integrity: ``git diff --check`` → passed.
+- IDE diagnostics on edited Python modules: no errors.
+- Paid OpenAI / live AWS calls: not run.
+
+### Compatibility / migration / rollback
+
+- Additive only: existing message rows backfill to revision ``0`` with
+  ``superseded_at_revision`` NULL; display stays Conversation 01 until an edit.
+- DSQL: admin manual DDL / ``init_dsql.py`` catalog path only — **app startup
+  never DDL**. See ``docs/deploy/AWS_STATELESS_EC2.md``.
+- Rollback: revert the application image/code; older code ignores the additive
+  columns and retained historical rows. Avoid ``DROP COLUMN`` on live student
+  data. Use the pre-migration backup/cluster snapshot if physical schema
+  rollback is required. SQLite migrations are additive on open.
+
+### Known risks / blockers
+
+- Existing DSQL clusters must receive the additive notebook/message revision
+  migration before this application version is deployed. Runtime cannot repair
+  missing columns and app startup intentionally performs no DDL.
+- The migration and behavior are covered by deterministic mocks, not a live
+  DSQL write. No live browser/upload/RAG QA is claimed in this phase.
+
+### Next exact action
+
+1. On existing Aurora DSQL, as admin, apply notebook ``conversation_revision``
+   (if missing) then the three message columns via ``scripts/init_dsql.py`` /
+   ``docs/deploy/AWS_STATELESS_EC2.md`` (one DDL per transaction; inspect
+   catalog; backfill defaults; backup first).
+2. Build and redeploy the ARM64 ECR image after migration and require internal
+   readiness 200.
+3. With separate live-write approval, run controlled Cognito/DSQL edit,
+   retry/restart, ownership, assessment, and source-citation smoke; then finish
+   browser/upload/RAG QA.
+
+### Prior pilot context (Phases 1–14)
+
 **Phases 1–13 complete on ``Production-RemoveData``; Phase 14 verdict:
 READY FOR CONTROLLED PILOT.** Live manual production QA documented in
 ``docs/MANUAL_PRODUCTION_QA.md`` (2026-08-10). **Month-1 product policy:**
@@ -15,15 +180,11 @@ wins and auto-advance is treated as off. Health ``mode`` now follows
 logging added. Coach chat shows a **thinking** status while the buffered
 provider turn runs (early NDJSON ``status``); true token streaming remains
 deferred. For lower wait times keep Guidance short, reasoning low, and avoid
-extra selected sources. **Edit message** is restored via server-authoritative
-``POST .../messages/{id}/revise``: truncates later turns, recomputes stage/
-journey, bumps ``conversation_revision``, revokes old coach idempotency keys,
-then regenerates with a **new** key. Stale provider results against an old
-revision are rejected. Provider failure after a successful revision leaves the
-truncated history (no auto-restore). Regenerate remains unavailable. Remaining
-gates: redeploy with DSQL ``conversation_revision`` column, live QA_A/B IDOR,
-upload/RAG smoke, ARM64 image build. Bedrock and true provider streaming remain
-out of scope.
+extra selected sources. **Edit message** (pre–append-only) used
+server-authoritative ``POST .../messages/{id}/revise`` with
+``conversation_revision`` CAS and a **new** idempotency key; that path is being
+replaced by append-only revision history on this branch. Regenerate remains
+unavailable.
 
 ### Behavior changes (Phases 1–13)
 
@@ -79,10 +240,10 @@ out of scope.
    language reaches the prompt, reasoning effort restores per notebook, and
    selected sources force model-knowledge fallback off. Request/image limits
    are enforced at the API/application boundary.
-7. User-message **Edit** uses composer Save & resend → server
-   ``revise_and_resubmit`` (truncate, stage/journey recompute,
-   ``conversation_revision`` CAS, new idempotency key). Regenerate remains
-   unavailable. Normal send/stream retries use the durable idempotency
+7. User-message **Edit** uses inline bubble Save → server
+   ``revise_and_resubmit`` (append-only conversation revision, stage/journey
+   recompute, ``conversation_revision`` CAS, new idempotency key). Regenerate
+   remains unavailable. Normal send/stream retries use the durable idempotency
    contract described below.
 8. Production documentation now uses ``compose.prod.yaml``/ECR and makes S3
    setup/readiness explicit. The default stateful Compose stack is labelled
@@ -357,6 +518,9 @@ out of scope.
 
 ### Next exact action
 
+Authoritative next steps for append-only revision are under **Current phase →
+Next exact action** above. Continuing AWS cutover after that:
+
 1. Configure GitHub branch protection per
    ``docs/deploy/GITHUB_BRANCH_PROTECTION.md``.
 2. Owner decision on public lecture PDFs per
@@ -367,10 +531,10 @@ out of scope.
    instance role.
 4. Finish Aurora DSQL, map the EC2 role to ``co_design_app``, run
    ``scripts/init_dsql.py`` as admin (or for existing clusters apply the
-   manual ``conversation_revision`` ``ALTER`` in
-   ``docs/deploy/AWS_STATELESS_EC2.md``), then grant SELECT/INSERT/UPDATE/DELETE
-   on all tables in ``public`` to ``co_design_app``. Do not grant schema
-   ``USAGE``.
+   manual notebook ``conversation_revision`` **and** three message revision
+   column ``ALTER``s in ``docs/deploy/AWS_STATELESS_EC2.md``), then grant
+   SELECT/INSERT/UPDATE/DELETE on all tables in ``public`` to
+   ``co_design_app``. Do not grant schema ``USAGE``. App startup never DDL.
 5. With separate live-write approval, run
    ``scripts/smoke_dsql_idempotency.py --confirm-live --identifier
    'cognito:<sub>'`` under ``DATABASE_PROVIDER=dsql`` and
@@ -378,9 +542,10 @@ out of scope.
 6. Deploy the immutable ECR image with ``scripts/deploy_ecr.sh`` and require
    internal ``/api/v1/ready`` 200. Verify Caddy edge curl checks in
    ``docs/security/CADDY_PUBLIC_BOUNDARY.md``.
-7. Run the full Cognito → notebook → coach → upload → restart → isolation →
-   logout live smoke in ``docs/deploy/AWS_STATELESS_EC2.md``. Use mock mode
-   first; make an OpenAI request only with explicit approval and a cost cap.
+7. Run the full Cognito → notebook → coach → upload → edit/revise → restart →
+   isolation → logout live smoke in ``docs/deploy/AWS_STATELESS_EC2.md``. Use
+   mock mode first; make an OpenAI request only with explicit approval and a
+   cost cap.
 8. Only after that smoke is green: open class-wide traffic; then consider
    durable provider streaming and Bedrock retrieval adapters.
 

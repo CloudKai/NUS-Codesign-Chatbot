@@ -341,13 +341,17 @@ def render_message(message: dict[str, Any]) -> None:
         if role == "user" and st.session_state.editing_message == message["id"]:
             safe_id = message["id"].replace("-", "_")
             with st.container(key=f"user_message_edit_{safe_id}"):
-                revised = st.text_area(
-                    "Edit message",
-                    value=message["content"],
-                    key=f"edit-text-{message['id']}",
-                    label_visibility="collapsed",
-                    height=USER_MESSAGE_EDIT_HEIGHT_PX,
-                )
+                edit_key = f"edit-text-{message['id']}"
+                # Prefer a restored draft already in session state (failed revise
+                # retry). Only pass ``value`` when the widget key is unset.
+                text_area_kwargs: dict[str, Any] = {
+                    "key": edit_key,
+                    "label_visibility": "collapsed",
+                    "height": USER_MESSAGE_EDIT_HEIGHT_PX,
+                }
+                if edit_key not in st.session_state:
+                    text_area_kwargs["value"] = message["content"]
+                revised = st.text_area("Edit message", **text_area_kwargs)
                 sync_user_message_edit_layout()
                 with st.container(key=f"user_message_edit_actions_{safe_id}"):
                     cancel_column, send_column = st.columns(2, gap="small")
@@ -357,6 +361,7 @@ def render_message(message: dict[str, Any]) -> None:
                         type="secondary",
                     ):
                         st.session_state.editing_message = None
+                        st.session_state.pop(edit_key, None)
                         rerun()
                     if send_column.button(
                         "Send",
@@ -612,9 +617,10 @@ def handle_prompt(
 
 @st.dialog("Edit this message?")
 def _confirm_edit_earlier_message_dialog() -> None:
-    """Warn that editing a non-latest user turn truncates later conversation."""
+    """Warn that editing a non-latest user turn starts a new conversation revision."""
     st.write(
-        "Editing this message will replace the conversation after this point."
+        "Editing this message creates a new conversation revision. "
+        "Later turns leave the active view but remain in revision history."
     )
     cancel_column, continue_column = st.columns(2)
     if cancel_column.button("Cancel", use_container_width=True):
@@ -632,20 +638,36 @@ def _confirm_edit_earlier_message_dialog() -> None:
         rerun()
 
 
+def _restore_pending_edit_draft(message_id: str, draft: str) -> None:
+    """Re-open the in-bubble editor with the failed revise draft for retry."""
+    if not message_id:
+        return
+    st.session_state.editing_message = message_id
+    if draft:
+        st.session_state[f"edit-text-{message_id}"] = draft
+
+
 def _submit_pending_edit(
     *,
     model_id: str,
     reasoning_effort: str | None,
-) -> None:
-    """Apply a bubble edit via the server revise endpoint and reload state."""
+) -> bool:
+    """Apply a bubble edit via the server revise endpoint and reload state.
+
+    Returns:
+        True when revise succeeded and a rerun was requested; False when the
+        edit could not run so the chat panel should keep rendering. On failure,
+        restores the in-bubble editor draft so the student can retry.
+    """
     pending = st.session_state.pop("pending_edit", None)
     if not isinstance(pending, dict):
-        return
+        return False
     message_id = str(pending.get("message_id") or "")
     draft = str(pending.get("prompt") or "").strip()
     if not message_id or not draft:
+        _restore_pending_edit_draft(message_id, draft)
         st.error("Enter a message before resending.")
-        return
+        return False
     thinking = st.status("Coach is thinking…", expanded=False)
     try:
         store.revise_message(
@@ -661,12 +683,13 @@ def _submit_pending_edit(
         thinking.update(label="Coach reply ready", state="complete")
     except Exception:
         thinking.update(label="Coaching failed", state="error")
+        _restore_pending_edit_draft(message_id, draft)
         st.error(
-            "Could not revise this message. Your earlier conversation is still "
-            "visible if the server rejected the change; if revision already "
-            "applied, reload the notebook and resend with a new attempt."
+            "Could not revise this message. Your active conversation is still "
+            "visible if the server rejected the change; if a new revision "
+            "already applied, reload the notebook and retry with a new attempt."
         )
-        return
+        return False
     updated_thread = store.get_thread(st.session_state.thread_id) or {}
     updated_metadata = updated_thread.get("metadata") or {}
     updated_journey = normalize_journey(updated_metadata.get("learning_journey"))
@@ -674,6 +697,26 @@ def _submit_pending_edit(
     st.session_state.response_detail = updated_journey["response_detail"]
     st.session_state.composer_nonce += 1
     rerun()
+    return True
+
+
+def _conversation_revision_label(thread: dict[str, Any] | None) -> str:
+    """Return the student-facing Conversation N label for a notebook revision.
+
+    Stored ``conversation_revision`` stays zero-based; display adds one so the
+    first branch shows as Conversation 1 (not renumbered in storage).
+    """
+    data = thread or {}
+    raw = data.get("conversation_revision")
+    if raw is None:
+        raw = (data.get("metadata") or {}).get("conversation_revision")
+    try:
+        revision = int(raw or 0)
+    except (TypeError, ValueError):
+        revision = 0
+    if revision < 0:
+        revision = 0
+    return f"Conversation {revision + 1}"
 
 
 def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
@@ -684,11 +727,13 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
         reasoning_effort: Compatible reasoning effort for that model, or None.
     """
     if st.session_state.get("pending_edit"):
-        _submit_pending_edit(
+        # Successful revise calls ``rerun()``. On failure, keep rendering the
+        # active chat instead of blanking the panel.
+        if _submit_pending_edit(
             model_id=model_id,
             reasoning_effort=reasoning_effort,
-        )
-        return
+        ):
+            return
 
     selected_sources = store.list_sources(
         st.session_state.thread_id,
@@ -697,9 +742,17 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
     allow_model_knowledge = not selected_sources
     st.session_state.allow_model_knowledge = allow_model_knowledge
     seed_coach_welcome(store, st.session_state.thread_id)
+    thread = store.get_thread(st.session_state.thread_id) or {}
     messages = store.get_messages(st.session_state.thread_id)
     chat_log = st.container(key="chat_log")
     with chat_log:
+        revision_label = _conversation_revision_label(thread)
+        st.markdown(
+            f'<div class="conversation-revision-label" '
+            f'title="Active conversation revision">'
+            f"{html.escape(revision_label)}</div>",
+            unsafe_allow_html=True,
+        )
         for message in messages:
             render_message(message)
 

@@ -147,18 +147,51 @@ Then grant runtime privileges (run as admin; no account ARNs in Git):
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO co_design_app;
 ```
 
-#### Existing clusters: ``conversation_revision`` (edit/revise CAS)
+#### Existing clusters: append-only conversation revisions
 
-Fresh ``init_dsql.py`` runs include ``notebooks.conversation_revision`` on
-``CREATE TABLE``. Clusters created before that column must apply DDL as admin
-(do not auto-migrate from the app).
+Fresh ``init_dsql.py`` runs include ``notebooks.conversation_revision`` plus
+the three message revision columns
+(``messages.conversation_revision``, ``messages.previous_message_id``,
+``messages.superseded_at_revision``). **App startup never issues DDL.** Runtime
+role ``co_design_app`` must never perform DDL. Prefer re-running
+``scripts/init_dsql.py`` as admin (DbConnectAdmin): it inspects the catalog,
+adds only missing objects, and commits **one DDL statement per transaction**,
+then waits on any new ASYNC index jobs.
+
+Before deploying application code that writes append-only revisions, confirm
+the notebook CAS column exists (**prerequisite**), then the three message
+columns. Manual admin path when not using ``init_dsql.py``:
 
 Aurora DSQL ``ALTER TABLE ADD COLUMN`` accepts **only** a name and type — not
 ``NOT NULL`` or ``DEFAULT`` in the same statement (error:
-``ALTER TABLE ADD COLUMN with constraint not supported``). Also, DSQL allows
-**one DDL statement per transaction**.
+``ALTER TABLE ADD COLUMN with constraint not supported``).
 
-Run these as **separate** admin statements (commit between each):
+**Backup / rollback caution:** take a cluster snapshot or export before ALTER.
+Prefer forward-fix + application code revert over ``DROP COLUMN`` on live
+student data. Additive columns leave historical message content intact; do not
+delete turns as part of migration.
+
+Inspect catalog (admin):
+
+```sql
+SELECT table_name, column_name
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND (
+    (table_name = 'notebooks' AND column_name = 'conversation_revision')
+    OR (
+      table_name = 'messages'
+      AND column_name IN (
+        'conversation_revision',
+        'previous_message_id',
+        'superseded_at_revision'
+      )
+    )
+  )
+ORDER BY table_name, column_name;
+```
+
+Notebook revision (prerequisite) — separate commits per statement:
 
 ```sql
 ALTER TABLE notebooks
@@ -176,12 +209,64 @@ SET conversation_revision = 0
 WHERE conversation_revision IS NULL;
 ```
 
-The application already treats a missing/null revision as ``0``
-(``COALESCE`` / ``or 0``). Enforcing ``NOT NULL`` on an existing DSQL table
-requires a table recreate/swap, which is unnecessary for this CAS column.
+Message revision columns — add only missing ones; one DDL per transaction:
 
-SQLite local DBs still add ``INTEGER NOT NULL DEFAULT 0`` on open via store
-migration.
+```sql
+ALTER TABLE messages
+  ADD COLUMN IF NOT EXISTS conversation_revision INTEGER;
+```
+
+```sql
+ALTER TABLE messages
+  ALTER COLUMN conversation_revision SET DEFAULT 0;
+```
+
+```sql
+ALTER TABLE messages
+  ADD COLUMN IF NOT EXISTS previous_message_id TEXT;
+```
+
+```sql
+ALTER TABLE messages
+  ADD COLUMN IF NOT EXISTS superseded_at_revision INTEGER;
+```
+
+Backfill / defaults (DML after DDL):
+
+```sql
+UPDATE messages
+SET conversation_revision = 0
+WHERE conversation_revision IS NULL;
+```
+
+Leave ``previous_message_id`` and ``superseded_at_revision`` NULL for existing
+rows (active at notebook revision 0). Fresh ``CREATE TABLE`` retains
+``INTEGER NOT NULL DEFAULT 0`` for both revision counters. The application
+treats null notebook/message revision as ``0`` (``COALESCE`` / ``or 0``).
+Student UI shows ``Conversation {notebook.conversation_revision + 1}`` (stored
+``0`` → Conversation 01); do not renumber stored values.
+
+**PART 1 (“only welcome”) — code inspection, not live-verified:** the UI
+welcome seed persists through workspace ``add_message`` without the coach
+workflow. At baseline ``6b54923``, coach persistence additionally used notebook
+revision CAS, so an older cluster missing
+``notebooks.conversation_revision`` could accept the independently committed
+welcome while real turn transactions rolled back. The new application also
+reads/writes all message revision columns from welcome and normal inserts; if
+those columns are missing, even welcome seeding may fail. This is why the full
+migration must precede the image deployment. Secondary diagnostics: wrong
+``DSQL_ENDPOINT``, database name, owner/runtime role (must be
+``co_design_app``), or Compose/``.env`` mismatch — check after confirming
+columns exist. Do not claim live DSQL verification from docs alone.
+
+**Assessment fields:** user rows and the fixed coach welcome keep
+``assessment_text`` NULL; assessed coach assistant replies store
+``assessment_text`` JSON. NULL on welcome/user is expected.
+
+SQLite local DBs add missing notebook/message revision columns on open once
+the backend migration lands. Back up the SQLite file before first startup;
+older application code ignores additive columns, so local rollback is a code
+rollback without deleting revision history.
 Do not grant ``USAGE`` on the built-in ``public`` schema. Aurora DSQL manages
 that schema as a system entity and rejects that grant. The object-level table
 grant above is the required runtime grant while application tables remain in

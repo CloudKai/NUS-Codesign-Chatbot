@@ -147,6 +147,12 @@ class WorkspaceService:
             raise ValueError("Notebook not found")
         return self._store.get_messages(thread_id)
 
+    def get_messages_at_revision(
+        self, thread_id: str, revision: int
+    ) -> list[dict[str, Any]]:
+        """Return chat history active at a conversation revision snapshot."""
+        return self._store.get_messages_at_revision(thread_id, revision)
+
     def add_message(
         self,
         thread_id: str,

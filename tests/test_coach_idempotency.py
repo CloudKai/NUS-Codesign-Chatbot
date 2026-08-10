@@ -655,3 +655,76 @@ def test_dsql_claim_retries_the_whole_unit_after_sqlstate_40001(
             "SELECT COUNT(*) FROM messages WHERE id=?", (claimed.marker_id,)
         ).fetchone()[0]
     assert marker_count == 1
+
+
+def test_revise_retry_replays_when_persist_committed_before_marker_complete(tmp_path):
+    """Same revise key after persist-before-complete must not supersede again.
+
+    Application recovers a durable recorded coach turn before calling revise, so
+    a retry cannot bump ``conversation_revision`` or alter the active branch.
+    Uses a normal durable turn (not a live revise mutation) so the assertion
+    stays valid while store revise finishes migrating to append-only.
+    """
+    store = StudentStore(tmp_path / "revise-persist-before-complete.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    provider = CountingProvider()
+    service = _service(store, provider)
+    revise_key = "revise-persist-before-complete"
+
+    first = service.submit(
+        _request(thread_id, key=revise_key, message="Durable revised claim.")
+    )
+    revision_after = int(
+        (store.get_thread(thread_id) or {}).get("conversation_revision") or 0
+    )
+    active_after = [
+        (message["id"], message["role"], message["content"])
+        for message in store.get_messages(thread_id)
+    ]
+    assert provider.calls == 1
+
+    marker_id = store._coach_marker_id(thread_id, revise_key)
+    assert store.path is not None
+    with sqlite3.connect(store.path) as connection:
+        metadata = json.loads(
+            connection.execute(
+                "SELECT metadata_text FROM messages WHERE id=?",
+                (marker_id,),
+            ).fetchone()[0]
+        )
+        metadata["status"] = "pending"
+        metadata.pop("turn", None)
+        metadata["lease_token"] = "interrupted-lease"
+        metadata["lease_expires_at"] = "2000-01-01T00:00:00+00:00"
+        connection.execute(
+            "UPDATE messages SET metadata_text=? WHERE id=?",
+            (json.dumps(metadata, ensure_ascii=False), marker_id),
+        )
+        connection.commit()
+
+    revise_calls: list[tuple[str, str, str]] = []
+    original_revise = store.revise_conversation_from_user_message
+
+    def tracking_revise(thread, message, content, **kwargs):
+        revise_calls.append((thread, message, content))
+        return original_revise(thread, message, content, **kwargs)
+
+    store.revise_conversation_from_user_message = tracking_revise  # type: ignore[method-assign]
+
+    replay = service.revise_and_resubmit(
+        thread_id,
+        "unused-original-user-id",
+        "Durable revised claim.",
+        idempotency_key=revise_key,
+    )
+
+    assert replay == first
+    assert provider.calls == 1
+    assert revise_calls == []
+    assert int(
+        (store.get_thread(thread_id) or {}).get("conversation_revision") or 0
+    ) == revision_after
+    assert [
+        (message["id"], message["role"], message["content"])
+        for message in store.get_messages(thread_id)
+    ] == active_after

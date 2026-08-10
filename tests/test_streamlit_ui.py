@@ -129,14 +129,29 @@ def test_streamlit_notebook_workspace_smoke():
     assert "--cd-user-bubble-max-height" in rendered
     chat_py = Path("ui/chat.py").read_text(encoding="utf-8")
     assert "USER_MESSAGE_EDIT_HEIGHT_PX" in chat_py
-    assert "height=USER_MESSAGE_EDIT_HEIGHT_PX" in chat_py
+    assert '"height": USER_MESSAGE_EDIT_HEIGHT_PX' in chat_py or (
+        "height=USER_MESSAGE_EDIT_HEIGHT_PX" in chat_py
+    )
     assert "sync_user_message_edit_layout" in chat_py
     assert "user_message_edit_" in chat_py
     assert "revise_message" in chat_py
     assert "pending_edit" in chat_py
+    assert "_conversation_revision_label" in chat_py
+    assert "_restore_pending_edit_draft" in chat_py
+    assert 'f"Conversation {revision + 1}"' in chat_py
+    assert "conversation-revision-label" in chat_py
+    assert "creates a new conversation revision" in chat_py
+    assert "remain in revision history" in chat_py
+    assert "will replace the conversation after this point" not in chat_py
+    assert "truncate" not in chat_py.lower()
     assert "Save & resend" not in chat_py
     assert "Editing message" not in chat_py
     assert "composer_edit" not in chat_py
+    assert "conversation-revision-label" in rendered
+    assert "Conversation 1" in rendered
+    assert ".conversation-revision-label" in Path(
+        "ui/assets/styles/30-chat.css"
+    ).read_text(encoding="utf-8")
     assert 'appearance == "Dark"' in Path("ui/chat.py").read_text(encoding="utf-8")
     assert "#5B6B7C" in Path("ui/chat.py").read_text(encoding="utf-8")
     assert "rgba(255, 255, 255, 0.35)" in Path("ui/chat.py").read_text(
@@ -701,3 +716,68 @@ def test_legacy_chat_turn_does_not_move_the_learning_stage_without_confirmation(
     assert not app.exception
     assert app.session_state["learning_journey"]["current_stage"] == "focus"
     assert app.session_state["learning_journey"]["completed_stages"] == []
+
+
+def test_conversation_revision_label_formatting():
+    """Display uses revision+1 without renumbering the stored value."""
+    from ui.chat import _conversation_revision_label
+
+    assert _conversation_revision_label(None) == "Conversation 1"
+    assert _conversation_revision_label({}) == "Conversation 1"
+    assert _conversation_revision_label({"conversation_revision": 0}) == "Conversation 1"
+    assert _conversation_revision_label({"conversation_revision": 8}) == "Conversation 9"
+    assert _conversation_revision_label({"conversation_revision": 9}) == "Conversation 10"
+    assert _conversation_revision_label({"conversation_revision": 99}) == "Conversation 100"
+    assert (
+        _conversation_revision_label({"metadata": {"conversation_revision": 3}})
+        == "Conversation 4"
+    )
+
+
+def test_pending_edit_failure_keeps_chat_visible(monkeypatch):
+    """A failed revise must not blank the discussion panel."""
+    from ui import chat
+    from backend.student_store import StudentStore
+
+    def reject_revise(*_args, **_kwargs):
+        raise RuntimeError("revise failed for AppTest")
+
+    monkeypatch.setattr(chat.store, "revise_message", reject_revise)
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    assert not app.exception
+    app.chat_input[0].set_value(
+        "I want to study safer street crossings for older pedestrians."
+    ).run()
+    assert not app.exception
+
+    thread_id = app.session_state["thread_id"]
+    user_message = next(
+        message
+        for message in StudentStore().get_messages(thread_id)
+        if message.get("role") == "user"
+    )
+    app.session_state["pending_edit"] = {
+        "message_id": user_message["id"],
+        "prompt": "I want to study safer crossings near schools.",
+    }
+    app.run()
+
+    assert not app.exception
+    rendered_errors = "\n".join(error.value or "" for error in app.error)
+    assert "Could not revise this message" in rendered_errors
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert "Conversation 1" in rendered
+    assert "Welcome to your critical-thinking coach" in rendered
+    assert "pending_edit" not in app.session_state or app.session_state[
+        "pending_edit"
+    ] is None
+    assert app.session_state["editing_message"] == user_message["id"]
+    assert (
+        app.session_state[f"edit-text-{user_message['id']}"]
+        == "I want to study safer crossings near schools."
+    )
+    # Active history remains in the store; panel still shows coach welcome.
+    roles = [message["role"] for message in StudentStore().get_messages(thread_id)]
+    assert "assistant" in roles
+    assert "user" in roles

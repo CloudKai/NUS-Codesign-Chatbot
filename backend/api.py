@@ -66,7 +66,7 @@ class StageSelectionRequest(BaseModel):
 
 
 class MessageReviseRequest(BaseModel):
-    """Edit a prior user message and regenerate the coach reply."""
+    """Edit a prior user message via append-only revision and regenerate the coach."""
 
     content: str = Field(min_length=1, max_length=12_000)
     idempotency_key: str = Field(
@@ -719,9 +719,10 @@ def create_app(
         http_request: Request,
         owner: OwnerServices = Depends(current_owner),
     ) -> CoachTurn:
-        """Revise an owned user message, truncate later turns, and coach again.
+        """Revise an owned user message via append-only supersede, then coach again.
 
         Uses a new idempotency key. Conversation revision is server-owned.
+        Historical revision snapshots are not exposed on this student route.
         """
         if not owner.store.get_thread(thread_id):
             raise HTTPException(status_code=404, detail="Notebook not found")

@@ -222,7 +222,8 @@ def test_edit_and_resend_replaces_later_turns_and_uses_revised_prompt(
 
     messages = store.get_messages(thread_id)
     assert [message["role"] for message in messages] == ["user", "assistant"]
-    assert messages[0]["id"] == first.user_message_id
+    assert messages[0]["id"] != first.user_message_id
+    assert messages[0].get("previous_message_id") == first.user_message_id
     assert messages[0]["content"] == "Revised prompt"
     assert "Old prompt" not in rendered
     assert "Later prompt" not in rendered
@@ -231,6 +232,9 @@ def test_edit_and_resend_replaces_later_turns_and_uses_revised_prompt(
         "Revised prompt",
         messages[1]["content"],
     ]
+    history = store.get_messages_at_revision(thread_id, 0)
+    assert any(item["id"] == first.user_message_id for item in history)
+    assert any(item["content"] == "Later prompt" for item in history)
 
 
 def test_mock_image_generation_returns_downloadable_artifact(tmp_path, monkeypatch):

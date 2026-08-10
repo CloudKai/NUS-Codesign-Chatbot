@@ -20,6 +20,11 @@ Differences from local SQLite:
 - UUID primary keys stay application-generated TEXT ids.
 - Secondary indexes use ``CREATE INDEX ASYNC`` / ``CREATE UNIQUE INDEX ASYNC``.
 - Admin bootstrap waits for each ASYNC index job.
+- Fresh ``notebooks`` / ``messages`` include revision columns
+  (``notebooks.conversation_revision`` plus message
+  ``conversation_revision``, ``previous_message_id``,
+  ``superseded_at_revision``). Existing clusters get missing columns only via
+  catalog-driven ``scripts/init_dsql.py`` ALTERs — never at app startup.
 
 Do not auto-create or destroy DSQL clusters from application startup. Schema
 application is explicit via ``scripts/init_dsql.py`` (admin only). Runtime
@@ -84,7 +89,10 @@ CREATE TABLE IF NOT EXISTS messages (
     decision_status TEXT,
     decision_at TEXT,
     metadata_text TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    conversation_revision INTEGER NOT NULL DEFAULT 0,
+    previous_message_id TEXT NULL,
+    superseded_at_revision INTEGER NULL
 );
 
 CREATE INDEX ASYNC IF NOT EXISTS idx_messages_notebook_created

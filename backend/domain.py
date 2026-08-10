@@ -183,8 +183,10 @@ class CoachRequest(BaseModel):
     model_id: str | None = None
     reasoning_effort: str | None = None
     # Server-filled notebook CAS token; clients must not treat this as authoritative.
+    # Normal submit stamps this current revision on new rows and does not bump it.
     conversation_revision: int | None = None
-    # When set, persist updates this existing user row instead of inserting one.
+    # Replacement user-message id from an append-only revision. The assistant
+    # attaches to this already-persisted row; it is excluded from provider history.
     revise_user_message_id: str | None = Field(default=None, max_length=64)
     idempotency_key: str | None = Field(
         default=None,

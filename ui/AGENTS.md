@@ -93,8 +93,14 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
   token streaming in the UI beyond what the API emits.
 - **Edit via server revise only.** User-message Edit uses the in-bubble editor
   (8-row max, then scroll) and must call ``store.revise_message`` /
-  ``POST .../messages/{id}/revise`` with a new idempotency key. Never truncate
-  history only in Streamlit session state.
+  ``POST .../messages/{id}/revise`` with a new idempotency key. The server
+  creates an append-only conversation revision (later turns leave the active
+  view but stay in revision history); never delete or rewrite history only in
+  Streamlit session state. ``get_messages`` returns the active branch. Show a
+  compact ``Conversation {conversation_revision + 1}`` label from the current
+  notebook (stored ``0`` displays as Conversation 1). On revise failure, keep
+  rendering the active chat and restore the in-bubble draft for retry; never
+  blank the panel.
 
 ## Entrypoint flow
 

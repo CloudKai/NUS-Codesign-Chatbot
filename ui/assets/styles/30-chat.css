@@ -1,4 +1,14 @@
     /* Discussion */
+    .conversation-revision-label {
+        color:var(--cd-muted);
+        font-size:.72rem;
+        line-height:1.2;
+        letter-spacing:.01em;
+        padding:.05rem 0 .4rem;
+        margin:0;
+        user-select:none;
+    }
+
     .chat-context-line {
         min-height:3.2rem;
         display:flex;
