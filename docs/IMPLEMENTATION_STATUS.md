@@ -2,31 +2,42 @@
 
 ## Current phase
 
-**Production-hardening append-only revision on ``Production-AddEditFunction``.**
-Append-only edit remains (no DELETE truncate). This hardening pass makes the
-Aurora DSQL revision migration resumable/idempotent (DEFAULT + batched NULL
-backfill; column presence alone is not “done”), keeps revise retries on a
-stable UI idempotency key, scopes ``select_learning_stage`` pending rejects to
-the active conversation branch, formats the label as ``Conversation 01``, and
-blocks destructive ``update_message`` content writes. Ownership stays
-``messages.notebook_id → notebooks.user_id → users.id``. Sources lock/select/
-sort UX from the prior commit remains. Deterministic mock tests cover migration
-repair, batch backfill, revise resume, stage-selection pending scope, and UI
-label/retry state.
+**AWS cutover: DSQL revision migration + live smoke (after UI hardening).**
+Local UI hardening on ``Production-AddEditFunction`` is complete for this pass:
+explicit edit retry (no auto-resubmit after revise failure), sanitized Sources +
+Studio errors, Conversation NN label hidden. Architecture is frozen for further
+feature work — next work is production DSQL migration and live AWS verification
+only (see Next exact action).
 
-### Hardening behavior changes (this pass)
+### UI hardening just completed (this pass)
+
+1. **Explicit edit retry.** On revise failure, clear ``pending_edit`` so the next
+   rerun does not auto-resubmit; keep the stable ``get_retry_key`` UUID; restore
+   the in-bubble draft; require Send to retry.
+2. **Studio sanitized errors.** Stage-select and transition-confirm failures log
+   internals and show fixed student-safe messages (no ``str(exc)``).
+3. **Full mock suite.** ``.venv/bin/python -m pytest -q`` → **387 passed**.
+
+### Prior production-hardening (still true)
+
+Append-only edit remains (no DELETE truncate). DSQL revision migration is
+resumable/idempotent (DEFAULT + batched NULL backfill). Ownership stays
+``messages.notebook_id → notebooks.user_id → users.id``.
+
+### Hardening behavior changes (revision pass)
 
 1. **DSQL revision migration.** ``scripts/init_dsql.py`` inspects
    ``information_schema`` name **and** ``column_default``, repairs missing
    DEFAULT 0, and batch-backfills NULL ``conversation_revision`` (1000 rows /
    transaction) for notebooks and messages. Safe to re-run; never app startup.
-2. **Stable revise retry.** Streamlit ``pending_edit`` keeps one UUID
-   idempotency key (via ``get_retry_key`` scope ``revise:{message_id}``) until
-   success; provider-failure retries resume without a second revision bump.
+2. **Stable revise retry.** Streamlit keeps one UUID idempotency key (via
+   ``get_retry_key`` scope ``revise:{message_id}``) until success; provider-
+   failure retries resume without a second revision bump. After a failed
+   attempt the UI requires an explicit Send (``pending_edit`` cleared).
 3. **Active-branch pending rejects.** ``select_learning_stage`` only rejects
    ``decision_status='pending'`` rows active at the current revision.
-4. **Conversation 01.** Display uses ``f"Conversation {revision + 1:02d}"``;
-   stored revision stays zero-based.
+4. **Conversation revision (internal).** Stored revision stays zero-based;
+   student UI does not show a Conversation NN label.
 5. **No destructive message content update.** ``StudentStore.update_message``
    raises; edits go through append-only revise only.
 
@@ -162,15 +173,21 @@ DSQL message columns, ``assessment_text`` on assessed assistants only).
 
 ### Next exact action
 
-1. On existing Aurora DSQL, as admin, apply notebook ``conversation_revision``
-   (if missing) then the three message columns via ``scripts/init_dsql.py`` /
-   ``docs/deploy/AWS_STATELESS_EC2.md`` (one DDL per transaction; inspect
-   catalog; backfill defaults; backup first).
-2. Build and redeploy the ARM64 ECR image after migration and require internal
-   readiness 200.
-3. With separate live-write approval, run controlled Cognito/DSQL edit,
-   retry/restart, ownership, assessment, and source-citation smoke; then finish
-   browser/upload/RAG QA.
+**Stop architecture/feature edits.** Proceed only with live AWS / DSQL cutover:
+
+1. Confirm host `.env` has ``DSQL_ENDPOINT``, ``AWS_REGION=us-west-2``, and
+   admin identity available for DbConnectAdmin. Take a DSQL snapshot/export.
+2. On the existing Aurora DSQL cluster, as admin only:
+   ``DSQL_ENDPOINT=<hostname> AWS_REGION=us-west-2 \\
+     .venv/bin/python scripts/init_dsql.py --admin-user admin``
+   Then ``GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public
+   TO co_design_app;`` (no schema USAGE). Re-run is safe/idempotent.
+3. With separate live-write approval, run
+   ``scripts/smoke_dsql_idempotency.py --confirm-live --identifier
+   'cognito:<sub>'`` as ``DSQL_USER=co_design_app``.
+4. Redeploy ARM64 ECR image; require internal ``/api/v1/ready`` 200; run the
+   Cognito → notebook → coach → upload → edit/revise → restart smoke in
+   ``docs/deploy/AWS_STATELESS_EC2.md`` (mock first; OpenAI only with cost cap).
 
 ### Prior pilot context (Phases 1–14)
 

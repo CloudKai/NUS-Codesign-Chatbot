@@ -99,15 +99,19 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
   leave the active view but stay in revision history); never delete or rewrite
   history only in Streamlit session state. ``get_messages`` returns the active
   branch. Do not show a student-facing ``Conversation NN`` revision label in
-  the chat panel (revision tracking stays internal). On revise failure, keep
-  rendering the active chat, preserve ``pending_edit`` + draft for retry; never
-  blank the panel.
+  the chat panel (revision tracking stays internal). On revise failure, clear
+  ``pending_edit`` (so the next rerun does not auto-resubmit), keep the stable
+  revise idempotency key, restore the in-bubble draft, and require an explicit
+  Send click to retry; never blank the panel.
 - **Sources panel.** Order is My Sources → Lecture Notes → Readings. Course
   materials show a lock only (no checkboxes); Select all / indeterminate /
   none and Sort (Recent / Name) apply to personal uploads. Lecture Notes and
   Readings expanders default collapsed until the student opens them. Never show
   raw ``str(exc)`` for source upload/sync/rename/download failures — log the
   internal error and display a fixed student-safe message.
+- **Thinking Path studio.** Never show raw ``str(exc)`` for stage-select or
+  transition-confirm failures — log internals and show a fixed student-safe
+  message.
 
 ## Entrypoint flow
 

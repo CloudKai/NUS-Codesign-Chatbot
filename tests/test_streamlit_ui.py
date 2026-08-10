@@ -116,6 +116,15 @@ def test_streamlit_notebook_workspace_smoke():
     )
     assert 'st.session_state["source_upload_error"] = str(exc)' not in sources_py
     assert "st.error(str(exc))" not in sources_py
+    assert "st.error(str(exc))" not in Path("ui/studio.py").read_text(encoding="utf-8")
+    assert "_STAGE_SELECT_ERROR" in Path("ui/studio.py").read_text(encoding="utf-8")
+    assert "_TRANSITION_RESOLVE_ERROR" in Path("ui/studio.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'click Send' in Path("ui/chat.py").read_text(encoding="utf-8")
+    assert "st.session_state.pop(\"pending_edit\", None)" in Path("ui/chat.py").read_text(
+        encoding="utf-8"
+    )
     assert "_SOURCE_UPLOAD_ERROR" in sources_py
     assert "_SOURCE_SYNC_ERROR" in sources_py
     assert "_SOURCE_RENAME_ERROR" in sources_py
@@ -775,11 +784,10 @@ def test_pending_edit_failure_keeps_chat_visible(monkeypatch):
     assert not app.exception
     rendered_errors = "\n".join(error.value or "" for error in app.error)
     assert "Could not finish this edit" in rendered_errors or "Could not" in rendered_errors
-    assert "pending_edit" in app.session_state
-    pending = app.session_state["pending_edit"]
-    assert isinstance(pending, dict)
-    assert pending.get("idempotency_key") == "11111111-1111-1111-1111-111111111111"
-    assert pending.get("prompt") == "I want to study safer crossings near schools."
+    # Explicit retry: failed revise must not leave pending_edit (auto-resubmit).
+    assert "pending_edit" not in app.session_state or app.session_state[
+        "pending_edit"
+    ] in (None, {})
     assert app.session_state["editing_message"] == user_message["id"]
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Conversation 01" not in rendered
@@ -789,6 +797,18 @@ def test_pending_edit_failure_keeps_chat_visible(monkeypatch):
         app.session_state[f"edit-text-{user_message['id']}"]
         == "I want to study safer crossings near schools."
     )
+    # Stable revise key remains for the next explicit Send.
+    from ui.retry_keys import RETRY_KEYS_SESSION_KEY, _scope_sha256
+
+    assert RETRY_KEYS_SESSION_KEY in app.session_state
+    records = app.session_state[RETRY_KEYS_SESSION_KEY]
+    scope = _scope_sha256(
+        thread_id,
+        f"revise:{user_message['id']}",
+        "I want to study safer crossings near schools.",
+    )
+    assert isinstance(records, dict)
+    assert records[scope]["key"] == "11111111-1111-1111-1111-111111111111"
     # Active history remains in the store; panel still shows coach welcome.
     roles = [message["role"] for message in StudentStore().get_messages(thread_id)]
     assert "assistant" in roles

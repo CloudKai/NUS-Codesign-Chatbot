@@ -9,6 +9,7 @@ with only the student's current stage open by default.
 
 from __future__ import annotations
 
+import logging
 from contextlib import nullcontext
 from html import escape
 from typing import Any
@@ -31,6 +32,13 @@ from ui.components import (
     review_feedback_items_html,
 )
 from ui.runtime import rerun, store
+
+logger = logging.getLogger(__name__)
+
+_STAGE_SELECT_ERROR = "The Thinking Path stage could not be updated. Try again."
+_TRANSITION_RESOLVE_ERROR = (
+    "The stage recommendation could not be updated. Try again."
+)
 
 
 def _review_fingerprint(review: dict[str, Any]) -> str:
@@ -127,8 +135,13 @@ def _select_journey_stage(stage_id: str) -> None:
         opened.discard(stage_id)
         st.session_state.journey_preview_stages = sorted(opened)
         rerun()
-    except Exception as exc:
-        st.error(str(exc))
+    except Exception:
+        logger.exception(
+            "Thinking Path stage select failed for notebook %s stage %s",
+            st.session_state.thread_id,
+            stage_id,
+        )
+        st.error(_STAGE_SELECT_ERROR)
 
 
 def render_journey_track() -> None:
@@ -427,8 +440,13 @@ def _resolve_pending_transition(transition_id: str, accepted: bool) -> None:
         )
         st.session_state.pop("confirm_next_transition_id", None)
         rerun()
-    except Exception as exc:
-        st.error(str(exc))
+    except Exception:
+        logger.exception(
+            "Thinking Path transition resolve failed for notebook %s transition %s",
+            st.session_state.thread_id,
+            transition_id,
+        )
+        st.error(_TRANSITION_RESOLVE_ERROR)
 
 
 @st.dialog("Move to the next stage?")

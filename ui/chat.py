@@ -667,10 +667,14 @@ def _submit_pending_edit(
     already committed but provider generation failed, the same key + original
     message id lets the server resume the replacement without bumping again.
 
+    On failure, clears ``pending_edit`` so a later rerun does not auto-resubmit;
+    the student must click Send again. The revise retry key stays in session.
+
     Returns:
         True when revise succeeded and a rerun was requested; False when the
         edit could not run so the chat panel should keep rendering. On failure,
-        preserves ``pending_edit`` and restores the in-bubble editor draft.
+        clears ``pending_edit``, restores the in-bubble editor draft, and keeps
+        the stable revise idempotency key for an explicit Send retry.
     """
     pending = st.session_state.get("pending_edit")
     if not isinstance(pending, dict):
@@ -683,14 +687,20 @@ def _submit_pending_edit(
         st.error("Enter a message before resending.")
         return False
     thread_id = st.session_state.thread_id
-    idempotency_key = str(pending.get("idempotency_key") or "").strip()
-    if not idempotency_key:
-        idempotency_key = get_retry_key(
-            st.session_state,
-            thread_id=thread_id,
-            stage=f"revise:{message_id}",
-            prompt=draft,
-        )
+    pending_key = str(pending.get("idempotency_key") or "").strip()
+
+    def _reuse_pending_key() -> str:
+        return pending_key
+
+    # Always register under the revise scope so clearing pending_edit on
+    # failure still lets an explicit Send reuse the same UUID.
+    idempotency_key = get_retry_key(
+        st.session_state,
+        thread_id=thread_id,
+        stage=f"revise:{message_id}",
+        prompt=draft,
+        new_key=_reuse_pending_key if pending_key else None,
+    )
     # Persist the stable key before the network call so browser reruns reuse it.
     pending = {
         **pending,
@@ -714,9 +724,13 @@ def _submit_pending_edit(
         thinking.update(label="Coach reply ready", state="complete")
     except Exception:
         thinking.update(label="Coaching failed", state="error")
+        # Drop pending_edit so the next rerun does not auto-resubmit. Keep the
+        # stable retry key in session and reopen the editor so the student must
+        # click Send again to retry the same revision attempt.
+        st.session_state.pop("pending_edit", None)
         _restore_pending_edit_draft(message_id, draft)
         st.error(
-            "Could not finish this edit. Your draft is preserved — use Send "
+            "Could not finish this edit. Your draft is preserved — click Send "
             "again to retry the same revision attempt without creating another "
             "conversation branch. If the server already applied the revision, "
             "retry resumes the replacement coach reply."
