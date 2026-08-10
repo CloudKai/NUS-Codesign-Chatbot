@@ -393,6 +393,39 @@ class LocalApiClient:
         payload = response.json()
         return payload if isinstance(payload, dict) else {}
 
+    def revise_message(
+        self,
+        thread_id: str,
+        message_id: str,
+        content: str,
+        *,
+        idempotency_key: str,
+        model_id: str | None = None,
+        reasoning_effort: str | None = None,
+        response_detail: str | None = None,
+        response_language: str | None = None,
+    ) -> CoachTurn:
+        """Revise a user message, truncate later turns, and regenerate the coach."""
+        body: dict[str, Any] = {
+            "content": content,
+            "idempotency_key": idempotency_key,
+        }
+        if model_id is not None:
+            body["model_id"] = model_id
+        if reasoning_effort is not None:
+            body["reasoning_effort"] = reasoning_effort
+        if response_detail is not None:
+            body["response_detail"] = response_detail
+        if response_language is not None:
+            body["response_language"] = response_language
+        response = self._http.post(
+            f"{self._base_url}/api/v1/threads/{thread_id}/messages/{message_id}/revise",
+            json=body,
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return CoachTurn.model_validate(response.json())
+
     def pending_transition(self, thread_id: str) -> PendingPhaseTransition | None:
         """Return the unresolved transition recommendation for one notebook."""
         response = self._http.get(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import html
 import mimetypes
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -384,12 +385,34 @@ def render_message(message: dict[str, Any]) -> None:
                     unsafe_allow_html=True,
                 )
                 with st.container(key=f"user_message_actions_{safe_id}"):
-                    _, copy_column = st.columns(
-                        [0.88, 0.12],
+                    _, copy_column, edit_column = st.columns(
+                        [0.76, 0.12, 0.12],
                         gap="small",
                     )
                     with copy_column:
                         _render_copy_control(content)
+                    if edit_column.button(
+                        "",
+                        icon=":material/edit:",
+                        key=f"edit-{message['id']}",
+                        help="Edit",
+                        type="tertiary",
+                    ):
+                        messages = store.get_messages(st.session_state.thread_id)
+                        latest_user = next(
+                            (
+                                item
+                                for item in reversed(messages)
+                                if item.get("role") == "user"
+                            ),
+                            None,
+                        )
+                        if latest_user and latest_user.get("id") != message["id"]:
+                            st.session_state.edit_confirm_message_id = message["id"]
+                        else:
+                            st.session_state.editing_message = message["id"]
+                            st.session_state.edit_confirm_message_id = None
+                        rerun()
             return
 
         st.markdown(
@@ -587,6 +610,72 @@ def handle_prompt(
     rerun()
 
 
+@st.dialog("Edit this message?")
+def _confirm_edit_earlier_message_dialog() -> None:
+    """Warn that editing a non-latest user turn truncates later conversation."""
+    st.write(
+        "Editing this message will replace the conversation after this point."
+    )
+    cancel_column, continue_column = st.columns(2)
+    if cancel_column.button("Cancel", use_container_width=True):
+        st.session_state.edit_confirm_message_id = None
+        rerun()
+    if continue_column.button(
+        "Edit & continue",
+        type="primary",
+        use_container_width=True,
+    ):
+        message_id = st.session_state.get("edit_confirm_message_id")
+        st.session_state.edit_confirm_message_id = None
+        if message_id:
+            st.session_state.editing_message = message_id
+        rerun()
+
+
+def _submit_pending_edit(
+    *,
+    model_id: str,
+    reasoning_effort: str | None,
+) -> None:
+    """Apply a bubble edit via the server revise endpoint and reload state."""
+    pending = st.session_state.pop("pending_edit", None)
+    if not isinstance(pending, dict):
+        return
+    message_id = str(pending.get("message_id") or "")
+    draft = str(pending.get("prompt") or "").strip()
+    if not message_id or not draft:
+        st.error("Enter a message before resending.")
+        return
+    thinking = st.status("Coach is thinking…", expanded=False)
+    try:
+        store.revise_message(
+            st.session_state.thread_id,
+            message_id,
+            draft,
+            idempotency_key=f"revise-{uuid.uuid4()}",
+            model_id=model_id,
+            reasoning_effort=reasoning_effort,
+            response_detail=st.session_state.get("response_detail") or "short",
+            response_language=st.session_state.get("response_language") or "English",
+        )
+        thinking.update(label="Coach reply ready", state="complete")
+    except Exception:
+        thinking.update(label="Coaching failed", state="error")
+        st.error(
+            "Could not revise this message. Your earlier conversation is still "
+            "visible if the server rejected the change; if revision already "
+            "applied, reload the notebook and resend with a new attempt."
+        )
+        return
+    updated_thread = store.get_thread(st.session_state.thread_id) or {}
+    updated_metadata = updated_thread.get("metadata") or {}
+    updated_journey = normalize_journey(updated_metadata.get("learning_journey"))
+    st.session_state.learning_journey = updated_journey
+    st.session_state.response_detail = updated_journey["response_detail"]
+    st.session_state.composer_nonce += 1
+    rerun()
+
+
 def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
     """Render the discussion log, coach welcome history, and chat composer.
 
@@ -594,6 +683,13 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
         model_id: Selected coaching model id for the next turn.
         reasoning_effort: Compatible reasoning effort for that model, or None.
     """
+    if st.session_state.get("pending_edit"):
+        _submit_pending_edit(
+            model_id=model_id,
+            reasoning_effort=reasoning_effort,
+        )
+        return
+
     selected_sources = store.list_sources(
         st.session_state.thread_id,
         selected_only=True,
@@ -606,6 +702,10 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
     with chat_log:
         for message in messages:
             render_message(message)
+
+    if st.session_state.get("edit_confirm_message_id"):
+        _confirm_edit_earlier_message_dialog()
+
     with st.container(key="chat_composer"):
         _render_composer_model_picker()
         composer_value = st.chat_input(

@@ -182,6 +182,10 @@ class CoachRequest(BaseModel):
     history: list[dict[str, Any]] = Field(default_factory=list)
     model_id: str | None = None
     reasoning_effort: str | None = None
+    # Server-filled notebook CAS token; clients must not treat this as authoritative.
+    conversation_revision: int | None = None
+    # When set, persist updates this existing user row instead of inserting one.
+    revise_user_message_id: str | None = Field(default=None, max_length=64)
     idempotency_key: str | None = Field(
         default=None,
         min_length=1,

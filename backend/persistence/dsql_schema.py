@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS notebooks (
     current_stage TEXT NOT NULL DEFAULT 'focus',
     progress_text TEXT NOT NULL DEFAULT '{}',
     settings_text TEXT NOT NULL DEFAULT '{}',
+    conversation_revision INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );

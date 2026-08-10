@@ -40,6 +40,8 @@ _OCC_WRITE_METHODS = (
     "persist_coach_turn",
     "update_message",
     "revise_user_message",
+    "revise_conversation_from_user_message",
+    "select_learning_stage",
     "create_phase_transition",
     "resolve_phase_transition",
     "apply_phase_transition_decision",

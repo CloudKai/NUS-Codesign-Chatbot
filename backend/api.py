@@ -41,6 +41,7 @@ from .student_store import (
     CoachIdempotencyConflictError,
     CoachRequestInProgressError,
     CoachRequestLeaseLostError,
+    ConversationRevisionConflictError,
     StudentStore,
 )
 from .workspace_service import WorkspaceService
@@ -62,6 +63,21 @@ class StageSelectionRequest(BaseModel):
     """Student-chosen Thinking Path stage for free selection mode."""
 
     stage_id: str = Field(min_length=1, max_length=64)
+
+
+class MessageReviseRequest(BaseModel):
+    """Edit a prior user message and regenerate the coach reply."""
+
+    content: str = Field(min_length=1, max_length=12_000)
+    idempotency_key: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
+    model_id: str | None = None
+    reasoning_effort: str | None = None
+    response_detail: str | None = Field(default=None, pattern="^(short|long)$")
+    response_language: str | None = Field(default=None, min_length=1, max_length=50)
 
 
 def _expire_streamlit_auth_cookie(response: RedirectResponse, cookie_name: str) -> None:
@@ -692,6 +708,76 @@ def create_app(
         record_stage_transition(outcome="selected")
         return dict(metadata or {})
 
+    @app.post(
+        "/api/v1/threads/{thread_id}/messages/{message_id}/revise",
+        response_model=CoachTurn,
+    )
+    def revise_user_message(
+        thread_id: str,
+        message_id: str,
+        request: MessageReviseRequest,
+        http_request: Request,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> CoachTurn:
+        """Revise an owned user message, truncate later turns, and coach again.
+
+        Uses a new idempotency key. Conversation revision is server-owned.
+        """
+        if not owner.store.get_thread(thread_id):
+            raise HTTPException(status_code=404, detail="Notebook not found")
+        selected_source_count = _selected_source_count(owner, thread_id)
+        try:
+            turn = owner.coach.revise_and_resubmit(
+                thread_id,
+                message_id,
+                request.content,
+                idempotency_key=request.idempotency_key,
+                model_id=request.model_id,
+                reasoning_effort=request.reasoning_effort,
+                response_detail=request.response_detail,
+                response_language=request.response_language,
+            )
+        except RateLimitExceeded as error:
+            raise _rate_limit_http_error(error) from error
+        except CoachIdempotencyConflictError as error:
+            _emit_coach_metric(
+                outcome="idempotency_conflict",
+                selected_source_count=selected_source_count,
+            )
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ConversationRevisionConflictError as error:
+            _emit_coach_metric(
+                outcome="revision_conflict",
+                selected_source_count=selected_source_count,
+            )
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except (CoachRequestInProgressError, CoachRequestLeaseLostError) as error:
+            _emit_coach_metric(
+                outcome="idempotency_in_progress",
+                selected_source_count=selected_source_count,
+            )
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ProviderUnavailableError as error:
+            _emit_coach_metric(
+                outcome="provider_unavailable",
+                selected_source_count=selected_source_count,
+            )
+            raise HTTPException(status_code=503, detail=str(error)) from error
+        except ValueError as error:
+            message = str(error)
+            status = 404 if "not found" in message.lower() else 400
+            _emit_coach_metric(
+                outcome="rejected",
+                selected_source_count=selected_source_count,
+            )
+            raise HTTPException(status_code=status, detail=message) from error
+        _emit_coach_metric(
+            outcome="ok",
+            selected_source_count=selected_source_count,
+            turn=turn,
+        )
+        return turn
+
     @app.get("/api/v1/threads/{thread_id}/phase-transitions/pending")
     def pending_transition(
         thread_id: str,
@@ -729,6 +815,12 @@ def create_app(
         except CoachIdempotencyConflictError as error:
             _emit_coach_metric(
                 outcome="idempotency_conflict",
+                selected_source_count=selected_source_count,
+            )
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ConversationRevisionConflictError as error:
+            _emit_coach_metric(
+                outcome="revision_conflict",
                 selected_source_count=selected_source_count,
             )
             raise HTTPException(status_code=409, detail=str(error)) from error
@@ -815,6 +907,15 @@ def create_app(
             except CoachIdempotencyConflictError as error:
                 _emit_coach_metric(
                     outcome="idempotency_conflict",
+                    selected_source_count=selected_source_count,
+                )
+                yield json.dumps(
+                    {"event": "error", "detail": str(error), "status": 409}
+                ) + "\n"
+                return
+            except ConversationRevisionConflictError as error:
+                _emit_coach_metric(
+                    outcome="revision_conflict",
                     selected_source_count=selected_source_count,
                 )
                 yield json.dumps(

@@ -147,6 +147,41 @@ Then grant runtime privileges (run as admin; no account ARNs in Git):
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO co_design_app;
 ```
 
+#### Existing clusters: ``conversation_revision`` (edit/revise CAS)
+
+Fresh ``init_dsql.py`` runs include ``notebooks.conversation_revision`` on
+``CREATE TABLE``. Clusters created before that column must apply DDL as admin
+(do not auto-migrate from the app).
+
+Aurora DSQL ``ALTER TABLE ADD COLUMN`` accepts **only** a name and type — not
+``NOT NULL`` or ``DEFAULT`` in the same statement (error:
+``ALTER TABLE ADD COLUMN with constraint not supported``). Also, DSQL allows
+**one DDL statement per transaction**.
+
+Run these as **separate** admin statements (commit between each):
+
+```sql
+ALTER TABLE notebooks
+  ADD COLUMN IF NOT EXISTS conversation_revision INTEGER;
+```
+
+```sql
+ALTER TABLE notebooks
+  ALTER COLUMN conversation_revision SET DEFAULT 0;
+```
+
+```sql
+UPDATE notebooks
+SET conversation_revision = 0
+WHERE conversation_revision IS NULL;
+```
+
+The application already treats a missing/null revision as ``0``
+(``COALESCE`` / ``or 0``). Enforcing ``NOT NULL`` on an existing DSQL table
+requires a table recreate/swap, which is unnecessary for this CAS column.
+
+SQLite local DBs still add ``INTEGER NOT NULL DEFAULT 0`` on open via store
+migration.
 Do not grant ``USAGE`` on the built-in ``public`` schema. Aurora DSQL manages
 that schema as a system entity and rejects that grant. The object-level table
 grant above is the required runtime grant while application tables remain in

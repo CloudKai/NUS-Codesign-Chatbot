@@ -15,9 +15,15 @@ wins and auto-advance is treated as off. Health ``mode`` now follows
 logging added. Coach chat shows a **thinking** status while the buffered
 provider turn runs (early NDJSON ``status``); true token streaming remains
 deferred. For lower wait times keep Guidance short, reasoning low, and avoid
-extra selected sources. Remaining gates: redeploy month-1 config, live QA_A/B
-IDOR, upload/RAG smoke, ARM64 image build. Bedrock and true provider streaming
-remain out of scope.
+extra selected sources. **Edit message** is restored via server-authoritative
+``POST .../messages/{id}/revise``: truncates later turns, recomputes stage/
+journey, bumps ``conversation_revision``, revokes old coach idempotency keys,
+then regenerates with a **new** key. Stale provider results against an old
+revision are rejected. Provider failure after a successful revision leaves the
+truncated history (no auto-restore). Regenerate remains unavailable. Remaining
+gates: redeploy with DSQL ``conversation_revision`` column, live QA_A/B IDOR,
+upload/RAG smoke, ARM64 image build. Bedrock and true provider streaming remain
+out of scope.
 
 ### Behavior changes (Phases 1–13)
 
@@ -73,9 +79,11 @@ remain out of scope.
    language reaches the prompt, reasoning effort restores per notebook, and
    selected sources force model-knowledge fallback off. Request/image limits
    are enforced at the API/application boundary.
-7. UI edit and regenerate controls remain disabled until there is a
-   transactional server-side replacement contract. Normal send/stream retries
-   now use the durable idempotency contract described below.
+7. User-message **Edit** uses composer Save & resend → server
+   ``revise_and_resubmit`` (truncate, stage/journey recompute,
+   ``conversation_revision`` CAS, new idempotency key). Regenerate remains
+   unavailable. Normal send/stream retries use the durable idempotency
+   contract described below.
 8. Production documentation now uses ``compose.prod.yaml``/ECR and makes S3
    setup/readiness explicit. The default stateful Compose stack is labelled
    local-only; Bedrock permissions are not required in this phase.
@@ -358,8 +366,11 @@ remain out of scope.
    Access; attach bucket list plus ``users/*`` object permissions to the EC2
    instance role.
 4. Finish Aurora DSQL, map the EC2 role to ``co_design_app``, run
-   ``scripts/init_dsql.py`` as admin, then grant SELECT/INSERT/UPDATE/DELETE on
-   all tables in ``public`` to ``co_design_app``. Do not grant schema ``USAGE``.
+   ``scripts/init_dsql.py`` as admin (or for existing clusters apply the
+   manual ``conversation_revision`` ``ALTER`` in
+   ``docs/deploy/AWS_STATELESS_EC2.md``), then grant SELECT/INSERT/UPDATE/DELETE
+   on all tables in ``public`` to ``co_design_app``. Do not grant schema
+   ``USAGE``.
 5. With separate live-write approval, run
    ``scripts/smoke_dsql_idempotency.py --confirm-live --identifier
    'cognito:<sub>'`` under ``DATABASE_PROVIDER=dsql`` and

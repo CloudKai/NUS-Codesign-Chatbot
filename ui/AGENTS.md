@@ -91,6 +91,10 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
 - **Coach wait UX.** While a turn is in flight, show an explicit thinking status
   (`st.status`) driven by early stream ``status`` events. Do not fake provider
   token streaming in the UI beyond what the API emits.
+- **Edit via server revise only.** User-message Edit uses the in-bubble editor
+  (8-row max, then scroll) and must call ``store.revise_message`` /
+  ``POST .../messages/{id}/revise`` with a new idempotency key. Never truncate
+  history only in Streamlit session state.
 
 ## Entrypoint flow
 

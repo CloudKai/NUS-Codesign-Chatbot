@@ -323,6 +323,7 @@ def test_complete_is_idempotent_after_waiter_promotes_persisted_turn(tmp_path):
     store.persist_coach_turn(
         thread_id,
         expected_stage="focus",
+        expected_conversation_revision=0,
         user_content="Assess this claim.",
         user_metadata={"coach_idempotency_key": key},
         assistant_content="A durable assistant reply.",
@@ -432,6 +433,7 @@ def test_expired_lease_cannot_commit_after_another_worker_claims_it(tmp_path):
         store.persist_coach_turn(
             thread_id,
             expected_stage="focus",
+        expected_conversation_revision=0,
             user_content="This old worker must not persist.",
             user_metadata={},
             assistant_content="This response must not be written.",
@@ -594,6 +596,7 @@ def test_dsql_expired_lease_rejects_the_stale_worker(tmp_path):
         first_store.persist_coach_turn(
             thread_id,
             expected_stage="focus",
+        expected_conversation_revision=0,
             user_content="The stale worker must roll back.",
             user_metadata={},
             assistant_content="This must not be stored.",

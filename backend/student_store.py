@@ -43,6 +43,21 @@ class CoachRequestInProgressError(RuntimeError):
     """Raised when another worker still owns an active coach request lease."""
 
 
+class ConversationRevisionConflictError(ValueError):
+    """Raised when a coach result targets a stale conversation_revision."""
+
+
+@dataclass(frozen=True)
+class ConversationRevisionResult:
+    """Authoritative notebook state after a conversation rewrite/truncate."""
+
+    thread_id: str
+    edited_message_id: str
+    conversation_revision: int
+    current_stage: str
+    surviving_history: list[dict[str, Any]]
+
+
 @dataclass(frozen=True)
 class CoachRequestReservation:
     """Durable state returned while reserving one coach request key."""
@@ -99,6 +114,7 @@ _SETTINGS_KEYS = frozenset(
         "display_name",
         "last_workflow_user_message_id",
         "tags",
+        "revoked_coach_idempotency_keys",
     }
 )
 
@@ -133,6 +149,7 @@ CREATE TABLE IF NOT EXISTS notebooks (
     current_stage TEXT NOT NULL DEFAULT 'focus',
     progress_text TEXT NOT NULL DEFAULT '{}',
     settings_text TEXT NOT NULL DEFAULT '{}',
+    conversation_revision INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -206,6 +223,7 @@ class StudentStore:
             connection.executescript(SCHEMA)
             self._migrate_oauth_login_states(connection)
             self._migrate_users_table(connection)
+            self._migrate_notebooks_conversation_revision(connection)
             self._repair_misbound_local_foreign_keys(connection)
             self._migrate_legacy_workspace(connection)
             # Index after users migration so legacy camelCase DBs can rebuild first.
@@ -361,6 +379,22 @@ class StudentStore:
         )
 
     @staticmethod
+    def _migrate_notebooks_conversation_revision(
+        connection: sqlite3.Connection,
+    ) -> None:
+        """Add ``conversation_revision`` for edit/revise CAS on existing DBs."""
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(notebooks)")
+        }
+        if "conversation_revision" in columns:
+            return
+        connection.execute(
+            "ALTER TABLE notebooks ADD COLUMN conversation_revision "
+            "INTEGER NOT NULL DEFAULT 0"
+        )
+
+    @staticmethod
     def _repair_misbound_local_foreign_keys(
         connection: sqlite3.Connection,
     ) -> None:
@@ -394,6 +428,7 @@ class StudentStore:
             "current_stage",
             "progress_text",
             "settings_text",
+            "conversation_revision",
             "created_at",
             "updated_at",
         )
@@ -422,6 +457,7 @@ class StudentStore:
                     current_stage TEXT NOT NULL DEFAULT 'focus',
                     progress_text TEXT NOT NULL DEFAULT '{}',
                     settings_text TEXT NOT NULL DEFAULT '{}',
+                    conversation_revision INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -432,9 +468,10 @@ class StudentStore:
                 """
                 INSERT INTO notebooks_fk_repair
                   (id, user_id, title, current_stage, progress_text,
-                   settings_text, created_at, updated_at)
+                   settings_text, conversation_revision, created_at, updated_at)
                 SELECT id, user_id, title, current_stage, progress_text,
-                       settings_text, created_at, updated_at
+                       settings_text, COALESCE(conversation_revision, 0),
+                       created_at, updated_at
                 FROM notebooks
                 """
             )
@@ -509,8 +546,8 @@ class StudentStore:
                 """
                 INSERT OR IGNORE INTO notebooks
                   (id, user_id, title, current_stage, progress_text,
-                   settings_text, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   settings_text, conversation_revision, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
                 """,
                 (
                     str(value["id"]),
@@ -993,8 +1030,8 @@ class StudentStore:
                 """
                 INSERT INTO notebooks
                   (id, user_id, title, current_stage, progress_text, settings_text,
-                   created_at, updated_at)
-                VALUES (?, ?, ?, ?, '{}', ?, ?, ?)
+                   conversation_revision, created_at, updated_at)
+                VALUES (?, ?, ?, ?, '{}', ?, 0, ?, ?)
                 """,
                 (
                     notebook_id,
@@ -1083,6 +1120,10 @@ class StudentStore:
         if not isinstance(settings_blob, dict):
             settings_blob = {}
         current_stage = str(row["current_stage"] or "focus")
+        try:
+            conversation_revision = int(row["conversation_revision"] or 0)
+        except (KeyError, TypeError, ValueError):
+            conversation_revision = 0
         journey = {
             **{key: progress[key] for key in _PROGRESS_KEYS if key in progress},
             "current_stage": current_stage,
@@ -1097,6 +1138,7 @@ class StudentStore:
             "learning_journey": journey,
             "thinking_stage": current_stage,
             "response_detail": journey["response_detail"],
+            "conversation_revision": conversation_revision,
         }
         for key in (
             "learning_summary",
@@ -1113,6 +1155,7 @@ class StudentStore:
             "userId": row["user_id"],
             "userIdentifier": self.identifier,
             "tags": settings_blob.get("tags") or [],
+            "conversation_revision": conversation_revision,
             "metadata": metadata,
         }
         for key in (
@@ -1554,6 +1597,53 @@ class StudentStore:
             }
         return None
 
+    def lookup_completed_coach_request(
+        self,
+        thread_id: str,
+        *,
+        idempotency_key: str,
+    ) -> dict[str, Any] | None:
+        """Return a completed coach turn payload for *idempotency_key*, if any.
+
+        Used by revise-and-resubmit so safe retries replay without rewriting
+        history or bumping ``conversation_revision`` again. Revoked keys are
+        treated as absent so a later edit cannot resurrect a truncated turn.
+        """
+        key = str(idempotency_key or "").strip()
+        if not key:
+            return None
+        marker_id = self._coach_marker_id(thread_id, key)
+        with self._lock, self._connect() as connection:
+            owned = connection.execute(
+                "SELECT id, settings_text FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not owned:
+                return None
+            settings_blob = _load(owned["settings_text"], {})
+            if not isinstance(settings_blob, dict):
+                settings_blob = {}
+            revoked = settings_blob.get("revoked_coach_idempotency_keys") or []
+            if isinstance(revoked, list) and key in {
+                str(item).strip() for item in revoked if str(item).strip()
+            }:
+                return None
+            row = connection.execute(
+                "SELECT metadata_text FROM messages WHERE id=? AND notebook_id=?",
+                (marker_id, thread_id),
+            ).fetchone()
+            if not row:
+                return None
+            metadata = _load(row["metadata_text"], {})
+            if (
+                not isinstance(metadata, dict)
+                or metadata.get("_internal_type") != _COACH_IDEMPOTENCY_MARKER
+                or metadata.get("status") != "completed"
+            ):
+                return None
+            turn = metadata.get("turn")
+            return turn if isinstance(turn, dict) else None
+
     def claim_coach_request(
         self,
         thread_id: str,
@@ -1579,11 +1669,21 @@ class StudentStore:
         marker_id = self._coach_marker_id(thread_id, key)
         with self._lock, self._connect() as connection:
             owned = connection.execute(
-                "SELECT id FROM notebooks WHERE id=? AND user_id=?",
+                "SELECT id, settings_text FROM notebooks WHERE id=? AND user_id=?",
                 (thread_id, self.owner_id),
             ).fetchone()
             if not owned:
                 raise ValueError("Chat not found")
+            settings_blob = _load(owned["settings_text"], {})
+            if not isinstance(settings_blob, dict):
+                settings_blob = {}
+            revoked = settings_blob.get("revoked_coach_idempotency_keys") or []
+            if isinstance(revoked, list) and key in {
+                str(item).strip() for item in revoked if str(item).strip()
+            }:
+                raise CoachIdempotencyConflictError(
+                    "This coach request key was invalidated by a conversation revision"
+                )
             row = connection.execute(
                 "SELECT * FROM messages WHERE id=? AND notebook_id=?",
                 (marker_id, thread_id),
@@ -1775,6 +1875,7 @@ class StudentStore:
         thread_id: str,
         *,
         expected_stage: str,
+        expected_conversation_revision: int,
         user_content: str,
         user_metadata: dict[str, Any],
         assistant_content: str,
@@ -1782,6 +1883,7 @@ class StudentStore:
         summary_metadata: dict[str, Any],
         assistant_message_id: str | None = None,
         generated_title: str | None = None,
+        existing_user_message_id: str | None = None,
         idempotency_marker_id: str | None = None,
         idempotency_key: str | None = None,
         idempotency_lease_token: str | None = None,
@@ -1792,12 +1894,16 @@ class StudentStore:
         Provider, retrieval, and object-storage work must finish before this
         method is called. The user row, assistant assessment/citations/pending
         decision, and notebook summary either commit together or roll back.
+
+        When ``existing_user_message_id`` is set (edit/revise path), the user
+        message is already durable from the revision transaction and only the
+        assistant row is inserted.
         """
         cleaned_user = user_content.strip()
         cleaned_assistant = assistant_content.strip()
         if not cleaned_user or not cleaned_assistant:
             raise ValueError("Completed coach turns require both messages")
-        user_id = str(uuid.uuid4())
+        user_id = str(existing_user_message_id or uuid.uuid4())
         assistant_id = assistant_message_id or str(uuid.uuid4())
         assistant_meta = dict(assistant_metadata)
         assessment = assistant_meta.pop("assessment", None)
@@ -1821,6 +1927,14 @@ class StudentStore:
             if active_stage != expected_stage:
                 raise ValueError(
                     "The notebook stage changed before the coaching turn was saved"
+                )
+            try:
+                active_revision = int(notebook["conversation_revision"] or 0)
+            except (KeyError, TypeError, ValueError):
+                active_revision = 0
+            if active_revision != int(expected_conversation_revision):
+                raise ConversationRevisionConflictError(
+                    "The conversation was revised before the coaching turn was saved"
                 )
             if idempotency_marker_id is not None:
                 marker = connection.execute(
@@ -1846,16 +1960,49 @@ class StudentStore:
 
             user_created_at = utc_now()
             assistant_created_at = utc_now()
-            connection.execute(
-                """
-                INSERT INTO messages
-                  (id, notebook_id, role, content, is_error, assessment_text,
-                   cited_source_ids_text, proposed_stage, decision_status,
-                   decision_at, metadata_text, created_at)
-                VALUES (?, ?, 'user', ?, 0, NULL, NULL, NULL, NULL, NULL, ?, ?)
-                """,
-                (user_id, thread_id, cleaned_user, _dump(user_metadata), user_created_at),
-            )
+            if existing_user_message_id:
+                owned_user = connection.execute(
+                    """
+                    SELECT id, role FROM messages
+                    WHERE id=? AND notebook_id=?
+                    """,
+                    (existing_user_message_id, thread_id),
+                ).fetchone()
+                if not owned_user or owned_user["role"] != "user":
+                    raise ValueError("User message not found")
+                connection.execute(
+                    """
+                    UPDATE messages
+                    SET content=?, metadata_text=?, is_error=0,
+                        assessment_text=NULL, cited_source_ids_text=NULL,
+                        proposed_stage=NULL, decision_status=NULL, decision_at=NULL
+                    WHERE id=? AND notebook_id=?
+                    """,
+                    (
+                        cleaned_user,
+                        _dump(user_metadata),
+                        existing_user_message_id,
+                        thread_id,
+                    ),
+                )
+                user_id = existing_user_message_id
+            else:
+                connection.execute(
+                    """
+                    INSERT INTO messages
+                      (id, notebook_id, role, content, is_error, assessment_text,
+                       cited_source_ids_text, proposed_stage, decision_status,
+                       decision_at, metadata_text, created_at)
+                    VALUES (?, ?, 'user', ?, 0, NULL, NULL, NULL, NULL, NULL, ?, ?)
+                    """,
+                    (
+                        user_id,
+                        thread_id,
+                        cleaned_user,
+                        _dump(user_metadata),
+                        user_created_at,
+                    ),
+                )
             if decision_status == "pending":
                 connection.execute(
                     """
@@ -1891,6 +2038,7 @@ class StudentStore:
                 **dict(thread.get("metadata") or {}),
                 **summary_metadata,
                 "last_workflow_user_message_id": user_id,
+                "conversation_revision": active_revision,
             }
             journey_meta = dict(current_meta.get("learning_journey") or {})
             for key in _PROGRESS_KEYS:
@@ -1908,7 +2056,7 @@ class StudentStore:
                 UPDATE notebooks
                 SET title=?, current_stage=?, progress_text=?, settings_text=?,
                     updated_at=?
-                WHERE id=? AND user_id=?
+                WHERE id=? AND user_id=? AND conversation_revision=?
                 """,
                 (
                     title,
@@ -1918,6 +2066,7 @@ class StudentStore:
                     assistant_created_at,
                     thread_id,
                     self.owner_id,
+                    active_revision,
                 ),
             )
         return user_id, assistant_id
@@ -1940,33 +2089,100 @@ class StudentStore:
                 (content, message_id),
             )
 
-    def revise_user_message(
+    def revise_conversation_from_user_message(
         self,
         thread_id: str,
         message_id: str,
         content: str,
         *,
-        model_id: str,
-        metadata: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        """Replace a user turn and discard every later turn."""
+        model_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> ConversationRevisionResult:
+        """Rewrite a user turn, truncate later history, and bump conversation_revision.
+
+        Does not call the model. Pending transitions on deleted assistants are
+        removed with those rows. All coach idempotency markers for the notebook
+        are deleted so stale keys cannot replay truncated turns.
+        """
+        from backend.student_journey import STAGE_BY_ID, THINKING_STAGES, normalize_journey
+
         cleaned = content.strip()
         if not cleaned:
             raise ValueError("Message cannot be empty")
         with self._lock, self._connect() as connection:
+            notebook = connection.execute(
+                "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not notebook:
+                raise ValueError("Notebook not found")
             target = connection.execute(
                 """
-                SELECT m.id, m.role, m.created_at
-                FROM messages m
-                JOIN notebooks n ON n.id=m.notebook_id
-                WHERE m.id=? AND m.notebook_id=? AND n.user_id=?
+                SELECT * FROM messages
+                WHERE id=? AND notebook_id=?
                 """,
-                (message_id, thread_id, self.owner_id),
+                (message_id, thread_id),
             ).fetchone()
             if not target or target["role"] != "user":
                 raise ValueError("User message not found")
 
             target_created = str(target["created_at"] or "")
+            target_meta = _load(target["metadata_text"], {})
+            if not isinstance(target_meta, dict):
+                target_meta = {}
+            restored_stage = str(
+                target_meta.get("thinking_stage")
+                or notebook["current_stage"]
+                or "focus"
+            ).strip()
+            if restored_stage not in STAGE_BY_ID:
+                restored_stage = "focus"
+
+            # Latest surviving assistant assessment (before truncation deletes).
+            prior_assistants = connection.execute(
+                """
+                SELECT assessment_text, metadata_text FROM messages
+                WHERE notebook_id=? AND role='assistant'
+                  AND (
+                    created_at < ?
+                    OR (created_at = ? AND id < ?)
+                  )
+                ORDER BY created_at DESC, id DESC
+                """,
+                (thread_id, target_created, target_created, message_id),
+            ).fetchall()
+            surviving_assessment: dict[str, Any] | None = None
+            for row in prior_assistants:
+                meta = _load(row["metadata_text"], {})
+                if isinstance(meta, dict) and meta.get("_internal_type") == _COACH_IDEMPOTENCY_MARKER:
+                    continue
+                assessment = _load(row["assessment_text"], None)
+                if isinstance(assessment, dict):
+                    surviving_assessment = assessment
+                    break
+
+            # Collect idempotency keys from turns about to be truncated.
+            later_rows = connection.execute(
+                """
+                SELECT metadata_text FROM messages
+                WHERE notebook_id=?
+                  AND (
+                    created_at > ?
+                    OR (created_at = ? AND id > ?)
+                  )
+                """,
+                (thread_id, target_created, target_created, message_id),
+            ).fetchall()
+            revoked_keys: list[str] = []
+            for row in later_rows:
+                meta = _load(row["metadata_text"], {})
+                if not isinstance(meta, dict):
+                    continue
+                for field in ("idempotency_key", "coach_idempotency_key"):
+                    key = str(meta.get(field) or "").strip()
+                    if key:
+                        revoked_keys.append(key)
+
             connection.execute(
                 """
                 DELETE FROM messages
@@ -1978,7 +2194,36 @@ class StudentStore:
                 """,
                 (thread_id, target_created, target_created, message_id),
             )
-            next_metadata = {**metadata, "model": model_id}
+            # Drop every remaining coach idempotency marker so truncated turns
+            # cannot be replayed by an old key after revision.
+            remaining = connection.execute(
+                """
+                SELECT id, metadata_text FROM messages
+                WHERE notebook_id=?
+                """,
+                (thread_id,),
+            ).fetchall()
+            for row in remaining:
+                meta = _load(row["metadata_text"], {})
+                if (
+                    isinstance(meta, dict)
+                    and meta.get("_internal_type") == _COACH_IDEMPOTENCY_MARKER
+                ):
+                    key = str(meta.get("idempotency_key") or "").strip()
+                    if key:
+                        revoked_keys.append(key)
+                    connection.execute(
+                        "DELETE FROM messages WHERE id=? AND notebook_id=?",
+                        (row["id"], thread_id),
+                    )
+
+            next_metadata = {
+                **target_meta,
+                **(metadata or {}),
+                "thinking_stage": restored_stage,
+            }
+            if model_id:
+                next_metadata["model"] = model_id
             connection.execute(
                 """
                 UPDATE messages
@@ -1989,30 +2234,166 @@ class StudentStore:
                 """,
                 (cleaned, _dump(next_metadata), message_id, thread_id),
             )
-            prior_rows = connection.execute(
+
+            thread = self._thread_dict(notebook)
+            current_meta = dict(thread.get("metadata") or {})
+            journey = normalize_journey(current_meta.get("learning_journey"))
+            stage_order = [stage.id for stage in THINKING_STAGES]
+            restored_index = stage_order.index(restored_stage)
+            journey["current_stage"] = restored_stage
+            journey["completed_stages"] = [
+                stage_id
+                for stage_id in journey.get("completed_stages") or []
+                if stage_id in STAGE_BY_ID
+                and stage_order.index(stage_id) < restored_index
+            ]
+            journey["stage_notes"] = {
+                stage_id: note
+                for stage_id, note in (journey.get("stage_notes") or {}).items()
+                if stage_id in STAGE_BY_ID
+                and (
+                    stage_id in journey["completed_stages"]
+                    or stage_order.index(stage_id) < restored_index
+                )
+            }
+            if surviving_assessment:
+                current_meta["learning_summary"] = surviving_assessment.get(
+                    "learning_summary"
+                ) or current_meta.get("learning_summary")
+                current_meta["working_conclusion"] = surviving_assessment.get(
+                    "working_conclusion"
+                ) or ""
+                current_meta["understanding_change"] = surviving_assessment.get(
+                    "understanding_change"
+                ) or ""
+                current_meta["critical_understanding"] = surviving_assessment.get(
+                    "critical_understanding_level"
+                ) or current_meta.get("critical_understanding")
+                journey["working_conclusion"] = current_meta.get(
+                    "working_conclusion"
+                ) or journey.get("working_conclusion") or ""
+                journey["critical_reflection"] = surviving_assessment.get(
+                    "understanding_change"
+                ) or journey.get("critical_reflection") or ""
+                journey["learning_summary"] = current_meta.get("learning_summary") or ""
+            else:
+                for key in (
+                    "learning_summary",
+                    "working_conclusion",
+                    "understanding_change",
+                    "critical_understanding",
+                ):
+                    current_meta.pop(key, None)
+                journey["working_conclusion"] = ""
+                journey["critical_reflection"] = ""
+                journey.pop("learning_summary", None)
+
+            current_meta["learning_journey"] = journey
+            current_meta["thinking_stage"] = restored_stage
+            current_meta["last_workflow_user_message_id"] = message_id
+            prior_revoked = current_meta.get("revoked_coach_idempotency_keys") or []
+            if not isinstance(prior_revoked, list):
+                prior_revoked = []
+            merged_revoked = []
+            seen_keys: set[str] = set()
+            for key in [*prior_revoked, *revoked_keys]:
+                cleaned_key = str(key or "").strip()
+                if not cleaned_key or cleaned_key in seen_keys:
+                    continue
+                seen_keys.add(cleaned_key)
+                merged_revoked.append(cleaned_key)
+            current_meta["revoked_coach_idempotency_keys"] = merged_revoked[-64:]
+            stage, progress_text, settings_text = self._split_notebook_metadata(
+                current_meta
+            )
+            try:
+                previous_revision = int(notebook["conversation_revision"] or 0)
+            except (KeyError, TypeError, ValueError):
+                previous_revision = 0
+            next_revision = previous_revision + 1
+            now = utc_now()
+            connection.execute(
                 """
-                SELECT role, content FROM messages
+                UPDATE notebooks
+                SET current_stage=?, progress_text=?, settings_text=?,
+                    conversation_revision=?, updated_at=?
+                WHERE id=? AND user_id=? AND conversation_revision=?
+                """,
+                (
+                    stage,
+                    progress_text,
+                    settings_text,
+                    next_revision,
+                    now,
+                    thread_id,
+                    self.owner_id,
+                    previous_revision,
+                ),
+            )
+
+            surviving_rows = connection.execute(
+                """
+                SELECT * FROM messages
                 WHERE notebook_id=?
-                  AND (
-                    created_at < ?
-                    OR (created_at = ? AND id < ?)
-                  )
                 ORDER BY created_at ASC, id ASC
                 """,
-                (thread_id, target_created, target_created, message_id),
+                (thread_id,),
             ).fetchall()
-            history = [
+            surviving_history: list[dict[str, Any]] = []
+            for row in surviving_rows:
+                meta = _load(row["metadata_text"], {})
+                if not isinstance(meta, dict):
+                    meta = {}
+                if meta.get("_internal_type") == _COACH_IDEMPOTENCY_MARKER:
+                    continue
+                surviving_history.append(
+                    {
+                        "id": str(row["id"]),
+                        "role": str(row["role"]),
+                        "content": str(row["content"] or ""),
+                        "metadata": meta,
+                    }
+                )
+
+        return ConversationRevisionResult(
+            thread_id=thread_id,
+            edited_message_id=message_id,
+            conversation_revision=next_revision,
+            current_stage=restored_stage,
+            surviving_history=surviving_history,
+        )
+
+    def revise_user_message(
+        self,
+        thread_id: str,
+        message_id: str,
+        content: str,
+        *,
+        model_id: str,
+        metadata: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Compatibility wrapper: revise and return prior history only.
+
+        Prefer :meth:`revise_conversation_from_user_message` for coach edits.
+        """
+        result = self.revise_conversation_from_user_message(
+            thread_id,
+            message_id,
+            content,
+            model_id=model_id,
+            metadata=metadata,
+        )
+        prior: list[dict[str, Any]] = []
+        for message in result.surviving_history:
+            if message.get("id") == message_id:
+                break
+            prior.append(
                 {
-                    "role": str(row["role"]),
-                    "content": str(row["content"] or ""),
+                    "role": str(message.get("role") or ""),
+                    "content": str(message.get("content") or ""),
                 }
-                for row in prior_rows
-            ]
-            connection.execute(
-                "UPDATE notebooks SET updated_at=? WHERE id=? AND user_id=?",
-                (utc_now(), thread_id, self.owner_id),
             )
-        return history
+        return prior
 
     def get_messages(self, thread_id: str) -> list[dict[str, Any]]:
         """Return canonical chronological messages for an owned notebook."""

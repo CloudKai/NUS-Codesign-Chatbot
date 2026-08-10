@@ -33,7 +33,11 @@ from .student_journey import (
     normalize_journey,
     personalized_stage_questions,
 )
-from .student_store import CoachRequestInProgressError, StudentStore
+from .student_store import (
+    ConversationRevisionConflictError,
+    CoachRequestInProgressError,
+    StudentStore,
+)
 from .title_service import NotebookTitleService
 from .workflow import CoachWorkflow
 
@@ -140,6 +144,18 @@ class CoachApplicationService:
         disagree are rejected. The workflow always writes an auditable
         transition first; automatic mode resolves it before the visible reply.
         """
+        thread = self._notebooks.get_thread(request.thread_id)
+        if not thread:
+            raise ValueError("Notebook not found")
+        metadata = dict(thread.get("metadata") or {})
+        revision = int(
+            metadata.get("conversation_revision")
+            if metadata.get("conversation_revision") is not None
+            else thread.get("conversation_revision")
+            or 0
+        )
+        request = request.model_copy(update={"conversation_revision": revision})
+
         idempotency_key = str(request.idempotency_key or "").strip()
         if not idempotency_key:
             return self._execute_rate_limited(request)
@@ -240,6 +256,9 @@ class CoachApplicationService:
         self._store.persist_coach_turn(
             prepared_request.thread_id,
             expected_stage=prepared_request.current_stage,
+            expected_conversation_revision=int(
+                prepared_request.conversation_revision or 0
+            ),
             user_content=prepared_request.student_message,
             user_metadata={
                 "thinking_stage": prepared_request.current_stage,
@@ -283,6 +302,7 @@ class CoachApplicationService:
                 "critical_understanding": turn.assessment.critical_understanding_level,
             },
             generated_title=generated_title,
+            existing_user_message_id=prepared_request.revise_user_message_id,
             idempotency_marker_id=idempotency_marker_id,
             idempotency_key=prepared_request.idempotency_key,
             idempotency_lease_token=idempotency_lease_token,
@@ -375,6 +395,16 @@ class CoachApplicationService:
             )
 
         store_history = self._store.get_messages(request.thread_id)
+        # Revise persists the edited user row before the provider runs. Exclude
+        # that id so history matches a normal send (prior turns only); the
+        # current student_message remains the active turn input.
+        revise_message_id = str(request.revise_user_message_id or "").strip()
+        if revise_message_id:
+            store_history = [
+                message
+                for message in store_history
+                if str(message.get("id") or "") != revise_message_id
+            ]
         if request.history and _history_signature(request.history) != _history_signature(
             store_history
         ):
@@ -498,6 +528,12 @@ class CoachApplicationService:
         # Conversely, a client cannot enable broader knowledge while any
         # selected source exists.
         allow_model_knowledge = not authoritative_ids
+        conversation_revision = int(
+            metadata.get("conversation_revision")
+            if metadata.get("conversation_revision") is not None
+            else thread.get("conversation_revision")
+            or 0
+        )
         return request.model_copy(
             update={
                 "current_stage": authoritative_stage,
@@ -512,8 +548,81 @@ class CoachApplicationService:
                 "reasoning_effort": selected_effort,
                 "response_language": response_language or "English",
                 "allow_model_knowledge": allow_model_knowledge,
+                "conversation_revision": conversation_revision,
             }
         )
+
+    def revise_and_resubmit(
+        self,
+        thread_id: str,
+        message_id: str,
+        content: str,
+        *,
+        idempotency_key: str,
+        model_id: str | None = None,
+        reasoning_effort: str | None = None,
+        response_detail: str | None = None,
+        response_language: str | None = None,
+    ) -> CoachTurn:
+        """Atomically revise a user turn, then generate a replacement coach reply.
+
+        The revision transaction commits before the provider call. If the
+        provider fails afterward, truncated history remains and the client may
+        retry with a new idempotency key against the current revision.
+
+        A completed ``idempotency_key`` replays the cached turn without rewriting
+        history again, so safe HTTP retries do not double-bump revision.
+        """
+        cleaned_key = str(idempotency_key or "").strip()
+        if not cleaned_key:
+            raise ValueError("idempotency_key is required for revise-and-resubmit")
+        cached = self._store.lookup_completed_coach_request(
+            thread_id, idempotency_key=cleaned_key
+        )
+        if cached is not None:
+            return CoachTurn.model_validate(cached)
+        thread = self._notebooks.get_thread(thread_id)
+        if not thread:
+            raise ValueError("Notebook not found")
+        metadata = dict(thread.get("metadata") or {})
+        detail = (
+            response_detail
+            if response_detail in {"short", "long"}
+            else str(
+                (metadata.get("learning_journey") or {}).get("response_detail")
+                or metadata.get("response_detail")
+                or "short"
+            )
+        )
+        if detail not in {"short", "long"}:
+            detail = "short"
+        revision = self._store.revise_conversation_from_user_message(
+            thread_id,
+            message_id,
+            content,
+            model_id=model_id or str(metadata.get("selected_model") or ""),
+            metadata={
+                "response_detail": detail,
+                **(
+                    {"response_language": response_language}
+                    if response_language
+                    else {}
+                ),
+            },
+        )
+        request = CoachRequest(
+            thread_id=thread_id,
+            student_message=content.strip(),
+            current_stage=revision.current_stage,
+            response_detail=detail,
+            model_id=model_id,
+            reasoning_effort=reasoning_effort,
+            response_language=response_language or "English",
+            idempotency_key=cleaned_key,
+            conversation_revision=revision.conversation_revision,
+            revise_user_message_id=revision.edited_message_id,
+        )
+        return self.submit(request)
 
     def _selected_citation_catalog(
         self, request: CoachRequest

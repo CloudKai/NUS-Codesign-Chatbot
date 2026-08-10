@@ -391,6 +391,42 @@ class WorkspaceFacade:
         _, _, _, learning = _resolve_resources()
         return learning.select_stage(thread_id, stage_id)
 
+    def revise_message(
+        self,
+        thread_id: str,
+        message_id: str,
+        content: str,
+        *,
+        idempotency_key: str,
+        model_id: str | None = None,
+        reasoning_effort: str | None = None,
+        response_detail: str | None = None,
+        response_language: str | None = None,
+    ) -> CoachTurn:
+        """Revise a user message through the FastAPI or in-process coach path."""
+        if local_api_enabled():
+            return local_api_client().revise_message(
+                thread_id,
+                message_id,
+                content,
+                idempotency_key=idempotency_key,
+                model_id=model_id,
+                reasoning_effort=reasoning_effort,
+                response_detail=response_detail,
+                response_language=response_language,
+            )
+        _, _, coach, _ = _resolve_resources()
+        return coach.revise_and_resubmit(
+            thread_id,
+            message_id,
+            content,
+            idempotency_key=idempotency_key,
+            model_id=model_id,
+            reasoning_effort=reasoning_effort,
+            response_detail=response_detail,
+            response_language=response_language,
+        )
+
     def request_course_material_sync(self, thread_id: str):
         """Start or join course-material sync for the active notebook.
 

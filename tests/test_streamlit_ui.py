@@ -127,12 +127,16 @@ def test_streamlit_notebook_workspace_smoke():
     assert "__cdUserEditCleanup" in edit_layout
     assert "--cd-user-bubble-max-rows:8" in rendered
     assert "--cd-user-bubble-max-height" in rendered
-    assert "USER_MESSAGE_EDIT_HEIGHT_PX" in Path("ui/chat.py").read_text(
-        encoding="utf-8"
-    )
-    assert "height=USER_MESSAGE_EDIT_HEIGHT_PX" in Path("ui/chat.py").read_text(
-        encoding="utf-8"
-    )
+    chat_py = Path("ui/chat.py").read_text(encoding="utf-8")
+    assert "USER_MESSAGE_EDIT_HEIGHT_PX" in chat_py
+    assert "height=USER_MESSAGE_EDIT_HEIGHT_PX" in chat_py
+    assert "sync_user_message_edit_layout" in chat_py
+    assert "user_message_edit_" in chat_py
+    assert "revise_message" in chat_py
+    assert "pending_edit" in chat_py
+    assert "Save & resend" not in chat_py
+    assert "Editing message" not in chat_py
+    assert "composer_edit" not in chat_py
     assert 'appearance == "Dark"' in Path("ui/chat.py").read_text(encoding="utf-8")
     assert "#5B6B7C" in Path("ui/chat.py").read_text(encoding="utf-8")
     assert "rgba(255, 255, 255, 0.35)" in Path("ui/chat.py").read_text(
