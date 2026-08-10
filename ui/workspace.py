@@ -16,7 +16,7 @@ from ui.layout.column_resize import (
     sync_workspace_column_resize,
 )
 from ui.layout.sources_scroll import sync_sources_scroll
-from ui.runtime import rerun
+from ui.runtime import rerun_app
 from ui.sources import render_sources_panel
 from ui.studio import render_studio_panel
 
@@ -31,7 +31,7 @@ def _render_collapsed_rail(*, side: str, expand_icon: str, label: str) -> None:
             help=f"Expand {label}",
         ):
             set_side_panel_collapsed(side, False)
-            rerun()
+            rerun_app()
 
 
 def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
@@ -98,7 +98,7 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                         help="Collapse Thinking Path",
                     ):
                         set_side_panel_collapsed("studio", True)
-                        rerun()
+                        rerun_app()
         with chat_column:
             with st.container(key="chat_panel"):
                 render_chat_panel(model_id, reasoning_effort)
@@ -120,6 +120,6 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                         help="Collapse Sources",
                     ):
                         set_side_panel_collapsed("sources", True)
-                        rerun()
+                        rerun_app()
                     sync_sources_scroll()
         sync_workspace_column_resize()

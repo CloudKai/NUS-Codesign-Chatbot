@@ -16,7 +16,7 @@ from backend.student_journey import (
 )
 
 from ui.components import empty_state_html
-from ui.runtime import rerun, store
+from ui.runtime import rerun_app, store
 from ui.rename import (
     render_enter_to_apply_rename,
     sync_rename_select_all,
@@ -139,7 +139,7 @@ def notebooks_dialog() -> None:
                         help="Rename or delete this notebook",
                     ):
                         request_notebook_actions(thread["id"])
-                        rerun()
+                        rerun_app()
 
     _sync_notebook_library_scroll()
 
@@ -257,7 +257,7 @@ def notebook_actions_dialog() -> None:
         )
         if applied and cleaned and cleaned != current_title:
             store.update_thread(thread_id, name=cleaned)
-            rerun()
+            rerun_app()
         sync_rename_select_all(
             root_selector='[role="dialog"]:has(.st-key-notebook_actions_panel)',
             aria_label="Rename",
@@ -276,4 +276,4 @@ def notebook_actions_dialog() -> None:
                 disabled=not confirm,
             ):
                 delete_notebook(thread_id)
-                rerun()
+                rerun_app()

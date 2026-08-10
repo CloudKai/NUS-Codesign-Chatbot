@@ -26,7 +26,7 @@ from ui.coach_welcome import seed_coach_welcome
 from ui.constants import APPEARANCE_MODES, DEFAULT_APPEARANCE, RESPONSE_LANGUAGES
 from ui.layout.column_resize import set_side_panel_collapsed
 from ui.rename import bump_rename_epoch, discard_rename_draft
-from ui.runtime import rerun, store
+from ui.runtime import rerun_app, store
 from ui.retry_keys import purge_notebook_retry_keys
 from ui.settings import apply_selected_model
 
@@ -148,7 +148,7 @@ def new_notebook(should_rerun: bool = True) -> None:
         st.session_state.nav_section = "Chat"
         set_side_panel_collapsed("sources", False)
         st.session_state.toast_course_materials_loading = True
-        rerun()
+        rerun_app()
 
 
 def delete_notebook(thread_id: str) -> None:
@@ -233,7 +233,7 @@ def select_thread(thread_id: str, should_rerun: bool = True) -> None:
     store.backfill_legacy_sources(thread_id)
     seed_coach_welcome(store, thread_id)
     if should_rerun:
-        rerun()
+        rerun_app()
 
 
 def save_journey(journey: dict[str, Any]) -> None:

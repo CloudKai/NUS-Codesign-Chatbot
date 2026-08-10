@@ -8,7 +8,7 @@ import streamlit.components.v1 as components
 from ui.auth_gate import app_logout_url, logout_user
 from ui.components import profile_initial
 from ui.constants import APPEARANCE_MODES, RESPONSE_LANGUAGES
-from ui.runtime import rerun, store
+from ui.runtime import rerun_app, store
 from ui.settings import persist_appearance, persist_response_language
 
 
@@ -115,7 +115,7 @@ def _render_language_dropdown(current_language: str) -> None:
                     if language != current_language:
                         st.session_state.setting_response_language = language
                         persist_response_language()
-                        rerun()
+                        rerun_app()
 
 
 def inject_profile_leave_helper() -> None:

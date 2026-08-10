@@ -20,6 +20,7 @@ from urllib.parse import ParseResult, urlparse
 import streamlit as st
 
 from backend.settings import settings
+from ui.runtime import rerun_app
 
 
 _SIGNIN_COOLDOWN_SECONDS = 5.0
@@ -387,7 +388,7 @@ def _render_signin_cooldown_fragment() -> None:
         _render_signin_button(disabled=True)
         return
     st.session_state.pop("_auth_signin_cooldown_until", None)
-    st.rerun()
+    rerun_app()
 
 
 def _render_redirecting_status() -> None:
@@ -563,7 +564,7 @@ def render_login_gate() -> None:
                 # fragment.  Always request one app rerun so the launch flag is
                 # consumed by this gate and the redirect starts once.
                 start_login()
-                st.rerun()
+                rerun_app()
         st.caption(
             "Account creation, confirmation, and passwords are handled securely "
             "by Amazon Cognito Managed Login."

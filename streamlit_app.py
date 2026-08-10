@@ -87,6 +87,9 @@ else:
 if "display_name" not in st.session_state:
     st.session_state.display_name = display_name
 
+# Debug counter for full-script runs (fragment-only interactions skip this path).
+st.session_state["_app_runs"] = int(st.session_state.get("_app_runs") or 0) + 1
+
 initialize_session()
 sync_appearance_from_widget()
 render_theme_css()

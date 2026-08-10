@@ -2,12 +2,21 @@
 
 ## Current phase
 
-**AWS cutover: DSQL revision migration + live smoke (after UI hardening).**
-Local UI hardening on ``Production-AddEditFunction`` is complete for this pass:
-explicit edit retry (no auto-resubmit after revise failure), sanitized Sources +
-Studio errors, Conversation NN label hidden. Architecture is frozen for further
-feature work — next work is production DSQL migration and live AWS verification
-only (see Next exact action).
+**UI: fragment-scoped Streamlit reruns (local interactions).** Explicit
+``rerun_app()`` / ``rerun_fragment()`` helpers replaced the ambiguous
+``rerun()``. Sources select/search/sort/upload/delete and Journey preview
+toggles stay panel-local; notebook/auth/coach/layout/stage-select remain
+full-app. Debug counters: ``_app_runs``, ``_sources_fragment_runs``,
+``_studio_fragment_runs``.
+
+### Full-app actions that remain intentional
+
+- Notebook create / switch / rename / delete
+- Auth / sign-in cooldown / logout
+- Coach send / revise / composer model changes
+- Workspace column collapse / mobile panel layout
+- Sources course-sync stable ↔ polling fragment remount
+- Thinking Path stage selection and transition confirm
 
 ### UI hardening just completed (this pass)
 
@@ -16,7 +25,7 @@ only (see Next exact action).
    the in-bubble draft; require Send to retry.
 2. **Studio sanitized errors.** Stage-select and transition-confirm failures log
    internals and show fixed student-safe messages (no ``str(exc)``).
-3. **Full mock suite.** ``.venv/bin/python -m pytest -q`` → **387 passed**.
+3. **Full mock suite.** ``.venv/bin/python -m pytest -q`` → **392 passed**.
 
 ### Prior production-hardening (still true)
 

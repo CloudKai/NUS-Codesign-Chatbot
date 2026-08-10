@@ -29,7 +29,7 @@ from ui.layout.user_message_edit_layout import (
     USER_MESSAGE_EDIT_HEIGHT_PX,
     sync_user_message_edit_layout,
 )
-from ui.runtime import rerun, store, stream_coach_turn_events
+from ui.runtime import rerun_app, store, stream_coach_turn_events
 from ui.retry_keys import get_retry_key, remove_retry_key
 from ui.settings import apply_selected_model, persist_composer_model_choice
 from ui.sources import source_viewer_dialog
@@ -109,7 +109,7 @@ def _render_composer_model_picker() -> None:
                                 st.session_state.composer_effort_menu_model = (
                                     model.id
                                 )
-                            rerun()
+                            rerun_app()
 
             if show_effort_pane and expanded_model is not None:
                 with st.container(key="composer_effort_pane"):
@@ -127,7 +127,7 @@ def _render_composer_model_picker() -> None:
                             apply_selected_model(expanded_model.id, effort=effort)
                             persist_composer_model_choice()
                             _close_composer_model_popover()
-                            rerun()
+                            rerun_app()
 
 
 def render_media(raw_paths: list[str]) -> None:
@@ -361,7 +361,7 @@ def render_message(message: dict[str, Any]) -> None:
                     ):
                         st.session_state.editing_message = None
                         st.session_state.pop(edit_key, None)
-                        rerun()
+                        rerun_app()
                     if send_column.button(
                         "Send",
                         key=f"save-{message['id']}",
@@ -384,7 +384,7 @@ def render_message(message: dict[str, Any]) -> None:
                             "idempotency_key": idempotency_key,
                         }
                         st.session_state.editing_message = None
-                        rerun()
+                        rerun_app()
             return
         if role == "user":
             safe_id = message["id"].replace("-", "_")
@@ -425,7 +425,7 @@ def render_message(message: dict[str, Any]) -> None:
                         else:
                             st.session_state.editing_message = message["id"]
                             st.session_state.edit_confirm_message_id = None
-                        rerun()
+                        rerun_app()
             return
 
         st.markdown(
@@ -620,7 +620,7 @@ def handle_prompt(
     st.session_state.learning_journey = updated_journey
     st.session_state.response_detail = updated_journey["response_detail"]
     st.session_state.composer_nonce += 1
-    rerun()
+    rerun_app()
 
 
 @st.dialog("Edit this message?")
@@ -633,7 +633,7 @@ def _confirm_edit_earlier_message_dialog() -> None:
     cancel_column, continue_column = st.columns(2)
     if cancel_column.button("Cancel", use_container_width=True):
         st.session_state.edit_confirm_message_id = None
-        rerun()
+        rerun_app()
     if continue_column.button(
         "Edit & continue",
         type="primary",
@@ -643,7 +643,7 @@ def _confirm_edit_earlier_message_dialog() -> None:
         st.session_state.edit_confirm_message_id = None
         if message_id:
             st.session_state.editing_message = message_id
-        rerun()
+        rerun_app()
 
 
 def _restore_pending_edit_draft(message_id: str, draft: str) -> None:
@@ -750,7 +750,7 @@ def _submit_pending_edit(
     st.session_state.learning_journey = updated_journey
     st.session_state.response_detail = updated_journey["response_detail"]
     st.session_state.composer_nonce += 1
-    rerun()
+    rerun_app()
     return True
 
 
@@ -762,7 +762,7 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
         reasoning_effort: Compatible reasoning effort for that model, or None.
     """
     if st.session_state.get("pending_edit"):
-        # Successful revise calls ``rerun()``. On failure, keep rendering the
+        # Successful revise calls ``rerun_app()``. On failure, keep rendering the
         # active chat instead of blanking the panel.
         if _submit_pending_edit(
             model_id=model_id,

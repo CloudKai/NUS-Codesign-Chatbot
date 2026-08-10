@@ -31,7 +31,7 @@ from ui.components import (
     review_card_html,
     review_feedback_items_html,
 )
-from ui.runtime import rerun, store
+from ui.runtime import rerun_app, rerun_fragment, store
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +134,7 @@ def _select_journey_stage(stage_id: str) -> None:
         opened = set(st.session_state.get("journey_preview_stages") or [])
         opened.discard(stage_id)
         st.session_state.journey_preview_stages = sorted(opened)
-        rerun()
+        rerun_app()
     except Exception:
         logger.exception(
             "Thinking Path stage select failed for notebook %s stage %s",
@@ -239,7 +239,7 @@ def render_journey_track() -> None:
                                 key=f"journey-toggle-{stage.id}",
                             ):
                                 _toggle_stage_preview(stage.id)
-                                rerun()
+                                rerun_fragment()
                         if selection_enabled:
                             if st.button(
                                 "Work on this stage",
@@ -439,7 +439,7 @@ def _resolve_pending_transition(transition_id: str, accepted: bool) -> None:
             (updated.get("metadata") or {}).get("learning_journey")
         )
         st.session_state.pop("confirm_next_transition_id", None)
-        rerun()
+        rerun_app()
     except Exception:
         logger.exception(
             "Thinking Path transition resolve failed for notebook %s transition %s",
@@ -464,7 +464,7 @@ def _confirm_next_stage_dialog() -> None:
     if cancel_column.button("Cancel", use_container_width=True):
         st.session_state.pop("confirm_next_transition_id", None)
         st.session_state.pop("confirm_next_to_stage", None)
-        rerun()
+        rerun_app()
     if confirm_column.button(
         "Next",
         type="primary",
@@ -476,7 +476,7 @@ def _confirm_next_stage_dialog() -> None:
         else:
             st.session_state.pop("confirm_next_transition_id", None)
             st.session_state.pop("confirm_next_to_stage", None)
-            rerun()
+            rerun_app()
 
 
 def render_thinking_path_footer() -> None:
@@ -504,16 +504,24 @@ def render_thinking_path_footer() -> None:
             if pending is not None:
                 st.session_state.confirm_next_transition_id = pending.id
                 st.session_state.confirm_next_to_stage = pending.to_stage
-                rerun()
+                rerun_app()
 
 
+@st.fragment
 def render_studio_panel() -> None:
     """Render Thinking Path with Journey/Review tabs and the Next footer.
 
     With ``STUDENT_STAGE_SELECTION=true``, Journey exposes audited stage picks.
     Otherwise stage changes require a coach ADVANCE recommendation, then Next
     confirmation (unless auto-advance is enabled).
+
+    Mounted as a fragment so Journey preview toggles stay panel-local. Stage
+    selection and transition confirmations still call ``rerun_app()`` because
+    they change shared coach/chat state.
     """
+    st.session_state["_studio_fragment_runs"] = (
+        int(st.session_state.get("_studio_fragment_runs") or 0) + 1
+    )
     journey = normalize_journey(st.session_state.learning_journey)
     preferred = st.session_state.get("studio_tab", "Journey")
     st.markdown(

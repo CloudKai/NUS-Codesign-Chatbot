@@ -35,7 +35,7 @@ Only read that for UI tasks that touch API migration or coaching flow.
 | `assets/styles/` | Ordered static CSS partials (edit the matching component file) |
 | `theme.py` | Loads `assets/styles/` in fixed order, `inject_template_css()`, dynamic `render_theme_css()` |
 | `layout/` | Browser-side layout helpers (column resize, sources scroll, composer) |
-| `runtime.py` | Cached store/workspace/coach + `WorkspaceFacade`, `local_api_client()`, coach helpers, `rerun()` |
+| `runtime.py` | Cached store/workspace/coach + `WorkspaceFacade`, `local_api_client()`, coach helpers, `rerun_app()` / `rerun_fragment()` |
 | `session.py` | Session defaults, notebook create/select/delete, `save_journey()` |
 | `rename.py` | Shared Enter-only rename forms, draft discard, select-all helper |
 | `topbar.py` | Brand, title, section switcher, Guidance, profile entry |
@@ -70,10 +70,16 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
   OpenAI/Ollama SDKs, or read/write the filesystem directly except through
   backend helpers already used in this package.
 - **Import shared runtime from `ui.runtime` only.** Use `store` (workspace
-  facade), `local_api_client()`, coach helpers, and `rerun()` from there — never
-  from `streamlit_app.py`. When `USE_LOCAL_API=true`, `store` routes CRUD through
-  the typed API; otherwise it uses in-process `WorkspaceService`. Student turns
-  always use the typed coach path (API or in-process), not `StudentChatEngine`.
+  facade), `local_api_client()`, coach helpers, `rerun_app()`, and
+  `rerun_fragment()` from there — never from `streamlit_app.py`. When
+  `USE_LOCAL_API=true`, `store` routes CRUD through the typed API; otherwise it
+  uses in-process `WorkspaceService`. Student turns always use the typed coach
+  path (API or in-process), not `StudentChatEngine`.
+- **Rerun scope.** Use `rerun_fragment()` for panel-local updates inside an
+  `@st.fragment` (Sources list, Journey preview toggles). Use `rerun_app()` only
+  when application-wide state changed (notebook switch, auth, coach send/revise,
+  layout collapse, course-sync fragment remount, stage selection). Do not keep a
+  generic `rerun()` helper.
 - **Preserve widget keys and dialog decorators.** Keep `@st.dialog` and
   `@st.fragment` on the functions that own them. Changing keys breaks session
   state and AppTest expectations.

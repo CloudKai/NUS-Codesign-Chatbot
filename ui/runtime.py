@@ -468,5 +468,11 @@ class WorkspaceFacade:
 store = WorkspaceFacade()
 
 
-def rerun() -> None:
+def rerun_app() -> None:
+    """Request a full Streamlit script rerun (notebook/auth/coach/layout changes)."""
     st.rerun()
+
+
+def rerun_fragment() -> None:
+    """Request a fragment-scoped rerun for panel-local UI updates."""
+    st.rerun(scope="fragment")
