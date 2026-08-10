@@ -114,6 +114,15 @@ def test_streamlit_notebook_workspace_smoke():
     assert "Loading course materials in the background…" in Path("ui/sources.py").read_text(
         encoding="utf-8"
     )
+    assert 'st.session_state["source_upload_error"] = str(exc)' not in sources_py
+    assert "st.error(str(exc))" not in sources_py
+    assert "_SOURCE_UPLOAD_ERROR" in sources_py
+    assert "_SOURCE_SYNC_ERROR" in sources_py
+    assert "_SOURCE_RENAME_ERROR" in sources_py
+    assert "_SOURCE_DOWNLOAD_ERROR" in sources_py
+    assert "logger.exception" in sources_py
+    assert "st.caption(_SOURCE_IMPORT_PARTIAL_ERROR)" in sources_py
+    assert 'st.caption(\n                "Some lecture notes could not be imported:' not in sources_py
     assert rendered.index('<span class="pane-title">Thinking Path</span>') < rendered.index(
         'class="message-meta coach-welcome"'
     ) < rendered.index('<span class="pane-title">Sources</span>')
@@ -149,12 +158,12 @@ def test_streamlit_notebook_workspace_smoke():
     assert "user_message_edit_" in chat_py
     assert "revise_message" in chat_py
     assert "pending_edit" in chat_py
-    assert "_conversation_revision_label" in chat_py
     assert "_restore_pending_edit_draft" in chat_py
-    assert 'f"Conversation {revision + 1:02d}"' in chat_py
+    assert "_conversation_revision_label" not in chat_py
+    assert "conversation-revision-label" not in chat_py
+    assert 'f"Conversation {revision + 1:02d}"' not in chat_py
     assert "idempotency_key" in chat_py
     assert 'stage=f"revise:{message' in chat_py or "revise:" in chat_py
-    assert "conversation-revision-label" in chat_py
     assert "creates a new conversation revision" in chat_py
     assert "remain in revision history" in chat_py
     assert "will replace the conversation after this point" not in chat_py
@@ -162,9 +171,9 @@ def test_streamlit_notebook_workspace_smoke():
     assert "Save & resend" not in chat_py
     assert "Editing message" not in chat_py
     assert "composer_edit" not in chat_py
-    assert "conversation-revision-label" in rendered
-    assert "Conversation 01" in rendered
-    assert ".conversation-revision-label" in Path(
+    assert "conversation-revision-label" not in rendered
+    assert "Conversation 01" not in rendered
+    assert ".conversation-revision-label" not in Path(
         "ui/assets/styles/30-chat.css"
     ).read_text(encoding="utf-8")
     assert 'appearance == "Dark"' in Path("ui/chat.py").read_text(encoding="utf-8")
@@ -733,22 +742,6 @@ def test_legacy_chat_turn_does_not_move_the_learning_stage_without_confirmation(
     assert app.session_state["learning_journey"]["completed_stages"] == []
 
 
-def test_conversation_revision_label_formatting():
-    """Display uses revision+1 without renumbering the stored value."""
-    from ui.chat import _conversation_revision_label
-
-    assert _conversation_revision_label(None) == "Conversation 01"
-    assert _conversation_revision_label({}) == "Conversation 01"
-    assert _conversation_revision_label({"conversation_revision": 0}) == "Conversation 01"
-    assert _conversation_revision_label({"conversation_revision": 8}) == "Conversation 09"
-    assert _conversation_revision_label({"conversation_revision": 9}) == "Conversation 10"
-    assert _conversation_revision_label({"conversation_revision": 99}) == "Conversation 100"
-    assert (
-        _conversation_revision_label({"metadata": {"conversation_revision": 3}})
-        == "Conversation 04"
-    )
-
-
 def test_pending_edit_failure_keeps_chat_visible(monkeypatch):
     """A failed revise must not blank the discussion panel."""
     from ui import chat
@@ -789,7 +782,8 @@ def test_pending_edit_failure_keeps_chat_visible(monkeypatch):
     assert pending.get("prompt") == "I want to study safer crossings near schools."
     assert app.session_state["editing_message"] == user_message["id"]
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "Conversation 01" in rendered
+    assert "Conversation 01" not in rendered
+    assert "conversation-revision-label" not in rendered
     assert "Welcome to your critical-thinking coach" in rendered
     assert (
         app.session_state[f"edit-text-{user_message['id']}"]

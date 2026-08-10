@@ -98,14 +98,16 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
   abandon). The server creates an append-only conversation revision (later turns
   leave the active view but stay in revision history); never delete or rewrite
   history only in Streamlit session state. ``get_messages`` returns the active
-  branch. Show a compact ``Conversation {conversation_revision + 1:02d}`` label
-  from the current notebook (stored ``0`` displays as Conversation 01). On
-  revise failure, keep rendering the active chat, preserve ``pending_edit`` +
-  draft for retry; never blank the panel.
+  branch. Do not show a student-facing ``Conversation NN`` revision label in
+  the chat panel (revision tracking stays internal). On revise failure, keep
+  rendering the active chat, preserve ``pending_edit`` + draft for retry; never
+  blank the panel.
 - **Sources panel.** Order is My Sources → Lecture Notes → Readings. Course
   materials show a lock only (no checkboxes); Select all / indeterminate /
   none and Sort (Recent / Name) apply to personal uploads. Lecture Notes and
-  Readings expanders default collapsed until the student opens them.
+  Readings expanders default collapsed until the student opens them. Never show
+  raw ``str(exc)`` for source upload/sync/rename/download failures — log the
+  internal error and display a fixed student-safe message.
 
 ## Entrypoint flow
 

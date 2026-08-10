@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from html import escape
 from pathlib import Path
@@ -20,6 +21,20 @@ from ui.rename import (
     sync_rename_select_all,
 )
 from ui.runtime import rerun, store
+
+logger = logging.getLogger(__name__)
+
+# Student-facing copy only — never pass raw exception text into the UI.
+_SOURCE_UPLOAD_ERROR = (
+    "The file could not be added. Check the type and size, then try again."
+)
+_SOURCE_SYNC_ERROR = "Course materials could not be loaded."
+_SOURCE_IMPORT_PARTIAL_ERROR = (
+    "Some course materials could not be imported. "
+    "Try again later or contact the course team."
+)
+_SOURCE_RENAME_ERROR = "The source could not be renamed. Try again."
+_SOURCE_DOWNLOAD_ERROR = "The file could not be downloaded. Try again."
 
 
 def format_size(size: int) -> str:
@@ -79,8 +94,12 @@ def _import_uploaded_sources(uploads: list[Any]) -> None:
             ],
             origin="source_panel",
         )
-    except Exception as exc:
-        st.session_state["source_upload_error"] = str(exc)
+    except Exception:
+        logger.exception(
+            "Source panel upload failed for notebook %s",
+            thread_id,
+        )
+        st.session_state["source_upload_error"] = _SOURCE_UPLOAD_ERROR
         # Clear the picker so the fragment stops retrying the failed selection.
         st.session_state["source_upload_nonce"] = nonce + 1
         rerun()
@@ -361,8 +380,12 @@ def _render_sources_panel_body() -> None:
     if not sync_loading:
         try:
             lecture_sync = sync_future.result()
-        except Exception as exc:
-            sync_error = str(exc) or "Course materials could not be loaded."
+        except Exception:
+            logger.exception(
+                "Course material sync failed for notebook %s",
+                st.session_state.thread_id,
+            )
+            sync_error = _SOURCE_SYNC_ERROR
     sources = store.list_sources(st.session_state.thread_id)
     personal_sources_all = [
         source for source in sources if not is_locked_course_source(source)
@@ -411,10 +434,12 @@ def _render_sources_panel_body() -> None:
             if upload_error:
                 st.error(upload_error)
         if lecture_sync and lecture_sync.errors:
-            st.caption(
-                "Some lecture notes could not be imported: "
-                + "; ".join(lecture_sync.errors)
+            logger.warning(
+                "Course material import issues for notebook %s: %s",
+                st.session_state.thread_id,
+                "; ".join(lecture_sync.errors),
             )
+            st.caption(_SOURCE_IMPORT_PARTIAL_ERROR)
         if sync_error:
             st.error(sync_error)
         if sync_loading:
@@ -589,8 +614,13 @@ def _render_sources_panel_body() -> None:
                                 cleaned,
                             )
                             rerun()
-                        except Exception as exc:
-                            st.error(str(exc))
+                        except Exception:
+                            logger.exception(
+                                "Source rename failed for notebook %s source %s",
+                                st.session_state.thread_id,
+                                source["id"],
+                            )
+                            st.error(_SOURCE_RENAME_ERROR)
                     sync_rename_select_all(
                         root_selector=(
                             f'[data-testid="stPopoverBody"]'
@@ -603,8 +633,13 @@ def _render_sources_panel_body() -> None:
                             content = store.get_source_content(
                                 st.session_state.thread_id, source["id"]
                             )
-                        except Exception as exc:
-                            st.error(str(exc))
+                        except Exception:
+                            logger.exception(
+                                "Source download failed for notebook %s source %s",
+                                st.session_state.thread_id,
+                                source["id"],
+                            )
+                            st.error(_SOURCE_DOWNLOAD_ERROR)
                         else:
                             st.download_button(
                                 "Download File",

@@ -740,25 +740,6 @@ def _submit_pending_edit(
     return True
 
 
-def _conversation_revision_label(thread: dict[str, Any] | None) -> str:
-    """Return the student-facing Conversation NN label for a notebook revision.
-
-    Stored ``conversation_revision`` stays zero-based; display adds one and
-    zero-pads to two digits (0 → Conversation 01). Storage is never renumbered.
-    """
-    data = thread or {}
-    raw = data.get("conversation_revision")
-    if raw is None:
-        raw = (data.get("metadata") or {}).get("conversation_revision")
-    try:
-        revision = int(raw or 0)
-    except (TypeError, ValueError):
-        revision = 0
-    if revision < 0:
-        revision = 0
-    return f"Conversation {revision + 1:02d}"
-
-
 def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
     """Render the discussion log, coach welcome history, and chat composer.
 
@@ -782,17 +763,9 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
     allow_model_knowledge = not selected_sources
     st.session_state.allow_model_knowledge = allow_model_knowledge
     seed_coach_welcome(store, st.session_state.thread_id)
-    thread = store.get_thread(st.session_state.thread_id) or {}
     messages = store.get_messages(st.session_state.thread_id)
     chat_log = st.container(key="chat_log")
     with chat_log:
-        revision_label = _conversation_revision_label(thread)
-        st.markdown(
-            f'<div class="conversation-revision-label" '
-            f'title="Active conversation revision">'
-            f"{html.escape(revision_label)}</div>",
-            unsafe_allow_html=True,
-        )
         for message in messages:
             render_message(message)
 
