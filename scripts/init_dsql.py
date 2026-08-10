@@ -58,6 +58,10 @@ _MESSAGE_REVISION_COLUMNS: tuple[tuple[str, str], ...] = (
     ("superseded_at_revision", "INTEGER"),
 )
 
+# Stay well under Aurora DSQL per-transaction row-modification limits (~3k).
+REVISION_NULL_BACKFILL_BATCH_SIZE = 1000
+_REVISION_BACKFILL_TABLES = frozenset({"notebooks", "messages"})
+
 
 def is_async_index_ddl(statement: str) -> bool:
     """Return True when *statement* is a CREATE [UNIQUE] INDEX ASYNC DDL."""
@@ -65,48 +69,72 @@ def is_async_index_ddl(statement: str) -> bool:
     return upper.startswith("CREATE") and " INDEX ASYNC " in f" {upper} "
 
 
+def column_default_is_zero(column_default: Any) -> bool:
+    """Return True when *column_default* is a numeric zero DEFAULT expression."""
+    if column_default is None:
+        return False
+    text = str(column_default).strip().lower()
+    if not text:
+        return False
+    return text == "0" or text == "(0)" or text.startswith("0::")
+
+
 def plan_missing_notebooks_conversation_revision_statements(
     existing_columns: set[str] | frozenset[str],
+    *,
+    default_is_zero: bool | None = None,
 ) -> list[str]:
-    """Return additive notebooks CAS DDL/DML when ``conversation_revision`` is absent.
+    """Return additive notebooks CAS DDL (ADD / SET DEFAULT) for repair.
 
-    Each returned statement is one DDL or a single backfill UPDATE so callers
-    can commit one statement per transaction. Idempotent when the column
-    already exists.
+    Presence of the column alone is not enough: when ``default_is_zero`` is
+    ``False``, emit ``SET DEFAULT 0``. NULL backfills are batched separately so
+    interrupted migrations remain resumable under DSQL row limits.
+
+    Name-only callers (``default_is_zero=None``) stay backward-compatible: if
+    the column already exists, return ``[]`` and let the richer apply path pass
+    an explicit default flag / null count.
 
     Args:
         existing_columns: Lower/mixed-case column names already on ``notebooks``.
+        default_is_zero: When the column exists, whether catalog DEFAULT is 0.
 
     Returns:
-        Ordered ADD / SET DEFAULT 0 / NULL-backfill statements, or ``[]``.
+        Ordered ADD / SET DEFAULT statements (never unbounded UPDATE), or ``[]``.
     """
     present = {str(name).lower() for name in existing_columns}
-    if "conversation_revision" in present:
-        return []
-    return [
-        "ALTER TABLE notebooks ADD COLUMN conversation_revision INTEGER",
-        "ALTER TABLE notebooks ALTER COLUMN conversation_revision SET DEFAULT 0",
-        "UPDATE notebooks SET conversation_revision = 0 "
-        "WHERE conversation_revision IS NULL",
-    ]
+    planned: list[str] = []
+    if "conversation_revision" not in present:
+        planned.append(
+            "ALTER TABLE notebooks ADD COLUMN conversation_revision INTEGER"
+        )
+        planned.append(
+            "ALTER TABLE notebooks ALTER COLUMN conversation_revision SET DEFAULT 0"
+        )
+        return planned
+    if default_is_zero is False:
+        planned.append(
+            "ALTER TABLE notebooks ALTER COLUMN conversation_revision SET DEFAULT 0"
+        )
+    return planned
 
 
 def plan_missing_message_revision_statements(
     existing_columns: set[str] | frozenset[str],
+    *,
+    revision_default_is_zero: bool | None = None,
 ) -> list[str]:
-    """Return additive message-revision DDL/DML for columns absent from catalog.
+    """Return additive message-revision DDL for missing columns / defaults.
 
-    Each returned statement is one DDL (or a single backfill UPDATE) so callers
-    can commit one statement per transaction. Idempotent: already-present
-    columns produce no statements.
+    Does not emit unbounded NULL backfills; those run through batched updates.
+    When ``conversation_revision`` exists but ``revision_default_is_zero`` is
+    false, emits ``SET DEFAULT 0``.
 
     Args:
         existing_columns: Lower/mixed-case column names already on ``messages``.
+        revision_default_is_zero: Catalog default status for conversation_revision.
 
     Returns:
-        Ordered statements to add missing revision columns and, when
-        ``conversation_revision`` is newly added, set DEFAULT 0 and backfill
-        NULLs (DSQL cannot combine ADD COLUMN with NOT NULL/DEFAULT).
+        Ordered ADD / SET DEFAULT statements.
     """
     present = {str(name).lower() for name in existing_columns}
     planned: list[str] = []
@@ -121,11 +149,62 @@ def plan_missing_message_revision_statements(
                 "ALTER TABLE messages ALTER COLUMN conversation_revision "
                 "SET DEFAULT 0"
             )
-            planned.append(
-                "UPDATE messages SET conversation_revision = 0 "
-                "WHERE conversation_revision IS NULL"
-            )
+    if (
+        "conversation_revision" in present
+        and revision_default_is_zero is False
+    ):
+        planned.append(
+            "ALTER TABLE messages ALTER COLUMN conversation_revision "
+            "SET DEFAULT 0"
+        )
     return planned
+
+
+def build_revision_null_backfill_update(
+    table: str,
+    row_ids: list[str] | tuple[str, ...],
+) -> str | None:
+    """Build one deterministic NULL→0 UPDATE for a known id batch.
+
+    Args:
+        table: ``notebooks`` or ``messages`` only.
+        row_ids: Ordered primary-key ids to repair (already selected).
+
+    Returns:
+        A single UPDATE statement, or ``None`` when *row_ids* is empty.
+
+    Raises:
+        ValueError: When *table* is not a revision backfill target.
+    """
+    cleaned_table = str(table or "").strip().lower()
+    if cleaned_table not in _REVISION_BACKFILL_TABLES:
+        raise ValueError(f"Unsupported revision backfill table: {table!r}")
+    cleaned_ids = [str(item).strip() for item in row_ids if str(item).strip()]
+    if not cleaned_ids:
+        return None
+    # Literal ids are admin-migration only; values come from a prior SELECT on
+    # the same table. Escape single quotes for safe SQL literals.
+    rendered = ", ".join("'" + item.replace("'", "''") + "'" for item in cleaned_ids)
+    return (
+        f"UPDATE {cleaned_table} SET conversation_revision = 0 "
+        f"WHERE id IN ({rendered}) AND conversation_revision IS NULL"
+    )
+
+
+def _row_value(row: Any, *names: str) -> Any:
+    """Read a column from a mapping/tuple row by case-insensitive name."""
+    if hasattr(row, "get"):
+        for name in names:
+            if name in row:
+                return row.get(name)
+        lowered = {str(key).lower(): row[key] for key in row}
+        for name in names:
+            if name.lower() in lowered:
+                return lowered[name.lower()]
+        return None
+    if isinstance(row, (tuple, list)) and row:
+        return row[0]
+    return row
 
 
 def fetch_table_columns(connection: Any, table_name: str) -> set[str]:
@@ -138,31 +217,83 @@ def fetch_table_columns(connection: Any, table_name: str) -> set[str]:
     Returns:
         Set of column names as reported by the catalog (case preserved).
     """
+    details = fetch_table_column_details(connection, table_name)
+    return {meta["name"] for meta in details.values() if meta.get("name")}
+
+
+def fetch_table_column_details(
+    connection: Any,
+    table_name: str,
+) -> dict[str, dict[str, Any]]:
+    """Return column metadata keyed by lower-case name.
+
+    Each value includes ``name``, ``column_default``, and ``is_nullable``.
+    """
     result = connection.execute(
         """
-        SELECT column_name
+        SELECT column_name, column_default, is_nullable
         FROM information_schema.columns
         WHERE table_schema = 'public' AND table_name = ?
         """,
         (table_name,),
     )
-    columns: set[str] = set()
+    details: dict[str, dict[str, Any]] = {}
     for row in result.fetchall():
-        if hasattr(row, "get"):
-            value = row.get("column_name")
-            if value is None:
-                for key in row:
-                    if str(key).lower() == "column_name":
-                        value = row[key]
-                        break
-        elif isinstance(row, (tuple, list)) and row:
-            value = row[0]
-        else:
-            value = row
-        name = str(value or "").strip()
-        if name:
-            columns.add(name)
-    return columns
+        name = str(_row_value(row, "column_name") or "").strip()
+        if not name:
+            continue
+        details[name.lower()] = {
+            "name": name,
+            "column_default": _row_value(row, "column_default"),
+            "is_nullable": _row_value(row, "is_nullable"),
+        }
+    return details
+
+
+def count_null_conversation_revisions(connection: Any, table_name: str) -> int:
+    """Return how many rows still have NULL ``conversation_revision``."""
+    cleaned = str(table_name or "").strip().lower()
+    if cleaned not in _REVISION_BACKFILL_TABLES:
+        raise ValueError(f"Unsupported revision backfill table: {table_name!r}")
+    result = connection.execute(
+        f"SELECT COUNT(*) AS null_count FROM {cleaned} "
+        "WHERE conversation_revision IS NULL"
+    )
+    row = result.fetchone()
+    value = _row_value(row, "null_count", "count")
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def fetch_null_conversation_revision_ids(
+    connection: Any,
+    table_name: str,
+    *,
+    batch_size: int = REVISION_NULL_BACKFILL_BATCH_SIZE,
+) -> list[str]:
+    """Return up to *batch_size* ids with NULL ``conversation_revision``."""
+    cleaned = str(table_name or "").strip().lower()
+    if cleaned not in _REVISION_BACKFILL_TABLES:
+        raise ValueError(f"Unsupported revision backfill table: {table_name!r}")
+    limit = max(1, int(batch_size))
+    result = connection.execute(
+        f"""
+        SELECT id
+        FROM {cleaned}
+        WHERE conversation_revision IS NULL
+        ORDER BY id
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    ids: list[str] = []
+    for row in result.fetchall():
+        value = str(_row_value(row, "id") or "").strip()
+        if value:
+            ids.append(value)
+    return ids
 
 
 def _job_id_from_result(result: Any) -> str | None:
@@ -403,17 +534,18 @@ def apply_missing_revision_columns(
     admin_user: str = "admin",
     connect_fn: Callable[..., Any] | None = None,
     token_provider: Callable[[], str] | None = None,
+    batch_size: int = REVISION_NULL_BACKFILL_BATCH_SIZE,
 ) -> list[str]:
-    """Inspect catalog and ALTER missing notebook/message revision columns.
+    """Inspect catalog and repair notebook/message revision columns.
 
-    Reads ``information_schema.columns`` for ``notebooks`` and ``messages`` on
-    one admin connection, plans additive statements (notebooks CAS column
-    first, then message revision columns), and applies each in its own
-    committed transaction. No-op when all columns already exist. Never runs
-    from application startup.
+    Reads ``information_schema.columns`` (names + defaults) for ``notebooks``
+    and ``messages``, plans additive DDL (ADD / SET DEFAULT), applies each in
+    its own committed transaction, then batch-backfills remaining NULL
+    ``conversation_revision`` values. Column existence alone never skips
+    DEFAULT or NULL repair. Never runs from application startup.
 
     Returns:
-        Statements that were executed (empty when already up to date).
+        Statements that were executed (empty when already fully repaired).
     """
     catalog_connection = _connect_admin(
         endpoint=endpoint,
@@ -424,8 +556,28 @@ def apply_missing_revision_columns(
         token_provider=token_provider,
     )
     try:
-        notebooks_columns = fetch_table_columns(catalog_connection, "notebooks")
-        messages_columns = fetch_table_columns(catalog_connection, "messages")
+        notebooks_details = fetch_table_column_details(
+            catalog_connection, "notebooks"
+        )
+        messages_details = fetch_table_column_details(
+            catalog_connection, "messages"
+        )
+        notebooks_columns = {
+            meta["name"] for meta in notebooks_details.values() if meta.get("name")
+        }
+        messages_columns = {
+            meta["name"] for meta in messages_details.values() if meta.get("name")
+        }
+        notebooks_default_zero = False
+        messages_default_zero = False
+        if "conversation_revision" in notebooks_details:
+            notebooks_default_zero = column_default_is_zero(
+                notebooks_details["conversation_revision"].get("column_default")
+            )
+        if "conversation_revision" in messages_details:
+            messages_default_zero = column_default_is_zero(
+                messages_details["conversation_revision"].get("column_default")
+            )
         catalog_connection.commit()
     except Exception:
         try:
@@ -437,11 +589,22 @@ def apply_missing_revision_columns(
     else:
         catalog_connection.close()
 
-    planned = (
-        plan_missing_notebooks_conversation_revision_statements(notebooks_columns)
-        + plan_missing_message_revision_statements(messages_columns)
+    planned = plan_missing_notebooks_conversation_revision_statements(
+        notebooks_columns,
+        default_is_zero=(
+            notebooks_default_zero
+            if "conversation_revision" in {n.lower() for n in notebooks_columns}
+            else None
+        ),
+    ) + plan_missing_message_revision_statements(
+        messages_columns,
+        revision_default_is_zero=(
+            messages_default_zero
+            if "conversation_revision" in {n.lower() for n in messages_columns}
+            else None
+        ),
     )
-    return _apply_admin_statements(
+    applied = _apply_admin_statements(
         planned=planned,
         endpoint=endpoint,
         region=region,
@@ -450,6 +613,84 @@ def apply_missing_revision_columns(
         connect_fn=connect_fn,
         token_provider=token_provider,
     )
+    applied.extend(
+        apply_revision_null_backfills(
+            endpoint=endpoint,
+            region=region,
+            database=database,
+            admin_user=admin_user,
+            connect_fn=connect_fn,
+            token_provider=token_provider,
+            batch_size=batch_size,
+        )
+    )
+    return applied
+
+
+def apply_revision_null_backfills(
+    *,
+    endpoint: str,
+    region: str,
+    database: str = "postgres",
+    admin_user: str = "admin",
+    connect_fn: Callable[..., Any] | None = None,
+    token_provider: Callable[[], str] | None = None,
+    batch_size: int = REVISION_NULL_BACKFILL_BATCH_SIZE,
+    tables: tuple[str, ...] = ("notebooks", "messages"),
+) -> list[str]:
+    """Batch-repair NULL ``conversation_revision`` values until none remain.
+
+    Each SELECT+UPDATE batch uses its own committed admin transaction and
+    stays within *batch_size* row modifications. Safe to rerun; no-op when
+    columns are absent or no NULLs remain.
+
+    Returns:
+        UPDATE statements that were executed.
+    """
+    limit = max(1, int(batch_size))
+    applied: list[str] = []
+    for table in tables:
+        cleaned = str(table or "").strip().lower()
+        if cleaned not in _REVISION_BACKFILL_TABLES:
+            raise ValueError(f"Unsupported revision backfill table: {table!r}")
+        while True:
+            connection = _connect_admin(
+                endpoint=endpoint,
+                region=region,
+                database=database,
+                admin_user=admin_user,
+                connect_fn=connect_fn,
+                token_provider=token_provider,
+            )
+            try:
+                details = fetch_table_column_details(connection, cleaned)
+                if "conversation_revision" not in details:
+                    connection.commit()
+                    connection.close()
+                    break
+                ids = fetch_null_conversation_revision_ids(
+                    connection,
+                    cleaned,
+                    batch_size=limit,
+                )
+                statement = build_revision_null_backfill_update(cleaned, ids)
+                if statement is None:
+                    connection.commit()
+                    connection.close()
+                    break
+                connection.execute(statement)
+                connection.commit()
+            except Exception:
+                try:
+                    connection.rollback()
+                except Exception:  # noqa: BLE001
+                    pass
+                connection.close()
+                raise
+            else:
+                connection.close()
+            applied.append(statement)
+    return applied
 
 
 # Backwards-compatible alias used by earlier tests/call sites.

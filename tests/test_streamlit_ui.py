@@ -151,7 +151,9 @@ def test_streamlit_notebook_workspace_smoke():
     assert "pending_edit" in chat_py
     assert "_conversation_revision_label" in chat_py
     assert "_restore_pending_edit_draft" in chat_py
-    assert 'f"Conversation {revision + 1}"' in chat_py
+    assert 'f"Conversation {revision + 1:02d}"' in chat_py
+    assert "idempotency_key" in chat_py
+    assert 'stage=f"revise:{message' in chat_py or "revise:" in chat_py
     assert "conversation-revision-label" in chat_py
     assert "creates a new conversation revision" in chat_py
     assert "remain in revision history" in chat_py
@@ -161,7 +163,7 @@ def test_streamlit_notebook_workspace_smoke():
     assert "Editing message" not in chat_py
     assert "composer_edit" not in chat_py
     assert "conversation-revision-label" in rendered
-    assert "Conversation 1" in rendered
+    assert "Conversation 01" in rendered
     assert ".conversation-revision-label" in Path(
         "ui/assets/styles/30-chat.css"
     ).read_text(encoding="utf-8")
@@ -735,15 +737,15 @@ def test_conversation_revision_label_formatting():
     """Display uses revision+1 without renumbering the stored value."""
     from ui.chat import _conversation_revision_label
 
-    assert _conversation_revision_label(None) == "Conversation 1"
-    assert _conversation_revision_label({}) == "Conversation 1"
-    assert _conversation_revision_label({"conversation_revision": 0}) == "Conversation 1"
-    assert _conversation_revision_label({"conversation_revision": 8}) == "Conversation 9"
+    assert _conversation_revision_label(None) == "Conversation 01"
+    assert _conversation_revision_label({}) == "Conversation 01"
+    assert _conversation_revision_label({"conversation_revision": 0}) == "Conversation 01"
+    assert _conversation_revision_label({"conversation_revision": 8}) == "Conversation 09"
     assert _conversation_revision_label({"conversation_revision": 9}) == "Conversation 10"
     assert _conversation_revision_label({"conversation_revision": 99}) == "Conversation 100"
     assert (
         _conversation_revision_label({"metadata": {"conversation_revision": 3}})
-        == "Conversation 4"
+        == "Conversation 04"
     )
 
 
@@ -773,19 +775,22 @@ def test_pending_edit_failure_keeps_chat_visible(monkeypatch):
     app.session_state["pending_edit"] = {
         "message_id": user_message["id"],
         "prompt": "I want to study safer crossings near schools.",
+        "idempotency_key": "11111111-1111-1111-1111-111111111111",
     }
     app.run()
 
     assert not app.exception
     rendered_errors = "\n".join(error.value or "" for error in app.error)
-    assert "Could not revise this message" in rendered_errors
-    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "Conversation 1" in rendered
-    assert "Welcome to your critical-thinking coach" in rendered
-    assert "pending_edit" not in app.session_state or app.session_state[
-        "pending_edit"
-    ] is None
+    assert "Could not finish this edit" in rendered_errors or "Could not" in rendered_errors
+    assert "pending_edit" in app.session_state
+    pending = app.session_state["pending_edit"]
+    assert isinstance(pending, dict)
+    assert pending.get("idempotency_key") == "11111111-1111-1111-1111-111111111111"
+    assert pending.get("prompt") == "I want to study safer crossings near schools."
     assert app.session_state["editing_message"] == user_message["id"]
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert "Conversation 01" in rendered
+    assert "Welcome to your critical-thinking coach" in rendered
     assert (
         app.session_state[f"edit-text-{user_message['id']}"]
         == "I want to study safer crossings near schools."

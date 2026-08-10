@@ -2,49 +2,53 @@
 
 ## Current phase
 
-**Append-only conversation revision on ``Production-AddEditFunction``.**
-Edit is append-only (no DELETE truncate): revise bumps
-``notebooks.conversation_revision``, marks the edited user and later active
-turns with ``superseded_at_revision``, inserts a new user row linked by
-``previous_message_id``, and regenerates the coach on the active branch.
-``get_messages`` / ``get_messages_at_revision`` use
-``conversation_revision <= R`` and
-``(superseded_at_revision IS NULL OR superseded_at_revision > R)``. Ownership
-stays ``messages.notebook_id → notebooks.user_id → users.id`` (no denormalized
-user columns on messages). Student UI keeps inline bubble edit, shows
-``Conversation {revision + 1}`` (stored ``0`` → Conversation 01), and warns that
-later turns leave the active view but remain in revision history. Regenerate
-remains unavailable. **Sources panel:** My Sources first, then Lecture Notes /
-Readings; course materials are lock-only (no checkboxes) and always included;
-Select all / indeterminate / none and Sort apply only to personal uploads;
-Lecture Notes / Readings expanders start collapsed. ``tests/test_conversation_revision.py`` is rewritten for
-these semantics. The complete 381-test deterministic mock suite and compileall
-pass. Remaining gates: additive DSQL DDL on existing clusters, controlled DSQL
-smoke, live browser/upload/RAG QA, and ARM64 image deployment. Bedrock and true
-provider streaming remain out of scope.
+**Production-hardening append-only revision on ``Production-AddEditFunction``.**
+Append-only edit remains (no DELETE truncate). This hardening pass makes the
+Aurora DSQL revision migration resumable/idempotent (DEFAULT + batched NULL
+backfill; column presence alone is not “done”), keeps revise retries on a
+stable UI idempotency key, scopes ``select_learning_stage`` pending rejects to
+the active conversation branch, formats the label as ``Conversation 01``, and
+blocks destructive ``update_message`` content writes. Ownership stays
+``messages.notebook_id → notebooks.user_id → users.id``. Sources lock/select/
+sort UX from the prior commit remains. Deterministic mock tests cover migration
+repair, batch backfill, revise resume, stage-selection pending scope, and UI
+label/retry state.
 
-### Behavior changes (this append-only phase)
+### Hardening behavior changes (this pass)
+
+1. **DSQL revision migration.** ``scripts/init_dsql.py`` inspects
+   ``information_schema`` name **and** ``column_default``, repairs missing
+   DEFAULT 0, and batch-backfills NULL ``conversation_revision`` (1000 rows /
+   transaction) for notebooks and messages. Safe to re-run; never app startup.
+2. **Stable revise retry.** Streamlit ``pending_edit`` keeps one UUID
+   idempotency key (via ``get_retry_key`` scope ``revise:{message_id}``) until
+   success; provider-failure retries resume without a second revision bump.
+3. **Active-branch pending rejects.** ``select_learning_stage`` only rejects
+   ``decision_status='pending'`` rows active at the current revision.
+4. **Conversation 01.** Display uses ``f"Conversation {revision + 1:02d}"``;
+   stored revision stays zero-based.
+5. **No destructive message content update.** ``StudentStore.update_message``
+   raises; edits go through append-only revise only.
+
+### Prior append-only phase (still true)
 
 1. **Active-branch chat.** Discussion renders only active messages for the
    notebook's current ``conversation_revision``; superseded turns stay durable
    for revision history / reporting.
-2. **Conversation label.** Chat panel shows a compact
-   ``Conversation {conversation_revision + 1}`` label from the current notebook
-   (do not renumber the stored value).
-3. **Edit confirm copy.** Editing an earlier user turn states that a new
+2. **Edit confirm copy.** Editing an earlier user turn states that a new
    conversation revision/branch is created; later turns leave the active view
    but remain in revision history (no truncate/delete claims).
-4. **Post-edit reload.** Successful revise reloads journey state and reruns so
+3. **Post-edit reload.** Successful revise reloads journey state and reruns so
    ``get_messages`` shows the new active branch.
-5. **Edit failure UX.** Failed ``pending_edit`` keeps rendering the chat panel
-   instead of blanking it.
-6. **Message revision columns (backend contract).** Messages carry
+4. **Message revision columns (backend contract).** Messages carry
    ``conversation_revision``, ``previous_message_id``, and
    ``superseded_at_revision``; ownership stays
    ``messages.notebook_id → notebooks.user_id → users.id``.
-7. **Assessment fields (expected).** User rows and the fixed coach welcome have
+5. **Assessment fields (expected).** User rows and the fixed coach welcome have
    ``assessment_text = NULL``; assessed coach assistant replies store
    ``assessment_text`` JSON. Do not treat welcome NULL assessment as a failure.
+6. **Sources panel.** My Sources → Lecture Notes → Readings; course materials
+   lock-only; Select all + Sort for personal uploads.
 
 ### PART 1 root-cause evidence (“only welcome” on DSQL) — code inspection
 

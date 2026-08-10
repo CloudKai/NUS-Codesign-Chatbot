@@ -391,23 +391,27 @@ class StudentStore:
     def _migrate_notebooks_conversation_revision(
         connection: sqlite3.Connection,
     ) -> None:
-        """Add ``conversation_revision`` for edit/revise CAS on existing DBs."""
+        """Add/repair ``conversation_revision`` for edit/revise CAS on existing DBs."""
         columns = {
             str(row["name"])
             for row in connection.execute("PRAGMA table_info(notebooks)")
         }
-        if "conversation_revision" in columns:
+        if "conversation_revision" not in columns:
+            connection.execute(
+                "ALTER TABLE notebooks ADD COLUMN conversation_revision "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
             return
         connection.execute(
-            "ALTER TABLE notebooks ADD COLUMN conversation_revision "
-            "INTEGER NOT NULL DEFAULT 0"
+            "UPDATE notebooks SET conversation_revision = 0 "
+            "WHERE conversation_revision IS NULL"
         )
 
     @staticmethod
     def _migrate_messages_revision_columns(
         connection: sqlite3.Connection,
     ) -> None:
-        """Add append-only message revision columns on existing local DBs."""
+        """Add/repair append-only message revision columns on existing local DBs."""
         columns = {
             str(row["name"])
             for row in connection.execute("PRAGMA table_info(messages)")
@@ -416,6 +420,11 @@ class StudentStore:
             connection.execute(
                 "ALTER TABLE messages ADD COLUMN conversation_revision "
                 "INTEGER NOT NULL DEFAULT 0"
+            )
+        else:
+            connection.execute(
+                "UPDATE messages SET conversation_revision = 0 "
+                "WHERE conversation_revision IS NULL"
             )
         if "previous_message_id" not in columns:
             connection.execute(
@@ -1411,11 +1420,13 @@ class StudentStore:
             )
 
     def select_learning_stage(self, thread_id: str, stage_id: str) -> dict[str, Any]:
-        """Set the notebook's current stage and reject any pending transitions.
+        """Set the notebook's current stage and reject active pending transitions.
 
-        Updates journey metadata and clears pending ADVANCE recommendations in
-        one connection so a mid-flight failure cannot leave a pending transition
-        pointing at a stage the student already left.
+        Updates journey metadata and clears pending ADVANCE recommendations on
+        the **active conversation branch only** in one connection so a mid-flight
+        failure cannot leave a pending transition pointing at a stage the
+        student already left. Superseded historical pendings stay untouched so
+        ``get_messages_at_revision`` can reconstruct prior branches faithfully.
 
         Returns:
             The updated notebook metadata dict (includes ``learning_journey``).
@@ -1443,13 +1454,15 @@ class StudentStore:
             current_meta["learning_journey"] = next_journey
             current_meta["thinking_stage"] = cleaned_stage
             now = utc_now()
+            active_revision = self._notebook_revision_value(row)
             connection.execute(
-                """
+                f"""
                 UPDATE messages
                 SET decision_status='rejected', decision_at=?
                 WHERE notebook_id=? AND decision_status='pending'
+                  AND {self._active_at_revision_sql()}
                 """,
-                (now, thread_id),
+                (now, thread_id, active_revision, active_revision),
             )
             current_stage, progress_text, settings_text = self._split_notebook_metadata(
                 current_meta
@@ -2338,11 +2351,20 @@ class StudentStore:
         return user_id, assistant_id
 
     def update_message(self, message_id: str, content: str) -> None:
-        """Replace the content of an owned message."""
+        """Refuse destructive in-place content replacement for chat messages.
+
+        Student edits must use :meth:`revise_conversation_from_user_message`
+        (append-only revision). This method remains only so accidental callers
+        fail loudly instead of silently rewriting history.
+
+        Raises:
+            ValueError: Always, for owned or missing messages alike after the
+                ownership check — content is never updated in place.
+        """
         with self._lock, self._connect() as connection:
             owned = connection.execute(
                 """
-                SELECT m.id FROM messages m
+                SELECT m.id, m.role FROM messages m
                 JOIN notebooks n ON n.id=m.notebook_id
                 WHERE m.id=? AND n.user_id=?
                 """,
@@ -2350,10 +2372,10 @@ class StudentStore:
             ).fetchone()
             if not owned:
                 raise ValueError("Message not found")
-            connection.execute(
-                "UPDATE messages SET content=? WHERE id=?",
-                (content, message_id),
-            )
+        raise ValueError(
+            "Destructive message content updates are not supported; "
+            "use append-only revise_conversation_from_user_message"
+        )
 
     def _find_active_replacement_user(
         self,

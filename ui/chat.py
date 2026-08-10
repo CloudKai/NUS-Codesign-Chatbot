@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import html
 import mimetypes
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -371,9 +370,18 @@ def render_message(message: dict[str, Any]) -> None:
                         if not revised.strip():
                             st.error("Enter a message before resending.")
                             return
+                        draft = revised.strip()
+                        thread_id = st.session_state.thread_id
+                        idempotency_key = get_retry_key(
+                            st.session_state,
+                            thread_id=thread_id,
+                            stage=f"revise:{message['id']}",
+                            prompt=draft,
+                        )
                         st.session_state.pending_edit = {
                             "message_id": message["id"],
-                            "prompt": revised.strip(),
+                            "prompt": draft,
+                            "idempotency_key": idempotency_key,
                         }
                         st.session_state.editing_message = None
                         rerun()
@@ -654,27 +662,50 @@ def _submit_pending_edit(
 ) -> bool:
     """Apply a bubble edit via the server revise endpoint and reload state.
 
+    Keeps one stable idempotency key for the logical edit attempt until it
+    succeeds or the student abandons editing. When the append-only revision
+    already committed but provider generation failed, the same key + original
+    message id lets the server resume the replacement without bumping again.
+
     Returns:
         True when revise succeeded and a rerun was requested; False when the
         edit could not run so the chat panel should keep rendering. On failure,
-        restores the in-bubble editor draft so the student can retry.
+        preserves ``pending_edit`` and restores the in-bubble editor draft.
     """
-    pending = st.session_state.pop("pending_edit", None)
+    pending = st.session_state.get("pending_edit")
     if not isinstance(pending, dict):
         return False
     message_id = str(pending.get("message_id") or "")
     draft = str(pending.get("prompt") or "").strip()
     if not message_id or not draft:
+        st.session_state.pop("pending_edit", None)
         _restore_pending_edit_draft(message_id, draft)
         st.error("Enter a message before resending.")
         return False
+    thread_id = st.session_state.thread_id
+    idempotency_key = str(pending.get("idempotency_key") or "").strip()
+    if not idempotency_key:
+        idempotency_key = get_retry_key(
+            st.session_state,
+            thread_id=thread_id,
+            stage=f"revise:{message_id}",
+            prompt=draft,
+        )
+    # Persist the stable key before the network call so browser reruns reuse it.
+    pending = {
+        **pending,
+        "message_id": message_id,
+        "prompt": draft,
+        "idempotency_key": idempotency_key,
+    }
+    st.session_state.pending_edit = pending
     thinking = st.status("Coach is thinking…", expanded=False)
     try:
         store.revise_message(
-            st.session_state.thread_id,
+            thread_id,
             message_id,
             draft,
-            idempotency_key=f"revise-{uuid.uuid4()}",
+            idempotency_key=idempotency_key,
             model_id=model_id,
             reasoning_effort=reasoning_effort,
             response_detail=st.session_state.get("response_detail") or "short",
@@ -685,12 +716,21 @@ def _submit_pending_edit(
         thinking.update(label="Coaching failed", state="error")
         _restore_pending_edit_draft(message_id, draft)
         st.error(
-            "Could not revise this message. Your active conversation is still "
-            "visible if the server rejected the change; if a new revision "
-            "already applied, reload the notebook and retry with a new attempt."
+            "Could not finish this edit. Your draft is preserved — use Send "
+            "again to retry the same revision attempt without creating another "
+            "conversation branch. If the server already applied the revision, "
+            "retry resumes the replacement coach reply."
         )
         return False
-    updated_thread = store.get_thread(st.session_state.thread_id) or {}
+    remove_retry_key(
+        st.session_state,
+        thread_id=thread_id,
+        stage=f"revise:{message_id}",
+        prompt=draft,
+    )
+    st.session_state.pop("pending_edit", None)
+    st.session_state.editing_message = None
+    updated_thread = store.get_thread(thread_id) or {}
     updated_metadata = updated_thread.get("metadata") or {}
     updated_journey = normalize_journey(updated_metadata.get("learning_journey"))
     st.session_state.learning_journey = updated_journey
@@ -701,10 +741,10 @@ def _submit_pending_edit(
 
 
 def _conversation_revision_label(thread: dict[str, Any] | None) -> str:
-    """Return the student-facing Conversation N label for a notebook revision.
+    """Return the student-facing Conversation NN label for a notebook revision.
 
-    Stored ``conversation_revision`` stays zero-based; display adds one so the
-    first branch shows as Conversation 1 (not renumbered in storage).
+    Stored ``conversation_revision`` stays zero-based; display adds one and
+    zero-pads to two digits (0 → Conversation 01). Storage is never renumbered.
     """
     data = thread or {}
     raw = data.get("conversation_revision")
@@ -716,7 +756,7 @@ def _conversation_revision_label(thread: dict[str, Any] | None) -> str:
         revision = 0
     if revision < 0:
         revision = 0
-    return f"Conversation {revision + 1}"
+    return f"Conversation {revision + 1:02d}"
 
 
 def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:

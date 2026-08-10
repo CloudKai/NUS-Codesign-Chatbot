@@ -93,14 +93,15 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
   token streaming in the UI beyond what the API emits.
 - **Edit via server revise only.** User-message Edit uses the in-bubble editor
   (8-row max, then scroll) and must call ``store.revise_message`` /
-  ``POST .../messages/{id}/revise`` with a new idempotency key. The server
-  creates an append-only conversation revision (later turns leave the active
-  view but stay in revision history); never delete or rewrite history only in
-  Streamlit session state. ``get_messages`` returns the active branch. Show a
-  compact ``Conversation {conversation_revision + 1}`` label from the current
-  notebook (stored ``0`` displays as Conversation 1). On revise failure, keep
-  rendering the active chat and restore the in-bubble draft for retry; never
-  blank the panel.
+  ``POST .../messages/{id}/revise`` with a **stable** revise idempotency key for
+  that edit attempt (reuse across provider-failure retries until success or
+  abandon). The server creates an append-only conversation revision (later turns
+  leave the active view but stay in revision history); never delete or rewrite
+  history only in Streamlit session state. ``get_messages`` returns the active
+  branch. Show a compact ``Conversation {conversation_revision + 1:02d}`` label
+  from the current notebook (stored ``0`` displays as Conversation 01). On
+  revise failure, keep rendering the active chat, preserve ``pending_edit`` +
+  draft for retry; never blank the panel.
 - **Sources panel.** Order is My Sources → Lecture Notes → Readings. Course
   materials show a lock only (no checkboxes); Select all / indeterminate /
   none and Sort (Recent / Name) apply to personal uploads. Lecture Notes and

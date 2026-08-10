@@ -191,7 +191,8 @@ WHERE table_schema = 'public'
 ORDER BY table_name, column_name;
 ```
 
-Notebook revision (prerequisite) — separate commits per statement:
+Notebook revision (prerequisite) — separate commits per statement. Re-run
+safely: existence alone does **not** mean DEFAULT/backfill finished.
 
 ```sql
 ALTER TABLE notebooks
@@ -202,6 +203,14 @@ ALTER TABLE notebooks
 ALTER TABLE notebooks
   ALTER COLUMN conversation_revision SET DEFAULT 0;
 ```
+
+Prefer ``scripts/init_dsql.py`` (admin) which inspects
+``information_schema.columns`` (name + ``column_default``), repairs missing
+DEFAULT 0, then batch-backfills NULLs (1000 rows/transaction) for both
+``notebooks`` and ``messages``. Do **not** rely on one unbounded
+``UPDATE ... WHERE conversation_revision IS NULL`` on large tables.
+
+Manual single-statement backfill (small clusters only):
 
 ```sql
 UPDATE notebooks
@@ -231,7 +240,8 @@ ALTER TABLE messages
   ADD COLUMN IF NOT EXISTS superseded_at_revision INTEGER;
 ```
 
-Backfill / defaults (DML after DDL):
+Backfill / defaults (DML after DDL) — use batched updates via
+``scripts/init_dsql.py`` on large tables. Small-cluster manual form:
 
 ```sql
 UPDATE messages
@@ -242,9 +252,11 @@ WHERE conversation_revision IS NULL;
 Leave ``previous_message_id`` and ``superseded_at_revision`` NULL for existing
 rows (active at notebook revision 0). Fresh ``CREATE TABLE`` retains
 ``INTEGER NOT NULL DEFAULT 0`` for both revision counters. The application
-treats null notebook/message revision as ``0`` (``COALESCE`` / ``or 0``).
-Student UI shows ``Conversation {notebook.conversation_revision + 1}`` (stored
-``0`` → Conversation 01); do not renumber stored values.
+treats null notebook/message revision as ``0`` (``COALESCE`` / ``or 0``) in
+Python, but SQL CAS ``WHERE conversation_revision = 0`` does **not** match
+SQL NULL — backfill before cutover. Student UI shows
+``Conversation {notebook.conversation_revision + 1:02d}`` (stored ``0`` →
+Conversation 01); do not renumber stored values.
 
 **PART 1 (“only welcome”) — code inspection, not live-verified:** the UI
 welcome seed persists through workspace ``add_message`` without the coach

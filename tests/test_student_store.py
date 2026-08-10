@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from backend.retrieval import (
     LocalChunkRetriever,
     RetrievalQuery,
@@ -103,9 +105,10 @@ def test_delete_notebook_removes_messages_and_sources(tmp_path):
         support_mode="critical-thinking",
     )
     message_id = store.add_message(thread_id, "user", "Original")
-    store.update_message(message_id, "Revised")
+    with pytest.raises(ValueError, match="append-only"):
+        store.update_message(message_id, "Revised")
+    assert store.get_messages(thread_id)[0]["content"] == "Original"
     store.update_thread(thread_id, name="Draft feedback")
-    assert store.get_messages(thread_id)[0]["content"] == "Revised"
     assert store.get_thread(thread_id)["name"] == "Draft feedback"
     store.delete_thread(thread_id)
     assert store.get_thread(thread_id) is None

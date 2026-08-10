@@ -1295,3 +1295,108 @@ def test_sqlite_migration_adds_notebook_and_message_revision_columns(tmp_path):
     assert "previous_message_id" in message_cols
     assert "superseded_at_revision" in message_cols
     assert migrated.get_messages(thread_id)[0]["content"] == "Keep me"
+
+
+def test_select_learning_stage_rejects_only_active_pending(tmp_path, monkeypatch):
+    """Historical superseded pendings stay pending for revision reconstruction."""
+    monkeypatch.setattr(settings, "auto_advance_stages", False)
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    store = StudentStore(tmp_path / "stage-pending.sqlite3")
+    coach = _coach(store, auto_advance=False)
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    turn = coach.submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="Ready to move on with a clear focus.",
+            current_stage="focus",
+            response_detail="short",
+            idempotency_key="stage-pending-1",
+        )
+    )
+    assert turn.pending_transition is not None
+    superseded_pending_id = turn.pending_transition.id
+    user_id = store.get_messages(thread_id)[0]["id"]
+    coach.revise_and_resubmit(
+        thread_id,
+        user_id,
+        "Stay in focus for now.",
+        idempotency_key="stage-pending-revise",
+    )
+    # Simulate a historical pending left on a superseded tip (revision snapshot).
+    with store._lock, store._connect() as connection:
+        connection.execute(
+            """
+            UPDATE messages
+            SET decision_status='pending', decision_at=NULL
+            WHERE id=? AND notebook_id=?
+            """,
+            (superseded_pending_id, thread_id),
+        )
+        connection.commit()
+    store.select_learning_stage(thread_id, "evidence")
+    revision = int(store.get_thread(thread_id)["conversation_revision"] or 0)
+    with store._connect() as connection:
+        after = connection.execute(
+            """
+            SELECT decision_status, superseded_at_revision
+            FROM messages WHERE id=?
+            """,
+            (superseded_pending_id,),
+        ).fetchone()
+        active_pending = connection.execute(
+            f"""
+            SELECT id FROM messages
+            WHERE notebook_id=? AND decision_status='pending'
+              AND {store._active_at_revision_sql()}
+            """,
+            (thread_id, revision, revision),
+        ).fetchall()
+    assert after is not None
+    assert after["superseded_at_revision"] is not None
+    assert after["decision_status"] == "pending"
+    assert active_pending == []
+    rev0 = store.get_messages_at_revision(thread_id, 0)
+    assert any(message["id"] == superseded_pending_id for message in rev0)
+
+
+def test_provider_failure_retry_same_key_does_not_double_bump(tmp_path, monkeypatch):
+    """Stable revise key resumes replacement without a second CAS bump."""
+    monkeypatch.setattr(settings, "student_stage_selection", False)
+    store = StudentStore(tmp_path / "retry-same-key.sqlite3")
+    provider = _FailOnceThenRecordProvider()
+    coach = _coach_with_provider(store, provider)
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    seed = _coach(store)
+    seed.submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="First prompt",
+            current_stage="focus",
+            response_detail="short",
+            idempotency_key="retry-seed",
+        )
+    )
+    user_id = store.get_messages(thread_id)[0]["id"]
+    with pytest.raises(RuntimeError, match="simulated provider failure"):
+        coach.revise_and_resubmit(
+            thread_id,
+            user_id,
+            "Edited once",
+            idempotency_key="stable-revise-key",
+        )
+    assert int(store.get_thread(thread_id)["conversation_revision"] or 0) == 1
+    recovered = coach.revise_and_resubmit(
+        thread_id,
+        user_id,
+        "Edited once",
+        idempotency_key="stable-revise-key",
+    )
+    assert int(store.get_thread(thread_id)["conversation_revision"] or 0) == 1
+    assert recovered.response_text
+    active_users = [
+        message
+        for message in store.get_messages(thread_id)
+        if message.get("role") == "user"
+    ]
+    assert len(active_users) == 1
+    assert active_users[0]["content"] == "Edited once"

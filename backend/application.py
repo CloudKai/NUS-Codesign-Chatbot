@@ -652,9 +652,10 @@ class CoachApplicationService:
         branch or bumping ``conversation_revision`` again.
 
         The revision transaction commits before the provider call. If the
-        provider fails afterward, the append-only supersede remains and the
-        client may retry with a new idempotency key against the current
-        revision. A durable turn for this key still replays without mutation.
+        provider fails afterward, the append-only supersede remains. Clients
+        must retry with the **same** idempotency key so durable-turn recovery
+        and ``try_resume_revision_result`` can resume without bumping
+        ``conversation_revision`` again.
         """
         cleaned_key = str(idempotency_key or "").strip()
         if not cleaned_key:
