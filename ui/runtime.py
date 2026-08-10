@@ -158,6 +158,7 @@ def stream_coach_turn_events(request: CoachRequest) -> Iterator[dict[str, Any]]:
         "thread_id": request.thread_id,
         "stage": request.current_stage,
     }
+    yield {"event": "status", "phase": "thinking"}
     turn = coach.submit(request)
     text = turn.response_text
     chunk_size = 32

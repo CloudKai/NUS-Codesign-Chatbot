@@ -521,21 +521,37 @@ def handle_prompt(
             idempotency_key=idempotency_key,
         )
         with st.chat_message("assistant", avatar=":material/auto_awesome:"):
+            thinking = st.status("Coach is thinking…", expanded=False)
             try:
                 turn: CoachTurn | None = None
+                thinking_closed = False
+
+                def _close_thinking(*, label: str, state: str) -> None:
+                    nonlocal thinking_closed
+                    if thinking_closed:
+                        return
+                    thinking.update(label=label, state=state)
+                    thinking_closed = True
 
                 def token_stream():
                     nonlocal turn
                     for event in stream_coach_turn_events(request):
                         kind = event.get("event")
+                        if kind in {"started", "status", "graph"}:
+                            # Keep the running status visible during provider wait.
+                            continue
                         if kind == "token":
+                            _close_thinking(label="Coach reply ready", state="complete")
                             yield str(event.get("text") or "")
                         elif kind == "done":
+                            _close_thinking(label="Coach reply ready", state="complete")
                             turn = CoachTurn.model_validate(event["turn"])
                         elif kind == "error":
+                            _close_thinking(label="Coaching failed", state="error")
                             status = event.get("status")
                             detail = event.get("detail") or "Coaching failed"
                             raise RuntimeError(f"{detail} (status={status})")
+                    _close_thinking(label="Coach reply ready", state="complete")
 
                 st.write_stream(token_stream())
                 remove_retry_key(
@@ -549,6 +565,10 @@ def handle_prompt(
                         "The coach has recommended a next step in Thinking Path."
                     )
             except Exception:
+                try:
+                    thinking.update(label="Coaching failed", state="error")
+                except Exception:
+                    pass
                 st.error(
                     "Coaching is unavailable. Prefer `sh scripts/start.sh` for "
                     "API mode, or check the local provider."

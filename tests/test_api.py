@@ -751,6 +751,8 @@ def test_local_api_ready_request_id_stream_and_graph(tmp_path):
     events = [__import__("json").loads(line) for line in lines]
     kinds = [event["event"] for event in events]
     assert kinds[0] == "started"
+    assert kinds[1] == "status"
+    assert events[1].get("phase") == "thinking"
     assert "token" in kinds
     assert kinds[-1] == "done"
     assert events[-1]["turn"]["response_text"]

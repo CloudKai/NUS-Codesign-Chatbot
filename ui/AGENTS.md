@@ -88,6 +88,9 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
   selection is allowed only when ``STUDENT_STAGE_SELECTION=true`` (server
   ``select-stage`` API); never let the client spoof ``current_stage`` on coach
   turns.
+- **Coach wait UX.** While a turn is in flight, show an explicit thinking status
+  (`st.status`) driven by early stream ``status`` events. Do not fake provider
+  token streaming in the UI beyond what the API emits.
 
 ## Entrypoint flow
 

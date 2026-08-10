@@ -795,6 +795,11 @@ def create_app(
                     "stage": request.current_stage,
                 }
             ) + "\n"
+            # Signal UI before the long provider submit so students see a
+            # thinking state instead of a blank assistant bubble.
+            yield json.dumps(
+                {"event": "status", "phase": "thinking"}
+            ) + "\n"
             try:
                 turn = owner.coach.submit(request)
             except RateLimitExceeded as error:

@@ -12,9 +12,12 @@ and ``AUTO_ADVANCE_STAGES=false`` — Journey shows audited **Work on this stage
 (``POST .../learning-state/select-stage``); if both flags are true, selection
 wins and auto-advance is treated as off. Health ``mode`` now follows
 ``APP_ENV``. Login-start rate limit and allow-listed Cognito callback error
-logging added. Remaining gates: redeploy month-1 config, live QA_A/B IDOR,
-upload/RAG smoke, ARM64 image build. Bedrock and true provider streaming remain
-out of scope.
+logging added. Coach chat shows a **thinking** status while the buffered
+provider turn runs (early NDJSON ``status``); true token streaming remains
+deferred. For lower wait times keep Guidance short, reasoning low, and avoid
+extra selected sources. Remaining gates: redeploy month-1 config, live QA_A/B
+IDOR, upload/RAG smoke, ARM64 image build. Bedrock and true provider streaming
+remain out of scope.
 
 ### Behavior changes (Phases 1–13)
 
