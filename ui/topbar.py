@@ -8,9 +8,10 @@ from backend.title_service import NotebookTitleService
 from backend.student_journey import RESPONSE_DETAILS, normalize_journey
 
 from ui.notebooks import notebooks_dialog
+from ui.menu_popovers import close_menu_popover, menu_popover_widget_key
 from ui.profile import inject_profile_leave_helper, render_profile_menu
 from ui.rename import bump_rename_epoch, render_enter_to_apply_rename
-from ui.runtime import rerun_app, store
+from ui.runtime import rerun_app, rerun_fragment, store
 from ui.session import save_journey
 from ui.settings import apply_selected_model
 
@@ -21,11 +22,19 @@ GUIDANCE_LABELS = {
 }
 
 
-def _render_guidance_dropdown(journey: dict) -> None:
-    """Render a compact guidance menu with no editable text field."""
+@st.fragment
+def _render_guidance_fragment() -> None:
+    """Guidance Level control; fragment-scoped so Chat/Journey do not redraw."""
+    st.session_state["_topbar_guidance_fragment_runs"] = (
+        int(st.session_state.get("_topbar_guidance_fragment_runs") or 0) + 1
+    )
+    journey = normalize_journey(st.session_state.learning_journey)
     current_detail = journey["response_detail"]
     with st.container(key="topbar_mode"):
-        with st.popover(GUIDANCE_LABELS[current_detail]):
+        with st.popover(
+            GUIDANCE_LABELS[current_detail],
+            key=menu_popover_widget_key("topbar-guidance"),
+        ):
             for detail in RESPONSE_DETAILS:
                 label = GUIDANCE_LABELS[detail]
                 if st.button(
@@ -37,7 +46,17 @@ def _render_guidance_dropdown(journey: dict) -> None:
                     if detail != current_detail:
                         journey["response_detail"] = detail
                         save_journey(journey)
-                        rerun_app()
+                    close_menu_popover("topbar-guidance")
+                    rerun_fragment()
+
+
+@st.fragment
+def _render_profile_fragment() -> None:
+    """Profile menu; local preference edits stay fragment-scoped."""
+    st.session_state["_topbar_profile_fragment_runs"] = (
+        int(st.session_state.get("_topbar_profile_fragment_runs") or 0) + 1
+    )
+    render_profile_menu()
 
 
 def render_topbar() -> tuple[str, str | None]:
@@ -104,11 +123,10 @@ def render_topbar() -> tuple[str, str | None]:
                 '<p class="topbar-guidance-label">Guidance Level:</p>',
                 unsafe_allow_html=True,
             )
-            journey = normalize_journey(st.session_state.learning_journey)
             with guidance_menu_column:
-                _render_guidance_dropdown(journey)
+                _render_guidance_fragment()
         with profile_column.container(key="topbar_profile_slot"):
-            render_profile_menu()
+            _render_profile_fragment()
         inject_profile_leave_helper()
         chosen_model = st.session_state.selected_model
         apply_selected_model(chosen_model)

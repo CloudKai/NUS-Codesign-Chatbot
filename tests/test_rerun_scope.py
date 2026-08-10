@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from ui.sources import (
     _select_all_widget_key,
@@ -59,3 +60,63 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
         "def render_journey_track", 1
     )[0]
     assert "rerun_app()" in select_block
+
+
+def test_topbar_guidance_and_profile_use_fragment_scope() -> None:
+    topbar = Path("ui/topbar.py").read_text(encoding="utf-8")
+    profile = Path("ui/profile.py").read_text(encoding="utf-8")
+    assert "@st.fragment\ndef _render_guidance_fragment()" in topbar.replace(
+        "\r\n", "\n"
+    )
+    assert "@st.fragment\ndef _render_profile_fragment()" in topbar.replace(
+        "\r\n", "\n"
+    )
+    guidance_block = topbar.split("def _render_guidance_fragment", 1)[1].split(
+        "def _render_profile_fragment", 1
+    )[0]
+    assert "save_journey(journey)" in guidance_block
+    assert "rerun_fragment()" in guidance_block
+    assert "rerun_app()" not in guidance_block
+    assert "rerun_fragment()" in profile
+    assert "def _on_appearance_changed()" in profile
+    appearance_block = profile.split("def _on_appearance_changed", 1)[1].split(
+        "def render_profile_menu", 1
+    )[0]
+    assert "persist_appearance()" in appearance_block
+    assert "rerun_app()" in appearance_block
+    language_block = profile.split("def _render_language_dropdown", 1)[1]
+    assert "persist_response_language()" in language_block
+    assert "rerun_fragment()" in language_block
+    display_block = profile.split("def persist_display_name", 1)[1].split(
+        "def _on_appearance_changed", 1
+    )[0]
+    assert "rerun_fragment()" in display_block
+
+
+def test_menu_popover_key_bumps_to_remount_closed(monkeypatch) -> None:
+    import ui.menu_popovers as menu_popovers
+
+    fake_state: dict[str, object] = {}
+    monkeypatch.setattr(
+        menu_popovers,
+        "st",
+        SimpleNamespace(session_state=fake_state),
+    )
+    first = menu_popovers.menu_popover_widget_key("source-sort", "thread-a")
+    menu_popovers.close_menu_popover("source-sort", "thread-a")
+    second = menu_popovers.menu_popover_widget_key("source-sort", "thread-a")
+    assert first != second
+    assert first.endswith("-0")
+    assert second.endswith("-1")
+
+
+def test_select_menus_close_after_pick() -> None:
+    topbar = Path("ui/topbar.py").read_text(encoding="utf-8")
+    profile = Path("ui/profile.py").read_text(encoding="utf-8")
+    sources = Path("ui/sources.py").read_text(encoding="utf-8")
+    assert 'close_menu_popover("topbar-guidance")' in topbar
+    assert 'menu_popover_widget_key("topbar-guidance")' in topbar
+    assert 'close_menu_popover("profile-language")' in profile
+    assert 'menu_popover_widget_key("profile-language")' in profile
+    assert 'close_menu_popover("source-sort", thread_id)' in sources
+    assert 'menu_popover_widget_key("source-sort", thread_id)' in sources

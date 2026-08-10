@@ -4,10 +4,12 @@
 
 **UI: fragment-scoped Streamlit reruns (local interactions).** Explicit
 ``rerun_app()`` / ``rerun_fragment()`` helpers replaced the ambiguous
-``rerun()``. Sources select/search/sort/upload/delete and Journey preview
-toggles stay panel-local; notebook/auth/coach/layout/stage-select remain
-full-app. Debug counters: ``_app_runs``, ``_sources_fragment_runs``,
-``_studio_fragment_runs``.
+``rerun()``. Sources select/search/sort/upload/delete, Journey preview
+toggles, Guidance Level, response language, and display-name avatar stay
+panel-local; notebook/auth/coach/layout/stage-select/**Appearance theme**
+remain full-app. Debug counters: ``_app_runs``, ``_sources_fragment_runs``,
+``_studio_fragment_runs``, ``_topbar_guidance_fragment_runs``,
+``_topbar_profile_fragment_runs``.
 
 ### Full-app actions that remain intentional
 
@@ -17,6 +19,7 @@ full-app. Debug counters: ``_app_runs``, ``_sources_fragment_runs``,
 - Workspace column collapse / mobile panel layout
 - Sources course-sync stable ↔ polling fragment remount
 - Thinking Path stage selection and transition confirm
+- Appearance theme (entrypoint ``render_theme_css``)
 
 ### UI hardening just completed (this pass)
 
@@ -25,7 +28,7 @@ full-app. Debug counters: ``_app_runs``, ``_sources_fragment_runs``,
    the in-bubble draft; require Send to retry.
 2. **Studio sanitized errors.** Stage-select and transition-confirm failures log
    internals and show fixed student-safe messages (no ``str(exc)``).
-3. **Full mock suite.** ``.venv/bin/python -m pytest -q`` → **392 passed**.
+3. **Full mock suite.** ``.venv/bin/python -m pytest -q`` → **393 passed**.
 
 ### Prior production-hardening (still true)
 

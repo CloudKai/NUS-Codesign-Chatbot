@@ -8,7 +8,8 @@ import streamlit.components.v1 as components
 from ui.auth_gate import app_logout_url, logout_user
 from ui.components import profile_initial
 from ui.constants import APPEARANCE_MODES, RESPONSE_LANGUAGES
-from ui.runtime import rerun_app, store
+from ui.menu_popovers import close_menu_popover, menu_popover_widget_key
+from ui.runtime import rerun_app, rerun_fragment, store
 from ui.settings import persist_appearance, persist_response_language
 
 
@@ -20,6 +21,14 @@ def persist_display_name() -> None:
         st.session_state.thread_id,
         metadata={"display_name": st.session_state.display_name},
     )
+    # Avatar initial is rendered in this profile fragment.
+    rerun_fragment()
+
+
+def _on_appearance_changed() -> None:
+    """Persist theme and force a full-app rerun so entrypoint CSS re-applies."""
+    persist_appearance()
+    rerun_app()
 
 
 def render_profile_menu() -> None:
@@ -45,7 +54,7 @@ def render_profile_menu() -> None:
                     "Appearance",
                     APPEARANCE_MODES,
                     key="setting_appearance",
-                    on_change=persist_appearance,
+                    on_change=_on_appearance_changed,
                 )
                 current_language = str(st.session_state.response_language or "English")
                 if current_language not in RESPONSE_LANGUAGES:
@@ -104,7 +113,11 @@ def _render_language_dropdown(current_language: str) -> None:
             "</div>",
             unsafe_allow_html=True,
         )
-        with st.popover(current_language, use_container_width=True):
+        with st.popover(
+            current_language,
+            use_container_width=True,
+            key=menu_popover_widget_key("profile-language"),
+        ):
             for index, language in enumerate(RESPONSE_LANGUAGES):
                 if st.button(
                     language,
@@ -115,7 +128,8 @@ def _render_language_dropdown(current_language: str) -> None:
                     if language != current_language:
                         st.session_state.setting_response_language = language
                         persist_response_language()
-                        rerun_app()
+                    close_menu_popover("profile-language")
+                    rerun_fragment()
 
 
 def inject_profile_leave_helper() -> None:

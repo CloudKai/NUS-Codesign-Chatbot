@@ -76,9 +76,11 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
   uses in-process `WorkspaceService`. Student turns always use the typed coach
   path (API or in-process), not `StudentChatEngine`.
 - **Rerun scope.** Use `rerun_fragment()` for panel-local updates inside an
-  `@st.fragment` (Sources list, Journey preview toggles). Use `rerun_app()` only
-  when application-wide state changed (notebook switch, auth, coach send/revise,
-  layout collapse, course-sync fragment remount, stage selection). Do not keep a
+  `@st.fragment` (Sources list, Journey preview toggles, Guidance Level,
+  response language, display-name avatar). Use `rerun_app()` when
+  application-wide state changed (notebook switch, auth, coach send/revise,
+  layout collapse, course-sync fragment remount, stage selection, **Appearance
+  theme** — `render_theme_css()` only runs on a full script). Do not keep a
   generic `rerun()` helper.
 - **Preserve widget keys and dialog decorators.** Keep `@st.dialog` and
   `@st.fragment` on the functions that own them. Changing keys breaks session
