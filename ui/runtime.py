@@ -57,7 +57,9 @@ def resources(
         notebooks,
         workflow,
         learning,
-        auto_advance_stages=bool(getattr(settings, "auto_advance_stages", False)),
+        auto_advance_stages=bool(
+            getattr(settings, "effective_auto_advance_stages", False)
+        ),
     )
     return store, service, coach, learning
 
@@ -380,6 +382,13 @@ class WorkspaceFacade:
             )
         _, _, _, learning = _resolve_resources()
         return learning.resolve(thread_id, transition_id, accepted)
+
+    def select_stage(self, thread_id: str, stage_id: str) -> dict:
+        """Move the notebook to a student-chosen Thinking Path stage."""
+        if local_api_enabled():
+            return local_api_client().select_stage(thread_id, stage_id)
+        _, _, _, learning = _resolve_resources()
+        return learning.select_stage(thread_id, stage_id)
 
     def request_course_material_sync(self, thread_id: str):
         """Start or join course-material sync for the active notebook.

@@ -22,10 +22,51 @@ from backend.cognito_cookies import (
     oauth_state_cookie_settings,
     refresh_cookie_settings,
 )
+from backend.rate_limit import RateLimitExceeded, get_login_start_limiter
 from backend.settings import settings
 from backend.student_store import StudentStore
 
 logger = logging.getLogger(__name__)
+
+# Cognito Hosted UI / OAuth error codes we are willing to echo in logs.
+_COGNITO_CALLBACK_ERROR_CODES = frozenset(
+    {
+        "access_denied",
+        "invalid_request",
+        "unauthorized_client",
+        "unsupported_response_type",
+        "invalid_scope",
+        "server_error",
+        "temporarily_unavailable",
+        "login_required",
+        "interaction_required",
+    }
+)
+
+
+def _cognito_callback_error_category(error: str | None) -> str:
+    """Return an allow-listed Cognito error code, or ``unlisted``.
+
+    Never logs the raw attacker-controlled query string.
+    """
+    code = str(error or "").strip().lower()
+    if code in _COGNITO_CALLBACK_ERROR_CODES:
+        return code
+    return "unlisted"
+
+
+def _login_client_key(request: Request) -> str:
+    """Return a stable client key for login-start throttling.
+
+    Prefer the first ``X-Forwarded-For`` hop when present (Caddy), otherwise
+    the direct peer address. Values are truncated and never trusted for auth.
+    """
+    forwarded = str(request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    if forwarded:
+        return forwarded[:128]
+    client = request.client
+    host = str(getattr(client, "host", "") or "").strip()
+    return (host or "unknown")[:128]
 
 
 def _safe_ui_redirect(path_query: str = "/") -> str:
@@ -125,8 +166,21 @@ def register_auth_routes(
     oidc_client = oidc or CognitoOIDCClient(store=store)
 
     @app.get("/api/v1/auth/login")
-    def auth_login() -> RedirectResponse:
+    def auth_login(request: Request) -> RedirectResponse:
         """Redirect the browser to Cognito Managed Login (authorization code + PKCE)."""
+        try:
+            get_login_start_limiter().acquire(_login_client_key(request))
+        except RateLimitExceeded as limit_error:
+            logger.info(
+                "Cognito login start rate-limited retry_after=%s",
+                limit_error.retry_after_seconds,
+            )
+            response = RedirectResponse(
+                _safe_ui_redirect("/?auth_error=1"), status_code=302
+            )
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Retry-After"] = str(int(limit_error.retry_after_seconds))
+            return response
         try:
             authorize_url, state = oidc_client.begin_login()
         except CognitoOIDCError as error:
@@ -167,7 +221,10 @@ def register_auth_routes(
             return response
 
         if error:
-            logger.info("Cognito callback returned error=%s", error)
+            logger.info(
+                "Cognito callback returned OAuth error category=%s",
+                _cognito_callback_error_category(error),
+            )
             return _auth_error_redirect()
 
         query_state = str(state or "").strip()

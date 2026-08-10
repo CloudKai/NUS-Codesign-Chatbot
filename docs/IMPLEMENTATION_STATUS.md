@@ -3,13 +3,18 @@
 ## Current phase
 
 **Phases 1–13 complete on ``Production-RemoveData``; Phase 14 verdict:
-READY FOR CONTROLLED PILOT.** Mock suite, production fail-closed
-``APP_ENV``, readiness, compose/Caddy hardening, in-process rate limits,
-upload bounds, privacy-safer coach logs, pinned deps, Mock CI gates, load
-probe, AWS smoke docs, branch-protection docs, and public PDF governance are
-in place. Live Cognito/DSQL/S3 end-to-end smoke with ``--confirm-live`` remains
-a **separate release gate** and has not been executed in this pass. Bedrock
-and true provider streaming remain out of scope.
+READY FOR CONTROLLED PILOT.** Live manual production QA documented in
+``docs/MANUAL_PRODUCTION_QA.md`` (2026-08-10). **Month-1 product policy:**
+``AUTO_ADVANCE_STAGES=true`` and ``STUDENT_STAGE_SELECTION=false`` in
+``compose.prod.yaml`` (coach ADVANCE applies without Next; no Journey stage
+pick controls). **Month-2+ operator flip:** set ``STUDENT_STAGE_SELECTION=true``
+and ``AUTO_ADVANCE_STAGES=false`` — Journey shows audited **Work on this stage**
+(``POST .../learning-state/select-stage``); if both flags are true, selection
+wins and auto-advance is treated as off. Health ``mode`` now follows
+``APP_ENV``. Login-start rate limit and allow-listed Cognito callback error
+logging added. Remaining gates: redeploy month-1 config, live QA_A/B IDOR,
+upload/RAG smoke, ARM64 image build. Bedrock and true provider streaming remain
+out of scope.
 
 ### Behavior changes (Phases 1–13)
 

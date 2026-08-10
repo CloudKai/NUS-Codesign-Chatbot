@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .auth_oidc import CognitoOIDCClient
 from .auth_routes import register_auth_routes
@@ -56,6 +56,12 @@ class TransitionResolution(BaseModel):
     """Student decision submitted for one pending phase recommendation."""
 
     accepted: bool
+
+
+class StageSelectionRequest(BaseModel):
+    """Student-chosen Thinking Path stage for free selection mode."""
+
+    stage_id: str = Field(min_length=1, max_length=64)
 
 
 def _expire_streamlit_auth_cookie(response: RedirectResponse, cookie_name: str) -> None:
@@ -115,9 +121,9 @@ def create_app(
     if workspace is not None and workspace.store is not active_store:
         raise ValueError("Injected workspace must use the same store instance")
     advance = (
-        settings.auto_advance_stages
+        settings.effective_auto_advance_stages
         if auto_advance_stages is None
-        else auto_advance_stages
+        else bool(auto_advance_stages) and not settings.student_stage_selection
     )
     oidc = oidc_client or CognitoOIDCClient(store=active_store)
     resolver = OwnerResolver(
@@ -263,8 +269,14 @@ def create_app(
 
     @app.get("/api/v1/health")
     def health() -> dict[str, str]:
-        """Return a lightweight process-health response."""
-        return {"status": "ok", "mode": "local"}
+        """Return a lightweight process-health response.
+
+        ``mode`` reflects ``APP_ENV`` only (no secrets, no dependency checks).
+        Use ``/api/v1/ready`` for production fail-closed readiness.
+        """
+        env = (settings.app_env or "").strip().lower() or "development"
+        mode = "production" if env == "production" else "local"
+        return {"status": "ok", "mode": mode}
 
     @app.get("/api/v1/auth/logout/callback")
     def auth_logout_callback(request: Request) -> RedirectResponse:
@@ -659,6 +671,26 @@ def create_app(
         if not thread:
             raise HTTPException(status_code=404, detail="Notebook not found")
         return dict(thread.get("metadata") or {})
+
+    @app.post("/api/v1/threads/{thread_id}/learning-state/select-stage")
+    def select_learning_stage(
+        thread_id: str,
+        request: StageSelectionRequest,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> dict:
+        """Move the owned notebook to a student-chosen Thinking Path stage.
+
+        Requires ``STUDENT_STAGE_SELECTION=true``. Returns updated notebook
+        metadata including ``learning_journey``.
+        """
+        try:
+            metadata = owner.learning.select_stage(thread_id, request.stage_id)
+        except ValueError as error:
+            message = str(error)
+            status = 404 if "not found" in message.lower() else 400
+            raise HTTPException(status_code=status, detail=message) from error
+        record_stage_transition(outcome="selected")
+        return dict(metadata or {})
 
     @app.get("/api/v1/threads/{thread_id}/phase-transitions/pending")
     def pending_transition(

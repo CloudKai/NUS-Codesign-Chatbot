@@ -84,7 +84,10 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
 - **Avoid circular imports.** Typical flow: `runtime` → `session` → panels;
   `topbar` imports `notebooks` and `settings`; `workspace` imports panel modules.
 - **No hidden stage controls.** Show coach recommendations and respect persisted
-  transition state; do not add manual stage jump controls or HTML comment parsers.
+  transition state; do not use HTML comment parsers. Audited Journey stage
+  selection is allowed only when ``STUDENT_STAGE_SELECTION=true`` (server
+  ``select-stage`` API); never let the client spoof ``current_stage`` on coach
+  turns.
 
 ## Entrypoint flow
 

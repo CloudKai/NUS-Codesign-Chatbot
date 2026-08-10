@@ -61,6 +61,11 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert "source: ./data" not in app
     assert "target: /app/data" not in app
     assert 'APP_ENV: "production"' in app
+    assert 'AUTO_ADVANCE_STAGES: "true"' in app
+    assert 'STUDENT_STAGE_SELECTION: "false"' in app
+    env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "STUDENT_STAGE_SELECTION=false" in env_example
+    assert "Month-2+" in env_example
     assert 'DATABASE_PROVIDER: "dsql"' in app
     assert 'FILE_STORAGE_PROVIDER: "s3"' in app
     assert 'DSQL_USER: "co_design_app"' in app
@@ -216,3 +221,24 @@ def test_duckdns_stays_on_host_not_in_application_modules():
         text = path.read_text(encoding="utf-8")
         assert "duckdns.org/update" not in text
         assert "DUCKDNS_TOKEN" not in text
+
+
+def test_student_stage_selection_boolean_and_effective_auto_advance(monkeypatch):
+    from backend.settings import Settings, _boolean
+
+    assert _boolean("STUDENT_STAGE_SELECTION", False) is False
+    monkeypatch.setenv("STUDENT_STAGE_SELECTION", "true")
+    assert _boolean("STUDENT_STAGE_SELECTION", False) is True
+    monkeypatch.setenv("STUDENT_STAGE_SELECTION", "0")
+    assert _boolean("STUDENT_STAGE_SELECTION", False) is False
+
+    from backend.settings import settings
+
+    monkeypatch.setattr(settings, "auto_advance_stages", True)
+    monkeypatch.setattr(settings, "student_stage_selection", False)
+    assert settings.effective_auto_advance_stages is True
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    assert settings.effective_auto_advance_stages is False
+    # Settings dataclass fields are import-time; ensure the property still
+    # reflects mutual exclusion on a freshly constructed instance shape.
+    assert hasattr(Settings, "effective_auto_advance_stages")

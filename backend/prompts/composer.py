@@ -144,11 +144,18 @@ def _runtime_instructions(context: PromptContext) -> str:
     parts.append(
         f"Respond to the student in {language}. Keep source labels such as [S1] unchanged."
     )
-    if settings.auto_advance_stages:
+    if settings.effective_auto_advance_stages:
         parts.append(
             "When you recommend advance, the application will automatically move "
             "the student to the next stage—write as if already coaching that next "
             "skill, with no confirmation language."
+        )
+    elif settings.student_stage_selection:
+        parts.append(
+            "The student can choose any Thinking Path stage in Journey. Recommend "
+            "ADVANCE only when the current stage purpose is adequately met; do not "
+            "assume a fixed linear order. A recommendation may wait for student "
+            "confirmation via Next, or the student may switch stages themselves."
         )
     else:
         parts.append(

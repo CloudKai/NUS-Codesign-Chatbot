@@ -1186,6 +1186,67 @@ class StudentStore:
                 ),
             )
 
+    def select_learning_stage(self, thread_id: str, stage_id: str) -> dict[str, Any]:
+        """Set the notebook's current stage and reject any pending transitions.
+
+        Updates journey metadata and clears pending ADVANCE recommendations in
+        one connection so a mid-flight failure cannot leave a pending transition
+        pointing at a stage the student already left.
+
+        Returns:
+            The updated notebook metadata dict (includes ``learning_journey``).
+
+        Raises:
+            ValueError: When the notebook is missing or ``stage_id`` is unknown.
+        """
+        from backend.student_journey import STAGE_BY_ID, normalize_journey, set_current_stage
+
+        cleaned_stage = str(stage_id or "").strip()
+        if cleaned_stage not in STAGE_BY_ID:
+            raise ValueError(f"Unknown thinking stage: {cleaned_stage}")
+
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not row:
+                raise ValueError("Notebook not found")
+            thread = self._thread_dict(row)
+            current_meta = dict(thread.get("metadata") or {})
+            journey = normalize_journey(current_meta.get("learning_journey"))
+            next_journey = set_current_stage(journey, cleaned_stage)
+            current_meta["learning_journey"] = next_journey
+            current_meta["thinking_stage"] = cleaned_stage
+            now = utc_now()
+            connection.execute(
+                """
+                UPDATE messages
+                SET decision_status='rejected', decision_at=?
+                WHERE notebook_id=? AND decision_status='pending'
+                """,
+                (now, thread_id),
+            )
+            current_stage, progress_text, settings_text = self._split_notebook_metadata(
+                current_meta
+            )
+            connection.execute(
+                """
+                UPDATE notebooks
+                SET current_stage=?, progress_text=?, settings_text=?, updated_at=?
+                WHERE id=? AND user_id=?
+                """,
+                (
+                    current_stage,
+                    progress_text,
+                    settings_text,
+                    now,
+                    thread_id,
+                    self.owner_id,
+                ),
+            )
+            return current_meta
+
     @staticmethod
     def _split_notebook_metadata(
         metadata: dict[str, Any],

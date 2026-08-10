@@ -178,6 +178,51 @@ def test_local_api_can_retain_confirmation_mode(tmp_path, caplog):
     assert (advanced.get("learning_journey") or {}).get("current_stage") == "evidence"
 
 
+def test_select_stage_api_requires_flag_and_valid_stage(tmp_path, monkeypatch, caplog):
+    store = StudentStore(tmp_path / "select-api.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = TestClient(create_app(store, auto_advance_stages=False))
+    monkeypatch.setattr(settings, "student_stage_selection", False)
+
+    disabled = client.post(
+        f"/api/v1/threads/{thread_id}/learning-state/select-stage",
+        json={"stage_id": "evidence"},
+    )
+    assert disabled.status_code == 400
+    assert "not enabled" in disabled.json()["detail"].lower()
+
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    unknown = client.post(
+        f"/api/v1/threads/{thread_id}/learning-state/select-stage",
+        json={"stage_id": "nope"},
+    )
+    assert unknown.status_code == 400
+
+    missing = client.post(
+        "/api/v1/threads/missing-notebook/learning-state/select-stage",
+        json={"stage_id": "evidence"},
+    )
+    assert missing.status_code == 404
+
+    with caplog.at_level("INFO", logger="co_design.operational"):
+        selected = client.post(
+            f"/api/v1/threads/{thread_id}/learning-state/select-stage",
+            json={"stage_id": "evidence"},
+        )
+    assert selected.status_code == 200
+    body = selected.json()
+    assert body["thinking_stage"] == "evidence"
+    assert body["learning_journey"]["current_stage"] == "evidence"
+    assert body["learning_journey"]["completed_stages"] == []
+    stage_event = next(
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.name == "co_design.operational"
+        and '"event":"stage_transition"' in record.getMessage()
+    )
+    assert stage_event["outcome"] == "selected"
+
+
 def test_complex_guidance_is_stricter_before_recommending_advance(tmp_path):
     store = StudentStore(tmp_path / "complex-api.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")

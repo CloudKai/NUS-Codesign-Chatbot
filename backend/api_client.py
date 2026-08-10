@@ -382,6 +382,17 @@ class LocalApiClient:
         payload = response.json()
         return payload if isinstance(payload, dict) else {}
 
+    def select_stage(self, thread_id: str, stage_id: str) -> dict:
+        """Move the notebook to a student-chosen Thinking Path stage."""
+        response = self._http.post(
+            f"{self._base_url}/api/v1/threads/{thread_id}/learning-state/select-stage",
+            json={"stage_id": stage_id},
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
+
     def pending_transition(self, thread_id: str) -> PendingPhaseTransition | None:
         """Return the unresolved transition recommendation for one notebook."""
         response = self._http.get(

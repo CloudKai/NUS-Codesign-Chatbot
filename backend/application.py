@@ -288,8 +288,13 @@ class CoachApplicationService:
             idempotency_lease_token=idempotency_lease_token,
             idempotency_fingerprint=idempotency_fingerprint,
         )
+        # Selection mode disables auto-advance even if the coach service was
+        # constructed with auto_advance_stages=True.
+        from backend.settings import settings as runtime_settings
+
         if (
             self._auto_advance_stages
+            and not runtime_settings.student_stage_selection
             and self._progress is not None
             and turn.pending_transition is not None
         ):

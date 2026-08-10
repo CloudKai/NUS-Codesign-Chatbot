@@ -116,11 +116,27 @@ def _toggle_stage_preview(stage_id: str) -> None:
     st.session_state.journey_preview_stages = sorted(opened)
 
 
+def _select_journey_stage(stage_id: str) -> None:
+    """Persist a student-chosen Thinking Path stage and refresh session journey."""
+    try:
+        metadata = store.select_stage(st.session_state.thread_id, stage_id)
+        st.session_state.learning_journey = normalize_journey(
+            (metadata or {}).get("learning_journey")
+        )
+        opened = set(st.session_state.get("journey_preview_stages") or [])
+        opened.discard(stage_id)
+        st.session_state.journey_preview_stages = sorted(opened)
+        rerun()
+    except Exception as exc:
+        st.error(str(exc))
+
+
 def render_journey_track() -> None:
     """Render the six-stage roadmap with progress and stage guidance."""
     journey = normalize_journey(st.session_state.learning_journey)
     completed = set(journey["completed_stages"])
     current_id = journey["current_stage"]
+    selection_enabled = bool(settings.student_stage_selection)
     stage_index = next(
         index
         for index, item in enumerate(THINKING_STAGES, start=1)
@@ -141,6 +157,8 @@ def render_journey_track() -> None:
         ),
         unsafe_allow_html=True,
     )
+    if selection_enabled:
+        st.caption("Choose a stage to work on.")
     stage_icons = {
         "focus": "my_location",
         "evidence": "find_in_page",
@@ -209,6 +227,14 @@ def render_journey_track() -> None:
                             ):
                                 _toggle_stage_preview(stage.id)
                                 rerun()
+                        if selection_enabled:
+                            if st.button(
+                                "Work on this stage",
+                                type="primary",
+                                use_container_width=True,
+                                key=f"journey-select-{stage.id}",
+                            ):
+                                _select_journey_stage(stage.id)
                         if is_preview_open:
                             _render_stage_detail(stage)
                 if state == "current" or is_preview_open:
@@ -379,7 +405,7 @@ def render_pending_transition() -> None:
 
 def _fetch_pending_transition():
     """Return the pending transition through the active application path."""
-    if settings.auto_advance_stages:
+    if settings.effective_auto_advance_stages:
         return None
     try:
         return store.pending_transition(st.session_state.thread_id)
@@ -437,7 +463,7 @@ def _confirm_next_stage_dialog() -> None:
 
 def render_thinking_path_footer() -> None:
     """Render the confirmation-gated Next control for Thinking Path."""
-    if settings.auto_advance_stages:
+    if settings.effective_auto_advance_stages:
         return
 
     pending = _fetch_pending_transition()
@@ -466,7 +492,8 @@ def render_thinking_path_footer() -> None:
 def render_studio_panel() -> None:
     """Render Thinking Path with Journey/Review tabs and the Next footer.
 
-    Stage changes require a coach ADVANCE recommendation, then an explicit Next
+    With ``STUDENT_STAGE_SELECTION=true``, Journey exposes audited stage picks.
+    Otherwise stage changes require a coach ADVANCE recommendation, then Next
     confirmation (unless auto-advance is enabled).
     """
     journey = normalize_journey(st.session_state.learning_journey)

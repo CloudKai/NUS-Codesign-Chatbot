@@ -463,6 +463,23 @@ def test_language_theme_and_journey_has_no_manual_progression_control():
     assert StudentStore().get_user_preferences().get("appearance") == "Dark"
 
     assert app.session_state["learning_journey"]["current_stage"] == "focus"
+    assert not any(button.label == "Work on this stage" for button in app.button)
+    assert not app.exception
+
+
+def test_journey_work_on_this_stage_appears_when_selection_enabled(monkeypatch):
+    from backend.settings import settings
+
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    monkeypatch.setattr(settings, "auto_advance_stages", False)
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    select_buttons = [
+        button for button in app.button if button.label == "Work on this stage"
+    ]
+    assert len(select_buttons) == 5
+    captions = "\n".join(caption.value or "" for caption in app.caption)
+    assert "Choose a stage to work on." in captions
     assert not app.exception
 
 

@@ -22,6 +22,7 @@ os.environ["OPENAI_API_KEY"] = ""
 # Default AppTest path uses in-process coaching; API-mode UI tests opt in.
 os.environ["USE_LOCAL_API"] = "false"
 os.environ["AUTO_ADVANCE_STAGES"] = "false"
+os.environ["STUDENT_STAGE_SELECTION"] = "false"
 os.environ["DEFAULT_CHAT_MODEL"] = "gpt-5.6-luna"
 os.environ["OPENAI_CHAT_MODEL"] = "gpt-5.6-luna"
 os.environ["DEFAULT_REASONING_EFFORT"] = "low"
@@ -65,6 +66,7 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("OPENAI_API_KEY", "")
     monkeypatch.setenv("USE_LOCAL_API", "false")
     monkeypatch.setenv("AUTO_ADVANCE_STAGES", "false")
+    monkeypatch.setenv("STUDENT_STAGE_SELECTION", "false")
     monkeypatch.setenv("APP_DATA_DIR", str(root))
     monkeypatch.setenv("APP_DATABASE_PATH", str(database))
     monkeypatch.setenv("APP_FILES_DIR", str(files_dir))
@@ -98,6 +100,7 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(settings_module.settings, "model_provider", "mock")
     monkeypatch.setattr(settings_module.settings, "use_local_api", False)
     monkeypatch.setattr(settings_module.settings, "auto_advance_stages", False)
+    monkeypatch.setattr(settings_module.settings, "student_stage_selection", False)
     # Keep production defaults low; raise only in tests so multi-turn suites
     # are not blocked by the process-local burst window.
     monkeypatch.setattr(

@@ -158,7 +158,8 @@ class OwnerResolver:
             notebooks,
             workflow,
             learning,
-            auto_advance_stages=self._auto_advance_stages,
+            auto_advance_stages=self._auto_advance_stages
+            and not settings.student_stage_selection,
         )
         resolved_user_id = str(user_id or getattr(store, "owner_id", "") or "")
         return OwnerServices(

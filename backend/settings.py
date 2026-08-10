@@ -90,6 +90,9 @@ class Settings:
     mock_openai: bool = _boolean("MOCK_OPENAI", True)
     mock_recommend_advance: bool = _boolean("MOCK_RECOMMEND_ADVANCE", False)
     auto_advance_stages: bool = _boolean("AUTO_ADVANCE_STAGES", False)
+    # When true, Journey lets students pick any Thinking Path stage. Takes
+    # precedence over auto_advance_stages (selection wins if both are true).
+    student_stage_selection: bool = _boolean("STUDENT_STAGE_SELECTION", False)
     model_provider: str = os.getenv("MODEL_PROVIDER", "mock").strip().lower()
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     ollama_chat_model: str = os.getenv("OLLAMA_CHAT_MODEL", "gpt-oss:20b")
@@ -149,6 +152,13 @@ class Settings:
     max_concurrent_model_calls: int = int(
         os.getenv("MAX_CONCURRENT_MODEL_CALLS", "20")
     )
+    # Public Cognito login-start throttle (OAuth-state DSQL writes).
+    auth_login_requests_per_minute_per_ip: int = int(
+        os.getenv("AUTH_LOGIN_REQUESTS_PER_MINUTE_PER_IP", "10")
+    )
+    auth_login_requests_per_minute_global: int = int(
+        os.getenv("AUTH_LOGIN_REQUESTS_PER_MINUTE_GLOBAL", "60")
+    )
     python_timeout_seconds: int = int(os.getenv("PYTHON_TIMEOUT_SECONDS", "30"))
     default_model: str = os.getenv("DEFAULT_CHAT_MODEL", "gpt-5.6-luna")
     default_reasoning_effort: str = os.getenv("DEFAULT_REASONING_EFFORT", "low")
@@ -158,6 +168,16 @@ class Settings:
     def is_production(self) -> bool:
         """Return True when ``APP_ENV=production`` (explicit production gate)."""
         return self.app_env == "production"
+
+    @property
+    def effective_auto_advance_stages(self) -> bool:
+        """Return whether coach ADVANCE should auto-apply.
+
+        Student stage selection takes precedence: when
+        ``STUDENT_STAGE_SELECTION=true``, auto-advance is treated as off even
+        if ``AUTO_ADVANCE_STAGES=true``.
+        """
+        return bool(self.auto_advance_stages) and not bool(self.student_stage_selection)
 
     @property
     def uses_local_database(self) -> bool:
@@ -262,3 +282,10 @@ def validate_production_configuration() -> None:
 
 settings = Settings()
 settings.ensure_directories()
+if settings.auto_advance_stages and settings.student_stage_selection:
+    import logging
+
+    logging.getLogger(__name__).warning(
+        "STUDENT_STAGE_SELECTION=true takes precedence over AUTO_ADVANCE_STAGES; "
+        "coach ADVANCE will not auto-apply"
+    )
