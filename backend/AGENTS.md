@@ -39,12 +39,15 @@ FastAPI (api.py)
 | `workflow.py` | Single LangGraph coach workflow wrapper (not six agents) |
 | `student_journey.py` | Six thinking stages, journey normalization, review helpers, stage questions |
 | `learning_service.py` | Confirmation-gated phase transitions and learning progression |
-| `student_store.py` | SQLite store for notebooks, folders, messages, sources, metadata |
+| `student_store.py` | Five-table SQLite/DSQL-compatible store for users, OAuth state, notebooks, messages, sources |
+| `persistence/` | Storage ports + factories: SQLite/DSQL student stores, local/S3 file storage |
 | `repositories.py` | Narrow repository adapters over `StudentStore` |
-| `chat_service.py` | Legacy/direct chat engine (`StudentChatEngine`) for non-API Streamlit path |
-| `providers.py` | Ollama and OpenAI coach provider adapters |
+| `chat_service.py` | Legacy/direct chat engine (`StudentChatEngine`); OpenAI continuation state is not persisted |
+| `providers.py` | Ollama and OpenAI coach provider adapters (consume composed prompts) |
+| `prompts/` | Framework-neutral stage prompt files, loader, and composer |
 | `mock_provider.py` | Deterministic provider for tests and offline demo |
 | `source_library.py` | Source CRUD helpers, lecture-notes sync, URL import, citation context |
+| `retrieval.py` | Provider-neutral retrieval port + deterministic local selected-source chunk retriever |
 | `file_processing.py` | Upload storage, text extraction, safe paths |
 | `settings.py` | Environment-driven configuration (`Settings`) |
 | `models.py` | Model registry and allowed model IDs |
@@ -67,8 +70,9 @@ FastAPI (api.py)
   status in one SQLite transaction).
 - **Structured provider failures** map to HTTP 503 at the API boundary.
 - **Mock-first testing**. Automated tests must not require paid APIs or internet.
-- **No AWS runtime dependencies** unless explicitly requested. Keep ports
-  replaceable for future adapters.
+- **AWS production adapters are opt-in** via ``DATABASE_PROVIDER=dsql`` and
+  ``FILE_STORAGE_PROVIDER=s3``. Keep ports replaceable; never bake credentials
+  into images; tests must use mocks/fakes only.
 - **Notebook isolation**. Retrieval and citations must stay scoped to the active
   notebook and selected sources.
 

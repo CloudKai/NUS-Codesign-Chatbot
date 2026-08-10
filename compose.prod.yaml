@@ -1,0 +1,95 @@
+services:
+  app:
+    image: ${APP_IMAGE}
+    restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    env_file:
+      - .env
+    environment:
+      APP_ENV: "production"
+      # Month-1 pilot: coach ADVANCE auto-applies (no Next confirmation).
+      # Month-2+: set AUTO_ADVANCE_STAGES=false and STUDENT_STAGE_SELECTION=true
+      # so students pick stages in Journey. If both are true, selection wins.
+      AUTO_ADVANCE_STAGES: "true"
+      STUDENT_STAGE_SELECTION: "false"
+      USE_LOCAL_API: "true"
+      CO_DESIGN_API_URL: "http://127.0.0.1:8000"
+      CO_DESIGN_PUBLIC_API_URL: "https://cde2300chatbot.duckdns.org"
+      CO_DESIGN_UI_URL: "https://cde2300chatbot.duckdns.org"
+      # Must never silently fall back to the local 127.0.0.1 Cognito callback.
+      COGNITO_REDIRECT_URI: "https://cde2300chatbot.duckdns.org/api/v1/auth/callback"
+      AUTH_COOKIE_SECURE: "true"
+      DSQL_SSLROOTCERT: "/etc/ssl/certs/ca-certificates.crt"
+      DATABASE_PROVIDER: "dsql"
+      FILE_STORAGE_PROVIDER: "s3"
+      AWS_REGION: "us-west-2"
+      # Runtime DSQL role (DbConnect). Never admin — schema uses scripts/init_dsql.py.
+      DSQL_USER: "co_design_app"
+      # Course-material / Bedrock ownership is another developer's workstream.
+      # Keep this false so production never copies lecture PDFs into USER_UPLOADS_BUCKET.
+      COURSE_MATERIAL_SYNC_ENABLED: "false"
+      # Runtime-configured; do not hard-code account IDs or bucket names in Git.
+      # DSQL_ENDPOINT: set in host .env
+      # USER_UPLOADS_BUCKET: set in host .env
+      # APP_IMAGE: set on the host to the ECR image URI + immutable tag
+      # Lecture notes are not bundled into the production image.
+    expose:
+      - "8000"
+      - "8501"
+    volumes:
+      # Cognito client secrets only — no persistent student/application data mount.
+      - type: bind
+        source: ./.streamlit/secrets.toml
+        target: /app/.streamlit/secrets.toml
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen("http://127.0.0.1:8000/api/v1/ready", timeout=2);
+          urllib.request.urlopen("http://127.0.0.1:8501/_stcore/health", timeout=2)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 30s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - type: bind
+        source: ./Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

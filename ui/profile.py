@@ -293,10 +293,13 @@ def _sync_profile_popover_close_on_leave() -> None:
     }
   }
 
-  observer = new win.MutationObserver(() => {
-    bind();
-  });
-  observer.observe(doc.body, { childList: true, subtree: true });
+  const body = doc.body;
+  if (body) {
+    observer = new win.MutationObserver(() => {
+      bind();
+    });
+    observer.observe(body, { childList: true, subtree: true });
+  }
   bind();
 
   win.__cdProfileLeaveCleanup = () => {

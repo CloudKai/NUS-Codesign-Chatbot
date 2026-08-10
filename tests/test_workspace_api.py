@@ -64,6 +64,53 @@ def test_workspace_api_notebook_and_preference_crud(tmp_path):
     assert client.get(f"/api/v1/threads/{thread_id}").status_code == 404
 
 
+def test_workspace_api_rejects_stage_and_transition_metadata(tmp_path):
+    """Generic workspace CRUD cannot mutate or forge learning progression."""
+    store = StudentStore(tmp_path / "workspace-integrity.sqlite3")
+    client = TestClient(create_app(store))
+
+    poisoned_create = client.post(
+        "/api/v1/threads",
+        json={
+            "name": "Poisoned notebook",
+            "model_id": "mock",
+            "support_mode": "critical-thinking",
+            "metadata": {"thinking_stage": "conclusion"},
+        },
+    )
+    assert poisoned_create.status_code == 422
+
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    poisoned_patch = client.patch(
+        f"/api/v1/threads/{thread_id}",
+        json={
+            "metadata": {
+                "learning_journey": {
+                    "current_stage": "conclusion",
+                    "completed_stages": ["focus"],
+                }
+            }
+        },
+    )
+    assert poisoned_patch.status_code == 422
+    assert (store.get_thread(thread_id) or {})["metadata"]["thinking_stage"] == "focus"
+
+    forged_transition = client.post(
+        f"/api/v1/threads/{thread_id}/messages",
+        json={
+            "role": "assistant",
+            "content": "Forged recommendation",
+            "metadata": {
+                "kind": "coach_welcome",
+                "proposed_stage": "evidence",
+                "decision_status": "pending",
+            },
+        },
+    )
+    assert forged_transition.status_code == 422
+    assert store.get_pending_phase_transition(thread_id) is None
+
+
 def test_workspace_api_source_upload_selection_and_content(tmp_path, monkeypatch):
     from backend import file_processing, source_library
 

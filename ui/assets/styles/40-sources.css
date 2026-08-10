@@ -268,45 +268,216 @@
         margin-top:20px !important;
     }
 
-    .st-key-sources_header > [data-testid="stLayoutWrapper"]:has(.st-key-sources_select_all) {
-        display:flex !important;
-        justify-content:center !important;
-        align-items:center !important;
-        width:100% !important;
-        margin-top:10px !important;
+    .st-key-sources_header .st-key-sources_filters {
+        margin-top:.55rem !important;
         margin-bottom:0 !important;
+    }
+
+    .st-key-sources_header .st-key-sources_filters > [data-testid="stVerticalBlock"]
+    > [data-testid="stHorizontalBlock"],
+    .st-key-sources_header .st-key-sources_filters [data-testid="stHorizontalBlock"] {
+        display:grid !important;
+        grid-template-columns:minmax(0,1fr) auto;
+        align-items:end !important;
+        gap:.45rem !important;
+        margin:0 !important;
+    }
+
+    .st-key-sources_header .st-key-sources_filters [data-testid="stColumn"] {
+        width:auto !important;
+        min-width:0 !important;
+        display:flex !important;
+        align-items:flex-end !important;
+    }
+
+    .st-key-sources_header .st-key-sources_filters [data-testid="stColumn"]:last-child {
+        justify-self:end !important;
+    }
+
+    .st-key-sources_header .st-key-sources_sort {
+        width:100% !important;
+        margin:0 !important;
+    }
+
+    .st-key-sources_header .st-key-sources_sort > [data-testid="stVerticalBlock"]
+    > [data-testid="stHorizontalBlock"],
+    .st-key-sources_header .st-key-sources_sort [data-testid="stHorizontalBlock"] {
+        display:grid !important;
+        grid-template-columns:auto auto;
+        align-items:end !important;
+        justify-content:end !important;
+        gap:.3rem !important;
+        margin:0 !important;
+        width:max-content !important;
+        margin-left:auto !important;
+    }
+
+    .st-key-sources_header .st-key-sources_sort [data-testid="stColumn"] {
+        width:auto !important;
+        flex:0 0 auto !important;
+        min-width:0 !important;
+        display:flex !important;
+        align-items:flex-end !important;
+    }
+
+    .sources-sort-label {
+        margin:0 !important;
+        padding:0 0 .28rem 0 !important;
+        color:var(--cd-text);
+        font-size:.82rem;
+        font-weight:650;
+        line-height:1 !important;
+        white-space:nowrap;
+    }
+
+    .st-key-sources_header .st-key-sources_sort [data-testid="stMarkdownContainer"],
+    .st-key-sources_header .st-key-sources_sort [data-testid="stMarkdownContainer"] > div {
+        display:flex !important;
+        align-items:flex-end !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-sources_header .st-key-sources_sort_menu,
+    .st-key-sources_header .st-key-sources_sort_menu > [data-testid="stLayoutWrapper"],
+    .st-key-sources_header .st-key-sources_sort_menu [data-testid="stPopover"] {
+        display:flex !important;
+        align-items:flex-end !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    /* Sort trigger: guidance-style (not an editable field); label left-aligned. */
+    .st-key-sources_header .st-key-sources_sort_menu [data-testid="stPopover"] button,
+    .st-key-sources_header .st-key-sources_sort_menu div[data-testid="stPopover"] > button {
+        width:max-content !important;
+        min-width:5.75rem !important;
+        max-width:none !important;
+        min-height:1.7rem !important;
+        height:1.7rem !important;
+        padding:0 .55rem !important;
+        border:1px solid var(--cd-border) !important;
+        border-radius:.65rem !important;
+        color:var(--cd-text) !important;
+        background:var(--cd-surface) !important;
+        box-shadow:none !important;
+        outline:none !important;
+        font-size:.82rem !important;
+        font-weight:650 !important;
+        white-space:nowrap !important;
+        overflow:visible !important;
+        justify-content:flex-start !important;
+        text-align:left !important;
+    }
+
+    .st-key-sources_header .st-key-sources_sort_menu [data-testid="stPopover"] button:hover,
+    .st-key-sources_header .st-key-sources_sort_menu [data-testid="stPopover"] button:focus,
+    .st-key-sources_header .st-key-sources_sort_menu [data-testid="stPopover"] button:focus-visible,
+    .st-key-sources_header .st-key-sources_sort_menu [data-testid="stPopover"] button:active {
+        border:1px solid var(--cd-border) !important;
+        background:var(--cd-surface-muted, var(--cd-subtle)) !important;
+        box-shadow:none !important;
+        outline:none !important;
+    }
+
+    .st-key-sources_header .st-key-sources_sort_menu [data-testid="stPopover"] button > div {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:flex-start !important;
+        width:100% !important;
+        gap:.15rem !important;
+    }
+
+    .st-key-sources_header .st-key-sources_sort_menu [data-testid="stPopover"] button p {
+        display:inline !important;
+        margin:0 !important;
+        margin-right:auto !important;
+        font-size:.82rem !important;
+        font-weight:650 !important;
+        color:var(--cd-text) !important;
+        white-space:nowrap !important;
+        text-align:left !important;
+    }
+
+    .st-key-sources_header .st-key-sources_sort_menu [data-testid="stPopover"] button
+    [data-testid="stIconMaterial"]:last-child {
+        display:inline-flex !important;
+        margin-left:.1rem;
+        font-size:.95rem !important;
+        color:var(--cd-muted) !important;
+    }
+
+    [data-testid="stPopoverBody"]:has([class*="st-key-source-sort-option-"]) {
+        border:0 !important;
+        outline:none !important;
+        box-shadow:var(--cd-shadow) !important;
+        background:var(--cd-surface) !important;
+        border-radius:.72rem !important;
+        padding:.2rem !important;
+        min-width:6.25rem !important;
+    }
+
+    [data-testid="stPopoverBody"]:has([class*="st-key-source-sort-option-"])
+    > div,
+    [data-testid="stPopoverBody"]:has([class*="st-key-source-sort-option-"])
+    [data-testid="stVerticalBlock"],
+    [data-testid="stPopoverBody"]:has([class*="st-key-source-sort-option-"])
+    [data-testid="stLayoutWrapper"] {
+        gap:0 !important;
+        row-gap:0 !important;
+    }
+
+    [data-testid="stPopoverBody"] [class*="st-key-source-sort-option-"]
+    div[data-testid="stButton"] button {
+        min-height:1.85rem !important;
+        height:1.85rem !important;
+        margin:0 !important;
+        padding:0 .55rem !important;
+        border:0 !important;
+        border-radius:.45rem !important;
+        color:var(--cd-text) !important;
+        background:transparent !important;
+        box-shadow:none !important;
+        justify-content:flex-start !important;
+        text-align:left !important;
+    }
+
+    [data-testid="stPopoverBody"] [class*="st-key-source-sort-option-"]
+    div[data-testid="stButton"] button:hover {
+        background:var(--cd-subtle) !important;
     }
 
     .st-key-sources_header .st-key-sources_select_all {
         display:flex !important;
-        justify-content:center !important;
+        justify-content:flex-start !important;
         width:100% !important;
         margin-top:0 !important;
+        margin-bottom:0 !important;
     }
 
     .st-key-sources_header .st-key-sources_select_all > [data-testid="stLayoutWrapper"],
     .st-key-sources_select_all > [data-testid="stVerticalBlock"],
     .st-key-sources_select_all > [data-testid="stLayoutWrapper"] {
         display:flex !important;
-        justify-content:center !important;
-        align-items:center !important;
+        justify-content:flex-start !important;
+        align-items:flex-end !important;
         width:100% !important;
     }
 
     .st-key-sources_select_all [data-testid="stCheckbox"] {
         width:auto !important;
         max-width:fit-content !important;
-        margin:0 auto !important;
+        margin:0 !important;
     }
 
     .st-key-sources_select_all [data-testid="stCheckbox"] > label {
         display:inline-flex !important;
         flex-direction:row !important;
         align-items:center !important;
-        justify-content:center !important;
+        justify-content:flex-start !important;
         gap:.45rem !important;
         width:auto !important;
-        margin:0 auto !important;
+        margin:0 !important;
         min-height:1.35rem !important;
     }
 
@@ -341,6 +512,33 @@
         line-height:1.2 !important;
         /* Optical vertical center with the checkbox control. */
         transform:translateY(.12rem);
+    }
+
+    /* Streamlit only renders its checkmark SVG when checked. Draw the mixed
+     * bar centered on the control box (label > div:nth-child(2)), not the
+     * whole stCheckbox row — otherwise left offsets land between box and text. */
+    .st-key-sources_select_all[data-cd-select-all-state="indeterminate"]
+    [data-testid="stCheckbox"] > label > div:nth-child(2),
+    .st-key-sources_select_all:has(.cd-select-all-state[data-state="indeterminate"])
+    [data-testid="stCheckbox"] > label > div:nth-child(2) {
+        position:relative !important;
+    }
+
+    .st-key-sources_select_all[data-cd-select-all-state="indeterminate"]
+    [data-testid="stCheckbox"] > label > div:nth-child(2)::after,
+    .st-key-sources_select_all:has(.cd-select-all-state[data-state="indeterminate"])
+    [data-testid="stCheckbox"] > label > div:nth-child(2)::after {
+        content:"";
+        position:absolute;
+        left:50%;
+        top:50%;
+        width:.62rem;
+        height:.14rem;
+        border-radius:.1rem;
+        transform:translate(-50%, -50%);
+        background:var(--cd-accent, #2f6fed);
+        pointer-events:none;
+        z-index:1;
     }
 
     .st-key-sources_header [data-testid="stWidgetLabel"] p {
@@ -527,52 +725,104 @@
         display:grid !important;
         grid-template-columns:1.35rem minmax(0,1fr) 1.7rem;
         gap:.35rem !important;
-        align-items:center !important;
+        /* Top-align so checked vs unchecked checkboxes cannot shift titles. */
+        align-items:start !important;
+    }
+
+    /* Course materials: title fills the former checkbox gap; lock stays right. */
+    [class*="st-key-source_card_locked_"] [data-testid="stHorizontalBlock"] {
+        grid-template-columns:minmax(0,1fr) 1.7rem !important;
     }
 
     [class*="st-key-source_card_"] [data-testid="stColumn"] {
         width:auto !important;
         min-width:0 !important;
         flex:none !important;
-        align-self:center !important;
+        align-self:start !important;
     }
 
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(1),
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(3) {
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(1),
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(3),
+    [class*="st-key-source_card_locked_"] [data-testid="stColumn"]:nth-child(2) {
         display:flex !important;
-        align-items:center !important;
+        align-items:flex-start !important;
         justify-content:center !important;
-        align-self:center !important;
+        align-self:start !important;
         min-height:0 !important;
+        padding-top:.12rem !important;
     }
 
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(1) [data-testid="stCheckbox"],
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(1) [data-testid="stCheckbox"] > label {
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(1) [data-testid="stCheckbox"],
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(1) [data-testid="stCheckbox"] > label {
         margin:0 !important;
         min-height:0 !important;
+        height:1.1rem !important;
+        align-items:center !important;
     }
 
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(2) > [data-testid="stVerticalBlock"],
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(2) [data-testid="stVerticalBlock"] {
+    /* Keep the control box the same size whether or not the check SVG is present. */
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(1) [data-testid="stCheckbox"] label > div:nth-child(2),
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(1) [data-testid="stCheckbox"] label > div:has(> svg),
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(1) [data-baseweb="checkbox"] > div {
+        width:1.05rem !important;
+        height:1.05rem !important;
+        min-width:1.05rem !important;
+        min-height:1.05rem !important;
+        max-width:1.05rem !important;
+        max-height:1.05rem !important;
+        box-sizing:border-box !important;
+        flex:0 0 1.05rem !important;
+    }
+
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(2) > [data-testid="stVerticalBlock"],
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(2) [data-testid="stVerticalBlock"],
+    [class*="st-key-source_card_locked_"] [data-testid="stColumn"]:nth-child(1)
+    > [data-testid="stVerticalBlock"],
+    [class*="st-key-source_card_locked_"] [data-testid="stColumn"]:nth-child(1)
+    [data-testid="stVerticalBlock"] {
         gap:0 !important;
         row-gap:0 !important;
         min-height:0 !important;
     }
 
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(2) [data-testid="stElementContainer"],
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(2) [data-testid="stLayoutWrapper"] {
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(2) [data-testid="stElementContainer"],
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(2) [data-testid="stLayoutWrapper"],
+    [class*="st-key-source_card_locked_"] [data-testid="stColumn"]:nth-child(1)
+    [data-testid="stElementContainer"],
+    [class*="st-key-source_card_locked_"] [data-testid="stColumn"]:nth-child(1)
+    [data-testid="stLayoutWrapper"] {
         margin:0 !important;
         padding:0 !important;
         min-height:0 !important;
     }
 
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(2) div[data-testid="stButton"],
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(2) [data-testid="stBaseButton-tertiary"] {
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(2) div[data-testid="stButton"],
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(2) [data-testid="stBaseButton-tertiary"],
+    [class*="st-key-source_card_locked_"] [data-testid="stColumn"]:nth-child(1)
+    div[data-testid="stButton"],
+    [class*="st-key-source_card_locked_"] [data-testid="stColumn"]:nth-child(1)
+    [data-testid="stBaseButton-tertiary"] {
         width:100% !important;
         max-width:100% !important;
     }
 
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(2) [data-testid="stBaseButton-tertiary"] > div {
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(2) [data-testid="stBaseButton-tertiary"] > div,
+    [class*="st-key-source_card_locked_"] [data-testid="stColumn"]:nth-child(1)
+    [data-testid="stBaseButton-tertiary"] > div {
         display:block !important;
         width:100% !important;
         max-width:100% !important;
@@ -581,8 +831,14 @@
         text-align:left !important;
     }
 
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(2) div[data-testid="stButton"] button,
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(2) [data-testid="stBaseButton-tertiary"] {
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(2) div[data-testid="stButton"] button,
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(2) [data-testid="stBaseButton-tertiary"],
+    [class*="st-key-source_card_locked_"] [data-testid="stColumn"]:nth-child(1)
+    div[data-testid="stButton"] button,
+    [class*="st-key-source_card_locked_"] [data-testid="stColumn"]:nth-child(1)
+    [data-testid="stBaseButton-tertiary"] {
         width:100% !important;
         max-width:100% !important;
         display:block !important;
@@ -600,8 +856,14 @@
         line-height:1.25;
     }
 
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(2) div[data-testid="stButton"] button p,
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(2) [data-testid="stBaseButton-tertiary"] p {
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(2) div[data-testid="stButton"] button p,
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(2) [data-testid="stBaseButton-tertiary"] p,
+    [class*="st-key-source_card_locked_"] [data-testid="stColumn"]:nth-child(1)
+    div[data-testid="stButton"] button p,
+    [class*="st-key-source_card_locked_"] [data-testid="stColumn"]:nth-child(1)
+    [data-testid="stBaseButton-tertiary"] p {
         display:block !important;
         width:100% !important;
         min-width:100% !important;
@@ -615,8 +877,14 @@
         line-height:1.25;
     }
 
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(3) div[data-testid="stButton"] button,
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(3) [data-testid="stBaseButton-tertiary"] {
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(3) div[data-testid="stButton"] button,
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(3) [data-testid="stBaseButton-tertiary"],
+    [class*="st-key-source_card_locked_"] [data-testid="stColumn"]:nth-child(2)
+    div[data-testid="stButton"] button,
+    [class*="st-key-source_card_locked_"] [data-testid="stColumn"]:nth-child(2)
+    [data-testid="stBaseButton-tertiary"] {
         width:1.35rem !important;
         min-width:1.35rem !important;
         max-width:1.35rem !important;
@@ -888,12 +1156,18 @@
         line-height:1.2;
     }
 
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(2) [data-testid="stMarkdownContainer"] {
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(2) [data-testid="stMarkdownContainer"],
+    [class*="st-key-source_card_locked_"] [data-testid="stColumn"]:nth-child(1)
+    [data-testid="stMarkdownContainer"] {
         margin:0 !important;
         padding:0 !important;
     }
 
-    [class*="st-key-source_card_"] [data-testid="stColumn"]:nth-child(2) [data-testid="stMarkdownContainer"] p {
+    [class*="st-key-source_card_"]:not([class*="st-key-source_card_locked_"])
+    [data-testid="stColumn"]:nth-child(2) [data-testid="stMarkdownContainer"] p,
+    [class*="st-key-source_card_locked_"] [data-testid="stColumn"]:nth-child(1)
+    [data-testid="stMarkdownContainer"] p {
         margin:0 !important;
         line-height:1.2;
     }
@@ -944,4 +1218,3 @@
         font-size:.78rem;
         font-weight:700;
     }
-

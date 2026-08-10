@@ -1,8 +1,9 @@
 """Application service for notebook, history, source, and preference CRUD.
 
 Keeps Streamlit and FastAPI on one persistence path while ``StudentStore``
-remains the SQLite adapter. Source file bytes are read here so the UI never
-touches notebook paths under ``files_dir``.
+(or ``DsqlStudentStore``) remains the persistence adapter. Source file bytes
+are read here via ``read_source_bytes`` so the UI never touches storage paths
+directly.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from .source_library import (
     LectureNotesSyncResult,
     add_file_sources,
     backfill_legacy_sources,
-    safe_source_file_path,
+    read_source_bytes,
 )
 from .student_store import StudentStore
 
@@ -32,8 +33,19 @@ class SourceContent:
 
 def public_source(source: dict[str, Any]) -> dict[str, Any]:
     """Return a source record safe for API/UI consumers (no filesystem path)."""
-    payload = {key: value for key, value in source.items() if key != "path"}
-    payload["has_file"] = bool(source.get("path"))
+    payload = {
+        key: value
+        for key, value in source.items()
+        if key not in {"path", "object_key", "extracted_text_key", "local_path"}
+    }
+    # Keep extracted text for grounding/UI; strip storage keys only.
+    meta = dict(payload.get("metadata") or {})
+    meta.pop("object_key", None)
+    meta.pop("local_path", None)
+    payload["metadata"] = meta
+    payload["has_file"] = bool(
+        source.get("path") or source.get("object_key") or meta.get("local_path")
+    )
     return payload
 
 
@@ -116,14 +128,30 @@ class WorkspaceService:
         return thread
 
     def delete_thread(self, thread_id: str) -> None:
-        """Delete a notebook and its owned files."""
+        """Idempotently delete a notebook and retry its owned-file cleanup.
+
+        The store derives cleanup prefixes from its authenticated owner context.
+        Calling through when the row is already absent lets a repeated API
+        DELETE retry object-storage cleanup that failed after the DB commit.
+        The public API still reports an absent/foreign notebook as not found
+        after that safe owner-scoped cleanup attempt.
+        """
+        existed = self._store.get_thread(thread_id) is not None
         self._store.delete_thread(thread_id)
+        if not existed:
+            raise ValueError("Notebook not found")
 
     def get_messages(self, thread_id: str) -> list[dict[str, Any]]:
         """Return canonical chat history for a notebook."""
         if not self._store.get_thread(thread_id):
             raise ValueError("Notebook not found")
         return self._store.get_messages(thread_id)
+
+    def get_messages_at_revision(
+        self, thread_id: str, revision: int
+    ) -> list[dict[str, Any]]:
+        """Return chat history active at a conversation revision snapshot."""
+        return self._store.get_messages_at_revision(thread_id, revision)
 
     def add_message(
         self,
@@ -182,7 +210,7 @@ class WorkspaceService:
         return source
 
     def set_all_sources_selected(self, thread_id: str, selected: bool) -> list[dict[str, Any]]:
-        """Select or deselect every source in a notebook."""
+        """Select or deselect personal sources; locked course materials stay on."""
         self._store.set_all_sources_selected(thread_id, selected)
         return self.list_sources(thread_id)
 
@@ -195,20 +223,29 @@ class WorkspaceService:
         return source
 
     def delete_source(self, thread_id: str, source_id: str) -> None:
-        """Delete a non-locked source."""
+        """Idempotently delete a source and retry owner-scoped prefix cleanup.
+
+        Existing source metadata still enforces ownership and locked-course
+        rules in the store. An absent row is treated as a cleanup retry, then
+        reported as not found so cross-user deletes keep their existing API
+        semantics.
+        """
+        existed = self._store.get_source(thread_id, source_id) is not None
         self._store.delete_source(thread_id, source_id)
+        if not existed:
+            raise ValueError("Source not found")
 
     def read_source_content(self, thread_id: str, source_id: str) -> SourceContent:
-        """Read source file bytes for preview/download after path validation."""
+        """Read source file bytes for preview/download via local or object storage."""
         source = self._store.get_source(thread_id, source_id)
         if not source:
             raise ValueError("Source not found")
-        path = safe_source_file_path(source)
-        if path is None:
+        data = read_source_bytes(source)
+        if data is None:
             raise ValueError("Source file is not available")
         mime = str(source.get("mime") or "application/octet-stream")
-        filename = Path(str(source.get("title") or path.name)).name or path.name
-        return SourceContent(data=path.read_bytes(), mime=mime, filename=filename)
+        filename = Path(str(source.get("title") or "download")).name or "download"
+        return SourceContent(data=data, mime=mime, filename=filename)
 
     def backfill_legacy_sources(self, thread_id: str) -> int:
         """Import legacy message attachments into the source library."""

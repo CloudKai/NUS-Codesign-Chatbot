@@ -7,7 +7,7 @@ on:
 jobs:
   mock-suite:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -27,17 +27,58 @@ jobs:
         run: |
           sh -n scripts/start.sh
           sh -n scripts/build.sh
+          sh -n scripts/start_prod.sh
+          sh -n scripts/deploy_ecr.sh
+          sh -n scripts/browser_e2e_smoke.sh
+
+      - name: Compose config
+        run: |
+          # CI has no private .env; compose files require env_file: .env.
+          # Use the committed example only for config validation—never commit secrets.
+          cp .env.example .env
+          docker compose config --quiet
+          APP_IMAGE=co-design:test docker compose -f compose.prod.yaml config --quiet
 
       - name: Compile sources
         env:
           PYTHONPYCACHEPREFIX: /tmp/co-design-pycache
         run: python -m compileall -q backend ui streamlit_app.py tests
 
-      - name: Run mock pytest suite
+      - name: Production configuration rejection tests
         env:
           MOCK_OPENAI: "true"
           MODEL_PROVIDER: mock
           OPENAI_API_KEY: ""
           USE_LOCAL_API: "false"
           AUTO_ADVANCE_STAGES: "false"
+          APP_ENV: development
+        run: python -m pytest -q tests/test_production_config.py tests/test_deployment_config.py
+
+      - name: Idempotency and ownership gates
+        env:
+          MOCK_OPENAI: "true"
+          MODEL_PROVIDER: mock
+          OPENAI_API_KEY: ""
+          USE_LOCAL_API: "false"
+          AUTO_ADVANCE_STAGES: "false"
+          APP_ENV: development
+        run: >
+          python -m pytest -q
+          tests/test_coach_idempotency.py
+          tests/test_multiuser_ownership.py
+          tests/test_production_critical_path.py
+
+      - name: Run complete mock pytest suite
+        env:
+          MOCK_OPENAI: "true"
+          MODEL_PROVIDER: mock
+          OPENAI_API_KEY: ""
+          USE_LOCAL_API: "false"
+          AUTO_ADVANCE_STAGES: "false"
+          APP_ENV: development
         run: python -m pytest -q
+
+      - name: Optional Docker image build
+        if: github.event_name == 'push'
+        run: |
+          docker build -t co-design:ci-${GITHUB_SHA::12} .

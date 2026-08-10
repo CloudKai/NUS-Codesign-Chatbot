@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import threading
+
 from fastapi.testclient import TestClient
 from streamlit.testing.v1 import AppTest
 
 from backend.api import create_app
 from backend.api_client import LocalApiClient
 from backend.settings import settings
+from backend.source_library import CourseMaterialSyncCoordinator
 from backend.student_store import StudentStore
 
 
@@ -117,3 +120,50 @@ def test_streamlit_api_mode_auto_advance_moves_thinking_path(monkeypatch):
         assert app.session_state["learning_journey"]["current_stage"] == "evidence"
     finally:
         client.close()
+
+
+def test_course_sync_snapshots_streamlit_auth_before_background_worker(monkeypatch):
+    """The sync executor must not resolve browser cookies from its own thread."""
+    from ui import runtime
+
+    main_thread = threading.get_ident()
+    snapshot_threads: list[int] = []
+    worker_threads: list[int] = []
+
+    class _Client:
+        def auth_cookie_snapshot(self) -> dict[str, str]:
+            snapshot_threads.append(threading.get_ident())
+            return {"co_design_id": "captured-on-render-thread"}
+
+        def sync_course_materials(
+            self,
+            thread_id: str,
+            *,
+            auth_cookies: dict[str, str],
+        ) -> dict:
+            worker_threads.append(threading.get_ident())
+            assert thread_id == "owned-notebook"
+            assert auth_cookies == {
+                "co_design_id": "captured-on-render-thread"
+            }
+            return {
+                "added": 0,
+                "updated": 0,
+                "removed": 0,
+                "unchanged": 0,
+                "skipped": 0,
+                "errors": [],
+            }
+
+    coordinator = CourseMaterialSyncCoordinator()
+    monkeypatch.setattr(runtime, "local_api_enabled", lambda: True)
+    monkeypatch.setattr(runtime, "local_api_client", lambda: _Client())
+    monkeypatch.setattr(runtime, "course_material_sync", lambda: coordinator)
+
+    result = runtime.WorkspaceFacade().request_course_material_sync(
+        "owned-notebook"
+    ).result(timeout=5)
+
+    assert not result.errors
+    assert snapshot_threads == [main_thread]
+    assert worker_threads and worker_threads[0] != main_thread

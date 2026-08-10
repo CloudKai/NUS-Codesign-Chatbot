@@ -30,6 +30,7 @@ from ui.layout.user_message_edit_layout import (
     sync_user_message_edit_layout,
 )
 from ui.runtime import rerun, store, stream_coach_turn_events
+from ui.retry_keys import get_retry_key, remove_retry_key
 from ui.settings import apply_selected_model, persist_composer_model_choice
 from ui.sources import source_viewer_dialog
 
@@ -339,13 +340,17 @@ def render_message(message: dict[str, Any]) -> None:
         if role == "user" and st.session_state.editing_message == message["id"]:
             safe_id = message["id"].replace("-", "_")
             with st.container(key=f"user_message_edit_{safe_id}"):
-                revised = st.text_area(
-                    "Edit message",
-                    value=message["content"],
-                    key=f"edit-text-{message['id']}",
-                    label_visibility="collapsed",
-                    height=USER_MESSAGE_EDIT_HEIGHT_PX,
-                )
+                edit_key = f"edit-text-{message['id']}"
+                # Prefer a restored draft already in session state (failed revise
+                # retry). Only pass ``value`` when the widget key is unset.
+                text_area_kwargs: dict[str, Any] = {
+                    "key": edit_key,
+                    "label_visibility": "collapsed",
+                    "height": USER_MESSAGE_EDIT_HEIGHT_PX,
+                }
+                if edit_key not in st.session_state:
+                    text_area_kwargs["value"] = message["content"]
+                revised = st.text_area("Edit message", **text_area_kwargs)
                 sync_user_message_edit_layout()
                 with st.container(key=f"user_message_edit_actions_{safe_id}"):
                     cancel_column, send_column = st.columns(2, gap="small")
@@ -355,6 +360,7 @@ def render_message(message: dict[str, Any]) -> None:
                         type="secondary",
                     ):
                         st.session_state.editing_message = None
+                        st.session_state.pop(edit_key, None)
                         rerun()
                     if send_column.button(
                         "Send",
@@ -364,9 +370,18 @@ def render_message(message: dict[str, Any]) -> None:
                         if not revised.strip():
                             st.error("Enter a message before resending.")
                             return
+                        draft = revised.strip()
+                        thread_id = st.session_state.thread_id
+                        idempotency_key = get_retry_key(
+                            st.session_state,
+                            thread_id=thread_id,
+                            stage=f"revise:{message['id']}",
+                            prompt=draft,
+                        )
                         st.session_state.pending_edit = {
                             "message_id": message["id"],
-                            "prompt": revised.strip(),
+                            "prompt": draft,
+                            "idempotency_key": idempotency_key,
                         }
                         st.session_state.editing_message = None
                         rerun()
@@ -396,7 +411,20 @@ def render_message(message: dict[str, Any]) -> None:
                         help="Edit",
                         type="tertiary",
                     ):
-                        st.session_state.editing_message = message["id"]
+                        messages = store.get_messages(st.session_state.thread_id)
+                        latest_user = next(
+                            (
+                                item
+                                for item in reversed(messages)
+                                if item.get("role") == "user"
+                            ),
+                            None,
+                        )
+                        if latest_user and latest_user.get("id") != message["id"]:
+                            st.session_state.edit_confirm_message_id = message["id"]
+                        else:
+                            st.session_state.editing_message = message["id"]
+                            st.session_state.edit_confirm_message_id = None
                         rerun()
             return
 
@@ -477,10 +505,6 @@ def handle_prompt(
     )
     allow_model_knowledge = not selected_sources and not uploads
     st.session_state.allow_model_knowledge = allow_model_knowledge
-    upload_tuples = [
-        (upload.name, upload.getvalue(), getattr(upload, "type", None))
-        for upload in uploads
-    ]
     with target:
         if existing_user_message_id is None:
             with st.chat_message("user", avatar=":material/person:"):
@@ -490,12 +514,36 @@ def handle_prompt(
                         "Adding to Sources · "
                         + ", ".join(upload.name for upload in uploads)
                     )
-        if upload_tuples:
-            store.upload_sources(
-                st.session_state.thread_id,
-                upload_tuples,
-                origin="chat_composer",
-            )
+        if uploads:
+            try:
+                store.upload_sources(
+                    st.session_state.thread_id,
+                    [
+                        (
+                            upload.name,
+                            upload.getvalue(),
+                            getattr(upload, "type", None),
+                        )
+                        for upload in uploads
+                    ],
+                    origin="chat_composer",
+                )
+            except Exception:
+                # The source service owns transactional/file cleanup. Do not
+                # submit a coach request when its prerequisite upload failed.
+                # Avoid surfacing raw exception text (paths, internals) in the UI.
+                st.error("The attachment could not be added, so no message was sent.")
+                st.caption("Remove or replace the attachment and try again.")
+                return
+        # Preserve this key only while the same submitted text is unresolved.
+        # The session helper stores a SHA-256 scope, never the prompt itself.
+        idempotency_key = get_retry_key(
+            st.session_state,
+            thread_id=st.session_state.thread_id,
+            stage=journey["current_stage"],
+            prompt=prompt,
+        )
+
         # Leave source_ids/context empty so the application service loads them.
         request = CoachRequest(
             thread_id=st.session_state.thread_id,
@@ -503,46 +551,68 @@ def handle_prompt(
             current_stage=journey["current_stage"],
             response_detail=journey["response_detail"],
             allow_model_knowledge=allow_model_knowledge,
+            response_language=st.session_state.get("response_language", "English"),
             model_id=model_id,
             reasoning_effort=reasoning_effort,
+            idempotency_key=idempotency_key,
         )
         with st.chat_message("assistant", avatar=":material/auto_awesome:"):
+            thinking = st.status("Coach is thinking…", expanded=False)
             try:
                 turn: CoachTurn | None = None
+                thinking_closed = False
+
+                def _close_thinking(*, label: str, state: str) -> None:
+                    nonlocal thinking_closed
+                    if thinking_closed:
+                        return
+                    thinking.update(label=label, state=state)
+                    thinking_closed = True
 
                 def token_stream():
                     nonlocal turn
                     for event in stream_coach_turn_events(request):
                         kind = event.get("event")
+                        if kind in {"started", "status", "graph"}:
+                            # Keep the running status visible during provider wait.
+                            continue
                         if kind == "token":
+                            _close_thinking(label="Coach reply ready", state="complete")
                             yield str(event.get("text") or "")
                         elif kind == "done":
+                            _close_thinking(label="Coach reply ready", state="complete")
                             turn = CoachTurn.model_validate(event["turn"])
                         elif kind == "error":
+                            _close_thinking(label="Coaching failed", state="error")
                             status = event.get("status")
                             detail = event.get("detail") or "Coaching failed"
                             raise RuntimeError(f"{detail} (status={status})")
+                    _close_thinking(label="Coach reply ready", state="complete")
 
                 st.write_stream(token_stream())
+                remove_retry_key(
+                    st.session_state,
+                    thread_id=st.session_state.thread_id,
+                    stage=journey["current_stage"],
+                    prompt=prompt,
+                )
                 if turn and turn.pending_transition:
                     st.caption(
                         "The coach has recommended a next step in Thinking Path."
                     )
-            except Exception as exc:
+            except Exception:
+                try:
+                    thinking.update(label="Coaching failed", state="error")
+                except Exception:
+                    pass
                 st.error(
                     "Coaching is unavailable. Prefer `sh scripts/start.sh` for "
-                    f"API mode, or check the local provider. ({exc})"
+                    "API mode, or check the local provider."
                 )
-                if st.button(
-                    "Retry",
-                    icon=":material/refresh:",
-                    key="retry-coach-api",
-                ):
-                    st.session_state.pending_edit = {
-                        "message_id": existing_user_message_id,
-                        "prompt": prompt,
-                    }
-                    rerun()
+                st.caption(
+                    "Reload the notebook before resubmitting; the completed turn "
+                    "may already be present if the connection ended late."
+                )
                 return
     updated_thread = store.get_thread(st.session_state.thread_id) or {}
     updated_metadata = updated_thread.get("metadata") or {}
@@ -553,6 +623,137 @@ def handle_prompt(
     rerun()
 
 
+@st.dialog("Edit this message?")
+def _confirm_edit_earlier_message_dialog() -> None:
+    """Warn that editing a non-latest user turn starts a new conversation revision."""
+    st.write(
+        "Editing this message creates a new conversation revision. "
+        "Later turns leave the active view but remain in revision history."
+    )
+    cancel_column, continue_column = st.columns(2)
+    if cancel_column.button("Cancel", use_container_width=True):
+        st.session_state.edit_confirm_message_id = None
+        rerun()
+    if continue_column.button(
+        "Edit & continue",
+        type="primary",
+        use_container_width=True,
+    ):
+        message_id = st.session_state.get("edit_confirm_message_id")
+        st.session_state.edit_confirm_message_id = None
+        if message_id:
+            st.session_state.editing_message = message_id
+        rerun()
+
+
+def _restore_pending_edit_draft(message_id: str, draft: str) -> None:
+    """Re-open the in-bubble editor with the failed revise draft for retry."""
+    if not message_id:
+        return
+    st.session_state.editing_message = message_id
+    if draft:
+        st.session_state[f"edit-text-{message_id}"] = draft
+
+
+def _submit_pending_edit(
+    *,
+    model_id: str,
+    reasoning_effort: str | None,
+) -> bool:
+    """Apply a bubble edit via the server revise endpoint and reload state.
+
+    Keeps one stable idempotency key for the logical edit attempt until it
+    succeeds or the student abandons editing. When the append-only revision
+    already committed but provider generation failed, the same key + original
+    message id lets the server resume the replacement without bumping again.
+
+    On failure, clears ``pending_edit`` so a later rerun does not auto-resubmit;
+    the student must click Send again. The revise retry key stays in session.
+
+    Returns:
+        True when revise succeeded and a rerun was requested; False when the
+        edit could not run so the chat panel should keep rendering. On failure,
+        clears ``pending_edit``, restores the in-bubble editor draft, and keeps
+        the stable revise idempotency key for an explicit Send retry.
+    """
+    pending = st.session_state.get("pending_edit")
+    if not isinstance(pending, dict):
+        return False
+    message_id = str(pending.get("message_id") or "")
+    draft = str(pending.get("prompt") or "").strip()
+    if not message_id or not draft:
+        st.session_state.pop("pending_edit", None)
+        _restore_pending_edit_draft(message_id, draft)
+        st.error("Enter a message before resending.")
+        return False
+    thread_id = st.session_state.thread_id
+    pending_key = str(pending.get("idempotency_key") or "").strip()
+
+    def _reuse_pending_key() -> str:
+        return pending_key
+
+    # Always register under the revise scope so clearing pending_edit on
+    # failure still lets an explicit Send reuse the same UUID.
+    idempotency_key = get_retry_key(
+        st.session_state,
+        thread_id=thread_id,
+        stage=f"revise:{message_id}",
+        prompt=draft,
+        new_key=_reuse_pending_key if pending_key else None,
+    )
+    # Persist the stable key before the network call so browser reruns reuse it.
+    pending = {
+        **pending,
+        "message_id": message_id,
+        "prompt": draft,
+        "idempotency_key": idempotency_key,
+    }
+    st.session_state.pending_edit = pending
+    thinking = st.status("Coach is thinking…", expanded=False)
+    try:
+        store.revise_message(
+            thread_id,
+            message_id,
+            draft,
+            idempotency_key=idempotency_key,
+            model_id=model_id,
+            reasoning_effort=reasoning_effort,
+            response_detail=st.session_state.get("response_detail") or "short",
+            response_language=st.session_state.get("response_language") or "English",
+        )
+        thinking.update(label="Coach reply ready", state="complete")
+    except Exception:
+        thinking.update(label="Coaching failed", state="error")
+        # Drop pending_edit so the next rerun does not auto-resubmit. Keep the
+        # stable retry key in session and reopen the editor so the student must
+        # click Send again to retry the same revision attempt.
+        st.session_state.pop("pending_edit", None)
+        _restore_pending_edit_draft(message_id, draft)
+        st.error(
+            "Could not finish this edit. Your draft is preserved — click Send "
+            "again to retry the same revision attempt without creating another "
+            "conversation branch. If the server already applied the revision, "
+            "retry resumes the replacement coach reply."
+        )
+        return False
+    remove_retry_key(
+        st.session_state,
+        thread_id=thread_id,
+        stage=f"revise:{message_id}",
+        prompt=draft,
+    )
+    st.session_state.pop("pending_edit", None)
+    st.session_state.editing_message = None
+    updated_thread = store.get_thread(thread_id) or {}
+    updated_metadata = updated_thread.get("metadata") or {}
+    updated_journey = normalize_journey(updated_metadata.get("learning_journey"))
+    st.session_state.learning_journey = updated_journey
+    st.session_state.response_detail = updated_journey["response_detail"]
+    st.session_state.composer_nonce += 1
+    rerun()
+    return True
+
+
 def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
     """Render the discussion log, coach welcome history, and chat composer.
 
@@ -560,6 +761,15 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
         model_id: Selected coaching model id for the next turn.
         reasoning_effort: Compatible reasoning effort for that model, or None.
     """
+    if st.session_state.get("pending_edit"):
+        # Successful revise calls ``rerun()``. On failure, keep rendering the
+        # active chat instead of blanking the panel.
+        if _submit_pending_edit(
+            model_id=model_id,
+            reasoning_effort=reasoning_effort,
+        ):
+            return
+
     selected_sources = store.list_sources(
         st.session_state.thread_id,
         selected_only=True,
@@ -572,26 +782,10 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
     with chat_log:
         for message in messages:
             render_message(message)
-        if messages and messages[-1]["role"] == "assistant":
-            previous_user = next(
-                (
-                    message
-                    for message in reversed(messages[:-1])
-                    if message["role"] == "user"
-                ),
-                None,
-            )
-            if previous_user and st.button(
-                "Regenerate",
-                icon=":material/refresh:",
-                type="tertiary",
-                key="regenerate-response",
-            ):
-                st.session_state.pending_edit = {
-                    "message_id": previous_user["id"],
-                    "prompt": previous_user["content"],
-                }
-                rerun()
+
+    if st.session_state.get("edit_confirm_message_id"):
+        _confirm_edit_earlier_message_dialog()
+
     with st.container(key="chat_composer"):
         _render_composer_model_picker()
         composer_value = st.chat_input(
@@ -604,10 +798,7 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
             height="content",
         )
         sync_composer_layout()
-    pending_edit = st.session_state.pop("pending_edit", None)
-    prompt, uploads = normalize_composer_value(
-        (pending_edit or {}).get("prompt") or composer_value
-    )
+    prompt, uploads = normalize_composer_value(composer_value)
     if prompt:
         handle_prompt(
             prompt,
@@ -615,5 +806,5 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
             model_id,
             reasoning_effort,
             chat_log,
-            existing_user_message_id=(pending_edit or {}).get("message_id"),
+            existing_user_message_id=None,
         )

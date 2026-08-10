@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi.testclient import TestClient
 
 from backend.api import create_app
@@ -129,7 +131,7 @@ def test_local_api_runs_a_mock_turn_and_auto_advances(tmp_path):
     assert pending.json() is None
 
 
-def test_local_api_can_retain_confirmation_mode(tmp_path):
+def test_local_api_can_retain_confirmation_mode(tmp_path, caplog):
     store = StudentStore(tmp_path / "manual-api.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     client = TestClient(create_app(store, auto_advance_stages=False))
@@ -157,13 +159,68 @@ def test_local_api_can_retain_confirmation_mode(tmp_path):
     assert (state.get("learning_journey") or {}).get("current_stage", "focus") == "focus"
 
     transition_id = follow_up.json()["pending_transition"]["id"]
-    resolved = client.post(
-        f"/api/v1/threads/{thread_id}/phase-transitions/{transition_id}/resolve",
-        json={"accepted": True},
-    )
+    with caplog.at_level("INFO", logger="co_design.operational"):
+        resolved = client.post(
+            f"/api/v1/threads/{thread_id}/phase-transitions/{transition_id}/resolve",
+            json={"accepted": True},
+        )
     assert resolved.status_code == 200
+    stage_event = next(
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.name == "co_design.operational"
+        and '"event":"stage_transition"' in record.getMessage()
+    )
+    assert stage_event == {"event": "stage_transition", "outcome": "accepted"}
+    assert thread_id not in json.dumps(stage_event)
+    assert transition_id not in json.dumps(stage_event)
     advanced = client.get(f"/api/v1/threads/{thread_id}/learning-state").json()
     assert (advanced.get("learning_journey") or {}).get("current_stage") == "evidence"
+
+
+def test_select_stage_api_requires_flag_and_valid_stage(tmp_path, monkeypatch, caplog):
+    store = StudentStore(tmp_path / "select-api.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = TestClient(create_app(store, auto_advance_stages=False))
+    monkeypatch.setattr(settings, "student_stage_selection", False)
+
+    disabled = client.post(
+        f"/api/v1/threads/{thread_id}/learning-state/select-stage",
+        json={"stage_id": "evidence"},
+    )
+    assert disabled.status_code == 400
+    assert "not enabled" in disabled.json()["detail"].lower()
+
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    unknown = client.post(
+        f"/api/v1/threads/{thread_id}/learning-state/select-stage",
+        json={"stage_id": "nope"},
+    )
+    assert unknown.status_code == 400
+
+    missing = client.post(
+        "/api/v1/threads/missing-notebook/learning-state/select-stage",
+        json={"stage_id": "evidence"},
+    )
+    assert missing.status_code == 404
+
+    with caplog.at_level("INFO", logger="co_design.operational"):
+        selected = client.post(
+            f"/api/v1/threads/{thread_id}/learning-state/select-stage",
+            json={"stage_id": "evidence"},
+        )
+    assert selected.status_code == 200
+    body = selected.json()
+    assert body["thinking_stage"] == "evidence"
+    assert body["learning_journey"]["current_stage"] == "evidence"
+    assert body["learning_journey"]["completed_stages"] == []
+    stage_event = next(
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.name == "co_design.operational"
+        and '"event":"stage_transition"' in record.getMessage()
+    )
+    assert stage_event["outcome"] == "selected"
 
 
 def test_complex_guidance_is_stricter_before_recommending_advance(tmp_path):
@@ -223,7 +280,7 @@ def test_first_coaching_turn_generates_a_concise_model_assisted_title(tmp_path):
     assert store.get_thread(thread_id)["name"] == "Elderly Road Safety"
 
 
-def test_local_api_does_not_attach_all_selected_sources_as_citations(tmp_path):
+def test_local_api_grounds_mock_reply_in_retrieved_selected_source(tmp_path):
     store = StudentStore(tmp_path / "source-api.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     source = add_text_source(
@@ -247,14 +304,26 @@ def test_local_api_does_not_attach_all_selected_sources_as_citations(tmp_path):
     )
 
     assert response.status_code == 200
-    assert response.json()["assessment"]["citations"] == []
+    payload = response.json()
+    assert "Older pedestrians may require longer crossing intervals." in payload[
+        "response_text"
+    ]
+    assert "[S1]" in payload["response_text"]
+    assert payload["assessment"]["citations"] == [
+        {
+            "source_id": source["id"],
+            "label": "S1",
+            "title": "Week 1 lecture",
+            "excerpt": "Older pedestrians may require longer crossing intervals.",
+        }
+    ]
     assistant = store.get_messages(thread_id)[-1]
-    assert assistant["metadata"]["source_refs"] == []
+    assert assistant["metadata"]["source_refs"] == [
+        {"id": source["id"], "label": "S1", "title": "Week 1 lecture"}
+    ]
 
 
-def test_local_api_persists_explicit_response_citations(tmp_path, monkeypatch):
-    from backend.mock_provider import DeterministicCoachProvider
-
+def test_local_api_persists_mock_response_citations(tmp_path):
     store = StudentStore(tmp_path / "cited-api.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     source = add_text_source(
@@ -263,16 +332,6 @@ def test_local_api_persists_explicit_response_citations(tmp_path, monkeypatch):
         "Week 1 lecture",
         "Older pedestrians may require longer crossing intervals.",
     )
-    original_assess = DeterministicCoachProvider.assess
-
-    def assess_with_citation(self, request):
-        response, assessment = original_assess(self, request)
-        return (
-            response + "\n\nSee the crossing intervals in [S1].",
-            assessment,
-        )
-
-    monkeypatch.setattr(DeterministicCoachProvider, "assess", assess_with_citation)
     client = TestClient(create_app(store))
 
     response = client.post(
@@ -288,6 +347,7 @@ def test_local_api_persists_explicit_response_citations(tmp_path, monkeypatch):
     )
 
     assert response.status_code == 200
+    assert "[S1]" in response.json()["response_text"]
     citation = response.json()["assessment"]["citations"][0]
     assert citation["source_id"] == source["id"]
     assert citation["label"] == "S1"
@@ -514,6 +574,155 @@ def test_local_api_maps_provider_failures_to_503(tmp_path, monkeypatch):
     assert "mock provider offline" in response.json()["detail"]
 
 
+def test_operational_metrics_are_aggregate_and_do_not_log_student_content(
+    tmp_path, caplog
+):
+    """API logs aggregate latency/retrieval/citation outcomes, never prompt text."""
+    store = StudentStore(tmp_path / "operational-metrics.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    source = add_text_source(
+        store,
+        thread_id,
+        "Road evidence",
+        "The trial reports an 18 percent capacity loss in low light.",
+    )
+    sensitive_prompt = "PRIVATE_STUDENT_PROMPT_DO_NOT_LOG"
+    client = TestClient(create_app(store))
+
+    with caplog.at_level("INFO", logger="co_design.operational"):
+        response = client.post(
+            "/api/v1/coach/turn",
+            json={
+                "thread_id": thread_id,
+                "student_message": sensitive_prompt,
+                "current_stage": "focus",
+                "source_ids": [source["id"]],
+                "response_detail": "short",
+            },
+        )
+
+    assert response.status_code == 200
+    messages = [
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.name == "co_design.operational"
+    ]
+    coach = next(message for message in messages if message["event"] == "coach_turn")
+    http = next(message for message in messages if message["event"] == "http_request")
+    assert coach == {
+        "citation_count": 1,
+        "citation_outcome": "cited",
+        "event": "coach_turn",
+        "outcome": "ok",
+        "provider": "mock",
+        "recommendation": "stay",
+        "retrieval_outcome": "cited",
+        "selected_source_count": 1,
+        "transition_outcome": "none",
+    }
+    assert http["method"] == "POST"
+    assert http["route"] == "/api/v1/coach/turn"
+    assert http["status_code"] == 200
+    assert isinstance(http["duration_ms"], float)
+    rendered_metrics = "\n".join(record.getMessage() for record in caplog.records)
+    assert sensitive_prompt not in rendered_metrics
+    assert source["id"] not in rendered_metrics
+    assert thread_id not in rendered_metrics
+
+
+def test_operational_metrics_use_store_selected_sources_when_client_omits_ids(
+    tmp_path, caplog
+):
+    """UI-style empty source_ids still report the notebook's selected sources."""
+    store = StudentStore(tmp_path / "operational-metrics-ui.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    add_text_source(
+        store,
+        thread_id,
+        "Road evidence",
+        "The trial reports an 18 percent capacity loss in low light.",
+    )
+    client = TestClient(create_app(store))
+
+    with caplog.at_level("INFO", logger="co_design.operational"):
+        response = client.post(
+            "/api/v1/coach/turn",
+            json={
+                "thread_id": thread_id,
+                "student_message": "What does the evidence say?",
+                "current_stage": "focus",
+                "response_detail": "short",
+            },
+        )
+
+    assert response.status_code == 200
+    coach = next(
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.name == "co_design.operational"
+        and '"event":"coach_turn"' in record.getMessage()
+    )
+    assert coach["selected_source_count"] == 1
+    assert coach["retrieval_outcome"] == "cited"
+
+
+def test_operational_metrics_record_provider_failure_without_thread_identifier(
+    tmp_path, monkeypatch, caplog
+):
+    """Unavailable providers are countable without logging a notebook identity."""
+    from backend.providers import ProviderUnavailableError
+    from backend.workflow import CoachWorkflow
+
+    store = StudentStore(tmp_path / "provider-metric.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+
+    def fail_run(self, request):
+        raise ProviderUnavailableError("offline")
+
+    monkeypatch.setattr(CoachWorkflow, "run", fail_run)
+    client = TestClient(create_app(store))
+    with caplog.at_level("INFO", logger="co_design.operational"):
+        response = client.post(
+            "/api/v1/coach/turn",
+            json={
+                "thread_id": thread_id,
+                "student_message": "private message",
+                "current_stage": "focus",
+                "response_detail": "short",
+            },
+        )
+
+    assert response.status_code == 503
+    coach = next(
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.name == "co_design.operational"
+        and '"event":"coach_turn"' in record.getMessage()
+    )
+    assert coach["outcome"] == "provider_unavailable"
+    assert coach["retrieval_outcome"] == "not_requested"
+    assert thread_id not in json.dumps(coach)
+
+
+def test_operational_metrics_do_not_log_unmatched_url_values(tmp_path, caplog):
+    """Unknown paths use one bounded label instead of logging attacker input."""
+    client = TestClient(create_app(StudentStore(tmp_path / "route-metric.sqlite3")))
+    sensitive_path_value = "private-student@example.edu"
+
+    with caplog.at_level("INFO", logger="co_design.operational"):
+        response = client.get(f"/not-a-route/{sensitive_path_value}")
+
+    assert response.status_code == 404
+    event = next(
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.name == "co_design.operational"
+        and '"event":"http_request"' in record.getMessage()
+    )
+    assert event["route"] == "<unmatched>"
+    assert sensitive_path_value not in json.dumps(event)
+
+
 def test_local_api_ready_request_id_stream_and_graph(tmp_path):
     store = StudentStore(tmp_path / "ready-stream.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
@@ -542,6 +751,8 @@ def test_local_api_ready_request_id_stream_and_graph(tmp_path):
     events = [__import__("json").loads(line) for line in lines]
     kinds = [event["event"] for event in events]
     assert kinds[0] == "started"
+    assert kinds[1] == "status"
+    assert events[1].get("phase") == "thinking"
     assert "token" in kinds
     assert kinds[-1] == "done"
     assert events[-1]["turn"]["response_text"]
@@ -551,3 +762,100 @@ def test_local_api_ready_request_id_stream_and_graph(tmp_path):
     payload = graph.json()
     assert payload["steps"] == ["load_context", "assess", "recommend", "format"]
     assert payload["mode"] in {"langgraph", "sequential"}
+
+
+def test_readiness_fails_when_file_storage_is_unavailable(tmp_path, monkeypatch):
+    """Compose must not route traffic before the configured bucket is usable."""
+
+    class UnavailableStorage:
+        def ping(self) -> None:
+            raise PermissionError("AccessDenied")
+
+    monkeypatch.setattr(
+        "backend.persistence.factory.get_file_storage",
+        lambda: UnavailableStorage(),
+    )
+    store = StudentStore(tmp_path / "ready-storage.sqlite3")
+    client = TestClient(create_app(store))
+
+    response = client.get("/api/v1/ready")
+
+    assert response.status_code == 503
+    assert "File storage not ready" in response.json()["detail"]
+    assert "AccessDenied" in response.json()["detail"]
+
+
+def test_production_readiness_requires_local_cognito_configuration_check(
+    tmp_path, monkeypatch
+):
+    """DSQL/S3 readiness must fail closed when non-secret Cognito config is invalid."""
+
+    class ReadyStorage:
+        def ping(self) -> None:
+            return None
+
+    calls: list[bool] = []
+
+    def invalid_cognito(*, require_https: bool) -> None:
+        calls.append(require_https)
+        raise ValueError("Cognito callback must use HTTPS in production")
+
+    monkeypatch.setattr(settings, "database_provider", "sqlite")
+    monkeypatch.setattr(settings, "file_storage_provider", "s3")
+    monkeypatch.setattr(settings, "user_uploads_bucket", "test-uploads")
+    monkeypatch.setattr("backend.persistence.factory.get_file_storage", lambda: ReadyStorage())
+    monkeypatch.setattr("backend.api.validate_cognito_readiness", invalid_cognito)
+    client = TestClient(create_app(StudentStore(tmp_path / "prod-ready.sqlite3")))
+
+    response = client.get("/api/v1/ready")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Cognito callback must use HTTPS in production"
+    assert calls == [True]
+
+
+def test_production_readiness_redacts_dependency_error_details(tmp_path, monkeypatch):
+    """IAM/provider exception details must not become a readiness response body."""
+
+    class DeniedStorage:
+        def ping(self) -> None:
+            raise PermissionError("AccessDenied private-bucket-name")
+
+    monkeypatch.setattr(settings, "file_storage_provider", "s3")
+    monkeypatch.setattr(settings, "user_uploads_bucket", "test-uploads")
+    monkeypatch.setattr("backend.persistence.factory.get_file_storage", lambda: DeniedStorage())
+    client = TestClient(create_app(StudentStore(tmp_path / "prod-ready-denied.sqlite3")))
+
+    response = client.get("/api/v1/ready")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "File storage not ready"
+    assert "private-bucket-name" not in response.text
+
+
+def test_production_readiness_reports_cognito_configured_without_discovery(
+    tmp_path, monkeypatch
+):
+    """A validated production config adds no OIDC network dependency to ready."""
+
+    class ReadyStorage:
+        def ping(self) -> None:
+            return None
+
+    calls: list[bool] = []
+    monkeypatch.setattr(settings, "database_provider", "sqlite")
+    monkeypatch.setattr(settings, "file_storage_provider", "s3")
+    monkeypatch.setattr(settings, "user_uploads_bucket", "test-uploads")
+    monkeypatch.setattr("backend.persistence.factory.get_file_storage", lambda: ReadyStorage())
+    monkeypatch.setattr(
+        "backend.api.validate_cognito_readiness",
+        lambda *, require_https: calls.append(require_https),
+    )
+    client = TestClient(create_app(StudentStore(tmp_path / "prod-ready-ok.sqlite3")))
+
+    response = client.get("/api/v1/ready")
+
+    assert response.status_code == 200
+    assert response.json()["mode"] == "production"
+    assert response.json()["cognito_configured"] == "true"
+    assert calls == [True]

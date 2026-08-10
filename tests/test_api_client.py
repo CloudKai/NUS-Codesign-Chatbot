@@ -127,7 +127,9 @@ def test_api_client_ready_stream_and_graph(tmp_path):
             )
         )
         kinds = [event.get("event") for event in events]
-        assert "started" in kinds
+        assert kinds[0] == "started"
+        assert kinds[1] == "status"
+        assert events[1].get("phase") == "thinking"
         assert "token" in kinds
         assert "done" in kinds
         done = next(event for event in events if event.get("event") == "done")
@@ -138,3 +140,114 @@ def test_api_client_ready_stream_and_graph(tmp_path):
         assert graph["steps"] == ["load_context", "assess", "recommend", "format"]
     finally:
         client.close()
+
+
+def test_api_client_auth_me_returns_user_or_none(tmp_path, monkeypatch):
+    """LocalApiClient.auth_me maps /auth/me success and 401 without raising."""
+    from datetime import datetime, timezone
+
+    from joserfc import jwt
+    from joserfc.jwk import OctKey
+
+    from backend.auth_oidc import CognitoIdentity, CognitoOIDCClient, CognitoOIDCError
+    from backend.cognito_config import CognitoAuthConfig
+
+    store = StudentStore(tmp_path / "client-auth-me.sqlite3")
+    fixed = datetime(2026, 1, 15, 12, 0, tzinfo=timezone.utc)
+    key = OctKey.generate_key(256, parameters={"alg": "HS256", "kid": "client"})
+    claims = {
+        "sub": "sub-client",
+        "email": "client@example.edu",
+        "iss": "https://cognito-idp.example.test/pool",
+        "aud": "test-client",
+        "exp": int((fixed.timestamp()) + 3600),
+        "iat": int(fixed.timestamp()),
+    }
+    id_token = jwt.encode({"alg": "HS256", "kid": "client"}, claims, key)
+
+    class _OIDC(CognitoOIDCClient):
+        def verify_id_token(self, token: str):
+            if token != id_token:
+                raise CognitoOIDCError("bad")
+            return CognitoIdentity(
+                sub="sub-client",
+                email="client@example.edu",
+                claims=dict(claims),
+            )
+
+        def refresh(self, refresh_token: str):
+            raise CognitoOIDCError("no refresh in this test")
+
+    store.upsert_cognito_user(
+        cognito_sub="sub-client",
+        identifier="cognito:sub-client",
+        email="client@example.edu",
+        display_name="Client",
+    )
+    oidc = _OIDC(
+        CognitoAuthConfig(
+            client_id="test-client",
+            client_secret="test-secret",
+            server_metadata_url="https://example.test/.well-known/openid-configuration",
+            redirect_uri="http://127.0.0.1:8000/api/v1/auth/callback",
+        ),
+        store=store,
+        clock=lambda: fixed,
+    )
+    app = create_app(store, oidc_client=oidc)
+    client = LocalApiClient("http://testserver", session=TestClient(app))
+    try:
+        assert client.auth_me("") is None
+        assert client.auth_me("not-a-token") is None
+
+        profile = client.auth_me(id_token)
+        assert profile is not None
+        assert profile["cognito_sub"] == "sub-client"
+        assert profile["email"] == "client@example.edu"
+        assert "access_token" not in profile
+        assert id_token not in str(profile)
+    finally:
+        client.close()
+
+
+def test_course_sync_uses_explicit_cookie_snapshot_without_worker_provider_call():
+    """A background sync can reuse main-thread auth without rereading context."""
+    provider_calls = 0
+
+    def cookie_provider():
+        nonlocal provider_calls
+        provider_calls += 1
+        return {"co_design_id": "short-lived-id-token"}
+
+    class _Session:
+        received_cookies: dict[str, str] | None = None
+
+        def post(self, url, **kwargs):
+            self.received_cookies = kwargs.get("cookies")
+            return httpx.Response(
+                200,
+                json={
+                    "added": 0,
+                    "updated": 0,
+                    "removed": 0,
+                    "unchanged": 0,
+                    "skipped": 0,
+                    "errors": [],
+                },
+                request=httpx.Request("POST", url),
+            )
+
+    session = _Session()
+    client = LocalApiClient(
+        "http://testserver",
+        session=session,
+        cookie_provider=cookie_provider,
+    )
+    snapshot = client.auth_cookie_snapshot()
+
+    client.sync_course_materials("notebook-1", auth_cookies=snapshot)
+
+    assert provider_calls == 1
+    assert session.received_cookies == {
+        "co_design_id": "short-lived-id-token"
+    }

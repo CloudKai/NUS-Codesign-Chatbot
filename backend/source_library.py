@@ -6,6 +6,7 @@ import mimetypes
 import re
 import socket
 import threading
+import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -77,6 +78,20 @@ def course_material_fingerprint() -> tuple[tuple[str, int, int], ...]:
     return tuple(fingerprint)
 
 
+def course_material_sync_disabled_result() -> LectureNotesSyncResult:
+    """Return an immediate no-op result when course-material sync is disabled."""
+    return LectureNotesSyncResult()
+
+
+def _completed_sync_future(
+    result: LectureNotesSyncResult | None = None,
+) -> Future[LectureNotesSyncResult]:
+    """Return an already-finished sync future (no worker thread)."""
+    future: Future[LectureNotesSyncResult] = Future()
+    future.set_result(result or course_material_sync_disabled_result())
+    return future
+
+
 class CourseMaterialSyncCoordinator:
     """Run one course-material import per notebook and file-system snapshot.
 
@@ -119,6 +134,8 @@ class CourseMaterialSyncCoordinator:
         thread_id: str,
     ) -> Future[LectureNotesSyncResult]:
         """Return the shared import future for the notebook's current file snapshot."""
+        if not settings.course_material_sync_enabled:
+            return _completed_sync_future()
         fingerprint = course_material_fingerprint()
         key = self._key(store, thread_id)
         with self._lock:
@@ -138,8 +155,7 @@ class CourseMaterialSyncCoordinator:
                     return future
 
             if not fingerprint and self._matches_snapshot(store, thread_id, fingerprint):
-                completed: Future[LectureNotesSyncResult] = Future()
-                completed.set_result(LectureNotesSyncResult())
+                completed = _completed_sync_future(LectureNotesSyncResult())
                 self._jobs[key] = (fingerprint, completed)
                 return completed
 
@@ -155,11 +171,12 @@ class CourseMaterialSyncCoordinator:
     ) -> Future[LectureNotesSyncResult]:
         """Share one remote (HTTP) course-material sync per notebook snapshot.
 
-        Used when the Streamlit UI creates notebooks via the local API
-        (``local-student`` ownership) while the UI process may be bound to a
-        Cognito-scoped in-process store. Sync must hit the API so the notebook
-        owner matches.
+        Used when Streamlit creates notebooks via FastAPI. Sync must hit the
+        API so notebook ownership stays bound to the authenticated Cognito user
+        (or local-student demo owner) rather than any in-process fallback store.
         """
+        if not settings.course_material_sync_enabled:
+            return _completed_sync_future()
         fingerprint = course_material_fingerprint()
         key = (str(channel), "__api__", str(thread_id))
         with self._lock:
@@ -342,6 +359,85 @@ def fetch_public_webpage(
     return title[:180] or fallback_title, extracted[:MAX_SOURCE_TEXT], final_url, len(payload)
 
 
+def _object_storage_key(value: str | None) -> str | None:
+    """Return *value* when it looks like a student-upload object key."""
+    key = str(value or "").strip()
+    if key.startswith("users/"):
+        return key
+    return None
+
+
+def _cleanup_object_keys(*keys: str | None) -> None:
+    """Best-effort delete of object-storage keys outside any DB OCC retry."""
+    to_delete = [_object_storage_key(key) for key in keys]
+    cleaned = [key for key in to_delete if key]
+    if not cleaned:
+        return
+    from backend.persistence.factory import get_file_storage
+
+    storage = get_file_storage()
+    errors: list[Exception] = []
+    for key in cleaned:
+        try:
+            storage.delete(key)
+        except Exception as error:  # noqa: BLE001 - surface after all deletes
+            errors.append(error)
+    if errors:
+        raise errors[0]
+
+
+def _add_source_with_extracted_text(
+    store: StudentStore,
+    notebook_id: str,
+    *,
+    extracted_text: str = "",
+    **source_values: Any,
+) -> str:
+    """Store extracted text before the retryable source-metadata DB write.
+
+    Object storage is deliberately outside ``StudentStore.add_source`` so an
+    Aurora DSQL OCC retry never repeats S3 writes. On metadata failure, both the
+    raw upload key and extracted-text key are cleaned up.
+    """
+    source_id = str(source_values.pop("source_id", "") or uuid.uuid4())
+    cleaned = (extracted_text or "")[:MAX_SOURCE_TEXT]
+    metadata = source_values.get("metadata")
+    metadata_dict = dict(metadata) if isinstance(metadata, dict) else {}
+    raw_object_key = _object_storage_key(
+        metadata_dict.get("object_key") or source_values.get("path")
+    )
+    extracted_text_key: str | None = None
+    storage = None
+    if cleaned:
+        from backend.persistence.factory import get_file_storage
+        from backend.persistence.object_keys import build_extracted_text_object_key
+
+        storage = get_file_storage()
+        extracted_text_key = build_extracted_text_object_key(
+            user_id=store.owner_id,
+            notebook_id=notebook_id,
+            source_id=source_id,
+        )
+        storage.put_bytes(
+            key=extracted_text_key,
+            data=cleaned.encode("utf-8"),
+            content_type="text/plain; charset=utf-8",
+        )
+    try:
+        return store.add_source(
+            notebook_id,
+            source_id=source_id,
+            extracted_text_key=extracted_text_key,
+            **source_values,
+        )
+    except Exception as database_error:
+        try:
+            _cleanup_object_keys(extracted_text_key, raw_object_key)
+        except Exception as cleanup_error:
+            raise cleanup_error from database_error
+        raise
+
+
 def add_file_sources(
     store: StudentStore,
     thread_id: str,
@@ -354,39 +450,63 @@ def add_file_sources(
     compress: bool = True,
 ) -> list[dict[str, Any]]:
     upload_items = list(uploads)
+    # Generate source ids server-side before object storage so keys include them.
+    source_ids = [str(uuid.uuid4()) for _ in upload_items]
     stored_uploads = save_uploads(
         thread_id,
         upload_items,
         max_file_size_mb=max_file_size_mb,
         compress=compress,
+        owner_id=getattr(store, "owner_id", "local-student"),
+        source_ids=source_ids,
     )
     created: list[dict[str, Any]] = []
-    for index, upload in enumerate(stored_uploads):
-        kind = "image" if upload.is_image else "file"
-        display_title = (
-            Path(upload_items[index][0]).name
-            if preserve_display_names
-            else upload.name
-        )
-        source_id = store.add_source(
-            thread_id,
-            kind=kind,
-            title=display_title,
-            mime=upload.mime,
-            path=str(upload.path),
-            extracted_text=upload.extracted_text,
-            size=upload.size,
-            selected=True,
-            metadata={
-                **(extra_metadata or {}),
-                "managed_file": True,
-                "supported": upload.supported,
-                "origin": origin,
-            },
-        )
-        source = store.get_source(thread_id, source_id)
-        if source:
-            created.append(source)
+    pending_raw_keys: list[str] = []
+    for upload in stored_uploads:
+        raw_key = _object_storage_key(upload.storage_key)
+        if raw_key:
+            pending_raw_keys.append(raw_key)
+    try:
+        for index, upload in enumerate(stored_uploads):
+            kind = "image" if upload.is_image else "file"
+            display_title = (
+                Path(upload_items[index][0]).name
+                if preserve_display_names
+                else upload.name
+            )
+            source_id = _add_source_with_extracted_text(
+                store,
+                thread_id,
+                kind=kind,
+                title=display_title,
+                mime=upload.mime,
+                path=upload.storage_key or str(upload.path),
+                extracted_text=upload.extracted_text,
+                size=upload.size,
+                selected=True,
+                source_id=upload.source_id or source_ids[index],
+                metadata={
+                    **(extra_metadata or {}),
+                    "managed_file": True,
+                    "supported": upload.supported,
+                    "origin": origin,
+                    "storage_provider": upload.storage_provider,
+                    **(
+                        {"object_key": upload.storage_key}
+                        if upload.storage_key
+                        else {}
+                    ),
+                },
+            )
+            raw_key = _object_storage_key(upload.storage_key)
+            if raw_key and raw_key in pending_raw_keys:
+                pending_raw_keys.remove(raw_key)
+            source = store.get_source(thread_id, source_id)
+            if source:
+                created.append(source)
+    except Exception:
+        _cleanup_object_keys(*pending_raw_keys)
+        raise
     return created
 
 
@@ -395,6 +515,8 @@ def sync_lecture_notes_folder(
     thread_id: str,
 ) -> LectureNotesSyncResult:
     """Synchronize course files once, repairing duplicates from older races."""
+    if not settings.course_material_sync_enabled:
+        return course_material_sync_disabled_result()
     with _COURSE_MATERIAL_SYNC_LOCK:
         return _sync_lecture_notes_folder(store, thread_id)
 
@@ -526,7 +648,8 @@ def add_text_source(
     cleaned = text.strip()
     if not cleaned:
         raise SourceImportError("Paste some source text first.")
-    source_id = store.add_source(
+    source_id = _add_source_with_extracted_text(
+        store,
         thread_id,
         kind="text",
         title=title or "Pasted text",
@@ -547,7 +670,8 @@ def add_url_source(
     opener: Any | None = None,
 ) -> dict[str, Any]:
     title, text, final_url, size = fetch_public_webpage(url, opener=opener)
-    source_id = store.add_source(
+    source_id = _add_source_with_extracted_text(
+        store,
         thread_id,
         kind="url",
         title=title,
@@ -582,7 +706,8 @@ def backfill_legacy_sources(store: StudentStore, thread_id: str) -> int:
                     extracted = extract_text(path)[:MAX_SOURCE_TEXT]
                 except Exception:
                     extracted = ""
-            store.add_source(
+            _add_source_with_extracted_text(
+                store,
                 thread_id,
                 kind="image" if suffix in IMAGE_SUFFIXES else "file",
                 title=str(upload.get("name") or path.name),
@@ -651,9 +776,18 @@ def safe_source_file_path(source: dict[str, Any]) -> Path | None:
 
     Returns:
         Absolute path when the file exists and is owned by the configured files
-        root; otherwise ``None`` (missing path, missing file, or traversal).
+        root; otherwise ``None`` (missing path, missing file, object storage,
+        or traversal).
     """
-    path_value = source.get("path")
+    metadata = source.get("metadata") or {}
+    if metadata.get("storage_provider") in {"s3", "memory"}:
+        return None
+    if source.get("object_key") and metadata.get("storage_provider") in {
+        "s3",
+        "memory",
+    }:
+        return None
+    path_value = source.get("path") or metadata.get("local_path")
     if not path_value:
         return None
     path = Path(str(path_value)).resolve()
@@ -661,6 +795,38 @@ def safe_source_file_path(source: dict[str, Any]) -> Path | None:
     if not path.is_file() or files_root not in path.parents:
         return None
     return path
+
+
+def read_source_bytes(source: dict[str, Any]) -> bytes | None:
+    """Return source file bytes from local disk or configured object storage."""
+    metadata = source.get("metadata") or {}
+    object_key = (
+        source.get("object_key")
+        or metadata.get("object_key")
+        or (
+            source.get("path")
+            if metadata.get("storage_provider") in {"s3", "memory"}
+            else None
+        )
+    )
+    if object_key:
+        from backend.persistence.factory import get_file_storage
+
+        try:
+            return get_file_storage().get_bytes(str(object_key))
+        except FileNotFoundError:
+            return None
+    path = safe_source_file_path(source)
+    if path is None:
+        # Compatibility: path may be a local_path stored only in metadata.
+        local_path = metadata.get("local_path")
+        if local_path:
+            candidate = {**source, "path": local_path, "metadata": metadata}
+            path = safe_source_file_path(candidate)
+            if path is not None:
+                return path.read_bytes()
+        return None
+    return path.read_bytes()
 
 
 def source_image_input(source: dict[str, Any]) -> dict[str, str] | None:
@@ -671,11 +837,16 @@ def source_image_input(source: dict[str, Any]) -> dict[str, str] | None:
     """
     if source.get("kind") != "image":
         return None
-    path = safe_source_file_path(source)
-    if path is None:
+    payload = read_source_bytes(source)
+    if payload is None:
         return None
-    mime = str(source.get("mime") or mimetypes.guess_type(path.name)[0] or "image/png")
-    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    name = str(source.get("title") or source.get("path") or "image.png")
+    mime = str(
+        source.get("mime")
+        or mimetypes.guess_type(name)[0]
+        or "image/png"
+    )
+    encoded = base64.b64encode(payload).decode("ascii")
     return {
         "type": "input_image",
         "image_url": f"data:{mime};base64,{encoded}",

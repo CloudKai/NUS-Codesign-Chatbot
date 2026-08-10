@@ -354,11 +354,19 @@ def concise_coach_response(response_text: str) -> str:
 
 
 def set_current_stage(journey: dict[str, Any], stage_id: str) -> dict[str, Any]:
+    """Set the active Thinking Path stage without marking other stages complete."""
     normalized = normalize_journey(journey)
     if stage_id not in STAGE_BY_ID:
         raise ValueError(f"Unknown thinking stage: {stage_id}")
     normalized["current_stage"] = stage_id
     return normalized
+
+
+def stage_selection_enabled() -> bool:
+    """Return whether Journey stage picking is enabled for this process."""
+    from backend.settings import settings
+
+    return bool(settings.student_stage_selection)
 
 
 def next_stage_id(stage_id: str) -> str | None:

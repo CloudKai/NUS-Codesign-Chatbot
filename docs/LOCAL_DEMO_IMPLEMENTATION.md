@@ -132,12 +132,16 @@ hard-code a model in the workflow. Give a helpful, actionable error if Ollama is
 unavailable. The mock provider must be deterministic and support all automated
 tests without network access.
 
-Retrieval is notebook-isolated and source-first. It stores chunk metadata and
-stable source mappings, retrieves only selected sources from the active
-notebook, and returns citations that open the correct source. Student uploads
-remain private. Enforce existing file-count and size limits, prevent path
-traversal, validate content types where practical, and preserve legacy source
-attachments.
+Retrieval is notebook-isolated and source-first. The current local adapter
+creates sentence-aware overlapping chunks from extracted selected-source text
+at query time, ranks them against the current turn plus bounded continuity,
+and records stable source/chunk audit mappings on the assistant message. It
+retrieves only selected sources from the active notebook and returns citations
+that open the correct source. Student uploads remain private. Enforce existing
+file-count and size limits, prevent path traversal, validate content types
+where practical, and preserve legacy source attachments. Future Bedrock
+Knowledge Base retrieval replaces only the retrieval adapter and must retain
+the same notebook/source filter, chunk-result contract, and citation mapping.
 
 ## Development sequence
 

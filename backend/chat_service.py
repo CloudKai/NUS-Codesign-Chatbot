@@ -14,11 +14,17 @@ from openai import APIConnectionError, APIStatusError, OpenAI, RateLimitError
 from .analysis_tool import PYTHON_TOOL, run_analysis_tool
 from .file_processing import StoredUpload
 from .models import ModelDefinition, get_model, validate_reasoning
+from .persistence.factory import create_student_store
+from .retrieval import (
+    LocalChunkRetriever,
+    RetrievalQuery,
+    focused_excerpt,
+    retrieval_sources_from_notebook,
+)
 from .settings import settings
 from .source_library import (
     add_file_sources,
     backfill_legacy_sources,
-    selected_source_context,
     source_image_input,
 )
 from .student_journey import (
@@ -56,11 +62,11 @@ class ChatStream:
     prompt: str
     uploads: list[StoredUpload]
     grounding_sources: list[dict[str, Any]]
+    retrieval_context: str
     source_references: list[dict[str, Any]]
     options: ChatOptions
     text: str = ""
     assistant_message_id: str | None = None
-    response_id: str | None = None
     sources: list[dict[str, str]] = field(default_factory=list)
     artifacts: list[Path] = field(default_factory=list)
     usage: dict[str, Any] = field(default_factory=dict)
@@ -80,7 +86,7 @@ def _safe_history_item(item: dict[str, Any]) -> dict[str, Any]:
                 normalized.append(
                     {"type": "input_text", "text": "[Student included an image in this turn.]"}
                 )
-            elif "<notebook_sources>" in text or text.startswith(
+            elif "<selected_sources>" in text or text.startswith(
                 "The student attached the following assignment material."
             ):
                 continue
@@ -145,7 +151,7 @@ def _sources_from_response(response: Any) -> list[dict[str, str]]:
 
 class StudentChatEngine:
     def __init__(self, store: StudentStore | None = None):
-        self.store = store or StudentStore()
+        self.store = store or create_student_store()
 
     def submit(
         self,
@@ -207,7 +213,37 @@ class StudentChatEngine:
         options.source_ids = [source["id"] for source in available_sources]
         if not available_sources:
             options.allow_model_knowledge = True
-        _, source_references = selected_source_context(available_sources)
+        retrieval_result = LocalChunkRetriever().retrieve(
+            RetrievalQuery(
+                current_message=prompt,
+                current_stage=options.thinking_stage,
+                sources=retrieval_sources_from_notebook(available_sources),
+                project_context="\n".join(
+                    str(value or "")
+                    for value in options.assignment.values()
+                    if str(value or "").strip()
+                ),
+                recent_messages=tuple(self.store.get_messages(thread_id)),
+            )
+        )
+        sources_by_id = {str(source["id"]): source for source in available_sources}
+        source_references: list[dict[str, Any]] = []
+        seen_reference_ids: set[str] = set()
+        for chunk in retrieval_result.chunks:
+            if chunk.source_id in seen_reference_ids:
+                continue
+            seen_reference_ids.add(chunk.source_id)
+            source = sources_by_id[chunk.source_id]
+            source_references.append(
+                {
+                    "id": chunk.source_id,
+                    "label": chunk.label,
+                    "title": chunk.title,
+                    "kind": source.get("kind", "file"),
+                    "mime": source.get("mime", "application/octet-stream"),
+                    "url": source.get("sourceUrl"),
+                }
+            )
         upload_metadata = [
             {
                 "name": upload.name,
@@ -234,18 +270,29 @@ class StudentChatEngine:
             "response_language": options.response_language,
             "uploads": upload_metadata,
             "source_ids": options.source_ids,
+            "retrieval_refs": [
+                {
+                    "source_id": chunk.source_id,
+                    "label": chunk.label,
+                    "title": chunk.title,
+                    "chunk_id": chunk.chunk_id,
+                    "excerpt": focused_excerpt(chunk.text, prompt, limit=600),
+                    "score": chunk.score,
+                }
+                for chunk in retrieval_result.chunks
+            ],
             "source_refs": source_references,
             "allow_model_knowledge": options.allow_model_knowledge,
         }
         if options.existing_user_message_id:
-            self.store.revise_user_message(
+            revision = self.store.revise_conversation_from_user_message(
                 thread_id,
                 options.existing_user_message_id,
                 prompt,
                 model_id=model.id,
                 metadata=user_metadata,
             )
-            user_id = options.existing_user_message_id
+            user_id = revision.edited_message_id
             journey_options = self._journey_from_messages(
                 self.store.get_messages(thread_id),
                 response_detail=options.response_detail,
@@ -279,6 +326,7 @@ class StudentChatEngine:
             prompt=prompt,
             uploads=stored_uploads,
             grounding_sources=available_sources,
+            retrieval_context=retrieval_result.context,
             source_references=source_references,
             options=options,
         )
@@ -307,17 +355,16 @@ class StudentChatEngine:
 
     def _user_item(self, stream: ChatStream, model: ModelDefinition) -> dict[str, Any]:
         content: list[dict[str, Any]] = [{"type": "input_text", "text": stream.prompt}]
-        context, references = selected_source_context(stream.grounding_sources)
-        stream.source_references = references
+        context = stream.retrieval_context
         if context:
             content.append(
                 {
                     "type": "input_text",
                     "text": (
-                        "<notebook_sources>\n"
+                        "<selected_sources>\n"
                         "Use these selected notebook sources for this turn. Cite factual claims "
                         "with their exact bracketed labels, such as [S1].\n\n"
-                        f"{context}\n</notebook_sources>"
+                        f"{context}\n</selected_sources>"
                     ),
                 }
             )
@@ -442,7 +489,6 @@ class StudentChatEngine:
                     "response_language": stream.options.response_language,
                     "sources": stream.sources,
                     "artifacts": [str(path) for path in stream.artifacts],
-                    "response_id": stream.response_id,
                     "source_ids": stream.options.source_ids,
                     "source_refs": cited_references,
                     "allow_model_knowledge": stream.options.allow_model_knowledge,
@@ -450,14 +496,6 @@ class StudentChatEngine:
                     "next_thinking_stage": next_stage,
                 },
                 is_error=bool(stream.error),
-            )
-            self.store.record_turn(
-                stream.thread_id,
-                stream.user_message_id,
-                stream.assistant_message_id,
-                model.id,
-                stream.options.reasoning_effort,
-                stream.usage,
             )
 
     def _mock_stream(self, stream: ChatStream, model: ModelDefinition) -> Iterator[str]:
@@ -495,42 +533,27 @@ class StudentChatEngine:
         for chunk in self._chunk(answer):
             stream.text += chunk
             yield chunk
-        state = self.store.get_state(stream.thread_id)
-        history = list(state.get("history", []))
-        history.extend(
-            [
-                {"role": "user", "content": stream.prompt},
-                {"role": "assistant", "content": stream.text},
-            ]
-        )
-        self.store.save_state(
-            stream.thread_id,
-            previous_response_id=None,
-            model_id=model.id,
-            history=history,
-            source_snapshot=stream.options.source_ids,
-            grounding_mode=(
-                "hybrid" if stream.options.allow_model_knowledge else "source_first"
-            ),
-        )
         stream.usage = {"mock": True}
 
     def _openai_stream(self, stream: ChatStream, model: ModelDefinition) -> Iterator[str]:
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is not configured. Use MOCK_OPENAI=true to preview.")
         client = OpenAI(api_key=settings.openai_api_key)
-        state = self.store.get_state(stream.thread_id)
-        history = list(state.get("history", []))
+        history = [
+            {"role": message["role"], "content": message["content"]}
+            for message in self.store.get_messages(stream.thread_id)
+            if str(message.get("content") or "").strip()
+        ]
         user_item = self._user_item(stream, model)
         current_input, previous_response_id = response_input_for_model(
             history,
             user_item,
-            previous_model=state.get("modelId"),
+            previous_model=None,
             selected_model=model.id,
-            previous_response_id=state.get("previousResponseId"),
-            previous_source_snapshot=state.get("sourceSnapshot"),
+            previous_response_id=None,
+            previous_source_snapshot=None,
             selected_source_snapshot=stream.options.source_ids,
-            previous_grounding_mode=state.get("groundingMode"),
+            previous_grounding_mode=None,
             selected_grounding_mode=(
                 "hybrid" if stream.options.allow_model_knowledge else "source_first"
             ),
@@ -608,29 +631,11 @@ class StudentChatEngine:
             stream.text += warning
             yield warning
 
-        stream.response_id = final_response_id
         if completed_response:
             stream.sources = _sources_from_response(completed_response)
         if not stream.text and stream.artifacts:
             stream.text = "I generated the requested output. Review the file below."
             yield stream.text
-        history.extend(
-            [
-                {"role": "user", "content": stream.prompt},
-                {"role": "assistant", "content": stream.text},
-            ]
-        )
-        self.store.save_state(
-            stream.thread_id,
-            previous_response_id=final_response_id,
-            model_id=model.id,
-            history=history,
-            vector_store_id=state.get("vectorStoreId"),
-            source_snapshot=stream.options.source_ids,
-            grounding_mode=(
-                "hybrid" if stream.options.allow_model_knowledge else "source_first"
-            ),
-        )
 
     def _mock_image(self, thread_id: str, prompt: str) -> Path:
         workspace = (settings.workspaces_dir / thread_id).resolve()

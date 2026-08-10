@@ -6,9 +6,11 @@ import io
 import logging
 import mimetypes
 import tempfile
+import uuid
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from .settings import settings
 
@@ -29,6 +31,13 @@ _PDF_IMAGE_MAX_EDGE = 1600
 _PDF_JPEG_QUALITY = 72
 _IMAGE_MAX_EDGE = 2048
 _IMAGE_JPEG_QUALITY = 82
+_MAX_PDF_PAGES = 200
+_MAX_OFFICE_ARCHIVE_ENTRIES = 5_000
+_MAX_OFFICE_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
+_MAX_OFFICE_COMPRESSION_RATIO = 100
+_MAX_DOCUMENT_PARAGRAPHS = 50_000
+_MAX_PRESENTATION_SLIDES = 300
+_MAX_SPREADSHEET_CELLS = 200_000
 
 
 @dataclass(frozen=True)
@@ -39,10 +48,26 @@ class StoredUpload:
     size: int
     supported: bool
     extracted_text: str = ""
+    storage_key: str | None = None
+    storage_provider: str = "local"
+    source_id: str | None = None
 
     @property
     def is_image(self) -> bool:
-        return self.path.suffix.lower() in IMAGE_SUFFIXES
+        suffix = (
+            Path(self.name).suffix.lower()
+            if self.storage_key
+            else self.path.suffix.lower()
+        )
+        return suffix in IMAGE_SUFFIXES
+
+    def read_bytes(self) -> bytes:
+        """Return upload bytes from local path or configured object storage."""
+        if self.storage_key and self.storage_provider != "local":
+            from backend.persistence.factory import get_file_storage
+
+            return get_file_storage().get_bytes(self.storage_key)
+        return self.path.read_bytes()
 
 
 def _safe_name(name: str) -> str:
@@ -61,6 +86,24 @@ def _upload_root(thread_id: str) -> Path:
     return root
 
 
+def _validate_office_archive(path: Path) -> None:
+    """Reject Office zip containers with unsafe expansion characteristics."""
+    with zipfile.ZipFile(path) as archive:
+        entries = archive.infolist()
+        if len(entries) > _MAX_OFFICE_ARCHIVE_ENTRIES:
+            raise ValueError("Office document contains too many archive entries")
+        total_compressed = sum(max(0, entry.compress_size) for entry in entries)
+        total_uncompressed = sum(max(0, entry.file_size) for entry in entries)
+        if total_uncompressed > _MAX_OFFICE_UNCOMPRESSED_BYTES:
+            raise ValueError("Office document expands beyond the safe limit")
+        if (
+            total_compressed > 0
+            and total_uncompressed / total_compressed
+            > _MAX_OFFICE_COMPRESSION_RATIO
+        ):
+            raise ValueError("Office document compression ratio is unsafe")
+
+
 def extract_text(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix in TEXT_SUFFIXES:
@@ -68,16 +111,25 @@ def extract_text(path: Path) -> str:
     if suffix == ".pdf":
         from pypdf import PdfReader
 
-        return "\n\n".join(page.extract_text() or "" for page in PdfReader(path).pages)
+        reader = PdfReader(path)
+        if len(reader.pages) > _MAX_PDF_PAGES:
+            raise ValueError(f"PDF exceeds the {_MAX_PDF_PAGES}-page extraction limit")
+        return "\n\n".join(page.extract_text() or "" for page in reader.pages)
     if suffix == ".docx":
         from docx import Document
 
+        _validate_office_archive(path)
         document = Document(path)
+        if len(document.paragraphs) > _MAX_DOCUMENT_PARAGRAPHS:
+            raise ValueError("Word document contains too many paragraphs")
         return "\n".join(paragraph.text for paragraph in document.paragraphs)
     if suffix == ".pptx":
         from pptx import Presentation
 
+        _validate_office_archive(path)
         presentation = Presentation(path)
+        if len(presentation.slides) > _MAX_PRESENTATION_SLIDES:
+            raise ValueError("Presentation contains too many slides")
         values: list[str] = []
         for index, slide in enumerate(presentation.slides, start=1):
             values.append(f"Slide {index}")
@@ -88,12 +140,17 @@ def extract_text(path: Path) -> str:
     if suffix == ".xlsx":
         from openpyxl import load_workbook
 
+        _validate_office_archive(path)
         workbook = load_workbook(path, read_only=True, data_only=True)
         output = io.StringIO()
         writer = csv.writer(output)
+        cell_count = 0
         for sheet in workbook.worksheets:
             writer.writerow([f"Sheet: {sheet.title}"])
             for row in sheet.iter_rows(values_only=True):
+                cell_count += len(row)
+                if cell_count > _MAX_SPREADSHEET_CELLS:
+                    raise ValueError("Spreadsheet exceeds the safe cell limit")
                 writer.writerow(["" if value is None else value for value in row])
         return output.getvalue()
     return ""
@@ -276,6 +333,8 @@ def save_uploads(
     *,
     max_file_size_mb: int | None = None,
     compress: bool = True,
+    owner_id: str = "local-student",
+    source_ids: Sequence[str] | None = None,
 ) -> list[StoredUpload]:
     """Validate, optionally compress, and store uploads.
 
@@ -285,53 +344,126 @@ def save_uploads(
 
     Pass ``compress=False`` for trusted copies (for example already-prepared
     lecture-note sync) so notebook create does not re-encode large PDFs.
+
+    Local development keeps the existing ``files_dir/threads/.../uploads``
+    layout. Object storage stores bytes under generated keys that include a
+    server-generated ``source_id``:
+
+    ``users/<user-id>/notebooks/<notebook-id>/sources/<source-id>/raw/<safe-filename>``
     """
     items = list(uploads)
     if len(items) > settings.max_files:
         raise ValueError(f"Upload at most {settings.max_files} files per message.")
-    root = _upload_root(thread_id)
+    if source_ids is not None and len(source_ids) != len(items):
+        raise ValueError("source_ids length must match uploads")
     size_limit_mb = max_file_size_mb or settings.max_file_size_mb
-    stored: list[StoredUpload] = []
-    for name, content, supplied_mime in items:
+    for name, content, _ in items:
         if len(content) > size_limit_mb * 1024 * 1024:
             raise ValueError(f"{name} exceeds the {size_limit_mb} MB limit.")
-        payload = compress_upload_bytes(name, content) if compress else content
-        safe_name = _safe_name(name)
-        candidate = root / safe_name
-        counter = 2
-        while candidate.exists():
-            candidate = root / f"{Path(safe_name).stem}-{counter}{Path(safe_name).suffix}"
-            counter += 1
-        candidate.write_bytes(payload)
-        mime = (
-            supplied_mime
-            or mimetypes.guess_type(candidate.name)[0]
-            or "application/octet-stream"
-        )
-        supported = candidate.suffix.lower() in SUPPORTED_SUFFIXES
-        extracted = ""
-        if supported and candidate.suffix.lower() not in IMAGE_SUFFIXES:
-            try:
-                extracted = extract_text(candidate)
-            except Exception as exc:
-                extracted = (
-                    f"[Could not extract {candidate.name}: {type(exc).__name__}]"
-                )
-        stored.append(
-            StoredUpload(
-                name=candidate.name,
-                path=candidate,
-                mime=mime,
-                size=len(payload),
-                supported=supported,
-                extracted_text=extracted[:120_000],
+    use_object_storage = settings.file_storage_provider != "local"
+    root = None if use_object_storage else _upload_root(thread_id)
+    stored: list[StoredUpload] = []
+    pending_object_keys: list[str] = []
+    try:
+        for index, (name, content, supplied_mime) in enumerate(items):
+            payload = compress_upload_bytes(name, content) if compress else content
+            safe_name = _safe_name(name)
+            mime = (
+                supplied_mime
+                or mimetypes.guess_type(safe_name)[0]
+                or "application/octet-stream"
             )
-        )
+            suffix = Path(safe_name).suffix.lower()
+            supported = suffix in SUPPORTED_SUFFIXES
+            extracted = ""
+            if supported and suffix not in IMAGE_SUFFIXES:
+                try:
+                    extracted = _extract_text_from_bytes(safe_name, payload)
+                except Exception as exc:
+                    extracted = f"[Could not extract {safe_name}: {type(exc).__name__}]"
+
+            if use_object_storage:
+                from backend.persistence.factory import get_file_storage
+                from backend.persistence.object_keys import build_upload_object_key
+
+                source_id = str(
+                    (source_ids[index] if source_ids is not None else None)
+                    or uuid.uuid4()
+                )
+                key = build_upload_object_key(
+                    user_id=owner_id,
+                    notebook_id=thread_id,
+                    source_id=source_id,
+                    filename=safe_name,
+                )
+                # Track before PUT: some clients can create the object and then
+                # raise while decoding a response. Deleting a missing key is safe.
+                pending_object_keys.append(key)
+                get_file_storage().put_bytes(key=key, data=payload, content_type=mime)
+                temp_path = Path(tempfile.gettempdir()) / safe_name
+                stored.append(
+                    StoredUpload(
+                        name=safe_name,
+                        path=temp_path,
+                        mime=mime,
+                        size=len(payload),
+                        supported=supported,
+                        extracted_text=extracted[:120_000],
+                        storage_key=key,
+                        storage_provider=settings.file_storage_provider,
+                        source_id=source_id,
+                    )
+                )
+                continue
+
+            assert root is not None
+            candidate = root / safe_name
+            counter = 2
+            while candidate.exists():
+                candidate = root / f"{Path(safe_name).stem}-{counter}{Path(safe_name).suffix}"
+                counter += 1
+            candidate.write_bytes(payload)
+            if supported and suffix not in IMAGE_SUFFIXES and not extracted:
+                try:
+                    extracted = extract_text(candidate)
+                except Exception as exc:
+                    extracted = (
+                        f"[Could not extract {candidate.name}: {type(exc).__name__}]"
+                    )
+            local_source_id = (
+                str(source_ids[index]) if source_ids is not None else None
+            )
+            stored.append(
+                StoredUpload(
+                    name=candidate.name,
+                    path=candidate,
+                    mime=mime,
+                    size=len(payload),
+                    supported=supported,
+                    extracted_text=extracted[:120_000],
+                    storage_provider="local",
+                    source_id=local_source_id,
+                )
+            )
+    except Exception:
+        if pending_object_keys:
+            from backend.persistence.factory import get_file_storage
+
+            storage = get_file_storage()
+            for key in pending_object_keys:
+                try:
+                    storage.delete(key)
+                except Exception:
+                    logger.warning(
+                        "Failed to clean object after upload batch failure",
+                        exc_info=True,
+                    )
+        raise
     return stored
 
 
 def image_input(upload: StoredUpload) -> dict[str, str]:
-    encoded = base64.b64encode(upload.path.read_bytes()).decode("ascii")
+    encoded = base64.b64encode(upload.read_bytes()).decode("ascii")
     return {
         "type": "input_image",
         "image_url": f"data:{upload.mime};base64,{encoded}",

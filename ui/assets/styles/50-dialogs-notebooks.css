@@ -58,12 +58,27 @@
         height:auto;
         /* Scroll only the notebook list, never the whole dialog. */
         overflow:hidden !important;
+        padding:.95rem 1.15rem 1.1rem !important;
+        box-sizing:border-box !important;
     }
 
     [role="dialog"]:has(.st-key-notebook-search)
     > [data-testid="stVerticalBlock"] {
         overflow:hidden !important;
         max-height:100%;
+        padding:0 !important;
+        margin:0 !important;
+    }
+
+    /* Keep the close control from colliding with the title/actions. */
+    [role="dialog"]:has(.st-key-notebook-search) > h2[slot="title"],
+    [role="dialog"]:has(.st-key-notebook-search) header,
+    [role="dialog"]:has(.st-key-notebook-search)
+    [data-testid="stDialogHeader"],
+    [role="dialog"]:has(.st-key-notebook-search)
+    [data-testid="stMarkdownContainer"]:has(h2) {
+        padding-right:2rem !important;
+        box-sizing:border-box !important;
     }
 
     [data-testid="stDialog"] > div:has(> [role="dialog"] .st-key-notebook-search) {
@@ -659,7 +674,7 @@
 
     [class*="st-key-notebook_card_"] {
         margin:0 !important;
-        padding:15px .1rem 15px 8px;
+        padding:15px .75rem 15px .75rem;
         border:0;
         border-bottom:1px solid var(--cd-border);
         border-radius:0;

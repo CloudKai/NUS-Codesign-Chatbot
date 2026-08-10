@@ -62,8 +62,8 @@ def thread_overview(thread: dict[str, Any]) -> dict[str, Any]:
         "progress": journey_progress(journey),
         "summary": " ".join(summary.split())[:160] or "No learning summary yet.",
         "turns": int(thread.get("studentTurnCount") or 0),
-        "helpful": int(thread.get("helpfulCount") or 0),
-        "review": int(thread.get("needsReviewCount") or 0),
+        "helpful": 0,
+        "review": 0,
     }
 
 

@@ -44,7 +44,9 @@ def resources(
     LearningProgressService,
 ]:
     """Create the shared store, workspace service, and coaching application service."""
-    store = StudentStore(identifier=identifier)
+    from backend.persistence.factory import create_student_store
+
+    store = create_student_store(identifier=identifier)
     service = WorkspaceService(store, CourseMaterialSyncCoordinator())
     notebooks = SQLiteNotebookRepository(store)
     transitions = SQLitePhaseTransitionRepository(store)
@@ -55,7 +57,9 @@ def resources(
         notebooks,
         workflow,
         learning,
-        auto_advance_stages=bool(getattr(settings, "auto_advance_stages", False)),
+        auto_advance_stages=bool(
+            getattr(settings, "effective_auto_advance_stages", False)
+        ),
     )
     return store, service, coach, learning
 
@@ -98,25 +102,37 @@ def course_material_sync() -> CourseMaterialSyncCoordinator:
 
 @st.cache_resource
 def local_api_client() -> LocalApiClient:
-    """Create the typed client used when the optional local API mode is enabled."""
+    """Create the typed client used when the optional local API mode is enabled.
+
+    Forwards the short-lived Cognito ID-token cookie on each request so FastAPI
+    can resolve the authenticated owner. The refresh cookie never reaches
+    Streamlit and is not forwarded here.
+    """
+
+    def _id_cookie() -> dict[str, str]:
+        try:
+            from ui.auth_gate import _cookie_value
+        except Exception:
+            return {}
+        token = _cookie_value(str(settings.cognito_id_token_cookie_name))
+        if not token:
+            return {}
+        return {str(settings.cognito_id_token_cookie_name): token}
+
     return LocalApiClient(
-        str(getattr(settings, "api_base_url", "http://127.0.0.1:8000"))
+        str(getattr(settings, "api_base_url", "http://127.0.0.1:8000")),
+        cookie_provider=_id_cookie,
     )
 
 
 def local_api_enabled() -> bool:
-    """Return whether the single-owner local API is safe for this session.
+    """Return whether Streamlit should call FastAPI for application traffic.
 
-    The current FastAPI demo owns one ``local-student`` store and has no
-    authenticated request boundary. Cognito users therefore stay on the
-    equivalent in-process application services, which are keyed by
-    ``cognito:{sub}``, instead of collapsing multiple users into that shared
-    API owner. The API remains available for its original single-user local
-    demo and deterministic contract tests.
+    Cognito-authenticated students and the local ``local-student`` demo both use
+    the API when ``USE_LOCAL_API`` is enabled. FastAPI resolves the owner from
+    the verified Cognito ID cookie (or falls back to local-student for demos).
     """
-    return bool(getattr(settings, "use_local_api", False)) and (
-        owner_identifier() == "local-student"
-    )
+    return bool(getattr(settings, "use_local_api", False))
 
 
 def submit_coach_turn(request: CoachRequest) -> CoachTurn:
@@ -142,6 +158,7 @@ def stream_coach_turn_events(request: CoachRequest) -> Iterator[dict[str, Any]]:
         "thread_id": request.thread_id,
         "stage": request.current_stage,
     }
+    yield {"event": "status", "phase": "thinking"}
     turn = coach.submit(request)
     text = turn.response_text
     chunk_size = 32
@@ -367,20 +384,69 @@ class WorkspaceFacade:
         _, _, _, learning = _resolve_resources()
         return learning.resolve(thread_id, transition_id, accepted)
 
+    def select_stage(self, thread_id: str, stage_id: str) -> dict:
+        """Move the notebook to a student-chosen Thinking Path stage."""
+        if local_api_enabled():
+            return local_api_client().select_stage(thread_id, stage_id)
+        _, _, _, learning = _resolve_resources()
+        return learning.select_stage(thread_id, stage_id)
+
+    def revise_message(
+        self,
+        thread_id: str,
+        message_id: str,
+        content: str,
+        *,
+        idempotency_key: str,
+        model_id: str | None = None,
+        reasoning_effort: str | None = None,
+        response_detail: str | None = None,
+        response_language: str | None = None,
+    ) -> CoachTurn:
+        """Revise a user message through the FastAPI or in-process coach path."""
+        if local_api_enabled():
+            return local_api_client().revise_message(
+                thread_id,
+                message_id,
+                content,
+                idempotency_key=idempotency_key,
+                model_id=model_id,
+                reasoning_effort=reasoning_effort,
+                response_detail=response_detail,
+                response_language=response_language,
+            )
+        _, _, coach, _ = _resolve_resources()
+        return coach.revise_and_resubmit(
+            thread_id,
+            message_id,
+            content,
+            idempotency_key=idempotency_key,
+            model_id=model_id,
+            reasoning_effort=reasoning_effort,
+            response_detail=response_detail,
+            response_language=response_language,
+        )
+
     def request_course_material_sync(self, thread_id: str):
         """Start or join course-material sync for the active notebook.
 
-        Single-user local API sessions sync through FastAPI. Cognito sessions
-        use the owner-scoped in-process store selected by ``local_api_enabled``.
-
-        Otherwise uses the shared in-process coordinator so the Sources
-        fragment can poll without blocking on large lecture PDFs.
+        API-mode sessions (including Cognito) sync through FastAPI so ownership
+        stays on the authenticated application user.
         """
         if local_api_enabled():
             api_base = str(getattr(settings, "api_base_url", "http://127.0.0.1:8000"))
+            client = local_api_client()
+            # Streamlit's cookie context is script-thread local. Capture the
+            # short-lived ID cookie before handing work to the sync executor;
+            # reading it inside that worker resolves the fallback owner and
+            # causes an endless authenticated-notebook 404 retry loop.
+            auth_cookies = client.auth_cookie_snapshot()
 
             def _sync_via_api() -> LectureNotesSyncResult:
-                payload = local_api_client().sync_course_materials(thread_id)
+                payload = client.sync_course_materials(
+                    thread_id,
+                    auth_cookies=auth_cookies,
+                )
                 errors = payload.get("errors") or []
                 return LectureNotesSyncResult(
                     added=int(payload.get("added") or 0),

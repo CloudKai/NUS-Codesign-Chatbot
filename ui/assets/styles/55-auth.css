@@ -248,18 +248,29 @@
  * ========================================================================= */
 
 /*
- * Shared 10px external gap under .cd-auth-course-notice ("Never graded").
- * Used by the redirecting box wrapper and the empty signed-out spacer.
+ * Shared 10px external gap around the redirecting box below
+ * .cd-auth-course-notice ("Never graded"). The empty signed-out spacer
+ * overrides this with a fixed 10px height.
  * Prefer padding/height here — Streamlit collapses margin on wrappers.
  */
 .cd-auth-gap-after-course-notice {
-    padding-top:10px;
+    padding:10px 0;
 }
 
 .cd-auth-gap-after-course-notice--spacer {
-    /* Empty spacer ahead of st.success (signed-out alert). */
-    padding-top:0;
+    /* Empty spacer ahead of st.success / st.error after the course notice. */
+    padding:0;
     height:10px;
+}
+
+/* Config-error alert: keep Streamlit's outer gap from stacking on the spacer. */
+.st-key-auth_login_card .st-key-auth-config-error {
+    margin-top:0 !important;
+    padding-top:0 !important;
+}
+
+.st-key-auth_login_card .st-key-auth-config-error [data-testid="stAlert"] {
+    margin-top:0 !important;
 }
 
 /* Redirecting status box (spinner + "Redirecting..." + timeout hint) */
@@ -307,10 +318,21 @@
     to { transform:rotate(360deg); }
 }
 
-/* Sign in CTA: 10px gap under course notice (or under status blocks). */
+/* Sign in CTA container */
 .st-key-auth_login_card .st-key-auth-sign-in {
     margin-top:10px !important;
     padding-top:0 !important;
+}
+
+/* Navigation fallback is deliberately hidden; the original Streamlit button
+ * remains the only visible sign-in control during redirect/retry. */
+a[data-cd-auth-redirect="1"] {
+    display:none !important;
+}
+
+.st-key-auth_login_card [class*="st-key-auth-sign-in"] button,
+.st-key-auth_login_card button[kind="primary"] {
+    min-height:2.6rem !important;
 }
 
 /* Keep Streamlit's signed-out alert flush to the spacer above (no double gap). */
@@ -333,11 +355,6 @@
 
 .st-key-auth_login_card:has(.st-key-auth-signed-out-notice) .st-key-auth-sign-in {
     margin-top:5px !important;
-}
-
-.st-key-auth_login_card [class*="st-key-auth-sign-in"] button,
-.st-key-auth_login_card button[kind="primary"] {
-    min-height:2.6rem !important;
 }
 
 /* =========================================================================

@@ -27,6 +27,7 @@ from ui.constants import APPEARANCE_MODES, DEFAULT_APPEARANCE, RESPONSE_LANGUAGE
 from ui.layout.column_resize import set_side_panel_collapsed
 from ui.rename import bump_rename_epoch, discard_rename_draft
 from ui.runtime import rerun, store
+from ui.retry_keys import purge_notebook_retry_keys
 from ui.settings import apply_selected_model
 
 
@@ -58,6 +59,7 @@ def initialize_session() -> None:
         "composer_nonce": 0,
         "pending_edit": None,
         "editing_message": None,
+        "edit_confirm_message_id": None,
         "pending_notebook_actions": None,
         "reopen_notebooks_dialog": False,
         "mobile_panel": "Chat",
@@ -124,8 +126,6 @@ def new_notebook(should_rerun: bool = True) -> None:
     store.update_thread(
         thread_id,
         metadata={
-            "learning_journey": journey,
-            "thinking_stage": journey["current_stage"],
             "response_detail": journey["response_detail"],
             "response_language": "English",
             "allow_model_knowledge": False,
@@ -140,6 +140,8 @@ def new_notebook(should_rerun: bool = True) -> None:
     st.session_state.assignment = {"title": "", "course": "", "brief": "", "rubric": ""}
     st.session_state.allow_model_knowledge = False
     st.session_state.editing_message = None
+    st.session_state.pending_edit = None
+    st.session_state.edit_confirm_message_id = None
     _persist_active_thread(thread_id)
     if should_rerun:
         st.session_state.mobile_panel = "Chat"
@@ -154,6 +156,7 @@ def delete_notebook(thread_id: str) -> None:
     st.session_state.pending_notebook_actions = None
     st.session_state.reopen_notebooks_dialog = True
     store.delete_thread(thread_id)
+    purge_notebook_retry_keys(st.session_state, thread_id)
     if thread_id == st.session_state.thread_id:
         st.session_state.thread_id = None
         _persist_active_thread(None)
@@ -198,7 +201,7 @@ def select_thread(thread_id: str, should_rerun: bool = True) -> None:
     # Keep effort compatible with the restored model choice.
     st.session_state.reasoning_effort = validate_reasoning(
         get_model(st.session_state.selected_model),
-        st.session_state.get("reasoning_effort"),
+        metadata.get("reasoning_effort"),
     )
     st.session_state.support_mode = DEFAULT_SUPPORT_MODE
     st.session_state.allow_model_knowledge = False
@@ -224,6 +227,8 @@ def select_thread(thread_id: str, should_rerun: bool = True) -> None:
         st.session_state.display_name = display_name
     st.session_state.thread_id = thread_id
     st.session_state.editing_message = None
+    st.session_state.pending_edit = None
+    st.session_state.edit_confirm_message_id = None
     _persist_active_thread(thread_id)
     store.backfill_legacy_sources(thread_id)
     seed_coach_welcome(store, thread_id)
@@ -232,15 +237,17 @@ def select_thread(thread_id: str, should_rerun: bool = True) -> None:
 
 
 def save_journey(journey: dict[str, Any]) -> None:
-    """Normalize and persist the learning journey for the active notebook."""
+    """Normalize local display state and persist student-editable settings only.
+
+    The session copy of ``current_stage`` is never sent back through generic
+    notebook metadata; FastAPI and the learning service own persisted stages.
+    """
     normalized = normalize_journey(journey)
     st.session_state.learning_journey = normalized
     st.session_state.response_detail = normalized["response_detail"]
     store.update_thread(
         st.session_state.thread_id,
         metadata={
-            "learning_journey": normalized,
-            "thinking_stage": normalized["current_stage"],
             "response_detail": normalized["response_detail"],
             "response_language": st.session_state.get("response_language", "English"),
         },

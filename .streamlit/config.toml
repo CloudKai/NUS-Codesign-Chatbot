@@ -28,7 +28,8 @@ secondaryBackgroundColor = "#1C232B"
 
 [server]
 headless = true
-maxUploadSize = 25
+# Keep aligned with backend settings.max_file_size_mb (MAX_FILE_SIZE_MB, default 10).
+maxUploadSize = 10
 fileWatcherType = "auto"
 
 [browser]

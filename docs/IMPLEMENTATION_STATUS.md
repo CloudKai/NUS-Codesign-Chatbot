@@ -2,636 +2,591 @@
 
 ## Current phase
 
-**Public Caddy API exposure reduced to logout + health**
+**AWS cutover: DSQL revision migration + live smoke (after UI hardening).**
+Local UI hardening on ``Production-AddEditFunction`` is complete for this pass:
+explicit edit retry (no auto-resubmit after revise failure), sanitized Sources +
+Studio errors, Conversation NN label hidden. Architecture is frozen for further
+feature work — next work is production DSQL migration and live AWS verification
+only (see Next exact action).
 
-Production Caddy now publicly proxies only
-``/api/v1/auth/logout/callback`` and ``/api/v1/health`` to FastAPI. All other
-``/api/*`` requests return 404 at the edge and never reach the unauthenticated
-FastAPI process. Streamlit remains the fallback for non-API traffic. Local
-``scripts/start.sh``, Cognito/session semantics, FastAPI routes, and Compose
-topology are unchanged.
+### UI hardening just completed (this pass)
 
-### Behavior implemented
+1. **Explicit edit retry.** On revise failure, clear ``pending_edit`` so the next
+   rerun does not auto-resubmit; keep the stable ``get_retry_key`` UUID; restore
+   the in-bubble draft; require Send to retry.
+2. **Studio sanitized errors.** Stage-select and transition-confirm failures log
+   internals and show fixed student-safe messages (no ``str(exc)``).
+3. **Full mock suite.** ``.venv/bin/python -m pytest -q`` → **387 passed**.
 
-- Restricted ``Caddyfile`` public FastAPI exposure to the browser logout
-  callback and optional health probe.
-- Remaining ``/api/*`` paths respond ``404 Not Found`` at Caddy before FastAPI.
-- In-container ``CO_DESIGN_API_URL=http://127.0.0.1:8000`` remains for local
-  process communication; browser logout still uses
-  ``CO_DESIGN_PUBLIC_API_URL``.
-- Deployment tests assert the allow-list, ``/api/*`` block, Streamlit fallback,
-  internal app ports, and unchanged container-local API URL.
+### Prior production-hardening (still true)
 
-### Files changed
+Append-only edit remains (no DELETE truncate). DSQL revision migration is
+resumable/idempotent (DEFAULT + batched NULL backfill). Ownership stays
+``messages.notebook_id → notebooks.user_id → users.id``.
 
-- Updated: ``Caddyfile``, ``tests/test_deployment_config.py``, ``README.md``,
-  this status file.
+### Hardening behavior changes (revision pass)
 
-### Commands run and results
+1. **DSQL revision migration.** ``scripts/init_dsql.py`` inspects
+   ``information_schema`` name **and** ``column_default``, repairs missing
+   DEFAULT 0, and batch-backfills NULL ``conversation_revision`` (1000 rows /
+   transaction) for notebooks and messages. Safe to re-run; never app startup.
+2. **Stable revise retry.** Streamlit keeps one UUID idempotency key (via
+   ``get_retry_key`` scope ``revise:{message_id}``) until success; provider-
+   failure retries resume without a second revision bump. After a failed
+   attempt the UI requires an explicit Send (``pending_edit`` cleared).
+3. **Active-branch pending rejects.** ``select_learning_stage`` only rejects
+   ``decision_status='pending'`` rows active at the current revision.
+4. **Conversation revision (internal).** Stored revision stays zero-based;
+   student UI does not show a Conversation NN label.
+5. **No destructive message content update.** ``StudentStore.update_message``
+   raises; edits go through append-only revise only.
 
-- ``docker compose config --quiet`` → passed.
-- ``sh -n scripts/start.sh scripts/start_prod.sh`` → passed; ``scripts/start.sh``
-  diff empty.
-- ``.venv/bin/python -m pytest -q tests/test_deployment_config.py`` → **7 passed**.
-- No auth, FastAPI route, Dockerfile, Compose topology, or private secret/data
-  files were modified.
+### Prior append-only phase (still true)
 
-### Migration / compatibility / rollback
+1. **Active-branch chat.** Discussion renders only active messages for the
+   notebook's current ``conversation_revision``; superseded turns stay durable
+   for revision history / reporting.
+2. **Edit confirm copy.** Editing an earlier user turn states that a new
+   conversation revision/branch is created; later turns leave the active view
+   but remain in revision history (no truncate/delete claims).
+3. **Post-edit reload.** Successful revise reloads journey state and reruns so
+   ``get_messages`` shows the new active branch.
+4. **Message revision columns (backend contract).** Messages carry
+   ``conversation_revision``, ``previous_message_id``, and
+   ``superseded_at_revision``; ownership stays
+   ``messages.notebook_id → notebooks.user_id → users.id``.
+5. **Assessment fields (expected).** User rows and the fixed coach welcome have
+   ``assessment_text = NULL``; assessed coach assistant replies store
+   ``assessment_text`` JSON. Do not treat welcome NULL assessment as a failure.
+6. **Sources panel.** My Sources → Lecture Notes → Readings; course materials
+   lock-only; Select all + Sort for personal uploads.
 
-- No schema or data migration. Private ``.env``, secrets, and ``data/`` are
-  untouched.
-- Rollback restores the previous ``Caddyfile`` that proxied all ``/api/*`` to
-  FastAPI; application code does not need to change.
+### PART 1 root-cause evidence (“only welcome” on DSQL) — code inspection
 
-### Risks / blockers
+No live DSQL verification was run for this writeup.
 
-- FastAPI still has no authenticated request boundary inside the Compose
-  network. Edge blocking of public ``/api/*`` reduces exposure but does not
-  replace API authentication for a future authenticated-owner FastAPI path.
-- Existing database source rows may still store absolute paths from outside
-  ``/app/data``.
-- Live HTTPS/Cognito WebSocket smoke on EC2 remains pending.
+**Primary mechanism (code evidence):**
+
+- UI welcome seed (`ui/coach_welcome.py` → `store.add_message`) persists a fixed
+  assistant welcome through the workspace CRUD path **without** the coach
+  workflow / ``persist_coach_turn`` CAS.
+- Coach turns persist via ``CoachApplicationService`` → ``persist_coach_turn``.
+  At branch baseline ``6b54923``, this path required
+  ``notebooks.conversation_revision`` for CAS while the simpler welcome insert
+  did not.
+- **Welcome-only root cause from code inspection:** an older DSQL cluster
+  missing ``notebooks.conversation_revision`` could accept the independently
+  committed welcome, then roll back every real coaching turn when
+  ``persist_coach_turn`` reached its revision CAS.
+- The new implementation also reads/writes the three message revision columns
+  from normal and welcome inserts. Missing message columns are therefore a
+  deployment failure prerequisite, not evidence that the new app will still
+  seed a welcome successfully. Run admin ``scripts/init_dsql.py`` before
+  deploying the new image.
+
+**Secondary diagnostics (not claimed verified live):** wrong ``DSQL_ENDPOINT``,
+database name, runtime role/owner (``DSQL_USER`` not ``co_design_app``), or
+``.env``/Compose config mismatch can produce empty or partial notebooks and
+should be checked after confirming schema columns exist.
+
+### Owner reporting JOIN (do not denormalize messages)
+
+```sql
+SELECT
+  u.id AS user_pk,
+  u.identifier,
+  u.cognito_sub,
+  n.id AS notebook_id,
+  n.conversation_revision AS notebook_revision,
+  m.id AS message_id,
+  m.role,
+  m.conversation_revision AS message_revision,
+  m.previous_message_id,
+  m.superseded_at_revision,
+  m.assessment_text,
+  m.created_at
+FROM messages m
+JOIN notebooks n ON n.id = m.notebook_id
+JOIN users u ON u.id = n.user_id
+WHERE n.id = :notebook_id
+ORDER BY m.created_at, m.id;
+```
+
+### Files changed (this append-only phase)
+
+- ``backend/student_store.py``, ``backend/application.py``,
+  ``backend/chat_service.py``, ``backend/repositories.py``, and
+  ``backend/workspace_service.py`` — append-only persistence, snapshots, CAS,
+  retry recovery, and legacy compatibility.
+- ``backend/api.py``, ``backend/api_client.py``, and ``backend/domain.py`` —
+  append-only contract documentation.
+- ``backend/persistence/dsql_schema.py`` and ``scripts/init_dsql.py`` — fresh
+  schema plus catalog-driven additive DSQL migration.
+- ``ui/chat.py``, ``ui/assets/styles/30-chat.css``, and ``ui/AGENTS.md`` —
+  Conversation label, edit warning, and failure fall-through.
+- Revision, migration, idempotency, store, legacy-engine, and UI regression
+  tests were updated under ``tests/``.
+- ``docs/IMPLEMENTATION_STATUS.md`` and
+  ``docs/deploy/AWS_STATELESS_EC2.md`` — migration, reporting, evidence, and
+  deployment steps.
+
+``tests/test_conversation_revision.py`` asserts append-only semantics
+(``previous_message_id`` lineage, ``superseded_at_revision``, active
+``get_messages`` / ``get_messages_at_revision(0)`` = Conversation 01, provider-
+failure retention, stale CAS, revoked keys, pending supersede, API ownership,
+DSQL message columns, ``assessment_text`` on assessed assistants only).
+
+### Validation evidence
+
+- Integrated revision/storage/UI selection:
+  ``.venv/bin/python -m pytest -q tests/test_conversation_revision.py
+  tests/test_init_dsql.py tests/test_coach_idempotency.py
+  tests/test_streamlit_ui.py tests/test_student_store.py
+  tests/test_storage_providers.py tests/test_learning_service.py`` → **115
+  passed** (deterministic mocks; 2026-08-10).
+- Full suite: ``.venv/bin/python -m pytest -q`` → **381 passed**.
+- Compile: ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache
+  .venv/bin/python -m compileall -q backend ui streamlit_app.py tests scripts``
+  → passed.
+- Patch integrity: ``git diff --check`` → passed.
+- IDE diagnostics on edited Python modules: no errors.
+- Paid OpenAI / live AWS calls: not run.
+
+### Compatibility / migration / rollback
+
+- Additive only: existing message rows backfill to revision ``0`` with
+  ``superseded_at_revision`` NULL; display stays Conversation 01 until an edit.
+- DSQL: admin manual DDL / ``init_dsql.py`` catalog path only — **app startup
+  never DDL**. See ``docs/deploy/AWS_STATELESS_EC2.md``.
+- Rollback: revert the application image/code; older code ignores the additive
+  columns and retained historical rows. Avoid ``DROP COLUMN`` on live student
+  data. Use the pre-migration backup/cluster snapshot if physical schema
+  rollback is required. SQLite migrations are additive on open.
+
+### Known risks / blockers
+
+- Existing DSQL clusters must receive the additive notebook/message revision
+  migration before this application version is deployed. Runtime cannot repair
+  missing columns and app startup intentionally performs no DDL.
+- The migration and behavior are covered by deterministic mocks, not a live
+  DSQL write. No live browser/upload/RAG QA is claimed in this phase.
 
 ### Next exact action
 
-- Redeploy or reload Caddy on EC2, then verify:
-  ``/api/v1/health`` succeeds, logout callback still clears cookies,
-  ``/api/v1/threads`` returns 404 at Caddy, and Streamlit continues to serve
-  the UI.
+**Stop architecture/feature edits.** Proceed only with live AWS / DSQL cutover:
+
+1. Confirm host `.env` has ``DSQL_ENDPOINT``, ``AWS_REGION=us-west-2``, and
+   admin identity available for DbConnectAdmin. Take a DSQL snapshot/export.
+2. On the existing Aurora DSQL cluster, as admin only:
+   ``DSQL_ENDPOINT=<hostname> AWS_REGION=us-west-2 \\
+     .venv/bin/python scripts/init_dsql.py --admin-user admin``
+   Then ``GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public
+   TO co_design_app;`` (no schema USAGE). Re-run is safe/idempotent.
+3. With separate live-write approval, run
+   ``scripts/smoke_dsql_idempotency.py --confirm-live --identifier
+   'cognito:<sub>'`` as ``DSQL_USER=co_design_app``.
+4. Redeploy ARM64 ECR image; require internal ``/api/v1/ready`` 200; run the
+   Cognito → notebook → coach → upload → edit/revise → restart smoke in
+   ``docs/deploy/AWS_STATELESS_EC2.md`` (mock first; OpenAI only with cost cap).
+
+### Prior pilot context (Phases 1–14)
+
+**Phases 1–13 complete on ``Production-RemoveData``; Phase 14 verdict:
+READY FOR CONTROLLED PILOT.** Live manual production QA documented in
+``docs/MANUAL_PRODUCTION_QA.md`` (2026-08-10). **Month-1 product policy:**
+``AUTO_ADVANCE_STAGES=true`` and ``STUDENT_STAGE_SELECTION=false`` in
+``compose.prod.yaml`` (coach ADVANCE applies without Next; no Journey stage
+pick controls). **Month-2+ operator flip:** set ``STUDENT_STAGE_SELECTION=true``
+and ``AUTO_ADVANCE_STAGES=false`` — Journey shows audited **Work on this stage**
+(``POST .../learning-state/select-stage``); if both flags are true, selection
+wins and auto-advance is treated as off. Health ``mode`` now follows
+``APP_ENV``. Login-start rate limit and allow-listed Cognito callback error
+logging added. Coach chat shows a **thinking** status while the buffered
+provider turn runs (early NDJSON ``status``); true token streaming remains
+deferred. For lower wait times keep Guidance short, reasoning low, and avoid
+extra selected sources. **Edit message** (pre–append-only) used
+server-authoritative ``POST .../messages/{id}/revise`` with
+``conversation_revision`` CAS and a **new** idempotency key; that path is being
+replaced by append-only revision history on this branch. Regenerate remains
+unavailable.
+
+### Behavior changes (Phases 1–13)
+
+1. Concurrent identical coach idempotency keys converge to one provider
+   execution; completed markers replay without false lease-lost errors.
+2. ``APP_ENV=production`` fail-closes via ``validate_production_configuration()``
+   at ``create_app`` and ``/api/v1/ready``.
+3. ``/api/v1/ready`` checks config, DB ping, file-store ping, provider
+   credential shape, and Cognito HTTPS config without paid LLM calls.
+4. ``compose.prod.yaml`` sets ``APP_ENV=production``, json-file log rotation
+   (10m × 3), and ``no-new-privileges`` on ``app``/``caddy``.
+5. ``backend/rate_limit.py`` provides single-EC2 in-process coach limits
+   (``MAX_ACTIVE_COACH_REQUESTS_PER_USER=1``, ``COACH_REQUESTS_PER_MINUTE=8``,
+   ``MAX_CONCURRENT_MODEL_CALLS=20``) wired into ``coach_turn`` /
+   ``coach_turn_stream`` using authenticated ``owner.store.owner_id``. HTTP
+   429 includes ``Retry-After``; slots release in ``finally``.
+6. Uploads: Streamlit ``maxUploadSize=10``; API rejects excess file count and
+   bounds each ``upload.read(max+1)``.
+7. Coach info logs omit notebook/thread ids and message text; request IDs and
+   aggregates remain.
+8. Caddy adds HSTS / nosniff / Referrer-Policy / Permissions-Policy (no CSP).
+   Curl checks live in ``docs/security/CADDY_PUBLIC_BOUNDARY.md``.
+9. ``requirements.txt`` uses exact pins; Mock CI runs shell/compose/compile,
+   production + idempotency gates, and full pytest.
+10. ``scripts/load_probe.py`` + ``docs/operations/LOAD_PROBE.md``; AWS smoke
+    checklist expanded; ``docs/deploy/GITHUB_BRANCH_PROTECTION.md``; public PDF
+    audit lists 10 normal-blob lecture/reading PDFs (no LFS).
+
+### Behavior changes
+
+1. Public notebook/message payloads are typed and reject stage, progress, and
+   transition metadata. Only the internal learning workflow can write
+   authoritative stage state; Conclusion cannot propose or confirm another
+   Conclusion transition.
+2. Workflow/provider failures are not retried through the sequential fallback,
+   preventing duplicate paid provider calls. A completed user/assistant turn,
+   assessment, pending decision, and notebook summary now commit in one store
+   transaction. DSQL notebook read/merge/write also uses one retryable
+   transaction, preventing stale stage reversion.
+3. New S3 uploads separate raw and derived namespaces. Batch uploads prevalidate
+   sizes and clean up all accumulated objects on validation or put failure.
+   PDF/Office extraction has bounded page, archive, compression, slide,
+   paragraph, and cell limits.
+4. Cognito logout derives the trusted same-origin ``/oauth2/revoke`` endpoint
+   when discovery omits it. Unknown JWKS key IDs have a bounded forced-refresh
+   window, avoiding unauthenticated network amplification. Expired OAuth login
+   states are cleaned during new-state insertion.
+5. Production readiness now verifies the configured file store, bounded S3
+   list access, and SELECT access to all five required DSQL tables. The DSQL
+   schema expresses non-primary uniqueness as explicit ``CREATE UNIQUE INDEX
+   ASYNC`` jobs that bootstrap waits for.
+6. The adapter-configured OpenAI/Ollama model is authoritative. Response
+   language reaches the prompt, reasoning effort restores per notebook, and
+   selected sources force model-knowledge fallback off. Request/image limits
+   are enforced at the API/application boundary.
+7. User-message **Edit** uses inline bubble Save → server
+   ``revise_and_resubmit`` (append-only conversation revision, stage/journey
+   recompute, ``conversation_revision`` CAS, new idempotency key). Regenerate
+   remains unavailable. Normal send/stream retries use the durable idempotency
+   contract described below.
+8. Production documentation now uses ``compose.prod.yaml``/ECR and makes S3
+   setup/readiness explicit. The default stateful Compose stack is labelled
+   local-only; Bedrock permissions are not required in this phase.
+9. Selected-source concatenation is replaced by a provider-neutral retrieval
+   port and deterministic local chunk retriever. It uses sentence-aware chunks,
+   current-turn-weighted lexical ranking, bounded conversation/project
+   continuity, source diversity, stable ``[S#]`` labels, image markers, and
+   strict context budgets in both preferred API and legacy development paths.
+10. Assistant messages persist structured ``retrieval_refs`` for audit while
+   ``source_refs`` remains limited to sources actually cited. Citation previews
+   focus on matching evidence. Application code rebuilds prompt context only
+   from validated chunks and rejects source IDs/labels outside the selected
+   notebook, preserving the future Bedrock adapter boundary.
+11. Live Aurora DSQL bootstrap corrections: async index waits now execute
+   ``CALL sys.wait_for_job(?)`` on a dedicated verify-full admin connection
+   with ``autocommit=True``; DDL remains one transaction per connection. The
+   unsupported ``GRANT USAGE ON SCHEMA public`` was removed, leaving only
+   SELECT/INSERT/UPDATE/DELETE on all application tables in ``public``.
+12. Local legacy SQLite upgrades are additive and idempotent. The migration no
+    longer renames/drops ``users`` (which previously cascaded deletion into
+    legacy tables); it copies old threads, chat steps, source rows, stage state,
+    and extracted source text into the five application tables while retaining
+    the legacy rows as a rollback source. Legacy local source paths still
+    preview/download, and copied extracted text remains available to the same
+    provider-neutral local retriever used by new sources.
+13. Cognito-scoped stores reconcile legacy/noncanonical identities and repair
+    the earlier split-owner layout without dropping notebooks. Streamlit also
+    reuses the first verified ``/auth/me`` result instead of making a second
+    authentication request on every rerun.
+14. Sign-in now uses a dialog-owned button callback instead of a fragment-owned
+    callback. After the click, the original button remains the only visible
+    sign-in control, is disabled for five seconds while the visible
+    ``Redirecting...`` status is shown, and automatically becomes a retry
+    button if Cognito navigation stalls.
+15. Local startup repairs the broken ``notebooks.user_id -> users_legacy``
+    foreign key left by the retired destructive user migration. The SQLite-only
+    rebuild is transactional, preserves notebook/message/source IDs, checks for
+    orphaned notebooks before commit, and is idempotent. DSQL schema SQL is not
+    changed.
+16. The deterministic mock provider now makes retrieved grounding visible in
+    its normal reply by quoting one bounded validated chunk and emitting its
+    stable ``[S#]`` label. The existing citation resolver persists and renders
+    the corresponding source reference without test-only monkeypatching.
+17. Chat-composer attachment failures render a recoverable in-chat error and do
+    not submit a coaching turn. Authoritative source selection now enables
+    broader model knowledge only when no source is selected, so stale notebook
+    metadata cannot contradict the visible UI mode.
+18. API-mode course-material sync snapshots the short-lived Cognito ID cookie
+    on Streamlit's render thread before starting its background worker. This
+    prevents the worker losing browser context, resolving the fallback owner,
+    and retrying a protected notebook sync with 404 every second.
+19. Coach submission now accepts a validated idempotency key in the typed body
+    and standard HTTP header. A durable owner/notebook-scoped reservation in
+    the existing ``messages`` table prevents concurrent/restarted retries from
+    calling the provider or inserting the turn twice, replays the exact
+    completed ``CoachTurn``, rejects changed-input key reuse with HTTP 409, and
+    releases provider failures for a real retry. Lease ownership is verified in
+    the same transaction that persists the user/assistant pair. No sixth table
+    or DSQL schema change was introduced.
+20. Production ``/api/v1/ready`` now also validates non-secret Cognito callback
+    and metadata configuration locally, requires an HTTPS callback, and redacts
+    DSQL/S3 exception details. Structured internal operational events cover
+    route latency/status, provider/retrieval/citation results, coach stage
+    recommendations, and accepted/rejected progression without prompts, source
+    text, user/notebook/source/transition IDs, emails, or tokens.
+21. A deterministic authenticated FastAPI production-parity regression covers
+    Cognito cookie verification, notebook/source upload-selection-preview,
+    grounded ``[S1]`` replies, idempotent replay/conflict, stage confirmation,
+    process restart, object cleanup, and logout/revocation. A headed Playwright
+    smoke runner preserves the real Cognito boundary and captures desktop,
+    390 px mobile, and console evidence after a manually completed Hosted UI
+    sign-in; it never installs a production auth bypass.
+22. Streamlit retry keys now retain only a SHA-256 request scope, UUID, notebook
+    id, and timestamp for one hour. The helper reuses unresolved retries, removes
+    completed/deleted/expired entries, keeps at most eight per notebook and 24
+    globally, preserves valid entries across notebook switches, and migrates
+    only the active valid legacy entry without retaining raw prompt text.
+23. The Cognito sign-in retry cooldown is server-authoritative. An absolute
+    five-second deadline and a temporary 0.5-second Streamlit fragment keep the
+    original button disabled without client-side DOM mutation. A bounded,
+    non-sensitive per-tab query marker carries that exact deadline across a
+    fresh Streamlit session after browser Back, then is consumed once; malformed,
+    stale, or implausibly future values are rejected. The launch flag remains
+    one-shot, and success, sign-out, logout, or configuration failure clears all
+    transient state. Trusted auth navigation now uses Streamlit 1.60's
+    non-iframed ``st.html`` API instead of the deprecated components helper.
+24. DSQL idempotency tests now exercise two independent adapter instances,
+    exact replay after restart, changed-payload conflict, provider-failure
+    release, expired-lease takeover, stale-worker rejection, and whole-operation
+    SQLSTATE ``40001`` retry without AWS. The guarded live runner requires
+    ``--confirm-live``, the DSQL provider, ``co_design_app``, and an explicit
+    ``cognito:<sub>`` owner; it uses runtime DML and the mock provider only.
+25. Coach idempotency ``complete_coach_request`` is now idempotent when a waiter
+    or restart already promoted the marker to ``completed`` from persisted
+    message rows after the lease owner committed ``persist_coach_turn`` but
+    before the owner completed. Matching key/fingerprint completed markers
+    return successfully; expired takeover, provider-failure release, stale
+    persist rejection, restart promotion, and DSQL OCC wrappers stay unchanged.
+26. ``APP_ENV`` defaults to ``development``. When ``APP_ENV=production``,
+    ``validate_production_configuration()`` fail-closes for mock provider,
+    ``MOCK_OPENAI`` masking, sqlite/local/memory storage, DSQL admin runtime,
+    insecure auth cookies, HTTP Cognito callbacks, incomplete Cognito/DSQL/S3/
+    OpenAI configuration, and loopback or non-HTTPS public API/UI URLs. It
+    reuses ``validate_storage_configuration`` and
+    ``validate_cognito_readiness(require_https=True)`` with no network/AWS
+    calls. ``create_app`` and ``/api/v1/ready`` both invoke it; readiness keeps
+    a dual-gate for legacy dsql/s3 Cognito HTTPS checks during cutover.
+    ``compose.prod.yaml`` and ``.env.example`` declare the env switch.
+
+### Validation evidence
+
+**Local (Phases 4–8 — this phase):**
+
+- ``.venv/bin/python -m pytest -q tests/test_rate_limit.py
+  tests/test_production_config.py tests/test_coach_idempotency.py
+  tests/test_api.py`` → **64 passed**. Upload hardening covered by
+  ``tests/test_upload_hardening.py``; compose/Caddy assertions in
+  ``tests/test_deployment_config.py``.
+- Branch ``Production-RemoveData``; no commit created in this phase.
+- Phase 1–2 uncommitted work preserved.
+
+**Local (Phase 2 — APP_ENV production fail-closed):**
+
+- Focused suite → **39 passed** (1 warning: Starlette TestClient deprecation):
+  ```sh
+  .venv/bin/python -m pytest \
+    tests/test_production_config.py \
+    tests/test_api.py::test_local_api_ready_request_id_stream_and_graph \
+    tests/test_api.py::test_readiness_fails_when_file_storage_is_unavailable \
+    tests/test_api.py::test_production_readiness_requires_local_cognito_configuration_check \
+    tests/test_api.py::test_production_readiness_redacts_dependency_error_details \
+    tests/test_api.py::test_production_readiness_reports_cognito_configured_without_discovery \
+    tests/test_deployment_config.py \
+    tests/test_storage_providers.py::test_validate_storage_configuration_requires_production_fields \
+    tests/test_cognito_token_jwks.py::test_production_cognito_readiness_is_local_and_requires_https_callback \
+    tests/test_cognito_token_jwks.py::test_cognito_readiness_errors_do_not_echo_credentials
+  ```
+- ``tests/test_production_config.py`` alone → **21 passed**.
+- ``tests/test_deployment_config.py`` alone → **10 passed**.
+- No live OpenAI, DSQL, S3, or Bedrock calls. No schema migration.
+- Branch ``Production-RemoveData``; no commit created in this phase.
+- Phase 1 uncommitted files (``backend/student_store.py``,
+  ``tests/test_coach_idempotency.py``) preserved.
+
+**Local (Phase 1 — promote-vs-complete idempotency):**
+
+- ``.venv/bin/python -m pytest -q tests/test_coach_idempotency.py`` → **15 passed**.
+- Focused coverage added for promote-between-persist-and-complete, five-way
+  concurrent same-key submissions, and API/stream HTTP 409 payload mismatch.
+- No live OpenAI, DSQL, S3, or Bedrock calls. No schema migration.
+- Branch ``Production-RemoveData``; no commit created in this phase.
+
+**Prior local (previous production hardening phase):**
+
+- ``.venv/bin/python -m pytest -q`` → **305 passed**.
+- Focused auth/UI/production-path validation → **57 passed**.
+- ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m
+  compileall -q backend ui streamlit_app.py tests`` → exit 0.
+- ``docker compose config --quiet`` and
+  ``APP_IMAGE=co-design:test docker compose -f compose.prod.yaml config --quiet``
+  → exit 0.
+- ``sh -n scripts/start.sh scripts/start_prod.sh scripts/build.sh
+  scripts/deploy_ecr.sh scripts/browser_e2e_smoke.sh`` → exit 0; the Python
+  DSQL runner compiled, displayed ``--help``, and refused a missing
+  ``--confirm-live`` before any connection attempt.
+- ``git diff --check`` → exit 0.
+- No live OpenAI, DSQL, S3, or Bedrock calls. No Bedrock implementation
+  changes.
+- The approved live-click smoke performed no credential entry: two clicks
+  produced exactly two FastAPI login redirects and two Cognito Hosted UI GETs.
+  Browser Back was invoked 2.7 seconds after the first click; the slow Streamlit
+  reconnect completed after the five-second window with ``Redirecting...``
+  retained and the original button enabled, proving the deadline was not
+  restarted. The retry remained visible at 390 px and redirected exactly once.
+  AppTest covers the complementary fast-remount case where Back completes before
+  expiry and the same button must remain disabled.
+- With the developer-authorized test account, the in-app browser completed the
+  real Cognito Hosted UI PKCE login and callback, created/renamed a notebook,
+  synchronized 7 lecture notes and 3 readings, displayed a grounded mock reply
+  and ``[S1]`` citation preview, confirmed Focus → Evidence, restored the chat
+  and stage after refresh, rendered Review scores, deleted the disposable
+  notebook, and logged out.
+- The live run reproduced and then verified the local foreign-key repair and
+  authenticated background-sync fix. After cleanup, the test owner again had
+  zero notebooks, messages, and sources.
+- ``data/backups/co_design.pre-fk-repair-20260809.sqlite3`` is the pre-migration
+  SQLite backup. It is local data and must never be committed.
+
+### Compatibility, rollback, and known risks
+
+- New S3 objects use ``raw/`` and ``derived/`` subpaths. Existing rows retain
+  their full historical keys, remain readable, and stay within the same
+  source/notebook deletion prefix. No object migration is required.
+- DSQL bootstrap schema changed before live initialization. If an earlier
+  draft schema was already applied, inspect existing uniqueness/index state
+  before rerunning bootstrap; never drop production objects automatically.
+- This DSQL bootstrap correction changes no table or index DDL. An earlier
+  failed public-schema ``USAGE`` grant needs no rollback; rerun bootstrap, then
+  apply only the documented object-level runtime grant.
+- Public clients that sent unrestricted notebook/message metadata now receive
+  422 and must use the typed settings or internal coaching endpoints.
+- RAG requires no schema migration. New assistant/user metadata may include
+  ``retrieval_refs``; older messages without it remain compatible.
+- The current local retriever reads selected extracted text and chunks it at
+  query time. This is deterministic and suitable for the bounded development
+  corpus, but it is lexical rather than embedding-semantic and is not the
+  long-term large-corpus index. Bedrock Knowledge Bases replaces this adapter.
+- UI edit/regenerate stays unavailable until a transactional replacement
+  design is implemented; the new request key protects retries of normal turns
+  but does not define edit-in-place semantics.
+- Existing local legacy tables are intentionally retained and left unchanged;
+  rollback is a code revert because the older application ignores the added
+  snake_case columns and the new five-table copies. A pre-existing database
+  that already ran the earlier destructive users-table migration cannot have
+  deleted legacy rows reconstructed from SQLite metadata; restore such rows
+  from a pre-upgrade backup if available. Local upload files themselves are not
+  deleted or rewritten by this migration.
+- Split-owner repair preserves the authenticated Cognito row, moves any
+  five-table notebooks onto it, merges preferences, and retains the obsolete
+  empty row under a ``legacy-orphan:<id>`` identifier for inspection rather
+  than deleting it.
+- The SQLite foreign-key repair applies only when ``notebooks.user_id`` targets
+  a table other than ``users`` and only when the known eight-column notebook
+  layout matches. An unknown layout stops with a clear error instead of losing
+  data. Restore the pre-repair backup to roll back the local database.
+- This local compatibility phase changes no DSQL schema/bootstrap SQL, IAM,
+  S3, Cognito infrastructure, EC2, paid-provider, or Bedrock behavior.
+- Provider-token streaming is still simulated after a complete persisted turn
+  and graph inspection state is process-local. Durable request idempotency now
+  makes a disconnected stream safe to retry, but it does not turn the buffered
+  response into upstream token streaming or persist graph inspection state.
+- Completed idempotency reservations are stored as hidden internal rows in the
+  existing ``messages`` table. No migration is required and current code omits
+  them from chat/history/counts/activity. Rolling back to code that predates
+  this filter can expose blank internal assistant rows; back up first and remove
+  only rows explicitly marked ``_internal_type=coach_idempotency`` under an
+  approved rollback procedure.
+- The promote-vs-complete fix changes only ``complete_coach_request`` behavior
+  for already-completed same-key/fingerprint markers. No schema or data
+  migration is required; rollback is a code revert.
+- ``APP_ENV`` and ``validate_production_configuration`` are additive. Local
+  development remains the default; production Compose must set
+  ``APP_ENV=production``. Rollback is a code/config revert with no schema or
+  data migration.
+- Fully automated protected-browser CI remains blocked by the deliberate lack
+  of a production authentication bypass and by the uncached Playwright CLI.
+  ``scripts/browser_e2e_smoke.sh`` therefore pauses for a human to complete the
+  real Cognito Hosted UI before mobile/console capture. The deterministic
+  authenticated HTTP regression and Streamlit AppTests run without live AWS.
+- UI retry-key records are session-only and require no migration. Reverting the
+  helper drops retry reuse after a disconnected Streamlit submission but does
+  not change durable notebook/chat data or the HTTP idempotency contract.
+- The DSQL concurrency suite uses independent ``DsqlStudentStore`` instances
+  over an isolated SQLite transaction proxy, so it deterministically checks the
+  adapter/lease/OCC contract without claiming wire-level Aurora behavior. The
+  guarded live runner remains deliberately unexecuted until DSQL is ready and a
+  separate live-write approval is given.
+- Fresh Streamlit loads and ordinary reloads have a clean browser console. The
+  in-app browser records React hydration errors ``#418``/``#423`` while restoring
+  Streamlit itself from cross-origin browser history; the recovered page remains
+  functional and no new error is emitted after it settles. The deprecated auth
+  components iframe was removed, but eliminating this framework-level history
+  artifact requires an upstream Streamlit/browser fix rather than more auth
+  state mutation.
+- The cooldown query marker contains only an epoch deadline, is scoped to one
+  tab's URL, is accepted for at most a 30-second restore grace, and never
+  authorizes a user or changes OAuth state. No API, cookie, schema, or data
+  migration is required; rollback is limited to the two auth UI/test files.
+- Rollback is a code/config revert. Do not commit `.env`, secrets, database
+  files, or uploaded content. No live AWS resource was created or modified.
+
+### Next exact action
+
+Authoritative next steps for append-only revision are under **Current phase →
+Next exact action** above. Continuing AWS cutover after that:
+
+1. Configure GitHub branch protection per
+   ``docs/deploy/GITHUB_BRANCH_PROTECTION.md``.
+2. Owner decision on public lecture PDFs per
+   ``docs/security/PUBLIC_REPOSITORY_CONTENT_AUDIT.md`` (do not delete/rewrite
+   without explicit approval).
+3. Create the private S3 uploads bucket in ``us-west-2`` with Block Public
+   Access; attach bucket list plus ``users/*`` object permissions to the EC2
+   instance role.
+4. Finish Aurora DSQL, map the EC2 role to ``co_design_app``, run
+   ``scripts/init_dsql.py`` as admin (or for existing clusters apply the
+   manual notebook ``conversation_revision`` **and** three message revision
+   column ``ALTER``s in ``docs/deploy/AWS_STATELESS_EC2.md``), then grant
+   SELECT/INSERT/UPDATE/DELETE on all tables in ``public`` to
+   ``co_design_app``. Do not grant schema ``USAGE``. App startup never DDL.
+5. With separate live-write approval, run
+   ``scripts/smoke_dsql_idempotency.py --confirm-live --identifier
+   'cognito:<sub>'`` under ``DATABASE_PROVIDER=dsql`` and
+   ``DSQL_USER=co_design_app``.
+6. Deploy the immutable ECR image with ``scripts/deploy_ecr.sh`` and require
+   internal ``/api/v1/ready`` 200. Verify Caddy edge curl checks in
+   ``docs/security/CADDY_PUBLIC_BOUNDARY.md``.
+7. Run the full Cognito → notebook → coach → upload → edit/revise → restart →
+   isolation → logout live smoke in ``docs/deploy/AWS_STATELESS_EC2.md``. Use
+   mock mode first; make an OpenAI request only with explicit approval and a
+   cost cap.
+8. Only after that smoke is green: open class-wide traffic; then consider
+   durable provider streaming and Bedrock retrieval adapters.
 
 ## Previous completed work
 
-**Single-EC2 production Docker deployment preparation complete**
+**Provider-neutral stage prompts + retryable S3 cleanup** — ``19f5d4e`` on
+``Production-RemoveData`` (pushed). Local mock suite 232 passed; GitHub Mock CI
+failed on missing CI ``.env`` before compose validation.
 
-Python 3.12 app image, supervised dual-process entrypoint, Compose with
-internal ``8000``/``8501``, and Caddy on ``80``/``443`` for
-``cde2300chatbot.duckdns.org``. Persistent ``./data``, read-only secrets mount,
-and fail-closed bind sources. The subsequent Caddy allow-list change above
-narrows public FastAPI exposure without changing that topology.
+**Final pre-AWS hardening (Cognito / DSQL / student S3)** — Cognito ID
+``token_use``, JWKS cache, DSQL ``verify-full``, course-sync gate, orphan
+object cleanup, ownership-in-write checks, ``ca-certificates`` in image.
 
-**Cognito login redesign complete — same-tab local logout fixed**
+**Multi-user FastAPI ownership + student S3 key isolation**
 
-Streamlit-native Amazon Cognito authorization-code login remains the identity
-boundary. The signed-out gate now matches the product design, explains course
-research use, and states clearly that chatbot work is never graded. Cognito
-subjects use owner-scoped in-process application services instead of the
-unauthenticated single-owner local API. Logout stays in the current browser tab,
-uses a fixed FastAPI callback to expire Streamlit's HttpOnly cookies, and stops
-at the app's signed-out gate.
+**Cognito-owned browser session + five-table persistence cleanup**
 
-## Latest completed work (Cognito review and redesign)
+**DSQL bootstrap / adapter hardening**
 
-### Behavior implemented
-
-- Unauthenticated and malformed-identity paths stop before notebook/session
-  initialization; logged-in identities without ``sub`` are cleared.
-- ``ui/auth_gate.py``: compact branded dialog, Cognito-managed account CTA,
-  student-safe configuration error, grade/research notice, strict logout URLs.
-- ``ui/assets/styles/55-auth.css``: token-based desktop and 390 px auth layout.
-- Login remains Streamlit-native authorization code with PKCE when advertised;
-  access/ID tokens are not exposed to app UI or logs.
-- ``backend/auth_profiles.py`` + ``StudentStore.upsert_cognito_user``: match by
-  ``cognitoSub``, default role ``student``, preserve lecturer/admin, converge
-  safely on concurrent first-login inserts.
-- Non-destructive SQLite columns: ``cognitoSub``, ``email``, ``displayName``,
-  ``role``, ``updatedAt``, ``lastLoginAt``.
-- Cognito users no longer route persistence through FastAPI's shared
-  ``local-student`` store; stage confirmation works on either application path.
-- Same-tab logout: the profile uses a regular button rather than
-  ``st.link_button`` (which opens an external URL in a second tab). The local
-  ``/api/v1/auth/logout/callback`` expires Streamlit auth cookies with matching
-  attributes and redirects only to the configured ``CO_DESIGN_UI_URL`` gate.
-- Logout never calls ``st.logout()`` because Streamlit sends Cognito's
-  ``/logout`` endpoint incompatible OIDC parameters, producing Cognito's
-  “Invalid request” page.
-- Secrets example now uses placeholders and documents the exact callback,
-  scopes, sign-out callback, and Streamlit session limitation.
-
-### Files changed
-
-- ``streamlit_app.py``, ``ui/auth_gate.py``, ``ui/profile.py``, ``ui/runtime.py``,
-  ``ui/studio.py``, ``ui/theme.py``, ``ui/assets/styles/55-auth.css``
-- ``backend/auth_profiles.py``, ``backend/student_store.py``,
-  ``backend/learning_service.py``, ``backend/api.py``, ``backend/settings.py``
-- ``requirements.txt``, ``.gitignore``, ``.streamlit/secrets.toml.example``
-- ``tests/conftest.py``, ``tests/test_auth_gate.py``,
-  ``tests/test_runtime_auth.py``, related API/learning/UI tests
-- ``README.md``, ``DESIGN.md``, ``docs/IMPLEMENTATION_STATUS.md``
-
-### Commands run and results
-
-- Focused auth/API/UI regression selection → **67 passed**
-- Full suite: ``.venv/bin/python -m pytest -q`` → **150 passed**
-- ``compileall -q backend ui streamlit_app.py tests`` → passed
-- ``sh -n scripts/start.sh`` and ``git diff --check`` → passed
-- Browser: signed-in app + logout initiation checked; redesigned gate checked at
-  desktop and 390 px with no horizontal overflow.
-- Latest logout regression selection → **13 passed**; restarted API/UI and
-  confirmed the signed-out gate remained stable with no delayed AWS redirect.
-
-### Migration / compatibility / rollback
-
-- Non-destructive ``ALTER TABLE`` / unique index on ``users``.
-- Existing ``local-student`` notebooks are not auto-attached to Cognito users.
-- Cognito sessions use owner-scoped in-process services until FastAPI gets a
-  verified authenticated-owner boundary; local API contract tests remain.
-- Rollback: revert the auth gate/owner binding and logout callback code. No
-  existing notebook, source, upload, or database row is deleted.
-
-### Risks / blockers
-
-- Streamlit 1.60 hard-codes a 30-day signed HttpOnly identity cookie and does
-  not retain Cognito refresh tokens. Refresh-token rotation and a configurable
-  app-cookie lifetime cannot be implemented without replacing native auth.
-- Local logout deliberately does not clear Cognito's hosted session. A later
-  sign-in may therefore use Cognito SSO without asking for credentials again.
-- Cognito Managed Login owns signup, confirmation, password reset, MFA, and
-  account-enumeration-safe messages; these require AWS configuration/manual QA.
-
-### Next exact action
-
-- Manually smoke one complete sign-in → same-tab logout → sign-in cycle, then
-  decide separately whether clearing the hosted Cognito SSO session is required.
-
-## Previous phase
-
-**UI stylesheet split complete — stop for review**
-
-Split the monolithic ``ui/assets/template.css`` into ordered component
-partials under ``ui/assets/styles/``. ``ui/theme.py`` concatenates them in a
-fixed cascade order into the same single ``<style>`` injection. No schema,
-API, or educational-behavior changes. Private `.env` was not modified.
-
-## Latest completed work (stylesheet split)
-
-### Behavior implemented
-
-- Static CSS now lives in eight ordered partials:
-  ``00-foundations``, ``10-workspace``, ``20-studio``, ``30-chat``,
-  ``40-sources``, ``50-dialogs-notebooks``, ``60-profile-topbar``,
-  ``90-responsive``.
-- ``ui/theme.py`` loads every partial, caches on per-file
-  ``(name, mtime_ns, size)`` signature, and still injects one ``<style>``
-  block.
-- UI tests assert the assembled stylesheet via ``_template_stylesheet()``;
-  ``tests/test_theme_styles.py`` covers manifest order and markers.
-
-### Files changed
-
-- Added ``ui/assets/styles/*.css``; removed ``ui/assets/template.css``
-- ``ui/theme.py``, ``ui/assets/__init__.py``, ``ui/AGENTS.md``, ``DESIGN.md``
-- ``ui/rename.py``, ``ui/chat.py``, ``ui/layout/user_message_edit_layout.py``
-- ``tests/test_theme_styles.py``, ``tests/test_streamlit_ui.py``,
-  ``tests/AGENTS.md``, ``docs/IMPLEMENTATION_STATUS.md``
-
-### Commands run and results
-
-- Focused: ``.venv/bin/python -m pytest -q tests/test_theme_styles.py tests/test_streamlit_ui.py -k 'theme or language_theme or rename_and_icon or assembled'`` → **4 passed**
-- Full: ``.venv/bin/python -m pytest -q`` → **113 passed**
-- ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m compileall -q backend ui streamlit_app.py`` → ok
-- Live Streamlit at ``http://127.0.0.1:8501/``: assembled partial markers present in injected CSS (including ``foundations stylesheet``); top bar, chat composer, Sources/Journey structure rendered.
-
-### Migration / compatibility / rollback
-
-- No data migration. Browser still receives one concatenated stylesheet.
-- Rollback: restore ``ui/assets/template.css`` and the previous single-file
-  loader in ``ui/theme.py``, or concatenate the partials back into one file
-  in the same order.
-
-### Risks / blockers
-
-- Cascade depends on manifest order in ``ui/theme.py``; reordering partials
-  can change override winners without a Python failure.
-
-### Next exact action
-
-- **Stop for review.** Stylesheet split is complete; no further action required
-  for this phase unless a visual regression is reported.
-
-## Previous phase
-
-**Phase 6 complete (streaming, checkpoints, observability, legacy retirement)**
-
-Phases 1–5 covered UI rename/a11y, safe defaults, backend integrity, test
-isolation, and CRUD behind the typed API. Phase 6 added readiness polling,
-request IDs, NDJSON coach streaming, multi-step LangGraph with inspectable
-checkpoints, retired ``StudentChatEngine`` for student turns, and removed the
-dead composer model picker. Private `.env` was not modified.
-
-## Completed
-
-- Locked coaching to **GPT-5.6 Luna** with **low** reasoning: removed the
-  composer model picker, collapsed the model registry to one entry, and set
-  OpenAI coach calls to `gpt-5.6-luna` / `low`.
-- Fixed Learning Path advancement for everyday startup: `scripts/start.sh`
-  starts FastAPI + Streamlit with `USE_LOCAL_API=true`.
-  Legacy Streamlit-only chat never mutated the journey; that was why the
-  progress bar stayed on Focus.
-- Hardened OpenAI structured coaching output (`additionalProperties: false`
-  schema, stage coercion, clearer Focus advance rule) and verified a live
-  Focus→Evidence auto-advance with Luna low.
-- Added the durable `AGENTS.md` rules and the authoritative local architecture
-  specification in `docs/LOCAL_DEMO_IMPLEMENTATION.md`.
-- Added typed domain contracts for educational assessments, source citations,
-  coaching turns, and pending phase transitions.
-- Added repository adapters, confirmation-gated learning progression,
-  deterministic mock provider, Ollama/OpenAI provider ports, and one
-  inspectable LangGraph workflow wrapper.
-- Added FastAPI `/api/v1` health, coaching-turn, learning-state,
-  pending-transition, and transition-resolution endpoints plus a typed client.
-- Added the additive SQLite `phase_transitions` table; existing rows are not
-  converted or deleted.
-- Added `scripts/start.sh`, `.env.example`, and local demo setup
-  documentation.
-- Removed hidden HTML stage-control markers and legacy automatic progression.
-  Streamlit now shows a coach recommendation only after one is persisted, then
-  requires the student's confirm/reject decision.
-- Added a feature-gated Streamlit API path with `USE_LOCAL_API=true`; the
-  legacy direct path remains available while source/notebook CRUD is migrated.
-- Added a conversational coach greeting for empty notebooks and removed the
-  generic OpenAI-knowledge status strip when no sources are selected.
-- Made the deterministic local demonstration history-aware: it gives tailored
-  guidance on the first stage contribution, recommends a confirmation-gated
-  transition after the follow-up, and never presents that turn-based behavior
-  as semantic model evaluation.
-- Added recent canonical history and non-repetitive coaching requirements to
-  the OpenAI provider prompt while retaining structured stage decisions.
-- Repository defaults use confirmation mode (`AUTO_ADVANCE_STAGES=false`).
-  Audited auto-advance (`AUTO_ADVANCE_STAGES=true`) remains an explicit local
-  override that still persists a transition row.
-- Added the shared `lecture_notes/` drop folder. Supported files are
-  safely copied into each active notebook, selected, refreshed on change,
-  removed when the folder file disappears, and exposed as stable citation
-  chips in the local coaching workflow.
-- Grouped instructor-managed PDFs into locked **Lecture Notes** and **Readings**
-  source folders. The UI exposes selection and preview only, while repository
-  enforcement blocks interactive deletion and keeps synchronizer refreshes safe.
-  A separate 50 MB trusted-course-file limit covers compressed lecture PDFs
-  without increasing the 10 MB student-upload limit. New notebooks keep Sources
-  open so course-material import can start immediately; sync runs quietly in
-  the background without re-compressing shared lecture files.
-- Student uploads stored through ``save_uploads`` (Sources Add, chat attachments)
-  are compressed when safe. PDFs keep extractable text; images are downscaled.
-  Lecture-note sync copies prepared folder files without recompression.
-  Sources **Add** is a compact file picker in the original header spot: choose
-  files and they import immediately, with no dialog. Upload dedupe is scoped to
-  the current picker generation (claim → import → reset), and failures clear the
-  picker so the 1s Sources fragment does not retry forever.
-- Isolated short-lived corner toasts in ``ui/toasts.py`` (new-notebook
-  ``Course materials are loading.`` notice). Presentation HTML helpers stay in
-  ``ui/components.py``.
-- Replaced automatic-stage movement announcements with the next stage heading
-  and one or two topic-specific coaching questions. Provider prompts use the
-  selected course context; deterministic mock/offline mode includes a focused
-  fallback for older-adult and other student topics.
-  Older persisted responses receive the same presentation through a read-only
-  compatibility adapter; canonical chat history is not rewritten.
-- Simplified the notebook workspace header and Sources panel: notebook names are
-  now editable inline, the response-detail control is labelled `Mode`, and the
-  Setting dialog contains only language, appearance, and model selection.
-- Added deterministic concise notebook-title generation from the first student
-  contribution and the structured coach summary. Recognized legacy prompt-based
-  titles are shortened on view without changing manually named notebooks.
-- Removed contribution-restatement boilerplate such as `You're exploring` from
-  both new provider instructions and the display of existing persisted replies.
-- Removed the first-source promotion, sync caption, top-bar New action, pencil
-  edit action, mode guide, Assignment context, and Notebook details from the
-  default interface. Lecture Notes and Readings remain visible source groups.
-- Kept the Sources title, contextual help, and Add action aligned in one row at
-  desktop and 390 px. The help text now explains that selected materials
-  personalize and ground coaching responses.
-- Removed the selected-source status strip from the conversation so the
-  scrollable chat log receives the full available panel height. A single source
-  remains an inline citation; two or more citations collapse into one
-  `Sources used (N)` disclosure with all source-viewer actions preserved.
-- Reduced top-bar chrome by making Notebooks and Setting borderless icon-only
-  actions with accessible hover help. The editable notebook title and its input
-  outline are hidden at rest, then revealed on hover or keyboard/mouse focus;
-  Streamlit's character counter stays hidden during editing.
-- Tightened the Sources header so its help action sits directly beside the
-  heading and the source selector begins immediately below the divider. Renamed
-  the response control to `Guidance`, presenting the existing persisted
-  `short`/`long` values as compact `Quick`/`Complex` choices without a data change.
-- Restored the editable notebook title as permanently visible text in the top
-  bar. Notebooks now shows its Material notebook icon and label in a content-fit,
-  borderless action; Setting remains a compact icon-only action. Both controls
-  keep their behavior without an outlined selection container.
-- Phase 1: shared Enter-only rename + a11y for Settings, Source actions, and
-  rail collapse/expand.
-- Phase 2: validation-only `scripts/build.sh`; `init_db.py` refuses existing DB
-  without `--force`; repository defaults mock + confirmation; test suite clears
-  `OPENAI_API_KEY`; all configured data paths resolve via `_project_path`.
-- Phase 3: API coaching turns reject spoofed stage/history/sources/images;
-  domain validates known stages; confirmations apply journey + transition status
-  atomically; provider outages return HTTP 503 with request/thread logging.
-- Phase 4: per-test isolated data dirs; `LocalApiClient` session injection;
-  API-mode AppTest (confirmation + auto-advance) plus legacy fallback;
-  all-six-stage / stale / restart / isolation tests; `.github/workflows/mock-ci.yml`.
-- Phase 5: notebook/message/source/preference CRUD API; `WorkspaceService` +
-  `WorkspaceFacade`; source content endpoint; UI no longer reads source paths.
-
-## Validation evidence
-
-- Historical browser and feature acceptance notes remain for continuity; the
-  latest automated counts are under Phase 1 / Phase 2 evidence.
-- `sh -n scripts/start.sh` and `sh -n scripts/build.sh` passed.
-- Private interactive `.env` may still use OpenAI + auto-advance; repository
-  defaults and automated tests use mock + confirmation.
-
-## Data and migration state
-
-- Existing SQLite data and local uploads remain in ignored data paths.
-- No schema migration is required for Phase 2.
-- `scripts/init_db.py` no longer runs from `build.sh`; explicit `--database` or
-  `--force` is required to touch an existing file.
-- Private `.env` was left unchanged.
-
-## Risks and open questions
-
-- The project baseline remains mostly untracked; no Git commit was created.
-- Private `.env` may still enable OpenAI / auto-advance; that is intentional and
-  out of repository defaults.
-- The Ollama provider still needs live host validation.
-- Lecture-folder retrieval currently uses the bounded selected-source context
-  path; vector/embedding retrieval remains a later provider-adapter phase.
-- Source, notebook, and folder CRUD still use the existing direct Streamlit
-  store calls; only coaching turns and transition decisions use the API path.
-- Corner toasts use a ``components.html`` parent-DOM injection; Streamlit
-  upgrades can break that path (fallback to ``st.toast`` is in place).
-- Shared lecture PDFs in ``lecture_notes/`` remain large git blobs; prefer
-  compressed PDFs and Git LFS for future large files.
-- Website / Paste Sources Add was intentionally removed from the UI; backend
-  ``add_url_source`` / ``add_text_source`` remain for tests and API use.
-- Rename Apply remains CSS-hidden so Enter can submit Streamlit forms; if CSS
-  fails to inject, Apply becomes visible. Source draft reset still depends on
-  popover open-edge detection inside the 1s Sources fragment.
-- Profile leave-to-close still uses parent-DOM MutationObserver automation.
-- AppTest defaults to ``USE_LOCAL_API=false`` (in-process coach); preferred API
-  coaching is covered by ``tests/test_streamlit_api_mode.py`` and
-  ``tests/test_api_client.py``.
-- Course-material sync still uses the in-process coordinator from the facade
-  (HTTP sync endpoint exists for non-UI callers). Legacy engine artifact
-  ``render_media`` may still read workspace/files paths.
-- ``StudentChatEngine`` remains only for dedicated unit tests
-  (``tests/test_files_and_engine.py``); UI student turns use the typed coach path.
-- LangGraph checkpoints are in-memory (``MemorySaver``); they do not survive
-  API process restart. Graph inspection returns the latest in-process summary.
-
-## Phase 1 evidence (UI rename / a11y)
-
-### Behavior implemented
-
-- Shared Enter-only rename helper in ``ui/rename.py`` used by notebook actions,
-  source menus, and the top-bar title.
-- Rename commits only on form Apply/Enter; blur alone does not persist.
-- Closing notebook actions or a source menu without Enter discards draft keys
-  via explicit prefixes and bumps an epoch so the next open shows the saved
-  title.
-- Accessible help restored/added for Settings, Source actions, and workspace
-  collapse/expand controls; source ⋯ keeps a visible ``:focus-visible`` ring.
-- ``Press Enter to apply`` remains the focused-field hint; ``help`` exposes the
-  same instruction to assistive tech.
-
-### Files changed
-
-- ``ui/rename.py`` (new)
-- ``ui/session.py``, ``ui/notebooks.py``, ``ui/sources.py``, ``ui/topbar.py``
-- ``ui/profile.py``, ``ui/workspace.py``, ``ui/assets/template.css``, ``ui/AGENTS.md``
-- ``tests/test_rename.py`` (new), ``tests/test_streamlit_ui.py``
-- ``docs/IMPLEMENTATION_STATUS.md``
-
-### Commands run and results
-
-- Focused: ``.venv/bin/python -m pytest -q tests/test_rename.py tests/test_streamlit_ui.py`` → **17 passed**
-- Full: ``.venv/bin/python -m pytest -q`` → **85 passed** (before Phase 2)
-- ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m compileall -q backend ui streamlit_app.py tests`` → success
-
-### Manual validation
-
-- Not re-run in-browser in this phase boundary. Recommend hard-refresh and check:
-  topbar Enter-only title, notebook actions dismiss reset, source ⋯ rename
-  dismiss reset, keyboard focus ring on source menu, Settings help on profile.
-
-### Migration and rollback
-
-- No database or schema changes.
-- Rollback: restore the listed UI/test files; private ``.env`` and SQLite data
-  were not modified.
-
-### Known incomplete items
-
-- Browser acceptance for Phase 1 controls still pending manual hard-refresh.
-- Phase 4+ not started (test isolation, API-mode UI coverage, all-six-stage /
-  restart tests, CI workflow).
-
-## Phase 2 evidence (safety / repository defaults)
-
-### Behavior implemented
-
-- ``scripts/build.sh`` is validation-only: prefers ``.venv/bin/python``,
-  ``compileall`` on ``backend ui streamlit_app.py tests``, then mock ``pytest``.
-  It no longer calls ``init_db.py``.
-- ``scripts/init_db.py`` refuses an existing database unless ``--force``; prefer
-  ``--database PATH`` for a fresh file.
-- Repository defaults in ``.env.example`` and ``backend/settings.py``:
-  ``MODEL_PROVIDER=mock``, ``MOCK_OPENAI=true``, ``AUTO_ADVANCE_STAGES=false``.
-- All configured data paths resolve through ``_project_path`` relative to the
-  project root when not absolute.
-- ``tests/conftest.py`` clears ``OPENAI_API_KEY``.
-- Docs/AGENTS/README/DESIGN aligned: confirmation is the safe default;
-  auto-advance is an explicit audited local mode. Dark DESIGN tokens match the
-  live teal dark theme (no purple accent table).
-- Removed unused ``asyncio_mode`` from ``pyproject.toml``.
-- Private ``.env`` untouched.
-
-### Files changed
-
-- ``scripts/build.sh``, ``scripts/init_db.py``, ``scripts/AGENTS.md``
-- ``.env.example``, ``backend/settings.py``, ``tests/conftest.py``
-- ``tests/test_init_db.py`` (new), ``pyproject.toml``
-- ``README.md``, ``docs/LOCAL_DEMO_IMPLEMENTATION.md``, ``DESIGN.md``
-- ``AGENTS.md``, ``tests/AGENTS.md``, ``docs/IMPLEMENTATION_STATUS.md``
-
-### Commands run and results
-
-- ``sh -n scripts/start.sh && sh -n scripts/build.sh`` → success
-- Focused: ``.venv/bin/python -m pytest -q tests/test_init_db.py`` (with models) → passed
-- Full: ``.venv/bin/python -m pytest -q`` → **89 passed**
-- ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m compileall -q backend ui streamlit_app.py tests`` → success
-- Fresh init: ``scripts/init_db.py --database /tmp/co-design-phase2-fresh.sqlite3`` → created
-- Second init without ``--force`` → refused (exit 1)
-
-### Migration and rollback
-
-- No schema migration. Existing live DB is unchanged.
-- Rollback: restore listed files; re-enable old ``build.sh`` init only if needed.
-- Developers with an existing private ``.env`` keep current provider/stage mode.
-
-### Known incomplete items
-
-- Superseded by Phase 3 completion notes below.
-
-## Phase 3 evidence (backend integrity)
-
-### Behavior implemented
-
-- ``CoachApplicationService`` reloads persisted stage, canonical history,
-  selected source IDs, source context, and image inputs from the notebook store.
-  Mismatched or unknown client hints return HTTP 400.
-- ``CoachRequest.current_stage`` is validated against the six Thinking Path IDs
-  (HTTP 422 for unknown values).
-- ``StudentStore.apply_phase_transition_decision`` updates transition status and
-  journey metadata in one SQLite transaction; injected journey-write failures
-  leave the transition pending.
-- ``ProviderUnavailableError`` maps to HTTP 503. API routes log thread IDs
-  without source text or secrets.
-
-### Files changed
-
-- ``backend/application.py``, ``backend/domain.py``, ``backend/api.py``
-- ``backend/learning_service.py``, ``backend/student_store.py``, ``backend/workflow.py``
-- ``backend/AGENTS.md``, ``docs/LOCAL_DEMO_IMPLEMENTATION.md``
-- ``tests/test_api.py``, ``tests/test_learning_service.py``
-- ``docs/IMPLEMENTATION_STATUS.md``
-
-### Commands run and results
-
-- Focused: ``.venv/bin/python -m pytest -q tests/test_api.py tests/test_learning_service.py tests/test_workflow.py`` → **18 passed**
-- Full: ``.venv/bin/python -m pytest -q`` → **95 passed**
-- ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m compileall -q backend ui streamlit_app.py tests`` → success
-
-### Migration and rollback
-
-- No schema migration. Existing live DB and private ``.env`` unchanged.
-- Rollback: restore the listed backend/test/doc files.
-
-### Known incomplete items
-
-- Superseded by Phase 4 completion notes below.
-
-## Phase 4 evidence (test isolation / primary-path coverage)
-
-### Behavior implemented
-
-- Autouse ``isolated_test_environment`` gives each test its own data/DB/files
-  tree, asserts mock mode + empty ``OPENAI_API_KEY``, and clears Streamlit
-  resource caches.
-- ``LocalApiClient`` accepts an injectable sync session for in-process FastAPI
-  ``TestClient`` contracts; adds ``learning_state``.
-- API-mode AppTest covers confirmation (pending transition) and auto-advance
-  (Thinking Path moves); one legacy AppTest remains on ``USE_LOCAL_API=false``.
-- Primary-path tests cover all six stages, reject/stale transitions, restart
-  recovery, cross-notebook isolation, and additive ``phase_transitions`` schema.
-- Mock CI workflow runs shell syntax, compileall, and pytest on push/PR.
-
-### Files changed
-
-- ``tests/conftest.py``, ``tests/AGENTS.md``
-- ``tests/test_api_client.py`` (new), ``tests/test_primary_path.py`` (new)
-- ``tests/test_streamlit_api_mode.py`` (new)
-- ``backend/api_client.py``
-- ``.github/workflows/mock-ci.yml`` (new)
-- ``docs/IMPLEMENTATION_STATUS.md``
-
-### Commands run and results
-
-- Focused: ``tests/test_api_client.py tests/test_primary_path.py tests/test_streamlit_api_mode.py`` → **11 passed**
-- Full: ``.venv/bin/python -m pytest -q`` → **106 passed**
-- ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m compileall -q backend ui streamlit_app.py tests`` → success
-
-### Migration and rollback
-
-- No schema migration. Existing live DB and private ``.env`` unchanged.
-- Rollback: restore listed test/client/CI files.
-
-### Known incomplete items
-
-- Superseded by Phase 5 completion notes below.
-
-## Phase 5 evidence (CRUD behind typed API)
-
-### Behavior implemented
-
-- ``WorkspaceService`` owns notebook/history/source/preference CRUD and safe
-  source-byte reads; API responses redact filesystem ``path`` (``has_file``).
-- FastAPI routes under ``/api/v1`` for preferences, threads, messages, sources,
-  upload, select-all, content, legacy backfill, and course-material sync.
-- ``LocalApiClient`` covers the new contracts; ``ui.runtime.store`` is a
-  ``WorkspaceFacade`` that uses the API when ``USE_LOCAL_API=true`` else the
-  in-process service.
-- Sources preview/download and uploads go through the facade (no direct path
-  reads in ``ui/sources.py`` / chat upload path).
-
-### Files changed
-
-- ``backend/workspace_service.py`` (new), ``backend/api.py``, ``backend/api_client.py``
-- ``backend/domain.py``, ``backend/repositories.py``, ``backend/source_library.py``
-- ``ui/runtime.py``, ``ui/sources.py``, ``ui/chat.py``, ``ui/session.py``
-- ``ui/AGENTS.md``, ``backend/AGENTS.md``
-- ``tests/test_workspace_api.py`` (new)
-- ``docs/IMPLEMENTATION_STATUS.md``
-
-### Commands run and results
-
-- Full: ``.venv/bin/python -m pytest -q`` → **109 passed**
-- ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m compileall -q backend ui streamlit_app.py tests`` → success
-
-### Migration and rollback
-
-- No schema migration. Existing live DB and private ``.env`` unchanged.
-- Rollback: restore listed backend/UI/test files.
-
-### Known incomplete items
-
-- None for Phase 5; Phase 6 evidence follows.
-
-## Phase 6 evidence (streaming / checkpoints / legacy retirement)
-
-### Behavior implemented
-
-- ``scripts/start.sh`` polls ``GET /api/v1/ready`` before starting Streamlit.
-- FastAPI stamps ``X-Request-ID`` on every response and exposes readiness,
-  ``POST /api/v1/coach/turn/stream`` (NDJSON), and
-  ``GET /api/v1/threads/{id}/graph``.
-- ``CoachWorkflow`` runs ``load_context → assess → recommend → format`` with
-  LangGraph ``MemorySaver`` when available; sequential fallback remains.
-- Streamlit student turns always use typed coaching (API or in-process
-  ``CoachApplicationService``) with streamed tokens; ``StudentChatEngine`` is
-  no longer on the UI path.
-- Removed the one-option composer model picker, related layout JS, and dead
-  model-slot CSS.
-
-### Files changed
-
-- ``scripts/start.sh``
-- ``backend/workflow.py``, ``backend/api.py``, ``backend/api_client.py``
-- ``ui/runtime.py``, ``ui/chat.py``, ``ui/layout/composer_layout.py``
-- ``ui/assets/template.css``, ``ui/AGENTS.md``
-- ``tests/test_api.py``, ``tests/test_api_client.py``, ``tests/test_workflow.py``
-- ``tests/test_streamlit_ui.py``, ``tests/test_streamlit_api_mode.py``,
-  ``tests/conftest.py``
-- ``docs/IMPLEMENTATION_STATUS.md``
-
-### Commands run and results
-
-- Full: ``.venv/bin/python -m pytest -q`` → **111 passed**
-- ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m compileall -q backend ui streamlit_app.py tests`` → success
-
-### Migration and rollback
-
-- No schema migration. Existing live DB and private ``.env`` unchanged.
-- Rollback: restore listed backend/UI/test/script files.
-
-### Known incomplete items / risks
-
-- In-memory LangGraph checkpoints do not survive API process restart.
-- ``StudentChatEngine`` unit tests remain; do not rewire UI to that path.
-- CSS cleanup removed model-slot rules from the recovered working-tree stylesheet;
-  re-check desktop and 390 px composer layout visually after restart.
-
-## Next exact action
-
-**Stop for review.** After approval, optional follow-ups: durable checkpoint
-adapter beyond ``MemorySaver``, further CSS maintainability splits, or a live
-Ollama smoke (labelled, separate from mock CI). Do not start unpaid OpenAI
-calls or commits unless explicitly requested.
+**AWS stateless EC2 migration scaffolding**

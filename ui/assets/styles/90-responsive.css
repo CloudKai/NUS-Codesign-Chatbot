@@ -209,7 +209,7 @@
 
         body:has(.st-key-mobile_panel label:nth-child(1) input:checked)
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-sources_panel) {
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel) {
             display:block;
         }
 
@@ -221,7 +221,7 @@
 
         body:has(.st-key-mobile_panel label:nth-child(3) input:checked)
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel) {
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-sources_panel) {
             display:block;
         }
 

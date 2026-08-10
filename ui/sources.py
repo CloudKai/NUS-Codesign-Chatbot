@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from html import escape
 from pathlib import Path
 from typing import Any
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from backend.settings import settings
 from backend.source_library import COURSE_MATERIAL_GROUPS, is_locked_course_source
@@ -19,6 +21,20 @@ from ui.rename import (
     sync_rename_select_all,
 )
 from ui.runtime import rerun, store
+
+logger = logging.getLogger(__name__)
+
+# Student-facing copy only — never pass raw exception text into the UI.
+_SOURCE_UPLOAD_ERROR = (
+    "The file could not be added. Check the type and size, then try again."
+)
+_SOURCE_SYNC_ERROR = "Course materials could not be loaded."
+_SOURCE_IMPORT_PARTIAL_ERROR = (
+    "Some course materials could not be imported. "
+    "Try again later or contact the course team."
+)
+_SOURCE_RENAME_ERROR = "The source could not be renamed. Try again."
+_SOURCE_DOWNLOAD_ERROR = "The file could not be downloaded. Try again."
 
 
 def format_size(size: int) -> str:
@@ -78,8 +94,12 @@ def _import_uploaded_sources(uploads: list[Any]) -> None:
             ],
             origin="source_panel",
         )
-    except Exception as exc:
-        st.session_state["source_upload_error"] = str(exc)
+    except Exception:
+        logger.exception(
+            "Source panel upload failed for notebook %s",
+            thread_id,
+        )
+        st.session_state["source_upload_error"] = _SOURCE_UPLOAD_ERROR
         # Clear the picker so the fragment stops retrying the failed selection.
         st.session_state["source_upload_nonce"] = nonce + 1
         rerun()
@@ -229,6 +249,95 @@ def _sources_expander_changed(section: str, widget_key: str) -> None:
     """Persist as soon as the student expands or collapses a Sources section."""
     _persist_sources_expander_state(section, widget_key)
 
+
+def _select_all_checkbox_state(
+    selected_count: int,
+    total_count: int,
+) -> tuple[bool, bool]:
+    """Return ``(checked, indeterminate)`` for the source master checkbox."""
+    if total_count <= 0:
+        return False, False
+    if selected_count >= total_count:
+        return True, False
+    return False, selected_count > 0
+
+
+def _set_select_all_checkbox_state(*, checked: bool, indeterminate: bool) -> None:
+    """Apply the tri-state visual state to Streamlit's native checkbox.
+
+    Streamlit exposes a boolean checkbox value, so the partial-selection state
+    is applied to the rendered native input after the widget mounts. Clicking
+    an indeterminate checkbox follows the native browser behavior and selects
+    every source.
+    """
+    state = "indeterminate" if indeterminate else "checked" if checked else "unchecked"
+    aria_state = "mixed" if indeterminate else "true" if checked else "false"
+    components.html(
+        f"""
+<script>
+(() => {{
+  const state = {state!r};
+  const ariaState = {aria_state!r};
+  let attempts = 0;
+  const applyState = () => {{
+    try {{
+      const root = window.parent.document.querySelector(
+        '.st-key-sources_select_all'
+      );
+      const control = root && root.querySelector(
+        '[role="checkbox"], input[type="checkbox"]'
+      );
+      if (root) {{
+        root.dataset.cdSelectAllState = state;
+        if (control) {{
+          if ('indeterminate' in control) {{
+            control.indeterminate = state === 'indeterminate';
+          }}
+          control.setAttribute('aria-checked', ariaState);
+          const label = control.closest('label');
+          if (label) label.setAttribute('aria-checked', ariaState);
+        }}
+        if (control || attempts++ >= 20) return;
+        window.setTimeout(applyState, 50);
+        return;
+      }}
+    }} catch (error) {{
+    }}
+    if (attempts++ < 20) window.setTimeout(applyState, 50);
+  }};
+  window.setTimeout(applyState, 0);
+}})();
+</script>
+""",
+        height=0,
+    )
+
+
+def _render_source_sort_dropdown(thread_id: str) -> str:
+    """Render a compact Sort menu (popover, not an editable select field).
+
+    Returns:
+        The active sort mode: ``Recent`` or ``Name``.
+    """
+    sort_key = f"source-sort-{thread_id}"
+    if st.session_state.get(sort_key) not in {"Recent", "Name"}:
+        st.session_state[sort_key] = "Recent"
+    current = str(st.session_state[sort_key])
+    with st.container(key="sources_sort_menu"):
+        with st.popover(current, key=f"source-sort-popover-{thread_id}"):
+            for mode in ("Recent", "Name"):
+                if st.button(
+                    mode,
+                    key=f"source-sort-option-{thread_id}-{mode.lower()}",
+                    use_container_width=True,
+                    type="tertiary",
+                ):
+                    if mode != current:
+                        st.session_state[sort_key] = mode
+                        rerun()
+    return str(st.session_state[sort_key])
+
+
 def render_sources_panel() -> None:
     """Render the Sources column.
 
@@ -271,11 +380,24 @@ def _render_sources_panel_body() -> None:
     if not sync_loading:
         try:
             lecture_sync = sync_future.result()
-        except Exception as exc:
-            sync_error = str(exc) or "Course materials could not be loaded."
+        except Exception:
+            logger.exception(
+                "Course material sync failed for notebook %s",
+                st.session_state.thread_id,
+            )
+            sync_error = _SOURCE_SYNC_ERROR
     sources = store.list_sources(st.session_state.thread_id)
-    selected_count = sum(1 for source in sources if source["selected"])
-    count_label = "Loading…" if sync_loading else f"{selected_count} selected"
+    personal_sources_all = [
+        source for source in sources if not is_locked_course_source(source)
+    ]
+    personal_selected_count = sum(
+        1 for source in personal_sources_all if source["selected"]
+    )
+    count_label = (
+        "Loading…"
+        if sync_loading
+        else f"{personal_selected_count} selected"
+    )
     with st.container(key="sources_header"):
         # Match Thinking Path: markdown title first (no st.columns chrome), Add overlaid.
         with st.container(key="sources_title_row"):
@@ -312,10 +434,12 @@ def _render_sources_panel_body() -> None:
             if upload_error:
                 st.error(upload_error)
         if lecture_sync and lecture_sync.errors:
-            st.caption(
-                "Some lecture notes could not be imported: "
-                + "; ".join(lecture_sync.errors)
+            logger.warning(
+                "Course material import issues for notebook %s: %s",
+                st.session_state.thread_id,
+                "; ".join(lecture_sync.errors),
             )
+            st.caption(_SOURCE_IMPORT_PARTIAL_ERROR)
         if sync_error:
             st.error(sync_error)
         if sync_loading:
@@ -327,65 +451,114 @@ def _render_sources_panel_body() -> None:
             label_visibility="collapsed",
             key=f"source-search-{st.session_state.thread_id}",
         )
+        # Always show Select all; it only toggles My Sources (personal uploads).
+        all_selected, select_all_indeterminate = _select_all_checkbox_state(
+            personal_selected_count,
+            len(personal_sources_all),
+        )
+        select_all_state = (
+            "indeterminate"
+            if select_all_indeterminate
+            else "checked"
+            if all_selected
+            else "unchecked"
+        )
+        with st.container(key="sources_filters"):
+            select_column, sort_column = st.columns([0.58, 0.42], gap="small")
+            with select_column:
+                with st.container(key="sources_select_all"):
+                    st.markdown(
+                        f'<span class="cd-select-all-state" '
+                        f'data-state="{select_all_state}" aria-hidden="true"></span>',
+                        unsafe_allow_html=True,
+                    )
+                    next_all = st.checkbox(
+                        "Select all sources",
+                        value=all_selected,
+                        disabled=not personal_sources_all,
+                        key=(
+                            f"all-sources-{st.session_state.thread_id}-"
+                            f"{len(personal_sources_all)}-{personal_selected_count}"
+                        ),
+                    )
+            with sort_column:
+                with st.container(key="sources_sort"):
+                    sort_label_column, sort_menu_column = st.columns(
+                        [0.34, 0.66],
+                        gap="small",
+                    )
+                    sort_label_column.markdown(
+                        '<p class="sources-sort-label">Sort:</p>',
+                        unsafe_allow_html=True,
+                    )
+                    with sort_menu_column:
+                        sort_mode = _render_source_sort_dropdown(
+                            st.session_state.thread_id
+                        )
+        _set_select_all_checkbox_state(
+            checked=all_selected,
+            indeterminate=select_all_indeterminate,
+        )
+        if personal_sources_all and next_all != all_selected:
+            store.set_all_sources_selected(st.session_state.thread_id, next_all)
+            if next_all:
+                st.session_state.allow_model_knowledge = False
+                store.update_thread(
+                    st.session_state.thread_id,
+                    metadata={"allow_model_knowledge": False},
+                )
+            rerun()
         visible_sources = _filter_sources(
             sources,
             query=search,
             type_filter="All",
-            sort_mode="Recent",
+            sort_mode=sort_mode,
         )
-        if sources:
-            all_selected = selected_count == len(sources)
-            with st.container(key="sources_select_all"):
-                next_all = st.checkbox(
-                    "Select all sources",
-                    value=all_selected,
-                    key=(
-                        f"all-sources-{st.session_state.thread_id}-"
-                        f"{len(sources)}-{selected_count}"
-                    ),
-                )
-            if next_all != all_selected:
-                store.set_all_sources_selected(st.session_state.thread_id, next_all)
-                if next_all:
-                    st.session_state.allow_model_knowledge = False
-                    store.update_thread(
-                        st.session_state.thread_id,
-                        metadata={"allow_model_knowledge": False},
-                    )
-                rerun()
-        elif sync_loading:
+        if sync_loading and not personal_sources_all:
             st.caption(
                 "Chat and Thinking Path stay available while course materials import."
             )
 
     def render_source_card(source: dict[str, Any]) -> None:
-        """Render one selectable source with preview and edit actions."""
+        """Render one source row: selectable personal, lock-only course materials."""
         safe_id = source["id"].replace("-", "_")
         locked = is_locked_course_source(source)
-        with st.container(key=f"source_card_{safe_id}"):
-            check_column, title_column, menu_column = st.columns(
-                [0.12, 0.76, 0.12],
-                gap="small",
-            )
-            selected = check_column.checkbox(
-                f"Use {source['title']}",
-                value=source["selected"],
-                label_visibility="collapsed",
-                key=f"source-selected-{source['id']}-{int(source['selected'])}",
-            )
-            if selected != source["selected"]:
-                store.set_source_selected(
-                    st.session_state.thread_id,
-                    source["id"],
-                    selected,
+        card_key = (
+            f"source_card_locked_{safe_id}" if locked else f"source_card_{safe_id}"
+        )
+        with st.container(key=card_key):
+            if locked:
+                title_column, menu_column = st.columns(
+                    [0.88, 0.12],
+                    gap="small",
                 )
-                if selected:
-                    st.session_state.allow_model_knowledge = False
-                    store.update_thread(
+            else:
+                check_column, title_column, menu_column = st.columns(
+                    [0.12, 0.76, 0.12],
+                    gap="small",
+                )
+                selected = check_column.checkbox(
+                    f"Use {source['title']}",
+                    value=bool(source["selected"]),
+                    label_visibility="collapsed",
+                    key=(
+                        f"source-selected-{source['id']}-"
+                        f"{int(bool(source['selected']))}"
+                    ),
+                )
+                if selected != bool(source["selected"]):
+                    store.set_source_selected(
                         st.session_state.thread_id,
-                        metadata={"allow_model_knowledge": False},
+                        source["id"],
+                        selected,
                     )
-                rerun()
+                    if selected:
+                        st.session_state.allow_model_knowledge = False
+                        store.update_thread(
+                            st.session_state.thread_id,
+                            metadata={"allow_model_knowledge": False},
+                        )
+                    rerun()
             with title_column:
                 if title_column.button(
                     source["title"],
@@ -406,7 +579,7 @@ def _render_sources_panel_body() -> None:
                     type="tertiary",
                     disabled=True,
                     key=f"locked-source-{source['id']}",
-                    help="Managed course material",
+                    help="Always included in coaching",
                 )
             else:
                 # Icon in the label (not icon=) so Streamlit hides the expand chevron.
@@ -441,8 +614,13 @@ def _render_sources_panel_body() -> None:
                                 cleaned,
                             )
                             rerun()
-                        except Exception as exc:
-                            st.error(str(exc))
+                        except Exception:
+                            logger.exception(
+                                "Source rename failed for notebook %s source %s",
+                                st.session_state.thread_id,
+                                source["id"],
+                            )
+                            st.error(_SOURCE_RENAME_ERROR)
                     sync_rename_select_all(
                         root_selector=(
                             f'[data-testid="stPopoverBody"]'
@@ -455,8 +633,13 @@ def _render_sources_panel_body() -> None:
                             content = store.get_source_content(
                                 st.session_state.thread_id, source["id"]
                             )
-                        except Exception as exc:
-                            st.error(str(exc))
+                        except Exception:
+                            logger.exception(
+                                "Source download failed for notebook %s source %s",
+                                st.session_state.thread_id,
+                                source["id"],
+                            )
+                            st.error(_SOURCE_DOWNLOAD_ERROR)
                         else:
                             st.download_button(
                                 "Download File",
@@ -500,34 +683,6 @@ def _render_sources_panel_body() -> None:
             for source in visible_sources
             if not is_locked_course_source(source)
         ]
-        for group in COURSE_MATERIAL_GROUPS:
-            # Keep empty course expanders visible when not filtering away the group.
-            group_all = [
-                source
-                for source in sources
-                if is_locked_course_source(source)
-                and (source.get("metadata") or {}).get("course_material_group") == group
-            ]
-            group_sources = _sort_course_sources_by_name(grouped_course_sources[group])
-            group_key = _ensure_sources_expander_state(group, default=True)
-            with st.expander(
-                f"{group} · {len(group_all)}",
-                expanded=bool(st.session_state.get(group_key, True)),
-                key=group_key,
-                # Required for session_state[key] to track open/closed. Without
-                # this, the 1s Sources fragment re-applies the seeded expanded
-                # value and collapsed sections snap back open.
-                on_change=_sources_expander_changed,
-                args=(group, group_key),
-            ):
-                if group_sources:
-                    for source in group_sources:
-                        render_source_card(source)
-                elif not search.strip():
-                    st.caption("No materials available yet.")
-                else:
-                    st.caption("No matching materials in this group.")
-            _persist_sources_expander_state(group, group_key)
         my_sources_key = _ensure_sources_expander_state("My Sources", default=True)
         with st.expander(
             f"My Sources · {len(personal_sources)}",
@@ -553,3 +708,32 @@ def _render_sources_panel_body() -> None:
             else:
                 st.caption("No matching personal sources.")
         _persist_sources_expander_state("My Sources", my_sources_key)
+        for group in COURSE_MATERIAL_GROUPS:
+            # Keep empty course expanders visible when not filtering away the group.
+            group_all = [
+                source
+                for source in sources
+                if is_locked_course_source(source)
+                and (source.get("metadata") or {}).get("course_material_group") == group
+            ]
+            group_sources = _sort_course_sources_by_name(grouped_course_sources[group])
+            # Collapsed by default; students open Lecture Notes / Readings as needed.
+            group_key = _ensure_sources_expander_state(group, default=False)
+            with st.expander(
+                f"{group} · {len(group_all)}",
+                expanded=bool(st.session_state.get(group_key, False)),
+                key=group_key,
+                # Required for session_state[key] to track open/closed. Without
+                # this, the 1s Sources fragment re-applies the seeded expanded
+                # value and collapsed sections snap back open.
+                on_change=_sources_expander_changed,
+                args=(group, group_key),
+            ):
+                if group_sources:
+                    for source in group_sources:
+                        render_source_card(source)
+                elif not search.strip():
+                    st.caption("No materials available yet.")
+                else:
+                    st.caption("No matching materials in this group.")
+            _persist_sources_expander_state(group, group_key)

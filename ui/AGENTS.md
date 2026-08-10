@@ -84,7 +84,34 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
 - **Avoid circular imports.** Typical flow: `runtime` → `session` → panels;
   `topbar` imports `notebooks` and `settings`; `workspace` imports panel modules.
 - **No hidden stage controls.** Show coach recommendations and respect persisted
-  transition state; do not add manual stage jump controls or HTML comment parsers.
+  transition state; do not use HTML comment parsers. Audited Journey stage
+  selection is allowed only when ``STUDENT_STAGE_SELECTION=true`` (server
+  ``select-stage`` API); never let the client spoof ``current_stage`` on coach
+  turns.
+- **Coach wait UX.** While a turn is in flight, show an explicit thinking status
+  (`st.status`) driven by early stream ``status`` events. Do not fake provider
+  token streaming in the UI beyond what the API emits.
+- **Edit via server revise only.** User-message Edit uses the in-bubble editor
+  (8-row max, then scroll) and must call ``store.revise_message`` /
+  ``POST .../messages/{id}/revise`` with a **stable** revise idempotency key for
+  that edit attempt (reuse across provider-failure retries until success or
+  abandon). The server creates an append-only conversation revision (later turns
+  leave the active view but stay in revision history); never delete or rewrite
+  history only in Streamlit session state. ``get_messages`` returns the active
+  branch. Do not show a student-facing ``Conversation NN`` revision label in
+  the chat panel (revision tracking stays internal). On revise failure, clear
+  ``pending_edit`` (so the next rerun does not auto-resubmit), keep the stable
+  revise idempotency key, restore the in-bubble draft, and require an explicit
+  Send click to retry; never blank the panel.
+- **Sources panel.** Order is My Sources → Lecture Notes → Readings. Course
+  materials show a lock only (no checkboxes); Select all / indeterminate /
+  none and Sort (Recent / Name) apply to personal uploads. Lecture Notes and
+  Readings expanders default collapsed until the student opens them. Never show
+  raw ``str(exc)`` for source upload/sync/rename/download failures — log the
+  internal error and display a fixed student-safe message.
+- **Thinking Path studio.** Never show raw ``str(exc)`` for stage-select or
+  transition-confirm failures — log internals and show a fixed student-safe
+  message.
 
 ## Entrypoint flow
 

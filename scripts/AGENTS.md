@@ -18,9 +18,14 @@ logic.
 | Script | Purpose | Safety notes |
 |---|---|---|
 | `start.sh` | **Canonical launcher** — FastAPI `:8000` + Streamlit `:8501` with `USE_LOCAL_API=true` | Everyday path |
-| `start_prod.sh` | Docker app entrypoint — both services on `0.0.0.0`, supervised together | Production container only; ports stay internal to Compose |
+| `start_prod.sh` | Docker app entrypoint — both services on `0.0.0.0`, supervised together | Production container; sqlite/local still may use `/app/data`; DSQL+S3 does not |
+| `deploy_ecr.sh` | ECR login + `compose.prod.yaml` pull/up | Host-only; needs `APP_IMAGE` + IAM role |
+| `host/duck.sh` | DuckDNS IP updater | Host cron only; token in `duck.env` (not Git) |
 | `build.sh` | Validation-only: `compileall` + full mock `pytest` | **Does not** initialize or modify the live DB |
-| `init_db.py` | Explicit DB schema setup | Refuses existing DB unless `--force`; prefer `--database PATH` for new files |
+| `init_db.py` | Explicit SQLite schema setup | Refuses existing DB unless `--force`; prefer `--database PATH` for new files |
+| `init_dsql.py` | Admin-only Aurora DSQL schema bootstrap | One DDL per transaction; async-job `CALL` on dedicated autocommit connection; never app startup; not `co_design_app` |
+| `smoke_dsql_idempotency.py` | Explicitly approved live DSQL runtime-role idempotency smoke | Requires `--confirm-live`, `DATABASE_PROVIDER=dsql`, `DSQL_USER=co_design_app`, and `--identifier cognito:<sub>`; mock provider only; no DDL/S3/Bedrock |
+| `preview_prompt.py` | Demo-only composed stage-prompt preview | No DB, student data, tokens, or provider calls |
 
 ## Environment variables
 

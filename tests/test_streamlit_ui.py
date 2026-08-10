@@ -5,6 +5,45 @@ from streamlit.testing.v1 import AppTest
 from backend.settings import settings
 
 
+def test_chat_composer_attachment_error_is_recoverable(monkeypatch):
+    """Rejecting a chat attachment leaves the notebook usable and unsent."""
+    from ui import chat
+
+    class FailedUpload:
+        """Minimal uploaded-file stand-in for the composer submission."""
+
+        name = "oversized.pdf"
+        type = "application/pdf"
+
+        @staticmethod
+        def getvalue() -> bytes:
+            """Return deterministic content if the UI reaches the upload adapter."""
+            return b"not actually uploaded"
+
+    def reject_upload(*_args, **_kwargs):
+        raise ValueError("Attachment exceeds the permitted size")
+
+    monkeypatch.setattr(
+        chat,
+        "normalize_composer_value",
+        lambda _value: ("Please review this attachment.", [FailedUpload()]),
+    )
+    monkeypatch.setattr(chat.store, "upload_sources", reject_upload)
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+
+    assert not app.exception
+    rendered_errors = "\n".join(error.value or "" for error in app.error)
+    assert "attachment could not be added" in rendered_errors.lower()
+    assert "no message was sent" in rendered_errors.lower()
+    thread_id = app.session_state["thread_id"]
+    from backend.student_store import StudentStore
+
+    assert [message["role"] for message in StudentStore().get_messages(thread_id)] == [
+        "assistant"
+    ]
+
+
 def test_streamlit_notebook_workspace_smoke():
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     assert not app.exception
@@ -25,7 +64,7 @@ def test_streamlit_notebook_workspace_smoke():
     workspace_panel = next(
         radio for radio in app.radio if radio.label == "Workspace panel"
     )
-    assert workspace_panel.options == ["Sources", "Chat", "Journey"]
+    assert workspace_panel.options == ["Journey", "Chat", "Sources"]
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Guidance Level:" in rendered
     assert any(button.label == "Quick" for button in app.button)
@@ -57,11 +96,42 @@ def test_streamlit_notebook_workspace_smoke():
         "Readings · 0",
         "My Sources · 0",
     }
+    sources_py = Path("ui/sources.py").read_text(encoding="utf-8")
+    my_sources_at = sources_py.index('f"My Sources · {len(personal_sources)}"')
+    lecture_at = sources_py.index('f"{group} · {len(group_all)}"')
+    assert my_sources_at < lecture_at
+    assert '_ensure_sources_expander_state(group, default=False)' in sources_py
+    assert '_ensure_sources_expander_state("My Sources", default=True)' in sources_py
+    assert "source_card_locked_" in sources_py
+    assert "disabled=locked" not in sources_py
+    assert 'key="sources_filters"' in sources_py
+    assert "sources-sort-label" in sources_py
+    assert "_render_source_sort_dropdown" in sources_py
+    assert "personal_sources_all" in sources_py
+    assert "Select all sources" in sources_py
     assert "Clarify the question, problem, or claim" in rendered
     assert "Add your first source" in rendered
     assert "Loading course materials in the background…" in Path("ui/sources.py").read_text(
         encoding="utf-8"
     )
+    assert 'st.session_state["source_upload_error"] = str(exc)' not in sources_py
+    assert "st.error(str(exc))" not in sources_py
+    assert "st.error(str(exc))" not in Path("ui/studio.py").read_text(encoding="utf-8")
+    assert "_STAGE_SELECT_ERROR" in Path("ui/studio.py").read_text(encoding="utf-8")
+    assert "_TRANSITION_RESOLVE_ERROR" in Path("ui/studio.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'click Send' in Path("ui/chat.py").read_text(encoding="utf-8")
+    assert "st.session_state.pop(\"pending_edit\", None)" in Path("ui/chat.py").read_text(
+        encoding="utf-8"
+    )
+    assert "_SOURCE_UPLOAD_ERROR" in sources_py
+    assert "_SOURCE_SYNC_ERROR" in sources_py
+    assert "_SOURCE_RENAME_ERROR" in sources_py
+    assert "_SOURCE_DOWNLOAD_ERROR" in sources_py
+    assert "logger.exception" in sources_py
+    assert "st.caption(_SOURCE_IMPORT_PARTIAL_ERROR)" in sources_py
+    assert 'st.caption(\n                "Some lecture notes could not be imported:' not in sources_py
     assert rendered.index('<span class="pane-title">Thinking Path</span>') < rendered.index(
         'class="message-meta coach-welcome"'
     ) < rendered.index('<span class="pane-title">Sources</span>')
@@ -88,12 +158,33 @@ def test_streamlit_notebook_workspace_smoke():
     assert "__cdUserEditCleanup" in edit_layout
     assert "--cd-user-bubble-max-rows:8" in rendered
     assert "--cd-user-bubble-max-height" in rendered
-    assert "USER_MESSAGE_EDIT_HEIGHT_PX" in Path("ui/chat.py").read_text(
-        encoding="utf-8"
+    chat_py = Path("ui/chat.py").read_text(encoding="utf-8")
+    assert "USER_MESSAGE_EDIT_HEIGHT_PX" in chat_py
+    assert '"height": USER_MESSAGE_EDIT_HEIGHT_PX' in chat_py or (
+        "height=USER_MESSAGE_EDIT_HEIGHT_PX" in chat_py
     )
-    assert "height=USER_MESSAGE_EDIT_HEIGHT_PX" in Path("ui/chat.py").read_text(
-        encoding="utf-8"
-    )
+    assert "sync_user_message_edit_layout" in chat_py
+    assert "user_message_edit_" in chat_py
+    assert "revise_message" in chat_py
+    assert "pending_edit" in chat_py
+    assert "_restore_pending_edit_draft" in chat_py
+    assert "_conversation_revision_label" not in chat_py
+    assert "conversation-revision-label" not in chat_py
+    assert 'f"Conversation {revision + 1:02d}"' not in chat_py
+    assert "idempotency_key" in chat_py
+    assert 'stage=f"revise:{message' in chat_py or "revise:" in chat_py
+    assert "creates a new conversation revision" in chat_py
+    assert "remain in revision history" in chat_py
+    assert "will replace the conversation after this point" not in chat_py
+    assert "truncate" not in chat_py.lower()
+    assert "Save & resend" not in chat_py
+    assert "Editing message" not in chat_py
+    assert "composer_edit" not in chat_py
+    assert "conversation-revision-label" not in rendered
+    assert "Conversation 01" not in rendered
+    assert ".conversation-revision-label" not in Path(
+        "ui/assets/styles/30-chat.css"
+    ).read_text(encoding="utf-8")
     assert 'appearance == "Dark"' in Path("ui/chat.py").read_text(encoding="utf-8")
     assert "#5B6B7C" in Path("ui/chat.py").read_text(encoding="utf-8")
     assert "rgba(255, 255, 255, 0.35)" in Path("ui/chat.py").read_text(
@@ -272,9 +363,37 @@ def test_add_pasted_source_then_chat_with_citation():
     assert not any(
         (expander.label or "").startswith("Sources used (") for expander in app.expander
     )
-    assert not any(
-        (button.label or "").startswith("[S1]") for button in app.button
+    assert any(
+        (button.label or "").startswith("[S1] Lecture evidence")
+        for button in app.button
     )
+
+
+def test_select_all_sources_renders_indeterminate_marker_for_partial_selection():
+    from backend.source_library import add_text_source
+    from backend.student_store import StudentStore
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    local_store = StudentStore()
+    thread_id = app.session_state["thread_id"]
+    add_text_source(local_store, thread_id, "First source", "First source text.")
+    add_text_source(local_store, thread_id, "Second source", "Second source text.")
+    app.run()
+
+    next(
+        checkbox
+        for checkbox in app.checkbox
+        if checkbox.label == "Use First source"
+    ).set_value(False).run()
+
+    assert not app.exception
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert 'class="cd-select-all-state"' in rendered
+    assert 'data-state="indeterminate"' in rendered
+    select_all = next(
+        checkbox for checkbox in app.checkbox if checkbox.label == "Select all sources"
+    )
+    assert select_all.value is False
 
 
 def test_multiple_selected_sources_do_not_force_sources_used_footer():
@@ -396,6 +515,23 @@ def test_language_theme_and_journey_has_no_manual_progression_control():
     assert StudentStore().get_user_preferences().get("appearance") == "Dark"
 
     assert app.session_state["learning_journey"]["current_stage"] == "focus"
+    assert not any(button.label == "Work on this stage" for button in app.button)
+    assert not app.exception
+
+
+def test_journey_work_on_this_stage_appears_when_selection_enabled(monkeypatch):
+    from backend.settings import settings
+
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    monkeypatch.setattr(settings, "auto_advance_stages", False)
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    select_buttons = [
+        button for button in app.button if button.label == "Work on this stage"
+    ]
+    assert len(select_buttons) == 5
+    captions = "\n".join(caption.value or "" for caption in app.caption)
+    assert "Choose a stage to work on." in captions
     assert not app.exception
 
 
@@ -613,3 +749,67 @@ def test_legacy_chat_turn_does_not_move_the_learning_stage_without_confirmation(
     assert not app.exception
     assert app.session_state["learning_journey"]["current_stage"] == "focus"
     assert app.session_state["learning_journey"]["completed_stages"] == []
+
+
+def test_pending_edit_failure_keeps_chat_visible(monkeypatch):
+    """A failed revise must not blank the discussion panel."""
+    from ui import chat
+    from backend.student_store import StudentStore
+
+    def reject_revise(*_args, **_kwargs):
+        raise RuntimeError("revise failed for AppTest")
+
+    monkeypatch.setattr(chat.store, "revise_message", reject_revise)
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    assert not app.exception
+    app.chat_input[0].set_value(
+        "I want to study safer street crossings for older pedestrians."
+    ).run()
+    assert not app.exception
+
+    thread_id = app.session_state["thread_id"]
+    user_message = next(
+        message
+        for message in StudentStore().get_messages(thread_id)
+        if message.get("role") == "user"
+    )
+    app.session_state["pending_edit"] = {
+        "message_id": user_message["id"],
+        "prompt": "I want to study safer crossings near schools.",
+        "idempotency_key": "11111111-1111-1111-1111-111111111111",
+    }
+    app.run()
+
+    assert not app.exception
+    rendered_errors = "\n".join(error.value or "" for error in app.error)
+    assert "Could not finish this edit" in rendered_errors or "Could not" in rendered_errors
+    # Explicit retry: failed revise must not leave pending_edit (auto-resubmit).
+    assert "pending_edit" not in app.session_state or app.session_state[
+        "pending_edit"
+    ] in (None, {})
+    assert app.session_state["editing_message"] == user_message["id"]
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert "Conversation 01" not in rendered
+    assert "conversation-revision-label" not in rendered
+    assert "Welcome to your critical-thinking coach" in rendered
+    assert (
+        app.session_state[f"edit-text-{user_message['id']}"]
+        == "I want to study safer crossings near schools."
+    )
+    # Stable revise key remains for the next explicit Send.
+    from ui.retry_keys import RETRY_KEYS_SESSION_KEY, _scope_sha256
+
+    assert RETRY_KEYS_SESSION_KEY in app.session_state
+    records = app.session_state[RETRY_KEYS_SESSION_KEY]
+    scope = _scope_sha256(
+        thread_id,
+        f"revise:{user_message['id']}",
+        "I want to study safer crossings near schools.",
+    )
+    assert isinstance(records, dict)
+    assert records[scope]["key"] == "11111111-1111-1111-1111-111111111111"
+    # Active history remains in the store; panel still shows coach welcome.
+    roles = [message["role"] for message in StudentStore().get_messages(thread_id)]
+    assert "assistant" in roles
+    assert "user" in roles

@@ -86,6 +86,8 @@ def test_mock_provider_includes_facione_scores():
     assert 0 <= assessment.facione_scores.self_regulation <= 4
     assert assessment.review_strengths
     assert "That's an interesting direction" in response
+    assert "One retrieved finding is:" not in response
+    assert "[S" not in response
     assert "You’ve made this step clearer" not in response
     assert "ready for the next part" not in response.lower()
 

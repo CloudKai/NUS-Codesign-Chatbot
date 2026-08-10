@@ -24,11 +24,28 @@ __pycache__/
 htmlcov/
 
 data/
+*.sqlite3
+*.db
 .files/
 output/
 logs/
 *.log
+tmp/
+temp/
+
+# Keep large instructor PDFs out of runtime images. Local compose bind-mounts
+# ./lecture_notes for the demo; production disables course-material sync.
+lecture_notes/
 
 .DS_Store
 *.swp
 *.tmp
+*.pem
+*.key
+id_rsa*
+credentials
+aws-credentials
+
+# Host-only DuckDNS / deploy secrets (never bake into the image)
+scripts/host/duck.env
+**/duck.env

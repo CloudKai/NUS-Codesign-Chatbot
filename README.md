@@ -2,15 +2,24 @@
 
 Local critical-thinking coach for university students. The app is a **Streamlit**
 UI plus a **FastAPI** coaching API. Student data stays on your machine (SQLite +
-files under `data/`). Amazon Cognito Managed Login authenticates students; the
-application stores the stable Cognito subject and profile fields, never passwords
-or refresh tokens.
+files under `data/`). Amazon Cognito Managed Login proves identity; FastAPI
+keeps Cognito refresh + ID tokens in HttpOnly cookies (never DB / localStorage).
+
+```text
+Cognito authentication
+        ↓
+FastAPI /api/v1/auth/callback
+        ↓
+HttpOnly Cognito refresh + ID-token cookies (Path=/api/v1/auth)
+        ↓
+Streamlit asks FastAPI /api/v1/auth/me
+```
 
 Use **one command** to start everything. That command starts both services with
-`USE_LOCAL_API=true`. The FastAPI process remains a single-owner local demo.
-Authenticated Cognito sessions automatically use equivalent owner-scoped
-in-process application services so one student's data cannot collapse into the
-API's shared `local-student` owner.
+`USE_LOCAL_API=true`. Authenticated students call FastAPI with their Cognito
+ID-token cookie; FastAPI verifies Cognito `sub`, binds the application user,
+and scopes every notebook/source/message operation to that owner. The shared
+`local-student` owner remains only for explicit local/mock demos and tests.
 
 Both paths support Thinking Path progression, structured assessments, Review
 personalization, and selected image grounding.
@@ -83,27 +92,25 @@ Do **not** commit `.env` (it may contain secrets later).
 cp .streamlit/secrets.toml.example .streamlit/secrets.toml
 ```
 
-Fill the private file with the Cognito app-client values. In the Cognito app
-client, enable authorization-code grant, `openid email profile`, self-service
-sign-up and confirmation as required by the course, and allow these exact local
-URLs:
+Fill the private file (or equivalent env vars) with the Cognito app-client
+values. In the Cognito app client, enable authorization-code grant,
+`openid email profile`, self-service sign-up/confirmation as required by the
+course, and allow this exact local callback URL:
 
-- Callback: `http://127.0.0.1:8501/oauth2callback`
+- Callback: `http://127.0.0.1:8000/api/v1/auth/callback`
 
-Profile Logout clears Streamlit cookies through
-`http://127.0.0.1:8000/api/v1/auth/logout/callback` and returns to the login
-gate. Cognito hosted `/logout` is optional; only enable it after adding that
-exact callback under Cognito Allowed sign-out URLs (a missing entry shows
-Cognito's "Something went wrong" page).
+Sign-in starts at `http://127.0.0.1:8000/api/v1/auth/login`. Profile Logout
+revokes the Cognito refresh token (best-effort) at
+`http://127.0.0.1:8000/api/v1/auth/logout`, clears auth cookies, and returns to
+the login gate with `?signed_out=1`.
 
-Use the same hostname in `redirect_uri` and any `logout_uri` (their ports differ
-locally); `localhost` and `127.0.0.1` are different hosts. Keep
-`.streamlit/secrets.toml` uncommitted.
+Keep every local URL on `127.0.0.1` (not `localhost`) so host-only cookies stay
+consistent. Keep `.streamlit/secrets.toml` uncommitted.
 
-Streamlit 1.60 uses authorization code with PKCE when Cognito advertises it. Its
-signed HttpOnly identity cookie lasts 30 days. Streamlit does not retain Cognito
-refresh tokens, so Cognito refresh-token rotation does not control that cookie
-lifetime.
+Cognito owns the browser session via HttpOnly refresh + ID-token cookies
+(`AUTH_COOKIE_SECURE=false` locally; Compose sets `true` in production).
+Refresh cookie Max-Age defaults to 30 days; Cognito app-client refresh validity
+is authoritative. Tokens are never stored in SQLite or returned in API JSON.
 
 ### 5. Start the whole program (one command)
 
@@ -224,6 +231,19 @@ Trusted course files may be up to **50 MB**; student uploads remain **10 MB**
 (up to 5 files per add). Student-upload compression uses `pymupdf` and `Pillow`
 from `requirements.txt` when installed; lecture sync does not re-compress
 shared course files.
+
+### Local RAG behavior
+
+Selected notebook sources are retrieved per turn rather than concatenated into
+the prompt. The local retriever builds overlapping, sentence-aware chunks,
+ranks them against the student's current question and bounded notebook context,
+and sends only the strongest diverse excerpts to the coach. Source labels
+remain stable (`[S1]`, `[S2]`), while internal chunk IDs are stored only for
+audit/debugging. See
+[`docs/PROMPT_ARCHITECTURE.md`](docs/PROMPT_ARCHITECTURE.md) for the complete
+ingestion → retrieval → prompt → citation flow and the later Bedrock adapter
+contract.
+
 ---
 
 ## Architecture (local)
@@ -247,89 +267,110 @@ boundary.
 
 ## Production Docker deployment (single EC2)
 
-The production-only stack keeps the local launcher unchanged:
+Production is the stateless ECR + Aurora DSQL + S3 stack described in
+[`docs/deploy/AWS_STATELESS_EC2.md`](docs/deploy/AWS_STATELESS_EC2.md). The
+default `compose.yaml`, its `./data` mount, and `docker compose up --build` are
+for local development only; do not use them for the EC2 production service.
+
+The production network boundary is:
 
 ```text
 Internet :80/:443 -> Caddy
-  /api/v1/auth/logout/callback -> app:8000 (browser logout only)
+  /api/v1/auth/login           -> app:8000
+  /api/v1/auth/callback        -> app:8000
+  /api/v1/auth/logout          -> app:8000
   /api/v1/health               -> app:8000 (optional public probe)
   other /api/*                 -> 404 (never reaches FastAPI)
   everything else              -> app:8501 (Streamlit)
 ```
 
 FastAPI and Streamlit share one `app` container and are not published to the
-host. Only Caddy maps host ports. Inside the container, Streamlit may still
-reach FastAPI on `http://127.0.0.1:8000`; that loopback path is not published.
-Caddy obtains and renews HTTPS certificates for
-`cde2300chatbot.duckdns.org`; the DuckDNS record must already resolve to the
-EC2 Elastic IP, and the EC2 security group must allow inbound TCP 80 and 443.
+host. Only Caddy maps host ports. Inside the container, Streamlit reaches
+FastAPI on `http://127.0.0.1:8000` for `/api/v1/auth/me` and other internal
+calls; that loopback path is not published. Caddy obtains and renews HTTPS
+certificates for `cde2300chatbot.duckdns.org`; the DuckDNS record must already
+resolve to the EC2 Elastic IP, and the EC2 security group must allow inbound
+TCP 80 and 443.
 
-Before validating or starting the stack:
+On EC2, install a private `.env` and `.streamlit/secrets.toml`, set an immutable
+ECR image tag, and deploy with the production wrapper:
 
 ```bash
-cp .env.example .env                         # then set private production values
+export APP_IMAGE="<account>.dkr.ecr.us-west-2.amazonaws.com/cde2300-chatbot:<git-sha>"
+export ECR_REGISTRY="<account>.dkr.ecr.us-west-2.amazonaws.com"
+export AWS_REGION="us-west-2"
+sh scripts/deploy_ecr.sh
+docker compose -f compose.prod.yaml ps
+docker compose -f compose.prod.yaml logs --tail=100 app caddy
+```
+
+Production does not mount or transfer `data/`. Student state must be in DSQL
+and S3. Before deployment, the host-only configuration must include:
+
+```dotenv
+DATABASE_PROVIDER=dsql
+FILE_STORAGE_PROVIDER=s3
+AWS_REGION=us-west-2
+DSQL_ENDPOINT=<cluster-hostname>
+DSQL_USER=co_design_app
+USER_UPLOADS_BUCKET=<private-bucket-name>
+```
+
+Set the Cognito callback to
+`https://cde2300chatbot.duckdns.org/api/v1/auth/callback`, keep
+`AUTH_COOKIE_SECURE=true`, and do not put private values in the image or
+repository. The current model path is configured independently (OpenAI or
+mock); Bedrock/course-material integration is not required for this deployment
+phase.
+
+Safe pre-deployment checks, which do not call a model provider or AWS service:
+
+```bash
+docker compose config --quiet
+APP_IMAGE=co-design:test docker compose -f compose.prod.yaml config --quiet
+sh -n scripts/start.sh scripts/start_prod.sh scripts/build.sh scripts/deploy_ecr.sh
+.venv/bin/python -m pytest -q
+PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \
+  .venv/bin/python -m compileall -q backend ui streamlit_app.py tests
+```
+
+The production readiness endpoint verifies configuration, all required DSQL
+tables/grants, and read access to the S3 bucket. It will deliberately return
+503 until DSQL bootstrap/grants and the private S3 bucket/IAM permissions are
+complete.
+
+After DSQL is ready, and only with separate approval for live writes, check
+runtime-role idempotency with the deterministic smoke:
+
+```bash
+DATABASE_PROVIDER=dsql DSQL_USER=co_design_app \
+  .venv/bin/python scripts/smoke_dsql_idempotency.py \
+  --confirm-live --identifier 'cognito:<sub>'
+```
+
+The command uses two independent runtime connections and the mock coach,
+creates one disposable notebook, performs no DDL/S3/Bedrock/provider calls,
+and removes its rows in `finally`. Do not run it until Aurora DSQL is ready and
+the live operation has been explicitly approved.
+
+For local development only, use the stateful default Compose stack:
+
+```bash
+cp .env.example .env
 cp .streamlit/secrets.toml.example .streamlit/secrets.toml
 mkdir -p data
 chmod 700 data .streamlit
 chmod 600 .env .streamlit/secrets.toml
-```
-
-The image runs as uid/gid `1000:1000`. On Linux/EC2, make the persistent data
-tree and mounted secrets file accessible to that account before startup:
-
-```bash
 sudo chown -R 1000:1000 data .streamlit/secrets.toml
-test -d data && test -f .streamlit/secrets.toml
-```
-
-Compose refuses to create either bind source automatically. This prevents a
-missing secrets file from silently becoming a directory and prevents a
-root-owned empty data directory from being created during startup.
-
-Set the private Cognito secrets file to use:
-
-- `redirect_uri = "https://cde2300chatbot.duckdns.org/oauth2callback"`
-- optional `logout_uri = "https://cde2300chatbot.duckdns.org/api/v1/auth/logout/callback"`
-
-Add those exact URLs to the Cognito app client. Do not put private values in the
-image or repository. Compose injects `.env` at runtime and bind-mounts
-`.streamlit/secrets.toml` read-only.
-
-Safe configuration/build checks (they do not start model providers):
-
-```bash
-docker compose config --quiet
-docker compose build
-sh -n scripts/start.sh scripts/start_prod.sh scripts/build.sh
-.venv/bin/python -m pytest -q
-```
-
-On EC2, after securely transferring the private configuration and any existing
-`data/` directory:
-
-```bash
 docker compose up -d --build
-docker compose ps
-docker compose logs --tail=100 app caddy
-curl -fsS https://cde2300chatbot.duckdns.org/api/v1/health
 ```
 
-The host `./data` bind mount persists the SQLite database, uploads, synced
-course-material copies, and optional generated workspaces across image rebuilds
-and container replacement. Back it up before deployment changes:
-
-```bash
-tar -czf "co-design-data-$(date +%Y%m%d-%H%M%S).tar.gz" data/
-```
-
-Do not run `docker compose down -v` unless removing Caddy's certificate/config
-volumes is intentional. `docker compose down` alone does not delete `./data`.
-
-> Security boundary: FastAPI still has no authenticated request boundary, so
-> Caddy publicly exposes only `/api/v1/auth/logout/callback` and
-> `/api/v1/health`. Cognito-authenticated Streamlit sessions continue to use
-> owner-scoped in-process services. Other `/api/*` paths return 404 at Caddy and
-> never reach FastAPI on the public hostname.
+> Security boundary: Caddy publicly exposes only auth browser routes
+> (`/api/v1/auth/login`, `/callback`, `/logout`) and `/api/v1/health`.
+> `/api/v1/auth/me` stays on the container loopback. Cognito-authenticated
+> Streamlit sessions continue to use owner-scoped in-process services. Other
+> `/api/*` paths return 404 at Caddy and never reach FastAPI on the public
+> hostname.
 
 ---
 
@@ -341,6 +382,25 @@ python -m pytest -q
 PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \
   python -m compileall -q backend ui streamlit_app.py
 ```
+
+### Headed Cognito browser smoke
+
+The deterministic suite covers the authenticated API critical path with an
+in-memory Cognito verifier and object store. A real browser cannot perform the
+protected workspace flow without either real Cognito authentication or a test
+cookie bypass, and the application deliberately has no such bypass. After
+explicitly approving a real Cognito smoke test, start the local stack and run:
+
+```bash
+sh scripts/start.sh
+sh scripts/browser_e2e_smoke.sh
+```
+
+The runner captures the signed-out desktop shell, pauses for a manual Hosted
+UI login and disposable-notebook check, then captures the authenticated 390 px
+mobile layout and browser console errors. It stores ignored artifacts under
+`output/playwright/browser-smoke/`; do not enter credentials into scripts or
+commit those artifacts.
 
 ---
 

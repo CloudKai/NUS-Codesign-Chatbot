@@ -8,15 +8,39 @@ cd "$ROOT"
 export USE_LOCAL_API="true"
 export CO_DESIGN_API_URL="${CO_DESIGN_API_URL:-http://127.0.0.1:8000}"
 
-DATA_DIR="${APP_DATA_DIR:-/app/data}"
+DATABASE_PROVIDER="${DATABASE_PROVIDER:-sqlite}"
+FILE_STORAGE_PROVIDER="${FILE_STORAGE_PROVIDER:-local}"
 SECRETS_FILE="/app/.streamlit/secrets.toml"
-if [ ! -d "$DATA_DIR" ] || [ ! -w "$DATA_DIR" ]; then
-  echo "Application data directory must exist and be writable: $DATA_DIR" >&2
-  echo "On the host, create it and grant uid/gid 1000 ownership before startup." >&2
-  exit 1
-fi
+
 if [ ! -f "$SECRETS_FILE" ] || [ ! -r "$SECRETS_FILE" ]; then
   echo "Streamlit secrets must be a readable file: $SECRETS_FILE" >&2
+  exit 1
+fi
+
+# Local/dev containers may still use SQLite + filesystem under APP_DATA_DIR.
+# Stateless production (DSQL + S3) must not require a persistent /app/data mount.
+if [ "$DATABASE_PROVIDER" = "sqlite" ] || [ "$FILE_STORAGE_PROVIDER" = "local" ]; then
+  DATA_DIR="${APP_DATA_DIR:-/app/data}"
+  if [ ! -d "$DATA_DIR" ] || [ ! -w "$DATA_DIR" ]; then
+    echo "Application data directory must exist and be writable: $DATA_DIR" >&2
+    echo "On the host, create it and grant uid/gid 1000 ownership before startup." >&2
+    exit 1
+  fi
+fi
+
+if [ "$DATABASE_PROVIDER" = "dsql" ] && [ -z "${DSQL_ENDPOINT:-}" ]; then
+  echo "DATABASE_PROVIDER=dsql requires DSQL_ENDPOINT." >&2
+  exit 1
+fi
+if [ "$DATABASE_PROVIDER" = "dsql" ]; then
+  DSQL_USER_VALUE="${DSQL_USER:-co_design_app}"
+  if [ "$DSQL_USER_VALUE" = "admin" ]; then
+    echo "DSQL_USER=admin is not allowed for application runtime; use co_design_app." >&2
+    exit 1
+  fi
+fi
+if [ "$FILE_STORAGE_PROVIDER" = "s3" ] && [ -z "${USER_UPLOADS_BUCKET:-}" ]; then
+  echo "FILE_STORAGE_PROVIDER=s3 requires USER_UPLOADS_BUCKET." >&2
   exit 1
 fi
 

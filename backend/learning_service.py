@@ -1,15 +1,23 @@
-"""Application service for confirmation-gated learning-stage progression."""
+"""Application service for confirmation-gated and student-selected stage progression."""
 
 from __future__ import annotations
 
+from typing import Any
+
 from .domain import PendingPhaseTransition
 from .repositories import NotebookRepository, PhaseTransitionRepository
-from .student_journey import complete_and_advance, current_stage, normalize_journey
+from .settings import settings
+from .student_journey import (
+    STAGE_BY_ID,
+    complete_and_advance,
+    current_stage,
+    normalize_journey,
+)
 from .student_store import StudentStore
 
 
 class LearningProgressService:
-    """Apply only student-confirmed recommendations to persisted learning state."""
+    """Apply student-confirmed recommendations and optional stage selection."""
 
     def __init__(
         self,
@@ -77,3 +85,25 @@ class LearningProgressService:
             expected_from_stage=pending.from_stage if accepted else None,
         )
         return PendingPhaseTransition.model_validate(resolved)
+
+    def select_stage(self, thread_id: str, stage_id: str) -> dict[str, Any]:
+        """Move the notebook to a student-chosen Thinking Path stage.
+
+        Requires ``STUDENT_STAGE_SELECTION=true``. Does not mark skipped stages
+        complete; rejects any pending ADVANCE recommendation for the notebook.
+
+        Returns:
+            Updated notebook metadata including ``learning_journey``.
+
+        Raises:
+            ValueError: When selection is disabled, the stage is unknown, or the
+                notebook is missing.
+        """
+        if not settings.student_stage_selection:
+            raise ValueError("Student stage selection is not enabled")
+        cleaned = str(stage_id or "").strip()
+        if cleaned not in STAGE_BY_ID:
+            raise ValueError(f"Unknown thinking stage: {cleaned}")
+        if not self._notebooks.get_thread(thread_id):
+            raise ValueError("Notebook not found")
+        return self._store.select_learning_stage(thread_id, cleaned)

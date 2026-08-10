@@ -8,7 +8,7 @@ application services, and infrastructure adapters.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -37,6 +37,19 @@ class CitationReference(BaseModel):
     label: str
     title: str
     excerpt: str = ""
+
+
+class RetrievalChunkReference(BaseModel):
+    """Auditable metadata for one source chunk supplied to a coaching turn."""
+
+    model_config = ConfigDict(frozen=True)
+
+    source_id: str
+    label: str
+    title: str
+    chunk_id: str
+    excerpt: str = Field(default="", max_length=600)
+    score: float = 0.0
 
 
 class FacioneDimensionScores(BaseModel):
@@ -149,19 +162,38 @@ class CoachRequest(BaseModel):
 
     Clients may hint stage, history, and sources, but the application service
     reloads those values from the notebook store and rejects mismatches.
+    ``student_project_context`` and ``conversation_summary`` are also filled
+    server-side for prompt composition; clients cannot inject prompt files or
+    stage instructions through this contract.
     """
 
     thread_id: str
-    student_message: str = Field(min_length=1, max_length=50_000)
+    student_message: str = Field(min_length=1, max_length=12_000)
     current_stage: str
     response_detail: str = Field(pattern="^(short|long)$")
     source_ids: list[str] = Field(default_factory=list)
     source_context: str = ""
-    image_inputs: list[CoachImageInput] = Field(default_factory=list)
+    student_project_context: str = ""
+    conversation_summary: str = ""
+    retrieved_chunks: list[RetrievalChunkReference] = Field(default_factory=list)
+    image_inputs: list[CoachImageInput] = Field(default_factory=list, max_length=5)
     allow_model_knowledge: bool = False
+    response_language: str = Field(default="English", min_length=1, max_length=50)
     history: list[dict[str, Any]] = Field(default_factory=list)
     model_id: str | None = None
     reasoning_effort: str | None = None
+    # Server-filled notebook CAS token; clients must not treat this as authoritative.
+    # Normal submit stamps this current revision on new rows and does not bump it.
+    conversation_revision: int | None = None
+    # Replacement user-message id from an append-only revision. The assistant
+    # attaches to this already-persisted row; it is excluded from provider history.
+    revise_user_message_id: str | None = Field(default=None, max_length=64)
+    idempotency_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
 
     @field_validator("current_stage")
     @classmethod
@@ -229,6 +261,27 @@ class PreferencePatch(BaseModel):
     sources_expander_state: dict[str, Any] | None = None
 
 
+class NotebookMetadataPatch(BaseModel):
+    """Student-editable notebook settings accepted at the public API boundary.
+
+    Learning-stage, progress-summary, assessment, and transition fields are
+    deliberately absent. Those values are written only by trusted application
+    services after a validated coaching turn or transition decision.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    response_detail: Literal["short", "long"] | None = None
+    response_language: str | None = Field(default=None, min_length=1, max_length=50)
+    selected_model: str | None = Field(default=None, min_length=1, max_length=120)
+    reasoning_effort: str | None = Field(default=None, min_length=1, max_length=30)
+    support_mode: str | None = Field(default=None, min_length=1, max_length=120)
+    assignment: dict[str, str] | None = None
+    allow_model_knowledge: bool | None = None
+    display_name: str | None = Field(default=None, min_length=1, max_length=80)
+    tags: list[str] | None = Field(default=None, max_length=50)
+
+
 class NotebookCreateRequest(BaseModel):
     """Payload for creating a notebook through the typed API."""
 
@@ -236,22 +289,35 @@ class NotebookCreateRequest(BaseModel):
     model_id: str = Field(min_length=1, max_length=120)
     support_mode: str = Field(min_length=1, max_length=120)
     assignment: dict[str, str] = Field(default_factory=dict)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: NotebookMetadataPatch = Field(default_factory=NotebookMetadataPatch)
 
 
 class NotebookUpdateRequest(BaseModel):
     """Partial notebook rename / metadata merge."""
 
     name: str | None = Field(default=None, min_length=1, max_length=120)
-    metadata: dict[str, Any] | None = None
+    metadata: NotebookMetadataPatch | None = None
+
+
+class WelcomeMessageMetadata(BaseModel):
+    """Fixed metadata accepted for the public welcome-message seed command."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["coach_welcome"] = "coach_welcome"
+    workflow: Literal["welcome"] = "welcome"
 
 
 class MessageCreateRequest(BaseModel):
-    """Persist one chat message outside the coaching workflow (e.g. welcome)."""
+    """Seed the fixed assistant welcome outside the coaching workflow.
 
-    role: str = Field(pattern="^(user|assistant|system)$")
+    General message creation is intentionally not exposed: user turns,
+    assistant assessments, and stage decisions belong to the coaching service.
+    """
+
+    role: Literal["assistant"] = "assistant"
     content: str = Field(min_length=1, max_length=100_000)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: WelcomeMessageMetadata = Field(default_factory=WelcomeMessageMetadata)
 
 
 class SourceUpdateRequest(BaseModel):

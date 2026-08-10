@@ -320,6 +320,11 @@
         overflow-wrap:anywhere;
     }
 
+    /* Hide Streamlit's "Press ⌘+Enter to apply" hint inside the bubble editor. */
+    [class*="st-key-user_message_edit_"] [data-testid="InputInstructions"] {
+        display:none !important;
+    }
+
     [class*="st-key-user_message_edit_actions_"] {
         width:100% !important;
         max-width:100% !important;
