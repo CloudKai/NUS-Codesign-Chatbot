@@ -19,6 +19,11 @@ DSQL_ENDPOINT=<hostname> AWS_REGION=us-west-2 \\
   .venv/bin/python scripts/init_dsql.py --admin-user admin
 ```
 
+On AWS CloudShell (system CA / IPv6 flaky), set ``DSQL_SSLROOTCERT`` to Amazon
+Root CA 1 and use a checkout that includes IPv4 ``hostaddr`` preference. Full
+operator checklist: ``docs/deploy/AWS_STATELESS_EC2.md``
+(section *CloudShell / laptop init_dsql checklist*).
+
 After success, grant runtime privileges (map the EC2 IAM role to co_design_app
 in IAM; do not commit account ARNs):
 

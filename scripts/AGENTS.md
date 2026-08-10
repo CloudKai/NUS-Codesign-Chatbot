@@ -23,7 +23,7 @@ logic.
 | `host/duck.sh` | DuckDNS IP updater | Host cron only; token in `duck.env` (not Git) |
 | `build.sh` | Validation-only: `compileall` + full mock `pytest` | **Does not** initialize or modify the live DB |
 | `init_db.py` | Explicit SQLite schema setup | Refuses existing DB unless `--force`; prefer `--database PATH` for new files |
-| `init_dsql.py` | Admin-only Aurora DSQL schema bootstrap | One DDL per transaction; async-job `CALL` on dedicated autocommit connection; never app startup; not `co_design_app` |
+| `init_dsql.py` | Admin-only Aurora DSQL schema bootstrap | One DDL per transaction; async-job `CALL` on dedicated autocommit connection; never app startup; not `co_design_app`. CloudShell SSL/IPv4 checklist: [`docs/deploy/AWS_STATELESS_EC2.md`](../docs/deploy/AWS_STATELESS_EC2.md) (§ CloudShell / laptop init_dsql checklist) |
 | `smoke_dsql_idempotency.py` | Explicitly approved live DSQL runtime-role idempotency smoke | Requires `--confirm-live`, `DATABASE_PROVIDER=dsql`, `DSQL_USER=co_design_app`, and `--identifier cognito:<sub>`; mock provider only; no DDL/S3/Bedrock |
 | `preview_prompt.py` | Demo-only composed stage-prompt preview | No DB, student data, tokens, or provider calls |
 
