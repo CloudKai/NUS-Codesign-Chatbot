@@ -20,7 +20,7 @@ from ui.rename import (
     render_enter_to_apply_rename,
     sync_rename_select_all,
 )
-from ui.runtime import rerun, store
+from ui.runtime import rerun_app, rerun_fragment, store
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ def _import_uploaded_sources(uploads: list[Any]) -> None:
         st.session_state["source_upload_error"] = _SOURCE_UPLOAD_ERROR
         # Clear the picker so the fragment stops retrying the failed selection.
         st.session_state["source_upload_nonce"] = nonce + 1
-        rerun()
+        rerun_fragment()
         return
     st.session_state.pop("source_upload_error", None)
     if added:
@@ -113,7 +113,7 @@ def _import_uploaded_sources(uploads: list[Any]) -> None:
         )
         st.toast(f"Added {len(added)} source{'s' if len(added) != 1 else ''}.")
     st.session_state["source_upload_nonce"] = nonce + 1
-    rerun()
+    rerun_fragment()
 
 
 @st.dialog("Source", width="large")
@@ -313,6 +313,59 @@ def _set_select_all_checkbox_state(*, checked: bool, indeterminate: bool) -> Non
     )
 
 
+def _source_selected_widget_key(source_id: str) -> str:
+    """Return the stable checkbox key for one personal source."""
+    return f"source-selected-{source_id}"
+
+
+def _select_all_widget_key(thread_id: str, personal_count: int) -> str:
+    """Return the select-all key (remounts when the personal source count changes)."""
+    return f"all-sources-{thread_id}-{personal_count}"
+
+
+def _persist_source_selected(source_id: str, widget_key: str) -> None:
+    """Write one source selection to the store from the checkbox widget state.
+
+    Session state mirrors the widget only for Streamlit binding; the store/API
+    remains authoritative for coaching and refresh.
+    """
+    selected = bool(st.session_state.get(widget_key))
+    thread_id = st.session_state.thread_id
+    store.set_source_selected(thread_id, source_id, selected)
+    if selected:
+        st.session_state.allow_model_knowledge = False
+        store.update_thread(
+            thread_id,
+            metadata={"allow_model_knowledge": False},
+        )
+
+
+def _persist_select_all_sources(
+    thread_id: str,
+    widget_key: str,
+    source_ids: tuple[str, ...],
+) -> None:
+    """Persist select-all and mirror personal checkbox keys from the new value."""
+    selected = bool(st.session_state.get(widget_key))
+    store.set_all_sources_selected(thread_id, selected)
+    for source_id in source_ids:
+        st.session_state[_source_selected_widget_key(source_id)] = selected
+    if selected:
+        st.session_state.allow_model_knowledge = False
+        store.update_thread(
+            thread_id,
+            metadata={"allow_model_knowledge": False},
+        )
+
+
+def _sync_source_selection_widgets(personal_sources: list[dict[str, Any]]) -> None:
+    """Align checkbox session keys with store-selected flags before render."""
+    for source in personal_sources:
+        st.session_state[_source_selected_widget_key(source["id"])] = bool(
+            source.get("selected")
+        )
+
+
 def _render_source_sort_dropdown(thread_id: str) -> str:
     """Render a compact Sort menu (popover, not an editable select field).
 
@@ -334,7 +387,7 @@ def _render_source_sort_dropdown(thread_id: str) -> str:
                 ):
                     if mode != current:
                         st.session_state[sort_key] = mode
-                        rerun()
+                        rerun_fragment()
     return str(st.session_state[sort_key])
 
 
@@ -358,7 +411,7 @@ def _render_sources_panel_stable() -> None:
     """Sources UI without a client auto-refresh timer."""
     _render_sources_panel_body()
     if not store.request_course_material_sync(st.session_state.thread_id).done():
-        rerun()
+        rerun_app()
 
 
 @st.fragment(run_every="1s")
@@ -367,11 +420,14 @@ def _render_sources_panel_polling() -> None:
     _render_sources_panel_body()
     if store.request_course_material_sync(st.session_state.thread_id).done():
         # Remount the stable fragment so the browser drops the 1s timer.
-        rerun()
+        rerun_app()
 
 
 def _render_sources_panel_body() -> None:
     """Shared Sources panel body used by the stable and polling fragments."""
+    st.session_state["_sources_fragment_runs"] = (
+        int(st.session_state.get("_sources_fragment_runs") or 0) + 1
+    )
     store.backfill_legacy_sources(st.session_state.thread_id)
     sync_future = store.request_course_material_sync(st.session_state.thread_id)
     sync_loading = not sync_future.done()
@@ -390,6 +446,7 @@ def _render_sources_panel_body() -> None:
     personal_sources_all = [
         source for source in sources if not is_locked_course_source(source)
     ]
+    _sync_source_selection_widgets(personal_sources_all)
     personal_selected_count = sum(
         1 for source in personal_sources_all if source["selected"]
     )
@@ -463,6 +520,12 @@ def _render_sources_panel_body() -> None:
             if all_selected
             else "unchecked"
         )
+        select_all_key = _select_all_widget_key(
+            st.session_state.thread_id,
+            len(personal_sources_all),
+        )
+        personal_ids = tuple(str(source["id"]) for source in personal_sources_all)
+        st.session_state[select_all_key] = all_selected
         with st.container(key="sources_filters"):
             select_column, sort_column = st.columns([0.58, 0.42], gap="small")
             with select_column:
@@ -472,13 +535,15 @@ def _render_sources_panel_body() -> None:
                         f'data-state="{select_all_state}" aria-hidden="true"></span>',
                         unsafe_allow_html=True,
                     )
-                    next_all = st.checkbox(
+                    st.checkbox(
                         "Select all sources",
-                        value=all_selected,
                         disabled=not personal_sources_all,
-                        key=(
-                            f"all-sources-{st.session_state.thread_id}-"
-                            f"{len(personal_sources_all)}-{personal_selected_count}"
+                        key=select_all_key,
+                        on_change=_persist_select_all_sources,
+                        args=(
+                            st.session_state.thread_id,
+                            select_all_key,
+                            personal_ids,
                         ),
                     )
             with sort_column:
@@ -499,15 +564,6 @@ def _render_sources_panel_body() -> None:
             checked=all_selected,
             indeterminate=select_all_indeterminate,
         )
-        if personal_sources_all and next_all != all_selected:
-            store.set_all_sources_selected(st.session_state.thread_id, next_all)
-            if next_all:
-                st.session_state.allow_model_knowledge = False
-                store.update_thread(
-                    st.session_state.thread_id,
-                    metadata={"allow_model_knowledge": False},
-                )
-            rerun()
         visible_sources = _filter_sources(
             sources,
             query=search,
@@ -537,28 +593,14 @@ def _render_sources_panel_body() -> None:
                     [0.12, 0.76, 0.12],
                     gap="small",
                 )
-                selected = check_column.checkbox(
+                selected_key = _source_selected_widget_key(source["id"])
+                check_column.checkbox(
                     f"Use {source['title']}",
-                    value=bool(source["selected"]),
                     label_visibility="collapsed",
-                    key=(
-                        f"source-selected-{source['id']}-"
-                        f"{int(bool(source['selected']))}"
-                    ),
+                    key=selected_key,
+                    on_change=_persist_source_selected,
+                    args=(source["id"], selected_key),
                 )
-                if selected != bool(source["selected"]):
-                    store.set_source_selected(
-                        st.session_state.thread_id,
-                        source["id"],
-                        selected,
-                    )
-                    if selected:
-                        st.session_state.allow_model_knowledge = False
-                        store.update_thread(
-                            st.session_state.thread_id,
-                            metadata={"allow_model_knowledge": False},
-                        )
-                    rerun()
             with title_column:
                 if title_column.button(
                     source["title"],
@@ -583,12 +625,12 @@ def _render_sources_panel_body() -> None:
                 )
             else:
                 # Icon in the label (not icon=) so Streamlit hides the expand chevron.
+                # Fragment widget interactions already re-run this panel; no app rerun.
                 menu = menu_column.popover(
                     ":material/more_horiz:",
                     type="tertiary",
                     key=f"source-menu-{source['id']}",
                     help="Source actions",
-                    on_change="rerun",
                 )
                 was_open_key = f"source-menu-was-open-{source['id']}"
                 was_open = bool(st.session_state.get(was_open_key))
@@ -613,7 +655,7 @@ def _render_sources_panel_body() -> None:
                                 source["id"],
                                 cleaned,
                             )
-                            rerun()
+                            rerun_fragment()
                         except Exception:
                             logger.exception(
                                 "Source rename failed for notebook %s source %s",
@@ -666,7 +708,7 @@ def _render_sources_panel_body() -> None:
                                 st.session_state.thread_id,
                                 source["id"],
                             )
-                            rerun()
+                            rerun_fragment()
 
     with st.container(key="sources_scroll", height="stretch"):
         grouped_course_sources = {

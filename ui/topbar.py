@@ -10,7 +10,7 @@ from backend.student_journey import RESPONSE_DETAILS, normalize_journey
 from ui.notebooks import notebooks_dialog
 from ui.profile import inject_profile_leave_helper, render_profile_menu
 from ui.rename import bump_rename_epoch, render_enter_to_apply_rename
-from ui.runtime import rerun, store
+from ui.runtime import rerun_app, store
 from ui.session import save_journey
 from ui.settings import apply_selected_model
 
@@ -37,7 +37,7 @@ def _render_guidance_dropdown(journey: dict) -> None:
                     if detail != current_detail:
                         journey["response_detail"] = detail
                         save_journey(journey)
-                        rerun()
+                        rerun_app()
 
 
 def render_topbar() -> tuple[str, str | None]:
@@ -86,7 +86,7 @@ def render_topbar() -> tuple[str, str | None]:
                 if applied and cleaned_title and cleaned_title != current_title:
                     store.update_thread(thread_id, name=cleaned_title)
                     bump_rename_epoch("topbar", thread_id)
-                    rerun()
+                    rerun_app()
         with controls_column.container(key="topbar_actions"):
             chats_column, guidance_label_column, guidance_menu_column = st.columns(
                 [0.28, 0.40, 0.32],

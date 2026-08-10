@@ -262,7 +262,8 @@ def test_auth_gate_uses_server_authoritative_cooldown_and_same_document_redirect
     assert "querySelector" in source
     assert "@st.fragment(run_every=0.5)" in source
     assert "def _render_signin_cooldown_fragment" in source
-    assert "st.rerun()" in source
+    assert "rerun_app()" in source
+    assert "st.rerun()" not in source
     assert "removeAttribute('disabled')" not in source
     assert "removeAttribute('aria-disabled')" not in source
     assert "button.disabled = false" not in source

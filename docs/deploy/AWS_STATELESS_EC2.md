@@ -137,6 +137,98 @@ with autocommit enabled, only when a new ``job_id`` is returned. The procedure
 cannot run in a transaction block; ``IF NOT EXISTS`` re-runs that find an
 existing index return no job and skip the call.
 Runtime never uses DbConnectAdmin.
+
+#### CloudShell / laptop init_dsql checklist
+
+Use this whenever you pull a newer bootstrap script and re-run admin migration
+from **AWS CloudShell** (or any host whose system CA / IPv6 path is flaky).
+
+**Symptoms this checklist fixes**
+
+| Error | Cause |
+|---|---|
+| `SSL error: certificate verify failed` | System trust store lacks Amazon Root CA 1 |
+| `Cannot assign requested address` on an `2600:…` host | CloudShell cannot open DSQL’s IPv6 AAAA |
+| Traceback still shows `sslrootcert="system"` / no `hostaddr` | Wrong clone or branch; old script still on disk |
+| `fatal: Need to specify how to reconcile divergent branches` | Local and `origin` diverged; no pull strategy set |
+
+**1. Use one clone, on the branch that has the fix**
+
+CloudShell sometimes has a nested tree
+(`~/NUS-Codesign-Chatbot/NUS-Codesign-Chatbot/`). Always confirm:
+
+```sh
+pwd
+git rev-parse --show-toplevel
+git fetch origin
+git checkout Production-AddEditFunction   # or the branch that carries the fix
+git reset --hard origin/Production-AddEditFunction
+git log -1 --oneline
+grep -n "_prefer_ipv4_hostaddr\|connect_kwargs\|DSQL_SSLROOTCERT" scripts/init_dsql.py | head
+```
+
+Prefer `git pull --ff-only origin <branch>` when the local branch can fast-forward.
+Do **not** set `git config pull.rebase` unless you intentionally want a repo-wide
+default. `reset --hard` discards **local-only** commits on that clone.
+
+Confirm the script prefers IPv4 (`_prefer_ipv4_hostaddr` / `hostaddr`) and reads
+`settings.dsql_sslrootcert` (env ``DSQL_SSLROOTCERT``).
+
+**2. Point TLS at Amazon Root CA 1**
+
+```sh
+# once per CloudShell home (persist across sessions in $HOME)
+curl -fsSL -o "$HOME/AmazonRootCA1.pem" \
+  https://www.amazontrust.com/repository/AmazonRootCA1.pem
+export DSQL_SSLROOTCERT="$HOME/AmazonRootCA1.pem"
+test -f "$DSQL_SSLROOTCERT" && echo "cert OK"
+```
+
+`/tmp/AmazonRootCA1.pem` is easy to lose when the session recycles; prefer
+`$HOME`.
+
+**3. Env + migrate**
+
+```sh
+# IAM identity must be allowed DbConnectAdmin on the cluster
+export AWS_REGION="${AWS_REGION:-us-west-2}"
+export DSQL_ENDPOINT="<cluster-hostname>.dsql.${AWS_REGION}.on.aws"
+export DSQL_SSLROOTCERT="${DSQL_SSLROOTCERT:-$HOME/AmazonRootCA1.pem}"
+
+cd "$(git rev-parse --show-toplevel)"
+source .venv/bin/activate   # create/install deps first if needed
+python scripts/init_dsql.py \
+  --endpoint "$DSQL_ENDPOINT" \
+  --region "$AWS_REGION" \
+  --admin-user admin
+```
+
+Then GRANT runtime privileges as admin (see SQL below). Never run this script
+as `co_design_app`, and never from application startup.
+
+**4. Quick smoke if connect still fails**
+
+```sh
+python - <<'PY'
+import os, socket
+import psycopg
+from backend.persistence.dsql_connection import generate_dsql_admin_auth_token
+from backend.settings import settings
+
+endpoint = os.environ["DSQL_ENDPOINT"]
+region = os.environ.get("AWS_REGION", "us-west-2")
+cert = os.environ.get("DSQL_SSLROOTCERT") or settings.dsql_sslrootcert
+infos = socket.getaddrinfo(endpoint, 5432, socket.AF_INET, socket.SOCK_STREAM)
+hostaddr = infos[0][4][0]
+token = generate_dsql_admin_auth_token(endpoint=endpoint, region=region)
+conn = psycopg.connect(
+    host=endpoint, hostaddr=hostaddr, port=5432, dbname="postgres",
+    user="admin", password=token, sslmode="verify-full", sslrootcert=cert,
+)
+print("ok", conn.info.host, hostaddr, "sslrootcert=", cert)
+conn.close()
+PY
+```
 Useful secondary indexes (ASYNC): ``users(identifier)``, ``users(cognito_sub)``,
 ``notebooks(user_id, updated_at)``, ``messages(notebook_id, created_at, id)``,
 ``messages(notebook_id, decision_status, created_at)``,
