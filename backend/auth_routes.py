@@ -18,9 +18,11 @@ from backend.auth_oidc import (
 )
 from backend.auth_profiles import sync_authenticated_user
 from backend.cognito_cookies import (
+    SESSION_HINT_COOKIE_VALUE,
     id_token_cookie_settings,
     oauth_state_cookie_settings,
     refresh_cookie_settings,
+    session_hint_cookie_settings,
 )
 from backend.rate_limit import RateLimitExceeded, get_login_start_limiter
 from backend.settings import settings
@@ -108,16 +110,22 @@ def _read_cookie(request: Request, name: str) -> str | None:
 
 
 def _set_auth_cookies(response: Response, session: CognitoAuthSession) -> None:
-    """Attach HttpOnly refresh + ID-token cookies from a verified session."""
+    """Attach HttpOnly refresh, ID-token, and session-hint cookies."""
     refresh_params = refresh_cookie_settings()
     id_params = id_token_cookie_settings()
+    hint_params = session_hint_cookie_settings()
     response.set_cookie(value=session.refresh_token, **refresh_params)
     response.set_cookie(value=session.id_token, **id_params)
+    response.set_cookie(value=SESSION_HINT_COOKIE_VALUE, **hint_params)
 
 
 def _clear_auth_cookies(response: Response) -> None:
-    """Expire both Cognito auth cookies (idempotent)."""
-    for params in (refresh_cookie_settings(), id_token_cookie_settings()):
+    """Expire Cognito auth cookies including the session presence hint."""
+    for params in (
+        refresh_cookie_settings(),
+        id_token_cookie_settings(),
+        session_hint_cookie_settings(),
+    ):
         response.delete_cookie(
             key=params["key"],
             path=params["path"],
@@ -346,6 +354,9 @@ def register_auth_routes(
             # Rotate ID cookie (and refresh when Cognito returned a new one).
             response.set_cookie(
                 value=refreshed.id_token, **id_token_cookie_settings()
+            )
+            response.set_cookie(
+                value=SESSION_HINT_COOKIE_VALUE, **session_hint_cookie_settings()
             )
             if refreshed.refresh_token != refresh_token:
                 response.set_cookie(

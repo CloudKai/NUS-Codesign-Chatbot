@@ -356,12 +356,33 @@ def test_env_example_documents_cognito_cookies_and_fastapi_callback():
     example = Path(".env.example").read_text(encoding="utf-8")
     assert "COGNITO_REFRESH_COOKIE_NAME=co_design_refresh" in example
     assert "COGNITO_ID_TOKEN_COOKIE_NAME=co_design_id" in example
+    assert "COGNITO_SESSION_HINT_COOKIE_NAME=co_design_session" in example
     assert "COGNITO_REFRESH_COOKIE_MAX_AGE=2592000" in example
     assert "AUTH_COOKIE_SECURE=false" in example
     assert "APP_SESSION_" not in example
     assert "COGNITO_REDIRECT_URI=http://127.0.0.1:8000/api/v1/auth/callback" in example
     assert "CO_DESIGN_PUBLIC_API_URL=http://127.0.0.1:8000" in example
     assert "authoritative" in example.lower() or "app-client" in example.lower()
+
+
+def test_should_attempt_session_refresh_runs_once_when_signed_out(monkeypatch):
+    """Expired ID cookies still reach the refresh bridge via one browser hop."""
+    st.session_state.clear()
+    monkeypatch.setattr(auth_gate.st, "query_params", {})
+    assert auth_gate.should_attempt_session_refresh() is True
+
+    st.session_state["_auth_refresh_attempted"] = True
+    assert auth_gate.should_attempt_session_refresh() is False
+
+
+def test_should_attempt_session_refresh_skips_auth_required_marker(monkeypatch):
+    st.session_state.clear()
+    monkeypatch.setattr(
+        auth_gate.st,
+        "query_params",
+        {"auth_required": "1"},
+    )
+    assert auth_gate.should_attempt_session_refresh() is False
 
 
 def test_authenticated_users_see_full_application(logged_in_user, monkeypatch):

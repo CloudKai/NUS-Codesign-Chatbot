@@ -160,17 +160,13 @@ def should_attempt_session_refresh() -> bool:
     ``auth_refreshed``, ``auth_error``, ``signed_out``) as well as the in-tab
     ``_auth_refresh_attempted`` flag.
 
-    When the browser has no ID-token cookie at all, skip the bridge and show
-    the login gate immediately. The refresh cookie is path-scoped to FastAPI
-    and invisible here; attempting the bridge on every cold visit only caused
-    a stuck "Checking your session…" page when scripted navigation failed.
+    The refresh cookie is path-scoped to ``/api/v1/auth`` and invisible here.
+    Always try the browser bridge once when signed out: either the short-lived
+    ID cookie is still present, the Path=/ session-hint remains after ID expiry,
+    or only the refresh cookie exists. Cold visitors without a refresh cookie
+    round-trip once through ``/api/v1/auth/refresh`` → ``/?auth_required=1``.
     """
     if bool(st.session_state.get("_auth_refresh_attempted")):
-        return False
-    id_cookie = _cookie_value(
-        str(getattr(settings, "cognito_id_token_cookie_name", "co_design_id"))
-    )
-    if not id_cookie:
         return False
     try:
         return not any(

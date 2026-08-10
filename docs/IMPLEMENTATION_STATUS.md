@@ -2,6 +2,16 @@
 
 ## Current phase
 
+**Auth: restore Cognito refresh after 1-hour ID cookie expiry.** Streamlit
+could not see the path-scoped refresh cookie, and ``should_attempt_session_refresh``
+skipped the browser bridge whenever ``co_design_id`` was missing — so a normal
+page load after ~1h forced re-login even though the 30-day refresh token was
+still valid. Fix: always attempt ``/api/v1/auth/refresh`` once when signed out
+(loop-guarded by query markers), and set a non-sensitive Path=/ 
+``co_design_session`` hint alongside auth cookies.
+
+### Prior UI phase (still true)
+
 **UI: fragment-scoped Streamlit reruns (local interactions).** Explicit
 ``rerun_app()`` / ``rerun_fragment()`` helpers replaced the ambiguous
 ``rerun()``. Sources select/search/sort/upload/delete, Journey preview
@@ -21,14 +31,24 @@ remain full-app. Debug counters: ``_app_runs``, ``_sources_fragment_runs``,
 - Thinking Path stage selection and transition confirm
 - Appearance theme (entrypoint ``render_theme_css``)
 
-### UI hardening just completed (this pass)
+3. **Full mock suite.** ``.venv/bin/python -m pytest -q`` → **397 passed**.
+
+### Auth refresh fix (this pass)
+
+1. ``should_attempt_session_refresh`` no longer requires a live ``co_design_id``
+   cookie before redirecting to ``/api/v1/auth/refresh``.
+2. Login/refresh/logout set or clear ``co_design_session`` (Path=/, Max-Age 30d,
+   non-sensitive ``1``) alongside the Cognito token cookies.
+3. Focused auth suites + full mock ``pytest`` green.
+
+### Prior UI hardening
 
 1. **Explicit edit retry.** On revise failure, clear ``pending_edit`` so the next
    rerun does not auto-resubmit; keep the stable ``get_retry_key`` UUID; restore
    the in-bubble draft; require Send to retry.
 2. **Studio sanitized errors.** Stage-select and transition-confirm failures log
    internals and show fixed student-safe messages (no ``str(exc)``).
-3. **Full mock suite.** ``.venv/bin/python -m pytest -q`` → **393 passed**.
+3. **Full mock suite (prior).** ``.venv/bin/python -m pytest -q`` → **393 passed**.
 
 ### Prior production-hardening (still true)
 

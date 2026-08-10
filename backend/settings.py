@@ -114,6 +114,11 @@ class Settings:
     cognito_id_token_cookie_name: str = os.getenv(
         "COGNITO_ID_TOKEN_COOKIE_NAME", "co_design_id"
     ).strip() or "co_design_id"
+    # Path=/ presence marker so Streamlit can attempt the refresh bridge after
+    # the short-lived ID cookie expires. Value is non-sensitive ("1").
+    cognito_session_hint_cookie_name: str = os.getenv(
+        "COGNITO_SESSION_HINT_COOKIE_NAME", "co_design_session"
+    ).strip() or "co_design_session"
     cognito_refresh_cookie_max_age: int = int(
         os.getenv("COGNITO_REFRESH_COOKIE_MAX_AGE", "2592000")
     )
