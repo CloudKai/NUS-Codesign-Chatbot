@@ -210,7 +210,7 @@ class WorkspaceService:
         return source
 
     def set_all_sources_selected(self, thread_id: str, selected: bool) -> list[dict[str, Any]]:
-        """Select or deselect every source in a notebook."""
+        """Select or deselect personal sources; locked course materials stay on."""
         self._store.set_all_sources_selected(thread_id, selected)
         return self.list_sources(thread_id)
 

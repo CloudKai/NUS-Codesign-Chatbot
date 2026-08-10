@@ -101,6 +101,10 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
   notebook (stored ``0`` displays as Conversation 1). On revise failure, keep
   rendering the active chat and restore the in-bubble draft for retry; never
   blank the panel.
+- **Sources panel.** Order is My Sources → Lecture Notes → Readings. Course
+  materials show a lock only (no checkboxes); Select all / indeterminate /
+  none and Sort (Recent / Name) apply to personal uploads. Lecture Notes and
+  Readings expanders default collapsed until the student opens them.
 
 ## Entrypoint flow
 

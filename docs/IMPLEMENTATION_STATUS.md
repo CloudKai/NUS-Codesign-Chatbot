@@ -14,7 +14,10 @@ stays ``messages.notebook_id → notebooks.user_id → users.id`` (no denormaliz
 user columns on messages). Student UI keeps inline bubble edit, shows
 ``Conversation {revision + 1}`` (stored ``0`` → Conversation 01), and warns that
 later turns leave the active view but remain in revision history. Regenerate
-remains unavailable. ``tests/test_conversation_revision.py`` is rewritten for
+remains unavailable. **Sources panel:** My Sources first, then Lecture Notes /
+Readings; course materials are lock-only (no checkboxes) and always included;
+Select all / indeterminate / none and Sort apply only to personal uploads;
+Lecture Notes / Readings expanders start collapsed. ``tests/test_conversation_revision.py`` is rewritten for
 these semantics. The complete 381-test deterministic mock suite and compileall
 pass. Remaining gates: additive DSQL DDL on existing clusters, controlled DSQL
 smoke, live browser/upload/RAG QA, and ARM64 image deployment. Bedrock and true

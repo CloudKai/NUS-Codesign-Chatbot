@@ -157,6 +157,42 @@ def test_lecture_notes_folder_syncs_updates_and_removes_sources(tmp_path, monkey
     assert store.list_sources(thread_id) == []
 
 
+def test_locked_course_sources_cannot_be_unselected(tmp_path, monkeypatch):
+    from backend import source_library
+
+    store, thread_id, _files_dir = make_notebook(tmp_path, monkeypatch)
+    lecture_notes = tmp_path / "lecture_notes"
+    notes_folder = lecture_notes / "lectureNotes"
+    notes_folder.mkdir(parents=True)
+    (notes_folder / "week-01.txt").write_text("Locked lecture", encoding="utf-8")
+    monkeypatch.setattr(source_library.settings, "lecture_notes_dir", lecture_notes)
+    monkeypatch.setattr(source_library.settings, "max_lecture_notes", 50)
+    monkeypatch.setattr(source_library.settings, "max_course_material_size_mb", 1)
+
+    sync_lecture_notes_folder(store, thread_id)
+    locked = store.list_sources(thread_id)[0]
+    personal = add_file_sources(
+        store,
+        thread_id,
+        [("mine.txt", b"Personal upload", "text/plain")],
+    )[0]
+
+    with pytest.raises(ValueError, match="cannot be unselected"):
+        store.set_source_selected(thread_id, locked["id"], False)
+    assert store.get_source(thread_id, locked["id"])["selected"] is True
+
+    store.set_source_selected(thread_id, personal["id"], False)
+    store.set_all_sources_selected(thread_id, False)
+    sources = {item["id"]: item for item in store.list_sources(thread_id)}
+    assert sources[locked["id"]]["selected"] is True
+    assert sources[personal["id"]]["selected"] is False
+
+    store.set_all_sources_selected(thread_id, True)
+    sources = {item["id"]: item for item in store.list_sources(thread_id)}
+    assert sources[locked["id"]]["selected"] is True
+    assert sources[personal["id"]]["selected"] is True
+
+
 def test_lecture_notes_sync_skips_upload_compression(tmp_path, monkeypatch):
     from backend import source_library
 

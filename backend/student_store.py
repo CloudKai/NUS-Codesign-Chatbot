@@ -3352,7 +3352,23 @@ class StudentStore:
         source_id: str,
         selected: bool,
     ) -> None:
-        """Toggle one source selection flag."""
+        """Toggle one personal source selection flag.
+
+        Locked course materials (Lecture Notes / Readings) stay selected and
+        cannot be cleared through this API.
+        """
+        from backend.source_library import is_locked_course_source
+
+        source = self.get_source(thread_id, source_id)
+        if not source:
+            raise ValueError("Source not found")
+        if is_locked_course_source(source):
+            if not selected:
+                raise ValueError(
+                    "Course materials stay selected and cannot be unselected."
+                )
+            if source.get("selected"):
+                return
         with self._lock, self._connect() as connection:
             changed = connection.execute(
                 """
@@ -3374,17 +3390,48 @@ class StudentStore:
             raise ValueError("Source not found")
 
     def set_all_sources_selected(self, thread_id: str, selected: bool) -> None:
-        """Select or deselect every source in an owned notebook."""
+        """Select or deselect personal sources in an owned notebook.
+
+        Locked course materials are never cleared. When selecting all, any
+        locked row that somehow became unselected is forced back on.
+        """
+        from backend.source_library import is_locked_course_source
+
         if not self.get_thread(thread_id):
             raise ValueError("Notebook not found")
+        now = utc_now()
         with self._lock, self._connect() as connection:
-            connection.execute(
+            rows = connection.execute(
                 """
-                UPDATE sources SET selected=?, updated_at=?
+                SELECT id, selected, metadata_text FROM sources
                 WHERE notebook_id=?
                 """,
-                (int(selected), utc_now(), thread_id),
-            )
+                (thread_id,),
+            ).fetchall()
+            for row in rows:
+                metadata = _load(row["metadata_text"], {})
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                locked = is_locked_course_source(
+                    {"metadata": metadata, "selected": bool(row["selected"])}
+                )
+                if locked:
+                    if not bool(row["selected"]):
+                        connection.execute(
+                            """
+                            UPDATE sources SET selected=1, updated_at=?
+                            WHERE id=? AND notebook_id=?
+                            """,
+                            (now, row["id"], thread_id),
+                        )
+                    continue
+                connection.execute(
+                    """
+                    UPDATE sources SET selected=?, updated_at=?
+                    WHERE id=? AND notebook_id=?
+                    """,
+                    (int(selected), now, row["id"], thread_id),
+                )
 
     def rename_source(self, thread_id: str, source_id: str, title: str) -> None:
         """Rename a personal notebook source. Locked course materials stay fixed."""

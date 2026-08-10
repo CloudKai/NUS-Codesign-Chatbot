@@ -96,6 +96,19 @@ def test_streamlit_notebook_workspace_smoke():
         "Readings · 0",
         "My Sources · 0",
     }
+    sources_py = Path("ui/sources.py").read_text(encoding="utf-8")
+    my_sources_at = sources_py.index('f"My Sources · {len(personal_sources)}"')
+    lecture_at = sources_py.index('f"{group} · {len(group_all)}"')
+    assert my_sources_at < lecture_at
+    assert '_ensure_sources_expander_state(group, default=False)' in sources_py
+    assert '_ensure_sources_expander_state("My Sources", default=True)' in sources_py
+    assert "source_card_locked_" in sources_py
+    assert "disabled=locked" not in sources_py
+    assert 'key="sources_filters"' in sources_py
+    assert "sources-sort-label" in sources_py
+    assert "_render_source_sort_dropdown" in sources_py
+    assert "personal_sources_all" in sources_py
+    assert "Select all sources" in sources_py
     assert "Clarify the question, problem, or claim" in rendered
     assert "Add your first source" in rendered
     assert "Loading course materials in the background…" in Path("ui/sources.py").read_text(
