@@ -323,6 +323,32 @@ def _job_id_from_result(result: Any) -> str | None:
     return job_id or None
 
 
+def _prefer_ipv4_hostaddr(hostname: str) -> str | None:
+    """Return an IPv4 address for *hostname* when DNS provides one.
+
+    CloudShell often cannot open DSQL's IPv6 AAAA ("Cannot assign requested
+    address"). Passing ``hostaddr`` keeps ``host`` for TLS verify-full SNI.
+    """
+    import socket
+
+    cleaned = str(hostname or "").strip()
+    if not cleaned:
+        return None
+    try:
+        infos = socket.getaddrinfo(
+            cleaned,
+            5432,
+            socket.AF_INET,
+            socket.SOCK_STREAM,
+        )
+    except OSError:
+        return None
+    if not infos:
+        return None
+    address = infos[0][4][0]
+    return str(address) if address else None
+
+
 def _connect_admin(
     *,
     endpoint: str,
@@ -333,7 +359,12 @@ def _connect_admin(
     token_provider: Callable[[], str] | None = None,
     autocommit: bool = False,
 ) -> DsqlConnectionProxy:
-    """Open one verify-full admin connection for a DDL or procedure call."""
+    """Open one verify-full admin connection for a DDL or procedure call.
+
+    Honors ``settings.dsql_sslrootcert`` (``DSQL_SSLROOTCERT``, default
+    ``system``) so operators can point at Amazon Root CA 1 on CloudShell when
+    the platform trust store fails DSQL certificate verification.
+    """
     if not endpoint.strip():
         raise ValueError("DSQL_ENDPOINT is required")
     token = (
@@ -355,16 +386,20 @@ def _connect_admin(
             return psycopg.connect(**kwargs)
 
         active_connect = _connect
-    raw = active_connect(
-        host=endpoint,
-        port=5432,
-        dbname=database,
-        user=admin_user,
-        password=token,
-        sslmode="verify-full",
-        sslrootcert="system",
-        autocommit=autocommit,
-    )
+    connect_kwargs: dict[str, Any] = {
+        "host": endpoint,
+        "port": 5432,
+        "dbname": database,
+        "user": admin_user,
+        "password": token,
+        "sslmode": "verify-full",
+        "sslrootcert": str(settings.dsql_sslrootcert or "system"),
+        "autocommit": autocommit,
+    }
+    hostaddr = _prefer_ipv4_hostaddr(endpoint)
+    if hostaddr:
+        connect_kwargs["hostaddr"] = hostaddr
+    raw = active_connect(**connect_kwargs)
     return DsqlConnectionProxy(raw)
 
 
