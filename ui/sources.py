@@ -14,6 +14,7 @@ import streamlit.components.v1 as components
 from backend.settings import settings
 from backend.source_library import COURSE_MATERIAL_GROUPS, is_locked_course_source
 from ui.components import empty_state_html
+from ui.menu_popovers import close_menu_popover, menu_popover_widget_key
 from ui.rename import (
     bump_rename_epoch,
     discard_rename_draft,
@@ -377,7 +378,10 @@ def _render_source_sort_dropdown(thread_id: str) -> str:
         st.session_state[sort_key] = "Recent"
     current = str(st.session_state[sort_key])
     with st.container(key="sources_sort_menu"):
-        with st.popover(current, key=f"source-sort-popover-{thread_id}"):
+        with st.popover(
+            current,
+            key=menu_popover_widget_key("source-sort", thread_id),
+        ):
             for mode in ("Recent", "Name"):
                 if st.button(
                     mode,
@@ -387,7 +391,8 @@ def _render_source_sort_dropdown(thread_id: str) -> str:
                 ):
                     if mode != current:
                         st.session_state[sort_key] = mode
-                        rerun_fragment()
+                    close_menu_popover("source-sort", thread_id)
+                    rerun_fragment()
     return str(st.session_state[sort_key])
 
 

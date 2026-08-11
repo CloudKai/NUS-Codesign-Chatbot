@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
+
 import streamlit as st
 import streamlit.components.v1 as components
 
 from ui.auth_gate import app_logout_url, logout_user
 from ui.components import profile_initial
 from ui.constants import APPEARANCE_MODES, RESPONSE_LANGUAGES
-from ui.runtime import rerun_app, store
+from ui.menu_popovers import close_menu_popover, menu_popover_widget_key
+from ui.runtime import rerun_fragment, store
 from ui.settings import persist_appearance, persist_response_language
 
 
@@ -22,6 +25,54 @@ def persist_display_name() -> None:
     )
 
 
+def _sync_profile_avatar_initial(initial: str) -> None:
+    """Update the popover trigger after a fragment-local display-name edit."""
+    encoded_initial = json.dumps(initial)
+    components.html(
+        f"""
+<script>
+(() => {{
+  const button = window.parent.document.querySelector(
+    '.st-key-topbar_profile [data-testid="stPopover"] button'
+  );
+  const label = button?.querySelector('p');
+  if (label) {{
+    label.textContent = {encoded_initial};
+  }}
+}})();
+</script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
+@st.fragment
+def _render_display_name_fragment(display_name: str) -> None:
+    """Render display-name editing without redrawing the workspace."""
+    st.text_input(
+        "Display name",
+        value=display_name,
+        max_chars=80,
+        key="profile_display_name",
+        on_change=persist_display_name,
+        placeholder="Student",
+    )
+    current_name = str(st.session_state.get("display_name") or "Student")
+    _sync_profile_avatar_initial(profile_initial(current_name))
+
+
+@st.fragment
+def _render_language_fragment() -> None:
+    """Render response-language selection without redrawing the workspace."""
+    current_language = str(st.session_state.response_language or "English")
+    if current_language not in RESPONSE_LANGUAGES:
+        current_language = "English"
+        st.session_state.response_language = current_language
+    st.session_state.setting_response_language = current_language
+    _render_language_dropdown(current_language)
+
+
 def render_profile_menu() -> None:
     """Render the upper-right profile avatar that opens a compact settings menu."""
     display_name = str(st.session_state.get("display_name") or "Student")
@@ -33,26 +84,17 @@ def render_profile_menu() -> None:
                     '<div class="cd-profile-menu" hidden></div>',
                     unsafe_allow_html=True,
                 )
-                st.text_input(
-                    "Display name",
-                    value=display_name,
-                    max_chars=80,
-                    key="profile_display_name",
-                    on_change=persist_display_name,
-                    placeholder="Student",
-                )
+                _render_display_name_fragment(display_name)
                 st.segmented_control(
                     "Appearance",
                     APPEARANCE_MODES,
                     key="setting_appearance",
+                    # This widget intentionally stays outside a fragment. Its
+                    # normal widget rerun must re-execute streamlit_app.py so
+                    # the complete theme and layout stylesheet is re-injected.
                     on_change=persist_appearance,
                 )
-                current_language = str(st.session_state.response_language or "English")
-                if current_language not in RESPONSE_LANGUAGES:
-                    current_language = "English"
-                    st.session_state.response_language = current_language
-                st.session_state.setting_response_language = current_language
-                _render_language_dropdown(current_language)
+                _render_language_fragment()
                 st.divider()
                 st.markdown(
                     '<div class="cd-profile-help">'
@@ -104,7 +146,11 @@ def _render_language_dropdown(current_language: str) -> None:
             "</div>",
             unsafe_allow_html=True,
         )
-        with st.popover(current_language, use_container_width=True):
+        with st.popover(
+            current_language,
+            use_container_width=True,
+            key=menu_popover_widget_key("profile-language"),
+        ):
             for index, language in enumerate(RESPONSE_LANGUAGES):
                 if st.button(
                     language,
@@ -115,7 +161,8 @@ def _render_language_dropdown(current_language: str) -> None:
                     if language != current_language:
                         st.session_state.setting_response_language = language
                         persist_response_language()
-                        rerun_app()
+                    close_menu_popover("profile-language")
+                    rerun_fragment()
 
 
 def inject_profile_leave_helper() -> None:

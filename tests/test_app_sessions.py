@@ -25,9 +25,11 @@ from backend.cognito_config import CognitoAuthConfig, load_cognito_auth_config
 from backend.cognito_cookies import (
     AUTH_COOKIE_PATH,
     ID_TOKEN_COOKIE_PATH,
+    SESSION_HINT_COOKIE_VALUE,
     id_token_cookie_settings,
     oauth_state_cookie_settings,
     refresh_cookie_settings,
+    session_hint_cookie_settings,
 )
 from backend.settings import settings
 from backend.student_store import StudentStore
@@ -51,6 +53,10 @@ def _id_cookie_name() -> str:
 
 def _refresh_cookie_name() -> str:
     return settings.cognito_refresh_cookie_name
+
+
+def _hint_cookie_name() -> str:
+    return settings.cognito_session_hint_cookie_name
 
 
 def _cookie_value_from_response(response, name: str) -> str | None:
@@ -345,8 +351,14 @@ def test_browser_refresh_bridge_keeps_refresh_token_out_of_streamlit(
         for header in response.headers.get_list("set-cookie")
         if header.lower().startswith(f"{_refresh_cookie_name().lower()}=")
     ).lower()
+    hint_header = next(
+        header
+        for header in response.headers.get_list("set-cookie")
+        if header.lower().startswith(f"{_hint_cookie_name().lower()}=")
+    ).lower()
     assert f"path={ID_TOKEN_COOKIE_PATH}" in id_header
     assert f"path={AUTH_COOKIE_PATH}" in refresh_header
+    assert f"path={ID_TOKEN_COOKIE_PATH}" in hint_header
     assert store.get_user_by_cognito_sub("sub-bridge") is not None
 
 
@@ -619,6 +631,8 @@ def test_callback_sets_auth_cookies_without_persisting_tokens(tmp_path, monkeypa
     set_cookie = _set_cookie_header(response)
     assert f"{_id_cookie_name()}=" in set_cookie
     assert f"{_refresh_cookie_name()}=" in set_cookie
+    assert f"{_hint_cookie_name()}=" in set_cookie
+    assert SESSION_HINT_COOKIE_VALUE in set_cookie
     assert "HttpOnly" in set_cookie
     assert "samesite=lax" in set_cookie.lower()
     assert f"path={AUTH_COOKIE_PATH}" in set_cookie.lower()
@@ -638,8 +652,16 @@ def test_callback_sets_auth_cookies_without_persisting_tokens(tmp_path, monkeypa
         for h in response.headers.get_list("set-cookie")
         if h.lower().startswith(f"{_refresh_cookie_name().lower()}=")
     )
+    hint_header = next(
+        h
+        for h in response.headers.get_list("set-cookie")
+        if h.lower().startswith(f"{_hint_cookie_name().lower()}=")
+    )
     assert "secure" not in id_header.lower()
     assert "secure" not in refresh_header.lower()
+    assert "secure" not in hint_header.lower()
+    assert f"path={ID_TOKEN_COOKIE_PATH}" in hint_header.lower() or "path=/" in hint_header.lower()
+    assert "max-age=2592000" in hint_header.lower()
     db_text = (tmp_path / "callback-ok.sqlite3").read_bytes().decode(
         "latin-1", errors="ignore"
     )
@@ -813,6 +835,7 @@ def test_cookie_settings_local_insecure(monkeypatch):
     monkeypatch.setattr(settings, "cognito_id_token_cookie_max_age", 3600)
     refresh = refresh_cookie_settings()
     id_cookie = id_token_cookie_settings()
+    hint = session_hint_cookie_settings()
     assert refresh["httponly"] is True
     assert refresh["samesite"] == "lax"
     assert refresh["path"] == AUTH_COOKIE_PATH
@@ -822,6 +845,10 @@ def test_cookie_settings_local_insecure(monkeypatch):
     assert id_cookie["path"] == ID_TOKEN_COOKIE_PATH
     assert id_cookie["max_age"] == 3600
     assert id_cookie["httponly"] is True
+    assert hint["path"] == ID_TOKEN_COOKIE_PATH
+    assert hint["max_age"] == 2592000
+    assert hint["httponly"] is True
+    assert hint["key"] == settings.cognito_session_hint_cookie_name
     oauth = oauth_state_cookie_settings(max_age=OAUTH_STATE_TTL_SECONDS)
     assert oauth["path"] == AUTH_COOKIE_PATH
     assert oauth["httponly"] is True
