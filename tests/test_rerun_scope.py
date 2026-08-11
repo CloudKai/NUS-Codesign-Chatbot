@@ -62,35 +62,34 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
     assert "rerun_app()" in select_block
 
 
-def test_topbar_guidance_and_profile_use_fragment_scope() -> None:
+def test_topbar_guidance_and_profile_use_correct_rerun_scope() -> None:
     topbar = Path("ui/topbar.py").read_text(encoding="utf-8")
     profile = Path("ui/profile.py").read_text(encoding="utf-8")
     assert "@st.fragment\ndef _render_guidance_fragment()" in topbar.replace(
         "\r\n", "\n"
     )
-    assert "@st.fragment\ndef _render_profile_fragment()" in topbar.replace(
-        "\r\n", "\n"
-    )
     guidance_block = topbar.split("def _render_guidance_fragment", 1)[1].split(
-        "def _render_profile_fragment", 1
+        "def render_topbar", 1
     )[0]
     assert "save_journey(journey)" in guidance_block
     assert "rerun_fragment()" in guidance_block
     assert "rerun_app()" not in guidance_block
     assert "rerun_fragment()" in profile
-    assert "def _on_appearance_changed()" in profile
-    appearance_block = profile.split("def _on_appearance_changed", 1)[1].split(
-        "def render_profile_menu", 1
+    normalized_profile = profile.replace("\r\n", "\n")
+    assert "@st.fragment\ndef _render_display_name_fragment" in normalized_profile
+    assert "@st.fragment\ndef _render_language_fragment" in normalized_profile
+    profile_render_block = profile.split("def render_profile_menu", 1)[1].split(
+        "def _render_language_dropdown", 1
     )[0]
-    assert "persist_appearance()" in appearance_block
-    assert "rerun_app()" in appearance_block
+    assert "on_change=persist_appearance" in profile_render_block
+    assert "rerun_app()" not in profile
     language_block = profile.split("def _render_language_dropdown", 1)[1]
     assert "persist_response_language()" in language_block
     assert "rerun_fragment()" in language_block
     display_block = profile.split("def persist_display_name", 1)[1].split(
-        "def _on_appearance_changed", 1
+        "def _sync_profile_avatar_initial", 1
     )[0]
-    assert "rerun_fragment()" in display_block
+    assert "rerun_fragment()" not in display_block
 
 
 def test_menu_popover_key_bumps_to_remount_closed(monkeypatch) -> None:

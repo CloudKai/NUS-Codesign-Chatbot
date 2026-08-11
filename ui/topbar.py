@@ -50,15 +50,6 @@ def _render_guidance_fragment() -> None:
                     rerun_fragment()
 
 
-@st.fragment
-def _render_profile_fragment() -> None:
-    """Profile menu; local preference edits stay fragment-scoped."""
-    st.session_state["_topbar_profile_fragment_runs"] = (
-        int(st.session_state.get("_topbar_profile_fragment_runs") or 0) + 1
-    )
-    render_profile_menu()
-
-
 def render_topbar() -> tuple[str, str | None]:
     """Render brand, notebook title, chats library, guidance, and profile."""
     thread = store.get_thread(st.session_state.thread_id) or {}
@@ -126,7 +117,9 @@ def render_topbar() -> tuple[str, str | None]:
             with guidance_menu_column:
                 _render_guidance_fragment()
         with profile_column.container(key="topbar_profile_slot"):
-            _render_profile_fragment()
+            # Appearance owns an app-scoped widget rerun; display name and
+            # language remain nested fragments inside the profile menu.
+            render_profile_menu()
         inject_profile_leave_helper()
         chosen_model = st.session_state.selected_model
         apply_selected_model(chosen_model)
