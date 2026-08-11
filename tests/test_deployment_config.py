@@ -18,7 +18,7 @@ def _service_block(compose: str, service: str) -> str:
     return "\n".join(block)
 
 
-def test_app_ports_are_internal_and_only_caddy_publishes_http_ports():
+def test_app_ports_are_internal_and_only_caddy_publishes_origin_http():
     compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
     app = _service_block(compose, "app")
     caddy = _service_block(compose, "caddy")
@@ -28,7 +28,7 @@ def test_app_ports_are_internal_and_only_caddy_publishes_http_ports():
     assert '"8501"' in app
     assert "ports:" not in app
     assert '"80:80"' in caddy
-    assert '"443:443"' in caddy
+    assert '"443:443"' not in caddy
     assert "8000:8000" not in compose
     assert "8501:8501" not in compose
 
@@ -77,15 +77,15 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert '"8000"' in app
     assert '"8501"' in app
     assert '"80:80"' in caddy
-    assert '"443:443"' in caddy
+    assert '"443:443"' not in caddy
     assert "8000:8000" not in compose
     assert "8501:8501" not in compose
     assert (
-        'COGNITO_REDIRECT_URI: "https://cde2300chatbot.duckdns.org/api/v1/auth/callback"'
+        'COGNITO_REDIRECT_URI: "https://d1sxfuoybzedj5.cloudfront.net/api/v1/auth/callback"'
         in app
     )
-    assert 'CO_DESIGN_PUBLIC_API_URL: "https://cde2300chatbot.duckdns.org"' in app
-    assert 'CO_DESIGN_UI_URL: "https://cde2300chatbot.duckdns.org"' in app
+    assert 'CO_DESIGN_PUBLIC_API_URL: "https://d1sxfuoybzedj5.cloudfront.net"' in app
+    assert 'CO_DESIGN_UI_URL: "https://d1sxfuoybzedj5.cloudfront.net"' in app
     assert "source: ./.streamlit/secrets.toml" in app
     for block in (app, caddy):
         assert "no-new-privileges:true" in block
@@ -100,10 +100,12 @@ def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     """Public Caddy must not forward arbitrary /api/* into FastAPI."""
     caddyfile = (ROOT / "Caddyfile").read_text(encoding="utf-8")
 
-    assert "cde2300chatbot.duckdns.org" in caddyfile
+    assert caddyfile.startswith(":80 {")
+    assert "CloudFront terminates viewer TLS" in caddyfile
     assert "handle /api/v1/auth/login" in caddyfile
     assert "handle /api/v1/auth/callback" in caddyfile
     assert "handle /api/v1/auth/me" in caddyfile
+    assert "handle /api/v1/auth/refresh" in caddyfile
     assert "handle /api/v1/auth/logout" in caddyfile
     assert "handle /api/v1/health" in caddyfile
     assert "handle /api/*" in caddyfile
@@ -116,10 +118,12 @@ def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     assert "Referrer-Policy" in caddyfile
     assert "Permissions-Policy" in caddyfile
     assert "Content-Security-Policy" not in caddyfile
+    assert ":443" not in caddyfile
 
     login_index = caddyfile.index("handle /api/v1/auth/login")
     callback_index = caddyfile.index("handle /api/v1/auth/callback")
     me_index = caddyfile.index("handle /api/v1/auth/me")
+    refresh_index = caddyfile.index("handle /api/v1/auth/refresh")
     logout_index = caddyfile.index("handle /api/v1/auth/logout")
     health_index = caddyfile.index("handle /api/v1/health")
     block_index = caddyfile.index("handle /api/*")
@@ -127,6 +131,7 @@ def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     assert login_index < block_index
     assert callback_index < block_index
     assert me_index < block_index
+    assert refresh_index < block_index
     assert logout_index < block_index
     assert health_index < block_index < streamlit_index
 
@@ -141,8 +146,8 @@ def test_compose_keeps_internal_fastapi_url_for_container_local_calls():
     app = _service_block(compose, "app")
 
     assert 'CO_DESIGN_API_URL: "http://127.0.0.1:8000"' in app
-    assert 'CO_DESIGN_PUBLIC_API_URL: "https://cde2300chatbot.duckdns.org"' in app
-    assert 'CO_DESIGN_UI_URL: "https://cde2300chatbot.duckdns.org"' in app
+    assert 'CO_DESIGN_PUBLIC_API_URL: "https://d1sxfuoybzedj5.cloudfront.net"' in app
+    assert 'CO_DESIGN_UI_URL: "https://d1sxfuoybzedj5.cloudfront.net"' in app
     assert "ports:" not in app
 
 
@@ -152,7 +157,7 @@ def test_compose_sets_production_cognito_redirect_uri():
     app = _service_block(compose, "app")
 
     assert (
-        'COGNITO_REDIRECT_URI: "https://cde2300chatbot.duckdns.org/api/v1/auth/callback"'
+        'COGNITO_REDIRECT_URI: "https://d1sxfuoybzedj5.cloudfront.net/api/v1/auth/callback"'
         in app
     )
     assert 'COGNITO_REDIRECT_URI: "http://127.0.0.1' not in app
@@ -176,7 +181,6 @@ def test_docker_context_excludes_secrets_state_and_development_artifacts():
         "data/",
         "*.sqlite3",
         "*.log",
-        "**/duck.env",
     ):
         assert required in ignore
     assert ".streamlit/secrets.toml.example" not in ignore
@@ -212,15 +216,31 @@ def test_production_script_validates_provider_config_without_requiring_data_for_
     assert "Application data directory must exist and be writable" in script
 
 
-def test_duckdns_stays_on_host_not_in_application_modules():
-    duck = (ROOT / "scripts" / "host" / "duck.sh").read_text(encoding="utf-8")
-    assert "duckdns.org/update" in duck
-    assert "DUCKDNS_TOKEN" in duck
-    assert 'echo "$DUCKDNS_TOKEN"' not in duck
-    for path in (ROOT / "backend").rglob("*.py"):
-        text = path.read_text(encoding="utf-8")
-        assert "duckdns.org/update" not in text
-        assert "DUCKDNS_TOKEN" not in text
+def test_cloudfront_is_the_only_documented_production_edge():
+    retired_provider = "duck" + "dns"
+    paths = [
+        ROOT / "README.md",
+        ROOT / "Caddyfile",
+        ROOT / "compose.yaml",
+        ROOT / "compose.prod.yaml",
+        ROOT / "scripts" / "AGENTS.md",
+        ROOT / "docs" / "AGENTS.md",
+        *sorted((ROOT / "docs").rglob("*.md")),
+        *sorted((ROOT / ".github" / "workflows").glob("*.yml")),
+    ]
+    for path in paths:
+        assert retired_provider not in path.read_text(encoding="utf-8").lower()
+    assert not (ROOT / "scripts" / "host" / "duck.sh").exists()
+    assert not (ROOT / "scripts" / "host" / "duck.env.example").exists()
+
+
+def test_ci_validates_compose_and_caddy_configuration():
+    workflow = (ROOT / ".github" / "workflows" / "mock-ci.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "APP_IMAGE=co-design:test docker compose -f compose.prod.yaml" in workflow
+    assert "--entrypoint caddy" in workflow
+    assert "validate --config /etc/caddy/Caddyfile" in workflow
 
 
 def test_student_stage_selection_boolean_and_effective_auto_advance(monkeypatch):

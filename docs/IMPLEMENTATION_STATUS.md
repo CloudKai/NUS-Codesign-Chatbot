@@ -2,13 +2,46 @@
 
 ## Current phase
 
-**Auth: restore Cognito refresh after 1-hour ID cookie expiry.** Streamlit
-could not see the path-scoped refresh cookie, and ``should_attempt_session_refresh``
-skipped the browser bridge whenever ``co_design_id`` was missing — so a normal
-page load after ~1h forced re-login even though the 30-day refresh token was
-still valid. Fix: always attempt ``/api/v1/auth/refresh`` once when signed out
-(loop-guarded by query markers), and set a non-sensitive Path=/ 
-``co_design_session`` hint alongside auth cookies.
+**Production edge: CloudFront viewer TLS → Caddy HTTP origin.** CloudFront at
+``d1sxfuoybzedj5.cloudfront.net`` is now the sole production hostname. Caddy
+listens on EC2 port 80 as the route-security boundary; host port 443 and the
+retired dynamic-DNS updater are removed. Both Compose contracts, CI deployment
+tests, Cognito callback examples, operational docs, and manual QA now use the
+CloudFront topology.
+
+### CloudFront/Caddy edge alignment (completed)
+
+1. CloudFront owns viewer HTTPS; Caddy accepts origin HTTP on ``:80`` and keeps
+   the auth/health allow-list plus the catch-all ``/api/*`` 404 boundary.
+2. ``compose.yaml`` and ``compose.prod.yaml`` use the CloudFront UI/API origin
+   and Cognito callback. Neither publishes host port 443.
+3. The obsolete host address-updater scripts and their secret-ignore rules were
+   removed. A deterministic deployment test rejects their return in runtime,
+   workflow, or documentation files.
+4. CI's production configuration gate is explicitly named for the
+   CloudFront/Caddy contract.
+5. No database, DSQL, S3, Cognito resource, or student-data migration is
+   required. Rollback is a code/config revert, but must not restore a second
+   public hostname after Cognito and CloudFront cutover.
+
+Validation: deployment/config/auth tests **50 passed**; full mock suite
+**401 passed**; compileall, shell syntax, both Compose config validations, and
+``git diff --check`` passed. No live AWS, DSQL, S3, Cognito, or paid-provider
+call was made.
+
+Next exact action: deploy the immutable image, restrict EC2 TCP 80 ingress to
+the AWS-managed CloudFront origin-facing prefix list, verify the distribution
+uses caching disabled plus full cookie/query/WebSocket forwarding, then run
+``docs/security/CADDY_PUBLIC_BOUNDARY.md`` and the authenticated production
+smoke. Do not open host TCP 443.
+
+### Prior auth phase (still true)
+
+**Auth: restore Cognito refresh after 1-hour ID cookie expiry.** The
+non-sensitive Path=/ ``co_design_session`` hint now limits refresh attempts to
+browsers with an established session. Cold visitors go directly to Sign in;
+expired sessions see the app skeleton and centered loader while the refresh
+bridge runs once; a Sign in launch cannot be intercepted by that bridge.
 
 ### Prior UI phase (still true)
 

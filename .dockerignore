@@ -45,7 +45,3 @@ lecture_notes/
 id_rsa*
 credentials
 aws-credentials
-
-# Host-only DuckDNS / deploy secrets (never bake into the image)
-scripts/host/duck.env
-**/duck.env

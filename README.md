@@ -275,9 +275,12 @@ for local development only; do not use them for the EC2 production service.
 The production network boundary is:
 
 ```text
-Internet :80/:443 -> Caddy
+Browser HTTPS -> CloudFront (viewer TLS, caching disabled)
+  -> EC2 :80 -> Caddy (HTTP origin policy boundary)
   /api/v1/auth/login           -> app:8000
   /api/v1/auth/callback        -> app:8000
+  /api/v1/auth/me              -> app:8000
+  /api/v1/auth/refresh         -> app:8000
   /api/v1/auth/logout          -> app:8000
   /api/v1/health               -> app:8000 (optional public probe)
   other /api/*                 -> 404 (never reaches FastAPI)
@@ -285,12 +288,13 @@ Internet :80/:443 -> Caddy
 ```
 
 FastAPI and Streamlit share one `app` container and are not published to the
-host. Only Caddy maps host ports. Inside the container, Streamlit reaches
-FastAPI on `http://127.0.0.1:8000` for `/api/v1/auth/me` and other internal
-calls; that loopback path is not published. Caddy obtains and renews HTTPS
-certificates for `cde2300chatbot.duckdns.org`; the DuckDNS record must already
-resolve to the EC2 Elastic IP, and the EC2 security group must allow inbound
-TCP 80 and 443.
+host. Only Caddy maps host TCP 80. Inside the container, Streamlit reaches
+FastAPI on `http://127.0.0.1:8000` for internal calls; that loopback path is
+not published. CloudFront serves the public HTTPS hostname and forwards all
+methods, cookies, query strings, and WebSocket upgrades with caching disabled.
+Caddy does not manage certificates. Restrict the EC2 security group's TCP 80
+origin access to the AWS-managed CloudFront origin-facing prefix list; do not
+publish host TCP 443.
 
 On EC2, install a private `.env` and `.streamlit/secrets.toml`, set an immutable
 ECR image tag, and deploy with the production wrapper:
@@ -317,7 +321,7 @@ USER_UPLOADS_BUCKET=<private-bucket-name>
 ```
 
 Set the Cognito callback to
-`https://cde2300chatbot.duckdns.org/api/v1/auth/callback`, keep
+`https://d1sxfuoybzedj5.cloudfront.net/api/v1/auth/callback`, keep
 `AUTH_COOKIE_SECURE=true`, and do not put private values in the image or
 repository. The current model path is configured independently (OpenAI or
 mock); Bedrock/course-material integration is not required for this deployment
@@ -365,12 +369,11 @@ sudo chown -R 1000:1000 data .streamlit/secrets.toml
 docker compose up -d --build
 ```
 
-> Security boundary: Caddy publicly exposes only auth browser routes
-> (`/api/v1/auth/login`, `/callback`, `/logout`) and `/api/v1/health`.
-> `/api/v1/auth/me` stays on the container loopback. Cognito-authenticated
-> Streamlit sessions continue to use owner-scoped in-process services. Other
-> `/api/*` paths return 404 at Caddy and never reach FastAPI on the public
-> hostname.
+> Security boundary: CloudFront is the public HTTPS edge. Caddy exposes only
+> auth browser routes (`/login`, `/callback`, `/me`, `/refresh`, `/logout` and
+> the migration logout callback) plus `/api/v1/health` to FastAPI. Other
+> `/api/*` paths return 404 at Caddy and never reach FastAPI through the public
+> distribution.
 
 ---
 
