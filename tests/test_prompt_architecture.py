@@ -35,7 +35,7 @@ from backend.prompts import (
 )
 from backend.prompts import composer as composer_module
 from backend.prompts import loader as loader_module
-from backend.providers import OpenAICoachProvider
+from backend.providers import OpenAICoachProvider, ProviderUnavailableError
 from backend.repositories import (
     SQLiteNotebookRepository,
     SQLitePhaseTransitionRepository,
@@ -437,6 +437,7 @@ def test_api_responses_do_not_expose_raw_prompt_text(tmp_path):
 
 def test_openai_provider_receives_composed_prompt_with_schema_and_effort(monkeypatch):
     captured: dict[str, object] = {}
+    client_configuration: dict[str, object] = {}
 
     class _FakeResponses:
         def create(self, **kwargs):
@@ -461,16 +462,16 @@ def test_openai_provider_receives_composed_prompt_with_schema_and_effort(monkeyp
 
     class _FakeClient:
         def __init__(self, *args, **kwargs):
+            client_configuration.update(kwargs)
             self.responses = _FakeResponses()
 
-    from backend.settings import settings as app_settings
-
     monkeypatch.setattr("backend.providers.OpenAI", _FakeClient)
-    monkeypatch.setattr(app_settings, "openai_api_key", "test-key-not-used-for-network")
     provider = OpenAICoachProvider(
         "test-key-not-used-for-network",
         "gpt-test",
         reasoning_effort="low",
+        timeout_seconds=42,
+        max_retries=1,
     )
     request = CoachRequest(
         thread_id="thread-demo",
@@ -489,6 +490,11 @@ def test_openai_provider_receives_composed_prompt_with_schema_and_effort(monkeyp
     assert captured["input"] == expected
     assert captured["reasoning"] == {"effort": "medium"}
     assert captured["model"] == "gpt-test"
+    assert client_configuration == {
+        "api_key": "test-key-not-used-for-network",
+        "timeout": 42.0,
+        "max_retries": 1,
+    }
     format_block = captured["text"]["format"]  # type: ignore[index]
     assert format_block["type"] == "json_schema"
     assert format_block["name"] == "coach_turn"
@@ -496,3 +502,9 @@ def test_openai_provider_receives_composed_prompt_with_schema_and_effort(monkeyp
     assert format_block["schema"] == openai_strict_schema(ProviderCoachOutput)
     assert _STAGE_MARKERS["evidence"] in expected
     assert _STAGE_MARKERS["assumptions"] not in expected
+
+
+def test_openai_provider_rejects_missing_injected_api_key():
+    """Provider validity belongs to its injected configuration, not global state."""
+    with pytest.raises(ProviderUnavailableError, match="OPENAI_API_KEY"):
+        OpenAICoachProvider("  ", "gpt-test")

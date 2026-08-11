@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from uuid import UUID
 
 from fastapi.testclient import TestClient
 
@@ -735,6 +736,12 @@ def test_local_api_ready_request_id_stream_and_graph(tmp_path):
 
     stamped = client.get("/api/v1/health", headers={"X-Request-ID": "demo-req-1"})
     assert stamped.headers.get("x-request-id") == "demo-req-1"
+
+    untrusted = "attacker value " * 40
+    replaced = client.get("/api/v1/health", headers={"X-Request-ID": untrusted})
+    generated_request_id = replaced.headers["x-request-id"]
+    assert generated_request_id != untrusted
+    assert str(UUID(generated_request_id)) == generated_request_id
 
     with client.stream(
         "POST",

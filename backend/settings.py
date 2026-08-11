@@ -98,6 +98,8 @@ class Settings:
     ollama_chat_model: str = os.getenv("OLLAMA_CHAT_MODEL", "gpt-oss:20b")
     ollama_embedding_model: str = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
     openai_chat_model: str = os.getenv("OPENAI_CHAT_MODEL", "gpt-5.6-luna")
+    openai_timeout_seconds: float = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "110"))
+    openai_max_retries: int = int(os.getenv("OPENAI_MAX_RETRIES", "0"))
     api_base_url: str = os.getenv("CO_DESIGN_API_URL", "http://127.0.0.1:8000")
     public_api_base_url: str = os.getenv(
         "CO_DESIGN_PUBLIC_API_URL",
@@ -250,6 +252,17 @@ def validate_production_configuration() -> None:
         )
     if not settings.openai_api_key.strip():
         raise ValueError("OPENAI_API_KEY is not configured")
+    if not 1 <= settings.openai_timeout_seconds <= 120:
+        raise ValueError("OPENAI_TIMEOUT_SECONDS must be between 1 and 120")
+    if not 0 <= settings.openai_max_retries <= 2:
+        raise ValueError("OPENAI_MAX_RETRIES must be between 0 and 2")
+
+    if not settings.use_local_api:
+        raise ValueError("USE_LOCAL_API must be enabled in production")
+    if settings.enable_local_code_execution:
+        raise ValueError("ENABLE_LOCAL_CODE_EXECUTION is not allowed in production")
+    if settings.course_material_sync_enabled:
+        raise ValueError("COURSE_MATERIAL_SYNC_ENABLED is not allowed in production")
 
     if settings.database_provider == "sqlite":
         raise ValueError("DATABASE_PROVIDER=sqlite is not allowed in production")

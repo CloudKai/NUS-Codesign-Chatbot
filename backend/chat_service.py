@@ -538,7 +538,11 @@ class StudentChatEngine:
     def _openai_stream(self, stream: ChatStream, model: ModelDefinition) -> Iterator[str]:
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is not configured. Use MOCK_OPENAI=true to preview.")
-        client = OpenAI(api_key=settings.openai_api_key)
+        client = OpenAI(
+            api_key=settings.openai_api_key,
+            timeout=settings.openai_timeout_seconds,
+            max_retries=settings.openai_max_retries,
+        )
         history = [
             {"role": message["role"], "content": message["content"]}
             for message in self.store.get_messages(stream.thread_id)

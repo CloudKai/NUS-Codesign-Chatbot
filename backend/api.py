@@ -4,15 +4,22 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 from urllib.parse import quote, urlparse
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import RedirectResponse, Response, StreamingResponse
+from fastapi.responses import (
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from pydantic import BaseModel, Field
 
 from .auth_oidc import CognitoOIDCClient
+from .auth_profiles import PROTECTED_ROLES
 from .auth_routes import register_auth_routes
 from .cognito_config import validate_cognito_readiness
 from .domain import (
@@ -45,12 +52,32 @@ from .student_store import (
     StudentStore,
 )
 from .workspace_service import WorkspaceService
+from .professor_analytics.models import (
+    ConversationTranscriptResponse,
+    CriticalThinkingResponse,
+    EngagementResponse,
+    OverviewResponse,
+    StudentDetailResponse,
+    StudentsResponse,
+)
+from .professor_analytics.repository import (
+    ProfessorAnalyticsRepository,
+    ProfessorAnalyticsUnavailable,
+)
+from .professor_analytics.service import ProfessorAnalyticsService
 
 logger = logging.getLogger(__name__)
 
 # Streamlit OIDC cookie names (and numeric chunks) cleared by the logout callback.
 # Profile Logout / ui.auth_gate.app_logout_url() navigates here; not Cognito /logout.
 _STREAMLIT_AUTH_COOKIES = ("_streamlit_user", "_streamlit_user_tokens")
+_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+
+
+def _request_id_from_header(value: str | None) -> str:
+    """Return a bounded correlation ID or replace untrusted input with a UUID."""
+    candidate = str(value or "")
+    return candidate if _REQUEST_ID_PATTERN.fullmatch(candidate) else str(uuid4())
 
 
 class TransitionResolution(BaseModel):
@@ -174,10 +201,30 @@ def create_app(
         """FastAPI dependency: Cognito-verified owner or local-student default."""
         return resolver.resolve(request)
 
+    def current_professor(
+        request: Request,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> OwnerServices:
+        """Require a verified, persisted lecturer/admin role for analytics.
+
+        This is intentionally separate from navigation visibility: a student
+        who calls a professor URL directly receives 403.  Role claims are not
+        trusted; the application reloads the database profile after Cognito
+        verification so staff access can be revoked without waiting for token
+        expiry.
+        """
+        if not str(request.cookies.get(settings.cognito_id_token_cookie_name) or "").strip():
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        profile = owner.store.get_user_by_id(owner.user_id)
+        role = str((profile or {}).get("role") or "student").strip().lower()
+        if role not in PROTECTED_ROLES:
+            raise HTTPException(status_code=403, detail="Professor access required")
+        return owner
+
     @app.middleware("http")
     async def attach_request_id(request: Request, call_next):
         """Stamp responses and emit privacy-safe latency/status telemetry."""
-        request_id = request.headers.get("x-request-id") or str(uuid4())
+        request_id = _request_id_from_header(request.headers.get("x-request-id"))
         request.state.request_id = request_id
         started = started_at()
         try:
@@ -200,6 +247,20 @@ def create_app(
             started=started,
         )
         return response
+
+    @app.exception_handler(ProfessorAnalyticsUnavailable)
+    async def professor_analytics_unavailable(
+        request: Request, _error: ProfessorAnalyticsUnavailable
+    ) -> JSONResponse:
+        """Return a privacy-safe temporary failure without driver or SQL detail."""
+        logger.warning(
+            "Professor analytics snapshot unavailable request_id=%s",
+            getattr(request.state, "request_id", "unknown"),
+        )
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Professor analytics is temporarily unavailable"},
+        )
 
     def _value_error(error: ValueError) -> HTTPException:
         detail = str(error)
@@ -293,6 +354,86 @@ def create_app(
         env = (settings.app_env or "").strip().lower() or "development"
         mode = "production" if env == "production" else "local"
         return {"status": "ok", "mode": mode}
+
+    def _professor_service(owner: OwnerServices) -> ProfessorAnalyticsService:
+        """Build a read-only analytics service for one authorised request."""
+        return ProfessorAnalyticsService(ProfessorAnalyticsRepository(owner.store))
+
+    @app.get("/api/v1/professor/overview", response_model=OverviewResponse)
+    def professor_overview(
+        owner: OwnerServices = Depends(current_professor),
+    ) -> OverviewResponse:
+        """Return a compact class snapshot for teaching staff only."""
+        return _professor_service(owner).overview()
+
+    @app.get("/api/v1/professor/students", response_model=StudentsResponse)
+    def professor_students(
+        search: str = "",
+        stage: str | None = None,
+        attention_only: bool = False,
+        min_score: float | None = None,
+        max_score: float | None = None,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> StudentsResponse:
+        """List privacy-minimised student rows with safe server-side filters."""
+        return _professor_service(owner).students(
+            search=search,
+            stage=stage,
+            attention_only=attention_only,
+            min_score=min_score,
+            max_score=max_score,
+        )
+
+    @app.get(
+        "/api/v1/professor/students/{student_id}",
+        response_model=StudentDetailResponse,
+    )
+    def professor_student_detail(
+        student_id: str,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> StudentDetailResponse:
+        """Return one student's active learning journey and authorised transcript."""
+        detail = _professor_service(owner).student_detail(student_id)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="Student not found")
+        return detail
+
+    @app.get(
+        "/api/v1/professor/students/{student_id}/conversations/{notebook_id}",
+        response_model=ConversationTranscriptResponse,
+    )
+    def professor_conversation_transcript(
+        student_id: str,
+        notebook_id: str,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> ConversationTranscriptResponse:
+        """Return one selected student's active notebook transcript only."""
+        transcript = _professor_service(owner).conversation_transcript(
+            student_id, notebook_id
+        )
+        if transcript is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return transcript
+
+    @app.get(
+        "/api/v1/professor/critical-thinking",
+        response_model=CriticalThinkingResponse,
+    )
+    def professor_critical_thinking(
+        owner: OwnerServices = Depends(current_professor),
+    ) -> CriticalThinkingResponse:
+        """Return current, non-causal Facione assessment aggregates."""
+        return _professor_service(owner).critical_thinking()
+
+    @app.get(
+        "/api/v1/professor/engagement",
+        response_model=EngagementResponse,
+    )
+    def professor_engagement(
+        owner: OwnerServices = Depends(current_professor),
+    ) -> EngagementResponse:
+        """Return usage/session analytics, kept distinct from performance."""
+        return _professor_service(owner).engagement()
 
     @app.get("/api/v1/auth/logout/callback")
     def auth_logout_callback(request: Request) -> RedirectResponse:

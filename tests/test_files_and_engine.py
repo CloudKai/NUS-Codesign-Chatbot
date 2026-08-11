@@ -306,7 +306,13 @@ def test_responses_stream_web_sources_and_state_without_live_api(tmp_path, monke
 
     fake_responses = FakeResponses()
     fake_client = SimpleNamespace(responses=fake_responses)
-    monkeypatch.setattr(chat_service, "OpenAI", lambda **_: fake_client)
+    client_configuration = {}
+
+    def fake_openai(**kwargs):
+        client_configuration.update(kwargs)
+        return fake_client
+
+    monkeypatch.setattr(chat_service, "OpenAI", fake_openai)
     monkeypatch.setattr(chat_service.settings, "mock_openai", False)
     monkeypatch.setattr(chat_service.settings, "openai_api_key", "test-key")
 
@@ -334,6 +340,11 @@ def test_responses_stream_web_sources_and_state_without_live_api(tmp_path, monke
     assert fake_responses.kwargs["model"] == DEFAULT_CHAT_MODEL_ID
     assert fake_responses.kwargs["tools"] == [{"type": "web_search"}]
     assert fake_responses.kwargs["include"] == ["web_search_call.action.sources"]
+    assert client_configuration == {
+        "api_key": "test-key",
+        "timeout": 110.0,
+        "max_retries": 0,
+    }
     assistant = store.get_messages(thread_id)[-1]
     assert assistant["content"] == "Evidence matters."
     assert "response_id" not in assistant["metadata"]

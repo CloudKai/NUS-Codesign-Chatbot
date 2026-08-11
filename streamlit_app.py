@@ -30,6 +30,7 @@ from ui.session import initialize_session
 from ui.settings import sync_appearance_from_widget
 from ui.theme import inject_template_css, render_theme_css
 from ui.topbar import render_topbar
+from ui.professor import render_professor_dashboard
 from ui.workspace import render_workspace
 
 from backend.auth_profiles import store_identifier_for_sub
@@ -86,6 +87,16 @@ else:
 
 if "display_name" not in st.session_state:
     st.session_state.display_name = display_name
+
+# Professor navigation is only a convenience; the FastAPI professor routes
+# independently verify Cognito and the persisted lecturer/admin role.  Branch
+# before student notebook/session initialisation so staff never create or alter
+# a student workspace while reviewing analytics.
+if str(user.get("role") or "").strip().lower() in {"lecturer", "admin"}:
+    st.session_state["appearance"] = st.session_state.get("appearance", DEFAULT_APPEARANCE)
+    render_theme_css()
+    render_professor_dashboard()
+    st.stop()
 
 # Debug counter for full-script runs (fragment-only interactions skip this path).
 st.session_state["_app_runs"] = int(st.session_state.get("_app_runs") or 0) + 1

@@ -163,6 +163,60 @@ class LocalApiClient:
         response.raise_for_status()
         return response.json()
 
+    def professor_overview(self) -> dict[str, Any]:
+        """Return professor-authorised class overview analytics."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/overview", **self._request_kwargs()
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_students(self, **filters: Any) -> dict[str, Any]:
+        """Return professor-authorised roster data with server-side filters."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students",
+            params={key: value for key, value in filters.items() if value not in (None, "")},
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_student_detail(self, student_id: str) -> dict[str, Any]:
+        """Return one professor-authorised student's learning journey."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students/{student_id}",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_conversation_transcript(
+        self, student_id: str, notebook_id: str
+    ) -> dict[str, Any]:
+        """Return one selected active-branch transcript for teaching review."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students/{student_id}/conversations/{notebook_id}",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_critical_thinking(self) -> dict[str, Any]:
+        """Return professor-authorised Facione analytics."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/critical-thinking", **self._request_kwargs()
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_engagement(self) -> dict[str, Any]:
+        """Return professor-authorised engagement analytics."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/engagement", **self._request_kwargs()
+        )
+        response.raise_for_status()
+        return response.json()
+
     def get_preferences(self) -> dict[str, Any]:
         """Return local user preferences."""
         response = self._http.get(

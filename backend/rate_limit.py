@@ -149,7 +149,7 @@ class LoginStartLimiter:
         self.per_client_per_minute = max(1, int(per_client_per_minute))
         self.global_per_minute = max(1, int(global_per_minute))
         self._lock = threading.Lock()
-        self._recent_by_client: dict[str, deque[float]] = defaultdict(deque)
+        self._recent_by_client: dict[str, deque[float]] = {}
         self._recent_global: deque[float] = deque()
 
     def _prune(self, window: deque[float], now: float) -> None:
@@ -157,15 +157,25 @@ class LoginStartLimiter:
         while window and now - window[0] >= 60.0:
             window.popleft()
 
+    def _prune_clients(self, now: float) -> None:
+        """Remove inactive client keys so attacker-controlled identities stay bounded."""
+        expired: list[str] = []
+        for key, window in self._recent_by_client.items():
+            self._prune(window, now)
+            if not window:
+                expired.append(key)
+        for key in expired:
+            self._recent_by_client.pop(key, None)
+
     def acquire(self, client_key: str) -> None:
         """Reserve one login-start slot for *client_key* or raise."""
         key = str(client_key or "").strip() or "unknown"
         now = time.monotonic()
         with self._lock:
-            client_window = self._recent_by_client[key]
-            self._prune(client_window, now)
+            self._prune_clients(now)
             self._prune(self._recent_global, now)
-            if len(client_window) >= self.per_client_per_minute:
+            client_window = self._recent_by_client.get(key)
+            if client_window and len(client_window) >= self.per_client_per_minute:
                 oldest = client_window[0]
                 retry_after = max(1, int(60.0 - (now - oldest)) + 1)
                 raise RateLimitExceeded(
@@ -179,6 +189,9 @@ class LoginStartLimiter:
                     retry_after,
                     "Login service is at capacity; retry shortly",
                 )
+            if client_window is None:
+                client_window = deque()
+                self._recent_by_client[key] = client_window
             client_window.append(now)
             self._recent_global.append(now)
 

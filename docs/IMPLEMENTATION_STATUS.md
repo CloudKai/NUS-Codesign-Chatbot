@@ -2,6 +2,80 @@
 
 ## Current phase
 
+**Production-grade repository audit and focused hardening.** The full layered
+application, state ownership, persistence, Cognito boundary, provider adapters,
+source ingestion, professor analytics, Streamlit presentation, deployment
+configuration, tests, and canonical documentation were reviewed. No broad
+folder move, schema migration, data rewrite, dependency addition, or product
+redesign was justified.
+
+### Changes in this phase
+
+1. The public login-start limiter no longer creates an in-memory client entry
+   for every rotated key after the global limit is full, and stale client
+   windows are evicted. This closes an unauthenticated process-memory growth
+   path while retaining the existing per-client/global behavior.
+2. Client-provided ``X-Request-ID`` values are accepted only when they match a
+   1–128 character correlation-ID allow-list. Invalid or oversized values are
+   replaced with a UUID before response reflection or application logging.
+3. ``APP_ENV=production`` now requires ``USE_LOCAL_API=true`` and rejects local
+   code execution and repository course-material sync. These checks enforce the
+   documented FastAPI authorization boundary and current DSQL/S3 ownership
+   model even if host environment overrides drift from ``compose.prod.yaml``.
+4. OpenAI clients now use explicit ``OPENAI_TIMEOUT_SECONDS`` (default 110) and
+   ``OPENAI_MAX_RETRIES`` (default 0). The structured provider validates its
+   injected API key rather than consulting global settings during each call;
+   the legacy local-only path receives the same bounded client policy.
+5. Dynamic values entering raw professor/profile HTML are attribute/text
+   escaped. Professor UI one-line render blocks were expanded for maintainable
+   review without changing the visual design.
+6. README ownership wording now matches the implemented production API
+   boundary. The dated manual-production report is explicitly historical and
+   its four broken local links now resolve to canonical repository documents.
+
+### Validation evidence
+
+- Focused API, configuration, provider, limiter, legacy-provider, professor UI,
+  and Streamlit suites → **111 passed**.
+- ``.venv/bin/python -m pytest -q`` → **415 passed** (deterministic; no live
+  OpenAI, AWS, Cognito, DSQL, S3, or paid calls).
+- ``.venv/bin/python -m pip check`` → no broken requirements.
+- ``compileall`` for ``backend``, ``ui``, ``streamlit_app.py``, and ``tests``;
+  ``git diff --check``; API import/route smoke → passed.
+- Isolated mock startup on alternate localhost ports with a temporary SQLite
+  root: FastAPI ``/health`` and ``/ready`` returned 200; Streamlit
+  ``/_stcore/health`` returned ``ok``. Existing processes on the canonical
+  8000/8501 ports were left untouched.
+- Static top-level import audit: 79 modules, zero cycles, zero backend→UI edges.
+- Ruff is configured in ``pyproject.toml`` but not installed in the project
+  virtual environment; mypy is neither configured nor installed. Neither is
+  claimed as executed.
+
+### Compatibility, rollback, and remaining risk
+
+- No database or file migration. Existing notebooks, revisions, messages,
+  sources, assessments, and Cognito identities are untouched. Rollback is a
+  code/config revert.
+- No live DSQL/AWS or authenticated production-browser smoke was authorized or
+  run. Professor class endpoints still aggregate one full active message batch
+  in Python; query count is constant and appropriate for the 80–100 student
+  pilot, but production DSQL latency must be measured before wider scale.
+- The webpage importer validates DNS and redirects but does not pin the
+  validated address through connection establishment; DNS-rebinding-resistant
+  transport remains required before treating arbitrary URL import as a strong
+  network sandbox.
+- The single-process rate limiters intentionally do not coordinate across
+  replicas. Move them to a shared limiter before horizontal scaling.
+
+### Next exact action
+
+Complete the existing Aurora DSQL revision-schema cutover and the guarded live
+idempotency smoke described below. Then run a read-only professor analytics
+latency/contract check and authenticated desktop/mobile browser QA against the
+deployed lecturer account. Do not open class traffic before those checks pass.
+
+### Prior auth phase (still true)
+
 **Auth: restore Cognito refresh after 1-hour ID cookie expiry.** Streamlit
 could not see the path-scoped refresh cookie, and ``should_attempt_session_refresh``
 skipped the browser bridge whenever ``co_design_id`` was missing — so a normal
@@ -606,6 +680,111 @@ Next exact action** above. Continuing AWS cutover after that:
    durable provider streaming and Bedrock retrieval adapters.
 
 ## Previous completed work
+
+**Professor Learning Analytics Dashboard (implementation; local deterministic validation)**
+
+### What changed
+
+- Added a read-only ``backend/professor_analytics`` layer with typed API
+  contracts, one batch active-branch repository query per analytics snapshot,
+  and pure aggregation/service rules. It uses existing ``users``,
+  ``notebooks``, and ``messages.assessment_text`` data only; no table, column,
+  index, event tracking, DSQL migration, model call, or application write was
+  added.
+- Added internal FastAPI routes below ``/api/v1/professor`` for Overview,
+  Students, selected Student detail, a separately requested active transcript,
+  Critical Thinking, and Engagement. Routes require a verified Cognito ID-token cookie
+  and reload the persisted user role; only existing ``lecturer`` and ``admin``
+  roles pass. Anonymous requests receive 401 and students receive 403 even if
+  they call the URL directly.
+- Added typed ``LocalApiClient`` methods and a dedicated Streamlit professor
+  shell. The shell branches before student notebook/session initialisation and
+  uses FastAPI only—never a store, model provider, filesystem, or DSQL client.
+  It implements Overview, Students + detail, Critical Thinking, and Engagement
+  with compact tables, labelled bar charts, neutral attention reasons, empty
+  states, and the established IBM Plex/slate/teal visual system.
+- Active analytics excludes internal idempotency markers and messages outside
+  the notebook's current conversation revision. Class rosters exclude
+  lecturer/admin accounts and the unauthenticated ``local-student`` bootstrap
+  row.
+- Final Sol review corrected the internal-row SQL predicate so ordinary API
+  turns carrying ``coach_idempotency_key`` remain visible; only rows whose
+  ``_internal_type`` is ``coach_idempotency`` are excluded. It also corrected
+  conversation counts, primary-notebook Facione scope, per-notebook sessions,
+  Not-started distribution, inactivity age, deterministic summary claims, and
+  equal-per-student weekly trends. Transcript bodies now load only after a
+  professor selects one notebook, and database failures return a sanitised 503.
+- Engagement now reports the count/share of assessed coach responses with at
+  least one persisted source citation. This is labelled as source grounding,
+  not evidence that a student read or understood a source.
+
+### Calculation definitions
+
+- ``Active this week`` means at least one active-branch student message in the
+  previous seven days. Current stage is the most recently active notebook's
+  persisted stage; a student with no notebook is ``Not started``.
+- Overall Facione is the mean of the latest assessed response's non-zero
+  persisted dimensions (0 means not started). Class and dimension profiles use
+  medians of one latest profile per assessed student; absent values stay ``Not
+  assessed`` rather than becoming 0.0.
+- Estimated active time groups student messages within each notebook when gaps
+  are at most 30 minutes. Each session contributes its span with a five-minute
+  minimum. It is labelled estimated active time, not time spent.
+- Attention is centrally configured and transparent: no activity in seven
+  days (including an account at least seven days old with no activity), Focus
+  after eight turns in the current notebook, twelve current-notebook turns
+  with at most one completed stage, or latest overall Facione below 2.0 after
+  at least three scored dimensions. These are prompts for follow-up, not a
+  judgement of ability.
+
+### Validation evidence
+
+- ``.venv/bin/python -m pytest -q tests/test_professor_analytics.py
+  tests/test_professor_ui.py tests/test_auth_gate.py tests/test_streamlit_ui.py`` → **64 passed**
+  (deterministic SQLite/Fake Cognito only; no network or model calls).
+- Final-review focused suite (professor analytics/UI, API client, Caddy
+  boundary) → **26 passed**.
+- ``.venv/bin/python -m pytest -q`` → **406 passed** (full deterministic
+  suite; no paid/model calls).
+- ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m
+  compileall -q backend ui streamlit_app.py tests`` → passed.
+- ``git diff --check`` → passed at implementation checkpoint.
+- Post-review UI polish (responsive navigation, non-deprecated dataframe
+  sizing, and light-theme time-series charts) was revalidated with
+  ``tests/test_professor_analytics.py tests/test_professor_ui.py`` → **9
+  passed**, plus ``compileall`` and ``git diff --check`` → passed.
+- In-app browser review used the real professor UI against an isolated,
+  synthetic 82-student API-shaped dataset. Overview, Students, selected
+  Student detail, Critical Thinking, and Engagement were exercised at 1440 px;
+  Overview was also checked at 390 px. Final browser logs contained no errors.
+  Review images are under the current Codex visualizations artifact directory;
+  no real student records or authenticated AWS session were used.
+- A later full-suite rerun reached **404 passed, 2 failed**. Both failures are
+  outside professor analytics and reflect concurrent deployment configuration
+  drift: ``tests/test_deployment_config.py`` still expects the DuckDNS/443
+  Caddy shape while the working tree currently contains a CloudFront/port-80
+  configuration. Those user-owned deployment edits were not reverted or
+  folded into this feature.
+- New coverage asserts 401 anonymous, 403 student, 200 lecturer; persisted
+  role rather than client claims; active-branch Facione/session correctness;
+  missing dimensions; constant-count repository access rather than N+1; normal
+  API idempotency metadata, multi-notebook conversation/session/assessment
+  scope, new-student inactivity boundaries; and no notebook, message, or source
+  mutation from analytics routes.
+
+### Compatibility / known limits / next action
+
+- No existing student data changes. Rollback is a code-only revert; analytics
+  endpoints have no mutation path. DSQL production deployment remains gated by
+  the existing revision-schema cutover in the Current phase section above.
+- Actual browser-presence/time-on-task, enrollment roster completeness,
+  normalized class-wide topics, causal learning impact, and source-reading
+  behavior remain intentionally unavailable. Notebook titles are shown as the
+  available discussion-topic proxy.
+- Next: after the approved DSQL revision cutover, run a read-only live DSQL
+  contract/latency check, then repeat the completed desktop/mobile visual QA
+  with a real Cognito lecturer session. Synthetic screenshots are available,
+  but no live AWS, real-student-data, or production-auth claim is made.
 
 **Provider-neutral stage prompts + retryable S3 cleanup** — ``19f5d4e`` on
 ``Production-RemoveData`` (pushed). Local mock suite 232 passed; GitHub Mock CI

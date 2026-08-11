@@ -29,6 +29,11 @@ def _apply_valid_production_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "model_provider", "openai")
     monkeypatch.setattr(settings, "mock_openai", False)
     monkeypatch.setattr(settings, "openai_api_key", "sk-test-not-a-real-key")
+    monkeypatch.setattr(settings, "openai_timeout_seconds", 110.0)
+    monkeypatch.setattr(settings, "openai_max_retries", 0)
+    monkeypatch.setattr(settings, "use_local_api", True)
+    monkeypatch.setattr(settings, "enable_local_code_execution", False)
+    monkeypatch.setattr(settings, "course_material_sync_enabled", False)
     monkeypatch.setattr(settings, "database_provider", "dsql")
     monkeypatch.setattr(settings, "file_storage_provider", "s3")
     monkeypatch.setattr(settings, "dsql_endpoint", "cluster.dsql.us-west-2.on.aws")
@@ -67,6 +72,12 @@ def test_valid_production_configuration_passes(monkeypatch):
         ("mock_openai", True, r"MOCK_OPENAI"),
         ("model_provider", "ollama", r"MODEL_PROVIDER=ollama"),
         ("openai_api_key", "", r"OPENAI_API_KEY"),
+        ("openai_timeout_seconds", 0, r"OPENAI_TIMEOUT_SECONDS"),
+        ("openai_timeout_seconds", 121, r"OPENAI_TIMEOUT_SECONDS"),
+        ("openai_max_retries", 3, r"OPENAI_MAX_RETRIES"),
+        ("use_local_api", False, r"USE_LOCAL_API"),
+        ("enable_local_code_execution", True, r"ENABLE_LOCAL_CODE_EXECUTION"),
+        ("course_material_sync_enabled", True, r"COURSE_MATERIAL_SYNC_ENABLED"),
         ("database_provider", "sqlite", r"sqlite"),
         ("file_storage_provider", "local", r"local"),
         ("dsql_user", "admin", r"admin"),

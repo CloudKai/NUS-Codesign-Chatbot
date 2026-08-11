@@ -219,6 +219,36 @@ def test_login_start_limiter_enforces_per_client_and_global_ceilings():
     assert global_limit.value.retry_after_seconds >= 1
 
 
+def test_login_limiter_does_not_track_globally_rejected_client_keys():
+    """A rotated-IP flood at global capacity must not grow process memory."""
+    limiter = LoginStartLimiter(per_client_per_minute=10, global_per_minute=1)
+    limiter.acquire("accepted-client")
+
+    for index in range(100):
+        with pytest.raises(RateLimitExceeded):
+            limiter.acquire(f"rejected-client-{index}")
+
+    assert set(limiter._recent_by_client) == {"accepted-client"}  # noqa: SLF001
+
+
+def test_login_limiter_evicts_stale_client_keys(monkeypatch):
+    """Accepted client identities expire with their rolling-window entries."""
+    from backend import rate_limit as rate_limit_module
+
+    clock = {"now": 0.0}
+    monkeypatch.setattr(
+        rate_limit_module.time,
+        "monotonic",
+        lambda: clock["now"],
+    )
+    limiter = LoginStartLimiter(per_client_per_minute=10, global_per_minute=10)
+    limiter.acquire("old-client")
+    clock["now"] = 61.0
+    limiter.acquire("current-client")
+
+    assert set(limiter._recent_by_client) == {"current-client"}  # noqa: SLF001
+
+
 def test_auth_login_rate_limit_short_circuits_before_oauth_write(tmp_path, monkeypatch):
     """Rate-limited login starts redirect without writing OAuth state."""
     from backend import auth_routes

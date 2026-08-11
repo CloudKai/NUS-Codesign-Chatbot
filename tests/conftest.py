@@ -19,6 +19,8 @@ os.environ["APP_ENV"] = "development"
 os.environ["MOCK_OPENAI"] = "true"
 os.environ["MODEL_PROVIDER"] = "mock"
 os.environ["OPENAI_API_KEY"] = ""
+os.environ["OPENAI_TIMEOUT_SECONDS"] = "110"
+os.environ["OPENAI_MAX_RETRIES"] = "0"
 # Default AppTest path uses in-process coaching; API-mode UI tests opt in.
 os.environ["USE_LOCAL_API"] = "false"
 os.environ["AUTO_ADVANCE_STAGES"] = "false"
@@ -64,6 +66,8 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("MOCK_OPENAI", "true")
     monkeypatch.setenv("MODEL_PROVIDER", "mock")
     monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.setenv("OPENAI_TIMEOUT_SECONDS", "110")
+    monkeypatch.setenv("OPENAI_MAX_RETRIES", "0")
     monkeypatch.setenv("USE_LOCAL_API", "false")
     monkeypatch.setenv("AUTO_ADVANCE_STAGES", "false")
     monkeypatch.setenv("STUDENT_STAGE_SELECTION", "false")
@@ -96,6 +100,8 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(settings_module.settings, "database_provider", "sqlite")
     monkeypatch.setattr(settings_module.settings, "file_storage_provider", "local")
     monkeypatch.setattr(settings_module.settings, "openai_api_key", "")
+    monkeypatch.setattr(settings_module.settings, "openai_timeout_seconds", 110.0)
+    monkeypatch.setattr(settings_module.settings, "openai_max_retries", 0)
     monkeypatch.setattr(settings_module.settings, "mock_openai", True)
     monkeypatch.setattr(settings_module.settings, "model_provider", "mock")
     monkeypatch.setattr(settings_module.settings, "use_local_api", False)

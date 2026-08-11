@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from html import escape
+
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -79,7 +81,8 @@ def render_profile_menu() -> None:
                 with st.container(key="profile-logout"):
                     if logout_url:
                         st.markdown(
-                            f'<a class="cd-profile-logout-link" href="{logout_url}" '
+                            '<a class="cd-profile-logout-link" '
+                            f'href="{escape(logout_url, quote=True)}" '
                             'target="_self" rel="noopener">Logout</a>',
                             unsafe_allow_html=True,
                         )

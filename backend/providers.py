@@ -97,15 +97,22 @@ class OpenAICoachProvider:
         model: str,
         *,
         reasoning_effort: str = "low",
+        timeout_seconds: float = 110.0,
+        max_retries: int = 0,
     ) -> None:
-        self._client = OpenAI(api_key=api_key)
+        cleaned_key = str(api_key or "").strip()
+        if not cleaned_key:
+            raise ProviderUnavailableError("OPENAI_API_KEY is not configured")
+        self._client = OpenAI(
+            api_key=cleaned_key,
+            timeout=float(timeout_seconds),
+            max_retries=int(max_retries),
+        )
         self._model = model
         self._reasoning_effort = reasoning_effort
 
     def assess(self, request: CoachRequest) -> tuple[str, Any]:
         """Request JSON-schema output from the optional paid OpenAI provider."""
-        if not settings.openai_api_key:
-            raise ProviderUnavailableError("OPENAI_API_KEY is not configured")
         try:
             prompt = compose_coach_prompt(request).composed_text
             if request.image_inputs:
@@ -144,8 +151,11 @@ class OpenAICoachProvider:
                 create_kwargs["reasoning"] = {"effort": effort}
             response = self._client.responses.create(**create_kwargs)
             turn = ProviderCoachOutput.model_validate_json(response.output_text)
-        except Exception as error:  # Provider errors are translated at the application boundary.
-            raise ProviderUnavailableError("OpenAI could not create a structured coaching turn") from error
+        except Exception as error:
+            # Provider errors are translated at the application boundary.
+            raise ProviderUnavailableError(
+                "OpenAI could not create a structured coaching turn"
+            ) from error
         # The request owns the active stage; providers sometimes mis-label it.
         assessment = turn.assessment.model_copy(
             update={"current_stage": request.current_stage}
@@ -165,5 +175,7 @@ def configured_coach_provider():
             settings.openai_api_key,
             settings.openai_chat_model,
             reasoning_effort=settings.default_reasoning_effort,
+            timeout_seconds=settings.openai_timeout_seconds,
+            max_retries=settings.openai_max_retries,
         )
     raise ProviderUnavailableError(f"Unsupported MODEL_PROVIDER: {settings.model_provider}")
