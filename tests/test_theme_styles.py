@@ -50,6 +50,8 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     auth_css = Path(_STYLES_DIR / "55-auth.css").read_text(encoding="utf-8")
     assert ".st-key-auth_login_card" in auth_css
     assert ".cd-auth-redirecting" in auth_css
+    assert ".cd-auth-session-loading" in auth_css
+    assert ".cd-auth-session-spinner" in auth_css
     assert ".cd-auth-gap-after-course-notice--spacer" in auth_css
     assert ".st-key-auth-config-error" in auth_css
 
