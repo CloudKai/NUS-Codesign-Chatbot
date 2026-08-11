@@ -1,8 +1,8 @@
 # Production AWS deployment (stateless EC2 + ECR)
 
-This document describes the image-based production topology for
-`cde2300chatbot.duckdns.org`. It does **not** delete local `data/` or migrate
-existing SQLite/uploads automatically.
+This document describes the image-based production topology served through
+`d1sxfuoybzedj5.cloudfront.net`. It does **not** delete local `data/` or
+migrate existing SQLite/uploads automatically.
 
 **A live DSQL + S3 smoke test is still required before declaring the migration
 complete.** Passing unit tests alone is not sufficient.
@@ -11,9 +11,10 @@ complete.** Passing unit tests alone is not sufficient.
 
 ```text
 Students
-  → https://cde2300chatbot.duckdns.org
-  → Caddy (TLS terminate, public auth/health only)
-  → T4g.small EC2 / Docker
+  → https://d1sxfuoybzedj5.cloudfront.net
+  → CloudFront (viewer TLS, caching disabled, WebSocket forwarding)
+  → T4g.small EC2 :80 / Docker
+       ├── Caddy (HTTP origin; public auth/health allow-list)
        ├── app (prebuilt linux/arm64 image from ECR)
        │     ├── Streamlit :8501 (internal)
        │     └── FastAPI :8000 (internal)
@@ -21,7 +22,6 @@ Students
        │           ├── Aurora DSQL (structured state, role co_design_app)
        │           ├── S3 (user uploads)
        │           └── OpenAI (temporary configured provider)
-       └── DuckDNS cron on the host (not in the app container)
 ```
 
 Persistent state lives in **Aurora DSQL** and **S3**. Replacing the app
@@ -533,39 +533,38 @@ Performs no DDL/S3/Bedrock/provider-paid calls; removes disposable rows in
 Until this smoke sequence passes, the migration is **not** complete and the
 application remains **READY FOR CONTROLLED PILOT** at best.
 
-## Edge route checks (Caddy)
+## CloudFront distribution and Caddy origin
 
-Public Caddy terminates TLS and exposes only Cognito auth routes, health, and
-Streamlit. Coaching/CRUD `/api/*` paths must remain blocked at the edge.
-Security headers (HSTS, nosniff, Referrer-Policy, Permissions-Policy) are set
-in the site block; Content-Security-Policy is intentionally not configured.
+Configure the distribution with HTTPS-only viewers (redirect HTTP to HTTPS),
+an HTTP-only EC2 origin on port 80, all HTTP methods enabled, caching disabled,
+and an origin request policy that forwards cookies, query strings, and the
+headers required by Streamlit WebSockets and Cognito. The EC2 security group
+must allow TCP 80 only from the AWS-managed CloudFront origin-facing prefix
+list. Do not expose TCP 443 on the host; Caddy does not own production TLS.
+
+## Edge route checks (CloudFront → Caddy)
+
+CloudFront terminates viewer TLS. Caddy exposes only Cognito auth routes,
+health, and Streamlit from the HTTP origin. Coaching/CRUD `/api/*` paths must
+remain blocked at Caddy. Security headers (HSTS, nosniff, Referrer-Policy,
+Permissions-Policy) are set in the site block and passed through CloudFront;
+Content-Security-Policy is intentionally not configured.
 
 From a laptop (replace the host if the domain changes):
 
 ```sh
 # Public auth/health should reach FastAPI (expect 2xx/3xx/401/403 — not 404).
-curl -sI https://cde2300chatbot.duckdns.org/api/v1/health | head -n 1
-curl -sI https://cde2300chatbot.duckdns.org/api/v1/auth/me | head -n 1
+curl -sI https://d1sxfuoybzedj5.cloudfront.net/api/v1/health | head -n 1
+curl -sI https://d1sxfuoybzedj5.cloudfront.net/api/v1/auth/me | head -n 1
 
 # Coaching/CRUD must be blocked at Caddy (expect HTTP 404 Not Found).
-curl -sI https://cde2300chatbot.duckdns.org/api/v1/coach/turn | head -n 1
-curl -sI https://cde2300chatbot.duckdns.org/api/v1/threads | head -n 1
-curl -sI https://cde2300chatbot.duckdns.org/api/v1/ready | head -n 1
+curl -sI https://d1sxfuoybzedj5.cloudfront.net/api/v1/coach/turn | head -n 1
+curl -sI https://d1sxfuoybzedj5.cloudfront.net/api/v1/threads | head -n 1
+curl -sI https://d1sxfuoybzedj5.cloudfront.net/api/v1/ready | head -n 1
 ```
 
 Readiness stays host-/container-internal via Docker healthcheck; do not publish
 `/api/v1/ready` publicly.
-
-## DuckDNS (host)
-
-Install `scripts/host/duck.sh` under `/home/ubuntu/duckdns/` with a mode-600
-`duck.env` containing `DUCKDNS_TOKEN` (see `duck.env.example`). Cron:
-
-```cron
-*/5 * * * * /home/ubuntu/duckdns/duck.sh >/dev/null 2>&1
-```
-
-Application startup must not depend on DuckDNS success.
 
 ## IAM role permissions (EC2)
 
@@ -589,13 +588,14 @@ only with the future Bedrock/course-material implementation.
 4. Attach the EC2 instance profile; map it to DB role `co_design_app`.
 5. Run `scripts/init_dsql.py` as admin, then GRANT runtime privileges.
 6. Confirm Cognito callback remains
-   `https://cde2300chatbot.duckdns.org/api/v1/auth/callback`.
+   `https://d1sxfuoybzedj5.cloudfront.net/api/v1/auth/callback`.
 7. In the Cognito app client, set **Refresh token expiration** to approximately
    **30 days** and keep token revocation enabled. This setting, not an
    application DB timeout, controls long-lived login duration.
 8. Confirm authorization-code grant and the `openid email profile` scopes are
    enabled. Keep the app-client secret only in the host secrets configuration.
-9. Pass the live smoke sequence above, then cut over DuckDNS.
+9. Pass the live smoke sequence above, then enable class traffic on the
+   CloudFront distribution.
 
 ## Aurora DSQL assumptions
 

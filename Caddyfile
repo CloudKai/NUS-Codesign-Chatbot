@@ -1,7 +1,10 @@
 :80 {
+	# CloudFront terminates viewer TLS. Caddy is the HTTP origin policy boundary
+	# and is reachable only from CloudFront through the EC2 security group.
 	encode zstd gzip
 
 	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"

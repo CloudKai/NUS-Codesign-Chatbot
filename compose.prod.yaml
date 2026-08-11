@@ -80,6 +80,8 @@ services:
       app:
         condition: service_healthy
     ports:
+      # CloudFront terminates viewer TLS. Restrict EC2 TCP 80 ingress to the
+      # AWS-managed CloudFront origin-facing prefix list.
       - "80:80"
     volumes:
       - type: bind

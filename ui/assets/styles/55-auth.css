@@ -5,6 +5,7 @@
  *   - .cd-auth-shell*     → render_signed_out_shell() decorative backdrop
  *   - .cd-auth-card*      → render_login_gate() dialog content
  *   - .cd-auth-redirect*  → redirecting status after Sign in click
+ *   - .cd-auth-session-*  → centered refresh progress over the app skeleton
  *   - .st-key-auth-*      → Streamlit widget keys used as style hooks
  *
  * The shell is decorative and non-interactive. Authentication credentials,
@@ -162,6 +163,41 @@
 .cd-auth-shell-coach-copy p,
 .cd-auth-shell-source-row {
     color:var(--cd-muted);
+}
+
+/* Existing-session refresh: preserve the app skeleton and show only progress. */
+.cd-auth-session-loading {
+    position:fixed;
+    inset:0;
+    z-index:999990;
+    display:grid;
+    place-items:center;
+    pointer-events:none;
+}
+
+.cd-auth-session-spinner {
+    width:2.25rem;
+    height:2.25rem;
+    border-radius:999px;
+    border:3px solid color-mix(in srgb, var(--cd-accent, #0f766e) 22%, transparent);
+    border-top-color:var(--cd-accent, #0f766e);
+    animation:cd-auth-spin .7s linear infinite;
+}
+
+.cd-auth-visually-hidden {
+    position:absolute !important;
+    width:1px !important;
+    height:1px !important;
+    padding:0 !important;
+    margin:-1px !important;
+    overflow:hidden !important;
+    clip:rect(0,0,0,0) !important;
+    white-space:nowrap !important;
+    border:0 !important;
+}
+
+a.cd-auth-refresh-link[data-cd-auth-refresh="1"] {
+    display:none !important;
 }
 
 /* =========================================================================

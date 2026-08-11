@@ -20,7 +20,6 @@ logic.
 | `start.sh` | **Canonical launcher** — FastAPI `:8000` + Streamlit `:8501` with `USE_LOCAL_API=true` | Everyday path |
 | `start_prod.sh` | Docker app entrypoint — both services on `0.0.0.0`, supervised together | Production container; sqlite/local still may use `/app/data`; DSQL+S3 does not |
 | `deploy_ecr.sh` | ECR login + `compose.prod.yaml` pull/up | Host-only; needs `APP_IMAGE` + IAM role |
-| `host/duck.sh` | DuckDNS IP updater | Host cron only; token in `duck.env` (not Git) |
 | `build.sh` | Validation-only: `compileall` + full mock `pytest` | **Does not** initialize or modify the live DB |
 | `init_db.py` | Explicit SQLite schema setup | Refuses existing DB unless `--force`; prefer `--database PATH` for new files |
 | `init_dsql.py` | Admin-only Aurora DSQL schema bootstrap | One DDL per transaction; async-job `CALL` on dedicated autocommit connection; never app startup; not `co_design_app`. CloudShell SSL/IPv4 checklist: [`docs/deploy/AWS_STATELESS_EC2.md`](../docs/deploy/AWS_STATELESS_EC2.md) (§ CloudShell / laptop init_dsql checklist) |

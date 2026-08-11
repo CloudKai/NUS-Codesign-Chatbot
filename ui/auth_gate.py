@@ -161,15 +161,21 @@ def should_attempt_session_refresh() -> bool:
     ``_auth_refresh_attempted`` flag.
 
     The refresh cookie is path-scoped to ``/api/v1/auth`` and invisible here.
-    Always try the browser bridge once when signed out: either the short-lived
-    ID cookie is still present, the Path=/ session-hint remains after ID expiry,
-    or only the refresh cookie exists. Cold visitors without a refresh cookie
-    round-trip once through ``/api/v1/auth/refresh`` → ``/?auth_required=1``.
+    The non-sensitive Path=/ session hint identifies browsers that may have a
+    refresh session after the short-lived ID cookie expires. Cold visitors go
+    directly to the login gate instead of making a pointless refresh round trip.
     """
-    if bool(st.session_state.get("_auth_refresh_attempted")):
+    if any(
+        bool(st.session_state.get(key))
+        for key in (
+            "_auth_refresh_attempted",
+            "_auth_launch_cognito",
+            "_auth_signin_redirecting",
+        )
+    ):
         return False
     try:
-        return not any(
+        if any(
             st.query_params.get(key) == "1"
             for key in (
                 "auth_required",
@@ -177,16 +183,37 @@ def should_attempt_session_refresh() -> bool:
                 "auth_error",
                 "signed_out",
             )
-        )
+        ):
+            return False
     except Exception:
         return False
+    session_hint = _cookie_value(
+        str(
+            getattr(
+                settings,
+                "cognito_session_hint_cookie_name",
+                "co_design_session",
+            )
+        )
+    )
+    if session_hint == "1":
+        return True
+    # Retain compatibility with sessions created before the hint cookie was
+    # introduced. A rejected ID cookie may still accompany a valid refresh
+    # cookie, and the bridge remains loop-safe through the markers above.
+    return bool(
+        _cookie_value(
+            str(getattr(settings, "cognito_id_token_cookie_name", "co_design_id"))
+        )
+    )
 
 
 def redirect_to_session_refresh() -> bool:
     """Navigate to FastAPI refresh without exposing the refresh token to JS.
 
-    Uses a real same-document ``<a>`` plus a best-effort auto-click. The link
-    remains available if the scripted navigation does not run.
+    The signed-out app skeleton is already present when this renders. A centered
+    progress indicator covers that shell while a trusted same-document link and
+    direct-location fallback navigate to the refresh endpoint.
 
     Returns:
         ``True`` when the bridge UI was armed and the caller should ``st.stop()``.
@@ -196,42 +223,58 @@ def redirect_to_session_refresh() -> bool:
         return False
     st.session_state["_auth_refresh_attempted"] = True
     st.markdown(
-        '<div class="cd-auth-session-check" role="status" aria-live="polite">'
-        "<p><strong>Checking your session…</strong></p>"
-        "<p>If nothing happens, continue below.</p>"
+        '<div class="cd-auth-session-loading" role="status" aria-live="polite" '
+        'aria-label="Checking your session">'
+        '<span class="cd-auth-session-spinner" aria-hidden="true"></span>'
+        '<span class="cd-auth-visually-hidden">Checking your session</span>'
         "</div>",
         unsafe_allow_html=True,
     )
     st.markdown(
         f'<a class="cd-auth-refresh-link" data-cd-auth-refresh="1" '
-        f'href="{_escape_attr(url)}" target="_self" rel="noopener">'
-        "Continue"
-        "</a>",
+        f'href="{_escape_attr(url)}" target="_self" rel="noopener" '
+        'aria-hidden="true" tabindex="-1">Continue</a>',
         unsafe_allow_html=True,
     )
-    _click_refresh_link()
+    _click_refresh_link(url)
     return True
 
 
-def _click_refresh_link() -> None:
-    """Click the trusted same-document refresh link after a short paint delay."""
+def _click_refresh_link(refresh_url: str) -> None:
+    """Navigate to refresh after a short paint delay.
+
+    Streamlit can mount the script before the preceding Markdown link. Direct
+    navigation is therefore required when the link is not visible to the first
+    DOM query; omitting that fallback caused the production session-check page
+    to remain indefinitely.
+    """
+    safe_url = json.dumps(refresh_url)
     st.html(
-        """
+        f"""
 <script>
-(() => {
-  const clickContinue = () => {
-    try {
+(() => {{
+  const url = {safe_url};
+  const go = () => {{
+    try {{
       const link = document.querySelector(
         'a.cd-auth-refresh-link[data-cd-auth-refresh="1"]'
       );
-      if (link) {
+      if (link) {{
         link.click();
-      }
-    } catch (error) {
-    }
-  };
-  setTimeout(clickContinue, 120);
-})();
+        return;
+      }}
+    }} catch (error) {{
+    }}
+    if (!url) {{
+      return;
+    }}
+    try {{
+      window.location.replace(url);
+    }} catch (error) {{
+    }}
+  }};
+  setTimeout(go, 120);
+}})();
 </script>
 """,
         unsafe_allow_javascript=True,
@@ -272,7 +315,6 @@ def start_login() -> None:
         _clear_signin_pending_state()
         return
     st.session_state.pop("_auth_config_error", None)
-    st.session_state.pop("_auth_refresh_attempted", None)
     deadline = time.time() + _SIGNIN_COOLDOWN_SECONDS
     st.session_state["_auth_launch_cognito"] = True
     st.session_state["_auth_signin_redirecting"] = True
