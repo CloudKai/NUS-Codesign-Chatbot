@@ -40,6 +40,7 @@ from backend.repositories import (
     SQLiteNotebookRepository,
     SQLitePhaseTransitionRepository,
 )
+from backend.settings import settings
 from backend.source_library import add_text_source
 from backend.student_journey import STAGE_BY_ID, THINKING_STAGES
 from backend.student_store import StudentStore
@@ -82,6 +83,35 @@ def test_shared_and_stage_prompts_load_as_utf8():
         text = load_stage_prompt(stage_id)
         assert _STAGE_MARKERS[stage_id] in text
         text.encode("utf-8")
+
+
+def test_shared_prompt_calibrates_facione_from_explicit_conversation_evidence():
+    shared = load_shared_prompt()
+    for dimension in (
+        "analysis",
+        "interpretation",
+        "inference",
+        "evaluation",
+        "explanation",
+        "self_regulation",
+    ):
+        assert f"- {dimension}:" in shared
+    assert "across the whole conversation" in shared
+    assert "multiple separate student contributions" in shared
+    assert "Choose exactly one integer from 0 through 4" in shared
+    assert "Do not award points for stage completion" in shared
+    assert "response length" in shared
+    assert "writing polish" in shared
+    assert "inferred general ability" in shared
+
+    composed = PromptComposer().compose(
+        PromptContext(
+            current_stage="focus",
+            student_message="I am comparing two possible problem framings.",
+        )
+    ).composed_text
+    assert "exact integer-only forced-choice calibration" in composed
+    assert "0=not started, 1=Weak" not in composed
 
 
 def test_unknown_stage_raises_without_fallback():
@@ -353,8 +383,14 @@ def test_authoritative_source_selection_controls_model_knowledge(tmp_path):
 def test_client_cannot_override_stage_or_inject_prompt_fields(tmp_path, monkeypatch):
     store = StudentStore(tmp_path / "trust.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
-    _set_stage(store, thread_id, "evidence")
+    monkeypatch.setattr(settings, "student_stage_selection", True)
     client = TestClient(create_app(store, auto_advance_stages=False))
+    selected = client.post(
+        f"/api/v1/threads/{thread_id}/learning-state/select-stage",
+        json={"stage_id": "evidence"},
+    )
+    assert selected.status_code == 200
+    assert selected.json()["learning_journey"]["completed_stages"] == []
 
     mismatched = client.post(
         "/api/v1/coach/turn",

@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from html import escape
 from typing import Any
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 from backend.student_journey import (
     THINKING_STAGES,
@@ -62,9 +62,45 @@ def thread_overview(thread: dict[str, Any]) -> dict[str, Any]:
         "progress": journey_progress(journey),
         "summary": " ".join(summary.split())[:160] or "No learning summary yet.",
         "turns": int(thread.get("studentTurnCount") or 0),
+        "messages": int(thread.get("messageCount") or 0),
+        "last_active": _relative_activity(
+            thread.get("lastActivity")
+            or thread.get("updatedAt")
+            or thread.get("createdAt")
+        ),
         "helpful": 0,
         "review": 0,
     }
+
+
+def _relative_activity(value: Any, *, now: datetime | None = None) -> str:
+    """Format a persisted activity timestamp as concise notebook metadata."""
+    raw = str(value or "").strip()
+    if not raw:
+        return "Unknown"
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return "Unknown"
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    activity_date = parsed.astimezone(current.tzinfo).date()
+    elapsed_days = max(0, (current.date() - activity_date).days)
+    if elapsed_days == 0:
+        return "today"
+    if elapsed_days == 1:
+        return "yesterday"
+    if elapsed_days < 7:
+        return f"{elapsed_days} days ago"
+    return parsed.astimezone(current.tzinfo).strftime("%d %b %Y")
+
+
+def _message_count_label(count: int) -> str:
+    """Return a correctly pluralized notebook message count."""
+    return f"{count} message{'s' if count != 1 else ''}"
 
 
 @st.dialog("Your Notebooks", width="large")
@@ -88,7 +124,7 @@ def notebooks_dialog() -> None:
 
     threads = store.list_threads(search, None)
     st.caption(f"{len(threads)} notebook{'s' if len(threads) != 1 else ''}")
-    with st.container(key="notebook_library_scroll", height=360):
+    with st.container(key="notebook_library_scroll"):
         if not threads:
             st.markdown(
                 empty_state_html(
@@ -114,14 +150,22 @@ def notebooks_dialog() -> None:
                         if is_active
                         else ""
                     )
+                    notebook_title = escape(
+                        thread.get("name") or "Untitled notebook"
+                    )
                     title_column.markdown(
                         '<div class="notebook-card-copy">'
                         '<div class="notebook-card-title">'
-                        f"{escape(thread.get('name') or 'Untitled notebook')}"
+                        f'<span class="notebook-card-title-text" title="{notebook_title}">'
+                        f"{notebook_title}"
+                        "</span>"
                         f"{current_badge}</div>"
                         f'<div class="notebook-card-meta">'
                         f"{escape(overview['stage'].short_label)} · "
-                        f"{overview['stage_index']} of 6</div>"
+                        f"{overview['stage_index']} of 6 stages</div>"
+                        f'<div class="notebook-card-activity">'
+                        f"Last active {escape(overview['last_active'])} · "
+                        f"{escape(_message_count_label(overview['messages']))}</div>"
                         "</div>",
                         unsafe_allow_html=True,
                     )
@@ -140,91 +184,6 @@ def notebooks_dialog() -> None:
                     ):
                         request_notebook_actions(thread["id"])
                         rerun_app()
-
-    _sync_notebook_library_scroll()
-
-
-def _sync_notebook_library_scroll() -> None:
-    """Keep the notebook list scrollable and pinned to the top on open."""
-    components.html(
-        """
-<script>
-(() => {
-  const doc = window.parent.document;
-  const win = window.parent;
-
-  function scrollRoot() {
-    return doc.querySelector(".st-key-notebook_library_scroll");
-  }
-
-  function clearNestedScroll(root) {
-    root
-      .querySelectorAll(
-        "[data-testid='stLayoutWrapper'], [data-testid='stElementContainer'], [class*='st-key-notebook_card_']"
-      )
-      .forEach((node) => {
-        if (node === root) return;
-        node.style.setProperty("height", "auto", "important");
-        node.style.setProperty("max-height", "none", "important");
-        node.style.setProperty("min-height", "0", "important");
-        node.style.setProperty("flex", "0 0 auto", "important");
-        node.style.setProperty("overflow", "visible", "important");
-      });
-  }
-
-  function apply() {
-    const dialog = doc.querySelector('[role="dialog"]:has(.st-key-notebook-search)');
-    const root = scrollRoot();
-    if (!dialog || !root) return false;
-
-    const dialogBody = dialog.querySelector(":scope > [data-testid='stVerticalBlock']");
-    if (dialogBody) {
-      dialogBody.style.setProperty("gap", "0", "important");
-      dialogBody.style.setProperty("row-gap", "0", "important");
-    }
-
-    clearNestedScroll(root);
-    root.style.setProperty("padding", "0", "important");
-    root.style.setProperty("height", "360px", "important");
-    root.style.setProperty("max-height", "360px", "important");
-    root.style.setProperty("min-height", "0", "important");
-    root.style.setProperty("overflow-y", "auto", "important");
-    root.style.setProperty("overflow-x", "hidden", "important");
-    root.style.setProperty("overscroll-behavior", "contain", "important");
-    root.style.setProperty("scrollbar-width", "thin", "important");
-    root.classList.toggle(
-      "is-scrollable",
-      root.scrollHeight > root.clientHeight + 1
-    );
-    if (!root.dataset.cdNotebookScrollReady) {
-      root.scrollTop = 0;
-      root.dataset.cdNotebookScrollReady = "1";
-    }
-
-    return true;
-  }
-
-  function schedule() {
-    win.requestAnimationFrame(apply);
-  }
-
-  function boot() {
-    if (apply()) return;
-    let attempts = 0;
-    const timer = win.setInterval(() => {
-      attempts += 1;
-      if (apply() || attempts > 80) win.clearInterval(timer);
-    }, 80);
-  }
-
-  boot();
-  win.addEventListener("resize", schedule);
-})();
-</script>
-        """,
-        height=0,
-    )
-
 
 @st.dialog(
     "Notebook Actions",

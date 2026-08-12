@@ -33,7 +33,7 @@
             overflow:hidden !important;
         }
 
-        /* Keep the notebook title in-flow so it cannot cover Notebooks/Guidance. */
+        /* Keep the notebook title in-flow so it cannot cover Notebooks/profile. */
         .st-key-current_notebook_identity {
             position:relative !important;
             top:auto !important;
@@ -51,25 +51,13 @@
             text-align:left !important;
         }
 
-        /* Drop "Guidance Level:" copy; keep the Quick/Complex control only. */
-        .topbar-guidance-label,
-        .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) {
-            display:none !important;
-        }
-
-        .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] {
+        .st-key-topbar_actions,
+        .st-key-topbar_actions > [data-testid="stVerticalBlock"],
+        .st-key-topbar_actions > [data-testid="stLayoutWrapper"] {
             display:flex !important;
             align-items:center !important;
             justify-content:flex-end !important;
-            gap:.45rem !important;
             width:auto !important;
-        }
-
-        .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(1) {
-            margin-right:0 !important;
         }
 
         .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
@@ -105,15 +93,6 @@
         .st-key-notebook_topbar [data-baseweb="select"] > div {
             width:100%;
             min-width:0;
-        }
-
-        .st-key-topbar_mode [data-testid="stPopover"] button {
-            min-width:5.5rem !important;
-            max-width:none !important;
-            width:max-content !important;
-            white-space:nowrap !important;
-            border:1px solid var(--cd-border) !important;
-            border-radius:.75rem !important;
         }
 
         .st-key-mobile_panel {
@@ -276,15 +255,8 @@
             max-width:min(22rem,24vw);
         }
 
-        .topbar-guidance-label,
-        .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) {
+        .brand-subtitle {
             display:none !important;
-        }
-
-        .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(1) {
-            margin-right:.7rem !important;
         }
     }
 

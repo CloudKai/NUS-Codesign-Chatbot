@@ -1,8 +1,7 @@
-"""Keep the chat composer in a Cursor-style card with a footer control row.
+"""Keep the chat composer compact while allowing multiline drafts.
 
-``sync_composer_layout`` injects DOM helpers that Streamlit does not expose:
-placing the model popover beside the attach control and sizing the composer card.
-Call once after rendering the composer widgets. Prefer ``ui.layout.composer_layout``.
+``sync_composer_layout`` caps the native Streamlit chat input at five rows,
+then enables internal scrolling. Call it once after rendering the composer.
 """
 
 from __future__ import annotations
@@ -11,7 +10,7 @@ import streamlit.components.v1 as components
 
 
 def sync_composer_layout() -> None:
-    """Pin the model dropdown beside the attach control on the composer footer."""
+    """Grow the native chat textarea with its draft, capped at five rows."""
     components.html(
         """
 <script>
@@ -25,182 +24,6 @@ def sync_composer_layout() -> None:
 
   function chatInput(composer) {
     return composer ? composer.querySelector('[data-testid="stChatInput"]') : null;
-  }
-
-  function modelSlot(composer) {
-    return composer ? composer.querySelector(".st-key-composer_model_slot") : null;
-  }
-
-  function modelTrigger() {
-    return doc.querySelector(
-      '.st-key-composer_model_slot [data-testid="stPopoverButton"]'
-    );
-  }
-
-  function modelMenuBody() {
-    const bodies = doc.querySelectorAll('[data-testid="stPopoverBody"]');
-    for (const body of bodies) {
-      if (body.querySelector('[class*="st-key-composer-model-"]')) return body;
-    }
-    return null;
-  }
-
-  function modelMenuLayer(body) {
-    let layer =
-      body.closest('[data-baseweb="popover"]') ||
-      body.closest('[data-testid="stPopover"]') ||
-      body.parentElement;
-    while (layer && layer.parentElement && layer.parentElement !== doc.body) {
-      const parent = layer.parentElement;
-      const style = win.getComputedStyle(parent);
-      if (style.position === "fixed" || style.position === "absolute") {
-        layer = parent;
-        break;
-      }
-      layer = parent;
-    }
-    return layer || body;
-  }
-
-  function placeModelMenu() {
-    const trigger = modelTrigger();
-    const body = modelMenuBody();
-    if (!trigger || !body) return;
-
-    const rect = trigger.getBoundingClientRect();
-    const gap = 6;
-    // Pin using the model list height only so opening the side effort
-    // flyout does not push the menu upward.
-    const modelPane = body.querySelector(".st-key-composer_model_pane");
-    const menuHeight = Math.max(
-      modelPane
-        ? modelPane.getBoundingClientRect().height
-        : 0,
-      body.querySelector('[class*="st-key-composer-model-"]')
-        ? 28
-        : 0,
-      32
-    );
-    const top = Math.max(8, rect.top - menuHeight - gap);
-
-    body.style.setProperty("position", "fixed", "important");
-    body.style.setProperty("inset", "auto", "important");
-    body.style.setProperty("top", top + "px", "important");
-    body.style.setProperty("left", rect.left + "px", "important");
-    body.style.setProperty("bottom", "auto", "important");
-    body.style.setProperty("right", "auto", "important");
-    body.style.setProperty("transform", "none", "important");
-    body.style.setProperty("margin", "0", "important");
-    body.style.setProperty("overflow", "visible", "important");
-    body.style.setProperty("z-index", "999", "important");
-
-    const layer = modelMenuLayer(body);
-    if (layer && layer !== body) {
-      layer.style.setProperty("position", "fixed", "important");
-      layer.style.setProperty("inset", "auto", "important");
-      layer.style.setProperty("top", top + "px", "important");
-      layer.style.setProperty("left", rect.left + "px", "important");
-      layer.style.setProperty("bottom", "auto", "important");
-      layer.style.setProperty("right", "auto", "important");
-      layer.style.setProperty("transform", "none", "important");
-      layer.style.setProperty("width", "auto", "important");
-      layer.style.setProperty("height", "auto", "important");
-      layer.style.setProperty("margin", "0", "important");
-      layer.style.setProperty("overflow", "visible", "important");
-      layer.style.setProperty("z-index", "999", "important");
-    }
-  }
-
-  function scheduleMenuPlacement() {
-    let frames = 0;
-    function tick() {
-      placeModelMenu();
-      frames += 1;
-      if (frames < 10) win.requestAnimationFrame(tick);
-    }
-    win.requestAnimationFrame(tick);
-  }
-
-  function bindModelMenu() {
-    const trigger = modelTrigger();
-    if (!trigger || trigger.dataset.cdModelMenuBound === "1") return;
-    trigger.dataset.cdModelMenuBound = "1";
-    trigger.addEventListener("click", scheduleMenuPlacement);
-  }
-
-  function watchModelMenu() {
-    const body = doc.body;
-    if (!body || body.dataset.cdModelMenuWatch === "1") return;
-    body.dataset.cdModelMenuWatch = "1";
-    const observer = new win.MutationObserver(() => {
-      bindModelMenu();
-      if (modelMenuBody()) scheduleMenuPlacement();
-    });
-    observer.observe(body, { childList: true, subtree: true });
-  }
-
-  function modelPopover(composer) {
-    const slot = modelSlot(composer);
-    if (!slot) return null;
-
-    const moved = composer.querySelector(
-      '[data-testid="stChatInput"] [data-testid="stPopover"]'
-    );
-    if (moved && !slot.contains(moved)) {
-      const anchor =
-        slot.querySelector('[data-testid="stElementContainer"]') ||
-        slot.querySelector('[data-testid="stVerticalBlock"]') ||
-        slot;
-      anchor.appendChild(moved);
-    }
-
-    return slot.querySelector('[data-testid="stPopover"]');
-  }
-
-  function fileUpload(input) {
-    return input
-      ? input.querySelector('[data-testid="stChatInputFileUploadButton"]')
-      : null;
-  }
-
-  function placeModel(composer, input) {
-    const popover = modelPopover(composer);
-    const attach = fileUpload(input);
-    const attachBtn = attach ? attach.querySelector("button") || attach : null;
-    if (!popover || !attachBtn) return;
-
-    const composerRect = composer.getBoundingClientRect();
-    const attachRect = attachBtn.getBoundingClientRect();
-    const chipHeight = Math.max(popover.getBoundingClientRect().height || 24, 24);
-    const chipWidth = Math.min(
-      Math.max(popover.getBoundingClientRect().width || 80, 68),
-      152
-    );
-
-    const left = attachRect.right - composerRect.left + 10;
-    const bottom =
-      composerRect.bottom -
-      attachRect.bottom +
-      (attachRect.height - chipHeight) / 2;
-    const maxLeft = composerRect.width - chipWidth - 56;
-    const clampedLeft = Math.max(34, Math.min(left, maxLeft));
-
-    popover.classList.add("cd-model-placed");
-    popover.style.setProperty("position", "absolute", "important");
-    popover.style.setProperty("left", clampedLeft + "px", "important");
-    popover.style.setProperty("bottom", bottom + "px", "important");
-    popover.style.setProperty("top", "auto", "important");
-    popover.style.setProperty("right", "auto", "important");
-    popover.style.setProperty("margin", "0", "important");
-    popover.style.setProperty("transform", "none", "important");
-    popover.style.setProperty("z-index", "45", "important");
-    popover.style.setProperty("width", "max-content", "important");
-    popover.style.setProperty("max-width", "14rem", "important");
-    popover.style.setProperty("min-width", "max-content", "important");
-    popover.style.setProperty("pointer-events", "auto", "important");
-    popover.style.setProperty("white-space", "nowrap", "important");
-    popover.style.setProperty("opacity", "1", "important");
-    popover.style.setProperty("visibility", "visible", "important");
   }
 
   function textShells(textarea) {
@@ -230,8 +53,6 @@ def sync_composer_layout() -> None:
     const minHeight = lineHeight;
     const shells = textShells(textarea);
 
-    // Collapse first so scrollHeight tracks the current draft, not the old
-    // expanded height left behind after deleting a long paste.
     for (const shell of shells) {
       shell.style.setProperty("height", "auto", "important");
       shell.style.setProperty("max-height", maxHeight + "px", "important");
@@ -245,7 +66,6 @@ def sync_composer_layout() -> None:
     const measured = Math.max(textarea.scrollHeight, minHeight);
     const nextHeight = Math.min(measured, maxHeight);
     const needsScroll = measured > maxHeight;
-
     textarea.style.setProperty("height", nextHeight + "px", "important");
     textarea.style.setProperty(
       "overflow-y",
@@ -254,8 +74,6 @@ def sync_composer_layout() -> None:
     );
     for (const shell of shells) {
       shell.style.setProperty("height", nextHeight + "px", "important");
-      shell.style.setProperty("max-height", maxHeight + "px", "important");
-      shell.style.setProperty("overflow", "hidden", "important");
     }
   }
 
@@ -265,16 +83,10 @@ def sync_composer_layout() -> None:
     if (!composer || !input) return false;
     composer.classList.add("cd-composer-card");
     input.classList.add("cd-composer-card");
-    const textarea = input.querySelector('[data-testid="stChatInputTextArea"], textarea');
+    const textarea = input.querySelector(
+      '[data-testid="stChatInputTextArea"], textarea'
+    );
     if (textarea) capTextarea(textarea);
-    win.requestAnimationFrame(() => {
-      placeModel(composer, input);
-      if (textarea) capTextarea(textarea);
-      win.requestAnimationFrame(() => {
-        placeModel(composer, input);
-        if (textarea) capTextarea(textarea);
-      });
-    });
     return true;
   }
 
@@ -301,23 +113,19 @@ def sync_composer_layout() -> None:
     });
     win.addEventListener("resize", schedule);
     const observer = new win.MutationObserver(schedule);
-    observer.observe(input, { childList: true, subtree: true, characterData: true });
-    const slot = modelSlot(composer);
-    if (slot) observer.observe(slot, { childList: true, subtree: true });
+    if (input instanceof win.Node) {
+      observer.observe(input, { childList: true, subtree: true, characterData: true });
+    }
     if (typeof win.ResizeObserver === "function") {
       const resizeObserver = new win.ResizeObserver(schedule);
       resizeObserver.observe(input);
       resizeObserver.observe(textarea);
     }
-    bindModelMenu();
-    watchModelMenu();
     apply();
     return true;
   }
 
   function boot() {
-    watchModelMenu();
-    bindModelMenu();
     if (bind()) return;
     let attempts = 0;
     const timer = win.setInterval(() => {

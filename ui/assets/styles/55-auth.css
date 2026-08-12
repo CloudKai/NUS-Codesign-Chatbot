@@ -45,8 +45,31 @@
     display:flex;
     align-items:center;
     gap:.5rem;
+}
+
+.cd-auth-shell-brand-copy,
+.cd-auth-brand-copy {
+    display:flex;
+    flex-direction:column;
+    min-width:0;
+    gap:.08rem;
+}
+
+.cd-auth-shell-brand-title {
     font-family:"Source Serif 4",Georgia,"Times New Roman",serif;
+    font-size:.88rem;
     font-weight:700;
+    line-height:1.15;
+    letter-spacing:-.01em;
+    white-space:nowrap;
+}
+
+.cd-auth-shell-brand-subtitle {
+    color:var(--cd-muted);
+    font-size:.6rem;
+    font-weight:500;
+    line-height:1.2;
+    white-space:nowrap;
 }
 
 /* Shell "C" badge (1.4rem). Dialog counterpart: .cd-auth-brand-mark (2rem). */
@@ -249,7 +272,15 @@ a.cd-auth-refresh-link[data-cd-auth-refresh="1"] {
     font-family:"Source Serif 4",Georgia,"Times New Roman",serif;
     font-size:1rem;
     font-weight:700;
+    line-height:1.15;
     letter-spacing:-.01em;
+}
+
+.cd-auth-brand-subtitle {
+    color:var(--cd-muted);
+    font-size:.7rem;
+    font-weight:500;
+    line-height:1.2;
 }
 
 .cd-auth-body {

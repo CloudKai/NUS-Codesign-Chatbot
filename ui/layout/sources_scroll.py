@@ -155,7 +155,9 @@ def sync_sources_scroll() -> None:
       sourcesPanel.__cdSourcesResizeObserver = observer;
     } else {
       const observer = new win.MutationObserver(schedule);
-      observer.observe(sourcesPanel, { childList: true, subtree: true });
+      if (sourcesPanel instanceof win.Node) {
+        observer.observe(sourcesPanel, { childList: true, subtree: true });
+      }
     }
 
     schedule();

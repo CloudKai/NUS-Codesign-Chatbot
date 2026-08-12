@@ -62,17 +62,15 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
     assert "rerun_app()" in select_block
 
 
-def test_topbar_guidance_and_profile_use_correct_rerun_scope() -> None:
-    topbar = Path("ui/topbar.py").read_text(encoding="utf-8")
+def test_profile_coaching_style_and_preferences_use_correct_rerun_scope() -> None:
     profile = Path("ui/profile.py").read_text(encoding="utf-8")
-    assert "@st.fragment\ndef _render_guidance_fragment()" in topbar.replace(
+    assert "@st.fragment\ndef _render_coaching_style_fragment()" in profile.replace(
         "\r\n", "\n"
     )
-    guidance_block = topbar.split("def _render_guidance_fragment", 1)[1].split(
+    guidance_block = profile.split("def _render_coaching_style_fragment", 1)[1].split(
         "def render_topbar", 1
-    )[0]
-    assert "save_journey(journey)" in guidance_block
-    assert "rerun_fragment()" in guidance_block
+    )[0].split("def render_profile_menu", 1)[0]
+    assert "on_change=_persist_coaching_style" in guidance_block
     assert "rerun_app()" not in guidance_block
     assert "rerun_fragment()" in profile
     normalized_profile = profile.replace("\r\n", "\n")
@@ -110,11 +108,8 @@ def test_menu_popover_key_bumps_to_remount_closed(monkeypatch) -> None:
 
 
 def test_select_menus_close_after_pick() -> None:
-    topbar = Path("ui/topbar.py").read_text(encoding="utf-8")
     profile = Path("ui/profile.py").read_text(encoding="utf-8")
     sources = Path("ui/sources.py").read_text(encoding="utf-8")
-    assert 'close_menu_popover("topbar-guidance")' in topbar
-    assert 'menu_popover_widget_key("topbar-guidance")' in topbar
     assert 'close_menu_popover("profile-language")' in profile
     assert 'menu_popover_widget_key("profile-language")' in profile
     assert 'close_menu_popover("source-sort", thread_id)' in sources

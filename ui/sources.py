@@ -621,12 +621,12 @@ def _render_sources_panel_body() -> None:
                 )
             if locked:
                 menu_column.button(
-                    "Managed course material",
+                    "Read-only course material",
                     icon=":material/lock:",
                     type="tertiary",
                     disabled=True,
                     key=f"locked-source-{source['id']}",
-                    help="Always included in coaching",
+                    help="Read-only course material",
                 )
             else:
                 # Icon in the label (not icon=) so Streamlit hides the expand chevron.
@@ -776,6 +776,12 @@ def _render_sources_panel_body() -> None:
                 on_change=_sources_expander_changed,
                 args=(group, group_key),
             ):
+                st.markdown(
+                    '<p class="course-resource-caption">'
+                    "Course material · Available for relevant reference"
+                    "</p>",
+                    unsafe_allow_html=True,
+                )
                 if group_sources:
                     for source in group_sources:
                         render_source_card(source)

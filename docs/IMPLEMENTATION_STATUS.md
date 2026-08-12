@@ -35,6 +35,150 @@ uses caching disabled plus full cookie/query/WebSocket forwarding, then run
 ``docs/security/CADDY_PUBLIC_BOUNDARY.md`` and the authenticated production
 smoke. Do not open host TCP 443.
 
+### CDE2300 design-learning workspace refinement (completed)
+
+The existing three-panel Streamlit workspace remains intact, but its production
+presentation now identifies the course and foregrounds design thinking,
+evidence, reflection, and project progress instead of model infrastructure.
+
+1. The product shell and signed-out experience now use ``CDE2300 Design
+   Thinking Companion`` with the secondary course line ``Product Design and
+   Innovation``. Light is the default only when no stored appearance exists;
+   existing student preferences still win.
+2. The model selector is removed from the student composer while the configured
+   ``model_id`` and ``reasoning_effort`` continue through the existing request
+   contract. Guidance remains the same ``short``/``long`` journey setting but
+   appears in Profile as the student-facing ``Concise``/``Guided`` coaching
+   style.
+3. Welcome copy is grounded in project challenges, field observations,
+   interview findings, evidence, assumptions, and affected people. The coach
+   uses a quiet compass-style icon; student bubbles, the composer, theme tokens,
+   borders, shadows, and focus states were restrained in both themes.
+4. Facione values now display as ``N / 4`` (or ``Not started``) with the
+   original restrained rubric glyph beside the value. Canonical rubric labels
+   remain in accessible cell names, and the glyph is supplementary. Review
+   retains the strongest normalized score per dimension across assessments on
+   the active conversation branch; edited-away branches do not contribute.
+   A reflection-not-grading note explains this cumulative basis.
+5. Course-source groups remain read-only and non-selectable, now carry a subtle
+   course-material caption, and are visually distinct from ``My Sources``.
+   The notebook dialog is content-aware and uses existing title, stage, last
+   activity, and message-count fields; it no longer reserves a tall empty area.
+6. Shared identity constants and light/dark design tokens were updated instead
+   of adding page-specific state or backend fields. Responsive breakpoints keep
+   the three-panel desktop layout through 1280 px and retain the existing
+   panel-switching behavior at 1024/tablet widths.
+7. Student-message Copy/Edit actions remain visible without hover. A live UI
+   retry also exposed and fixed a retrieval-boundary defect: excerpt ellipses
+   could push a 600-character excerpt past its Pydantic limit and abort an
+   otherwise healthy coach turn. Ellipses now stay inside the requested bound,
+   and coaching failures log only the thread/stage diagnostic context.
+8. Provider calibration now defines observable evidence for all six Facione
+   dimensions and scores only reasoning explicitly demonstrated by the student
+   across the conversation. It prohibits inflation from stage completion,
+   response length, writing polish, coach suggestions, uninterpreted source
+   content, or inferred ability. The integer-only 0–4 contract is unchanged;
+   ``4`` requires consistently strong evidence across separate contributions.
+   The deterministic mock scores only stage-relevant dimensions at 1 (stay) or
+   2 (advance) and never simulates 3/4 mastery.
+9. Completed Thinking Path stages retain their stage-specific symbol and add a
+   small success-green tick badge. Stage order, completion persistence, and
+   current-stage emphasis are unchanged.
+10. Phase-2 stage selection now allows audited one-click movement to any
+    non-current stage. Completed stages expose ``Revisit this stage`` and retain
+    their completion record and green badge; incomplete stages expose ``Work on
+    this stage`` without being marked complete. Selection alone does not alter
+    Facione evidence or scores.
+11. Journey no longer repeats ``Current focus``, a numeric progress count, a
+   progress bar, or selection-helper copy above the roadmap. The stages move up
+   directly beneath Journey/Review. The existing confirmation-gated ``Next``
+   control now belongs to the Journey tab and is absent from Review; its pending
+   recommendation and confirmation behavior is unchanged.
+12. Inactive-stage selection actions now follow the preview content. Expanded
+    stages present description, Suggested questions, then ``Work on this stage``
+    or ``Revisit this stage`` in one aligned text-column stack; collapsed stages
+    retain their compact one-click action.
+
+Files changed in this UI phase: ``DESIGN.md``; ``ui/auth_gate.py``,
+``ui/chat.py``, ``ui/coach_welcome.py``, ``ui/components.py``,
+``ui/constants.py``, ``ui/layout/composer_layout.py``, ``ui/notebooks.py``,
+``ui/profile.py``, ``ui/sources.py``, ``ui/studio.py``, ``ui/theme.py``,
+``ui/topbar.py``; shared styles under ``ui/assets/styles/``; and focused UI,
+auth, rerun-scope, model-support, and theme tests under ``tests/``.
+The coaching follow-ups also changed ``backend/retrieval.py``,
+``backend/student_journey.py``, the shared prompt/composer, the deterministic
+mock provider, and their focused regression tests.
+
+Validation and review evidence (2026-08-12):
+
+- ``.venv/bin/python -m pytest -q`` → **419 passed** using deterministic mock
+  providers. No paid model or live AWS call was made.
+- ``PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache .venv/bin/python -m
+  compileall -q backend ui streamlit_app.py tests`` and ``git diff --check`` →
+  passed.
+- Real authenticated Streamlit review at 1280 × 720 covered Journey at the
+  active Conclusion stage, Review, the composer, personal/course Sources,
+  Profile, and the notebook dialog in Light and Dark. Appearance changes
+  Light → Dark → original System completed without callback-rerun warnings,
+  broken layout, horizontal overflow, or lost state.
+- Before/after screenshots were compared at the same viewport for the main
+  workspace, Review, and notebook dialog. Long course-source names remained
+  readable inside the bounded panel; notebook empty/multiple/long-name behavior
+  remains isolated-test/CSS covered so real student data was not mutated for
+  display-only QA.
+- The authenticated local UI was reloaded after submitting ``helping elderly
+  cross the road``. The prompt and Coach reply both persisted, the failure state
+  was absent, and both student turns exposed visible Copy and Edit controls.
+- Facione Review was inspected at the default 1327 × 964 viewport and the
+  1024 × 768 responsive breakpoint in Light and Dark. All six glyphs rendered
+  through ``Material Symbols Rounded`` beside the numeric/Not-started values;
+  accessible cell names retained the score and canonical rubric label. The
+  table and page had no horizontal overflow. The original System appearance and
+  default viewport were restored after QA.
+- Parent-document observers used by the composer, inline editor, profile, and
+  Sources layout now verify the target belongs to the parent window's Node
+  realm before observing it. A fresh post-restart reload produced no browser
+  console warnings or errors.
+- The completed Focus stage was inspected in the authenticated Journey view in
+  Light and Dark. Its ``my_location`` symbol remained visible beside a separate
+  success-green ``check_circle`` badge; the original System preference was
+  restored, and a fresh profile open/close produced no console warnings or
+  errors.
+- With the real Phase-2 configuration enabled, the authenticated Journey view
+  exposes ``Revisit this stage`` for completed stages and ``Work on this stage``
+  for every incomplete non-current stage. AppTest exercises both paths and
+  confirms selection changes only the current stage; completion records and
+  cumulative Facione evidence remain intact.
+- Live Light/Dark Phase-2 review at the 981 px panel-switching breakpoint showed
+  one completed Focus action and four incomplete-stage actions with no horizontal
+  overflow. Clicking ``Work on this stage`` for Evidence made Evidence current
+  immediately while Focus retained its completion tick. Next remained Journey-
+  only, the original System appearance was restored, and the console stayed clean.
+- The compact Journey layout was inspected in Dark at the authenticated desktop
+  viewport. Focus began directly below the tabs with no progress block or empty
+  gap. The disabled ``Next`` control was present in Journey and absent after
+  switching to Review; returning to Journey restored it. No fresh browser
+  console warnings or errors were emitted.
+- Expanded Evidence was visually inspected in Light and Dark after the action
+  reorder. Its description preceded Suggested questions, and ``Work on this
+  stage`` appeared last at the same text-column width. The System appearance was
+  restored and no fresh console warnings or errors were emitted.
+
+Compatibility and rollback: no database, API, authentication, DSQL, S3,
+Cognito, source, notebook, stage, review, or provider schema changed. Existing
+preferences, per-turn assessment payloads, and canonical Facione labels are
+preserved. Legacy active assessment history is aggregated at read time with no
+migration. Rollback is a code/CSS/prompt revert; the excerpt fix changes no
+retrieval ranking or persisted schema. Known non-blocker: Streamlit logs its existing
+``st.components.v1.html`` removal warning for compatibility helpers; replacing
+those helpers is a separate framework-migration task and was intentionally not
+mixed into this UI phase.
+
+Next exact action for this UI phase: run the authenticated production smoke
+after the next immutable deployment and confirm the same Light/Dark views
+through the CloudFront hostname; keep paid-provider traffic disabled unless a
+separate capped live call is approved.
+
 ### Prior auth phase (still true)
 
 **Auth: restore Cognito refresh after 1-hour ID cookie expiry.** The
@@ -48,7 +192,7 @@ bridge runs once; a Sign in launch cannot be intercepted by that bridge.
 **UI: fragment-scoped Streamlit reruns (local interactions).** Explicit
 ``rerun_app()`` / ``rerun_fragment()`` helpers replaced the ambiguous
 ``rerun()``. Sources select/search/sort/upload/delete, Journey preview
-toggles, Guidance Level, response language, and display-name avatar stay
+toggles, coaching style, response language, and display-name avatar stay
 panel-local; notebook/auth/coach/layout/stage-select/**Appearance theme**
 remain full-app. Debug counters: ``_app_runs``, ``_sources_fragment_runs``,
 ``_studio_fragment_runs``, ``_topbar_guidance_fragment_runs``,
@@ -262,8 +406,9 @@ READY FOR CONTROLLED PILOT.** Live manual production QA documented in
 ``AUTO_ADVANCE_STAGES=true`` and ``STUDENT_STAGE_SELECTION=false`` in
 ``compose.prod.yaml`` (coach ADVANCE applies without Next; no Journey stage
 pick controls). **Month-2+ operator flip:** set ``STUDENT_STAGE_SELECTION=true``
-and ``AUTO_ADVANCE_STAGES=false`` — Journey shows audited **Work on this stage**
-(``POST .../learning-state/select-stage``); if both flags are true, selection
+and ``AUTO_ADVANCE_STAGES=false`` — Journey shows audited **Revisit this stage**
+for completed stages and **Work on this stage** for incomplete stages
+(``POST .../learning-state/select-stage``). If both flags are true, selection
 wins and auto-advance is treated as off. Health ``mode`` now follows
 ``APP_ENV``. Login-start rate limit and allow-listed Cognito callback error
 logging added. Coach chat shows a **thinking** status while the buffered

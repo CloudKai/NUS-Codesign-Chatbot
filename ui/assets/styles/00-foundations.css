@@ -9,28 +9,28 @@
  * This file: :root tokens, brand, progress, and shared baseline controls.
  */
     :root {
-        --cd-bg:#F3F5F7;
+        --cd-bg:#F4F6F7;
         --cd-surface:#FFFFFF;
-        --cd-surface-muted:#F7F9FA;
+        --cd-surface-muted:#F7F8F9;
         --cd-text:#15202B;
-        --cd-muted:#5B6B7C;
-        --cd-border:#D5DCE3;
+        --cd-muted:#5B6875;
+        --cd-border:#D7DDE2;
         --cd-accent:#0F766E;
         --cd-accent-hover:#0D9488;
-        --cd-accent-soft:#E6F5F3;
+        --cd-accent-soft:#E8F3F1;
         --cd-success:#15803D;
         --cd-danger:#B42318;
-        --cd-panel:#EEF1F4;
-        --cd-subtle:#E8ECF0;
-        --cd-shadow:0 8px 24px rgba(21,32,43,.08);
-        --cd-scrollbar:#C4CBD4;
+        --cd-panel:#F1F3F4;
+        --cd-subtle:#E9EDEF;
+        --cd-shadow:0 10px 28px rgba(21,32,43,.09);
+        --cd-scrollbar:#C6CDD3;
         --cd-checkbox-bg:#FFFFFF;
-        --cd-checkbox-border:#D5DCE3;
+        --cd-checkbox-border:#D7DDE2;
         --cd-header-height:5.4rem;
         --cd-user-bubble-max-rows:8;
         --cd-user-bubble-row-height:calc(0.9rem * 1.45);
         --cd-user-bubble-max-height:calc(var(--cd-user-bubble-row-height) * var(--cd-user-bubble-max-rows));
-        --cd-radius:.75rem;
+        --cd-radius:.68rem;
         --cd-placeholder-opacity:.48;
     }
 
@@ -47,6 +47,19 @@
             transition-duration:0.01ms !important;
             animation-duration:0.01ms !important;
         }
+    }
+
+    :where(
+        button,
+        input,
+        textarea,
+        [role="button"],
+        [role="tab"],
+        [role="radio"],
+        [role="checkbox"]
+    ):focus-visible {
+        outline:2px solid var(--cd-accent) !important;
+        outline-offset:2px !important;
     }
 
     /* Fainter placeholders across inputs, textareas, and chat composer. */
@@ -97,13 +110,13 @@
         line-height:1;
     }
     .st-key-thinking_path_footer {
-        margin-top:auto !important;
+        margin-top:.35rem !important;
         flex:0 0 auto !important;
     }
     .st-key-studio_panel [data-testid="stElementContainer"].st-key-thinking_path_footer,
     .st-key-studio_panel > [data-testid="stVerticalBlock"]
     > [data-testid="stLayoutWrapper"]:has(.st-key-thinking_path_footer) {
-        margin-top:auto !important;
+        margin-top:.35rem !important;
         flex:0 0 auto !important;
     }
     .st-key-thinking_path_footer [class*="st-key-thinking-path-next"]
@@ -165,6 +178,7 @@
         background:var(--cd-accent-soft);
     }
     .cd-roadmap-node {
+        position:relative;
         width:2.1rem;
         height:2.1rem;
         display:grid;
@@ -183,9 +197,24 @@
         line-height:1;
     }
     .cd-roadmap-step.completed .cd-roadmap-node {
-        border-color:var(--cd-accent);
-        background:var(--cd-accent);
-        color:#fff;
+        border-color:color-mix(in srgb, var(--cd-success) 46%, var(--cd-border));
+        background:var(--cd-surface);
+        color:var(--cd-text);
+    }
+    .cd-roadmap-node .journey-complete-badge {
+        position:absolute;
+        right:-.32rem;
+        bottom:-.26rem;
+        display:grid;
+        place-items:center;
+        width:1rem;
+        height:1rem;
+        border-radius:999px;
+        color:var(--cd-success);
+        background:var(--cd-surface);
+        font-size:1rem;
+        font-variation-settings:"FILL" 1,"wght" 600,"GRAD" 0,"opsz" 20;
+        line-height:1;
     }
     .cd-roadmap-step.current .cd-roadmap-node {
         border-color:var(--cd-accent);
@@ -437,4 +466,3 @@
         min-height:0;
         flex:1 1 auto;
     }
-

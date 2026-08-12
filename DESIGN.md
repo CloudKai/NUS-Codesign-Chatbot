@@ -1,9 +1,10 @@
-# Co-design Design Specification
+# CDE2300 Design Thinking Companion — Design Specification
 
 ## 1. Product intent
 
-Co-design is a critical-thinking companion for university students. It combines a grounded
-research notebook, a conversational coach, and a visible thinking journey in one workspace.
+The CDE2300 Design Thinking Companion is a project-development and critical-thinking
+workspace for Product Design and Innovation students. It combines a grounded research
+notebook, a restrained conversational coach, and a visible thinking journey in one workspace.
 
 The interface should help students answer three questions at any point:
 
@@ -47,8 +48,9 @@ copy.
 
 ### Student control
 
-Potentially consequential actions require clear confirmation. Students can choose response
-length, language, theme, model, sources, and when to manually move to the next journey step.
+Potentially consequential actions require clear confirmation. Students can choose coaching
+style, language, theme, sources, and when to manually move to the next journey step. Model
+infrastructure is configured internally and is not student-facing.
 
 ### Authentication and course transparency
 
@@ -69,10 +71,10 @@ copy or presented as a warning.
 Top bar
 ├── Product identity
 ├── Current notebook title
-├── Section switcher: Journey | Review | Chat | Sources | Notebooks
-├── Guidance (Quick / Complex)
+├── Notebooks
 └── Profile avatar
     ├── Display name
+    ├── Coaching style (Concise / Guided)
     ├── Appearance
     ├── Language
     └── Help and support
@@ -157,13 +159,13 @@ headings.
 | Background    | `#F3F5F7` | Cool-slate application canvas             |
 | Surface       | `#FFFFFF` | Discussion, header, dialogs, and controls |
 | Panel         | `#EEF1F4` | Thinking Path and Sources columns         |
-| Muted surface | `#F7F9FA` | Low-emphasis controls and states          |
+| Muted surface | `#F7F8F9` | Low-emphasis controls and states          |
 | Text          | `#15202B` | Primary slate copy                        |
-| Muted text    | `#5B6B7C` | Supporting copy and metadata              |
-| Border        | `#D5DCE3` | Soft dividers and control outlines        |
+| Muted text    | `#5B6875` | Supporting copy and metadata              |
+| Border        | `#D7DDE2` | Soft dividers and control outlines        |
 | Accent        | `#0F766E` | Teal selected states and primary actions  |
 | Accent hover  | `#0D9488` | Primary-action hover                      |
-| Accent soft   | `#E6F5F3` | Active stage and user messages            |
+| Accent soft   | `#E8F3F1` | Active stage and user messages            |
 | Success       | `#15803D` | Positive status                           |
 | Warning dot   | `#E11D48` | Review change notification                |
 
@@ -177,16 +179,16 @@ Avoid flat all-white layouts and avoid using accent color for passive decoration
 
 | Token         | Value     | Usage                               |
 | ------------- | --------- | ----------------------------------- |
-| Background    | `#0e1420` | Application canvas                  |
-| Surface       | `#151c2a` | Header, workspace, dialogs          |
-| Muted surface | `#1a2232` | Low-emphasis controls and states    |
-| Text          | `#f3f5fb` | Primary copy                        |
-| Muted text    | `#a6afc1` | Supporting copy and metadata        |
-| Border        | `#2b3548` | Dividers and control outlines       |
-| Accent        | `#2DD4BF` | Teal selected states and primary actions |
-| Accent hover  | `#5EEAD4` | Primary-action hover                |
-| Accent soft   | `#14352F` | Active stage and user messages      |
-| Success       | `#53c9a2` | Source-grounding status             |
+| Background    | `#111416` | Application canvas                  |
+| Surface       | `#171B1E` | Header, workspace, dialogs          |
+| Muted surface | `#1C2124` | Low-emphasis controls and states    |
+| Text          | `#EEF2F3` | Primary copy                        |
+| Muted text    | `#A4ADB3` | Supporting copy and metadata        |
+| Border        | `#30373C` | Dividers and control outlines       |
+| Accent        | `#2BA89A` | Teal selected states and primary actions |
+| Accent hover  | `#38B6A7` | Primary-action hover                |
+| Accent soft   | `#19312E` | Active stage and user messages      |
+| Success       | `#4FB37A` | Source-grounding status             |
 
 
 The application supports `System`, `Light`, and `Dark`. Theme changes must affect the whole
@@ -194,8 +196,8 @@ experience, including messages, inputs, menus, dialogs, upload areas, disabled s
 empty states.
 
 Select menus render in a portal outside the workspace. Their option text, hover surface,
-selected surface, border, and shadow must therefore use explicit theme tokens so Short,
-Long, language, and model choices remain readable in both light and dark appearances.
+selected surface, border, and shadow must therefore use explicit theme tokens so coaching
+style and language choices remain readable in both light and dark appearances.
 
 ### Shape and elevation
 
@@ -220,18 +222,14 @@ controls with accessible names.
 
 The top bar contains:
 
-- Co-design identity and “Critical Thinking Companion” descriptor.
+- “CDE2300 Design Thinking Companion” identity with the quiet “Product Design and
+  Innovation” descriptor.
 - Current notebook as the single page-level heading with an aligned edit action.
-- Grouped Notebooks and New actions with no decorative space between them.
-- A visible `Short` or `Long` response-detail selector.
-- A compact Preferences trigger contained inside one bordered control.
+- A compact Notebooks action.
+- A compact profile/Preferences trigger.
 
-Response detail remains visible because it changes the conversational experience. Language,
-appearance, model, assignment context, and notebook details live in Preferences.
-
-Inside the Preferences trigger, treat the tune icon and chevron as one compact group. Center
-that group with a slight optical shift toward the chevron; do not distribute the two icons
-across the full button width.
+Coaching style, language, and appearance live in Preferences so the header stays focused on
+course identity and the current project. Model infrastructure remains internal.
 
 On desktop, center the complete notebook-title group against the page viewport rather than
 against its layout column. The title and edit icon share one vertical axis. Apply a
@@ -255,6 +253,17 @@ Rules:
 - Expand only the active stage with its title and guidance.
 - Use a filled accent number for the active stage.
 - Use quiet borders and muted text for future stages.
+- Keep each completed stage's own symbol and add a small green tick badge;
+  completion must not replace the stage symbol with a generic check.
+- When audited stage selection is enabled, let students work on any non-current
+  stage. Label completed stages "Revisit this stage" and incomplete stages
+  "Work on this stage"; selection alone never marks a stage complete or changes
+  Facione scores.
+- In an expanded inactive stage, order the content as description, Suggested
+  questions, then the aligned stage-selection action.
+- Start the stage list directly beneath Journey/Review; do not repeat a progress
+  meter or "Current focus" heading above it. Keep the confirmation-gated Next
+  control inside Journey so it never appears as a Review action.
 - Present “Suggested questions” as a clear, bordered action inside the active stage.
 - Opening it reveals three stage-relevant options.
 - Treat those questions as view-only guidance. They never populate, submit, or otherwise
@@ -283,10 +292,12 @@ Review is a focused feedback surface, not another progress dashboard.
 Required sections:
 
 1. Summary — a model-written overview of the student’s thinking (not pasted prompts).
-2. Facione critical-thinking scores — six dimensions in a compact table with
-   Holistic rubric icons (0 not started, 1 Weak, 2 Unacceptable, 3 Acceptable,
-   4 Strong): Analysis, Interpretation, Inference, Evaluation, Explanation,
-   Self-Regulation.
+2. Facione critical-thinking scores — six dimensions in a compact neutral table. Display
+   `Not started` for 0 and `N / 4` for scores 1–4, with the original restrained rubric
+   glyph beside the value. Retain the canonical Holistic rubric meaning in accessible
+   text: Analysis, Interpretation, Inference, Evaluation, Explanation, Self-Regulation.
+   Review reports the strongest explicit evidence demonstrated per dimension across the
+   active conversation; a later brief response must not erase earlier demonstrated work.
 3. Strengths — collapsed expander with one subsection per Thinking Path stage.
    Stages stay empty until coaching feedback exists, and earlier stage feedback
    is preserved.
@@ -299,7 +310,9 @@ Avoid:
 - Repeating “1 of 6” or progress history inside Review.
 - Generic praise without evidence or a next action.
 - Duplicate summaries with different labels.
-- Charts, dashboards, or analytics beyond the Facione icon table.
+- Charts, dashboards, or analytics beyond the Facione score table. Facione glyphs are
+  supplementary visual cues only; the numeric value and accessible rubric text remain
+  authoritative.
 - Quoting student prompts verbatim as the summary.
 - Showing Strengths or Areas filler before the student has earned feedback.
 
@@ -385,11 +398,12 @@ content.
 
 Preferences contains:
 
+- Coaching style: Concise or Guided, backed by the existing short/long behavior.
 - Response language: English, 中文, Bahasa Melayu, or தமிழ்.
 - Appearance: System, Light, or Dark.
-- Model selection.
-- Assignment context.
-- Notebook details.
+
+The default appearance for a student without a stored preference is Light. Existing stored
+Light, Dark, and System choices remain authoritative.
 
 Use a consistent vertical rhythm in the popover: keep explanatory guidance clearly
 separated from the first field, place labels close to their own controls, and leave a
@@ -428,7 +442,7 @@ enablement step.
 
 - Show all three workspace columns.
 - Keep the current notebook identity in the header.
-- Keep response detail and Preferences visible.
+- Keep Notebooks and Preferences visible.
 
 
 
@@ -438,7 +452,7 @@ enablement step.
 - Panels are labeled Sources, Discussion, and Thinking Path.
 - Show only the selected panel.
 - Hide the full brand descriptor and current notebook identity when space is constrained.
-- Keep Notebooks, New, response detail, and Preferences available as compact controls.
+- Keep Notebooks and Preferences available as compact controls.
 - Preserve full-width tap targets and avoid horizontally scrolling controls.
 
 Mobile controls should remain usable at `390px` width. Long labels may wrap to two lines but
@@ -526,4 +540,3 @@ A design change is complete when:
 6. Semantic labels and keyboard interaction remain intact.
 7. Automated tests pass.
 8. Visual QA is captured and documented.
-

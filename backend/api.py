@@ -694,10 +694,10 @@ def create_app(
         request: StageSelectionRequest,
         owner: OwnerServices = Depends(current_owner),
     ) -> dict:
-        """Move the owned notebook to a student-chosen Thinking Path stage.
+        """Move the owned notebook to any student-chosen Thinking Path stage.
 
-        Requires ``STUDENT_STAGE_SELECTION=true``. Returns updated notebook
-        metadata including ``learning_journey``.
+        Requires ``STUDENT_STAGE_SELECTION=true``. Existing completion records
+        are preserved. Returns updated metadata including ``learning_journey``.
         """
         try:
             metadata = owner.learning.select_stage(thread_id, request.stage_id)

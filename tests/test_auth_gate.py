@@ -83,7 +83,8 @@ def test_unauthenticated_users_see_auth_gate(logged_out_user):
     assert not app.exception
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "st-key-auth_shell" in rendered or "cd-auth-shell" in rendered
-    assert "Critical Thinking Companion" in rendered
+    assert "CDE2300 Design Thinking Companion" in rendered
+    assert "Product Design and Innovation" in rendered
     assert any(
         button.label == "Sign in or create an account" for button in app.button
     )
@@ -535,7 +536,7 @@ def test_logged_in_identity_without_sub_is_cleared(monkeypatch):
 def test_signed_out_shell_contains_no_real_student_data(logged_out_user):
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "Welcome to your critical-thinking coach" in rendered
+    assert "Welcome back. What are you working through today?" in rendered
     assert "Lecture evidence" not in rendered
     assert "student@example.edu" not in rendered
     assert "cognito-sub" not in rendered

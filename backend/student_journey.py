@@ -200,23 +200,9 @@ def normalize_journey(value: Any) -> dict[str, Any]:
         journey["completed_stages"] = [
             stage.id for stage in THINKING_STAGES if stage.id in set(completed)
         ]
-    if (
-        journey["current_stage"] in journey["completed_stages"]
-        and journey["current_stage"] != THINKING_STAGES[-1].id
-    ):
-        current_index = next(
-            index
-            for index, stage in enumerate(THINKING_STAGES)
-            if stage.id == journey["current_stage"]
-        )
-        journey["current_stage"] = next(
-            (
-                stage.id
-                for stage in THINKING_STAGES[current_index + 1 :]
-                if stage.id not in journey["completed_stages"]
-            ),
-            THINKING_STAGES[-1].id,
-        )
+    # A completed stage may also be current when the student deliberately
+    # revisits earlier work. Completion remains recorded while coaching is
+    # temporarily focused on that stage again.
     notes = raw.get("stage_notes")
     if isinstance(notes, dict):
         journey["stage_notes"] = {
@@ -505,6 +491,24 @@ def _normalize_facione_scores(raw: Any) -> dict[str, int]:
     return normalized
 
 
+def _cumulative_facione_scores(
+    messages: Iterable[dict[str, Any]],
+) -> dict[str, int]:
+    """Return the strongest score demonstrated in active assessment history.
+
+    Review is a cumulative reflection on the notebook, so a brief later turn
+    must not erase reasoning already demonstrated earlier. Callers provide the
+    active message branch; superseded revision history is excluded by the
+    repository before this presentation helper runs.
+    """
+    cumulative = _normalize_facione_scores(None)
+    for assessment in _assessments(messages):
+        scores = _normalize_facione_scores(assessment.get("facione_scores"))
+        for key, _label in FACIONE_DIMENSIONS:
+            cumulative[key] = max(cumulative[key], scores[key])
+    return cumulative
+
+
 def _review_summary(assessment: dict[str, Any] | None) -> str:
     """Prefer the model-written learning_summary; never paste student prompts."""
     if not assessment:
@@ -634,10 +638,10 @@ def learning_review(
 ) -> dict[str, Any]:
     """Build the Review-tab payload for the current notebook.
 
-    Summary and Facione scores come from the newest assessment. Strengths and
-    areas for improvement are aggregated by Thinking Path stage across the full
-    conversation so past feedback is preserved. Empty notebooks stay empty
-    instead of showing generic filler.
+    Summary comes from the newest assessment. Facione scores retain the
+    strongest demonstrated level per dimension across active assessments, and
+    strengths and areas for improvement are aggregated by Thinking Path stage.
+    Empty notebooks stay empty instead of showing generic filler.
 
     Returns:
         A dict consumed by ``ui.studio.render_learning_review``, including
@@ -680,9 +684,7 @@ def learning_review(
         ),
         [],
     )
-    facione_scores = _normalize_facione_scores(
-        (assessment or {}).get("facione_scores") if assessment else None
-    )
+    facione_scores = _cumulative_facione_scores(message_list)
     summary = _review_summary(assessment)
     completed_labels = [
         STAGE_BY_ID[stage_id].label for stage_id in normalized["completed_stages"]

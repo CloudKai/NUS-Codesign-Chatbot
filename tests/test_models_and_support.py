@@ -11,6 +11,7 @@ from backend.domain import (
     CoachRequest,
     FacioneDimensionScores,
     ProviderCoachOutput,
+    StageDecision,
     openai_strict_schema,
 )
 from backend.mock_provider import DeterministicCoachProvider
@@ -90,6 +91,43 @@ def test_mock_provider_includes_facione_scores():
     assert "[S" not in response
     assert "You’ve made this step clearer" not in response
     assert "ready for the next part" not in response.lower()
+
+
+def test_mock_facione_scores_use_exact_stage_mapping_and_never_claim_mastery():
+    dimensions_by_stage = {
+        "focus": {"analysis", "interpretation"},
+        "evidence": {"interpretation", "evaluation"},
+        "assumptions": {"analysis", "self_regulation"},
+        "perspectives": {"interpretation", "evaluation", "self_regulation"},
+        "synthesis": {"inference", "evaluation", "explanation"},
+        "conclusion": {"inference", "explanation", "self_regulation"},
+    }
+    all_dimensions = set(FacioneDimensionScores.model_fields)
+
+    for stage_id, relevant_dimensions in dimensions_by_stage.items():
+        for decision, relevant_score in (
+            (StageDecision.STAY, 1),
+            (StageDecision.ADVANCE, 2),
+        ):
+            _, assessment = DeterministicCoachProvider(decision).assess(
+                CoachRequest(
+                    thread_id=f"{stage_id}-{decision}",
+                    student_message="A deterministic mock contribution.",
+                    current_stage=stage_id,
+                    response_detail="short",
+                )
+            )
+            scores = assessment.facione_scores.model_dump()
+            assert {
+                dimension
+                for dimension, score in scores.items()
+                if score == relevant_score
+            } == relevant_dimensions
+            assert all(
+                scores[dimension] == 0
+                for dimension in all_dimensions - relevant_dimensions
+            )
+            assert max(scores.values()) <= 2
 
 
 def test_reasoning_is_model_compatible():
@@ -173,12 +211,3 @@ def test_apply_selected_model_accepts_explicit_effort(monkeypatch):
 
     apply_selected_model(DEFAULT_CHAT_MODEL_ID, effort="not-allowed")
     assert state["reasoning_effort"] == DEFAULT_REASONING_EFFORT
-
-
-def test_composer_model_chip_includes_effort_label():
-    from ui.chat import _composer_model_chip_label, _effort_label
-
-    assert _effort_label("medium") == "Med"
-    assert _composer_model_chip_label("GPT-5.6 Luna", "low") == "GPT-5.6 Luna · Low"
-    assert _composer_model_chip_label("GPT-5.6 Luna", "medium") == "GPT-5.6 Luna · Med"
-    assert _composer_model_chip_label("GPT-5.6 Luna", None) == "GPT-5.6 Luna"

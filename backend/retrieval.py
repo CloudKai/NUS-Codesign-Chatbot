@@ -297,7 +297,9 @@ def focused_excerpt(text: str, query: str, *, limit: int = 600) -> str:
         if len(term) >= 3 and lowered.find(term) >= 0
     ]
     if not positions:
-        return cleaned[: max(1, limit - 1)].rstrip() + "…"
+        if limit == 1:
+            return "…"
+        return cleaned[: limit - 1].rstrip() + "…"
     best_start = 0
     best_score = -1
     for position in positions:
@@ -312,9 +314,11 @@ def focused_excerpt(text: str, query: str, *, limit: int = 600) -> str:
         boundary = cleaned.find(" ", best_start)
         if 0 <= boundary < best_start + 40:
             best_start = boundary + 1
-    excerpt = cleaned[best_start : best_start + limit].rstrip()
     prefix = "…" if best_start else ""
-    suffix = "…" if best_start + limit < len(cleaned) else ""
+    content_limit = max(0, limit - len(prefix))
+    suffix = "…" if best_start + content_limit < len(cleaned) else ""
+    content_limit = max(0, content_limit - len(suffix))
+    excerpt = cleaned[best_start : best_start + content_limit].rstrip()
     return f"{prefix}{excerpt}{suffix}"
 
 

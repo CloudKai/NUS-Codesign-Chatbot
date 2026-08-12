@@ -16,6 +16,7 @@ from backend.retrieval import (
     RetrievalResult,
     RetrievalSource,
     RetrievedChunk,
+    focused_excerpt,
     retrieval_sources_from_notebook,
 )
 from backend.source_library import add_text_source
@@ -38,6 +39,30 @@ def _source(
         text=text,
         kind=kind,
     )
+
+
+@pytest.mark.parametrize("limit", [1, 2, 32, 600])
+def test_focused_excerpt_never_exceeds_requested_limit(limit):
+    text = ("Before the evidence. " * 100) + ("After the evidence. " * 100)
+
+    excerpt = focused_excerpt(text, "missing query term", limit=limit)
+
+    assert len(excerpt) <= limit
+
+
+def test_focused_excerpt_reserves_ellipsis_inside_validation_limit():
+    text = (
+        ("Introductory material. " * 80)
+        + "Target evidence about pedestrian safety. "
+        + ("Closing material. " * 80)
+    )
+
+    excerpt = focused_excerpt(text, "target pedestrian evidence", limit=600)
+
+    assert len(excerpt) <= 600
+    assert excerpt.startswith("…")
+    assert excerpt.endswith("…")
+    assert "Target evidence about pedestrian safety" in excerpt
 
 
 def test_local_retriever_finds_relevant_late_document_chunk():

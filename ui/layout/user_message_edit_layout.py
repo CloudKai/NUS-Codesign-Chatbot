@@ -146,7 +146,9 @@ def sync_user_message_edit_layout() -> None:
     textarea.addEventListener("paste", onPaste);
     win.addEventListener("resize", onResize);
     const observer = new win.MutationObserver(schedule);
-    observer.observe(root, {{ childList: true, subtree: true, characterData: true }});
+    if (root instanceof win.Node) {{
+      observer.observe(root, {{ childList: true, subtree: true, characterData: true }});
+    }}
     let resizeObserver = null;
     if (typeof win.ResizeObserver === "function") {{
       resizeObserver = new win.ResizeObserver(schedule);

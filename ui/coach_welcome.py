@@ -7,12 +7,13 @@ from typing import Any, Protocol
 
 COACH_WELCOME_KIND = "coach_welcome"
 
-COACH_WELCOME_TITLE = "Welcome to your critical-thinking coach"
+COACH_WELCOME_TITLE = "Welcome back. What are you working through today?"
 
 COACH_WELCOME_BODY = (
-    "I'm here to help you think through a design or research challenge with "
-    "clearer questions, stronger evidence, and more careful reasoning.\n\n"
-    "What design challenge or problem are you working on today?"
+    "Use this space to examine your design problem, question assumptions, work "
+    "with evidence, and consider the people affected by your decisions.\n\n"
+    "You can begin with a project challenge, field observation, interview "
+    "finding, or a design decision you are uncertain about."
 )
 
 COACH_WELCOME_MARKDOWN = (

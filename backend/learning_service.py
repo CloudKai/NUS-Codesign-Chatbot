@@ -87,17 +87,19 @@ class LearningProgressService:
         return PendingPhaseTransition.model_validate(resolved)
 
     def select_stage(self, thread_id: str, stage_id: str) -> dict[str, Any]:
-        """Move the notebook to a student-chosen Thinking Path stage.
+        """Move the notebook to any student-chosen Thinking Path stage.
 
-        Requires ``STUDENT_STAGE_SELECTION=true``. Does not mark skipped stages
-        complete; rejects any pending ADVANCE recommendation for the notebook.
+        Requires ``STUDENT_STAGE_SELECTION=true``. Selection preserves existing
+        completion records and rejects any pending ADVANCE recommendation for
+        the notebook. Selecting an incomplete stage does not complete it or any
+        skipped stages.
 
         Returns:
             Updated notebook metadata including ``learning_journey``.
 
         Raises:
-            ValueError: When selection is disabled, the stage is unknown, or the
-                notebook is missing.
+            ValueError: When selection is disabled, the stage is unknown, is
+                already current, or the notebook is missing.
         """
         if not settings.student_stage_selection:
             raise ValueError("Student stage selection is not enabled")

@@ -139,7 +139,9 @@ def test_select_stage_rejects_unknown_stage(tmp_path, monkeypatch):
         service.select_stage(thread_id, "not-a-stage")
 
 
-def test_select_stage_updates_journey_without_completing_skipped(tmp_path, monkeypatch):
+def test_select_stage_moves_to_incomplete_stage_without_completing_skipped_stages(
+    tmp_path, monkeypatch
+):
     store = StudentStore(tmp_path / "select-ok.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     monkeypatch.setattr(settings, "student_stage_selection", True)
@@ -147,17 +149,62 @@ def test_select_stage_updates_journey_without_completing_skipped(tmp_path, monke
 
     metadata = service.select_stage(thread_id, "synthesis")
 
-    journey = metadata["learning_journey"]
-    assert journey["current_stage"] == "synthesis"
-    assert journey.get("completed_stages") == []
     assert metadata["thinking_stage"] == "synthesis"
+    assert metadata["learning_journey"]["current_stage"] == "synthesis"
+    assert metadata["learning_journey"]["completed_stages"] == []
+
+
+def test_select_stage_rejects_stage_that_is_already_current(tmp_path, monkeypatch):
+    store = StudentStore(tmp_path / "select-current.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    service = _learning_service(store)
+
+    with pytest.raises(ValueError, match="already current"):
+        service.select_stage(thread_id, "focus")
+
+
+def test_select_stage_revisits_completed_stage_without_erasing_completion(
+    tmp_path, monkeypatch
+):
+    store = StudentStore(tmp_path / "select-completed.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    store.update_thread(
+        thread_id,
+        metadata={
+            "thinking_stage": "evidence",
+            "learning_journey": {
+                "current_stage": "evidence",
+                "completed_stages": ["focus"],
+            },
+        },
+    )
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    service = _learning_service(store)
+
+    metadata = service.select_stage(thread_id, "focus")
+    journey = metadata["learning_journey"]
+    assert journey["current_stage"] == "focus"
+    assert journey["completed_stages"] == ["focus"]
+    assert metadata["thinking_stage"] == "focus"
     thread = store.get_thread(thread_id) or {}
-    assert thread["metadata"]["thinking_stage"] == "synthesis"
+    assert thread["metadata"]["thinking_stage"] == "focus"
+    assert thread["metadata"]["learning_journey"]["completed_stages"] == ["focus"]
 
 
 def test_select_stage_rejects_pending_transition(tmp_path, monkeypatch):
     store = StudentStore(tmp_path / "select-pending.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    store.update_thread(
+        thread_id,
+        metadata={
+            "thinking_stage": "evidence",
+            "learning_journey": {
+                "current_stage": "evidence",
+                "completed_stages": ["focus"],
+            },
+        },
+    )
     notebooks = SQLiteNotebookRepository(store)
     transitions = SQLitePhaseTransitionRepository(store)
     pending = CoachWorkflow(
@@ -165,8 +212,8 @@ def test_select_stage_rejects_pending_transition(tmp_path, monkeypatch):
     ).run(
         CoachRequest(
             thread_id=thread_id,
-            student_message="I have defined a focused question.",
-            current_stage="focus",
+            student_message="I evaluated the evidence and its limitations.",
+            current_stage="evidence",
             response_detail="short",
         )
     ).pending_transition
@@ -176,9 +223,9 @@ def test_select_stage_rejects_pending_transition(tmp_path, monkeypatch):
 
     monkeypatch.setattr(settings, "student_stage_selection", True)
     service = LearningProgressService(store, notebooks, transitions)
-    service.select_stage(thread_id, "perspectives")
+    service.select_stage(thread_id, "focus")
 
     assert transitions.get_pending(thread_id) is None
     thread = store.get_thread(thread_id) or {}
-    assert thread["metadata"]["thinking_stage"] == "perspectives"
-    assert thread["metadata"]["learning_journey"]["completed_stages"] == []
+    assert thread["metadata"]["thinking_stage"] == "focus"
+    assert thread["metadata"]["learning_journey"]["completed_stages"] == ["focus"]

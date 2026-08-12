@@ -5,6 +5,36 @@ from streamlit.testing.v1 import AppTest
 from backend.settings import settings
 
 
+def test_student_message_actions_are_always_visible():
+    """Keep copy/edit discoverable without requiring hover or touch guessing."""
+    chat_css = Path("ui/assets/styles/30-chat.css").read_text(encoding="utf-8")
+    actions_rule = chat_css.split(
+        '[class*="st-key-user_message_actions_"] {', 1
+    )[1].split("}", 1)[0]
+
+    assert "opacity:1 !important" in actions_rule
+    assert "opacity:0" not in actions_rule
+
+
+def test_completed_journey_stages_keep_their_icon_and_add_green_tick():
+    """Completion supplements rather than replaces each stage-specific icon."""
+    studio_source = Path("ui/studio.py").read_text(encoding="utf-8")
+    foundations = Path("ui/assets/styles/00-foundations.css").read_text(
+        encoding="utf-8"
+    )
+
+    assert "icon_name = stage_icons[stage.id]" in studio_source
+    assert "journey-complete-badge" in studio_source
+    assert '"check_circle</span>"' in studio_source
+    assert "max(completed_count, stage_index - 1)" not in studio_source
+    assert "progress_bar_html" not in studio_source
+    assert "Revisit a completed stage." not in studio_source
+    assert ".cd-roadmap-node .journey-complete-badge" in foundations
+    assert "color:var(--cd-success)" in foundations
+    assert "background:var(--cd-surface)" in foundations
+    assert "if stage.id in completed" in studio_source
+
+
 def test_chat_composer_attachment_error_is_recoverable(monkeypatch):
     """Rejecting a chat attachment leaves the notebook usable and unsent."""
     from ui import chat
@@ -47,6 +77,7 @@ def test_chat_composer_attachment_error_is_recoverable(monkeypatch):
 def test_streamlit_notebook_workspace_smoke():
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     assert not app.exception
+    assert app.session_state["appearance"] == "Light"
     assert "AttributeError" not in "\n".join(
         str(exception.value) for exception in app.exception
     )
@@ -66,24 +97,31 @@ def test_streamlit_notebook_workspace_smoke():
     )
     assert workspace_panel.options == ["Journey", "Chat", "Sources"]
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "Guidance Level:" in rendered
-    assert any(button.label == "Quick" for button in app.button)
+    coaching_style = next(
+        control
+        for control in app.segmented_control
+        if control.label == "Coaching style"
+    )
+    assert coaching_style.options == ["Concise", "Guided"]
     assert {tab.label for tab in app.tabs} >= {"Journey", "Review"}
 
     assert '<span class="pane-title">Sources</span>' in rendered
-    assert "Welcome to your critical-thinking coach" in rendered
-    assert "What design challenge or problem are you working on today?" in rendered
+    assert "Welcome back. What are you working through today?" in rendered
+    assert "question assumptions" in rendered
     notebook_title = next(
         text_input for text_input in app.text_input if text_input.label == "Notebook title"
     )
     assert notebook_title.value == "Untitled notebook"
     assert '<span class="pane-title">Thinking Path</span>' in rendered
-    assert "Critical Thinking Companion" in rendered
+    assert "CDE2300 Design Thinking Companion" in rendered
+    assert "Product Design and Innovation" in rendered
     assert 'aria-label="Critical-thinking journey"' in rendered
     assert "Focus" in rendered
     assert "Conclusion" in rendered
     assert "Summary" in rendered
     assert "Critical thinking (Facione)" in rendered
+    assert "Based on the strongest evidence demonstrated across this conversation." in rendered
+    assert "Intended to support reflection, not grading." in rendered
     assert "Discussion summary" in rendered
     assert "What to strengthen" in rendered
     assert {expander.label for expander in app.expander} >= {
@@ -103,6 +141,7 @@ def test_streamlit_notebook_workspace_smoke():
     assert '_ensure_sources_expander_state(group, default=False)' in sources_py
     assert '_ensure_sources_expander_state("My Sources", default=True)' in sources_py
     assert "source_card_locked_" in sources_py
+    assert "Course material · Available for relevant reference" in rendered
     assert "disabled=locked" not in sources_py
     assert 'key="sources_filters"' in sources_py
     assert "sources-sort-label" in sources_py
@@ -143,7 +182,7 @@ def test_streamlit_notebook_workspace_smoke():
     assert "max-width:min(100%, calc(80ch + 16px))" in rendered
     assert "max-height:none !important" in rendered
     assert "max-height:11rem" not in rendered
-    assert "min-height:4.5rem" in rendered
+    assert "min-height:3.25rem" in rendered
     assert "MAX_ROWS = 5" in Path("ui/layout/composer_layout.py").read_text(
         encoding="utf-8"
     )
@@ -186,11 +225,11 @@ def test_streamlit_notebook_workspace_smoke():
         "ui/assets/styles/30-chat.css"
     ).read_text(encoding="utf-8")
     assert 'appearance == "Dark"' in Path("ui/chat.py").read_text(encoding="utf-8")
-    assert "#5B6B7C" in Path("ui/chat.py").read_text(encoding="utf-8")
+    assert "#5B6875" in Path("ui/chat.py").read_text(encoding="utf-8")
     assert "rgba(255, 255, 255, 0.35)" in Path("ui/chat.py").read_text(
         encoding="utf-8"
     )
-    assert "#9AA8B5" in Path("ui/chat.py").read_text(encoding="utf-8")
+    assert "#A4ADB3" in Path("ui/chat.py").read_text(encoding="utf-8")
     assert "rgba(15, 20, 25, 0.72)" not in Path("ui/chat.py").read_text(
         encoding="utf-8"
     )
@@ -226,8 +265,8 @@ def test_streamlit_notebook_workspace_smoke():
     assert ".journey-question-list {" in rendered
     assert '[role="listbox"] [role="option"]' in rendered
     assert "-webkit-text-fill-color:currentColor" in rendered
-    assert "--cd-bg:#F3F5F7" in rendered
-    assert "--cd-panel:#EEF1F4" in rendered
+    assert "--cd-bg:#F4F6F7" in rendered
+    assert "--cd-panel:#F1F3F4" in rendered
     assert "--cd-text:#15202B" in rendered
     assert "--cd-accent:#0F766E" in rendered
     assert "cd-col-resize-handle" in rendered
@@ -238,6 +277,10 @@ def test_streamlit_notebook_workspace_smoke():
     assert "cd-roadmap" in rendered
     # Footer Next is present but disabled without a pending coach recommendation / local API.
     assert any(button.label == "Next" for button in app.button)
+    journey_block = Path("ui/studio.py").read_text(encoding="utf-8").split(
+        "with journey_tab:", 1
+    )[1].split("with review_tab:", 1)[0]
+    assert "render_thinking_path_footer()" in journey_block
     assert "IBM Plex Sans" in rendered
     assert "background:var(--cd-panel)" in rendered
 
@@ -259,8 +302,8 @@ def test_streamlit_notebook_workspace_smoke():
     assert "cd-profile-help-title" in rendered
     assert "cd-profile-help-body" in rendered
     assert "stTooltipHoverTarget" in rendered
-    assert "st-key-composer_model_slot" in rendered
-    assert any(
+    assert "st-key-composer_model_slot" not in rendered
+    assert not any(
         (button.key or "").startswith("composer-model-") for button in app.button
     )
     assert not any(
@@ -271,66 +314,118 @@ def test_streamlit_notebook_workspace_smoke():
     assert app.chat_message[0].name == "assistant"
 
 
-def test_composer_effort_picker_updates_session_and_thread_metadata():
-    """Choosing an intelligence level updates session state and notebook metadata."""
-    from backend.models import DEFAULT_CHAT_MODEL_ID
+def test_profile_coaching_style_maps_to_existing_response_detail():
+    """Human-facing labels persist the existing short/long journey values."""
     from backend.student_store import StudentStore
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    thread_id = app.session_state["thread_id"]
+    guided = next(
+        control
+        for control in app.segmented_control
+        if control.label == "Coaching style"
+    )
+    guided.set_value("Guided").run()
+
+    assert not app.exception
+    assert app.session_state["response_detail"] == "long"
+    assert app.session_state["learning_journey"]["response_detail"] == "long"
+    stored = StudentStore().get_thread(app.session_state["thread_id"])
+    assert stored is not None
+    assert stored["metadata"]["learning_journey"]["response_detail"] == "long"
+
+
+def test_facione_table_is_numeric_and_preserves_accessible_rubric_meaning():
+    """Numeric scores retain the canonical rubric cues without duplicating speech."""
+    from ui.components import facione_scores_table_html
+
+    rendered = facione_scores_table_html(
+        {
+            "analysis": 0,
+            "interpretation": 1,
+            "inference": 2,
+            "evaluation": 3,
+            "explanation": 4,
+        }
+    )
+
+    assert "1 / 4" in rendered
+    assert "2 / 4" in rendered
+    assert "3 / 4" in rendered
+    assert "4 / 4" in rendered
+    assert "Not started" in rendered
+    assert 'aria-label="Inference: 2 out of 4, Unacceptable"' in rendered
+    rubric_glyphs = {
+        "Not started": "radio_button_unchecked",
+        "Weak": "sentiment_very_dissatisfied",
+        "Unacceptable": "sentiment_dissatisfied",
+        "Acceptable": "sentiment_satisfied",
+        "Strong": "sentiment_very_satisfied",
+    }
+    for rubric, glyph in rubric_glyphs.items():
+        assert (
+            f'aria-hidden="true" title="{rubric}">{glyph}</span>' in rendered
+        )
+    assert (
+        "Based on the strongest evidence demonstrated across this conversation."
+        in rendered
+    )
+    assert "Intended to support reflection, not grading." in rendered
+
+
+def test_legacy_welcome_message_renders_current_canonical_copy():
+    """Older persisted welcome content needs no destructive data migration."""
+    from backend.models import LOCKED_CHAT_MODEL_ID
+    from backend.student_store import StudentStore
+    from backend.student_support import DEFAULT_SUPPORT_MODE
+
+    local_store = StudentStore()
+    thread_id = local_store.create_thread(
+        name="Existing notebook",
+        model_id=LOCKED_CHAT_MODEL_ID,
+        support_mode=DEFAULT_SUPPORT_MODE,
+    )
+    local_store.add_message(
+        thread_id,
+        "assistant",
+        "**Welcome to your critical-thinking coach**\n\nOld welcome body.",
+        metadata={"kind": "coach_welcome", "workflow": "welcome"},
+    )
+    local_store.update_user_preferences({"active_thread_id": thread_id})
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert "Welcome back. What are you working through today?" in rendered
+    assert "Old welcome body." not in rendered
+    assert not app.exception
+
+
+def test_notebook_activity_helpers_use_existing_payload_fields():
+    """Notebook metadata stays presentation-only and deterministic."""
+    from datetime import datetime, timezone
+
+    from ui.notebooks import _message_count_label, _relative_activity
+
+    now = datetime(2026, 8, 12, 10, 0, tzinfo=timezone.utc)
+    assert _relative_activity("2026-08-12T01:00:00Z", now=now) == "today"
+    assert _relative_activity("2026-08-11T01:00:00Z", now=now) == "yesterday"
+    assert _relative_activity("2026-08-09T01:00:00Z", now=now) == "3 days ago"
+    assert _message_count_label(1) == "1 message"
+    assert _message_count_label(2) == "2 messages"
+
+
+def test_student_composer_hides_model_infrastructure_but_keeps_internal_config():
+    """Configured model values remain available without a student-facing picker."""
+    from backend.models import DEFAULT_CHAT_MODEL_ID
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     assert app.session_state["selected_model"] == DEFAULT_CHAT_MODEL_ID
     assert app.session_state["reasoning_effort"] == "low"
     assert not any(
-        (button.key or "").startswith("composer-effort-") for button in app.button
-    )
-
-    model_button = next(
-        button
+        (button.key or "").startswith(("composer-model-", "composer-effort-"))
         for button in app.button
-        if (button.key or "") == f"composer-model-{DEFAULT_CHAT_MODEL_ID}"
     )
-    model_button.click().run()
+    assert len(app.chat_input) == 1
     assert not app.exception
-    assert app.session_state["composer_effort_menu_model"] == DEFAULT_CHAT_MODEL_ID
-    assert {button.label for button in app.button} >= {"Low", "Med"}
-    assert "High" not in {button.label for button in app.button}
-    assert any(
-        (button.key or "").startswith("composer-effort-") for button in app.button
-    )
-
-    model_button = next(
-        button
-        for button in app.button
-        if (button.key or "") == f"composer-model-{DEFAULT_CHAT_MODEL_ID}"
-    )
-    model_button.click().run()
-    assert not app.exception
-    assert app.session_state["composer_effort_menu_model"] in (None, "")
-    assert not any(
-        (button.key or "").startswith("composer-effort-") for button in app.button
-    )
-
-    model_button = next(
-        button
-        for button in app.button
-        if (button.key or "") == f"composer-model-{DEFAULT_CHAT_MODEL_ID}"
-    )
-    model_button.click().run()
-    medium = next(
-        button
-        for button in app.button
-        if (button.key or "") == f"composer-effort-{DEFAULT_CHAT_MODEL_ID}-medium"
-    )
-    medium.click().run()
-    assert not app.exception
-    assert app.session_state["selected_model"] == DEFAULT_CHAT_MODEL_ID
-    assert app.session_state["reasoning_effort"] == "medium"
-    assert app.session_state["composer_effort_menu_model"] in (None, "")
-    assert int(app.session_state["composer_model_popover_epoch"]) >= 1
-
-    metadata = StudentStore().get_thread(thread_id).get("metadata") or {}
-    assert metadata.get("selected_model") == DEFAULT_CHAT_MODEL_ID
-    assert metadata.get("reasoning_effort") == "medium"
 
 
 def test_add_pasted_source_then_chat_with_citation():
@@ -519,20 +614,102 @@ def test_language_theme_and_journey_has_no_manual_progression_control():
     assert not app.exception
 
 
-def test_journey_work_on_this_stage_appears_when_selection_enabled(monkeypatch):
+def test_phase_two_journey_selects_any_non_current_stage(monkeypatch):
+    from backend.student_store import StudentStore
     from backend.settings import settings
 
     monkeypatch.setattr(settings, "student_stage_selection", True)
     monkeypatch.setattr(settings, "auto_advance_stages", False)
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    select_buttons = [
+    thread_id = app.session_state["thread_id"]
+    work_buttons = [
         button for button in app.button if button.label == "Work on this stage"
     ]
-    assert len(select_buttons) == 5
+    assert len(work_buttons) == 5
+    assert {button.key for button in work_buttons} == {
+        "journey-select-evidence",
+        "journey-select-assumptions",
+        "journey-select-perspectives",
+        "journey-select-synthesis",
+        "journey-select-conclusion",
+    }
+    next(
+        button
+        for button in work_buttons
+        if button.key == "journey-select-synthesis"
+    ).click().run()
+    assert app.session_state["learning_journey"]["current_stage"] == "synthesis"
+    assert app.session_state["learning_journey"]["completed_stages"] == []
+
+    journey = {
+        "current_stage": "evidence",
+        "completed_stages": ["focus"],
+    }
+    StudentStore().update_thread(
+        thread_id,
+        metadata={"thinking_stage": "evidence", "learning_journey": journey},
+    )
+    app.session_state["learning_journey"] = journey
+    app.run()
+
+    revisit_buttons = [
+        button for button in app.button if button.label == "Revisit this stage"
+    ]
+    work_buttons = [
+        button for button in app.button if button.label == "Work on this stage"
+    ]
+    assert len(revisit_buttons) == 1
+    assert revisit_buttons[0].key == "journey-select-focus"
+    assert len(work_buttons) == 4
+    assert {button.key for button in work_buttons} == {
+        "journey-select-assumptions",
+        "journey-select-perspectives",
+        "journey-select-synthesis",
+        "journey-select-conclusion",
+    }
     captions = "\n".join(caption.value or "" for caption in app.caption)
-    assert "Choose a stage to work on." in captions
+    assert "Revisit a completed stage." not in captions
+
+    revisit_buttons[0].click().run()
+    assert app.session_state["learning_journey"]["current_stage"] == "focus"
+    assert app.session_state["learning_journey"]["completed_stages"] == ["focus"]
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert "journey-complete-badge" in rendered
+
+    mixed_journey = {
+        "current_stage": "conclusion",
+        "completed_stages": ["focus", "evidence"],
+    }
+    StudentStore().update_thread(
+        thread_id,
+        metadata={
+            "thinking_stage": "conclusion",
+            "learning_journey": mixed_journey,
+        },
+    )
+    app.session_state["learning_journey"] = mixed_journey
+    app.run()
+    assert len(
+        [button for button in app.button if button.label == "Revisit this stage"]
+    ) == 2
+    assert len(
+        [button for button in app.button if button.label == "Work on this stage"]
+    ) == 3
     assert not app.exception
+
+
+def test_stage_selection_action_renders_after_preview_guidance():
+    """Expanded stage actions follow the description and suggested questions."""
+    studio_source = Path("ui/studio.py").read_text(encoding="utf-8")
+    inactive_stage_block = studio_source.split(
+        'if state == "current" or is_preview_open:', 1
+    )[1].split("def _sync_review_stage_expander_state", 1)[0]
+
+    assert inactive_stage_block.index("_render_stage_suggestions(stage)") < (
+        inactive_stage_block.index("_render_stage_selection_action(stage")
+    )
+    assert 'st.columns([0.13, 0.87], gap="small")' in studio_source
 
 
 def test_stale_appearance_widget_does_not_overwrite_stored_dark():
@@ -792,7 +969,7 @@ def test_pending_edit_failure_keeps_chat_visible(monkeypatch):
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Conversation 01" not in rendered
     assert "conversation-revision-label" not in rendered
-    assert "Welcome to your critical-thinking coach" in rendered
+    assert "Welcome back. What are you working through today?" in rendered
     assert (
         app.session_state[f"edit-text-{user_message['id']}"]
         == "I want to study safer crossings near schools."

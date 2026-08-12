@@ -8,7 +8,6 @@ from .domain import CoachRequest, EducationalAssessment, FacioneDimensionScores,
 from .prompts import PreparedCoachPrompt, compose_coach_prompt
 from .student_journey import (
     STAGE_BY_ID,
-    THINKING_STAGES,
     next_stage_id,
     personalized_stage_questions,
     stage_guidance_questions,
@@ -17,6 +16,14 @@ from .student_journey import (
 
 _CITATION_LABEL = re.compile(r"S\d+")
 _MAX_GROUNDED_EXCERPT_CHARS = 320
+_FACIONE_DIMENSIONS_BY_STAGE = {
+    "focus": ("analysis", "interpretation"),
+    "evidence": ("interpretation", "evaluation"),
+    "assumptions": ("analysis", "self_regulation"),
+    "perspectives": ("interpretation", "evaluation", "self_regulation"),
+    "synthesis": ("inference", "evaluation", "explanation"),
+    "conclusion": ("inference", "explanation", "self_regulation"),
+}
 
 
 def _mock_grounded_evidence(request: CoachRequest) -> tuple[str, str] | None:
@@ -42,37 +49,18 @@ def _mock_grounded_evidence(request: CoachRequest) -> tuple[str, str] | None:
 
 
 def _mock_facione_scores(stage_id: str, *, is_advancing: bool) -> FacioneDimensionScores:
-    """Return deterministic Facione scores that rise with journey progress.
+    """Return stage-specific deterministic scores without simulating mastery.
 
-    Early stages light up Analysis/Interpretation; later stages unlock the rest.
-    Advancing nudges active dimensions up by one (capped at 4).
+    Relevant dimensions receive ``1`` for STAY or ``2`` for ADVANCE. Every
+    other dimension stays at ``0``; the offline mock never emits ``3`` or ``4``.
     """
-    stage_index = next(
-        (index for index, stage in enumerate(THINKING_STAGES) if stage.id == stage_id),
-        0,
-    )
-    baselines = {
-        "analysis": 1 if stage_index >= 0 else 0,
-        "interpretation": 1 if stage_index >= 0 else 0,
-        "inference": 1 if stage_index >= 2 else 0,
-        "evaluation": 1 if stage_index >= 1 else 0,
-        "explanation": 1 if stage_index >= 3 else 0,
-        "self_regulation": 1 if stage_index >= 4 else 0,
+    relevant_dimensions = _FACIONE_DIMENSIONS_BY_STAGE.get(stage_id, ())
+    relevant_score = 2 if is_advancing else 1
+    scores = {
+        dimension: (relevant_score if dimension in relevant_dimensions else 0)
+        for dimension in FacioneDimensionScores.model_fields
     }
-    bump = 1 if is_advancing else 0
-    if stage_index <= 1:
-        baselines["analysis"] = min(4, baselines["analysis"] + 1 + bump)
-        baselines["interpretation"] = min(4, baselines["interpretation"] + bump)
-        baselines["evaluation"] = min(4, baselines["evaluation"] + bump)
-    elif stage_index <= 3:
-        baselines["inference"] = min(4, baselines["inference"] + 1 + bump)
-        baselines["evaluation"] = min(4, baselines["evaluation"] + 1 + bump)
-        baselines["explanation"] = min(4, baselines["explanation"] + bump)
-    else:
-        baselines["explanation"] = min(4, baselines["explanation"] + 1 + bump)
-        baselines["self_regulation"] = min(4, baselines["self_regulation"] + 1 + bump)
-        baselines["inference"] = min(4, baselines["inference"] + bump)
-    return FacioneDimensionScores(**baselines)
+    return FacioneDimensionScores(**scores)
 
 
 def _mock_review_feedback(

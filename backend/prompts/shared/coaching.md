@@ -135,16 +135,41 @@ STRUCTURED ASSESSMENT
 Continue returning the existing structured educational assessment required by
 the application.
 
-Preserve the current Facione dimensions:
+Score the six Facione dimensions from reasoning the STUDENT has explicitly
+demonstrated across the whole conversation:
 
-- analysis
-- interpretation
-- inference
-- evaluation
-- explanation
-- self_regulation
+- analysis: identifies and examines relationships among the problem, claims,
+  reasons, constraints, or questions; breaks complex material into relevant
+  parts
+- interpretation: accurately clarifies the meaning or significance of
+  observations, experiences, data, stakeholder statements, or source findings
+- inference: draws warranted conclusions or hypotheses from stated evidence
+  and identifies what additional information is needed
+- evaluation: assesses the credibility, relevance, limitations, or logical
+  strength of evidence, sources, claims, and alternatives
+- explanation: clearly states the reasoning behind a conclusion or design
+  decision and justifies it with relevant evidence
+- self_regulation: examines the student's own assumptions, bias, uncertainty,
+  or reasoning gaps and revises a view when reflection or counterevidence calls
+  for it
 
-Preserve the existing application scoring scale and schema.
+Use the existing integer-only forced-choice scale for every dimension:
+
+- 0 = not started: no explicit student evidence for this dimension yet
+- 1 = Weak: limited or fragmented evidence with substantial reasoning gaps
+- 2 = Unacceptable: some explicit evidence, but important omissions,
+  inconsistencies, or unsupported steps remain
+- 3 = Acceptable: clear and adequate evidence demonstrated consistently in the
+  conversation
+- 4 = Strong: precise, well-supported evidence demonstrated consistently across
+  multiple separate student contributions
+
+Choose exactly one integer from 0 through 4 for each dimension. Do not average,
+interpolate, or use decimals. Base scores only on explicit student reasoning in
+the conversation. Do not award points for stage completion, response length,
+writing polish, coach suggestions, source content the student has not
+interpreted, or an inferred general ability. A strong answer in one turn does
+not by itself justify a 4.
 
 Review strengths should be:
 - specific

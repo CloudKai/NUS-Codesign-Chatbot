@@ -205,15 +205,43 @@ def test_select_stage_api_requires_flag_and_valid_stage(tmp_path, monkeypatch, c
     assert missing.status_code == 404
 
     with caplog.at_level("INFO", logger="co_design.operational"):
-        selected = client.post(
+        incomplete = client.post(
             f"/api/v1/threads/{thread_id}/learning-state/select-stage",
             json={"stage_id": "evidence"},
         )
+    assert incomplete.status_code == 200
+    incomplete_body = incomplete.json()
+    assert incomplete_body["thinking_stage"] == "evidence"
+    assert incomplete_body["learning_journey"]["current_stage"] == "evidence"
+    assert incomplete_body["learning_journey"]["completed_stages"] == []
+
+    already_current = client.post(
+        f"/api/v1/threads/{thread_id}/learning-state/select-stage",
+        json={"stage_id": "evidence"},
+    )
+    assert already_current.status_code == 400
+    assert "already current" in already_current.json()["detail"].lower()
+
+    store.update_thread(
+        thread_id,
+        metadata={
+            "thinking_stage": "evidence",
+            "learning_journey": {
+                "current_stage": "evidence",
+                "completed_stages": ["focus"],
+            },
+        },
+    )
+    with caplog.at_level("INFO", logger="co_design.operational"):
+        selected = client.post(
+            f"/api/v1/threads/{thread_id}/learning-state/select-stage",
+            json={"stage_id": "focus"},
+        )
     assert selected.status_code == 200
     body = selected.json()
-    assert body["thinking_stage"] == "evidence"
-    assert body["learning_journey"]["current_stage"] == "evidence"
-    assert body["learning_journey"]["completed_stages"] == []
+    assert body["thinking_stage"] == "focus"
+    assert body["learning_journey"]["current_stage"] == "focus"
+    assert body["learning_journey"]["completed_stages"] == ["focus"]
     stage_event = next(
         json.loads(record.getMessage())
         for record in caplog.records

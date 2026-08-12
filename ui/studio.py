@@ -27,7 +27,6 @@ from backend.student_journey import (
 
 from ui.components import (
     facione_scores_table_html,
-    progress_bar_html,
     review_card_html,
     review_feedback_items_html,
 )
@@ -114,6 +113,26 @@ def _render_stage_suggestions(stage: ThinkingStage) -> None:
             )
 
 
+def _render_stage_selection_action(
+    stage: ThinkingStage,
+    *,
+    completed: set[str],
+) -> None:
+    """Render the stage-selection action after preview guidance."""
+    _, action_column = st.columns([0.13, 0.87], gap="small")
+    action_label = (
+        "Revisit this stage" if stage.id in completed else "Work on this stage"
+    )
+    with action_column:
+        if st.button(
+            action_label,
+            type="primary",
+            use_container_width=True,
+            key=f"journey-select-{stage.id}",
+        ):
+            _select_journey_stage(stage.id)
+
+
 def _toggle_stage_preview(stage_id: str) -> None:
     """Open or close an inactive stage preview without changing the learning stage."""
     opened = set(st.session_state.get("journey_preview_stages") or [])
@@ -145,33 +164,14 @@ def _select_journey_stage(stage_id: str) -> None:
 
 
 def render_journey_track() -> None:
-    """Render the six-stage roadmap with progress and stage guidance."""
+    """Render the six-stage roadmap and stage guidance."""
     journey = normalize_journey(st.session_state.learning_journey)
     completed = set(journey["completed_stages"])
     current_id = journey["current_stage"]
     selection_enabled = bool(settings.student_stage_selection)
-    stage_index = next(
-        index
-        for index, item in enumerate(THINKING_STAGES, start=1)
-        if item.id == current_id
-    )
-    completed_count = len(completed)
-    if current_id not in completed:
-        completed_count = max(completed_count, stage_index - 1)
     preview_stages = set(st.session_state.get("journey_preview_stages") or [])
     preview_stages.discard(current_id)
     st.session_state.journey_preview_stages = sorted(preview_stages)
-    st.markdown(
-        progress_bar_html(
-            completed=completed_count,
-            total=6,
-            label="Thinking path",
-            heading="Current focus",
-        ),
-        unsafe_allow_html=True,
-    )
-    if selection_enabled:
-        st.caption("Choose a stage to work on.")
     stage_icons = {
         "focus": "my_location",
         "evidence": "find_in_page",
@@ -194,7 +194,13 @@ def render_journey_track() -> None:
                 if stage.id in completed
                 else "upcoming"
             )
-            icon_name = "check" if state == "completed" else stage_icons[stage.id]
+            icon_name = stage_icons[stage.id]
+            completion_badge = (
+                '<span class="material-symbols-rounded journey-complete-badge">'
+                "check_circle</span>"
+                if stage.id in completed
+                else ""
+            )
             is_preview_open = stage.id in preview_stages
             with st.container(key=f"journey_stage_{stage.id}"):
                 st.markdown(
@@ -206,7 +212,7 @@ def render_journey_track() -> None:
                     f'<div class="cd-roadmap-step {state}">'
                     f'<div class="cd-roadmap-node" aria-hidden="true">'
                     f'<span class="material-symbols-rounded">'
-                    f"{escape(icon_name)}</span></div></div>",
+                    f"{escape(icon_name)}</span>{completion_badge}</div></div>",
                     unsafe_allow_html=True,
                 )
                 with copy_column:
@@ -240,18 +246,12 @@ def render_journey_track() -> None:
                             ):
                                 _toggle_stage_preview(stage.id)
                                 rerun_fragment()
-                        if selection_enabled:
-                            if st.button(
-                                "Work on this stage",
-                                type="primary",
-                                use_container_width=True,
-                                key=f"journey-select-{stage.id}",
-                            ):
-                                _select_journey_stage(stage.id)
                         if is_preview_open:
                             _render_stage_detail(stage)
                 if state == "current" or is_preview_open:
                     _render_stage_suggestions(stage)
+                if selection_enabled and state != "current":
+                    _render_stage_selection_action(stage, completed=completed)
 
 
 def _sync_review_stage_expander_state(
@@ -412,7 +412,7 @@ def render_pending_transition() -> None:
     st.info(
         f"The coach recommends moving from {pending.from_stage.title()} to "
         f"{pending.to_stage.title()}: {pending.assessment.recommendation_rationale}",
-        icon=":material/auto_awesome:",
+        icon=":material/explore:",
     )
 
 
@@ -509,7 +509,7 @@ def render_thinking_path_footer() -> None:
 
 @st.fragment
 def render_studio_panel() -> None:
-    """Render Thinking Path with Journey/Review tabs and the Next footer.
+    """Render Thinking Path with Journey/Review tabs and Journey-owned Next.
 
     With ``STUDENT_STAGE_SELECTION=true``, Journey exposes audited stage picks.
     Otherwise stage changes require a coach ADVANCE recommendation, then Next
@@ -534,6 +534,8 @@ def render_studio_panel() -> None:
         with journey_tab:
             render_journey_track()
             render_pending_transition()
+            with st.container(key="thinking_path_footer"):
+                render_thinking_path_footer()
         with review_tab:
             if preferred == "Review":
                 st.caption("Current focus")
@@ -541,7 +543,5 @@ def render_studio_panel() -> None:
                     "review_fingerprint", ""
                 )
             render_learning_review(journey)
-    with st.container(key="thinking_path_footer"):
-        render_thinking_path_footer()
     if st.session_state.get("confirm_next_transition_id"):
         _confirm_next_stage_dialog()

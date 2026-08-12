@@ -7,12 +7,24 @@ import json
 import streamlit as st
 import streamlit.components.v1 as components
 
+from backend.student_journey import RESPONSE_DETAILS, normalize_journey
+
 from ui.auth_gate import app_logout_url, logout_user
 from ui.components import profile_initial
 from ui.constants import APPEARANCE_MODES, RESPONSE_LANGUAGES
 from ui.menu_popovers import close_menu_popover, menu_popover_widget_key
 from ui.runtime import rerun_fragment, store
+from ui.session import save_journey
 from ui.settings import persist_appearance, persist_response_language
+
+
+COACHING_STYLE_LABELS = {
+    "short": "Concise",
+    "long": "Guided",
+}
+COACHING_STYLE_VALUES = {
+    label: detail for detail, label in COACHING_STYLE_LABELS.items()
+}
 
 
 def persist_display_name() -> None:
@@ -73,6 +85,43 @@ def _render_language_fragment() -> None:
     _render_language_dropdown(current_language)
 
 
+def _select_coaching_style(detail: str) -> None:
+    """Persist one existing response-detail value from the profile control."""
+    journey = normalize_journey(st.session_state.learning_journey)
+    if detail != journey["response_detail"]:
+        journey["response_detail"] = detail
+        save_journey(journey)
+
+
+def _persist_coaching_style() -> None:
+    """Map the student-facing coaching label to the existing journey value."""
+    detail = COACHING_STYLE_VALUES.get(
+        str(st.session_state.get("setting_coaching_style") or "")
+    )
+    if detail:
+        _select_coaching_style(detail)
+
+
+@st.fragment
+def _render_coaching_style_fragment() -> None:
+    """Render response-detail preferences without redrawing the workspace."""
+    # Keep the existing diagnostic counter stable for rerun-scope regression tests.
+    st.session_state["_topbar_guidance_fragment_runs"] = (
+        int(st.session_state.get("_topbar_guidance_fragment_runs") or 0) + 1
+    )
+    journey = normalize_journey(st.session_state.learning_journey)
+    current_detail = journey["response_detail"]
+    labels = [COACHING_STYLE_LABELS[detail] for detail in RESPONSE_DETAILS]
+    if st.session_state.get("setting_coaching_style") not in labels:
+        st.session_state.setting_coaching_style = COACHING_STYLE_LABELS[current_detail]
+    st.segmented_control(
+        "Coaching style",
+        labels,
+        key="setting_coaching_style",
+        on_change=_persist_coaching_style,
+    )
+
+
 def render_profile_menu() -> None:
     """Render the upper-right profile avatar that opens a compact settings menu."""
     display_name = str(st.session_state.get("display_name") or "Student")
@@ -95,11 +144,12 @@ def render_profile_menu() -> None:
                     on_change=persist_appearance,
                 )
                 _render_language_fragment()
+                _render_coaching_style_fragment()
                 st.divider()
                 st.markdown(
                     '<div class="cd-profile-help">'
                     '<div class="cd-profile-help-title">Help</div>'
-                    '<div class="cd-profile-help-body">(Will input myself later)</div>'
+                    '<div class="cd-profile-help-body">Contact your course team for support.</div>'
                     "</div>",
                     unsafe_allow_html=True,
                 )
@@ -129,8 +179,8 @@ def render_profile_menu() -> None:
 def _render_language_dropdown(current_language: str) -> None:
     """Render Language as a select-only menu (no text caret), left-aligned.
 
-    Uses the same popover + button pattern as Guidance Level so the control
-    cannot be typed into while keeping the value left-aligned in the trigger.
+    Uses a popover + button pattern so the control cannot be typed into while
+    keeping the value left-aligned in the trigger.
     """
     with st.container(key="profile_language"):
         st.markdown(
@@ -341,7 +391,7 @@ def _sync_profile_popover_close_on_leave() -> None:
   }
 
   const body = doc.body;
-  if (body) {
+  if (body instanceof win.Node) {
     observer = new win.MutationObserver(() => {
       bind();
     });

@@ -34,6 +34,18 @@ def test_journey_advances_through_all_critical_thinking_stages():
     assert understanding_level(journey)[0] == "Integrated"
 
 
+def test_normalization_preserves_a_completed_stage_being_revisited():
+    journey = normalize_journey(
+        {
+            "current_stage": "focus",
+            "completed_stages": ["focus"],
+        }
+    )
+
+    assert journey["current_stage"] == "focus"
+    assert journey["completed_stages"] == ["focus"]
+
+
 def test_journey_normalization_and_short_long_learning_reviews():
     journey = normalize_journey(
         {
@@ -303,3 +315,92 @@ def test_learning_review_clamps_invalid_facione_scores():
     assert review["facione_scores"]["interpretation"] == 0
     assert review["facione_scores"]["inference"] == 0
     assert review["facione_scores"]["evaluation"] == 0
+
+
+def test_learning_review_keeps_strongest_facione_evidence_across_turns():
+    journey = default_journey()
+    messages = [
+        {
+            "role": "assistant",
+            "content": "Earlier assessment.",
+            "metadata": {
+                "assessment": {
+                    "recommendation": "stay",
+                    "learning_summary": "Earlier progress.",
+                    "facione_scores": {
+                        "analysis": 3,
+                        "interpretation": 2,
+                        "inference": 1,
+                        "evaluation": 9,
+                    },
+                }
+            },
+        },
+        {
+            "role": "assistant",
+            "content": "Later assessment.",
+            "metadata": {
+                "assessment": {
+                    "recommendation": "stay",
+                    "learning_summary": "Later progress.",
+                    "facione_scores": {
+                        "analysis": 1,
+                        "interpretation": 3,
+                        "inference": "invalid",
+                        "evaluation": 2,
+                        "explanation": 2,
+                    },
+                }
+            },
+        },
+    ]
+
+    review = learning_review(messages, journey)
+
+    assert review["facione_scores"] == {
+        "analysis": 3,
+        "interpretation": 3,
+        "inference": 1,
+        "evaluation": 4,
+        "explanation": 2,
+        "self_regulation": 0,
+    }
+    assert review["summary"] == "Later progress."
+
+
+def test_learning_review_ignores_superseded_assessment_branch(tmp_path):
+    from backend.student_store import StudentStore
+
+    store = StudentStore(tmp_path / "facione-revision.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    original_user_id = store.add_message(thread_id, "user", "Original prompt")
+    store.add_message(
+        thread_id,
+        "assistant",
+        "Original assessment",
+        metadata={
+            "assessment": {
+                "recommendation": "stay",
+                "learning_summary": "Original branch.",
+                "facione_scores": {"analysis": 4, "evaluation": 4},
+            }
+        },
+    )
+
+    store.revise_user_message(
+        thread_id,
+        original_user_id,
+        "Revised prompt",
+        model_id="mock",
+        metadata={},
+    )
+    review = learning_review(store.get_messages(thread_id), default_journey())
+
+    assert review["facione_scores"] == {
+        "analysis": 0,
+        "interpretation": 0,
+        "inference": 0,
+        "evaluation": 0,
+        "explanation": 0,
+        "self_regulation": 0,
+    }

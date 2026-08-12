@@ -134,7 +134,7 @@ def review_stage_sections_html(
     return '<div class="review-stage-list">' + "".join(rows) + "</div>"
 
 
-_FACIONE_ICONS: dict[int, tuple[str, str]] = {
+_FACIONE_RUBRICS: dict[int, tuple[str, str]] = {
     0: ("radio_button_unchecked", "Not started"),
     1: ("sentiment_very_dissatisfied", "Weak"),
     2: ("sentiment_dissatisfied", "Unacceptable"),
@@ -153,10 +153,12 @@ _FACIONE_ROWS: tuple[tuple[str, str], ...] = (
 
 
 def facione_scores_table_html(scores: dict[str, int] | None) -> str:
-    """Return a Facione dimension table with one rubric icon per row.
+    """Return a neutral numeric Facione dimension table.
 
     Scores use ``0`` not started through ``4`` Strong. Missing keys render as
-    not started so legacy assessments stay readable.
+    not started so legacy assessments stay readable. Canonical rubric labels
+    remain in the cell's accessible name; the accompanying rubric glyph is a
+    supplementary, aria-hidden visual cue with a hover title.
     """
     source = scores or {}
     rows: list[str] = []
@@ -166,17 +168,23 @@ def facione_scores_table_html(scores: dict[str, int] | None) -> str:
         except (TypeError, ValueError):
             value = 0
         value = max(0, min(4, value))
-        icon, rubric = _FACIONE_ICONS[value]
-        aria = f"{label}: {rubric}"
+        icon, rubric = _FACIONE_RUBRICS[value]
+        visible_score = "Not started" if value == 0 else f"{value} / 4"
+        aria = (
+            f"{label}: Not started"
+            if value == 0
+            else f"{label}: {value} out of 4, {rubric}"
+        )
         rows.append(
             "<tr>"
             f'<th scope="row">{escape(label)}</th>'
-            f'<td class="facione-score facione-score-{value}">'
-            '<span class="facione-score-content">'
-            f'<span class="material-symbols-rounded" role="img" '
-            f'title="{escape(aria)}" aria-label="{escape(aria)}">'
+            f'<td class="facione-score facione-score-{value}" '
+            f'aria-label="{escape(aria)}">'
+            '<span class="facione-score-content" aria-hidden="true">'
+            f'<span class="facione-score-value">{escape(visible_score)}</span>'
+            f'<span class="material-symbols-rounded facione-score-icon" '
+            f'aria-hidden="true" title="{escape(rubric)}">'
             f"{escape(icon)}</span>"
-            f'<span class="facione-rubric">{escape(rubric)}</span>'
             "</span>"
             "</td>"
             "</tr>"
@@ -190,6 +198,8 @@ def facione_scores_table_html(scores: dict[str, int] | None) -> str:
         "<th scope=\"col\">Score</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody>"
         "</table>"
+        '<p class="facione-note">Based on the strongest evidence demonstrated '
+        "across this conversation. Intended to support reflection, not grading.</p>"
         "</div></section>"
     )
 

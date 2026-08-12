@@ -20,6 +20,7 @@ from urllib.parse import ParseResult, urlparse
 import streamlit as st
 
 from backend.settings import settings
+from ui.constants import PRODUCT_SUBTITLE, PRODUCT_TITLE
 from ui.runtime import rerun_app
 
 
@@ -501,7 +502,7 @@ def _click_login_link(login_url: str) -> None:
 
 
 @st.dialog(
-    "Welcome to your critical-thinking coach",
+    "Welcome to CDE2300 Design Thinking Companion",
     width="small",
     dismissible=False,
 )
@@ -551,7 +552,10 @@ def render_login_gate() -> None:
             '<div class="cd-auth-card">'
             '<div class="cd-auth-brand">'
             '<span class="cd-auth-brand-mark" aria-hidden="true">C</span>'
-            '<span class="cd-auth-brand-name">Critical Thinking Companion</span>'
+            '<span class="cd-auth-brand-copy">'
+            f'<span class="cd-auth-brand-name">{PRODUCT_TITLE}</span>'
+            f'<span class="cd-auth-brand-subtitle">{PRODUCT_SUBTITLE}</span>'
+            "</span>"
             "</div>"
             '<p class="cd-auth-body">Sign in to save your notebooks, conversations, '
             "journey progress, sources, reviews, and personalised feedback.</p>"
@@ -613,16 +617,19 @@ def render_signed_out_shell() -> None:
     """Render a static, dimmed layout preview with no protected student data."""
     with st.container(key="auth_shell"):
         st.markdown(
-            """
+            f"""
 <!-- Signed-out decorative shell (behind the login dialog) -->
 <div class="cd-auth-shell" aria-hidden="true">
   <div class="cd-auth-shell-topbar">
     <div class="cd-auth-shell-brand"><span class="cd-auth-shell-mark">C</span>
-      Critical Thinking Companion</div>
+      <span class="cd-auth-shell-brand-copy">
+        <span class="cd-auth-shell-brand-title">{PRODUCT_TITLE}</span>
+        <span class="cd-auth-shell-brand-subtitle">{PRODUCT_SUBTITLE}</span>
+      </span>
+    </div>
     <div class="cd-auth-shell-title">Untitled notebook</div>
     <div class="cd-auth-shell-actions">
       <span class="cd-auth-shell-chip">Notebooks</span>
-      <span class="cd-auth-shell-chip">Guidance Level: Quick</span>
       <span class="cd-auth-shell-avatar">S</span>
     </div>
   </div>
@@ -641,8 +648,8 @@ def render_signed_out_shell() -> None:
     <section class="cd-auth-shell-panel cd-auth-shell-coach">
       <div class="cd-auth-shell-pane-title">Coach</div>
       <div class="cd-auth-shell-coach-copy">
-        <h2>Welcome to your critical-thinking coach</h2>
-        <p>Sign in to continue your notebooks and coaching conversations.</p>
+        <h2>Welcome back. What are you working through today?</h2>
+        <p>Sign in to continue your project thinking, evidence, and reflections.</p>
       </div>
     </section>
     <aside class="cd-auth-shell-panel cd-auth-shell-sources">
@@ -653,7 +660,7 @@ def render_signed_out_shell() -> None:
     </aside>
   </div>
 </div>
-            """,
+""",
             unsafe_allow_html=True,
         )
 

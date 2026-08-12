@@ -11,6 +11,8 @@ from pathlib import Path
 
 import streamlit as st
 
+from ui.constants import DEFAULT_APPEARANCE
+
 _ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 _STYLES_DIR = _ASSETS_DIR / "styles"
 # Fixed cascade order. Do not reorder without comparing the assembled CSS.
@@ -77,56 +79,56 @@ def inject_template_css() -> None:
 def render_theme_css() -> None:
     light_tokens = """
         color-scheme:light;
-        --cd-bg:#F3F5F7;--cd-surface:#FFFFFF;--cd-surface-muted:#F7F9FA;
-        --cd-text:#15202B;--cd-muted:#5B6B7C;--cd-border:#D5DCE3;
-        --cd-panel:#EEF1F4;--cd-subtle:#E8ECF0;--cd-accent-soft:#E6F5F3;
+        --cd-bg:#F4F6F7;--cd-surface:#FFFFFF;--cd-surface-muted:#F7F8F9;
+        --cd-text:#15202B;--cd-muted:#5B6875;--cd-border:#D7DDE2;
+        --cd-panel:#F1F3F4;--cd-subtle:#E9EDEF;--cd-accent-soft:#E8F3F1;
         --cd-accent:#0F766E;--cd-accent-hover:#0D9488;--cd-success:#15803D;
-        --cd-scrollbar:#C4CBD4;
-        --cd-checkbox-bg:#FFFFFF;--cd-checkbox-border:#D5DCE3;
-        --cd-shadow:0 8px 24px rgba(21,32,43,.08);
+        --cd-scrollbar:#C6CDD3;
+        --cd-checkbox-bg:#FFFFFF;--cd-checkbox-border:#D7DDE2;
+        --cd-shadow:0 10px 28px rgba(21,32,43,.09);
         --cd-placeholder-opacity:.48;
     """
     dark_tokens = """
         color-scheme:dark;
-        --cd-bg:#0F1419;--cd-surface:#171C22;--cd-surface-muted:#1C232B;
-        --cd-text:#F2F5F7;--cd-muted:#9AA8B5;--cd-border:#2A343E;
-        --cd-panel:#171C22;--cd-subtle:#1C232B;--cd-accent-soft:#14352F;
-        --cd-accent:#2DD4BF;--cd-accent-hover:#5EEAD4;--cd-success:#4ADE80;
-        --cd-scrollbar:#4A5560;
-        --cd-checkbox-bg:#1C232B;--cd-checkbox-border:#2A343E;
-        --cd-shadow:0 18px 50px rgba(0,0,0,.34);
+        --cd-bg:#111416;--cd-surface:#171B1E;--cd-surface-muted:#1C2124;
+        --cd-text:#EEF2F3;--cd-muted:#A4ADB3;--cd-border:#30373C;
+        --cd-panel:#15191C;--cd-subtle:#20262A;--cd-accent-soft:#19312E;
+        --cd-accent:#2BA89A;--cd-accent-hover:#38B6A7;--cd-success:#4FB37A;
+        --cd-scrollbar:#4A5359;
+        --cd-checkbox-bg:#1C2124;--cd-checkbox-border:#30373C;
+        --cd-shadow:0 14px 36px rgba(0,0,0,.28);
         --cd-placeholder-opacity:.48;
     """
-    mode = st.session_state.get("appearance", "System")
+    mode = st.session_state.get("appearance", DEFAULT_APPEARANCE)
     tokens = dark_tokens if mode == "Dark" else light_tokens
-    portal_background = "#171C22" if mode == "Dark" else "#FFFFFF"
-    portal_text = "#F2F5F7" if mode == "Dark" else "#15202B"
-    portal_muted = "#9AA8B5" if mode == "Dark" else "#5B6B7C"
+    portal_background = "#171B1E" if mode == "Dark" else "#FFFFFF"
+    portal_text = "#EEF2F3" if mode == "Dark" else "#15202B"
+    portal_muted = "#A4ADB3" if mode == "Dark" else "#5B6875"
     system_portal_dark = (
         """
         @media (prefers-color-scheme:dark) {
             [data-testid="stPopoverBody"],
             [data-testid="stPopoverBody"] > div {
-                background:#171C22 !important;
+                background:#171B1E !important;
             }
             [data-testid="stPopoverBody"] p,
             [data-testid="stPopoverBody"] h3,
             [data-testid="stPopoverBody"] label {
-                color:#F2F5F7 !important;
-                -webkit-text-fill-color:#F2F5F7 !important;
+                color:#EEF2F3 !important;
+                -webkit-text-fill-color:#EEF2F3 !important;
             }
             [data-testid="stPopoverBody"] [data-testid="stTooltipHoverTarget"],
             [data-testid="stPopoverBody"] [data-testid="stTooltipHoverTarget"] [data-testid="stIconMaterial"],
             [data-testid="stPopoverBody"] [data-testid="stTooltipHoverTarget"] svg {
                 opacity:1 !important;
-                color:#9AA8B5 !important;
-                -webkit-text-fill-color:#9AA8B5 !important;
+                color:#A4ADB3 !important;
+                -webkit-text-fill-color:#A4ADB3 !important;
                 fill:currentColor !important;
             }
             [data-testid="stPopoverBody"] [data-testid="stCaptionContainer"],
             [data-testid="stPopoverBody"] [data-testid="stCaptionContainer"] p {
-                color:#9AA8B5 !important;
-                -webkit-text-fill-color:#9AA8B5 !important;
+                color:#A4ADB3 !important;
+                -webkit-text-fill-color:#A4ADB3 !important;
             }
         }
         """

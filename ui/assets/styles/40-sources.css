@@ -689,6 +689,16 @@
         padding:0 !important;
     }
 
+    .course-resource-caption {
+        margin:.18rem 0 .28rem !important;
+        padding:0 .1rem !important;
+        color:var(--cd-muted) !important;
+        -webkit-text-fill-color:var(--cd-muted) !important;
+        font-size:.64rem !important;
+        font-weight:500 !important;
+        line-height:1.3 !important;
+    }
+
     .st-key-sources_scroll [data-testid="stExpanderDetails"] [data-testid="stMarkdownContainer"]:has(.cd-empty-state) {
         display:flex !important;
         justify-content:center !important;
@@ -732,6 +742,16 @@
     /* Course materials: title fills the former checkbox gap; lock stays right. */
     [class*="st-key-source_card_locked_"] [data-testid="stHorizontalBlock"] {
         grid-template-columns:minmax(0,1fr) 1.7rem !important;
+    }
+
+    .st-key-sources_panel [class*="st-key-source_card_locked_"] {
+        padding-left:.35rem;
+        padding-right:.2rem;
+        background:color-mix(
+            in srgb,
+            var(--cd-surface-muted) 58%,
+            transparent
+        );
     }
 
     [class*="st-key-source_card_"] [data-testid="stColumn"] {

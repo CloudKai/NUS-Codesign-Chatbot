@@ -104,8 +104,17 @@
         height:2rem !important;
         min-width:2rem;
         border-radius:50% !important;
-        color:#fff !important;
-        background:var(--cd-accent) !important;
+        border:1px solid var(--cd-border) !important;
+        color:var(--cd-text) !important;
+        background:var(--cd-surface-muted) !important;
+    }
+
+    [data-testid="stChatMessageAvatarCustom"] [data-testid="stIconMaterial"],
+    [data-testid="stChatMessageAvatarCustom"] span {
+        color:var(--cd-muted) !important;
+        -webkit-text-fill-color:var(--cd-muted) !important;
+        font-size:1rem !important;
+        opacity:1 !important;
     }
 
     [data-testid="stChatMessage"]:has([aria-label="Chat message from user"])
@@ -140,10 +149,10 @@
     .coach-welcome-title {
         margin:.05rem 0 .55rem;
         color:var(--cd-text);
-        font-size:1.35rem;
-        font-weight:760;
-        letter-spacing:-.02em;
-        line-height:1.3;
+        font-size:1.08rem;
+        font-weight:700;
+        letter-spacing:-.01em;
+        line-height:1.35;
     }
 
     [class*="st-key-user_message_row_"],
@@ -153,9 +162,9 @@
         width:fit-content !important;
         max-width:min(100%, calc(80ch + 16px)) !important;
         margin-left:auto !important;
-        padding:10px 12px 10px 16px !important;
-        border-radius:.85rem !important;
-        background:var(--cd-accent-soft) !important;
+        padding:9px 11px 8px 14px !important;
+        border-radius:.65rem !important;
+        background:color-mix(in srgb, var(--cd-accent-soft) 62%, var(--cd-surface)) !important;
         box-sizing:border-box !important;
     }
 
@@ -167,9 +176,9 @@
         max-width:min(100%, calc(80ch + 16px)) !important;
         min-width:min(100%, 22rem) !important;
         margin-left:auto !important;
-        padding:10px 12px 10px 16px !important;
-        border-radius:.85rem !important;
-        background:var(--cd-accent-soft) !important;
+        padding:9px 11px 8px 14px !important;
+        border-radius:.65rem !important;
+        background:color-mix(in srgb, var(--cd-accent-soft) 62%, var(--cd-surface)) !important;
         box-sizing:border-box !important;
     }
 
@@ -215,6 +224,7 @@
         min-height:0 !important;
         margin:0 !important;
         padding:0 !important;
+        opacity:1 !important;
     }
 
     [data-testid="stElementContainer"]:has(> [class*="st-key-user_message_actions_"]),
@@ -371,407 +381,17 @@
         overflow:visible;
     }
 
-    /* Model chip: overlay the composer so bottom/left pin to the footer. */
-    .st-key-chat_composer > [data-testid="stLayoutWrapper"]:has(.st-key-composer_model_slot),
-    .st-key-chat_composer [data-testid="stElementContainer"]:has(.st-key-composer_model_slot) {
-        position:absolute !important;
-        inset:0 !important;
-        width:auto !important;
-        height:auto !important;
-        min-height:0 !important;
-        margin:0 !important;
-        padding:0 !important;
-        overflow:visible !important;
-        pointer-events:none !important;
-    }
-
-    .st-key-composer_model_slot {
-        position:static !important;
-        width:100% !important;
-        height:100% !important;
-        min-height:0 !important;
-        margin:0 !important;
-        padding:0 !important;
-        overflow:visible !important;
-        pointer-events:none;
-    }
-
-    .st-key-composer_model_slot > [data-testid="stLayoutWrapper"],
-    .st-key-composer_model_slot [data-testid="stVerticalBlock"],
-    .st-key-composer_model_slot [data-testid="stElementContainer"] {
-        position:static !important;
-        width:100% !important;
-        height:100% !important;
-        min-width:0 !important;
-        min-height:0 !important;
-        margin:0 !important;
-        padding:0 !important;
-        overflow:visible !important;
-    }
-
-    .st-key-composer_model_slot [data-testid="stPopover"] {
-        position:absolute !important;
-        z-index:45 !important;
-        inset:auto !important;
-        left:0 !important;
-        top:0 !important;
-        right:auto !important;
-        bottom:auto !important;
-        width:max-content !important;
-        max-width:14.5rem !important;
-        min-width:max-content !important;
-        margin:0 !important;
-        pointer-events:auto !important;
-        white-space:nowrap !important;
-        transform:none !important;
-        opacity:0;
-    }
-
-    .st-key-composer_model_slot [data-testid="stPopover"].cd-model-placed {
-        opacity:1 !important;
-        visibility:visible !important;
-    }
-
-    .st-key-composer_model_slot [data-testid="stPopover"] > button,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-secondary"],
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-tertiary"],
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stPopoverButton"] {
-        display:inline-flex !important;
-        align-items:center !important;
-        justify-content:center !important;
-        flex-direction:row !important;
-        flex-wrap:nowrap !important;
-        width:max-content !important;
-        min-width:max-content !important;
-        max-width:14rem !important;
-        min-height:1.65rem !important;
-        height:1.65rem !important;
-        padding:0 .35rem 0 .1rem !important;
-        border:0 !important;
-        border-radius:.45rem !important;
-        color:var(--cd-text) !important;
-        background:transparent !important;
-        box-shadow:none !important;
-        outline:none !important;
-        font-size:.72rem !important;
-        font-weight:700 !important;
-        line-height:1 !important;
-        gap:.1rem !important;
-        white-space:nowrap !important;
-        writing-mode:horizontal-tb !important;
-        overflow:hidden !important;
-    }
-
-    .cd-locked-model-chip {
-        display:inline-flex !important;
-        align-items:center !important;
-        justify-content:center !important;
-        min-height:1.5rem !important;
-        height:1.5rem !important;
-        padding:0 .4rem !important;
-        border:0 !important;
-        border-radius:.45rem !important;
-        color:var(--cd-muted) !important;
-        background:transparent !important;
-        font-size:.78rem !important;
-        font-weight:600 !important;
-        line-height:1 !important;
-        white-space:nowrap !important;
-        pointer-events:none !important;
-    }
-
-    .cd-locked-model-chip.cd-model-placed {
-        opacity:1 !important;
-        visibility:visible !important;
-    }
-
-    .st-key-composer_model_slot [data-testid="stMarkdownContainer"],
-    .st-key-composer_model_slot [data-testid="stMarkdownContainer"] > div {
-        position:static !important;
-        width:100% !important;
-        height:100% !important;
-        margin:0 !important;
-        padding:0 !important;
-        overflow:visible !important;
-    }
-
-    .st-key-composer_model_slot [data-testid="stPopover"] > button:hover,
-    .st-key-composer_model_slot [data-testid="stPopover"] > button:focus,
-    .st-key-composer_model_slot [data-testid="stPopover"] > button:focus-visible,
-    .st-key-composer_model_slot [data-testid="stPopover"] > button:active,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-secondary"]:hover,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-secondary"]:focus,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-secondary"]:focus-visible,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-secondary"]:active,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-tertiary"]:hover,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-tertiary"]:focus,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-tertiary"]:focus-visible,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-tertiary"]:active,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stPopoverButton"]:hover,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stPopoverButton"]:focus,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stPopoverButton"]:focus-visible,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stPopoverButton"]:active {
-        border:0 !important;
-        color:var(--cd-text) !important;
-        background:transparent !important;
-        outline:none !important;
-        box-shadow:none !important;
-    }
-
-    .st-key-composer_model_slot [data-testid="stPopover"] > button *,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-tertiary"] * {
-        color:inherit !important;
-        -webkit-text-fill-color:currentColor !important;
-        white-space:nowrap !important;
-        writing-mode:horizontal-tb !important;
-    }
-
-    .st-key-composer_model_slot [data-testid="stPopover"] > button
-    span[data-has-shortcut],
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-tertiary"]
-    span[data-has-shortcut] {
-        display:inline-flex !important;
-        align-items:center !important;
-        flex-direction:row !important;
-        flex-wrap:nowrap !important;
-        width:max-content !important;
-        max-width:100%;
-        gap:.12rem !important;
-    }
-
-    .st-key-composer_model_slot [data-testid="stPopover"] > button p,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-secondary"] p,
-    .st-key-composer_model_slot [data-testid="stPopover"] [data-testid="stBaseButton-tertiary"] p {
-        display:inline !important;
-        margin:0 !important;
-        font-size:.72rem !important;
-        font-weight:650 !important;
-        white-space:nowrap !important;
-        overflow:hidden;
-        text-overflow:ellipsis;
-    }
-
-    .st-key-composer_model_slot [data-testid="stPopover"] > button
-    [data-testid="stIconMaterial"]:last-child {
-        display:inline-flex !important;
-        flex:none !important;
-        margin-left:.05rem;
-        font-size:.78rem !important;
-        color:var(--cd-muted) !important;
-        opacity:1;
-    }
-
-    
-    [data-testid="stPopoverBody"]:has([class*="st-key-composer-model-"]) {
-        border:0 !important;
-        outline:none !important;
-        box-shadow:0 4px 18px rgba(21,32,43,.14) !important;
-        background:var(--cd-surface) !important;
-        border-radius:.55rem !important;
-        padding:.2rem !important;
-        min-width:11.5rem !important;
-        max-width:min(14rem,calc(100vw - 2rem));
-        overflow:visible !important;
-        transform:none !important;
-    }
-
-    [data-testid="stPopoverBody"]:has([class*="st-key-composer-model-"])
-    * {
-        outline:none !important;
-    }
-
-    [data-testid="stPopoverBody"]:has([class*="st-key-composer-model-"])
-    > div,
-    [data-testid="stPopoverBody"]:has([class*="st-key-composer-model-"])
-    [data-testid="stVerticalBlock"],
-    [data-testid="stPopoverBody"]:has([class*="st-key-composer-model-"])
-    [data-testid="stLayoutWrapper"] {
-        gap:0 !important;
-        row-gap:0 !important;
-        overflow:visible !important;
-    }
-
-    [data-testid="stPopoverBody"] .st-key-composer_model_pane {
-        margin:0 !important;
-        padding:.1rem !important;
-        min-width:0 !important;
-        position:relative !important;
-    }
-
-    /* Side flyout: keep the model list fixed; open efforts to the right. */
-    [data-testid="stPopoverBody"] .st-key-composer_effort_pane {
-        position:absolute !important;
-        left:calc(100% + .28rem) !important;
-        top:0 !important;
-        bottom:auto !important;
-        right:auto !important;
-        z-index:3 !important;
-        margin:0 !important;
-        padding:.2rem !important;
-        min-width:5.25rem !important;
-        width:max-content !important;
-        height:auto !important;
-        border:0 !important;
-        border-radius:.55rem !important;
-        background:var(--cd-surface) !important;
-        box-shadow:0 4px 18px rgba(21,32,43,.14) !important;
-    }
-
-    [data-testid="stPopoverBody"]
-    [data-testid="stElementContainer"]:has(> .st-key-composer_effort_pane),
-    [data-testid="stPopoverBody"]
-    [data-testid="stLayoutWrapper"]:has(.st-key-composer_effort_pane) {
-        position:static !important;
-        height:0 !important;
-        min-height:0 !important;
-        margin:0 !important;
-        padding:0 !important;
-        overflow:visible !important;
-    }
-
-    [data-testid="stPopoverBody"] [class*="st-key-composer-model-"],
-    [data-testid="stPopoverBody"] [class*="st-key-composer-effort-"] {
-        margin:0 !important;
-        padding:0 !important;
-    }
-
-    [data-testid="stPopoverBody"] [class*="st-key-composer-model-"]
-    div[data-testid="stButton"],
-    [data-testid="stPopoverBody"] [class*="st-key-composer-effort-"]
-    div[data-testid="stButton"] {
-        margin:0 !important;
-        padding:0 !important;
-    }
-
-    [data-testid="stPopoverBody"] [class*="st-key-composer-model-"]
-    div[data-testid="stButton"] button,
-    [data-testid="stPopoverBody"] [class*="st-key-composer-effort-"]
-    div[data-testid="stButton"] button {
-        min-height:1.55rem !important;
-        height:1.55rem !important;
-        margin:0 !important;
-        padding:0 .45rem !important;
-        border:0 !important;
-        border-radius:.42rem !important;
-        color:var(--cd-text) !important;
-        background:transparent !important;
-        box-shadow:none !important;
-        outline:none !important;
-        justify-content:flex-start !important;
-        font-size:.72rem !important;
-        font-weight:700 !important;
-    }
-
-    /* Submenu chevron for models that open the effort pane. */
-    [data-testid="stPopoverBody"] [class*="st-key-composer_model_item_flyout_"]
-    div[data-testid="stButton"] button {
-        justify-content:space-between !important;
-    }
-
-    [data-testid="stPopoverBody"] [class*="st-key-composer_model_item_flyout_"]
-    div[data-testid="stButton"] button
-    [data-testid="stMarkdownContainer"],
-    [data-testid="stPopoverBody"] [class*="st-key-composer_model_item_flyout_"]
-    div[data-testid="stButton"] button
-    [data-testid="stMarkdownContainer"] > p {
-        display:flex !important;
-        align-items:center !important;
-        width:100% !important;
-        margin:0 !important;
-    }
-
-    [data-testid="stPopoverBody"] [class*="st-key-composer_model_item_flyout_"]
-    div[data-testid="stButton"] button
-    [data-testid="stMarkdownContainer"] > p::after {
-        content:"›";
-        margin-left:auto;
-        padding-left:.4rem;
-        font-size:.78rem;
-        font-weight:650;
-        color:var(--cd-muted);
-        -webkit-text-fill-color:var(--cd-muted);
-        line-height:1;
-    }
-
-    [data-testid="stPopoverBody"] [class*="st-key-composer-effort-"]
-    div[data-testid="stButton"] button {
-        min-height:1.4rem !important;
-        height:1.4rem !important;
-        font-size:.68rem !important;
-        font-weight:600 !important;
-        color:var(--cd-muted) !important;
-    }
-
-    [data-testid="stPopoverBody"] [class*="st-key-composer-model-"]
-    div[data-testid="stButton"] button p {
-        font-size:.72rem !important;
-        font-weight:700 !important;
-        color:var(--cd-text) !important;
-        -webkit-text-fill-color:var(--cd-text) !important;
-    }
-
-    [data-testid="stPopoverBody"] [class*="st-key-composer-effort-"]
-    div[data-testid="stButton"] button p {
-        font-size:.68rem !important;
-        font-weight:600 !important;
-        color:var(--cd-muted) !important;
-        -webkit-text-fill-color:var(--cd-muted) !important;
-    }
-
-    [data-testid="stPopoverBody"] [class*="st-key-composer-model-"]
-    div[data-testid="stButton"] [data-testid="stBaseButton-primary"],
-    [data-testid="stPopoverBody"] [class*="st-key-composer-effort-"]
-    div[data-testid="stButton"] [data-testid="stBaseButton-primary"] {
-        color:var(--cd-text) !important;
-        background:transparent !important;
-        font-weight:700 !important;
-        border:0 !important;
-        outline:none !important;
-        box-shadow:none !important;
-    }
-
-    [data-testid="stPopoverBody"] [class*="st-key-composer-model-"]
-    div[data-testid="stButton"] [data-testid="stBaseButton-primary"] p,
-    [data-testid="stPopoverBody"] [class*="st-key-composer-effort-"]
-    div[data-testid="stButton"] [data-testid="stBaseButton-primary"] p {
-        font-weight:700 !important;
-        color:var(--cd-text) !important;
-        -webkit-text-fill-color:var(--cd-text) !important;
-    }
-
-    [data-testid="stPopoverBody"] [class*="st-key-composer-model-"]
-    div[data-testid="stButton"] button:hover,
-    [data-testid="stPopoverBody"] [class*="st-key-composer-effort-"]
-    div[data-testid="stButton"] button:hover {
-        background:var(--cd-subtle) !important;
-    }
-
-    [data-testid="stPopoverBody"] [class*="st-key-composer-model-"]
-    div[data-testid="stButton"] [data-testid="stBaseButton-primary"]:hover,
-    [data-testid="stPopoverBody"] [class*="st-key-composer-effort-"]
-    div[data-testid="stButton"] [data-testid="stBaseButton-primary"]:hover {
-        background:var(--cd-subtle) !important;
-    }
-
-    /*
-     * Cursor-style card for Streamlit 1.60+ chat input.
-     * Empty state is a single flex row by default; force text on top and a
-     * footer row (attach + model | send) underneath.
-     *
-     * Cap only the textarea / Baseweb wrappers at 5 rows, then scroll. Do not
-     * hard-cap the outer card height or long drafts cover the chat log.
-     */
+    /* Native student composer: attachment, draft, and send only. */
     .st-key-chat_composer [data-testid="stChatInput"] {
         position:relative !important;
-        display:block !important;
         width:100% !important;
         box-sizing:border-box !important;
-        min-height:4.5rem !important;
+        min-height:3.25rem !important;
         max-height:none !important;
         height:auto !important;
         overflow:hidden !important;
         border:1px solid var(--cd-border) !important;
-        border-radius:1.05rem !important;
+        border-radius:.75rem !important;
         color:var(--cd-text);
         background:var(--cd-surface) !important;
         box-shadow:none !important;
@@ -784,42 +404,24 @@
 
     .st-key-chat_composer [data-testid="stChatInput"] > div {
         width:100% !important;
-        min-height:4.5rem !important;
+        min-height:3.25rem !important;
         height:auto !important;
         max-height:none !important;
         box-sizing:border-box !important;
-        padding:.55rem .8rem .45rem !important;
+        padding:.35rem .45rem !important;
         border:0 !important;
         outline:none !important;
         box-shadow:none !important;
         background:transparent !important;
     }
 
-    /* Main content row (Ae): always card grid — text full-width, footer below. */
-    .st-key-chat_composer [data-testid="stChatInput"] > div > div:has([data-testid="stChatInputTextArea"]) {
-        display:grid !important;
-        grid-template-columns:minmax(0,1fr) auto !important;
-        grid-template-rows:auto auto !important;
-        align-items:stretch !important;
-        justify-content:stretch !important;
-        width:100% !important;
-        column-gap:.35rem !important;
-        row-gap:.2rem !important;
-        flex:1 1 auto !important;
-        min-height:0 !important;
-        max-height:none !important;
-    }
-
     .st-key-chat_composer [data-testid="stChatInput"] div:has(> [data-testid="stChatInputTextArea"]) {
-        grid-column:1 / -1 !important;
-        grid-row:1 !important;
         width:100% !important;
         max-width:100% !important;
         min-width:0 !important;
         min-height:0 !important;
         max-height:calc(1em * 1.45 * 5) !important;
         flex:1 1 auto !important;
-        order:-1 !important;
         align-items:stretch !important;
         margin:0 !important;
         padding:0 !important;
@@ -827,47 +429,6 @@
         background:transparent !important;
         box-shadow:none !important;
         overflow:hidden !important;
-    }
-
-    /* Expanded Streamlit footer already holds attach + actions. */
-    .st-key-chat_composer [data-testid="stChatInput"]
-    div:has([data-testid="stChatInputFileUploadButton"]):has([data-testid="stChatInputSubmitButton"]):not(:has([data-testid="stChatInputTextArea"])) {
-        grid-column:1 / -1 !important;
-        grid-row:2 !important;
-        display:flex !important;
-        align-items:center !important;
-        justify-content:space-between !important;
-        width:100% !important;
-        gap:.35rem !important;
-    }
-
-    /* Compact mode: attach group left, action group right on footer row. */
-    .st-key-chat_composer [data-testid="stChatInput"]
-    div:has([data-testid="stChatInputFileUploadButton"]):not(:has([data-testid="stChatInputSubmitButton"])):not(:has([data-testid="stChatInputTextArea"])) {
-        grid-column:1 !important;
-        grid-row:2 !important;
-        display:flex !important;
-        flex-direction:row !important;
-        align-items:center !important;
-        justify-content:flex-start !important;
-        gap:.2rem !important;
-        width:auto !important;
-        min-width:0 !important;
-        order:0 !important;
-    }
-
-    .st-key-chat_composer [data-testid="stChatInput"]
-    div:has([data-testid="stChatInputSubmitButton"]):not(:has([data-testid="stChatInputFileUploadButton"])):not(:has([data-testid="stChatInputTextArea"])) {
-        grid-column:2 !important;
-        grid-row:2 !important;
-        display:flex !important;
-        flex-direction:row !important;
-        align-items:center !important;
-        justify-content:flex-end !important;
-        gap:.15rem !important;
-        width:auto !important;
-        margin-left:auto !important;
-        order:0 !important;
     }
 
     .st-key-chat_composer [data-testid="stChatInput"] [data-baseweb="textarea"],
@@ -896,7 +457,7 @@
         overflow-y:auto !important;
         overflow-x:hidden !important;
         resize:none !important;
-        padding:.2rem 0 .35rem !important;
+        padding:.2rem .15rem !important;
         margin:0 !important;
         text-align:left !important;
         text-indent:0 !important;
@@ -1079,4 +640,3 @@
         font-size:.88rem;
         line-height:1.55;
     }
-

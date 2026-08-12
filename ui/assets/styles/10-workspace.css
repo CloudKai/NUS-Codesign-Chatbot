@@ -65,18 +65,18 @@
     }
 
     .brand-mark {
-        width:2.9rem;
-        height:2.9rem;
+        width:2.55rem;
+        height:2.55rem;
         flex:none;
         display:grid;
         place-items:center;
-        border-radius:.75rem;
+        border-radius:.62rem;
         color:#fff;
         background:var(--cd-accent);
-        font-size:1.28rem;
-        font-weight:760;
+        font-size:1.08rem;
+        font-weight:740;
         line-height:1;
-        box-shadow:0 5px 14px color-mix(in srgb,var(--cd-accent) 22%,transparent);
+        box-shadow:none;
     }
 
     .brand-name {
@@ -87,12 +87,28 @@
         line-height:1.15;
     }
 
-    .brand-caption {
+    .brand-copy {
+        display:grid;
+        min-width:0;
+        gap:.12rem;
+    }
+
+    .brand-title {
         color:var(--cd-text);
-        font-size:1.18rem;
+        font-family:"Source Serif 4",Georgia,"Times New Roman",serif;
+        font-size:1rem;
         font-weight:700;
+        line-height:1.15;
+        letter-spacing:-.015em;
+        white-space:nowrap;
+    }
+
+    .brand-subtitle {
+        color:var(--cd-muted);
+        font-size:.69rem;
+        font-weight:500;
         line-height:1.2;
-        letter-spacing:-.02em;
+        letter-spacing:.005em;
         white-space:nowrap;
     }
 
@@ -969,4 +985,3 @@
     .st-key-studio_scroll [role="tab"] .react-aria-SelectionIndicator {
         display:none !important;
     }
-

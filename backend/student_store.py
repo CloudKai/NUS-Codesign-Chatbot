@@ -1420,7 +1420,7 @@ class StudentStore:
             )
 
     def select_learning_stage(self, thread_id: str, stage_id: str) -> dict[str, Any]:
-        """Set the notebook's current stage and reject active pending transitions.
+        """Select any non-current stage and reject active pending transitions.
 
         Updates journey metadata and clears pending ADVANCE recommendations on
         the **active conversation branch only** in one connection so a mid-flight
@@ -1432,7 +1432,8 @@ class StudentStore:
             The updated notebook metadata dict (includes ``learning_journey``).
 
         Raises:
-            ValueError: When the notebook is missing or ``stage_id`` is unknown.
+            ValueError: When the notebook is missing, ``stage_id`` is unknown,
+                or the requested stage is already current.
         """
         from backend.student_journey import STAGE_BY_ID, normalize_journey, set_current_stage
 
@@ -1450,6 +1451,8 @@ class StudentStore:
             thread = self._thread_dict(row)
             current_meta = dict(thread.get("metadata") or {})
             journey = normalize_journey(current_meta.get("learning_journey"))
+            if cleaned_stage == journey["current_stage"]:
+                raise ValueError("The requested Thinking Path stage is already current")
             next_journey = set_current_stage(journey, cleaned_stage)
             current_meta["learning_journey"] = next_journey
             current_meta["thinking_stage"] = cleaned_stage

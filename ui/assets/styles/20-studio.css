@@ -377,7 +377,8 @@
         border-collapse:collapse;
         border-spacing:0;
         table-layout:fixed;
-        border:1px solid var(--cd-border);
+        border-top:1px solid var(--cd-border);
+        border-bottom:1px solid var(--cd-border);
     }
 
     .facione-table th,
@@ -385,7 +386,7 @@
         display:table-cell;
         padding:.48rem .65rem;
         vertical-align:middle;
-        border:1px solid var(--cd-border);
+        border-bottom:1px solid var(--cd-border);
         font-size:.79rem;
         line-height:1.35;
         box-sizing:border-box;
@@ -393,12 +394,11 @@
 
     .facione-table thead th {
         color:var(--cd-muted);
-        font-size:.68rem;
+        font-size:.7rem;
         font-weight:650;
-        letter-spacing:.02em;
-        text-transform:uppercase;
+        letter-spacing:0;
         text-align:left;
-        background:color-mix(in srgb, var(--cd-border) 28%, transparent);
+        background:color-mix(in srgb, var(--cd-border) 16%, transparent);
     }
 
     .facione-table tbody th {
@@ -416,31 +416,37 @@
     .facione-score-content {
         display:inline-flex;
         align-items:center;
-        gap:.42rem;
+        gap:.38rem;
         white-space:nowrap;
     }
 
-    .facione-score .material-symbols-rounded {
-        font-family:"Material Symbols Rounded";
-        font-size:1.2rem;
-        font-variation-settings:"FILL" 0,"wght" 420,"GRAD" 0,"opsz" 20;
-        line-height:1;
-        color:var(--cd-muted);
-    }
-
-    .facione-score-3 .material-symbols-rounded,
-    .facione-score-4 .material-symbols-rounded {
+    .facione-score-value {
         color:var(--cd-text);
-        font-variation-settings:"FILL" 1,"wght" 480,"GRAD" 0,"opsz" 20;
+        font-size:.78rem;
+        font-weight:650;
+        font-variant-numeric:tabular-nums;
     }
 
-    .facione-score-0 .material-symbols-rounded {
-        opacity:.72;
-    }
-
-    .facione-rubric {
+    .facione-score-0 .facione-score-value {
         color:var(--cd-muted);
-        font-size:.72rem;
+        font-weight:540;
+    }
+
+    .facione-score-icon {
+        flex:none;
+        color:var(--cd-muted);
+        font-family:"Material Symbols Rounded";
+        font-size:1rem;
+        font-variation-settings:"FILL" 0,"wght" 380,"GRAD" 0,"opsz" 20;
+        line-height:1;
+        opacity:.82;
+    }
+
+    .facione-note {
+        margin:.58rem 0 0;
+        color:var(--cd-muted);
+        font-size:.7rem;
+        line-height:1.45;
     }
 
     .review-stage-list {
@@ -522,11 +528,10 @@
         .facione-table tbody th {
             width:52%;
         }
-        .facione-rubric {
-            font-size:.68rem;
+        .facione-score-value {
+            font-size:.73rem;
         }
         .review-stage-block {
             padding:.48rem .55rem;
         }
     }
-

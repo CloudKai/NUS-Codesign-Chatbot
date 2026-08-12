@@ -37,7 +37,9 @@ Live Cognito login, HTTPS, the public API boundary, session refresh, logout, and
 
 **Product progression policy (owner decision, 2026-08-10):**
 - **Month 1 (current pilot):** `AUTO_ADVANCE_STAGES=true` — coach ADVANCE auto-applies; no Next confirmation. Live already behaved this way; repo now matches via `compose.prod.yaml`.
-- **After month 1:** switch to **student stage selection** (students choose which Thinking Path stage to work on). That UI/API is **not built yet**; flipping auto-advance off alone only restores Next/confirm, not free stage picking.
+- **After month 1:** switch to **free stage selection**. With student stage
+  selection enabled, students can work on any non-current Thinking Path stage;
+  completed stages remain marked complete when revisited.
 
 Health `mode` now follows `APP_ENV` (local fix). Login-start throttle + allow-listed Cognito callback error logs added. Full mock pytest: **344 passed**.
 
@@ -232,7 +234,9 @@ Bottleneck: **model latency**, not page chrome.
 - **Severity:** was flagged P1 vs confirmation design; **reclassified as product policy**  
 - **Reproduction:** After partial Focus reply, Journey showed Focus completed and Evidence current; chat used `**Examine evidence**` + `Questions to explore`; Next absent. Matches `advanced_stage_response` + `auto_advance_stages`.  
 - **Decision:** Month-1 pilot keeps auto-advance. `compose.prod.yaml` sets `AUTO_ADVANCE_STAGES=true`. Production fail-closed rejection of auto-advance was **removed**.  
-- **Month-2 follow-up:** Build student stage-selection (choose which Thinking Path stage to work on), then turn auto-advance off.  
+- **Month-2 behavior:** Enable free stage selection, then turn auto-advance off.
+  Students may move to any non-current stage; selection alone does not complete
+  a stage or increase its Facione evidence.
 - **Files:** `compose.prod.yaml`, `backend/settings.py`, `.env.example`, tests/docs  
 - **Manual retest:** **LIVE** already in auto-advance mode.
 
