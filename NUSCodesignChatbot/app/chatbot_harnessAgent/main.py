@@ -1,9 +1,7 @@
 from typing import Any
 from collections import OrderedDict
-from strands import Agent, tool
+from strands import Agent
 import asyncio
-import subprocess
-import os
 from strands.tools.executors import SequentialToolExecutor
 from strands.types.exceptions import EventLoopException
 from hooks.execution_limits import ExecutionLimitExceeded, ExecutionLimitsHook
@@ -11,6 +9,7 @@ from strands.agent.conversation_manager.sliding_window_conversation_manager impo
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 from model.load import load_model
 from mcp_client.client import get_all_gateway_mcp_clients
+import phases
 
 app = BedrockAgentCoreApp()
 log = app.logger
@@ -19,153 +18,58 @@ log = app.logger
 mcp_clients = []
 mcp_clients += get_all_gateway_mcp_clients()
 
-DEFAULT_SYSTEM_PROMPT = """You are a helpful assistant."""
-
-
-# Define a collection of tools used by the model
-tools = []
-
 _INLINE_FUNCTION_NAMES = set()
 
-@tool
-def shell(command: str, timeout: int = 300) -> dict:
-    """Execute a bash command and return the results.
-
-    Args:
-        command: The bash command to execute
-        timeout: Timeout in seconds (default: 300)
-
-    Returns:
-        Dict with stdout, stderr, and exit_code
-    """
-    result = subprocess.run(
-        command, shell=True, capture_output=True, text=True, timeout=timeout
-    )
-    return {"stdout": result.stdout, "stderr": result.stderr, "exit_code": result.returncode}
-
-tools.append(shell)
-@tool
-def file_operations(
-    command: str,
-    path: str,
-    old_str: str = None,
-    new_str: str = None,
-    file_text: str = None,
-    insert_line: int = None,
-    view_range: list = None,
-) -> str:
-    """Text editor tool for viewing and modifying files.
-
-    Args:
-        command: The command to execute ("view", "str_replace", "create", "insert")
-        path: Path to the file or directory
-        old_str: Text to replace (for str_replace command)
-        new_str: Replacement text (for str_replace and insert commands)
-        file_text: Content for new file (for create command)
-        insert_line: Line number to insert after (for insert command)
-        view_range: [start_line, end_line] for viewing specific lines (for view command)
-
-    Returns:
-        Result of the operation
-    """
-    try:
-        if command == "view":
-            if not os.path.exists(path):
-                return f"Error: Path '{path}' does not exist"
-            if os.path.isdir(path):
-                return "\n".join(os.listdir(path))
-            with open(path) as f:
-                lines = f.read().splitlines()
-            if view_range:
-                start, end = view_range
-                start_idx = max(0, start - 1)
-                end_idx = len(lines) if end == -1 else min(len(lines), end)
-                lines = lines[start_idx:end_idx]
-                start_num = start_idx + 1
-            else:
-                start_num = 1
-            return "\n".join(f"{start_num + i}: {line}" for i, line in enumerate(lines))
-        elif command == "str_replace":
-            if old_str is None or new_str is None:
-                return "Error: str_replace requires both old_str and new_str parameters"
-            if not os.path.exists(path):
-                return f"Error: File '{path}' does not exist"
-            content = open(path).read()
-            if old_str not in content:
-                return "Error: Text not found in file"
-            count = content.count(old_str)
-            if count > 1:
-                return f"Error: Text appears {count} times in file. Please be more specific."
-            open(path, "w").write(content.replace(old_str, new_str, 1))
-            return f"Successfully replaced text in '{path}'"
-        elif command == "create":
-            if file_text is None:
-                return "Error: create requires file_text parameter"
-            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-            open(path, "w").write(file_text)
-            return f"Successfully created file '{path}'"
-        elif command == "insert":
-            if new_str is None or insert_line is None:
-                return "Error: insert requires both new_str and insert_line parameters"
-            if not os.path.exists(path):
-                return f"Error: File '{path}' does not exist"
-            lines = open(path).read().splitlines(True)
-            if insert_line == 0:
-                lines.insert(0, new_str + "\n")
-            elif insert_line >= len(lines):
-                lines.append(new_str + "\n")
-            else:
-                lines.insert(insert_line, new_str + "\n")
-            open(path, "w").write("".join(lines))
-            return f"Successfully inserted text in '{path}' at line {insert_line + 1}"
-        else:
-            return f"Error: Unknown command '{command}'"
-    except Exception as e:
-        return f"Error: {e}"
-
-tools.append(file_operations)
-
-
-# Add MCP clients to tools
-for mcp_client in mcp_clients:
-    if mcp_client:
-        tools.append(mcp_client)
+# Three specialist phases (see phases.py), picked deterministically by the caller via
+# payload["phase"] rather than an LLM router. Only Q&A gets the knowledge-base gateway tool --
+# coaching and scoring reason over conversation history alone, so they get no tools.
+PHASE_TOOLS = {
+    phases.PHASE_QA: [c for c in mcp_clients if c],
+    phases.PHASE_COACHING: [],
+    phases.PHASE_SCORING: [],
+}
 
 
 def _make_conversation_manager():
     return SlidingWindowConversationManager(**{"window_size":150}, per_turn=True)
 
-# Reuses one Agent per session_id so each session keeps its own in-process
-# conversation history (best-effort; resets on cold start). The cache is bounded
-# to 128 sessions with LRU eviction (least-recently-used is dropped and its
-# history reset) so a single process serving many sessions cannot leak history
-# between them or grow without limit. For durable history, attach a session manager.
-def agent_factory():
+# One shared history + conversation manager + execution-limits hook per session_id (best-effort;
+# resets on cold start), reused across phase switches so the 75-iteration/1hr cap in
+# ExecutionLimitsHook stays session-wide instead of resetting every turn. A fresh specialist Agent
+# is built per invocation, bound to that same shared state, with the system prompt and tools for
+# whichever phase the caller requests. The cache is bounded to 128 sessions with LRU eviction
+# (least-recently-used is dropped and its history reset) so a single process serving many sessions
+# cannot leak history between them or grow without limit. For durable history, attach a session manager.
+def session_store_factory():
     cache = OrderedDict()
-    def get_or_create_agent(session_id):
+    def get_or_create_session_state(session_id):
         if session_id in cache:
             cache.move_to_end(session_id)
             return cache[session_id]
         if len(cache) >= 128:
             cache.popitem(last=False)
-        cache[session_id] = Agent(
-            model=load_model(),
-            system_prompt=DEFAULT_SYSTEM_PROMPT,
-            tools=tools,
-            conversation_manager=_make_conversation_manager(),
-            tool_executor=SequentialToolExecutor(),
-            callback_handler=None,
-            hooks=[
-                ExecutionLimitsHook(
-                    max_iterations=75,
-                    
-                    timeout_seconds=3600,
-                ),
-            ],
-        )
+        cache[session_id] = {
+            "messages": [],
+            "conversation_manager": _make_conversation_manager(),
+            "hook": ExecutionLimitsHook(max_iterations=75, timeout_seconds=3600),
+        }
         return cache[session_id]
-    return get_or_create_agent
-get_or_create_agent = agent_factory()
+    return get_or_create_session_state
+get_or_create_session_state = session_store_factory()
+
+
+def build_specialist_agent(session_id: str, phase: str, topic: str | None) -> Agent:
+    state = get_or_create_session_state(session_id)
+    return Agent(
+        model=load_model(),
+        system_prompt=phases.build_system_prompt(phase, topic),
+        tools=PHASE_TOOLS.get(phase, PHASE_TOOLS[phases.DEFAULT_PHASE]),
+        messages=state["messages"],
+        conversation_manager=state["conversation_manager"],
+        tool_executor=SequentialToolExecutor(),
+        callback_handler=None,
+        hooks=[state["hook"]],
+    )
 
 
 def strip_trailing_tool_use(messages: Any) -> list[dict]:
@@ -246,9 +150,10 @@ async def invoke(payload, context):
 
 
     session_id = getattr(context, 'session_id', 'default-session')
-    agent = get_or_create_agent(session_id)
-
     prompt = _extract_prompt(payload)
+    phase = payload.get("phase", phases.DEFAULT_PHASE)
+    topic = payload.get("topic")
+    agent = build_specialist_agent(session_id, phase, topic)
 
 
     timeout_seconds = 3600
