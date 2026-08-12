@@ -1,0 +1,28 @@
+{
+  "targets": {
+    "default": {
+      "resources": {
+        "runtimes": {
+          "chatbot_harnessAgent": {
+            "runtimeId": "NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7",
+            "runtimeArn": "arn:aws:bedrock-agentcore:us-west-2:355604674280:runtime/NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7",
+            "roleArn": "arn:aws:iam::355604674280:role/AgentCore-NUSCodesignChat-ApplicationAgentChatbotHa-EVjV8lBDgqdP"
+          }
+        },
+        "harnesses": {
+          "NUSCodesignChatbot": {
+            "harnessId": "NUSCodesignChatbot_NUSCodesignChatbot-GE33tCQiBO",
+            "harnessArn": "arn:aws:bedrock-agentcore:us-west-2:355604674280:harness/NUSCodesignChatbot_NUSCodesignChatbot-GE33tCQiBO",
+            "roleArn": "arn:aws:iam::355604674280:role/NUSCodesignChatbot_NUSCodesignChatbot",
+            "status": "READY",
+            "harnessVersion": 1,
+            "agentRuntimeArn": "arn:aws:bedrock-agentcore:us-west-2:355604674280:runtime/harness_NUSCodesignChatbot_NUSCodesignChatbot-EiSjlM2eSX",
+            "provisioner": "cloudformation"
+          }
+        },
+        "stackName": "AgentCore-NUSCodesignChatbot-default",
+        "deployHash": "69921e22eec92724"
+      }
+    }
+  }
+}
