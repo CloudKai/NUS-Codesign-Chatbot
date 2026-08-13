@@ -2,6 +2,69 @@
 
 ## Current phase
 
+**Behavior-preserving architecture refactor — Phase 2 persistence foundation
+completed locally on 2026-08-13.** Phase 1 remains rollbackable at local commit
+``6e2f776``. This phase changes only implementation ownership behind the
+existing ``StudentStore`` and ``DsqlStudentStore`` façades.
+
+### Phase 2 behavior and structure
+
+1. **Stable contracts extracted.** Persistence exceptions, immutable command
+   results, JSON serialization helpers, Facione/progress/settings keys, and a
+   narrow structural store context now live in
+   ``backend.persistence.store.contracts``. ``backend.student_store`` re-exports
+   the same names and private aliases used by existing services and tests.
+2. **Schema lifecycle separated without migration.** The byte-equivalent local
+   five-table schema moved to ``sqlite_schema``. OAuth/user/revision/FK repair
+   logic moved to ``migrations`` while every legacy ``StudentStore`` static
+   migration seam remains as a delegating compatibility wrapper. Startup order,
+   implicit SQLite compatibility timing, commits, rollback paths, tables,
+   columns and indexes are unchanged. DSQL still performs no runtime DDL.
+3. **Composition introduced at a real boundary.** ``StoreOperations`` binds
+   focused source operations to a narrow store context from both SQLite and
+   DSQL constructors. A lazy compatibility binder protects historical tests
+   that construct DSQL with ``object.__new__``. All source validation, owned
+   queries, normalization, selection, rename/delete, and deterministic cleanup
+   now reside in ``operations.sources``; ``StudentStore`` methods keep identical
+   signatures and delegate to it.
+4. **Provider-neutral repository names added.** New ``Store*Repository`` names
+   describe adapters that work over either SQLite or DSQL. Every existing
+   ``SQLite*Repository`` import remains an alias to the same implementation.
+5. **Measured readability improvement.** ``student_store.py`` is now 3,121
+   lines (down from the 3,732-line checkpoint) and no moved implementation was
+   copied back into the façade. The remaining coaching/revision/notebook/user
+   groups are intentionally deferred to later persistence slices rather than
+   combined into one risky rewrite.
+
+### Phase 2 compatibility and migration
+
+- No data migration or rewrite. No schema, persisted JSON, ownership,
+  transaction, S3 cleanup order, DSQL OCC method list, route, authentication,
+  provider, prompt or UI contract changed.
+- ``StudentStore`` and ``DsqlStudentStore`` constructor/public/private seams,
+  return dictionaries, exceptions, source error messages and file safety checks
+  remain compatible. DSQL retries still wrap one complete public write method.
+- Existing private ``.env``, database and upload data were untouched. Rollback
+  is the Phase 2 local commit only; no data rollback is required.
+
+### Phase 2 verification
+
+- Complete deterministic suite: **459 passed** with the same 52 framework
+  deprecation warnings; no live AWS/Cognito/DSQL/S3/model call was made.
+- Persistence/source/DSQL/OCC focused gate: **145 passed**.
+- Ruff reports zero findings. Compileall, dependency consistency and
+  ``git diff --check`` passed.
+
+### Next exact phase
+
+Phase 3 starts at ``backend/api.py``. Move registration into
+``backend.http.routes.workspace``, ``system``, ``learning`` and ``coaching``;
+keep ``backend.api.create_app`` and all schemas/re-exports compatible. The
+complete route/method/name/dependency inventory test is the merge gate, followed
+by all API/auth/streaming tests and the full deterministic suite.
+
+## Previous completed architecture phase — Phase 1 quality gates
+
 **Behavior-preserving architecture refactor — Phase 1 quality and contract
 gates completed locally on 2026-08-13.** The pre-refactor application state is
 preserved in local commit ``5b94968`` on

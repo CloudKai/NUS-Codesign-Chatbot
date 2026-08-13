@@ -13,6 +13,7 @@ import threading
 from typing import Any, Callable
 
 from backend.student_store import NOTEBOOK_CHILD_TABLES, StudentStore
+from backend.persistence.store.operations import StoreOperations, bind_store_operations
 
 from .dsql_connection import (
     DsqlConnectionProxy,
@@ -85,6 +86,7 @@ class DsqlStudentStore(StudentStore):
         self.identifier = identifier
         self.path = None  # type: ignore[assignment]
         self._lock = threading.RLock()
+        self._operations: StoreOperations = bind_store_operations(self)
         self._endpoint = (endpoint or settings.dsql_endpoint).strip()
         self._region = (region or settings.aws_region).strip()
         self._database = (database or settings.dsql_database).strip() or "postgres"

@@ -1,4 +1,4 @@
-"""Repository ports and SQLite adapters for the local demonstration runtime."""
+"""Repository ports and provider-neutral adapters over ``StudentStore``."""
 
 from __future__ import annotations
 
@@ -85,8 +85,8 @@ class PhaseTransitionRepository(Protocol):
         """Mark a transition confirmed or rejected without changing journey state."""
 
 
-class SQLiteNotebookRepository:
-    """Adapter that exposes existing ``StudentStore`` notebooks through a narrow port."""
+class StoreNotebookRepository:
+    """Expose ``StudentStore`` notebooks through a provider-neutral port."""
 
     def __init__(self, store: StudentStore):
         self._store = store
@@ -140,8 +140,8 @@ class SQLiteNotebookRepository:
         self._store.delete_thread(thread_id)
 
 
-class SQLiteSourceRepository:
-    """Adapter for notebook source rows in SQLite."""
+class StoreSourceRepository:
+    """Expose ``StudentStore`` source rows through a provider-neutral port."""
 
     def __init__(self, store: StudentStore):
         self._store = store
@@ -157,8 +157,8 @@ class SQLiteSourceRepository:
         return self._store.get_source(thread_id, source_id)
 
 
-class SQLitePreferenceRepository:
-    """Adapter for local user preference metadata."""
+class StorePreferenceRepository:
+    """Expose ``StudentStore`` user preferences through a neutral port."""
 
     def __init__(self, store: StudentStore):
         self._store = store
@@ -172,8 +172,8 @@ class SQLitePreferenceRepository:
         self._store.update_user_preferences(patch)
 
 
-class SQLitePhaseTransitionRepository:
-    """Adapter for persisted, student-confirmed phase transition decisions."""
+class StorePhaseTransitionRepository:
+    """Expose persisted phase transitions through a provider-neutral port."""
 
     def __init__(self, store: StudentStore):
         self._store = store
@@ -197,3 +197,27 @@ class SQLitePhaseTransitionRepository:
         return PendingPhaseTransition.model_validate(
             self._store.resolve_phase_transition(thread_id, transition_id, status.value)
         )
+
+
+# Backward-compatible names retained for all existing imports. StudentStore may
+# be SQLite or DSQL; new code should prefer the provider-neutral names above.
+SQLiteNotebookRepository = StoreNotebookRepository
+SQLiteSourceRepository = StoreSourceRepository
+SQLitePreferenceRepository = StorePreferenceRepository
+SQLitePhaseTransitionRepository = StorePhaseTransitionRepository
+
+
+__all__ = [
+    "NotebookRepository",
+    "PhaseTransitionRepository",
+    "PreferenceRepository",
+    "SourceRepository",
+    "StoreNotebookRepository",
+    "StorePhaseTransitionRepository",
+    "StorePreferenceRepository",
+    "StoreSourceRepository",
+    "SQLiteNotebookRepository",
+    "SQLitePhaseTransitionRepository",
+    "SQLitePreferenceRepository",
+    "SQLiteSourceRepository",
+]
