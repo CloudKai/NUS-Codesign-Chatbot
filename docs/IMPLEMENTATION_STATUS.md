@@ -2,6 +2,63 @@
 
 ## Current phase
 
+**Behavior-preserving architecture refactor — Phase 7 source boundaries and
+final integration completed locally on 2026-08-13.** Phase 6 remains
+rollbackable at local commit ``9d8a144``. Source implementation ownership and
+documentation changed; source, provider and student behavior did not.
+
+### Phase 7 behavior and structure
+
+1. **Source package ownership.** The stable ``backend.source_library`` import is
+   now a 14-line transparent alias to ``backend.sources.library``. Deterministic
+   selected-source context and storage/image projection are separate typed
+   modules under ``backend.sources``. Ingestion and course-material sync remain
+   together where they share cleanup and background-job seams.
+2. **Compatibility review completed.** FastAPI route/method/name and protected
+   owner-dependency inventories, public façade signatures, ``StudentStore``
+   method inventory and DSQL OCC write inventory remain green. A further
+   closure-based HTTP route move was explicitly rejected in this phase because
+   it would add risk without changing a cohesive behavior boundary.
+3. **Current architecture documented.** Backend, database, structure and test
+   guides now point to the actual ``http``, ``coaching``, ``learning``,
+   ``sources``, ``persistence.store``, ``ui.panels``, ``ui.services``,
+   ``scripts.dsql`` and subsystem-test ownership.
+4. **Remaining debt is explicit.** The still-large StudentStore, HTTP app,
+   source ingestion/course sync and Streamlit panels have concrete next seams;
+   there is no arbitrary file-size gate or cosmetic class extraction.
+
+### Phase 7 compatibility and migration
+
+- Every source-library public and private monkeypatch seam remains on the same
+  module object. Context size/order, source labels, image payloads, storage
+  resolution, lecture sync, cleanup and error text are unchanged.
+- No product, route/schema, database, authentication, provider/prompt,
+  environment, CSS or UI change. No migration, rewrite or live data access.
+  Rollback is the Phase 7 commit only.
+
+### Phase 7 verification
+
+- Source/API/UI/architecture focused integration gate: **119 passed**.
+- Final complete deterministic suite: **459 passed** with 52 existing
+  Starlette/httpx deprecation warnings. Ruff, compileall, dependency
+  consistency, shell syntax and ``git diff --check`` passed.
+- Local and production Compose configurations both validate. Caddy container
+  validation could not be repeated because the local Docker daemon was not
+  running; the deterministic deployment/Caddy contract suite passed.
+- Read-only live SQLite checks returned ``quick_check=ok``, no foreign-key
+  failures, and zero orphan notebooks, messages or sources. No database write,
+  migration or reset was performed.
+- No live AWS, Cognito, DSQL, S3 or paid model call was made.
+
+### Next exact phase
+
+If refactoring continues, start with one independently reviewed slice of
+``StudentStore`` notebook/message operations or one closure-complete HTTP route
+registrar. Preserve the existing compatibility/OCC/route inventories and add a
+focused transaction or route regression before moving code.
+
+## Previous completed architecture phase — Phase 6 scripts and tests
+
 **Behavior-preserving architecture refactor — Phase 6 scripts and test
 organization completed locally on 2026-08-13.** Phase 5 remains rollbackable at
 local commit ``9196ad5``. Operator and test locations changed; CLI behavior,
@@ -39,14 +96,6 @@ test scenarios and collection did not.
   ``scripts/init_dsql.py --help`` remains successful without AWS access.
 - Ruff reports zero findings. Compileall, shell syntax, dependency consistency
   and ``git diff --check`` passed.
-
-### Next exact phase
-
-Phase 7 performs the final integration/documentation gate. Review remaining
-large HTTP, persistence and source modules against the green façade contracts;
-land only an additional extraction that has a cohesive low-risk seam. Update
-the architecture/database/testing/structure guides, verify all compatibility
-imports and run the complete acceptance matrix before the final local commit.
 
 ## Previous completed architecture phase — Phase 5 Streamlit presentation
 

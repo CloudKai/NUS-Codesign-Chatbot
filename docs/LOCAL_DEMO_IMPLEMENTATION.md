@@ -40,11 +40,12 @@ student-turn fallback.
 
 | Layer | Implemented responsibility |
 |---|---|
-| Presentation | `ui/` renders state and calls `ui.runtime.WorkspaceFacade` and typed coach helpers. Panels do not open SQLite, read source paths, or call model SDKs. |
-| API | `backend/api.py` composes owner-scoped workspace CRUD plus versioned health/readiness, auth, learning, revise, coach/stream, graph, and transition routes. |
-| Application | `CoachApplicationService`, `WorkspaceService`, and `LearningProgressService` orchestrate use cases and transactions. |
-| Domain/workflow | Pydantic contracts, six stage definitions, prompt composition, structured assessment validation, and one `CoachWorkflow`. |
-| Persistence | `StudentStore`/`DsqlStudentStore`, narrow repository adapters, and local/S3 `FileStorage` implementations. |
+| Presentation | `ui.panels` renders state and calls `ui.services.runtime.WorkspaceFacade` and typed coach helpers. Historical `ui.*` imports remain compatibility aliases. Panels do not open SQLite, read source paths, or call model SDKs. |
+| API | `backend.api` is the stable façade; `backend.http.app` composes owner-scoped workspace CRUD plus versioned health/readiness, auth, learning, revise, coach/stream, graph, and transition routes. |
+| Application | `backend.coaching.execution.CoachApplicationService`, `WorkspaceService`, and `LearningProgressService` orchestrate use cases and transactions; `backend.application` remains import-compatible. |
+| Domain/workflow | Pydantic contracts, `backend.learning` stage/journey definitions, prompt composition, structured assessment validation, and one `CoachWorkflow`. |
+| Persistence | `StudentStore`/`DsqlStudentStore`, extracted `persistence.store` contracts/schema/source operations, narrow repository adapters, and local/S3 `FileStorage` implementations. |
+| Sources | `backend.sources` owns ingestion/course sync plus deterministic bounded context and storage/image projection; `backend.source_library` remains import-compatible. |
 | Providers/retrieval | Deterministic mock and OpenAI coach adapters plus a notebook-scoped local selected-source retriever. |
 
 Folder organization is not a current UI/API feature. An ignored `folder_id`

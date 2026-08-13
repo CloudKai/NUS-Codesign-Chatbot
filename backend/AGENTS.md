@@ -18,13 +18,14 @@ This package does **not** own Streamlit UI code. Presentation lives in
 ## Layer map
 
 ```text
-FastAPI (api.py)
-  -> application services (application.py, learning_service.py, chat_service.py)
+FastAPI (`api.py` façade → `http/app.py`)
+  -> application services (`application.py` façade → `coaching/execution.py`,
+     `learning_service.py`, `chat_service.py`)
   -> one LangGraph workflow (workflow.py)
-  -> domain contracts (domain.py, student_journey.py)
+  -> domain contracts (`domain.py`, `student_journey.py` façade → `learning/`)
   -> repositories + SQLite (repositories.py, student_store.py)
   -> providers (providers.py, mock_provider.py)
-  -> sources/files (source_library.py, file_processing.py)
+  -> sources/files (`source_library.py` façade → `sources/`, `file_processing.py`)
 ```
 
 ## Module responsibilities
@@ -32,12 +33,12 @@ FastAPI (api.py)
 | Module | Responsibility |
 |---|---|
 | `domain.py` | Pydantic contracts: `CoachRequest`, `CoachTurn`, `EducationalAssessment`, `PendingPhaseTransition`, citations |
-| `application.py` | `CoachApplicationService` — coordinates workflow, persistence, optional auto-advance |
-| `api.py` | FastAPI app factory/composition plus owner-scoped workspace CRUD, auth, readiness, coach, learning, graph, revise, and transition routes |
+| `application.py` / `coaching/` | Compatibility import plus durable `CoachApplicationService` execution and citation projection |
+| `api.py` / `http/app.py` | Compatibility import plus FastAPI app factory/composition, routes, and HTTP error mapping |
 | `api_client.py` | Typed client used by Streamlit when `USE_LOCAL_API=true` |
 | `workspace_service.py` | Notebook/history/source/preference CRUD application service |
 | `workflow.py` | Single LangGraph coach workflow wrapper (not six agents) |
-| `student_journey.py` | Six thinking stages, journey normalization, review helpers, stage questions |
+| `student_journey.py` / `learning/` | Compatibility imports plus six stages, journey normalization, review helpers, and questions |
 | `learning_service.py` | Confirmation-gated phase transitions and learning progression |
 | `student_store.py` | Five-table SQLite/DSQL-compatible store for users, OAuth state, notebooks, messages, sources |
 | `persistence/` | Storage ports + factories: SQLite/DSQL student stores, local/S3 file storage |
@@ -46,7 +47,7 @@ FastAPI (api.py)
 | `providers.py` | OpenAI coach provider adapter and provider selection (consumes composed prompts) |
 | `prompts/` | Framework-neutral stage prompt files, loader, and composer |
 | `mock_provider.py` | Deterministic provider for tests and offline demo |
-| `source_library.py` | Source CRUD helpers, lecture-notes sync, URL import, citation context |
+| `source_library.py` / `sources/` | Compatibility import plus ingestion, course sync, bounded context, and image/storage projection |
 | `retrieval.py` | Provider-neutral retrieval port + deterministic local selected-source chunk retriever |
 | `file_processing.py` | Upload storage, text extraction, safe paths |
 | `settings.py` | Environment-driven configuration (`Settings`) |
@@ -113,15 +114,15 @@ documented as a current feature.
 
 **Add or change an API route**
 
-`domain.py` (request/response models) → `application.py` or service →
-`api.py` → `api_client.py` → targeted route/client tests. Keep owner
+`domain.py` (request/response models) → `coaching/` or service →
+`http/app.py` → `api_client.py` → targeted route/client tests. Keep owner
 resolution injected from `create_app`; moving a route must not weaken
 `Depends(current_owner)` or alter its OpenAPI contract.
 
 **Change stage behavior or coaching output**
 
-`student_journey.py` / provider prompts in `providers.py` → `workflow.py` →
-`application.py` → UI compatibility adapters in `ui/chat.py` if display-only.
+`learning/` / provider prompts in `providers.py` → `workflow.py` →
+`coaching/execution.py` → UI compatibility adapters in `ui/chat.py` if display-only.
 
 **Change persistence or schema**
 
@@ -130,15 +131,16 @@ and rollback path. Update `docs/IMPLEMENTATION_STATUS.md`.
 
 **Change source handling**
 
-`source_library.py`, `file_processing.py`, and tests in
-`tests/test_source_library.py`.
+`sources/`, `file_processing.py`, and tests in
+`tests/domain/test_source_library.py`.
 
 ## Validation
 
 ```sh
-.venv/bin/python -m pytest -q tests/test_api.py tests/test_workflow.py \
-  tests/test_learning_service.py tests/test_student_store.py \
-  tests/test_source_library.py tests/test_student_journey.py
+.venv/bin/python -m pytest -q tests/http/test_api.py \
+  tests/domain/test_workflow.py tests/domain/test_learning_service.py \
+  tests/persistence/test_student_store.py \
+  tests/domain/test_source_library.py tests/domain/test_student_journey.py
 PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \
   .venv/bin/python -m compileall -q backend
 ```
