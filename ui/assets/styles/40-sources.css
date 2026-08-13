@@ -184,7 +184,8 @@
         margin:0 !important;
         padding:0 !important;
         opacity:1 !important;
-        z-index:1 !important;
+        z-index:4 !important;
+        pointer-events:none !important;
     }
 
     .st-key-sources_panel [class*="st-key-add-sources"] [data-testid="stFileUploader"],

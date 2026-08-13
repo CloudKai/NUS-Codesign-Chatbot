@@ -25,6 +25,8 @@ logic.
 | `init_dsql.py` | Admin-only Aurora DSQL schema bootstrap | One DDL per transaction; async-job `CALL` on dedicated autocommit connection; never app startup; not `co_design_app`. CloudShell SSL/IPv4 checklist: [`docs/deploy/AWS_STATELESS_EC2.md`](../docs/deploy/AWS_STATELESS_EC2.md) (§ CloudShell / laptop init_dsql checklist) |
 | `smoke_dsql_idempotency.py` | Explicitly approved live DSQL runtime-role idempotency smoke | Requires `--confirm-live`, `DATABASE_PROVIDER=dsql`, `DSQL_USER=co_design_app`, and `--identifier cognito:<sub>`; mock provider only; no DDL/S3/Bedrock |
 | `preview_prompt.py` | Demo-only composed stage-prompt preview | No DB, student data, tokens, or provider calls |
+| `load_probe.py` | Temporary-SQLite mock capacity diagnostic | Direct CLI bootstraps the repository path; each virtual user receives an isolated owner on one temporary database; mock only and not proof of EC2/provider sizing |
+| `browser_e2e_smoke.sh` | Headed, manually authenticated desktop/mobile evidence helper | Not CI; requires Node.js/`npx`, an installed Playwright CLI wrapper, a running app, explicit live-Cognito approval, and manual sign-in |
 
 ## Environment variables
 
@@ -49,7 +51,7 @@ Never commit `.env` or embed API keys in scripts.
 - **Do not hard-code secrets** or model API keys in scripts.
 - **Prefer `.venv/bin/python`** when the virtual environment exists (as
   `start.sh` and `build.sh` do).
-- **Keep mock/Ollama paths explicit** in documentation when adding new startup
+- **Keep mock/live-provider paths explicit** in documentation when adding new startup
   modes. Paid OpenAI smoke tests require explicit user approval per root
   `AGENTS.md`.
 
@@ -89,6 +91,17 @@ Full automated gate (safe — no live DB init):
 ```sh
 sh scripts/build.sh
 ```
+
+Mock load diagnostic (not an EC2 sizing gate):
+
+```sh
+.venv/bin/python scripts/load_probe.py --users 5 --requests-per-user 1
+```
+
+Each virtual user has a distinct owner-scoped store on one temporary database.
+The probe still uses in-process `TestClient`, SQLite, memory files, and the mock
+provider, so it validates application concurrency/limit behavior rather than
+network, DSQL, S3, model-provider, or EC2 capacity.
 
 Explicit DB init examples:
 

@@ -1,4 +1,4 @@
-"""Profile settings popover for local appearance, language, and help."""
+"""Profile settings popover for appearance, coaching style, and help."""
 
 from __future__ import annotations
 
@@ -11,16 +11,15 @@ from backend.student_journey import RESPONSE_DETAILS, normalize_journey
 
 from ui.auth_gate import app_logout_url, logout_user
 from ui.components import profile_initial
-from ui.constants import APPEARANCE_MODES, RESPONSE_LANGUAGES
-from ui.menu_popovers import close_menu_popover, menu_popover_widget_key
-from ui.runtime import rerun_fragment, store
+from ui.constants import APPEARANCE_MODES
+from ui.runtime import store
 from ui.session import save_journey
-from ui.settings import persist_appearance, persist_response_language
+from ui.settings import persist_appearance
 
 
 COACHING_STYLE_LABELS = {
-    "short": "Concise",
-    "long": "Guided",
+    "short": "Quick",
+    "long": "Strict",
 }
 COACHING_STYLE_VALUES = {
     label: detail for detail, label in COACHING_STYLE_LABELS.items()
@@ -74,23 +73,14 @@ def _render_display_name_fragment(display_name: str) -> None:
     _sync_profile_avatar_initial(profile_initial(current_name))
 
 
-@st.fragment
-def _render_language_fragment() -> None:
-    """Render response-language selection without redrawing the workspace."""
-    current_language = str(st.session_state.response_language or "English")
-    if current_language not in RESPONSE_LANGUAGES:
-        current_language = "English"
-        st.session_state.response_language = current_language
-    st.session_state.setting_response_language = current_language
-    _render_language_dropdown(current_language)
-
-
-def _select_coaching_style(detail: str) -> None:
-    """Persist one existing response-detail value from the profile control."""
+def _select_coaching_style(detail: str) -> bool:
+    """Persist one response-detail value and report whether it changed."""
     journey = normalize_journey(st.session_state.learning_journey)
-    if detail != journey["response_detail"]:
-        journey["response_detail"] = detail
-        save_journey(journey)
+    if detail == journey["response_detail"]:
+        return False
+    journey["response_detail"] = detail
+    save_journey(journey)
+    return True
 
 
 def _persist_coaching_style() -> None:
@@ -102,9 +92,8 @@ def _persist_coaching_style() -> None:
         _select_coaching_style(detail)
 
 
-@st.fragment
 def _render_coaching_style_fragment() -> None:
-    """Render response-detail preferences without redrawing the workspace."""
+    """Render response-detail preferences with a normal full-app widget rerun."""
     # Keep the existing diagnostic counter stable for rerun-scope regression tests.
     st.session_state["_topbar_guidance_fragment_runs"] = (
         int(st.session_state.get("_topbar_guidance_fragment_runs") or 0) + 1
@@ -143,7 +132,6 @@ def render_profile_menu() -> None:
                     # the complete theme and layout stylesheet is re-injected.
                     on_change=persist_appearance,
                 )
-                _render_language_fragment()
                 _render_coaching_style_fragment()
                 st.divider()
                 st.markdown(
@@ -176,45 +164,6 @@ def render_profile_menu() -> None:
                             logout_user()
 
 
-def _render_language_dropdown(current_language: str) -> None:
-    """Render Language as a select-only menu (no text caret), left-aligned.
-
-    Uses a popover + button pattern so the control cannot be typed into while
-    keeping the value left-aligned in the trigger.
-    """
-    with st.container(key="profile_language"):
-        st.markdown(
-            '<div class="cd-profile-language-head">'
-            '<span class="cd-profile-language-label">Language</span>'
-            '<span class="cd-profile-language-help" tabindex="0" '
-            'aria-label="The coach responds in this language">'
-            "?"
-            '<span class="cd-profile-language-tooltip" role="tooltip">'
-            "The coach responds in this language"
-            "</span>"
-            "</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-        with st.popover(
-            current_language,
-            use_container_width=True,
-            key=menu_popover_widget_key("profile-language"),
-        ):
-            for index, language in enumerate(RESPONSE_LANGUAGES):
-                if st.button(
-                    language,
-                    key=f"profile-language-{index}",
-                    use_container_width=True,
-                    type="tertiary",
-                ):
-                    if language != current_language:
-                        st.session_state.setting_response_language = language
-                        persist_response_language()
-                    close_menu_popover("profile-language")
-                    rerun_fragment()
-
-
 def inject_profile_leave_helper() -> None:
     """Install the leave-to-close script outside the avatar layout chain."""
     with st.container(key="profile_leave_helper"):
@@ -225,7 +174,7 @@ def _sync_profile_popover_close_on_leave() -> None:
     """Close the profile menu only after the pointer leaves its chrome.
 
     Uses mouseenter/mouseleave on the popover body (not document mousemove) so
-    widget rerenders and Language portals do not false-close the menu.
+    widget rerenders do not false-close the menu.
     """
     components.html(
         """
@@ -272,8 +221,7 @@ def _sync_profile_popover_close_on_leave() -> None:
       node.closest(".st-key-profile_menu_root") ||
       node.closest('[data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)') ||
       node.closest('[data-testid="stPopoverBody"]:has(.cd-profile-help)') ||
-      node.closest('[data-testid="stPopoverBody"]:has(.cd-profile-menu)') ||
-      node.closest('[data-testid="stPopoverBody"]:has([class*="st-key-profile-language-"])')
+      node.closest('[data-testid="stPopoverBody"]:has(.cd-profile-menu)')
     ) {
       return true;
     }
@@ -362,6 +310,12 @@ def _sync_profile_popover_close_on_leave() -> None:
     scheduleClose();
   }
 
+  function onProfilePointerOver(event) {
+    if (nodeInsideProfile(event.target)) {
+      cancelClose();
+    }
+  }
+
   function unbind(node, enter, leave) {
     if (!node) {
       return;
@@ -390,12 +344,13 @@ def _sync_profile_popover_close_on_leave() -> None:
     }
   }
 
-  const body = doc.body;
-  if (body instanceof win.Node) {
+  const documentBody = doc.body;
+  if (documentBody && documentBody.nodeType === 1) {
     observer = new win.MutationObserver(() => {
       bind();
     });
-    observer.observe(body, { childList: true, subtree: true });
+    observer.observe(documentBody, { childList: true, subtree: true });
+    doc.addEventListener("pointerover", onProfilePointerOver, true);
   }
   bind();
 
@@ -409,6 +364,7 @@ def _sync_profile_popover_close_on_leave() -> None:
       observer.disconnect();
       observer = null;
     }
+    doc.removeEventListener("pointerover", onProfilePointerOver, true);
   };
 })();
 </script>

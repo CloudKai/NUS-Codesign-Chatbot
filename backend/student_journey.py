@@ -62,6 +62,8 @@ THINKING_STAGES: tuple[ThinkingStage, ...] = (
 STAGE_BY_ID = {stage.id: stage for stage in THINKING_STAGES}
 DEFAULT_STAGE = THINKING_STAGES[0].id
 RESPONSE_DETAILS = ("short", "long")
+COACHING_PROFILES = ("quick", "strict")
+STRICT_FACIONE_BASELINE_KEY = "strict_facione_baseline"
 _STAGE_DECISION = re.compile(
     r"<!--\s*stage\s*:\s*(advance|stay)\s*-->",
     re.IGNORECASE,
@@ -190,6 +192,11 @@ def default_journey() -> dict[str, Any]:
     }
 
 
+def coaching_profile_for_response_detail(response_detail: str) -> str:
+    """Map the stable public detail value to its internal coaching profile."""
+    return "strict" if str(response_detail).lower() == "long" else "quick"
+
+
 def normalize_journey(value: Any) -> dict[str, Any]:
     raw = value if isinstance(value, dict) else {}
     journey = default_journey()
@@ -214,6 +221,27 @@ def normalize_journey(value: Any) -> dict[str, Any]:
     journey["critical_reflection"] = str(raw.get("critical_reflection", "")).strip()
     detail = str(raw.get("response_detail", "short")).lower()
     journey["response_detail"] = detail if detail in RESPONSE_DETAILS else "short"
+    if STRICT_FACIONE_BASELINE_KEY in raw:
+        baseline = raw.get(STRICT_FACIONE_BASELINE_KEY)
+        if isinstance(baseline, dict) and "scores" in baseline:
+            boundary = baseline.get("captured_through")
+            normalized_boundary = None
+            if isinstance(boundary, dict):
+                created_at = str(boundary.get("created_at") or "").strip()
+                message_id = str(boundary.get("message_id") or "").strip()
+                if created_at and message_id:
+                    normalized_boundary = {
+                        "created_at": created_at,
+                        "message_id": message_id,
+                    }
+            journey[STRICT_FACIONE_BASELINE_KEY] = {
+                "scores": _normalize_facione_scores(baseline.get("scores")),
+                "captured_through": normalized_boundary,
+            }
+        else:
+            # Flat score dicts were written briefly before capture provenance
+            # existed. Preserve them as a fallback instead of losing progress.
+            journey[STRICT_FACIONE_BASELINE_KEY] = _normalize_facione_scores(baseline)
     return journey
 
 
@@ -493,16 +521,67 @@ def _normalize_facione_scores(raw: Any) -> dict[str, int]:
 
 def _cumulative_facione_scores(
     messages: Iterable[dict[str, Any]],
+    *,
+    coaching_profile: str,
+    baseline: Any = None,
 ) -> dict[str, int]:
-    """Return the strongest score demonstrated in active assessment history.
+    """Return strongest active scores for one internal coaching profile.
 
-    Review is a cumulative reflection on the notebook, so a brief later turn
-    must not erase reasoning already demonstrated earlier. Callers provide the
-    active message branch; superseded revision history is excluded by the
-    repository before this presentation helper runs.
+    Untagged assessments predate profile-aware scoring and seed both profiles.
+    Tagged Quick and Strict assessments otherwise remain separate. Strict may
+    additionally start from the immutable baseline captured on first switch so
+    existing progress is retained without letting later Quick evidence raise a
+    Strict score. Callers provide the active message branch; superseded history
+    is excluded by the repository before this presentation helper runs.
     """
-    cumulative = _normalize_facione_scores(None)
-    for assessment in _assessments(messages):
+    selected_profile = (
+        coaching_profile if coaching_profile in COACHING_PROFILES else "quick"
+    )
+    baseline_scores: Any = None
+    boundary: tuple[str, str] | None = None
+    if selected_profile == "strict" and isinstance(baseline, dict):
+        if "scores" in baseline:
+            baseline_scores = baseline.get("scores")
+            captured_through = baseline.get("captured_through")
+            if isinstance(captured_through, dict):
+                created_at = str(captured_through.get("created_at") or "").strip()
+                message_id = str(captured_through.get("message_id") or "").strip()
+                if created_at and message_id:
+                    boundary = (created_at, message_id)
+        else:
+            baseline_scores = baseline
+    cumulative = _normalize_facione_scores(
+        baseline_scores if selected_profile == "strict" and boundary is None else None
+    )
+    for message in messages:
+        if message.get("role") != "assistant":
+            continue
+        metadata = message.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            continue
+        profile = str(metadata.get("coaching_profile") or "").strip().lower()
+        if selected_profile == "strict" and boundary is not None:
+            message_position = (
+                str(message.get("createdAt") or message.get("created_at") or ""),
+                str(message.get("id") or ""),
+            )
+            is_baseline_evidence = profile in {"", "quick"}
+            if is_baseline_evidence and message_position > boundary:
+                continue
+        if profile and profile != selected_profile:
+            # Strict recomputes the baseline from active legacy/Quick messages
+            # at or before its capture boundary. Other cross-profile evidence
+            # remains isolated.
+            if not (
+                selected_profile == "strict"
+                and boundary is not None
+                and profile == "quick"
+                and message_position <= boundary
+            ):
+                continue
+        assessment = metadata.get("assessment")
+        if not isinstance(assessment, dict) or not assessment.get("recommendation"):
+            continue
         scores = _normalize_facione_scores(assessment.get("facione_scores"))
         for key, _label in FACIONE_DIMENSIONS:
             cumulative[key] = max(cumulative[key], scores[key])
@@ -684,7 +763,12 @@ def learning_review(
         ),
         [],
     )
-    facione_scores = _cumulative_facione_scores(message_list)
+    coaching_profile = coaching_profile_for_response_detail(selected_detail)
+    facione_scores = _cumulative_facione_scores(
+        message_list,
+        coaching_profile=coaching_profile,
+        baseline=journey.get(STRICT_FACIONE_BASELINE_KEY),
+    )
     summary = _review_summary(assessment)
     completed_labels = [
         STAGE_BY_ID[stage_id].label for stage_id in normalized["completed_stages"]

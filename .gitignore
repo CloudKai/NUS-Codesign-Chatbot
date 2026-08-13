@@ -1,11 +1,59 @@
+# Private configuration and credentials
 .env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+*.pem
+*.key
+credentials
+aws-credentials
+
+# Virtual environments and dependency caches
 .venv/
+venv/
+env/
+
+# Python-generated caches, reports, and build artifacts
 __pycache__/
 *.py[cod]
 .pytest_cache/
-.DS_Store
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Local application state and generated runtime output
 data/
 .files/
 output/
+logs/
+tmp/
+temp/
+lecture_notes/
+*.sqlite
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+*.db
+*.log
+
+# Editor and operating-system files
+.DS_Store
+.idea/
+.vscode/
+.cursor/
 .cursorignore
-.streamlit/secrets.toml
+*.swp
+*.swo
+*~
+
+# Keep local Markdown documentation and prompt files out of new Git changes.
+# Already tracked Markdown remains tracked; backend/prompts/*.md is required at runtime.
+*.md
+!backend/prompts/**/*.md

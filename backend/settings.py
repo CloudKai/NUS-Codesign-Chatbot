@@ -94,9 +94,6 @@ class Settings:
     # precedence over auto_advance_stages (selection wins if both are true).
     student_stage_selection: bool = _boolean("STUDENT_STAGE_SELECTION", False)
     model_provider: str = os.getenv("MODEL_PROVIDER", "mock").strip().lower()
-    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-    ollama_chat_model: str = os.getenv("OLLAMA_CHAT_MODEL", "gpt-oss:20b")
-    ollama_embedding_model: str = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
     openai_chat_model: str = os.getenv("OPENAI_CHAT_MODEL", "gpt-5.6-luna")
     api_base_url: str = os.getenv("CO_DESIGN_API_URL", "http://127.0.0.1:8000")
     public_api_base_url: str = os.getenv(
@@ -242,8 +239,6 @@ def validate_production_configuration() -> None:
         raise ValueError("MODEL_PROVIDER=mock is not allowed in production")
     if settings.mock_openai:
         raise ValueError("MOCK_OPENAI masking is not allowed in production")
-    if settings.model_provider == "ollama":
-        raise ValueError("MODEL_PROVIDER=ollama is not allowed in production")
     if settings.model_provider != "openai":
         raise ValueError(
             f"Unsupported MODEL_PROVIDER for production: {settings.model_provider}"

@@ -1,9 +1,11 @@
-# Co-design Student Chatbot
+# CDE2300 Design Thinking Companion
 
-Local critical-thinking coach for university students. The app is a **Streamlit**
-UI plus a **FastAPI** coaching API. Student data stays on your machine (SQLite +
-files under `data/`). Amazon Cognito Managed Login proves identity; FastAPI
-keeps Cognito refresh + ID tokens in HttpOnly cookies (never DB / localStorage).
+Co-design Chatbot is the repository name for this local critical-thinking coach
+for Product Design and Innovation students. The app is a **Streamlit** UI plus
+a **FastAPI** coaching API. In local mode, student data stays on your machine
+(SQLite + files under `data/`). Amazon Cognito Managed Login proves identity;
+FastAPI keeps Cognito refresh + ID tokens in HttpOnly cookies (never DB /
+localStorage).
 
 ```text
 Cognito authentication
@@ -21,8 +23,11 @@ ID-token cookie; FastAPI verifies Cognito `sub`, binds the application user,
 and scopes every notebook/source/message operation to that owner. The shared
 `local-student` owner remains only for explicit local/mock demos and tests.
 
-Both paths support Thinking Path progression, structured assessments, Review
-personalization, and selected image grounding.
+Both the normal HTTP path and the in-process development fallback use the same
+typed `CoachApplicationService`. They support Thinking Path progression,
+structured assessments, Review personalization, and selected image grounding.
+The older `StudentChatEngine` is retained for compatibility tests only and is
+not the current Streamlit fallback.
 
 ---
 
@@ -30,7 +35,7 @@ personalization, and selected image grounding.
 
 - **Python 3.12+** (3.12 recommended)
 - macOS or Linux shell (`zsh` / `bash`)
-- Optional later: [Ollama](https://ollama.com/) or an OpenAI API key
+- Optional later: an OpenAI API key
 
 ---
 
@@ -151,7 +156,7 @@ With `MODEL_PROVIDER=mock` (default in `.env.example`):
 1. First chat turn at a stage gets guidance (stage stays).
 2. Second turn at that stage recommends ADVANCE; with the default
    `AUTO_ADVANCE_STAGES=false`, press **Next** on Thinking Path and confirm to
-   move the progress bar.
+   move the current stage on the Journey roadmap.
 3. Upload/select sources (including images); the API coach path receives selected
    image inputs for grounding.
 
@@ -159,27 +164,7 @@ No OpenAI key is required.
 
 ---
 
-## Optional: live providers
-
-### Ollama (local model)
-
-```bash
-ollama pull gpt-oss:20b
-```
-
-In `.env`:
-
-```bash
-MODEL_PROVIDER=ollama
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_CHAT_MODEL=gpt-oss:20b
-```
-
-Then:
-
-```bash
-sh scripts/start.sh
-```
+## Optional: live provider
 
 ### OpenAI (paid — only with explicit approval / budget)
 
@@ -193,8 +178,8 @@ DEFAULT_REASONING_EFFORT=low
 MOCK_OPENAI=false
 ```
 
-Paid calls are **not** part of the default local workflow. Keep mock or Ollama
-for routine development.
+Paid calls are **not** part of the default local workflow. Keep mock mode for
+routine development.
 
 ### Thinking Path Next confirmation
 
@@ -204,7 +189,7 @@ Default: `AUTO_ADVANCE_STAGES=false`. After the coach recommends the next stage:
 2. Read the warning that confirming early can make the process less critical.
 3. Press **Next** again in the dialog to confirm (or Cancel).
 
-Quick guidance is a lighter advance bar; Complex is stricter. To restore silent
+Quick guidance is a lighter advance bar; Strict requires stronger evidence. To restore silent
 auto-advance:
 
 ```bash
@@ -257,11 +242,13 @@ ui/  → presentation only
 backend/ → domain, workflow, providers, SQLite, sources
 ```
 
-Prefer the API coaching path for all new behaviour. The legacy
-`StudentChatEngine` path exists only as a fallback when `USE_LOCAL_API` is off;
-do not add new behavior there. Cognito sessions use the same typed application
-services in process until FastAPI has its own verified authenticated-owner
-boundary.
+Prefer the API coaching path for all new behaviour. When `USE_LOCAL_API` is
+off, Streamlit still submits the same typed request to an in-process
+`CoachApplicationService`; it does not use `StudentChatEngine`. FastAPI owns the
+verified Cognito-owner boundary for API mode. See
+[`docs/LOCAL_DEMO_IMPLEMENTATION.md`](docs/LOCAL_DEMO_IMPLEMENTATION.md) for the
+implemented-versus-target architecture and its known process-local graph-state
+limitation.
 
 ---
 
@@ -357,7 +344,12 @@ creates one disposable notebook, performs no DDL/S3/Bedrock/provider calls,
 and removes its rows in `finally`. Do not run it until Aurora DSQL is ready and
 the live operation has been explicitly approved.
 
-For local development only, use the stateful default Compose stack:
+The shell launcher above is the canonical browser-local development path. The
+default `compose.yaml` is a **stateful image/Caddy deployment contract**: it
+builds locally and mounts `./data`, but its committed browser origins, secure
+cookies, and Cognito callback are aligned with the CloudFront hostname. Do not
+describe it as a localhost-auth stack. Use it only when that CloudFront/Caddy
+configuration is intentional:
 
 ```bash
 cp .env.example .env
@@ -383,7 +375,7 @@ docker compose up -d --build
 source .venv/bin/activate
 python -m pytest -q
 PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \
-  python -m compileall -q backend ui streamlit_app.py
+  python -m compileall -q backend ui scripts tests streamlit_app.py
 ```
 
 ### Headed Cognito browser smoke
@@ -398,6 +390,11 @@ explicitly approving a real Cognito smoke test, start the local stack and run:
 sh scripts/start.sh
 sh scripts/browser_e2e_smoke.sh
 ```
+
+The browser helper is an operator convenience, not a self-contained project
+dependency. It currently requires Node.js/`npx` and an installed Playwright CLI
+wrapper; set `PWCLI` to that wrapper when it is not in the default Codex skills
+location. It deliberately pauses for manual Cognito authentication.
 
 The runner captures the signed-out desktop shell, pauses for a manual Hosted
 UI login and disposable-notebook check, then captures the authenticated 390 px

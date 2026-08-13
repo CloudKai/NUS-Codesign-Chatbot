@@ -461,7 +461,7 @@ def handle_prompt(
             current_stage=journey["current_stage"],
             response_detail=journey["response_detail"],
             allow_model_knowledge=allow_model_knowledge,
-            response_language=st.session_state.get("response_language", "English"),
+            response_language="English",
             model_id=model_id,
             reasoning_effort=reasoning_effort,
             idempotency_key=idempotency_key,
@@ -634,7 +634,7 @@ def _submit_pending_edit(
             model_id=model_id,
             reasoning_effort=reasoning_effort,
             response_detail=st.session_state.get("response_detail") or "short",
-            response_language=st.session_state.get("response_language") or "English",
+            response_language="English",
         )
         thinking.update(label="Coach reply ready", state="complete")
     except Exception:
@@ -702,6 +702,7 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
         _confirm_edit_earlier_message_dialog()
 
     with st.container(key="chat_composer"):
+        upload_limits_hint = f"{settings.max_file_size_mb} MB max per file"
         composer_value = st.chat_input(
             "Ask a question or share your thinking",
             key=f"composer-{st.session_state.composer_nonce}",
@@ -711,7 +712,7 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
             submit_mode="stop",
             height="content",
         )
-        sync_composer_layout()
+        sync_composer_layout(upload_limits_hint=upload_limits_hint)
     prompt, uploads = normalize_composer_value(composer_value)
     if prompt:
         handle_prompt(

@@ -1,6 +1,10 @@
 # Mock load probe and EC2 monitoring
 
-## Mock capacity probe (no paid providers)
+## Mock diagnostic (no paid providers)
+
+The direct CLI bootstraps the repository import path and assigns every virtual
+user a distinct owner-scoped store on one temporary SQLite database. Uploads
+use memory storage and coaching uses the deterministic mock provider.
 
 ```bash
 .venv/bin/python scripts/load_probe.py --users 10 --requests-per-user 5
@@ -11,8 +15,12 @@ SQLite store and the mock coach. Aggregate metrics only (no notebook IDs or
 message text) are printed: requests/sec, p50/p95 latency, errors, and HTTP 429
 counts.
 
-Do **not** claim `t4g.small` is sufficient until the same workload shape is
-measured against the live EC2 stack with the real provider configuration.
+Treat the output as a local application concurrency diagnostic. It does not
+include HTTP network latency, real Cognito verification, Aurora DSQL, S3,
+provider latency, or container/EC2 resource pressure.
+
+Do **not** claim `t4g.small` is sufficient until a corrected workload shape is
+measured against the deployed stack with the intended provider configuration.
 
 ## What to watch on EC2 during a pilot
 
@@ -29,7 +37,7 @@ measured against the live EC2 stack with the real provider configuration.
 
 ## Suggested pilot sequence
 
-1. Run the mock probe locally and record baseline latency/error rates.
+1. Run the mock probe locally and record latency/error/429 rates.
 2. Deploy an immutable ARM64 image to staging/EC2.
 3. Confirm internal `/api/v1/ready` is healthy.
 4. Run a small controlled pilot with real Cognito users before opening class-wide

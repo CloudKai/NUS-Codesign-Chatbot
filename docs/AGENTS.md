@@ -20,7 +20,14 @@ Do not create parallel architecture documents. Extend or amend the files here.
 | [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md) | Architecture authority: layers, ports, workflow, providers, verification phases | Before any backend, API, persistence, workflow, or migration task |
 | [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) | Living handoff log: current phase, completed work, validation evidence, risks, next action | At session start to resume; at phase end to record evidence |
 | [`PROMPT_ARCHITECTURE.md`](PROMPT_ARCHITECTURE.md) | Local stage-prompt package, composer seam, current vs future KB diagrams | Before editing `backend/prompts/` or provider prompt wiring |
+| [`CODEBASE_STRUCTURE.md`](CODEBASE_STRUCTURE.md) | Current package/folder responsibilities and placement rules | When orienting new contributors or moving modules |
+| [`DATABASE.md`](DATABASE.md) | Current SQLite/DSQL logical model, migrations, transactions, compatibility | Before persistence/schema work |
+| [`TESTING.md`](TESTING.md) | Deterministic test layers, commands, external/live gaps | Before QA or CI changes |
+| [`MANUAL_PRODUCTION_QA.md`](MANUAL_PRODUCTION_QA.md) | Date-stamped historical production evidence and current reconciliation notes | When assessing what was actually tested live |
 | [`deploy/AWS_STATELESS_EC2.md`](deploy/AWS_STATELESS_EC2.md) | Production CloudFront + Caddy origin + ECR + DSQL + S3 topology; CloudShell `init_dsql.py` SSL/IPv4 checklist | Before AWS/EC2 cutover or re-running admin DSQL bootstrap |
+| [`operations/LOAD_PROBE.md`](operations/LOAD_PROBE.md) | Multi-owner SQLite/memory/mock concurrency diagnostic and its sizing limits | Before capacity probing |
+| [`security/CADDY_PUBLIC_BOUNDARY.md`](security/CADDY_PUBLIC_BOUNDARY.md) | Public/private CloudFront-Caddy route checks | Before production edge validation |
+| [`security/PUBLIC_REPOSITORY_CONTENT_AUDIT.md`](security/PUBLIC_REPOSITORY_CONTENT_AUDIT.md) | Tracked course-PDF ownership decision | Before changing lecture-material tracking/history |
 
 Related product docs outside `docs/`:
 

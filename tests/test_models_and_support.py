@@ -130,6 +130,68 @@ def test_mock_facione_scores_use_exact_stage_mapping_and_never_claim_mastery():
             assert max(scores.values()) <= 2
 
 
+def test_mock_provider_applies_quick_and_strict_advancement_thresholds():
+    def assessed_history(*profiles: str) -> list[dict]:
+        return [
+            {
+                "role": "assistant",
+                "content": "Earlier assessment.",
+                "metadata": {
+                    "coaching_profile": profile,
+                    "assessment": {
+                        "current_stage": "focus",
+                        "recommendation": "stay",
+                    },
+                },
+            }
+            for profile in profiles
+        ]
+
+    quick_response, quick = DeterministicCoachProvider().assess(
+        CoachRequest(
+            thread_id="quick-profile",
+            student_message="A workable focus question.",
+            current_stage="focus",
+            response_detail="short",
+            history=assessed_history("quick"),
+        )
+    )
+    strict_response, strict = DeterministicCoachProvider().assess(
+        CoachRequest(
+            thread_id="strict-profile",
+            student_message="A workable focus question.",
+            current_stage="focus",
+            response_detail="long",
+            history=assessed_history("strict"),
+        )
+    )
+    _, strict_after_quick = DeterministicCoachProvider().assess(
+        CoachRequest(
+            thread_id="strict-after-quick",
+            student_message="A first contribution under Strict.",
+            current_stage="focus",
+            response_detail="long",
+            history=assessed_history("quick", "quick"),
+        )
+    )
+    _, strict_after_two_strict = DeterministicCoachProvider().assess(
+        CoachRequest(
+            thread_id="strict-after-two-strict",
+            student_message="A third contribution under Strict.",
+            current_stage="focus",
+            response_detail="long",
+            history=assessed_history("strict", "strict"),
+        )
+    )
+
+    assert quick.recommendation is StageDecision.ADVANCE
+    assert "Examine evidence" in quick_response
+    assert strict.recommendation is StageDecision.STAY
+    assert "Define the focus" in strict_response
+    assert strict_after_quick.recommendation is StageDecision.STAY
+    assert strict_after_two_strict.recommendation is StageDecision.ADVANCE
+
+
 def test_reasoning_is_model_compatible():
     locked = get_model(LOCKED_CHAT_MODEL_ID)
     assert locked.reasoning_efforts == (DEFAULT_REASONING_EFFORT, "medium")

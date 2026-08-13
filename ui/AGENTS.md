@@ -29,7 +29,7 @@ Only read that for UI tasks that touch API migration or coaching flow.
 | Module | Responsibility |
 |---|---|
 | `auth_gate.py` | Signed-out shell, Cognito login dialog, logout helpers |
-| `constants.py` | Response languages and appearance modes |
+| `constants.py` | Product identity and appearance modes |
 | `components.py` | Shared HTML helpers for progress, empty states, review cards |
 | `toasts.py` | Corner toast helper (timed slide-in; falls back to `st.toast`) |
 | `assets/styles/` | Ordered static CSS partials (edit the matching component file) |
@@ -39,7 +39,7 @@ Only read that for UI tasks that touch API migration or coaching flow.
 | `session.py` | Session defaults, notebook create/select/delete, `save_journey()` |
 | `rename.py` | Shared Enter-only rename forms, draft discard, select-all helper |
 | `topbar.py` | Brand, title, section switcher, Guidance, profile entry |
-| `profile.py` | Compact settings popover (display name, appearance, language, help) |
+| `profile.py` | Compact settings popover (display name, appearance, coaching style, help) |
 | `workspace.py` | Mobile panel radio and three-column studio/chat/sources layout |
 | `chat.py` | Message rendering, citations, composer, `handle_prompt()`, `render_chat_panel()` |
 | `sources.py` | Source library with search/filter, add/viewer dialogs |
@@ -67,7 +67,7 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
 ## Hard constraints
 
 - **Presentation only.** Do not import SQLite drivers, LangChain, LangGraph,
-  OpenAI/Ollama SDKs, or read/write the filesystem directly except through
+  OpenAI SDKs, or read/write the filesystem directly except through
   backend helpers already used in this package.
 - **Import shared runtime from `ui.runtime` only.** Use `store` (workspace
   facade), `local_api_client()`, coach helpers, `rerun_app()`, and
@@ -76,12 +76,15 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
   uses in-process `WorkspaceService`. Student turns always use the typed coach
   path (API or in-process), not `StudentChatEngine`.
 - **Rerun scope.** Use `rerun_fragment()` for panel-local updates inside an
-  `@st.fragment` (Sources list, Journey preview toggles, Guidance Level,
-  response language, display-name avatar). Use `rerun_app()` when
+  `@st.fragment` (Sources list, Journey preview toggles, display-name avatar).
+  Use `rerun_app()` when
   application-wide state changed (notebook switch, auth, coach send/revise,
-  layout collapse, course-sync fragment remount, stage selection, **Appearance
-  theme** — `render_theme_css()` only runs on a full script). Do not keep a
-  generic `rerun()` helper.
+  layout collapse, course-sync fragment remount, stage selection, coaching
+  profile, **Appearance theme** — `render_theme_css()` only runs on a full script). Do not keep a
+  generic `rerun()` helper. Widget callbacks must not call `rerun_app()`
+  directly because Streamlit ignores reruns during callbacks. Keep app-wide
+  preferences such as coaching profile in the normal script flow so the
+  widget's automatic rerun refreshes every panel.
 - **Preserve widget keys and dialog decorators.** Keep `@st.dialog` and
   `@st.fragment` on the functions that own them. Changing keys breaks session
   state and AppTest expectations.
@@ -165,8 +168,9 @@ entrypoint or a parent panel if it must open on load.
 
 `chat.py` always submits typed `CoachRequest` turns. Prefer
 `USE_LOCAL_API=true` via `scripts/start.sh` (readiness-gated). The in-process
-`CoachApplicationService` path remains for Streamlit-only runs. Keep
-`StudentChatEngine` only for legacy unit tests in `backend/chat_service.py`.
+`CoachApplicationService` path remains for Streamlit-only runs and preserves
+the same educational workflow contract. `StudentChatEngine` is not a UI
+fallback; keep it only for legacy unit tests in `backend/chat_service.py`.
 
 ## Validation
 

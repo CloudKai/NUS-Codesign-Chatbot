@@ -147,10 +147,23 @@
         padding:0;
     }
 
-    [class*="st-key-journey_stage_"] [data-testid="stColumn"]:first-child {
+    [class*="st-key-journey_stage_"] > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {
         display:flex;
+        flex:0 0 2.1rem !important;
+        width:2.1rem !important;
+        min-width:2.1rem !important;
+        max-width:2.1rem !important;
         align-items:flex-start;
         justify-content:flex-start;
+    }
+
+    [class*="st-key-journey_stage_"] > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) {
+        flex:1 1 0 !important;
+        width:auto !important;
+        min-width:0 !important;
+        max-width:none !important;
     }
 
     .journey-state {

@@ -6,6 +6,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 from backend.api import create_app
@@ -217,6 +218,40 @@ def test_login_start_limiter_enforces_per_client_and_global_ceilings():
     with pytest.raises(RateLimitExceeded) as global_limit:
         limiter.acquire("3.3.3.3")
     assert global_limit.value.retry_after_seconds >= 1
+
+
+def test_login_client_key_uses_appended_proxy_address_not_spoofable_first_hop():
+    """Append-mode proxy chains must not trust the client-controlled first hop."""
+    from backend.auth_routes import _login_client_key
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/v1/auth/login",
+            "headers": [
+                (b"x-forwarded-for", b"198.51.100.9, 203.0.113.7"),
+            ],
+            "client": ("172.18.0.2", 43100),
+        }
+    )
+    assert _login_client_key(request) == "203.0.113.7"
+
+
+def test_login_client_key_falls_back_to_peer_for_invalid_forwarded_value():
+    """Malformed forwarded input cannot create an arbitrary limiter bucket."""
+    from backend.auth_routes import _login_client_key
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/v1/auth/login",
+            "headers": [(b"x-forwarded-for", b"attacker-controlled")],
+            "client": ("172.18.0.2", 43100),
+        }
+    )
+    assert _login_client_key(request) == "172.18.0.2"
 
 
 def test_auth_login_rate_limit_short_circuits_before_oauth_write(tmp_path, monkeypatch):

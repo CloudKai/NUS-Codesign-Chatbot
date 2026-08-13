@@ -33,7 +33,7 @@ FastAPI (api.py)
 |---|---|
 | `domain.py` | Pydantic contracts: `CoachRequest`, `CoachTurn`, `EducationalAssessment`, `PendingPhaseTransition`, citations |
 | `application.py` | `CoachApplicationService` — coordinates workflow, persistence, optional auto-advance |
-| `api.py` | FastAPI `/api/v1` routes (coach + workspace CRUD), app factory, structured errors |
+| `api.py` | FastAPI app factory/composition plus owner-scoped workspace CRUD, auth, readiness, coach, learning, graph, revise, and transition routes |
 | `api_client.py` | Typed client used by Streamlit when `USE_LOCAL_API=true` |
 | `workspace_service.py` | Notebook/history/source/preference CRUD application service |
 | `workflow.py` | Single LangGraph coach workflow wrapper (not six agents) |
@@ -42,8 +42,8 @@ FastAPI (api.py)
 | `student_store.py` | Five-table SQLite/DSQL-compatible store for users, OAuth state, notebooks, messages, sources |
 | `persistence/` | Storage ports + factories: SQLite/DSQL student stores, local/S3 file storage |
 | `repositories.py` | Narrow repository adapters over `StudentStore` |
-| `chat_service.py` | Legacy/direct chat engine (`StudentChatEngine`); OpenAI continuation state is not persisted |
-| `providers.py` | Ollama and OpenAI coach provider adapters (consume composed prompts) |
+| `chat_service.py` | Legacy/direct chat engine retained for compatibility tests; not the current Streamlit fallback |
+| `providers.py` | OpenAI coach provider adapter and provider selection (consumes composed prompts) |
 | `prompts/` | Framework-neutral stage prompt files, loader, and composer |
 | `mock_provider.py` | Deterministic provider for tests and offline demo |
 | `source_library.py` | Source CRUD helpers, lecture-notes sync, URL import, citation context |
@@ -84,32 +84,39 @@ sources, preferences, source content) run through the FastAPI path when
 `ui.runtime.store` (a `WorkspaceFacade`) so they do not open SQLite or source
 paths directly.
 
-A second stack remains for compatibility:
+A compatibility implementation remains, but it is not a second student UI
+stack:
 
 | Path | Entry | Use |
 |---|---|---|
 | Preferred | `application.py` → `workflow.py` → providers → API | Stage progression, assessments, selected-image inputs |
-| Legacy | `chat_service.StudentChatEngine` | Streamlit-only / `USE_LOCAL_API=false` fallback; does not mutate learning stages |
+| In-process fallback | `application.py` → `workflow.py` → providers | Same typed coach path when `USE_LOCAL_API=false` |
+| Legacy test seam | `chat_service.StudentChatEngine` | Compatibility/unit tests only; does not mutate learning stages |
 
-Do not add new coaching behaviour only to the legacy engine. The next
-architecture step (including AWS cutover) is to collapse onto the API/workflow
-path and retire `StudentChatEngine` for student turns.
+Do not add new coaching behaviour to the legacy engine. Student turns already
+use the API/workflow application path or its in-process equivalent;
+`StudentChatEngine` can be retired only after its remaining compatibility tests
+and non-student utilities are accounted for.
 
 `StudentStore` still concentrates notebooks, messages, sources, and preferences
 in one SQLite module. Repository adapters in `repositories.py` already narrow
 some access; when CRUD moves fully behind API routes (local or AWS), split
 persistence along those boundaries without changing the Streamlit contracts.
 
-Source, notebook, and folder CRUD may still be called directly from the
-Streamlit UI via `StudentStore`. When migrating CRUD behind API routes,
-preserve the verified UI behavior and existing SQLite data.
+Streamlit panels call `ui.runtime.WorkspaceFacade`, which selects typed FastAPI
+CRUD in API mode or `WorkspaceService` in process. Panels must not call
+`StudentStore` directly. Folder organization has been removed from the current
+UI; the ignored `folder_id` argument is compatibility-only and must not be
+documented as a current feature.
 
 ## Common edit paths
 
 **Add or change an API route**
 
 `domain.py` (request/response models) → `application.py` or service →
-`api.py` → `api_client.py` → targeted tests in `tests/test_api.py`.
+`api.py` → `api_client.py` → targeted route/client tests. Keep owner
+resolution injected from `create_app`; moving a route must not weaken
+`Depends(current_owner)` or alter its OpenAPI contract.
 
 **Change stage behavior or coaching output**
 

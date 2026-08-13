@@ -29,6 +29,14 @@ from .settings import settings
 
 
 _COACH_IDEMPOTENCY_MARKER = "coach_idempotency"
+_FACIONE_SCORE_KEYS = (
+    "analysis",
+    "interpretation",
+    "inference",
+    "evaluation",
+    "explanation",
+    "self_regulation",
+)
 
 
 class CoachIdempotencyConflictError(ValueError):
@@ -45,6 +53,10 @@ class CoachRequestInProgressError(RuntimeError):
 
 class ConversationRevisionConflictError(ValueError):
     """Raised when a coach result targets a stale conversation_revision."""
+
+
+class CoachingStyleConflictError(ConversationRevisionConflictError):
+    """Raised when coaching style changes while a coach turn is in flight."""
 
 
 @dataclass(frozen=True)
@@ -71,6 +83,15 @@ class CoachRequestReservation:
     marker_id: str
     lease_token: str | None = None
     turn_payload: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class AutoAdvancePersistence:
+    """Final stage state persisted atomically with an auto-advanced coach turn."""
+
+    from_stage: str
+    to_stage: str
+    contribution_note: str
 
 
 def utc_now() -> str:
@@ -104,6 +125,7 @@ _PROGRESS_KEYS = frozenset(
         "learning_summary",
         "understanding_change",
         "critical_understanding",
+        "strict_facione_baseline",
     }
 )
 
@@ -1025,9 +1047,12 @@ class StudentStore:
                 "SELECT code_verifier, expires_at FROM oauth_login_states WHERE state = ?",
                 (state_value,),
             ).fetchone()
+            # Every callback is also a bounded cleanup point for abandoned
+            # one-time login states. The requested state remains one-use even
+            # when it has not expired.
             connection.execute(
-                "DELETE FROM oauth_login_states WHERE state = ?",
-                (state_value,),
+                "DELETE FROM oauth_login_states WHERE state = ? OR expires_at <= ?",
+                (state_value, now_value),
             )
             if row is None:
                 return None
@@ -1380,6 +1405,10 @@ class StudentStore:
                 raise ValueError("Chat not found")
             thread = self._thread_dict(row)
             current_meta = dict(thread.get("metadata") or {})
+            existing_journey = dict(current_meta.get("learning_journey") or {})
+            previous_detail = str(
+                existing_journey.get("response_detail") or "short"
+            ).lower()
             if metadata:
                 current_meta = {**current_meta, **metadata}
                 if "learning_journey" in metadata and isinstance(
@@ -1389,10 +1418,53 @@ class StudentStore:
                     # journey snapshot. Public API models exclude this field.
                     current_meta["learning_journey"] = metadata["learning_journey"]
                 journey_meta = dict(current_meta.get("learning_journey") or {})
+                if (
+                    "strict_facione_baseline" in existing_journey
+                    and "strict_facione_baseline" not in journey_meta
+                ):
+                    # The first Strict-mode baseline is an immutable comparison
+                    # point. Trusted whole-journey refreshes must not erase it.
+                    journey_meta["strict_facione_baseline"] = existing_journey[
+                        "strict_facione_baseline"
+                    ]
                 for key in _PROGRESS_KEYS:
                     if key in metadata:
                         journey_meta[key] = metadata[key]
                 current_meta["learning_journey"] = journey_meta
+            journey_meta = dict(current_meta.get("learning_journey") or {})
+            next_detail = str(
+                journey_meta.get("response_detail")
+                or current_meta.get("response_detail")
+                or "short"
+            ).lower()
+            detail_changed = (
+                next_detail in {"short", "long"} and next_detail != previous_detail
+            )
+            if detail_changed:
+                active_revision = self._notebook_revision_value(row)
+                if (
+                    previous_detail == "short"
+                    and next_detail == "long"
+                    and "strict_facione_baseline" not in journey_meta
+                ):
+                    journey_meta["strict_facione_baseline"] = (
+                        self._strict_facione_baseline(
+                            connection,
+                            thread_id,
+                            active_revision,
+                        )
+                    )
+                    current_meta["learning_journey"] = journey_meta
+                now = utc_now()
+                connection.execute(
+                    f"""
+                    UPDATE messages
+                    SET decision_status='rejected', decision_at=?
+                    WHERE notebook_id=? AND decision_status='pending'
+                      AND {self._active_at_revision_sql()}
+                    """,
+                    (now, thread_id, active_revision, active_revision),
+                )
             current_stage, progress_text, settings_text = self._split_notebook_metadata(
                 current_meta
             )
@@ -1413,11 +1485,61 @@ class StudentStore:
                     current_stage,
                     progress_text,
                     settings_text,
-                    utc_now(),
+                    now if detail_changed else utc_now(),
                     thread_id,
                     self.owner_id,
                 ),
             )
+
+    def _strict_facione_baseline(
+        self,
+        connection: Any,
+        thread_id: str,
+        active_revision: int,
+    ) -> dict[str, Any]:
+        """Aggregate active legacy/Quick scores for the first Strict switch.
+
+        Strict-tagged assessments are excluded so the durable snapshot measures
+        evidence accumulated before Strict coaching began. Superseded history is
+        excluded with the same active-revision predicate used by chat history.
+        """
+        rows = connection.execute(
+            f"""
+            SELECT id, assessment_text, metadata_text, created_at FROM messages
+            WHERE notebook_id=? AND role='assistant'
+              AND assessment_text IS NOT NULL
+              AND {self._active_at_revision_sql()}
+            ORDER BY created_at ASC, id ASC
+            """,
+            (thread_id, active_revision, active_revision),
+        ).fetchall()
+        baseline = {key: 0 for key in _FACIONE_SCORE_KEYS}
+        captured_through: dict[str, str] | None = None
+        for message in rows:
+            metadata = _load(message["metadata_text"], {})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            profile = str(metadata.get("coaching_profile") or "").strip().lower()
+            if profile not in {"", "quick"}:
+                continue
+            assessment = _load(message["assessment_text"], None)
+            if not isinstance(assessment, dict):
+                continue
+            assessment_scores = assessment.get("facione_scores")
+            if not isinstance(assessment_scores, dict):
+                continue
+            for key in _FACIONE_SCORE_KEYS:
+                try:
+                    score = int(assessment_scores.get(key, 0))
+                except (TypeError, ValueError):
+                    score = 0
+                baseline_score = max(0, min(4, score))
+                baseline[key] = max(baseline[key], baseline_score)
+            captured_through = {
+                "created_at": str(message["created_at"] or ""),
+                "message_id": str(message["id"]),
+            }
+        return {"scores": baseline, "captured_through": captured_through}
 
     def select_learning_stage(self, thread_id: str, stage_id: str) -> dict[str, Any]:
         """Select any non-current stage and reject active pending transitions.
@@ -2139,6 +2261,7 @@ class StudentStore:
         *,
         expected_stage: str,
         expected_conversation_revision: int,
+        expected_response_detail: str | None = None,
         user_content: str,
         user_metadata: dict[str, Any],
         assistant_content: str,
@@ -2151,18 +2274,22 @@ class StudentStore:
         idempotency_key: str | None = None,
         idempotency_lease_token: str | None = None,
         idempotency_fingerprint: str | None = None,
+        auto_advance: AutoAdvancePersistence | None = None,
     ) -> tuple[str, str]:
         """Persist one completed coaching turn in a single DB transaction.
 
         Provider, retrieval, and object-storage work must finish before this
         method is called. The user row, assistant assessment/citations/pending
         decision, and notebook summary either commit together or roll back.
+        When supplied, ``expected_response_detail`` rejects a coach result
+        generated under a style that changed while provider work was in flight.
 
         When ``existing_user_message_id`` is set (edit/revise path), the user
         message is already durable from the revision transaction. Content is not
         rewritten destructively; metadata may be refreshed without clearing
         lineage columns. An assistant row stamped with the expected revision is
-        inserted.
+        inserted. When ``auto_advance`` is supplied, the final assistant reply,
+        confirmed transition audit, and next notebook stage commit atomically.
         """
         cleaned_user = user_content.strip()
         cleaned_assistant = assistant_content.strip()
@@ -2176,10 +2303,19 @@ class StudentStore:
         proposed_stage = assistant_meta.pop("proposed_stage", None)
         decision_status = assistant_meta.pop("decision_status", None)
         assistant_meta.pop("pending_transition_id", None)
-        if decision_status and decision_status != "pending":
-            raise ValueError("New coach transition status must be pending")
+        allowed_status = "confirmed" if auto_advance is not None else "pending"
+        if decision_status and decision_status != allowed_status:
+            raise ValueError(
+                f"New coach transition status must be {allowed_status}"
+            )
         if bool(proposed_stage) != bool(decision_status):
-            raise ValueError("Pending coach transitions require a proposed stage")
+            raise ValueError("Coach transitions require a proposed stage")
+        if auto_advance is not None:
+            if (
+                auto_advance.from_stage != expected_stage
+                or auto_advance.to_stage != proposed_stage
+            ):
+                raise ValueError("Auto-advance state does not match the coach transition")
 
         with self._lock, self._connect() as connection:
             notebook = connection.execute(
@@ -2198,6 +2334,21 @@ class StudentStore:
                 raise ConversationRevisionConflictError(
                     "The conversation was revised before the coaching turn was saved"
                 )
+            if expected_response_detail is not None:
+                expected_detail = str(expected_response_detail).strip().lower()
+                if expected_detail not in {"short", "long"}:
+                    raise ValueError("Invalid expected coaching response detail")
+                fresh_thread = self._thread_dict(notebook)
+                fresh_journey = dict(
+                    (fresh_thread.get("metadata") or {}).get("learning_journey") or {}
+                )
+                persisted_detail = str(
+                    fresh_journey.get("response_detail") or "short"
+                ).lower()
+                if persisted_detail != expected_detail:
+                    raise CoachingStyleConflictError(
+                        "The coaching style changed before the coaching turn was saved"
+                    )
             if idempotency_marker_id is not None:
                 marker = connection.execute(
                     "SELECT metadata_text FROM messages WHERE id=? AND notebook_id=?",
@@ -2271,7 +2422,7 @@ class StudentStore:
                         active_revision,
                     ),
                 )
-            if decision_status == "pending":
+            if decision_status in {"pending", "confirmed"}:
                 connection.execute(
                     f"""
                     UPDATE messages
@@ -2294,7 +2445,7 @@ class StudentStore:
                    decision_at, metadata_text, created_at,
                    conversation_revision, previous_message_id,
                    superseded_at_revision)
-                VALUES (?, ?, 'assistant', ?, 0, ?, ?, ?, ?, NULL, ?, ?,
+                VALUES (?, ?, 'assistant', ?, 0, ?, ?, ?, ?, ?, ?, ?,
                         ?, NULL, NULL)
                 """,
                 (
@@ -2305,6 +2456,7 @@ class StudentStore:
                     _dump(cited) if cited is not None else None,
                     proposed_stage,
                     decision_status,
+                    assistant_created_at if decision_status == "confirmed" else None,
                     _dump(assistant_meta),
                     assistant_created_at,
                     active_revision,
@@ -2322,11 +2474,39 @@ class StudentStore:
             for key in _PROGRESS_KEYS:
                 if key in summary_metadata:
                     journey_meta[key] = summary_metadata[key]
+            if auto_advance is not None:
+                from backend.student_journey import (
+                    complete_and_advance,
+                    current_stage,
+                    normalize_journey,
+                )
+
+                fresh_journey = normalize_journey(
+                    dict(thread.get("metadata") or {}).get("learning_journey")
+                )
+                if current_stage(fresh_journey).id != auto_advance.from_stage:
+                    raise ValueError(
+                        "The notebook stage changed before auto-advance was saved"
+                    )
+                journey_meta = complete_and_advance(
+                    fresh_journey,
+                    note=auto_advance.contribution_note,
+                )
+                if current_stage(journey_meta).id != auto_advance.to_stage:
+                    raise ValueError(
+                        "Auto-advance destination does not match the learning journey"
+                    )
+                for key in _PROGRESS_KEYS:
+                    if key in summary_metadata:
+                        journey_meta[key] = summary_metadata[key]
             current_meta["learning_journey"] = journey_meta
             stage, progress_text, settings_text = self._split_notebook_metadata(
                 current_meta
             )
-            if stage != expected_stage:
+            expected_persisted_stage = (
+                auto_advance.to_stage if auto_advance is not None else expected_stage
+            )
+            if stage != expected_persisted_stage:
                 raise ValueError("Coach summary cannot change the notebook stage")
             title = generated_title or notebook["title"]
             updated = connection.execute(

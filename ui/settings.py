@@ -15,16 +15,6 @@ from ui.constants import APPEARANCE_MODES, DEFAULT_APPEARANCE
 from ui.runtime import store
 
 
-def persist_response_language() -> None:
-    """Persist the response language immediately when its setting changes."""
-    chosen_language = str(st.session_state.setting_response_language)
-    st.session_state.response_language = chosen_language
-    store.update_thread(
-        st.session_state.thread_id,
-        metadata={"response_language": chosen_language},
-    )
-
-
 def apply_selected_model(model_id: str, *, effort: str | None = None) -> None:
     """Apply a model choice and keep reasoning effort compatible with it.
 

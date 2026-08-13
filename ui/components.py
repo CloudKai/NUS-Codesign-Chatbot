@@ -152,15 +152,30 @@ _FACIONE_ROWS: tuple[tuple[str, str], ...] = (
 )
 
 
-def facione_scores_table_html(scores: dict[str, int] | None) -> str:
+def facione_scores_table_html(
+    scores: dict[str, int] | None,
+    *,
+    coaching_style: str = "short",
+) -> str:
     """Return a neutral numeric Facione dimension table.
 
     Scores use ``0`` not started through ``4`` Strong. Missing keys render as
     not started so legacy assessments stay readable. Canonical rubric labels
     remain in the cell's accessible name; the accompanying rubric glyph is a
-    supplementary, aria-hidden visual cue with a hover title.
+    supplementary, aria-hidden visual cue with a hover title. The note identifies
+    the active score profile without changing the rubric semantics.
     """
     source = scores or {}
+    if coaching_style == "long":
+        reflection_note = (
+            "Existing progress is retained; future evidence uses the higher "
+            "Strict threshold. Intended to support reflection, not grading."
+        )
+    else:
+        reflection_note = (
+            "Based on the strongest evidence demonstrated under the Quick profile. "
+            "Intended to support reflection, not grading."
+        )
     rows: list[str] = []
     for key, label in _FACIONE_ROWS:
         try:
@@ -198,8 +213,7 @@ def facione_scores_table_html(scores: dict[str, int] | None) -> str:
         "<th scope=\"col\">Score</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody>"
         "</table>"
-        '<p class="facione-note">Based on the strongest evidence demonstrated '
-        "across this conversation. Intended to support reflection, not grading.</p>"
+        f'<p class="facione-note">{escape(reflection_note)}</p>'
         "</div></section>"
     )
 

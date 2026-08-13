@@ -365,7 +365,10 @@ def render_learning_review(journey: dict[str, Any]) -> None:
         unsafe_allow_html=True,
     )
     st.markdown(
-        facione_scores_table_html(review.get("facione_scores")),
+        facione_scores_table_html(
+            review.get("facione_scores"),
+            coaching_style=journey["response_detail"],
+        ),
         unsafe_allow_html=True,
     )
     with st.expander("Strengths", expanded=False):

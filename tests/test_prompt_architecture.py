@@ -193,7 +193,9 @@ def test_composer_includes_source_context_and_bounds_history():
     assert "message-19-" in text
     assert "message-0-" not in text
     assert len(text) <= composer_module.MAX_COMPOSED_PROMPT_CHARS
-    assert "Guidance mode: Complex" in text
+    assert "Guidance mode: Strict" in text
+    assert "choose the lower level when evidence falls between rubric levels" in text
+    assert "a 4 requires precise, well-supported" in text
     assert (
         len(source) > composer_module.MAX_RETRIEVED_CONTEXT_CHARS
         or "older pedestrians" in text
@@ -229,6 +231,8 @@ def test_composer_trims_dynamic_context_before_mandatory_sections(monkeypatch):
     assert student_message in text
     assert "<runtime_instructions>" in text
     assert "Guidance mode: Quick" in text
+    assert "Use the standard Facione calibration" in text
+    assert "Guidance mode: Strict" not in text
     assert text.index("<shared_coaching>") < text.index("<student_message>")
     assert text.index("<student_message>") < text.index("<runtime_instructions>")
     # Huge retrieval is clipped; whole-PDF injection is refused by budget.

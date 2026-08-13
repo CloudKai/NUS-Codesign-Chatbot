@@ -23,7 +23,7 @@ from backend.student_journey import default_journey, normalize_journey
 from backend.student_support import DEFAULT_SUPPORT_MODE
 
 from ui.coach_welcome import seed_coach_welcome
-from ui.constants import APPEARANCE_MODES, DEFAULT_APPEARANCE, RESPONSE_LANGUAGES
+from ui.constants import APPEARANCE_MODES, DEFAULT_APPEARANCE
 from ui.layout.column_resize import set_side_panel_collapsed
 from ui.rename import bump_rename_epoch, discard_rename_draft
 from ui.runtime import rerun_app, store
@@ -214,10 +214,7 @@ def select_thread(thread_id: str, should_rerun: bool = True) -> None:
     journey = normalize_journey(raw_journey)
     st.session_state.learning_journey = journey
     st.session_state.response_detail = journey["response_detail"]
-    language = str(metadata.get("response_language") or "English")
-    st.session_state.response_language = (
-        language if language in RESPONSE_LANGUAGES else "English"
-    )
+    st.session_state.response_language = "English"
     st.session_state.assignment = {
         **{"title": "", "course": "", "brief": "", "rubric": ""},
         **(metadata.get("assignment") or {}),
@@ -249,6 +246,6 @@ def save_journey(journey: dict[str, Any]) -> None:
         st.session_state.thread_id,
         metadata={
             "response_detail": normalized["response_detail"],
-            "response_language": st.session_state.get("response_language", "English"),
+            "response_language": "English",
         },
     )

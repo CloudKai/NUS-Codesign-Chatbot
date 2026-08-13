@@ -330,6 +330,17 @@ a.cd-auth-refresh-link[data-cd-auth-refresh="1"] {
     height:10px;
 }
 
+/* Redirecting is followed by a fragment-owned sign-in button. Remove the
+ * status wrapper's bottom padding and cancel Streamlit's .75rem sibling gap;
+ * the button container below supplies the single compact 4px gap. */
+.st-key-auth_login_card .st-key-auth-redirecting {
+    margin-bottom:calc(-0.75rem) !important;
+}
+
+.st-key-auth_login_card .st-key-auth-redirecting .cd-auth-gap-after-course-notice {
+    padding-bottom:0 !important;
+}
+
 /* Config-error alert: keep Streamlit's outer gap from stacking on the spacer. */
 .st-key-auth_login_card .st-key-auth-config-error {
     margin-top:0 !important;
@@ -389,6 +400,10 @@ a.cd-auth-refresh-link[data-cd-auth-refresh="1"] {
 .st-key-auth_login_card .st-key-auth-sign-in {
     margin-top:10px !important;
     padding-top:0 !important;
+}
+
+.st-key-auth_login_card:has(.st-key-auth-redirecting) .st-key-auth-sign-in {
+    margin-top:4px !important;
 }
 
 /* Navigation fallback is deliberately hidden; the original Streamlit button

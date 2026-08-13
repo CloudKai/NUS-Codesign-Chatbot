@@ -49,7 +49,7 @@ def test_workflow_returns_unpersisted_recommendation_without_stage_change(tmp_pa
     assert (metadata.get("learning_journey") or {}).get("completed_stages") == []
 
 
-def test_guided_mock_changes_its_question_then_recommends_progress(tmp_path):
+def test_quick_mock_changes_its_question_then_recommends_progress(tmp_path):
     store = StudentStore(tmp_path / "guided.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     workflow = CoachWorkflow(
@@ -66,7 +66,15 @@ def test_guided_mock_changes_its_question_then_recommends_progress(tmp_path):
                     "role": "user",
                     "content": "I want to evaluate a crossing design.",
                     "metadata": {"thinking_stage": "focus"},
-                }
+                },
+                {
+                    "role": "assistant",
+                    "content": first.response_text,
+                    "metadata": {
+                        "coaching_profile": "quick",
+                        "assessment": first.assessment.model_dump(mode="json"),
+                    },
+                },
             ],
         }
     )

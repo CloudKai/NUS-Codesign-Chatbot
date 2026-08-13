@@ -1,180 +1,186 @@
-# Local LangGraph demonstration architecture
+# Local demonstration architecture
 
-## Goal
+## Purpose and authority
 
-Evolve Co-design Chatbot into a professional local demonstration for a
-professor: a student uses the existing Streamlit research workspace while the
-backend visibly executes a single critical-thinking workflow. The local system
-must work without AWS, internet access, or paid model APIs in mock mode.
+This document is the architecture authority for Co-design Chatbot. It records
+both the **implemented architecture** and explicit **target work**. A target is
+not evidence that a feature exists. The working application and regression
+tests remain the behavior specification.
 
-The target architecture is:
+The application is a student-facing critical-thinking coach with a Streamlit
+workspace, a typed FastAPI boundary, one six-stage LangGraph workflow, local or
+AWS-backed persistence adapters, and replaceable model/retrieval providers.
+Automated development must work without AWS, internet access, or paid model
+calls.
+
+## Implemented system
 
 ```text
-Streamlit UI -> typed FastAPI client -> FastAPI /api/v1 -> application services
-    -> one LangGraph coach workflow -> model/retrieval/storage ports
-    -> Ollama or mock model, SQLite, local files, and local vector search
+Browser
+  -> Streamlit presentation (streamlit_app.py, ui/)
+       -> WorkspaceFacade
+            -> typed LocalApiClient -> FastAPI /api/v1       [normal startup]
+            -> WorkspaceService in process                   [development fallback]
+       -> typed CoachRequest
+            -> FastAPI or CoachApplicationService in process
+                 -> authoritative store/repositories
+                 -> selected-source LocalChunkRetriever
+                 -> one CoachWorkflow / LangGraph
+                 -> configured mock or OpenAI provider
+                 -> SQLite + local files, or DSQL + S3
 ```
 
-OpenAI remains an optional provider. Future AWS adapters may provide Bedrock,
-S3, DynamoDB/Aurora, Cognito, and CloudWatch behind the same ports. Do not add
-AWS services to the required local runtime.
+`scripts/start.sh` is the canonical local launcher. It starts FastAPI and
+Streamlit and forces `USE_LOCAL_API=true`. When API mode is disabled, Streamlit
+still uses the same application/workflow services in process. The legacy
+`StudentChatEngine` is retained for compatibility tests and is not the current
+student-turn fallback.
 
-## Compatibility baseline
+### Current boundaries
 
-Preserve the current Streamlit NotebookLM-inspired UI and its existing
-capabilities:
+| Layer | Implemented responsibility |
+|---|---|
+| Presentation | `ui/` renders state and calls `ui.runtime.WorkspaceFacade` and typed coach helpers. Panels do not open SQLite, read source paths, or call model SDKs. |
+| API | `backend/api.py` composes owner-scoped workspace CRUD plus versioned health/readiness, auth, learning, revise, coach/stream, graph, and transition routes. |
+| Application | `CoachApplicationService`, `WorkspaceService`, and `LearningProgressService` orchestrate use cases and transactions. |
+| Domain/workflow | Pydantic contracts, six stage definitions, prompt composition, structured assessment validation, and one `CoachWorkflow`. |
+| Persistence | `StudentStore`/`DsqlStudentStore`, narrow repository adapters, and local/S3 `FileStorage` implementations. |
+| Providers/retrieval | Deterministic mock and OpenAI coach adapters plus a notebook-scoped local selected-source retriever. |
 
-- notebooks, folders, history, source upload/selection/preview/download/removal;
-- source-grounded conversation, stable citations, streaming, model selection,
-  short/long response modes, and local persistence;
-- the six thinking stages: Focus, Evidence, Assumptions, Perspectives,
-  Synthesis, and Conclusion;
+Folder organization is not a current UI/API feature. An ignored `folder_id`
+parameter remains only for compatibility. Do not restore folders merely to
+match older documentation.
+
+### Implemented versus target
+
+| Concern | Implemented now | Target / intentionally deferred |
+|---|---|---|
+| Coaching workflow | One LangGraph flow: load → assess → recommend → format | Further graph decomposition only when it preserves the same educational contract |
+| Graph checkpoint | LangGraph `MemorySaver`; graph inspection is process-local | Durable graph inspection/checkpoint adapter if operationally required |
+| Durable learning state | Messages, assessments, pending/resolved transitions, journey metadata, idempotency markers, and conversation revisions persist in SQLite/DSQL | No separate graph-state table is currently planned |
+| Streaming | Early status event, then buffered completed response split into NDJSON token events | True upstream provider-token streaming |
+| Edit | Append-only user-message revise/resubmit with revision CAS and stable idempotency key | Regenerate remains unavailable |
+| Workspace | Notebook, message, source, preference, learning, and transition APIs | No folder API; no unrestricted metadata API |
+| Retrieval | Query-time deterministic lexical chunking/ranking over selected sources | Bedrock Knowledge Base adapter behind the same retrieval contract |
+| Production storage | DSQL and S3 adapters/configuration exist; live cutover remains an operator gate | Live wire-level DSQL/S3 proof and future Bedrock course-material path |
+
+## Behavior compatibility baseline
+
+Preserve:
+
+- notebooks, history, source upload/selection/preview/download/removal;
+- source-grounded conversation, stable citations, buffered streaming status,
+  model configuration, Quick/Strict coaching profiles backed by the compatible
+  ``short``/``long`` values, and persistence;
+- Focus, Evidence, Assumptions, Perspectives, Synthesis, and Conclusion;
 - prompt summaries, learning summaries, working conclusions, changes in
-  understanding, and critical-understanding assessment.
+  understanding, and critical-understanding assessment;
+- confirmation-gated progression, audited auto-advance, and audited student
+  stage selection according to configuration;
+- append-only message revision history and existing SQLite/DSQL data semantics;
+- authenticated owner isolation and notebook-scoped retrieval/object keys.
 
-Existing SQLite data, local source files, thread identities, and user-visible
-entrypoints must remain usable. Schema changes require explicit migrations,
-safe defaults, backup instructions, and a tested rollback path.
-
-## Target layers and interfaces
-
-### Presentation
-
-Streamlit remains the frontend entrypoint. It only renders state and calls a
-typed API client; it must not call SQLite, local files, model SDKs, LangChain,
-or LangGraph directly.
-
-### API
-
-FastAPI exposes typed, versioned routes below `/api/v1`, consistent structured
-errors, streaming chat, and development-only graph inspection. At minimum,
-cover health/readiness, provider availability, notebooks, folders, history,
-chat/edit/regenerate, source CRUD and selection, learning state, pending phase
-transitions, and transition confirmation/rejection.
-
-The graph inspection route must not expose secrets, hidden prompts, or raw
-private filesystem paths.
-
-### Application and domain
-
-Introduce framework-independent services and typed domain objects for chat,
-notebooks, sources, learning state, phase transitions, routing, citations, and
-usage. Model external input and output with Pydantic.
-
-Use narrow dependency-injected ports, including:
-
-- `ChatModelProvider` and `EmbeddingProvider`;
-- `KnowledgeRepository`, `ConversationRepository`, `NotebookRepository`,
-  `LearningStateRepository`, and `PhaseTransitionRepository`;
-- `FileStorage`, `CoachWorkflow`, and `ModelRouter`.
-
-Local SQLite, local filesystem, local vector search, Ollama, OpenAI, and mock
-implementations live in infrastructure. Do not leak their response schemas
-into domain or application code.
+Existing SQLite data, source files, notebook identities, and user-visible
+entrypoints must remain usable. Schema changes require explicit additive
+migrations, safe defaults, backup instructions, deterministic tests, and a
+rollback path. Never reset or recreate user databases as a normal startup step.
 
 ## Educational workflow
 
-Build one LangGraph workflow, not six agents. Give it explicit typed state and
-durable per-thread checkpoints.
+The server reloads authoritative notebook state, canonical active-branch
+history, selected sources, retrieval context, and image inputs. Client-supplied
+stage, history, source IDs, source context, and image payloads cannot override
+persisted ownership or learning state.
 
-Its steps are:
+For each turn the application:
 
-1. Load the notebook, canonical conversation history, and learning state.
-   Client-supplied stage, history, selected source IDs, source context, and
-   image payloads are treated as hints only; the server reloads persisted values
-   and rejects mismatches with typed 4xx responses.
-2. Retrieve evidence from selected notebook sources.
-3. Assess the student contribution against the current stage.
-4. Execute the current stage handler.
-5. Validate a structured educational assessment.
-6. Recommend staying or advancing.
-7. Persist a pending recommendation and wait for student confirmation.
-8. Generate and stream the user-facing response with citations.
-9. Update summaries, conclusion, understanding change, and learning state.
-10. Persist conversation, source snapshot, usage, and graph state.
+1. resolves the authenticated owner and notebook;
+2. validates the current conversation revision and idempotency reservation;
+3. loads canonical history, journey state, and selected sources;
+4. retrieves bounded notebook-scoped evidence;
+5. composes the shared prompt plus exactly one authoritative stage prompt;
+6. obtains and validates a structured educational assessment;
+7. normalizes the terminal Conclusion stage;
+8. persists the user/assistant turn, assessment, source audit snapshot, summary,
+   and pending/automatic transition atomically where required;
+9. exposes status, graph-summary, buffered token, and completed-turn events;
+10. replays an identical completed request without another provider call.
 
-Each assessment includes: current stage, contribution summary, stage-specific
-assessment, evidence, assumptions, missing reasoning elements,
-critical-understanding level, confidence, stay/advance recommendation,
-rationale, guidance questions, updated learning summary, working conclusion,
-understanding change, citations, Facione dimension scores (0–4 Holistic rubric
-plus not-started), supportive review strengths and improvements for the current
-stage (may be empty), and user-facing response.
+Each assessment includes the stage, contribution summary, stage assessment,
+evidence and assumption gaps, critical-understanding level, confidence,
+stay/advance recommendation, rationale, guidance questions, learning summary,
+working conclusion, understanding change, citations, six integer Facione
+dimension scores, supportive strengths/improvements, and response text.
 
-Only the student's explicit confirmation may apply an advancement in the safe
-default mode (`AUTO_ADVANCE_STAGES=false`). The system must persist the
-recommendation and confirmation/rejection event first. Remove hidden comment
-parsing, keyword-stage heuristics, and unrestricted manual advancement.
-
-Audited auto-advance (`AUTO_ADVANCE_STAGES=true`) is an explicit local demo
-override: the coach ADVANCE recommendation is applied immediately without the
-Next/confirm UI, but a transition row is still persisted for auditability. Do
-not treat auto-advance as the repository default.
+With `AUTO_ADVANCE_STAGES=false` and `STUDENT_STAGE_SELECTION=false`, an
+ADVANCE recommendation persists as pending until the student confirms it.
+With audited auto-advance enabled, it applies immediately and remains recorded.
+With `STUDENT_STAGE_SELECTION=true`, the student may select any non-current
+stage; selection takes precedence over auto-advance and does not manufacture
+completion or Facione evidence.
 
 ## Providers and retrieval
 
-Repository defaults in `.env.example` and `backend/settings.py` are cost-safe:
+Repository defaults are cost-safe:
 
 ```env
 MODEL_PROVIDER=mock
 MOCK_OPENAI=true
 AUTO_ADVANCE_STAGES=false
+STUDENT_STAGE_SELECTION=false
 USE_LOCAL_API=true
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_CHAT_MODEL=gpt-oss:20b
-OLLAMA_EMBEDDING_MODEL=<local-embedding-model>
 OPENAI_API_KEY=
 OPENAI_CHAT_MODEL=gpt-5.6-luna
 ```
 
-Set `MODEL_PROVIDER=ollama` or `openai` in a private `.env` when needed. Do not
-hard-code a model in the workflow. Give a helpful, actionable error if Ollama is
-unavailable. The mock provider must be deterministic and support all automated
-tests without network access.
+Set `MODEL_PROVIDER=openai` only in a private `.env`. Tests clear the OpenAI
+key and use deterministic providers. Provider-specific response objects must
+not escape infrastructure adapters.
 
-Retrieval is notebook-isolated and source-first. The current local adapter
-creates sentence-aware overlapping chunks from extracted selected-source text
-at query time, ranks them against the current turn plus bounded continuity,
-and records stable source/chunk audit mappings on the assistant message. It
-retrieves only selected sources from the active notebook and returns citations
-that open the correct source. Student uploads remain private. Enforce existing
-file-count and size limits, prevent path traversal, validate content types
-where practical, and preserve legacy source attachments. Future Bedrock
-Knowledge Base retrieval replaces only the retrieval adapter and must retain
-the same notebook/source filter, chunk-result contract, and citation mapping.
+Retrieval is source-first and notebook-isolated. The local adapter creates
+overlapping sentence-aware chunks at query time, ranks against the current
+turn plus bounded continuity, and persists stable source/chunk audit mappings.
+Only selected sources in the active notebook are eligible. `[S#]` labels are
+student-facing; internal chunk IDs are audit-only. A future retrieval adapter
+must preserve ownership filters, selected-source scope, bounded chunks, and
+citation mapping.
 
-## Development sequence
+## Persistence and security
 
-Work in these verified phases:
+The logical application tables are `users`, `oauth_login_states`, `notebooks`,
+`messages`, and `sources`; preferences live on the user record. Local SQLite
+uses foreign keys and additive compatibility migration. Aurora DSQL lacks those
+foreign-key guarantees, so the application performs ordered child cleanup and
+whole-unit OCC retries. See [`DATABASE.md`](DATABASE.md).
 
-1. Audit, Git/data safety baseline, and compatibility tests.
-2. Domain models, repository ports, and local repository adapters.
-3. FastAPI API and typed Streamlit API client, with old facades kept until
-   migration is complete.
-4. Structured educational assessment and one LangGraph workflow.
-5. Confirmation-based phase transitions and durable checkpoint state.
-6. Ollama, OpenAI, and deterministic mock provider adapters; local retrieval.
-7. Streamlit migration, source/citation integration, graph inspection, and
-   visual QA.
-8. Full regression, migration, restart, local-Ollama, and optional approved
-   OpenAI smoke testing.
+Cognito tokens stay in Secure/HttpOnly cookies according to environment and
+are not stored in the application database or returned in API JSON. FastAPI
+resolves the verified Cognito `sub`; every structured row, object key, source
+read, retrieval result, and delete operation remains owner-scoped. Operational
+logs must not contain prompts, source text, tokens, email addresses, or raw
+private identifiers.
 
-At every phase, update `IMPLEMENTATION_STATUS.md` with evidence before moving
-on. Do not begin a broad rewrite without first preserving behavior through
-targeted tests.
+## Development and verification sequence
 
-## Required verification
+Use small reviewable phases:
 
-Automated tests must require no paid API or internet connection. Cover domain
-validation, repository contracts, migration, graph routing, all six stages,
-stay/advance recommendations, confirmation/rejection, restart resumption,
-source selection, citations, notebook isolation, provider errors, streaming
-failures, upload safety, API contracts, and Streamlit client behavior.
+1. inspect Git/data state and establish regression evidence;
+2. add a failing deterministic regression before risky refactoring;
+3. change one cohesive boundary at a time;
+4. run the nearest focused suite;
+5. run the full mock suite and compile checks at the phase boundary;
+6. update `IMPLEMENTATION_STATUS.md` with behavior, compatibility, evidence,
+   risks, and the next exact action;
+7. perform browser or live infrastructure checks only when separately required
+   and authorized.
 
-Separately gate local Ollama and OpenAI smoke tests. UI changes require browser
-checks on desktop and 390 px mobile with a clean console.
+Required automated coverage includes domain validation, repository behavior,
+migrations, all six stages, stay/advance/selection modes, confirmation and
+rejection, restart recovery of durable business state, source selection,
+citations, notebook/owner isolation, provider failures, streaming event
+contracts, upload safety, API contracts, and Streamlit behavior.
 
-Final acceptance requires successful Streamlit and FastAPI startup, mock mode,
-Ollama operation when installed, preserved user data, streaming, grounded
-citations, inspectable graph state, confirmed progress transitions, recovery
-after restart, responsive UI, passing tests, and accurate setup documentation.
+Current automated tests do not prove live Cognito, DSQL, S3, OpenAI,
+ARM64 image execution, true provider-token streaming, or durable graph
+inspection. Those gaps must remain explicit. See [`TESTING.md`](TESTING.md) and
+the date-stamped evidence in [`MANUAL_PRODUCTION_QA.md`](MANUAL_PRODUCTION_QA.md).

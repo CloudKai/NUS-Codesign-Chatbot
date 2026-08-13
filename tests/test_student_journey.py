@@ -368,6 +368,158 @@ def test_learning_review_keeps_strongest_facione_evidence_across_turns():
     assert review["summary"] == "Later progress."
 
 
+def test_learning_review_separates_quick_and_strict_facione_evidence():
+    journey = {
+        **default_journey(),
+        "response_detail": "long",
+        "strict_facione_baseline": {
+            "analysis": 2,
+            "interpretation": 1,
+        },
+    }
+    messages = [
+        {
+            "role": "assistant",
+            "content": "Quick assessment.",
+            "metadata": {
+                "coaching_profile": "quick",
+                "assessment": {
+                    "recommendation": "stay",
+                    "learning_summary": "Quick evidence.",
+                    "facione_scores": {"analysis": 4, "evaluation": 3},
+                },
+            },
+        },
+        {
+            "role": "assistant",
+            "content": "Strict assessment.",
+            "metadata": {
+                "coaching_profile": "strict",
+                "assessment": {
+                    "recommendation": "stay",
+                    "learning_summary": "Strict evidence.",
+                    "facione_scores": {"analysis": 3, "inference": 2},
+                },
+            },
+        },
+    ]
+
+    strict_review = learning_review(messages, journey, detail="long")
+    quick_review = learning_review(messages, journey, detail="short")
+
+    assert strict_review["facione_scores"] == {
+        "analysis": 3,
+        "interpretation": 1,
+        "inference": 2,
+        "evaluation": 0,
+        "explanation": 0,
+        "self_regulation": 0,
+    }
+    assert quick_review["facione_scores"] == {
+        "analysis": 4,
+        "interpretation": 0,
+        "inference": 0,
+        "evaluation": 3,
+        "explanation": 0,
+        "self_regulation": 0,
+    }
+
+
+def test_legacy_facione_assessments_seed_both_profiles_and_baseline_is_clamped():
+    journey = normalize_journey(
+        {
+            **default_journey(),
+            "response_detail": "long",
+            "strict_facione_baseline": {
+                "analysis": 9,
+                "interpretation": "invalid",
+            },
+        }
+    )
+    messages = [
+        {
+            "role": "assistant",
+            "content": "Legacy assessment.",
+            "metadata": {
+                "assessment": {
+                    "recommendation": "stay",
+                    "learning_summary": "Legacy evidence.",
+                    "facione_scores": {"evaluation": 2},
+                }
+            },
+        }
+    ]
+
+    assert journey["strict_facione_baseline"]["analysis"] == 4
+    assert journey["strict_facione_baseline"]["interpretation"] == 0
+    assert learning_review(messages, journey, detail="short")["facione_scores"][
+        "evaluation"
+    ] == 2
+    assert learning_review(messages, journey, detail="long")["facione_scores"][
+        "evaluation"
+    ] == 2
+
+
+def test_strict_baseline_recomputes_active_evidence_through_capture_boundary():
+    journey = normalize_journey(
+        {
+            **default_journey(),
+            "response_detail": "long",
+            "strict_facione_baseline": {
+                # This snapshot may contain evidence later removed by revision.
+                "scores": {"analysis": 4, "evaluation": 3},
+                "captured_through": {
+                    "created_at": "2026-01-02T00:00:00+00:00",
+                    "message_id": "baseline-last",
+                },
+            },
+        }
+    )
+    messages = [
+        {
+            "id": "active-legacy",
+            "createdAt": "2026-01-01T00:00:00+00:00",
+            "role": "assistant",
+            "metadata": {
+                "assessment": {
+                    "recommendation": "stay",
+                    "facione_scores": {"analysis": 2},
+                }
+            },
+        },
+        {
+            "id": "later-quick",
+            "createdAt": "2026-01-03T00:00:00+00:00",
+            "role": "assistant",
+            "metadata": {
+                "coaching_profile": "quick",
+                "assessment": {
+                    "recommendation": "stay",
+                    "facione_scores": {"analysis": 4, "evaluation": 4},
+                },
+            },
+        },
+        {
+            "id": "strict-turn",
+            "createdAt": "2026-01-04T00:00:00+00:00",
+            "role": "assistant",
+            "metadata": {
+                "coaching_profile": "strict",
+                "assessment": {
+                    "recommendation": "stay",
+                    "facione_scores": {"inference": 3},
+                },
+            },
+        },
+    ]
+
+    scores = learning_review(messages, journey, detail="long")["facione_scores"]
+
+    assert scores["analysis"] == 2
+    assert scores["evaluation"] == 0
+    assert scores["inference"] == 3
+
+
 def test_learning_review_ignores_superseded_assessment_branch(tmp_path):
     from backend.student_store import StudentStore
 

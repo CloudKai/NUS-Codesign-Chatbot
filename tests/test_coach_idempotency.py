@@ -30,7 +30,12 @@ from backend.student_store import (
 from backend.workflow import CoachWorkflow
 
 
-def _service(store: StudentStore, provider: DeterministicCoachProvider) -> CoachApplicationService:
+def _service(
+    store: StudentStore,
+    provider: DeterministicCoachProvider,
+    *,
+    auto_advance_stages: bool = False,
+) -> CoachApplicationService:
     """Build the normal application path with an inspectable mock provider."""
     notebooks = SQLiteNotebookRepository(store)
     transitions = SQLitePhaseTransitionRepository(store)
@@ -40,6 +45,7 @@ def _service(store: StudentStore, provider: DeterministicCoachProvider) -> Coach
         notebooks,
         workflow,
         LearningProgressService(store, notebooks, transitions),
+        auto_advance_stages=auto_advance_stages,
     )
 
 
@@ -76,6 +82,30 @@ class CountingProvider(DeterministicCoachProvider):
         return super().assess(request)
 
 
+class LanguageRecordingProvider(CountingProvider):
+    """Record the authoritative language received by the provider."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.languages: list[str] = []
+
+    def assess(self, request: CoachRequest):  # type: ignore[override]
+        self.languages.append(request.response_language)
+        return super().assess(request)
+
+
+class DetailRecordingProvider(CountingProvider):
+    """Record the server-authoritative response detail seen by the provider."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.details: list[str] = []
+
+    def assess(self, request: CoachRequest):  # type: ignore[override]
+        self.details.append(request.response_detail)
+        return super().assess(request)
+
+
 class _SqliteDsqlProxy:
     """SQLite transaction facade used to exercise the pathless DSQL adapter."""
 
@@ -99,6 +129,15 @@ class _SqliteDsqlProxy:
         self.connection.close()
 
 
+class _FailingNotebookUpdateProxy(_SqliteDsqlProxy):
+    """Inject one transaction failure after coach messages are inserted."""
+
+    def execute(self, sql: str, params=None):
+        if "UPDATE notebooks\n                SET title=" in sql:
+            raise RuntimeError("simulated notebook update failure")
+        return super().execute(sql, params)
+
+
 def _dsql_store_over_sqlite(database, owner: StudentStore) -> DsqlStudentStore:
     """Build one independent DSQL adapter instance over a shared test database."""
     dsql_store = object.__new__(DsqlStudentStore)
@@ -113,6 +152,55 @@ def _dsql_store_over_sqlite(database, owner: StudentStore) -> DsqlStudentStore:
     dsql_store._user = "co_design_app"
     dsql_store._install_occ_wrappers()
     return dsql_store
+
+
+def test_dsql_style_switch_uses_occ_wrapped_atomic_update(tmp_path, monkeypatch):
+    """DSQL retries the notebook style switch as one database-only unit."""
+    database = tmp_path / "dsql-style-switch.sqlite3"
+    owner = StudentStore(database)
+    thread_id = owner.create_thread(model_id="mock", support_mode="critical-thinking")
+    owner.add_message(
+        thread_id,
+        "assistant",
+        "Quick assessment",
+        metadata={
+            "coaching_profile": "quick",
+            "assessment": {
+                "current_stage": "focus",
+                "recommendation": "advance",
+                "facione_scores": {
+                    "analysis": 3,
+                    "interpretation": 0,
+                    "inference": 0,
+                    "evaluation": 0,
+                    "explanation": 0,
+                    "self_regulation": 0,
+                },
+            },
+            "proposed_stage": "evidence",
+            "decision_status": "pending",
+        },
+    )
+    dsql_store = _dsql_store_over_sqlite(database, owner)
+    import backend.persistence.dsql_student_store as dsql_module
+
+    original_transaction = dsql_module.run_dsql_transaction
+    transaction_calls = 0
+
+    def tracked_transaction(work, **kwargs):
+        nonlocal transaction_calls
+        transaction_calls += 1
+        return original_transaction(work, **kwargs)
+
+    monkeypatch.setattr(dsql_module, "run_dsql_transaction", tracked_transaction)
+
+    dsql_store.update_thread(thread_id, metadata={"response_detail": "long"})
+
+    assert transaction_calls == 1
+    journey = (dsql_store.get_thread(thread_id) or {})["metadata"]["learning_journey"]
+    assert journey["response_detail"] == "long"
+    assert journey["strict_facione_baseline"]["scores"]["analysis"] == 3
+    assert dsql_store.get_pending_phase_transition(thread_id) is None
 
 
 def test_completed_key_replays_exact_turn_after_service_restart(tmp_path):
@@ -132,6 +220,211 @@ def test_completed_key_replays_exact_turn_after_service_restart(tmp_path):
         "user",
         "assistant",
     ]
+
+
+def test_coach_service_forces_english_over_legacy_language_metadata(tmp_path):
+    """Old notebook settings and client hints cannot select another language."""
+    store = StudentStore(tmp_path / "english-only.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    store.update_thread(thread_id, metadata={"response_language": "中文"})
+    provider = LanguageRecordingProvider()
+    request = _request(thread_id, key="english-only-1").model_copy(
+        update={"response_language": "தமிழ்"}
+    )
+
+    _service(store, provider).submit(request)
+
+    assert provider.languages == ["English"]
+
+
+@pytest.mark.parametrize(
+    ("persisted_detail", "client_detail", "expected_profile"),
+    [("short", "long", "quick"), ("long", "short", "strict")],
+)
+def test_coach_service_uses_persisted_profile_and_tags_assessment_metadata(
+    tmp_path,
+    persisted_detail,
+    client_detail,
+    expected_profile,
+):
+    """A stale client cannot weaken Strict or mislabel persisted score evidence."""
+    store = StudentStore(tmp_path / f"authoritative-{persisted_detail}.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    if persisted_detail == "long":
+        store.update_thread(thread_id, metadata={"response_detail": "long"})
+    provider = DetailRecordingProvider()
+    request = _request(thread_id, key=f"profile-{persisted_detail}").model_copy(
+        update={"response_detail": client_detail}
+    )
+
+    _service(store, provider).submit(request)
+
+    assert provider.details == [persisted_detail]
+    assistant = store.get_messages(thread_id)[-1]
+    assert assistant["metadata"]["coaching_profile"] == expected_profile
+    assert "coaching_profile" not in assistant["metadata"]["assessment"]
+
+
+def test_auto_advance_replays_atomic_final_turn_after_marker_failure(
+    tmp_path, monkeypatch
+):
+    """A restart recovers the final stage and reply after marker completion fails."""
+    database = tmp_path / "auto-advance-restart.sqlite3"
+    store = StudentStore(database)
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+
+    class ConclusionProvider(CountingProvider):
+        def assess(self, request):  # type: ignore[override]
+            response, assessment = super().assess(request)
+            return response, assessment.model_copy(
+                update={"working_conclusion": "New atomic conclusion"}
+            )
+
+    provider = ConclusionProvider()
+    request = _request(
+        thread_id,
+        key="auto-advance-marker-failure",
+        message="This is a clear focus question about improving safe crossings.",
+    )
+    provider.recommendation = StageDecision.ADVANCE
+    original_complete = store.complete_coach_request
+    completion_calls = 0
+
+    def fail_first_completion(*args, **kwargs):
+        nonlocal completion_calls
+        completion_calls += 1
+        if completion_calls == 1:
+            raise RuntimeError("simulated crash after atomic coach persist")
+        return original_complete(*args, **kwargs)
+
+    monkeypatch.setattr(store, "complete_coach_request", fail_first_completion)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        _service(store, provider, auto_advance_stages=True).submit(request)
+
+    reopened = StudentStore(database)
+    replay = _service(
+        reopened, provider, auto_advance_stages=True
+    ).submit(request)
+    messages = reopened.get_messages(thread_id)
+    assistant = messages[-1]
+
+    assert provider.calls == 1
+    assert len(messages) == 2
+    assert replay.pending_transition is None
+    assert replay.auto_advanced_to == "evidence"
+    assert replay.response_text.startswith("**Examine evidence**")
+    assert assistant["content"] == replay.response_text
+    assert assistant["metadata"]["decision_status"] == "confirmed"
+    assert assistant["metadata"]["auto_advanced_to"] == "evidence"
+    assert reopened.get_pending_phase_transition(thread_id) is None
+    persisted = reopened.get_thread(thread_id)["metadata"]
+    assert persisted["thinking_stage"] == "evidence"
+    assert persisted["working_conclusion"] == "New atomic conclusion"
+    assert persisted["working_conclusion"] == replay.assessment.working_conclusion
+
+
+def test_auto_advance_preserves_fresh_same_stage_journey_metadata(tmp_path):
+    """The transaction advances from the latest notebook row, not a stale snapshot."""
+    database = tmp_path / "auto-advance-fresh-journey.sqlite3"
+    store = StudentStore(database)
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+
+    class JourneyUpdatingProvider(CountingProvider):
+        def assess(self, request):  # type: ignore[override]
+            thread = store.get_thread(thread_id)
+            journey = dict(thread["metadata"]["learning_journey"])
+            journey["stage_notes"] = {"focus": "Concurrent note"}
+            store.update_thread(
+                thread_id,
+                metadata={
+                    "learning_journey": journey,
+                    "thinking_stage": "focus",
+                },
+            )
+            return super().assess(request)
+
+    provider = JourneyUpdatingProvider()
+    provider.recommendation = StageDecision.ADVANCE
+    result = _service(store, provider, auto_advance_stages=True).submit(
+        _request(
+            thread_id,
+            key="auto-advance-fresh-journey",
+            message="A precise focus for this design problem.",
+        )
+    )
+    journey = store.get_thread(thread_id)["metadata"]["learning_journey"]
+
+    assert result.auto_advanced_to == "evidence"
+    assert journey["current_stage"] == "evidence"
+    assert journey["response_detail"] == "short"
+    assert journey["stage_notes"]["focus"] == result.assessment.contribution_summary
+
+
+def test_auto_advance_rolls_back_messages_when_notebook_update_fails(
+    tmp_path, monkeypatch
+):
+    """The final reply cannot commit without its matching next-stage state."""
+    database = tmp_path / "auto-advance-rollback.sqlite3"
+    store = StudentStore(database)
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    provider = CountingProvider()
+    provider.recommendation = StageDecision.ADVANCE
+    request = _request(
+        thread_id,
+        key="auto-advance-rollback",
+        message="Frame a precise design question about safe crossings.",
+    )
+    original_connect = store._connect
+    monkeypatch.setattr(
+        store,
+        "_connect",
+        lambda: _FailingNotebookUpdateProxy(database),
+    )
+
+    with pytest.raises(RuntimeError, match="simulated notebook update failure"):
+        _service(store, provider, auto_advance_stages=True).submit(request)
+
+    monkeypatch.setattr(store, "_connect", original_connect)
+    assert store.get_messages(thread_id) == []
+    assert store.get_thread(thread_id)["metadata"]["thinking_stage"] == "focus"
+
+    completed = _service(store, provider, auto_advance_stages=True).submit(request)
+    assert provider.calls == 2
+    assert completed.auto_advanced_to == "evidence"
+    assert len(store.get_messages(thread_id)) == 2
+
+
+def test_dsql_adapter_replays_atomic_auto_advance_without_duplicate_turn(
+    tmp_path,
+):
+    """The DSQL OCC facade preserves the atomic auto-advance command contract."""
+    database = tmp_path / "dsql-auto-advance.sqlite3"
+    owner = StudentStore(database)
+    thread_id = owner.create_thread(model_id="mock", support_mode="critical-thinking")
+    provider = CountingProvider()
+    provider.recommendation = StageDecision.ADVANCE
+    request = _request(
+        thread_id,
+        key="dsql-auto-advance",
+        message="A precise design focus for safer pedestrian crossings.",
+    )
+    first_store = _dsql_store_over_sqlite(database, owner)
+
+    first = _service(
+        first_store, provider, auto_advance_stages=True
+    ).submit(request)
+    replay_store = _dsql_store_over_sqlite(database, owner)
+    replay = _service(
+        replay_store, provider, auto_advance_stages=True
+    ).submit(request)
+
+    assert replay == first
+    assert provider.calls == 1
+    assert replay.auto_advanced_to == "evidence"
+    assert replay.pending_transition is None
+    assert replay_store.get_pending_phase_transition(thread_id) is None
+    assert replay_store.get_thread(thread_id)["metadata"]["thinking_stage"] == "evidence"
+    assert len(replay_store.get_messages(thread_id)) == 2
 
 
 def test_reused_key_with_different_payload_fails_closed(tmp_path):

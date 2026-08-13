@@ -12,7 +12,6 @@ JavaScript. Tokens are never stored in ``st.session_state`` or localStorage.
 from __future__ import annotations
 
 import json
-import math
 import time
 from typing import Any
 from urllib.parse import ParseResult, urlparse
@@ -26,7 +25,6 @@ from ui.runtime import rerun_app
 
 _SIGNIN_COOLDOWN_SECONDS = 5.0
 _SIGNIN_COOLDOWN_QUERY_PARAM = "signin_cooldown_until"
-_SIGNIN_COOLDOWN_RESTORE_GRACE_SECONDS = 30.0
 
 
 def _is_allowed_http_origin(parsed: ParseResult) -> bool:
@@ -78,6 +76,22 @@ def authenticated_user() -> dict[str, Any] | None:
     st.session_state.pop("_auth_refresh_attempted", None)
     _clear_signin_pending_state()
     return user
+
+
+def clear_authenticated_refresh_marker() -> None:
+    """Remove the one-shot refresh marker after authentication succeeds.
+
+    The marker remains available to the signed-out path for loop prevention,
+    but it has no purpose once FastAPI has verified the current session.
+    Unrelated query parameters are preserved.
+    """
+    try:
+        if st.query_params.get("auth_refreshed") == "1":
+            del st.query_params["auth_refreshed"]
+    except Exception:
+        # URL cleanup must never turn a valid authenticated session into an
+        # application error on older Streamlit query-param implementations.
+        return
 
 
 def is_logged_in() -> bool:
@@ -320,7 +334,6 @@ def start_login() -> None:
     st.session_state["_auth_launch_cognito"] = True
     st.session_state["_auth_signin_redirecting"] = True
     st.session_state["_auth_signin_cooldown_until"] = deadline
-    _set_signin_cooldown_query_marker(deadline)
 
 
 def _clear_signin_pending_state() -> None:
@@ -334,16 +347,6 @@ def _clear_signin_pending_state() -> None:
     _clear_signin_cooldown_query_marker()
 
 
-def _set_signin_cooldown_query_marker(deadline: float) -> None:
-    """Keep a non-sensitive deadline in this tab's URL for one Back recovery."""
-    try:
-        st.query_params[_SIGNIN_COOLDOWN_QUERY_PARAM] = f"{deadline:.6f}"
-    except Exception:
-        # A missing query-parameter context only loses the optional Back
-        # recovery; the in-session, server-rendered cooldown remains intact.
-        return
-
-
 def _clear_signin_cooldown_query_marker() -> None:
     """Remove the one-tab cooldown marker without touching other query state."""
     try:
@@ -354,40 +357,21 @@ def _clear_signin_cooldown_query_marker() -> None:
 
 
 def _restore_signin_pending_state_from_query_marker() -> None:
-    """Restore a signed-out cooldown after Cognito navigation starts a new session.
+    """Consume a legacy cooldown marker as a cancelled Cognito navigation.
 
-    The marker is UI-only and holds a server-created epoch deadline. Invalid,
-    stale, or implausibly future values are ignored. It never authorizes a user
-    or affects the Cognito/OAuth flow, and is consumed after one fresh render.
+    Older builds persisted the temporary sign-in cooldown in the URL. Browser
+    Return/Back then incorrectly restored a stale ``Redirecting...`` status.
+    New launches keep cooldown state only in the active Streamlit session; an
+    old marker now clears pending UI state and returns to the normal sign-in
+    control. This marker never participates in OAuth validation.
     """
-    if any(
-        key in st.session_state
-        for key in (
-            "_auth_launch_cognito",
-            "_auth_signin_cooldown_until",
-            "_auth_signin_redirecting",
-        )
-    ):
-        return
     try:
-        raw_deadline = st.query_params.get(_SIGNIN_COOLDOWN_QUERY_PARAM)
+        has_marker = _SIGNIN_COOLDOWN_QUERY_PARAM in st.query_params
     except Exception:
         return
-    _clear_signin_cooldown_query_marker()
-    try:
-        deadline = float(raw_deadline)
-    except (TypeError, ValueError):
+    if not has_marker:
         return
-    now = time.time()
-    if (
-        not math.isfinite(deadline)
-        or deadline < now - _SIGNIN_COOLDOWN_RESTORE_GRACE_SECONDS
-        or deadline > now + _SIGNIN_COOLDOWN_SECONDS + 1
-    ):
-        return
-    st.session_state["_auth_signin_redirecting"] = True
-    if deadline > now:
-        st.session_state["_auth_signin_cooldown_until"] = deadline
+    _clear_signin_pending_state()
 
 
 def _signin_cooldown_active() -> bool:

@@ -25,7 +25,7 @@ RetrievalResult.context → PromptContext.retrieved_course_context
     ↓
 PromptComposer (server-side, no Streamlit / OpenAI / Bedrock imports)
     ↓
-OpenAI (or Ollama / deterministic mock)
+OpenAI (or deterministic mock)
     ↓
 structured coaching response (recommendation only)
     ↓

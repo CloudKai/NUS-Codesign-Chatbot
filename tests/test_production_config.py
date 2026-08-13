@@ -65,7 +65,7 @@ def test_valid_production_configuration_passes(monkeypatch):
     [
         ("model_provider", "mock", r"MODEL_PROVIDER=mock"),
         ("mock_openai", True, r"MOCK_OPENAI"),
-        ("model_provider", "ollama", r"MODEL_PROVIDER=ollama"),
+        ("model_provider", "unsupported", r"Unsupported MODEL_PROVIDER"),
         ("openai_api_key", "", r"OPENAI_API_KEY"),
         ("database_provider", "sqlite", r"sqlite"),
         ("file_storage_provider", "local", r"local"),

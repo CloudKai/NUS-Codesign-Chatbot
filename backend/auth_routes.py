@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import logging
 from typing import Any
 from urllib.parse import urlparse
@@ -60,15 +61,40 @@ def _cognito_callback_error_category(error: str | None) -> str:
 def _login_client_key(request: Request) -> str:
     """Return a stable client key for login-start throttling.
 
-    Prefer the first ``X-Forwarded-For`` hop when present (Caddy), otherwise
-    the direct peer address. Values are truncated and never trusted for auth.
+    CloudFront and other append-mode proxies add the verified connecting
+    address on the right. Use only that final valid address; never trust a
+    client-controlled left-most entry. Caddy's default proxy behavior also
+    replaces untrusted forwarded values with its direct peer address.
+
+    This key is rate-limit metadata only and is never used for authentication
+    or ownership.
     """
-    forwarded = str(request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
-    if forwarded:
-        return forwarded[:128]
+    forwarded = str(request.headers.get("x-forwarded-for") or "")
+    candidate = forwarded.rsplit(",", 1)[-1].strip() if forwarded else ""
+    if candidate:
+        try:
+            return str(ipaddress.ip_address(candidate))
+        except ValueError:
+            pass
     client = request.client
     host = str(getattr(client, "host", "") or "").strip()
-    return (host or "unknown")[:128]
+    try:
+        return str(ipaddress.ip_address(host))
+    except ValueError:
+        return (host or "unknown")[:128]
+
+
+def _reject_cross_site_get_logout(request: Request) -> None:
+    """Reject browser cross-site GET logout while preserving normal clients.
+
+    The profile's existing same-site navigation, POST logout, and older clients
+    that omit Fetch Metadata headers retain their current behavior. Modern
+    browsers mark third-party top-level navigation as ``cross-site``; blocking
+    that case prevents logout CSRF without changing the UI contract.
+    """
+    fetch_site = str(request.headers.get("sec-fetch-site") or "").strip().lower()
+    if request.method.upper() == "GET" and fetch_site == "cross-site":
+        raise HTTPException(status_code=403, detail="Cross-site logout is not allowed")
 
 
 def _safe_ui_redirect(path_query: str = "/") -> str:
@@ -369,6 +395,7 @@ def register_auth_routes(
     @app.post("/api/v1/auth/logout")
     def auth_logout(request: Request) -> RedirectResponse:
         """Best-effort revoke refresh token, always clear cookies, return to UI."""
+        _reject_cross_site_get_logout(request)
         refresh_token = _read_cookie(request, settings.cognito_refresh_cookie_name)
         if refresh_token:
             oidc_client.revoke(refresh_token)

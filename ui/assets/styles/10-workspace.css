@@ -843,10 +843,47 @@
 
     .st-key-sources_panel > [data-testid="stLayoutWrapper"]:has(.st-key-sources_scroll),
     .st-key-studio_panel > [data-testid="stLayoutWrapper"]:has(.st-key-studio_scroll),
+    .st-key-studio_panel > [data-testid="stVerticalBlock"]
+    > [data-testid="stLayoutWrapper"]:has(.st-key-studio_scroll),
     .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(.st-key-chat_log) {
         min-height:0;
         flex:1 1 auto;
         overflow:hidden;
+    }
+
+    .st-key-studio_panel > [data-testid="stElementContainer"].st-key-studio_scroll,
+    .st-key-studio_panel > [data-testid="stVerticalBlock"]
+    > [data-testid="stElementContainer"].st-key-studio_scroll {
+        min-height:0 !important;
+        flex:1 1 auto !important;
+        overflow-y:auto !important;
+        overflow-x:hidden !important;
+    }
+
+    /* Current Streamlit wraps keyed containers in LayoutWrapper > VerticalBlock.
+       Constrain that intermediate block so Journey content overflows into its
+       own scroll region instead of stretching beyond the workspace viewport. */
+    .st-key-studio_panel > [data-testid="stLayoutWrapper"]
+    > [data-testid="stVerticalBlock"] {
+        display:flex !important;
+        flex-direction:column !important;
+        height:100% !important;
+        min-height:0 !important;
+        max-height:100% !important;
+        overflow:hidden !important;
+    }
+
+    .st-key-studio_panel > [data-testid="stLayoutWrapper"]:has(.st-key-studio_scroll),
+    .st-key-studio_panel > [data-testid="stVerticalBlock"]
+    > [data-testid="stLayoutWrapper"]:has(.st-key-studio_scroll),
+    .st-key-studio_panel > [data-testid="stLayoutWrapper"]
+    > [data-testid="stVerticalBlock"]
+    > [data-testid="stLayoutWrapper"]:has(.st-key-studio_scroll) {
+        height:0 !important;
+        min-height:0 !important;
+        max-height:100% !important;
+        flex:1 1 auto !important;
+        overflow:hidden !important;
     }
 
     .st-key-sources_scroll,
@@ -862,7 +899,8 @@
 
     .st-key-studio_scroll,
     .st-key-chat_log {
-        height:100%;
+        height:auto;
+        max-height:100%;
     }
 
     .st-key-sources_scroll::-webkit-scrollbar,

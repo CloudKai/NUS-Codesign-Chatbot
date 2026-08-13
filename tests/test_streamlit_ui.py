@@ -88,7 +88,7 @@ def test_streamlit_notebook_workspace_smoke():
     assert not composer.proto.accept_audio
     assert composer.proto.max_upload_size_mb == settings.max_file_size_mb
 
-    assert any(
+    assert not any(
         (button.key or "").startswith("profile-language-") for button in app.button
     )
     assert any(control.label == "Appearance" for control in app.segmented_control)
@@ -102,7 +102,7 @@ def test_streamlit_notebook_workspace_smoke():
         for control in app.segmented_control
         if control.label == "Coaching style"
     )
-    assert coaching_style.options == ["Concise", "Guided"]
+    assert coaching_style.options == ["Quick", "Strict"]
     assert {tab.label for tab in app.tabs} >= {"Journey", "Review"}
 
     assert '<span class="pane-title">Sources</span>' in rendered
@@ -120,7 +120,7 @@ def test_streamlit_notebook_workspace_smoke():
     assert "Conclusion" in rendered
     assert "Summary" in rendered
     assert "Critical thinking (Facione)" in rendered
-    assert "Based on the strongest evidence demonstrated across this conversation." in rendered
+    assert "strongest evidence demonstrated under the Quick profile" in rendered
     assert "Intended to support reflection, not grading." in rendered
     assert "Discussion summary" in rendered
     assert "What to strengthen" in rendered
@@ -293,10 +293,7 @@ def test_streamlit_notebook_workspace_smoke():
 
     assert any(input_widget.label == "Display name" for input_widget in app.text_input)
     assert any(control.label == "Appearance" for control in app.segmented_control)
-    assert "cd-profile-language-label" in rendered
-    assert any(
-        (button.key or "").startswith("profile-language-") for button in app.button
-    )
+    assert "cd-profile-language-label" not in rendered
     assert "cd-profile-menu" in rendered
     assert "cd-profile-help-title" in rendered
     assert "cd-profile-help-title" in rendered
@@ -319,12 +316,13 @@ def test_profile_coaching_style_maps_to_existing_response_detail():
     from backend.student_store import StudentStore
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    guided = next(
+    strict = next(
         control
         for control in app.segmented_control
         if control.label == "Coaching style"
     )
-    guided.set_value("Guided").run()
+    assert strict.value == "Quick"
+    strict.set_value("Strict").run()
 
     assert not app.exception
     assert app.session_state["response_detail"] == "long"
@@ -365,11 +363,15 @@ def test_facione_table_is_numeric_and_preserves_accessible_rubric_meaning():
         assert (
             f'aria-hidden="true" title="{rubric}">{glyph}</span>' in rendered
         )
-    assert (
-        "Based on the strongest evidence demonstrated across this conversation."
-        in rendered
-    )
     assert "Intended to support reflection, not grading." in rendered
+    assert "strongest evidence demonstrated under the Quick profile" in rendered
+
+    strict_rendered = facione_scores_table_html(
+        {"analysis": 2},
+        coaching_style="long",
+    )
+    assert "Existing progress is retained" in strict_rendered
+    assert "higher Strict threshold" in strict_rendered
 
 
 def test_legacy_welcome_message_renders_current_canonical_copy():
@@ -426,6 +428,49 @@ def test_student_composer_hides_model_infrastructure_but_keeps_internal_config()
     )
     assert len(app.chat_input) == 1
     assert not app.exception
+
+
+def test_add_source_explains_configured_per_file_size_limit() -> None:
+    """The compact Add control exposes only the configured per-file size limit."""
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    add_uploader = next(
+        uploader for uploader in app.file_uploader if uploader.label == "Add"
+    )
+
+    assert not add_uploader.help
+    assert "cd-sources-add-hint" not in rendered
+
+    sources_css = Path("ui/assets/styles/40-sources.css").read_text(encoding="utf-8")
+    assert "cd-sources-add-hint" not in sources_css
+
+    sources_source = Path("ui/sources.py").read_text(encoding="utf-8")
+    composer_source = Path("ui/layout/composer_layout.py").read_text(
+        encoding="utf-8"
+    )
+    chat_source = Path("ui/chat.py").read_text(encoding="utf-8")
+    assert "_sync_add_source_upload_hint(upload_limits_hint)" in sources_source
+    assert 'tooltip.id = "cd-sources-add-tooltip"' in sources_source
+    assert 'width: "max-content"' in sources_source
+    assert 'whiteSpace: "nowrap"' in sources_source
+    assert 'doc.body.appendChild(tooltip)' in sources_source
+    assert 'target.removeAttribute("title")' in sources_source
+    assert 'target.setAttribute("aria-label", "Upload files · " + hint)' in sources_source
+    assert 'f"Up to {settings.max_files} files per message"' not in sources_source
+    assert 'uploadTargets.forEach((target)' in composer_source
+    assert 'target.removeAttribute("title")' in composer_source
+    assert "appendLimitsToTooltip" in composer_source
+    assert 'limit.className = "cd-composer-upload-limit"' in composer_source
+    assert 'tooltip.appendChild(limit)' in composer_source
+    assert "win.__cdComposerLayoutCleanup" in composer_source
+    assert "mutationObserver.disconnect()" in composer_source
+    assert "resizeObserver.disconnect()" in composer_source
+    assert 'win.removeEventListener("resize", inputHandler)' in composer_source
+    assert "sync_composer_layout(upload_limits_hint=upload_limits_hint)" in chat_source
+    assert 'f"Up to {settings.max_files} files per message"' not in chat_source
+    assert 'upload_limits_hint = f"{settings.max_file_size_mb} MB max per file"' in (
+        chat_source
+    )
 
 
 def test_add_pasted_source_then_chat_with_citation():
@@ -560,38 +605,21 @@ def test_learning_studio_and_notebook_history_controls():
     assert "of 6" in rendered
 
 
-def test_language_theme_and_journey_has_no_manual_progression_control():
+def test_english_only_theme_and_journey_has_no_manual_progression_control():
     from backend.student_store import StudentStore
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     # Preferences live in the profile settings popover (content exposed to AppTest).
 
-    # Language is a select-only popover (no text caret), same idea as Guidance.
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "cd-profile-language-label" in rendered
-    assert "cd-profile-language-tooltip" in rendered
-    assert "The coach responds in this language" in rendered
-    from ui.theme import _template_stylesheet
+    profile_source = Path("ui/profile.py").read_text(encoding="utf-8")
+    assert "cd-profile-language-label" not in rendered
+    assert "profile-language" not in profile_source
+    assert app.session_state["response_language"] == "English"
+    assert 'doc.addEventListener("pointerover", onProfilePointerOver, true)' in profile_source
+    assert "documentBody && documentBody.nodeType === 1" in profile_source
 
-    css = _template_stylesheet()
-    assert (
-        ".st-key-profile_language div[data-testid=\"stPopover\"] button > div > div:first-child"
-        in css
-    )
-    assert ".cd-profile-language-help:hover .cd-profile-language-tooltip" in css
-    assert "use_container_width=True" in Path("ui/profile.py").read_text(encoding="utf-8")
-    assert any(
-        (button.key or "").startswith("profile-language-") for button in app.button
-    )
-    chinese = next(
-        button
-        for button in app.button
-        if button.label == "中文" and (button.key or "").startswith("profile-language-")
-    )
-    chinese.click().run()
-    assert app.session_state["response_language"] == "中文"
-
-    # Popover content remains available for further preference changes.
+    # Profile content remains available for appearance changes.
     appearance = next(
         control
         for control in app.segmented_control

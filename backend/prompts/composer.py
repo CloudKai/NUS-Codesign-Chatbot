@@ -123,14 +123,20 @@ def _runtime_instructions(context: PromptContext) -> str:
         parts.append(
             "Guidance mode: Quick. Recommend advance once the student has a "
             "workable answer for this stage's core purpose, even if details "
-            "are still thin. Prefer progress, and keep follow-up questions light."
+            "are still thin. Prefer progress, and keep follow-up questions light. "
+            "Use the standard Facione calibration from the shared instructions."
         )
     else:
         parts.append(
-            "Guidance mode: Complex. Recommend advance only when the "
-            "contribution is thorough for this stage—specific claims, clear "
-            "reasoning, and limited ambiguity. Prefer stay when important "
-            "elements are still missing."
+            "Guidance mode: Strict. Apply a higher evidence threshold to both "
+            "stage progression and new Facione evidence. Recommend advance only "
+            "when the student has independently demonstrated the stage purpose "
+            "with specific claims, clear reasoning, and relevant support. Prefer "
+            "STAY when an important limitation, justification, or ambiguity "
+            "remains. For Facione scores, choose the lower level when evidence "
+            "falls between rubric levels; a 3 requires clear, adequate evidence "
+            "across the conversation and a 4 requires precise, well-supported "
+            "evidence across multiple separate student contributions."
         )
     if context.allow_model_knowledge:
         parts.append(

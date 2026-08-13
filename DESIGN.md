@@ -49,7 +49,7 @@ copy.
 ### Student control
 
 Potentially consequential actions require clear confirmation. Students can choose coaching
-style, language, theme, sources, and when to manually move to the next journey step. Model
+style, theme, sources, and when to manually move to the next journey step. Model
 infrastructure is configured internally and is not student-facing.
 
 ### Authentication and course transparency
@@ -74,9 +74,8 @@ Top bar
 ├── Notebooks
 └── Profile avatar
     ├── Display name
-    ├── Coaching style (Concise / Guided)
+    ├── Coaching style (Quick / Strict)
     ├── Appearance
-    ├── Language
     └── Help and support
 
 Workspace
@@ -196,8 +195,8 @@ experience, including messages, inputs, menus, dialogs, upload areas, disabled s
 empty states.
 
 Select menus render in a portal outside the workspace. Their option text, hover surface,
-selected surface, border, and shadow must therefore use explicit theme tokens so coaching
-style and language choices remain readable in both light and dark appearances.
+selected surface, border, and shadow must therefore use explicit theme tokens so choices
+remain readable in both light and dark appearances.
 
 ### Shape and elevation
 
@@ -228,7 +227,7 @@ The top bar contains:
 - A compact Notebooks action.
 - A compact profile/Preferences trigger.
 
-Coaching style, language, and appearance live in Preferences so the header stays focused on
+Coaching style and appearance live in Preferences so the header stays focused on
 course identity and the current project. Model infrastructure remains internal.
 
 On desktop, center the complete notebook-title group against the page viewport rather than
@@ -330,7 +329,8 @@ repeat it above the discussion.
 communicate authorship.
 - Keep coach responses on the main surface for readability.
 - Use “Coach” as the minimal assistant identity.
-- Keep edit and regeneration actions contextual.
+- Keep the student-message Copy/Edit action trigger visible and discoverable;
+  regeneration is not a current action.
 - Anchor the composer to the bottom of the discussion area.
 - Keep the empty composer compact. Let it grow with the draft until its maximum
 height, then scroll vertically inside the textarea.
@@ -379,27 +379,25 @@ Website import must communicate that only safe, public webpages are supported.
 
 ### Notebook library
 
-The library supports search, folder filtering, creating a notebook, folder management, and
-opening existing notebooks.
+The current library is folder-free. It supports search, creating a notebook,
+opening existing notebooks, and contextual notebook actions.
 
 Each notebook row includes:
 
 - Notebook title.
-- Folder.
 - Current stage and stage number.
 - A concise summary derived from the latest student thinking or working conclusion.
 - A contextual menu for rename, move, transcript download, and deletion.
 
-Use a two-column structure with folders on the left and notebooks on the right. When only a
-few notebooks exist, retain the same structure rather than filling the dialog with decorative
-content.
+Use a compact notebook list/card structure sized to its actual content. When
+only a few notebooks exist, do not reserve a folder rail or fill the dialog with
+decorative empty space.
 
 ### Preferences
 
 Preferences contains:
 
-- Coaching style: Concise or Guided, backed by the existing short/long behavior.
-- Response language: English, 中文, Bahasa Melayu, or தமிழ்.
+- Coaching style: Quick or Strict, backed by the existing short/long behavior.
 - Appearance: System, Light, or Dark.
 
 The default appearance for a student without a stored preference is Light. Existing stored
@@ -410,8 +408,8 @@ separated from the first field, place labels close to their own controls, and le
 distinct section gap before the next setting. Dividers separate groups but do not replace
 spacing.
 
-Changes apply to future responses. Source names, citations, proper nouns, and quoted evidence
-retain their original wording when the response language changes.
+Coaching responses are English-only. Source names, citations, proper nouns, and quoted
+evidence retain their original wording.
 
 ## 7. Interaction states
 
@@ -520,13 +518,14 @@ must not overlap adjacent controls.
 | Top bar and section nav               | `ui/topbar.py` → `render_topbar()`                    |
 | Sources library UI                    | `ui/sources.py` → `render_sources_panel()`            |
 | Critical-thinking state               | `backend/student_journey.py`                          |
-| Language-aware coaching prompt        | `backend/student_support.py`                          |
-| Response persistence                  | `backend/chat_service.py`                             |
-| Sources backend                       | `backend/source_library.py`                           |
+| English-only coaching enforcement     | `backend/application.py`                              |
+| Coaching orchestration/persistence     | `backend/application.py` + repository/store adapters  |
+| Workspace/source application boundary | `backend/workspace_service.py`                        |
+| Source ingestion and retrieval        | `backend/source_library.py` + `backend/retrieval.py`  |
 
 
 Visual QA evidence is recorded in
-`[docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)`. 
+[`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md).
 
 ## 12. Definition of done
 

@@ -29,12 +29,13 @@ from .retrieval import (
 from .source_library import image_inputs_for_source_ids, selected_source_context
 from .student_journey import (
     advanced_stage_response,
+    coaching_profile_for_response_detail,
     current_stage,
     normalize_journey,
     personalized_stage_questions,
 )
 from .student_store import (
-    ConversationRevisionConflictError,
+    AutoAdvancePersistence,
     CoachRequestInProgressError,
     StudentStore,
 )
@@ -218,8 +219,9 @@ class CoachApplicationService:
 
         Persisted notebook state is authoritative for stage, history, selected
         sources, source context, and image inputs. Client-supplied values that
-        disagree are rejected. The workflow always writes an auditable
-        transition first; automatic mode resolves it before the visible reply.
+        disagree are rejected. Confirmation mode writes a pending audit
+        recommendation. Automatic mode commits the final confirmed audit,
+        response, and next stage atomically.
 
         Stamps the current notebook ``conversation_revision`` onto the request
         for store CAS/stamping; normal submit does not bump that revision.
@@ -316,7 +318,54 @@ class CoachApplicationService:
                 "assessment": turn.assessment.model_copy(update={"citations": citations})
             }
         )
-        transition_id = turn.pending_transition.id if turn.pending_transition else None
+        recommended_transition = turn.pending_transition
+        # Selection mode disables auto-advance even if the coach service was
+        # constructed with auto_advance_stages=True.
+        from backend.settings import settings as runtime_settings
+
+        auto_advance: AutoAdvancePersistence | None = None
+        if (
+            self._auto_advance_stages
+            and not runtime_settings.student_stage_selection
+            and self._progress is not None
+            and recommended_transition is not None
+        ):
+            next_stage_id = recommended_transition.to_stage
+            journey = normalize_journey(
+                dict(initial_thread.get("metadata") or {}).get("learning_journey")
+            )
+            if current_stage(journey).id != recommended_transition.from_stage:
+                raise ValueError(
+                    "The notebook stage changed; request a new recommendation"
+                )
+            questions = turn.assessment.guidance_questions or list(
+                personalized_stage_questions(
+                    next_stage_id,
+                    prepared_request.student_message,
+                    has_course_sources=bool(prepared_request.source_ids),
+                )
+            )
+            turn = turn.model_copy(
+                update={
+                    "response_text": advanced_stage_response(
+                        turn.response_text,
+                        prepared_request.current_stage,
+                        next_stage_id,
+                        questions,
+                    ),
+                    "assessment": turn.assessment.model_copy(
+                        update={"guidance_questions": questions}
+                    ),
+                    "pending_transition": None,
+                    "auto_advanced_to": next_stage_id,
+                }
+            )
+            auto_advance = AutoAdvancePersistence(
+                from_stage=prepared_request.current_stage,
+                to_stage=next_stage_id,
+                contribution_note=turn.assessment.contribution_summary,
+            )
+        transition_id = recommended_transition.id if recommended_transition else None
         source_refs = [
             {
                 "id": citation.source_id,
@@ -339,6 +388,7 @@ class CoachApplicationService:
             expected_conversation_revision=int(
                 prepared_request.conversation_revision or 0
             ),
+            expected_response_detail=prepared_request.response_detail,
             user_content=prepared_request.student_message,
             user_metadata={
                 "thinking_stage": prepared_request.current_stage,
@@ -353,17 +403,35 @@ class CoachApplicationService:
             assistant_content=turn.response_text,
             assistant_message_id=transition_id,
             assistant_metadata={
-                "thinking_stage": prepared_request.current_stage,
+                "thinking_stage": (
+                    auto_advance.to_stage
+                    if auto_advance is not None
+                    else prepared_request.current_stage
+                ),
                 "assessment": turn.assessment.model_dump(mode="json"),
+                "coaching_profile": coaching_profile_for_response_detail(
+                    prepared_request.response_detail
+                ),
                 "pending_transition_id": transition_id,
                 "proposed_stage": (
-                    turn.pending_transition.to_stage if turn.pending_transition else None
-                ),
-                "decision_status": "pending" if turn.pending_transition else None,
-                "from_stage": (
-                    turn.pending_transition.from_stage
-                    if turn.pending_transition
+                    recommended_transition.to_stage
+                    if recommended_transition
                     else None
+                ),
+                "decision_status": (
+                    "confirmed"
+                    if auto_advance is not None
+                    else ("pending" if recommended_transition else None)
+                ),
+                "from_stage": (
+                    recommended_transition.from_stage
+                    if recommended_transition
+                    else None
+                ),
+                **(
+                    {"auto_advanced_to": auto_advance.to_stage}
+                    if auto_advance is not None
+                    else {}
                 ),
                 "workflow": "langgraph",
                 "source_ids": prepared_request.source_ids,
@@ -387,73 +455,8 @@ class CoachApplicationService:
             idempotency_key=prepared_request.idempotency_key,
             idempotency_lease_token=idempotency_lease_token,
             idempotency_fingerprint=idempotency_fingerprint,
+            auto_advance=auto_advance,
         )
-        # Selection mode disables auto-advance even if the coach service was
-        # constructed with auto_advance_stages=True.
-        from backend.settings import settings as runtime_settings
-
-        if (
-            self._auto_advance_stages
-            and not runtime_settings.student_stage_selection
-            and self._progress is not None
-            and turn.pending_transition is not None
-        ):
-            next_stage_id = turn.pending_transition.to_stage
-            self._progress.resolve(
-                prepared_request.thread_id,
-                turn.pending_transition.id,
-                accepted=True,
-            )
-            questions = turn.assessment.guidance_questions or list(
-                personalized_stage_questions(
-                    next_stage_id,
-                    prepared_request.student_message,
-                    has_course_sources=bool(prepared_request.source_ids),
-                )
-            )
-            turn = turn.model_copy(
-                update={
-                    "response_text": advanced_stage_response(
-                        turn.response_text,
-                        prepared_request.current_stage,
-                        next_stage_id,
-                        questions,
-                    ),
-                    "assessment": turn.assessment.model_copy(
-                        update={"guidance_questions": questions}
-                    ),
-                    "pending_transition": None,
-                    "auto_advanced_to": next_stage_id,
-                }
-            )
-            self._store.add_message(
-                prepared_request.thread_id,
-                "assistant",
-                turn.response_text,
-                message_id=transition_id,
-                metadata={
-                    "thinking_stage": next_stage_id,
-                    "assessment": turn.assessment.model_dump(mode="json"),
-                    "pending_transition_id": transition_id,
-                    "auto_advanced_to": next_stage_id,
-                    "workflow": "langgraph",
-                    "source_ids": prepared_request.source_ids,
-                    "retrieval_refs": retrieval_refs,
-                    **(
-                        {"coach_idempotency_key": prepared_request.idempotency_key}
-                        if prepared_request.idempotency_key
-                        else {}
-                    ),
-                    "source_refs": [
-                        {
-                            "id": citation.source_id,
-                            "label": citation.label,
-                            "title": citation.title,
-                        }
-                        for citation in turn.assessment.citations
-                    ],
-                },
-            )
         return turn
 
     def _authoritative_request(self, request: CoachRequest) -> CoachRequest:
@@ -469,6 +472,7 @@ class CoachApplicationService:
         metadata = dict(thread.get("metadata") or {})
         journey = normalize_journey(metadata.get("learning_journey"))
         authoritative_stage = current_stage(journey).id
+        authoritative_detail = journey["response_detail"]
         if request.current_stage != authoritative_stage:
             raise ValueError(
                 "current_stage does not match the notebook Thinking Path stage"
@@ -599,9 +603,6 @@ class CoachApplicationService:
                     score=chunk.score,
                 )
             )
-        response_language = " ".join(
-            str(metadata.get("response_language") or "English").split()
-        )[:50]
         # The selected-source set is server-authoritative. It is the only
         # grounding switch exposed by the current UI, so stale compatibility
         # metadata must not leave a source-free notebook in source-only mode.
@@ -617,6 +618,7 @@ class CoachApplicationService:
         return request.model_copy(
             update={
                 "current_stage": authoritative_stage,
+                "response_detail": authoritative_detail,
                 "history": store_history,
                 "source_ids": authoritative_ids,
                 "source_context": retrieval_result.context,
@@ -626,7 +628,7 @@ class CoachApplicationService:
                 "image_inputs": image_inputs,
                 "model_id": selected_model.id,
                 "reasoning_effort": selected_effort,
-                "response_language": response_language or "English",
+                "response_language": "English",
                 "allow_model_knowledge": allow_model_knowledge,
                 "conversation_revision": conversation_revision,
             }
@@ -692,11 +694,7 @@ class CoachApplicationService:
                 model_id=model_id or str(metadata.get("selected_model") or ""),
                 metadata={
                     "response_detail": detail,
-                    **(
-                        {"response_language": response_language}
-                        if response_language
-                        else {}
-                    ),
+                    "response_language": "English",
                 },
             )
         # Store returns the replacement user row id as edited_message_id.
@@ -708,7 +706,7 @@ class CoachApplicationService:
             response_detail=detail,
             model_id=model_id,
             reasoning_effort=reasoning_effort,
-            response_language=response_language or "English",
+            response_language="English",
             idempotency_key=cleaned_key,
             conversation_revision=revision.conversation_revision,
             revise_user_message_id=replacement_user_message_id,

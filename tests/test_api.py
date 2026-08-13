@@ -251,9 +251,10 @@ def test_select_stage_api_requires_flag_and_valid_stage(tmp_path, monkeypatch, c
     assert stage_event["outcome"] == "selected"
 
 
-def test_complex_guidance_is_stricter_before_recommending_advance(tmp_path):
+def test_strict_guidance_is_stricter_before_recommending_advance(tmp_path):
     store = StudentStore(tmp_path / "complex-api.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    store.update_thread(thread_id, metadata={"response_detail": "long"})
     client = TestClient(create_app(store, auto_advance_stages=False))
     request = {
         "thread_id": thread_id,
@@ -287,6 +288,45 @@ def test_complex_guidance_is_stricter_before_recommending_advance(tmp_path):
     )
     assert third.status_code == 200
     assert third.json()["pending_transition"]["to_stage"] == "evidence"
+
+
+def test_style_switch_rejects_an_in_flight_quick_turn_atomically(
+    tmp_path, monkeypatch
+):
+    """A Quick result cannot commit after the notebook switches to Strict."""
+    from backend.workflow import CoachWorkflow
+
+    store = StudentStore(tmp_path / "style-switch-race.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    original_run = CoachWorkflow.run
+
+    def switch_style_after_workflow(self, request):
+        turn = original_run(self, request)
+        store.update_thread(thread_id, metadata={"response_detail": "long"})
+        return turn
+
+    monkeypatch.setattr(CoachWorkflow, "run", switch_style_after_workflow)
+    client = TestClient(create_app(store, auto_advance_stages=False))
+
+    response = client.post(
+        "/api/v1/coach/turn",
+        json={
+            "thread_id": thread_id,
+            "current_stage": "focus",
+            "student_message": "Frame this crossing-design question.",
+            "response_detail": "short",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "The coaching style changed before the coaching turn was saved"
+    )
+    assert store.get_messages(thread_id) == []
+    assert store.get_pending_phase_transition(thread_id) is None
+    journey = (store.get_thread(thread_id) or {})["metadata"]["learning_journey"]
+    assert journey["response_detail"] == "long"
+    assert journey["current_stage"] == "focus"
 
 
 def test_first_coaching_turn_generates_a_concise_model_assisted_title(tmp_path):

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import statistics
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -25,10 +26,17 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 
-from fastapi.testclient import TestClient
+# Direct script execution places ``scripts/`` on sys.path, not the repository.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-from backend.api import create_app
-from backend.student_store import StudentStore
+from fastapi.testclient import TestClient  # noqa: E402
+
+from backend.api import create_app  # noqa: E402
+from backend.persistence.factory import reset_file_storage_cache  # noqa: E402
+from backend.settings import settings  # noqa: E402
+from backend.student_store import StudentStore  # noqa: E402
 
 
 def _parse_args() -> argparse.Namespace:
@@ -46,11 +54,23 @@ def main() -> None:
     lock = threading.Lock()
 
     with TemporaryDirectory(prefix="co-design-load-") as tmp:
-        store = StudentStore(Path(tmp) / "load.sqlite3")
-        client = TestClient(create_app(store))
+        database = Path(tmp) / "load.sqlite3"
+        # Keep the probe self-contained: uploads stay in memory and each virtual
+        # user receives the same owner isolation used by authenticated requests.
+        settings.file_storage_provider = "memory"
+        reset_file_storage_cache()
+        clients = [
+            TestClient(
+                create_app(
+                    StudentStore(database, identifier=f"load-user-{user_index}")
+                )
+            )
+            for user_index in range(args.users)
+        ]
 
         def worker(user_index: int) -> None:
             nonlocal errors, status_429
+            client = clients[user_index]
             # Exercise list/create/upload/coach under mock provider.
             list_response = client.get("/api/v1/threads")
             create_response = client.post(

@@ -14,6 +14,7 @@ import streamlit as st
 
 from ui.auth_gate import (
     authenticated_user,
+    clear_authenticated_refresh_marker,
     current_user_claims,
     display_name_from_claims,
     logout_user,
@@ -61,6 +62,10 @@ if not user:
         render_signed_out_shell()
     render_login_gate()
     st.stop()
+
+# The refresh bridge uses this one-shot marker to avoid signed-out redirect
+# loops. Once the session is verified, keep the student-facing URL clean.
+clear_authenticated_refresh_marker()
 
 # Reuse the verified /auth/me result. Calling the helper without it performs a
 # second network request on every Streamlit rerun and can strand a valid local

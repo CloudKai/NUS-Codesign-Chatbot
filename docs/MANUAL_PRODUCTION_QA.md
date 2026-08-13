@@ -1,12 +1,20 @@
 # Production Manual QA
 
+> **Historical evidence snapshot — 2026-08-10.** This report records the
+> deployed commit and browser session named below. It is not a current release
+> verdict and must not override `docs/IMPLEMENTATION_STATUS.md` or the current
+> code. Later repository work implemented audited student stage selection,
+> append-only Edit, the CloudFront/Caddy alignment, and additional regression
+> coverage. Retain the observations and test counts below as dated evidence;
+> repeat the unchecked live items on the next immutable deployment.
+
 ## Environment tested
 
 | Field | Value |
 |---|---|
 | Branch | `Production-RemoveData` |
 | Commit SHA (local tip when tested) | `aa8e934` (*Escape LIKE percent literals for DSQL/psycopg*) |
-| Production URL (current) | https://d1sxfuoybzedj5.cloudfront.net |
+| Production URL recorded for this snapshot | https://d1sxfuoybzedj5.cloudfront.net |
 | Browser | Cursor IDE browser (Chromium automation) |
 | Viewport(s) | Desktop default; mobile `390×844` via CDP Emulation (layout smoke only) |
 | Model/provider observed | GPT-5.6 Luna · Low (live OpenAI path) |
@@ -25,7 +33,7 @@ those historical observations as release evidence.
 
 ## Overall verdict
 
-**READY FOR CONTROLLED PILOT**
+**HISTORICAL VERDICT AT THE TESTED COMMIT: READY FOR CONTROLLED PILOT**
 
 Not **READY FOR PRODUCTION**: live host currently auto-advances stages (skips confirmation-gated **Next**), full six-stage pedagogy and live RAG upload/isolation passes were incomplete, and ARM64 image rebuild was not executed in this pass.
 
@@ -35,8 +43,8 @@ Not **READY FOR PRODUCTION**: live host currently auto-advances stages (skips co
 
 Live Cognito login, HTTPS, the public API boundary, session refresh, logout, and coach Focus→Evidence coaching behaviour were exercised on the production URL. Coach pedagogy for weak Focus scaffolding, injection resistance, and off-topic refusal looked aligned with `backend/prompts/*`.
 
-**Product progression policy (owner decision, 2026-08-10):**
-- **Month 1 (current pilot):** `AUTO_ADVANCE_STAGES=true` — coach ADVANCE auto-applies; no Next confirmation. Live already behaved this way; repo now matches via `compose.prod.yaml`.
+**Product progression policy recorded on 2026-08-10:**
+- **Month 1 at the tested snapshot:** `AUTO_ADVANCE_STAGES=true` — coach ADVANCE auto-applies; no Next confirmation. Live behaved this way and `compose.prod.yaml` still expresses that policy until operators intentionally change it.
 - **After month 1:** switch to **free stage selection**. With student stage
   selection enabled, students can work on any non-current Thinking Path stage;
   completed stages remain marked complete when revisited.
@@ -169,7 +177,9 @@ Conclusion terminal behaviour: **CODE REVIEW / automated tests only**.
 1. Server auto-advanced Focus→Evidence without student **Next** on live — **expected for month-1** (`AUTO_ADVANCE_STAGES=true`).
 2. Authoritative order is Focus→Evidence→Assumptions… (**CODE**).
 3. Confirmation-gated Next UI absent when auto-advance on (**LIVE**, intentional month 1).
-4. Month-2+ needs **student stage-selection** UI/API (not Next-only); not implemented yet.
+4. At the tested commit, Month-2+ still needed **student stage-selection**
+   UI/API. That UI/API is implemented in the current repository; it still needs
+   production deployment verification.
 
 ---
 
@@ -243,7 +253,7 @@ Bottleneck: **model latency**, not page chrome.
 ### F3 — Public login-start write amplification
 
 - **Severity:** P1 (code review; not load-tested live)  
-- **Reproduction:** Unauthenticated `GET /api/v1/auth/login` always persisted OAuth state (DSQL) with no throttle ([Sol security review](d9fce27a-9b27-4132-8003-b1688094656e)).  
+- **Reproduction:** Unauthenticated `GET /api/v1/auth/login` always persisted OAuth state (DSQL) with no throttle (prior review note; not a repository link).
 - **Root cause:** Public Caddy-exposed login start had no per-IP/global limiter.  
 - **Files:** `backend/rate_limit.py`, `backend/auth_routes.py`, `backend/settings.py`, `.env.example`, `tests/test_rate_limit.py`  
 - **Fix:** In-process `LoginStartLimiter` (default 10/min/IP, 60/min global); on limit redirect `/?auth_error=1` with `Retry-After` before `begin_login`.  
@@ -269,15 +279,21 @@ None observed that expose other students’ data or bypass auth on the public ed
 ### P1
 
 1. Login-start throttle exists in repo only until redeploy (**CODE**; do not flood live to verify).
-2. Month-2 student stage-selection feature not built yet (auto-advance-off alone is not enough).
+2. At this historical commit, Month-2 student stage selection was not built.
+   It is implemented in the current repository but remains unverified on the
+   deployed production image represented by this report.
 
 ### P2
 
 1. Health `mode` still wrong on live until redeploy.  
-2. Incomplete live coverage: uploads/RAG, multi-user IDOR (must use container-local API per [Auth ownership map](e6b197fd-0d32-47aa-9818-4b6c2b4c8640)), full stage ladder, idempotency double-click, rate-limit UX.  
-3. Auto-advance + concurrent idempotency waiter race ([Sol](d9fce27a-9b27-4132-8003-b1688094656e)) — relevant while month-1 auto-advance is on.  
+2. Incomplete live coverage: uploads/RAG, multi-user IDOR (must use the
+   container-local authenticated API), full stage ladder, idempotency
+   double-click, and rate-limit UX.
+3. Auto-advance plus concurrent idempotency waiter race (prior review note;
+   not a repository link) — relevant while month-1 auto-advance is on.
 4. Logout is GET and can be forced via top-level cross-site navigation (`SameSite=Lax`) — needs POST+CSRF design; **not changed** this pass.  
-5. Unsupported upload extensions are stored with `supported=False` rather than hard-rejected ([RAG map](a211ff22-ff19-4648-9e97-53938f872876)) — policy check.
+5. Unsupported upload extensions are stored with `supported=False` rather than
+   hard-rejected (prior RAG review note; not a repository link) — policy check.
 
 ### P3
 
@@ -339,8 +355,15 @@ docker buildx linux/arm64
 
 ## Operator actions before wider student use
 
-1. Redeploy so `compose.prod.yaml` `AUTO_ADVANCE_STAGES=true` wins over any host `.env` false (month-1 policy).  
-2. Confirm Thinking Path has **no Next** and stages auto-move on ADVANCE.  
-3. Smoke upload + citation; optional second QA user for IDOR.  
-4. Plan month-2 **stage-selection** feature before flipping auto-advance off.  
-5. Optional: rotate the password shared in chat after QA.
+These were the actions recorded for the historical deployment; re-evaluate the
+progression policy before applying them now:
+
+1. Deploy an immutable image with the intended current policy: auto-advance, or
+   audited student selection with auto-advance off.
+2. Verify Journey controls match that policy; do not expect confirmation
+   **Next** while auto-advance is enabled.
+3. Smoke upload, retrieval, citation, append-only Edit, restart recovery, and
+   cleanup.
+4. Use a second disposable QA user for live owner-isolation verification.
+5. Rotate any test credential that was shared outside the approved secret
+   channel.

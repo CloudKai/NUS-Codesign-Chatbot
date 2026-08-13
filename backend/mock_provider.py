@@ -8,6 +8,7 @@ from .domain import CoachRequest, EducationalAssessment, FacioneDimensionScores,
 from .prompts import PreparedCoachPrompt, compose_coach_prompt
 from .student_journey import (
     STAGE_BY_ID,
+    coaching_profile_for_response_detail,
     next_stage_id,
     personalized_stage_questions,
     stage_guidance_questions,
@@ -121,7 +122,7 @@ class DeterministicCoachProvider:
 
         An explicit recommendation keeps unit tests fully controllable. In the
         normal local demonstration, Quick guidance recommends advance after one
-        follow-up contribution at the stage; Complex waits for a second follow-up
+        follow-up contribution at the stage; Strict waits for a second follow-up
         so progression is a little stricter. This is turn-based demo behavior, not
         a claim that the mock provider semantically evaluated the writing.
         """
@@ -129,11 +130,20 @@ class DeterministicCoachProvider:
         self.last_prepared_prompt = prepared
         self.last_stage_id = request.current_stage
         stage = STAGE_BY_ID[request.current_stage]
+        coaching_profile = coaching_profile_for_response_detail(
+            request.response_detail
+        )
         prior_stage_contributions = sum(
             1
             for message in request.history
-            if message.get("role") == "user"
-            and (message.get("metadata") or {}).get("thinking_stage") == stage.id
+            if message.get("role") == "assistant"
+            and isinstance((message.get("metadata") or {}).get("assessment"), dict)
+            and (message.get("metadata") or {})["assessment"].get("current_stage")
+            == stage.id
+            and str(
+                (message.get("metadata") or {}).get("coaching_profile") or ""
+            ).strip().lower()
+            in {"", coaching_profile}
         )
         advance_after = 2 if request.response_detail == "long" else 1
         guided_recommendation = (

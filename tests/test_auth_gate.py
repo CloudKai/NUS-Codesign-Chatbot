@@ -174,40 +174,31 @@ def test_sign_in_button_cooldown_reenable_helpers(monkeypatch):
     assert auth_gate._signin_cooldown_active() is False
 
 
-def test_signin_cooldown_restores_after_a_fresh_streamlit_session(monkeypatch):
-    """A Cognito Back navigation restores and consumes its tab-local deadline."""
-    clock = [1_000.0]
-    monkeypatch.setattr(auth_gate.time, "time", lambda: clock[0])
+def test_cognito_return_clears_legacy_cooldown_marker_and_pending_ui(monkeypatch):
+    """Browser Return must show normal sign-in instead of stale Redirecting UI."""
     marker = {auth_gate._SIGNIN_COOLDOWN_QUERY_PARAM: "1004.5"}
-    monkeypatch.setattr(
-        auth_gate.st, "query_params", marker, raising=False
-    )
+    monkeypatch.setattr(auth_gate.st, "query_params", marker, raising=False)
     st.session_state.clear()
+    st.session_state["_auth_signin_redirecting"] = True
+    st.session_state["_auth_signin_cooldown_until"] = 1004.5
 
     auth_gate._restore_signin_pending_state_from_query_marker()
 
-    assert st.session_state["_auth_signin_redirecting"] is True
-    assert st.session_state["_auth_signin_cooldown_until"] == 1004.5
-    assert auth_gate._signin_cooldown_active() is True
+    assert "_auth_signin_redirecting" not in st.session_state
+    assert "_auth_signin_cooldown_until" not in st.session_state
     assert marker == {}
 
-    # Repeated render/remount keeps the original server deadline unchanged.
-    auth_gate._restore_signin_pending_state_from_query_marker()
-    assert st.session_state["_auth_signin_cooldown_until"] == 1004.5
 
-
-def test_signin_cooldown_restore_keeps_status_after_expiry(monkeypatch):
-    """An expired but valid marker enables retry without hiding status."""
-    monkeypatch.setattr(auth_gate.time, "time", lambda: 1_006.0)
+def test_legacy_cooldown_marker_is_consumed_regardless_of_value(monkeypatch):
+    """Legacy URL state is cleanup-only and never restores Redirecting UI."""
     marker = {auth_gate._SIGNIN_COOLDOWN_QUERY_PARAM: "1005.0"}
     monkeypatch.setattr(auth_gate.st, "query_params", marker, raising=False)
     st.session_state.clear()
 
     auth_gate._restore_signin_pending_state_from_query_marker()
 
-    assert st.session_state["_auth_signin_redirecting"] is True
+    assert "_auth_signin_redirecting" not in st.session_state
     assert "_auth_signin_cooldown_until" not in st.session_state
-    assert auth_gate._signin_cooldown_active() is False
     assert marker == {}
 
 
@@ -230,10 +221,10 @@ def test_signin_cooldown_restore_rejects_malformed_stale_or_future_marker(
     assert marker == {}
 
 
-def test_start_login_writes_exact_deadline_marker_until_a_fresh_session_consumes_it(
+def test_start_login_keeps_cooldown_out_of_url(
     monkeypatch,
 ):
-    """The current launch retains one exact marker for the Cognito Back path."""
+    """Cognito Return must not inherit stale redirect UI from the browser URL."""
     marker: dict[str, str] = {}
     monkeypatch.setattr(auth_gate.st, "query_params", marker, raising=False)
     monkeypatch.setattr(auth_gate.time, "time", lambda: 1_000.0)
@@ -247,12 +238,7 @@ def test_start_login_writes_exact_deadline_marker_until_a_fresh_session_consumes
     auth_gate.start_login()
 
     assert st.session_state["_auth_signin_cooldown_until"] == 1005.0
-    assert marker == {auth_gate._SIGNIN_COOLDOWN_QUERY_PARAM: "1005.000000"}
-
-    # The launch render owns pending state, so it must not consume the marker
-    # before Cognito has a chance to navigate away and the user returns.
-    auth_gate._restore_signin_pending_state_from_query_marker()
-    assert marker == {auth_gate._SIGNIN_COOLDOWN_QUERY_PARAM: "1005.000000"}
+    assert marker == {}
 
 
 def test_auth_gate_uses_server_authoritative_cooldown_and_same_document_redirect():
@@ -463,6 +449,18 @@ def test_authenticated_users_see_full_application(logged_in_user, monkeypatch):
     assert 'href="http://127.0.0.1:8000/api/v1/auth/logout"' in rendered
     assert 'target="_self"' in rendered
     assert app.session_state["display_name"] == "Alex"
+
+
+def test_authenticated_refresh_marker_is_removed_without_losing_other_params(
+    monkeypatch,
+):
+    """Successful refresh returns to a clean UI URL after verification."""
+    marker = {"auth_refreshed": "1", "notebook": "current"}
+    monkeypatch.setattr(auth_gate.st, "query_params", marker, raising=False)
+
+    auth_gate.clear_authenticated_refresh_marker()
+
+    assert marker == {"notebook": "current"}
 
 
 def test_authenticated_rerun_preserves_student_display_name(logged_in_user):

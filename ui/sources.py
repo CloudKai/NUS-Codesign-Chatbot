@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import re
 from html import escape
 from pathlib import Path
@@ -36,6 +37,87 @@ _SOURCE_IMPORT_PARTIAL_ERROR = (
 )
 _SOURCE_RENAME_ERROR = "The source could not be renamed. Try again."
 _SOURCE_DOWNLOAD_ERROR = "The file could not be downloaded. Try again."
+
+
+def _sync_add_source_upload_hint(upload_limits_hint: str) -> None:
+    """Show upload limits in a horizontal tooltip outside the narrow Add pill."""
+    encoded_hint = json.dumps(str(upload_limits_hint))
+    components.html(
+        f"""
+<script>
+(() => {{
+  const doc = window.parent.document;
+  const win = window.parent;
+  const hint = {encoded_hint};
+
+  function removeTooltip() {{
+    doc.getElementById("cd-sources-add-tooltip")?.remove();
+  }}
+
+  function showTooltip(root) {{
+    removeTooltip();
+    const bounds = root.getBoundingClientRect();
+    const tooltip = doc.createElement("div");
+    tooltip.id = "cd-sources-add-tooltip";
+    tooltip.setAttribute("role", "tooltip");
+    tooltip.textContent = hint;
+    Object.assign(tooltip.style, {{
+      position: "fixed",
+      top: Math.round(bounds.bottom + 6) + "px",
+      right: Math.max(8, Math.round(win.innerWidth - bounds.right)) + "px",
+      zIndex: "999999",
+      width: "max-content",
+      maxWidth: "calc(100vw - 16px)",
+      padding: "5px 8px",
+      borderRadius: "4px",
+      background: "#171a1f",
+      color: "#ffffff",
+      fontFamily: "inherit",
+      fontSize: "12px",
+      fontWeight: "500",
+      lineHeight: "1.3",
+      whiteSpace: "nowrap",
+      boxShadow: "0 4px 12px rgba(0,0,0,.24)",
+      pointerEvents: "none"
+    }});
+    doc.body.appendChild(tooltip);
+  }}
+
+  function apply() {{
+    const root = doc.querySelector(
+      '.st-key-sources_panel [class*="st-key-add-sources"]'
+    );
+    if (!root) return false;
+    const targets = root.querySelectorAll(
+      '[data-testid="stFileUploaderDropzone"], input[type="file"]'
+    );
+    targets.forEach((target) => {{
+      target.setAttribute("aria-label", "Upload files · " + hint);
+      target.removeAttribute("title");
+    }});
+    if (root.dataset.cdUploadHintBound !== "1") {{
+      root.dataset.cdUploadHintBound = "1";
+      root.addEventListener("mouseenter", () => showTooltip(root));
+      root.addEventListener("mouseleave", removeTooltip);
+      root.addEventListener("focusin", () => showTooltip(root));
+      root.addEventListener("focusout", removeTooltip);
+    }}
+    return targets.length > 0;
+  }}
+
+  if (!apply()) {{
+    let attempts = 0;
+    const timer = window.setInterval(() => {{
+      attempts += 1;
+      if (apply() || attempts > 40) window.clearInterval(timer);
+    }}, 80);
+  }}
+}})();
+</script>
+        """,
+        height=0,
+        width=0,
+    )
 
 
 def format_size(size: int) -> str:
@@ -472,6 +554,9 @@ def _render_sources_panel_body() -> None:
                 unsafe_allow_html=True,
             )
             with st.container(key="add-sources"):
+                upload_limits_hint = (
+                    f"{settings.max_file_size_mb} MB max per file"
+                )
                 st.markdown(
                     '<div class="cd-sources-add-face" aria-hidden="true">+ Add</div>',
                     unsafe_allow_html=True,
@@ -485,11 +570,8 @@ def _render_sources_panel_body() -> None:
                         f"source-upload-{st.session_state.thread_id}-"
                         f"{upload_nonce}"
                     ),
-                    help=(
-                        f"Choose files to add · up to {settings.max_files} files · "
-                        f"{settings.max_file_size_mb} MB each"
-                    ),
                 )
+                _sync_add_source_upload_hint(upload_limits_hint)
                 if uploads:
                     _import_uploaded_sources(list(uploads))
             upload_error = st.session_state.pop("source_upload_error", None)

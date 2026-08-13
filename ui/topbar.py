@@ -75,7 +75,7 @@ def render_topbar() -> tuple[str, str | None]:
                     notebooks_dialog()
         with profile_column.container(key="topbar_profile_slot"):
             # Appearance owns an app-scoped widget rerun; display name and
-            # language/coaching style remain nested fragments in the menu.
+            # Coaching style remains a nested fragment in the menu.
             render_profile_menu()
         inject_profile_leave_helper()
         chosen_model = st.session_state.selected_model

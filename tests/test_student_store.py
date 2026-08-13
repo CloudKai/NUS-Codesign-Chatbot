@@ -12,8 +12,48 @@ from backend.retrieval import (
     retrieval_sources_from_notebook,
 )
 from backend.settings import settings
+from backend.student_journey import learning_review
 from backend.student_store import StudentStore
 from backend.workspace_service import WorkspaceService
+
+
+def _facione_scores(**overrides: int) -> dict[str, int]:
+    """Return one complete deterministic Facione score payload."""
+    scores = {
+        "analysis": 0,
+        "interpretation": 0,
+        "inference": 0,
+        "evaluation": 0,
+        "explanation": 0,
+        "self_regulation": 0,
+    }
+    scores.update(overrides)
+    return scores
+
+
+def _add_assessment(
+    store: StudentStore,
+    thread_id: str,
+    *,
+    profile: str | None,
+    scores: dict[str, int],
+    pending_to: str | None = None,
+) -> str:
+    """Persist one assistant assessment using the normal message boundary."""
+    metadata = {
+        "assessment": {
+            "current_stage": "evidence",
+            "recommendation": "advance" if pending_to else "stay",
+            "facione_scores": scores,
+        },
+        **({"coaching_profile": profile} if profile else {}),
+        **(
+            {"proposed_stage": pending_to, "decision_status": "pending"}
+            if pending_to
+            else {}
+        ),
+    }
+    return store.add_message(thread_id, "assistant", "Assessment", metadata=metadata)
 
 
 def test_chat_history_and_notebook_state(tmp_path):
@@ -95,6 +135,156 @@ def test_notebook_update_reads_and_writes_on_one_connection(tmp_path, monkeypatc
     thread = store.get_thread(thread_id) or {}
     assert thread["metadata"]["thinking_stage"] == "focus"
     assert thread["metadata"]["response_detail"] == "long"
+
+
+def test_first_strict_switch_snapshots_active_legacy_and_quick_scores(tmp_path):
+    """Quick-to-Strict stores one durable baseline and rejects pending work."""
+    database = tmp_path / "strict-baseline.sqlite3"
+    store = StudentStore(database)
+    thread_id = store.create_thread(model_id="mock", support_mode="guided")
+    store.update_thread(
+        thread_id,
+        metadata={
+            "learning_journey": {
+                "current_stage": "evidence",
+                "completed_stages": ["focus"],
+                "stage_notes": {"focus": "Original focus"},
+                "working_conclusion": "Keep this conclusion",
+                "response_detail": "short",
+            }
+        },
+    )
+    _add_assessment(
+        store,
+        thread_id,
+        profile=None,
+        scores=_facione_scores(analysis=2, inference=1),
+    )
+    _add_assessment(
+        store,
+        thread_id,
+        profile="quick",
+        scores=_facione_scores(analysis=1, evaluation=3),
+    )
+    _add_assessment(
+        store,
+        thread_id,
+        profile="strict",
+        scores=_facione_scores(analysis=4, self_regulation=4),
+    )
+    pending_id = _add_assessment(
+        store,
+        thread_id,
+        profile="strict",
+        scores=_facione_scores(explanation=4),
+        pending_to="assumptions",
+    )
+    before_messages = [message["content"] for message in store.get_messages(thread_id)]
+
+    store.update_thread(thread_id, metadata={"response_detail": "long"})
+
+    reopened = StudentStore(database)
+    thread = reopened.get_thread(thread_id) or {}
+    journey = thread["metadata"]["learning_journey"]
+    baseline = journey["strict_facione_baseline"]
+    assert baseline["scores"] == _facione_scores(
+        analysis=2,
+        inference=1,
+        evaluation=3,
+    )
+    assert baseline["captured_through"] is not None
+    assert journey["current_stage"] == "evidence"
+    assert journey["completed_stages"] == ["focus"]
+    assert journey["stage_notes"] == {"focus": "Original focus"}
+    assert journey["working_conclusion"] == "Keep this conclusion"
+    assert [message["content"] for message in reopened.get_messages(thread_id)] == before_messages
+    pending = next(
+        message for message in reopened.get_messages(thread_id) if message["id"] == pending_id
+    )
+    assert pending["metadata"]["decision_status"] == "rejected"
+    assert reopened.get_pending_phase_transition(thread_id) is None
+
+    reopened.update_thread(thread_id, metadata={"response_detail": "short"})
+    _add_assessment(
+        reopened,
+        thread_id,
+        profile="quick",
+        scores=_facione_scores(analysis=4, explanation=4),
+    )
+    reopened.update_thread(thread_id, metadata={"response_detail": "long"})
+    assert (reopened.get_thread(thread_id) or {})["metadata"]["learning_journey"][
+        "strict_facione_baseline"
+    ] == baseline
+
+
+def test_style_switch_rolls_back_pending_rejection_with_notebook_update(
+    tmp_path, monkeypatch
+):
+    """Pending rejection and response-detail persistence are one transaction."""
+    store = StudentStore(tmp_path / "style-switch-rollback.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="guided")
+    pending_id = _add_assessment(
+        store,
+        thread_id,
+        profile="quick",
+        scores=_facione_scores(analysis=2),
+        pending_to="evidence",
+    )
+
+    def fail_split(_metadata):
+        raise RuntimeError("simulated notebook update failure")
+
+    monkeypatch.setattr(store, "_split_notebook_metadata", fail_split)
+    with pytest.raises(RuntimeError, match="simulated notebook update failure"):
+        store.update_thread(thread_id, metadata={"response_detail": "long"})
+
+    pending = next(
+        message for message in store.get_messages(thread_id) if message["id"] == pending_id
+    )
+    assert pending["metadata"]["decision_status"] == "pending"
+    journey = (store.get_thread(thread_id) or {})["metadata"]["learning_journey"]
+    assert journey["response_detail"] == "short"
+    assert "strict_facione_baseline" not in journey
+
+
+def test_strict_baseline_excludes_quick_evidence_superseded_after_capture(tmp_path):
+    """Append-only revision cannot retain a superseded Quick baseline score."""
+    store = StudentStore(tmp_path / "strict-baseline-revision.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="guided")
+    user_id = store.add_message(
+        thread_id,
+        "user",
+        "Original reasoning",
+        metadata={"thinking_stage": "focus"},
+    )
+    _add_assessment(
+        store,
+        thread_id,
+        profile="quick",
+        scores=_facione_scores(analysis=4),
+    )
+    store.update_thread(thread_id, metadata={"response_detail": "long"})
+    before = store.get_thread(thread_id) or {}
+    assert learning_review(
+        store.get_messages(thread_id),
+        before["metadata"]["learning_journey"],
+    )["facione_scores"]["analysis"] == 4
+
+    store.revise_conversation_from_user_message(
+        thread_id,
+        user_id,
+        "Replacement reasoning",
+        model_id="mock",
+        metadata={"thinking_stage": "focus"},
+    )
+
+    reopened = StudentStore(store.path)
+    after = reopened.get_thread(thread_id) or {}
+    assert after["metadata"]["learning_journey"]["response_detail"] == "long"
+    assert learning_review(
+        reopened.get_messages(thread_id),
+        after["metadata"]["learning_journey"],
+    )["facione_scores"]["analysis"] == 0
 
 
 def test_delete_notebook_removes_messages_and_sources(tmp_path):
@@ -260,6 +450,43 @@ def test_saving_oauth_state_prunes_expired_rows(tmp_path):
             ).fetchall()
         }
         assert states == {"current"}
+
+
+def test_consuming_oauth_state_prunes_other_abandoned_expired_rows(tmp_path):
+    store = StudentStore(tmp_path / "oauth-callback-cleanup.sqlite3")
+    with store._connect() as connection:
+        connection.executemany(
+            """
+            INSERT INTO oauth_login_states
+              (state, code_verifier, created_at, expires_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            [
+                (
+                    "abandoned",
+                    "expired-verifier",
+                    "2026-08-01T00:00:00+00:00",
+                    "2026-08-01T00:05:00+00:00",
+                ),
+                (
+                    "callback",
+                    "current-verifier",
+                    "2026-08-01T00:06:00+00:00",
+                    "2026-08-01T00:20:00+00:00",
+                ),
+            ],
+        )
+
+    assert (
+        store.consume_oauth_login_state(
+            "callback", now_iso="2026-08-01T00:10:00+00:00"
+        )
+        == "current-verifier"
+    )
+    with store._connect() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM oauth_login_states"
+        ).fetchone()[0] == 0
 
 
 def test_legacy_camelcase_oauth_login_states_are_migrated(tmp_path):

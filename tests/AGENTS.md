@@ -23,7 +23,8 @@ gives every test its own temporary data/database/files/lecture-notes tree and:
 
 - Forces `MOCK_OPENAI=true`, `MODEL_PROVIDER=mock`, and clears `OPENAI_API_KEY`
   (asserted each test).
-- Defaults `USE_LOCAL_API=false` for legacy AppTest; API-mode UI tests opt in.
+- Defaults `USE_LOCAL_API=false` for in-process `CoachApplicationService`
+  AppTest; API-mode UI tests opt in.
 - Defaults `AUTO_ADVANCE_STAGES=false`.
 - Monkeypatches `backend.settings.settings` paths onto the per-test tree.
 - Clears Streamlit `cache_resource` handles so AppTest does not reuse a store.
@@ -40,25 +41,39 @@ default `StudentStore()` path.
 | `test_api_client.py` | Typed `LocalApiClient` confirmation + auto-advance contracts; `/auth/me` session mapping |
 | `test_app_sessions.py` | Cognito refresh/ID cookie sessions, OAuth state binder, callback/logout, redirect URI precedence |
 | `test_auth_gate.py` | Streamlit auth gate, Redirecting UX, Cognito profile upsert, owner binding, no `st.login`/`st.user` authority |
+| `test_cognito_token_jwks.py` | Cognito token-use validation, JWKS refresh/cache, local readiness validation |
+| `test_multiuser_ownership.py` / `test_runtime_auth.py` | Authenticated owner isolation and API-mode owner selection |
+| `test_coach_idempotency.py` | Durable request replay/conflict, leases, concurrency, DSQL OCC wrappers |
+| `test_conversation_revision.py` | Append-only edit branches, CAS, retry recovery, active-history semantics |
+| `test_delete_idempotency.py` | Retryable owner-scoped source/notebook object cleanup |
 | `test_deployment_config.py` | Compose/Caddy/Dockerfile production auth route allow-list, Cognito redirect, stateless prod compose |
+| `test_production_config.py` | `APP_ENV=production` fail-closed settings |
+| `test_production_critical_path.py` | Authenticated HTTP notebook/source/RAG/restart/cleanup journey with fakes |
 | `test_storage_providers.py` | SQLite/local defaults, DSQL/S3 provider selection, mocked DSQL auth + S3 (no AWS calls) |
-| `test_runtime_auth.py` | Cognito owner isolation vs single-owner local API |
 | `test_workspace_api.py` | Notebook/source/preference CRUD API and path redaction |
 | `test_primary_path.py` | All six stages, stale/reject, restart, notebook isolation, schema |
 | `test_workflow.py` | LangGraph workflow routing and structured output |
 | `test_prompt_architecture.py` | Stage prompt files, composer ordering, authoritative stage selection, no raw prompts in API |
 | `test_learning_service.py` | Phase transition confirmation, resolution, atomic rollback |
-| `test_student_store.py` | Notebook, folder, message, source persistence |
+| `test_student_store.py` | Notebook, message, source, preference, owner, and legacy migration persistence |
 | `test_student_journey.py` | Stage normalization, journey helpers, review |
 | `test_source_library.py` | Source import, lecture sync, locked course groups |
+| `test_retrieval.py` | Selected-source chunking/ranking, scope enforcement, citation audit excerpts |
+| `test_upload_hardening.py` / `test_hardening_storage_sync.py` | Upload bounds and object cleanup on partial failure |
 | `test_title_service.py` | Notebook title shortening and legacy replacement |
 | `test_files_and_engine.py` | Upload processing and chat engine behavior |
 | `test_models_and_support.py` | Model registry and support-mode helpers |
-| `test_streamlit_ui.py` | AppTest smoke against `streamlit_app.py` (legacy path) |
+| `test_streamlit_ui.py` | AppTest smoke against `streamlit_app.py` (in-process application path) |
 | `test_theme_styles.py` | Ordered CSS partial manifest and assembled stylesheet contracts (incl. auth) |
-| `test_streamlit_api_mode.py` | AppTest API confirmation + auto-advance; one legacy fallback |
+| `test_streamlit_api_mode.py` | AppTest API confirmation + auto-advance; one in-process parity smoke |
+| `test_sources_ui.py` / `test_rerun_scope.py` | Source ordering/selection and fragment/full-app rerun contracts |
+| `test_retry_keys.py` | Bounded, privacy-safe UI retry-key lifecycle |
+| `test_rate_limit.py` | Per-owner/global coach limits and public login-start throttling |
+| `test_privacy_logging.py` | Privacy-safe operational logging |
 | `test_rename.py` | Enter-only rename draft helpers and epochs |
 | `test_init_db.py` | Safe `init_db.py` refuse-existing / `--force` behavior |
+| `test_init_dsql.py` | Additive/idempotent DSQL revision migration planning and bootstrap behavior |
+| `test_load_probe.py` | Direct CLI bootstrap plus distinct-owner mock load-probe behavior |
 
 ## Hard constraints
 
@@ -70,7 +85,10 @@ default `StudentStore()` path.
 - **Prefer targeted tests** after a localized change; run the full suite at
   phase boundaries and before handoff.
 - **Do not delete user data** in tests. Use the isolated paths from `conftest.py`.
-- Live Ollama/OpenAI tests stay `@pytest.mark.live` and disabled by default.
+- The registered `live` marker is excluded by the default pytest addopts
+  (`-m "not live"`). There are no live-marked tests today. Any future live test
+  must additionally self-skip unless its explicit opt-in environment flag is
+  set; never rely on a marker alone for cost/write safety.
 
 ## Common edit paths
 
@@ -81,7 +99,8 @@ boundaries — e.g. source changes go in `test_source_library.py`.
 
 **New Streamlit UI control or copy**
 
-Extend `test_streamlit_ui.py` (legacy) or `test_streamlit_api_mode.py` (API).
+Extend `test_streamlit_ui.py` (in-process application path) or
+`test_streamlit_api_mode.py` (HTTP API path).
 Assert on rendered output (`app.markdown`, `app.button`, etc.) when possible.
 
 **API contract change**
@@ -106,7 +125,7 @@ With compile check:
 
 ```sh
 PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \
-  .venv/bin/python -m compileall -q backend ui streamlit_app.py tests
+  .venv/bin/python -m compileall -q backend ui scripts streamlit_app.py tests
 ```
 
 CI: [`.github/workflows/mock-ci.yml`](../.github/workflows/mock-ci.yml) runs
@@ -114,6 +133,6 @@ shell syntax, compileall, and mock pytest on push/PR.
 
 ## Handoff
 
-Record new test counts and any gaps (e.g. unverified Ollama/OpenAI smoke) in
+Record new test counts and any gaps (e.g. unverified OpenAI smoke) in
 [`docs/IMPLEMENTATION_STATUS.md`](../docs/IMPLEMENTATION_STATUS.md) when tests
 are part of a completed phase.

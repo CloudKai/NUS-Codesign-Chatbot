@@ -547,6 +547,37 @@ def test_logout_idempotent_without_cookies(tmp_path, monkeypatch):
     )
 
 
+def test_cross_site_get_logout_is_rejected_without_revoking_session(
+    tmp_path, monkeypatch
+):
+    """A third-party link cannot trigger the browser's cookie-bearing GET logout."""
+    store = StudentStore(tmp_path / "logout-cross-site.sqlite3")
+    monkeypatch.setattr(settings, "ui_base_url", "http://127.0.0.1:8501")
+    oidc = _RecordingOIDC(
+        _config(),
+        store=store,
+        metadata_loader=lambda _url: _metadata(),
+        clock=lambda: FIXED_NOW,
+    )
+    session = oidc.seed_session(
+        sub="sub-cross-site",
+        refresh_token="refresh-cross-site",
+        email="cross-site@example.edu",
+    )
+    client = TestClient(create_app(store, oidc_client=oidc))
+
+    response = client.get(
+        "/api/v1/auth/logout",
+        headers={"Sec-Fetch-Site": "cross-site"},
+        cookies={_refresh_cookie_name(): session.refresh_token},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 403
+    assert oidc.revoke_calls == []
+    assert response.headers.get_list("set-cookie") == []
+
+
 def test_callback_rejects_invalid_state_and_missing_sub(tmp_path, monkeypatch):
     store = StudentStore(tmp_path / "callback.sqlite3")
     monkeypatch.setattr(settings, "ui_base_url", "http://127.0.0.1:8501")

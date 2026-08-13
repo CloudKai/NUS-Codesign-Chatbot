@@ -10,6 +10,113 @@ from backend.student_store import StudentStore
 from backend.workspace_service import WorkspaceService
 
 
+def _style_assessment(
+    store: StudentStore,
+    thread_id: str,
+    *,
+    profile: str | None,
+    analysis: int,
+    pending_to: str | None = None,
+) -> str:
+    """Persist one assessment used by style-switch API regressions."""
+    metadata = {
+        "assessment": {
+            "current_stage": "focus",
+            "recommendation": "advance" if pending_to else "stay",
+            "facione_scores": {
+                "analysis": analysis,
+                "interpretation": 0,
+                "inference": 0,
+                "evaluation": 0,
+                "explanation": 0,
+                "self_regulation": 0,
+            },
+        },
+        **({"coaching_profile": profile} if profile else {}),
+        **(
+            {"proposed_stage": pending_to, "decision_status": "pending"}
+            if pending_to
+            else {}
+        ),
+    }
+    return store.add_message(thread_id, "assistant", "Assessment", metadata=metadata)
+
+
+def test_workspace_route_contract_inventory_is_stable(tmp_path):
+    """Protect owner-scoped CRUD routes while their registrar evolves."""
+    store = StudentStore(tmp_path / "workspace-contract.sqlite3")
+    app = create_app(store)
+    expected = {
+        ("get", "/api/v1/preferences", "get_preferences"),
+        ("patch", "/api/v1/preferences", "patch_preferences"),
+        ("get", "/api/v1/threads", "list_threads"),
+        ("post", "/api/v1/threads", "create_thread"),
+        ("get", "/api/v1/threads/{thread_id}", "get_thread"),
+        ("patch", "/api/v1/threads/{thread_id}", "update_thread"),
+        ("delete", "/api/v1/threads/{thread_id}", "delete_thread"),
+        ("get", "/api/v1/threads/{thread_id}/messages", "list_messages"),
+        ("post", "/api/v1/threads/{thread_id}/messages", "create_message"),
+        ("get", "/api/v1/threads/{thread_id}/sources", "list_sources"),
+        ("post", "/api/v1/threads/{thread_id}/sources", "upload_sources"),
+        (
+            "get",
+            "/api/v1/threads/{thread_id}/sources/{source_id}",
+            "get_source",
+        ),
+        (
+            "patch",
+            "/api/v1/threads/{thread_id}/sources/{source_id}",
+            "update_source",
+        ),
+        (
+            "delete",
+            "/api/v1/threads/{thread_id}/sources/{source_id}",
+            "delete_source",
+        ),
+        (
+            "post",
+            "/api/v1/threads/{thread_id}/sources/select-all",
+            "select_all_sources",
+        ),
+        (
+            "get",
+            "/api/v1/threads/{thread_id}/sources/{source_id}/content",
+            "source_content",
+        ),
+        (
+            "post",
+            "/api/v1/threads/{thread_id}/sources/backfill-legacy",
+            "backfill_legacy",
+        ),
+        (
+            "post",
+            "/api/v1/threads/{thread_id}/sources/sync-course-materials",
+            "sync_course_materials",
+        ),
+    }
+    matched_routes = [
+        route
+        for route in app.routes
+        if any(
+            route.path == item[1]
+            and item[0].upper() in getattr(route, "methods", set())
+            for item in expected
+        )
+    ]
+    actual = {
+        (method.lower(), route.path, route.name)
+        for route in matched_routes
+        for method in getattr(route, "methods", set())
+    }
+    assert len(matched_routes) == len(expected)
+    assert all(
+        len(route.dependant.dependencies) == 1
+        and route.dependant.dependencies[0].call.__name__ == "current_owner"
+        for route in matched_routes
+    )
+    assert actual == expected
+
+
 def test_workspace_api_notebook_and_preference_crud(tmp_path):
     store = StudentStore(tmp_path / "workspace.sqlite3")
     client = TestClient(create_app(store))
@@ -62,6 +169,47 @@ def test_workspace_api_notebook_and_preference_crud(tmp_path):
     deleted = client.delete(f"/api/v1/threads/{thread_id}")
     assert deleted.status_code == 200
     assert client.get(f"/api/v1/threads/{thread_id}").status_code == 404
+
+
+def test_workspace_api_style_switch_initializes_baseline_and_rejects_pending(
+    tmp_path,
+):
+    """Existing PATCH contract applies the style transition atomically."""
+    store = StudentStore(tmp_path / "workspace-style-switch.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _style_assessment(store, thread_id, profile=None, analysis=2)
+    _style_assessment(store, thread_id, profile="strict", analysis=4)
+    pending_id = _style_assessment(
+        store,
+        thread_id,
+        profile="quick",
+        analysis=3,
+        pending_to="evidence",
+    )
+    client = TestClient(create_app(store))
+
+    response = client.patch(
+        f"/api/v1/threads/{thread_id}",
+        json={"metadata": {"response_detail": "long"}},
+    )
+
+    assert response.status_code == 200
+    journey = response.json()["metadata"]["learning_journey"]
+    assert journey["response_detail"] == "long"
+    assert journey["strict_facione_baseline"]["scores"] == {
+        "analysis": 3,
+        "interpretation": 0,
+        "inference": 0,
+        "evaluation": 0,
+        "explanation": 0,
+        "self_regulation": 0,
+    }
+    assert journey["strict_facione_baseline"]["captured_through"] is not None
+    pending = next(
+        message for message in store.get_messages(thread_id) if message["id"] == pending_id
+    )
+    assert pending["metadata"]["decision_status"] == "rejected"
+    assert store.get_pending_phase_transition(thread_id) is None
 
 
 def test_workspace_api_rejects_stage_and_transition_metadata(tmp_path):

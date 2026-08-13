@@ -179,8 +179,15 @@
     }
     .cd-roadmap-node {
         position:relative;
+        box-sizing:border-box;
+        flex:0 0 2.1rem;
         width:2.1rem;
+        min-width:2.1rem;
+        max-width:2.1rem;
         height:2.1rem;
+        min-height:2.1rem;
+        max-height:2.1rem;
+        aspect-ratio:1 / 1;
         display:grid;
         place-items:center;
         border-radius:999px;

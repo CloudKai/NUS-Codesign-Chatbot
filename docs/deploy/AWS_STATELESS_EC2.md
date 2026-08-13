@@ -68,9 +68,12 @@ Cognito is authoritative for credentials, refresh-token validity, revocation,
 and login lifetime. DSQL owns only application identity/profile and learning
 data; S3 owns uploaded bytes and extracted large text.
 
-Local SQLite uses the same logical model. Existing developer
-``data/*.sqlite3`` files are **not** auto-migrated; create a fresh DB or use
-``scripts/init_db.py --database …`` for a new file.
+Local SQLite uses the same logical model. Opening `StudentStore` applies the
+known additive/idempotent compatibility migrations covered by the regression
+suite; it does not reset the database. Back up an existing developer database
+and associated source files before first startup on migration-bearing code.
+Use ``scripts/init_db.py --database …`` only to create a separate new database;
+the script refuses an existing file unless `--force` is explicit.
 
 **Do not run ``scripts/init_dsql.py`` against the real cluster until this
 branch has been reviewed and the local suite is green.** A prior draft that
@@ -103,7 +106,7 @@ the operation rather than being counted as removed.
 |---|---|---|
 | Structured state | SQLite (`DATABASE_PROVIDER=sqlite`) | Aurora DSQL (`dsql`) |
 | Uploads | Local files (`FILE_STORAGE_PROVIDER=local`) | S3 (`s3`) |
-| Compose file | `compose.yaml` (build + `./data` mount) | `compose.prod.yaml` (image, no data mount) |
+| Compose file | `scripts/start.sh` is canonical localhost; `compose.yaml` is the stateful build/data-mount CloudFront-Caddy variant | `compose.prod.yaml` (immutable image, no data mount) |
 | DB role | n/a | Runtime `DSQL_USER=co_design_app` (never `admin`) |
 | Secrets | `.env` + `.streamlit/secrets.toml` (never in Git) | Host files + IAM role |
 
@@ -161,15 +164,16 @@ CloudShell sometimes has a nested tree
 pwd
 git rev-parse --show-toplevel
 git fetch origin
-git checkout Production-AddEditFunction   # or the branch that carries the fix
-git reset --hard origin/Production-AddEditFunction
+git switch Production-AddEditFunction     # or the reviewed deployment branch
+git merge --ff-only origin/Production-AddEditFunction
 git log -1 --oneline
 grep -n "_prefer_ipv4_hostaddr\|connect_kwargs\|DSQL_SSLROOTCERT" scripts/init_dsql.py | head
 ```
 
 Prefer `git pull --ff-only origin <branch>` when the local branch can fast-forward.
 Do **not** set `git config pull.rebase` unless you intentionally want a repo-wide
-default. `reset --hard` discards **local-only** commits on that clone.
+default. If the CloudShell clone has diverged, preserve it and use a fresh clone
+or reviewed worktree; do not discard local-only commits with `reset --hard`.
 
 Confirm the script prefers IPv4 (`_prefer_ipv4_hostaddr` / `hostaddr`) and reads
 `settings.dsql_sslrootcert` (env ``DSQL_SSLROOTCERT``).
@@ -346,9 +350,9 @@ rows (active at notebook revision 0). Fresh ``CREATE TABLE`` retains
 ``INTEGER NOT NULL DEFAULT 0`` for both revision counters. The application
 treats null notebook/message revision as ``0`` (``COALESCE`` / ``or 0``) in
 Python, but SQL CAS ``WHERE conversation_revision = 0`` does **not** match
-SQL NULL — backfill before cutover. Student UI shows
-``Conversation {notebook.conversation_revision + 1:02d}`` (stored ``0`` →
-Conversation 01); do not renumber stored values.
+SQL NULL — backfill before cutover. Conversation revisions remain internal;
+the current student UI deliberately does not display a ``Conversation NN``
+label. Do not renumber stored values.
 
 **PART 1 (“only welcome”) — code inspection, not live-verified:** the UI
 welcome seed persists through workspace ``add_message`` without the coach
@@ -521,7 +525,11 @@ Performs no DDL/S3/Bedrock/provider-paid calls; removes disposable rows in
 2. Create notebook.
 3. Send message / generate coach turn.
 4. Upload source; preview source.
-5. Confirm stage transition (recommend → student confirm).
+5. Verify the configured progression policy:
+   - confirmation mode: recommendation → pending → student **Next** confirm;
+   - auto-advance mode: ADVANCE applies immediately and remains audited;
+   - student-selection mode: select/revisit a non-current stage without
+     manufacturing completion or Facione evidence.
 6. Restart/remove/recreate the application container (no `/app/data` mount).
 7. Log back in; confirm notebook, messages, progress, and source still exist.
 8. Delete source/notebook; confirm S3 cleanup under the owner prefix.
