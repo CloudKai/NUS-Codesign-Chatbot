@@ -2,6 +2,59 @@
 
 ## Current phase
 
+**Behavior-preserving architecture refactor — Phase 4 learning and coaching
+boundaries completed locally on 2026-08-13.** Phase 3 remains rollbackable at
+local commit ``99a3288``. Domain/application ownership changed behind the same
+imports; prompts, scoring and workflow behavior did not.
+
+### Phase 4 behavior and structure
+
+1. **Learning domain package.** Immutable ``ThinkingStage`` definitions and the
+   six ordered CDE2300 stages live in ``backend.learning.stages``. Journey
+   normalization/navigation, guidance, deterministic fallback transitions and
+   Facione Review projection live in ``backend.learning.journey``.
+   ``backend.student_journey`` is now a 65-line compatibility façade exporting
+   every established constant, type and helper with the same signatures.
+2. **Coaching execution package.** Durable request preparation, idempotency,
+   retrieval, workflow execution, revision recovery and persistence live in
+   ``backend.coaching.execution``. ``backend.application`` is an 8-line façade
+   retaining ``CoachApplicationService`` and the private
+   ``_coach_request_fingerprint`` test/recovery seam.
+3. **Citation projection isolated.** Catalog construction and response citation
+   filtering are pure functions in ``backend.coaching.citations``. Existing
+   ``CoachApplicationService._selected_citation_catalog`` and
+   ``_relevant_citations`` methods remain as delegating private compatibility
+   seams, so no test or collaborator contract changed.
+4. **No forced class hierarchy.** Stage/review and citation transformations stay
+   typed pure functions. The application service remains a stateful class only
+   where it owns repositories, workflow, retrieval and progression dependencies.
+
+### Phase 4 compatibility and migration
+
+- Prompts, Quick/Strict thresholds, Facione integer scoring/profile isolation,
+  stage progression, revisions, retrieval ranking/context bounds, citations,
+  provider inputs and persisted metadata are unchanged.
+- No API, database, authentication, storage, environment-variable or UI change;
+  no data migration. Rollback is the Phase 4 commit only.
+
+### Phase 4 verification
+
+- Complete deterministic suite: **459 passed** with the same 52 framework
+  deprecation warnings; no live or paid call.
+- Learning/UI focused gate: **88 passed**. Coaching/revision/retrieval focused
+  gate: **100 passed**.
+- Ruff reports zero findings. Compileall and ``git diff --check`` passed.
+
+### Next exact phase
+
+Phase 5 starts in ``ui/``: make ``ui.services.runtime`` own resource/application
+facades and keep ``ui.runtime`` import-compatible, then move chat, sources and
+studio implementation into ``ui.panels`` only where widget/session keys,
+decorators, rerun scope, CSS, copy and rendered behavior can remain byte-for-byte
+compatible. Update brittle source-file tests to inspect owning implementations.
+
+## Previous completed architecture phase — Phase 3 HTTP composition
+
 **Behavior-preserving architecture refactor — Phase 3 HTTP composition
 completed locally on 2026-08-13.** Phase 2 remains rollbackable at local commit
 ``16b7f14``. FastAPI implementation ownership moved; its observable contract
