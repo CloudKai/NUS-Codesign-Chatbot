@@ -33,11 +33,24 @@ Do not point tests at a developer's real `data/` directory. Prefer explicit
 `StudentStore(tmp_path / "...")` for backend tests; AppTest uses the isolated
 default `StudentStore()` path.
 
-## Test file map
+## Test package map
+
+Tests are organized by owning subsystem. Repository-wide architecture and
+deployment contracts remain at the root.
+
+| Package | Covers |
+|---|---|
+| `domain/` | Coaching, learning, prompts, workflow, retrieval and source behavior |
+| `persistence/` | StudentStore, revisions, idempotency and storage adapters |
+| `http/` | FastAPI, auth, ownership, API clients and production request paths |
+| `ui/` | Streamlit AppTest, presentation state, themes and auth gate |
+| `scripts/` | SQLite/DSQL administration and mock load probe |
+
+## Detailed test map
 
 | File | Covers |
 |---|---|
-| `test_api.py` | FastAPI `/api/v1` health, coaching turn, transitions, integrity guards; legacy Streamlit-cookie logout callback |
+| `http/test_api.py` | FastAPI `/api/v1` health, coaching turn, transitions, integrity guards; legacy Streamlit-cookie logout callback |
 | `test_api_client.py` | Typed `LocalApiClient` confirmation + auto-advance contracts; `/auth/me` session mapping |
 | `test_app_sessions.py` | Cognito refresh/ID cookie sessions, OAuth state binder, callback/logout, redirect URI precedence |
 | `test_auth_gate.py` | Streamlit auth gate, Redirecting UX, Cognito profile upsert, owner binding, no `st.login`/`st.user` authority |
@@ -72,8 +85,8 @@ default `StudentStore()` path.
 | `test_privacy_logging.py` | Privacy-safe operational logging |
 | `test_rename.py` | Enter-only rename draft helpers and epochs |
 | `test_init_db.py` | Safe `init_db.py` refuse-existing / `--force` behavior |
-| `test_init_dsql.py` | Additive/idempotent DSQL revision migration planning and bootstrap behavior |
-| `test_load_probe.py` | Direct CLI bootstrap plus distinct-owner mock load-probe behavior |
+| `scripts/test_init_dsql.py` | Additive/idempotent DSQL revision migration planning and bootstrap behavior |
+| `scripts/test_load_probe.py` | Direct CLI bootstrap plus distinct-owner mock load-probe behavior |
 
 ## Hard constraints
 
@@ -112,7 +125,7 @@ Update `test_api.py`, `test_api_client.py`, and `backend/api_client.py` together
 Targeted:
 
 ```sh
-.venv/bin/python -m pytest -q tests/test_<module>.py
+.venv/bin/python -m pytest -q tests/<subsystem>/test_<module>.py
 ```
 
 Full suite:

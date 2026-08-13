@@ -2,6 +2,54 @@
 
 ## Current phase
 
+**Behavior-preserving architecture refactor — Phase 6 scripts and test
+organization completed locally on 2026-08-13.** Phase 5 remains rollbackable at
+local commit ``9196ad5``. Operator and test locations changed; CLI behavior,
+test scenarios and collection did not.
+
+### Phase 6 behavior and structure
+
+1. **DSQL implementation extracted.** Catalog inspection, additive revision
+   planning, bounded backfill, admin connection, async-index waiting and schema
+   execution now live in ``scripts.dsql.cli``. The 29-line
+   ``scripts/init_dsql.py`` entrypoint preserves direct execution, every CLI
+   argument/output, public helper and historical private test seam.
+2. **Tests grouped by ownership.** Existing scenarios now live under
+   ``tests/domain``, ``persistence``, ``http``, ``ui`` and ``scripts``.
+   Repository-wide architecture/deployment contracts remain at the root.
+   Subdirectories deliberately have no package marker: this prevents ``http``
+   and ``ui`` test directories from shadowing Python or application modules.
+3. **Automation and guides follow the new paths.** CI focused gates and testing
+   documentation reference owning subsystem paths. Complete collection remains
+   459 tests; no scenario was removed or combined.
+
+### Phase 6 compatibility and migration
+
+- ``.venv/bin/python scripts/init_dsql.py`` retains the same parser, safety
+  gates, stdout and exit behavior. DSQL transaction and admin/runtime role
+  separation are unchanged.
+- No product, API, database, authentication, provider, prompt, environment or
+  UI change; no migration or data access. Rollback is the Phase 6 commit only.
+
+### Phase 6 verification
+
+- Complete deterministic suite: **459 passed** with the same 52 framework
+  deprecation warnings; no live or paid call.
+- DSQL/storage/deployment focused gate: **49 passed**. Direct
+  ``scripts/init_dsql.py --help`` remains successful without AWS access.
+- Ruff reports zero findings. Compileall, shell syntax, dependency consistency
+  and ``git diff --check`` passed.
+
+### Next exact phase
+
+Phase 7 performs the final integration/documentation gate. Review remaining
+large HTTP, persistence and source modules against the green façade contracts;
+land only an additional extraction that has a cohesive low-risk seam. Update
+the architecture/database/testing/structure guides, verify all compatibility
+imports and run the complete acceptance matrix before the final local commit.
+
+## Previous completed architecture phase — Phase 5 Streamlit presentation
+
 **Behavior-preserving architecture refactor — Phase 5 Streamlit presentation
 boundaries completed locally on 2026-08-13.** Phase 4 remains rollbackable at
 local commit ``f2d97a8``. UI implementation ownership changed behind the same
@@ -46,13 +94,6 @@ imports; rendered behavior, state and styling did not.
   was restored to System after review.
 - Ruff reports zero findings. Compileall, dependency consistency and
   ``git diff --check`` passed.
-
-### Next exact phase
-
-Phase 6 starts at ``scripts/init_dsql.py``: extract catalog inspection,
-migration planning and execution into ``scripts.dsql`` behind the unchanged CLI
-entrypoint. Then group tests by subsystem only where pytest node collection,
-fixtures and documented commands remain compatible.
 
 ## Previous completed architecture phase — Phase 4 learning and coaching
 

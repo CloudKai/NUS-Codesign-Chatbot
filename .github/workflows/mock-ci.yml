@@ -58,7 +58,7 @@ jobs:
           USE_LOCAL_API: "false"
           AUTO_ADVANCE_STAGES: "false"
           APP_ENV: development
-        run: python -m pytest -q tests/test_production_config.py tests/test_deployment_config.py
+        run: python -m pytest -q tests/http/test_production_config.py tests/test_deployment_config.py
 
       - name: Idempotency and ownership gates
         env:
@@ -70,9 +70,9 @@ jobs:
           APP_ENV: development
         run: >
           python -m pytest -q
-          tests/test_coach_idempotency.py
-          tests/test_multiuser_ownership.py
-          tests/test_production_critical_path.py
+          tests/persistence/test_coach_idempotency.py
+          tests/http/test_multiuser_ownership.py
+          tests/http/test_production_critical_path.py
 
       - name: Run complete mock pytest suite
         env:
