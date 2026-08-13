@@ -19,8 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend.prompts import PromptComposer, PromptContext, load_stage_prompt
-from backend.student_journey import STAGE_BY_ID
+from backend.prompts import PromptComposer, PromptContext, load_stage_prompt  # noqa: E402
+from backend.student_journey import STAGE_BY_ID  # noqa: E402
 
 
 def _demo_context(stage_id: str) -> PromptContext:

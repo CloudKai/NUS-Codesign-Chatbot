@@ -47,6 +47,9 @@ jobs:
           PYTHONPYCACHEPREFIX: /tmp/co-design-pycache
         run: python -m compileall -q backend ui streamlit_app.py tests
 
+      - name: Lint sources
+        run: python -m ruff check .
+
       - name: Production configuration and CloudFront-Caddy edge contract
         env:
           MOCK_OPENAI: "true"

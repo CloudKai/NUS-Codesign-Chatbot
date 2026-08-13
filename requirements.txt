@@ -22,3 +22,4 @@ psycopg[binary]==3.2.9
 
 # Tests
 pytest==9.0.2
+ruff==0.11.13

@@ -2,7 +2,6 @@ from backend.models import (
     DEFAULT_CHAT_MODEL_ID,
     DEFAULT_REASONING_EFFORT,
     LOCKED_CHAT_MODEL_ID,
-    LOCKED_REASONING_EFFORT,
     MODEL_REGISTRY,
     get_model,
     validate_reasoning,

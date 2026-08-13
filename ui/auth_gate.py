@@ -19,6 +19,7 @@ from urllib.parse import ParseResult, urlparse
 import streamlit as st
 
 from backend.settings import settings
+from ui.auth.cookies import cookie_value
 from ui.constants import PRODUCT_SUBTITLE, PRODUCT_TITLE
 from ui.runtime import rerun_app
 
@@ -39,18 +40,7 @@ def _is_allowed_http_origin(parsed: ParseResult) -> bool:
     }
 
 
-def _cookie_value(name: str) -> str | None:
-    """Read one cookie from Streamlit context when the browser sent it."""
-    try:
-        cookies = getattr(st, "context", None)
-        cookie_map = getattr(cookies, "cookies", None) if cookies is not None else None
-        if cookie_map is None:
-            return None
-        value = cookie_map.get(name)
-        cleaned = str(value or "").strip()
-        return cleaned or None
-    except Exception:
-        return None
+_cookie_value = cookie_value
 
 
 def authenticated_user() -> dict[str, Any] | None:

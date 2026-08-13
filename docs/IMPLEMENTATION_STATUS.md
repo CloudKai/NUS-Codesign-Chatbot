@@ -2,6 +2,68 @@
 
 ## Current phase
 
+**Behavior-preserving architecture refactor — Phase 1 quality and contract
+gates completed locally on 2026-08-13.** The pre-refactor application state is
+preserved in local commit ``5b94968`` on
+``codex/pre-refactor-checkpoint-20260813``. Refactoring continues only on
+``codex/architecture-refactor``; neither branch has been pushed.
+
+### Phase 1 behavior and structure
+
+1. **No product behavior changed.** The FastAPI paths, methods and operation
+   names; ``StudentStore`` public methods; DSQL OCC write coverage; Streamlit
+   widget/session behavior; authentication flow; prompts; scoring; and visible
+   Light/Dark UI remain the compatibility baseline.
+2. **Lint is now reproducible.** The previous 14 Ruff findings were removed
+   through import ordering and unused-test-import cleanup. Ruff ``0.11.13`` is
+   pinned with the development/test requirements and ``python -m ruff check .``
+   is part of Mock CI. No formatting rewrite or runtime cleanup was mixed in.
+3. **Architecture regression gates were added.** Tests now reject backend-to-UI
+   imports, direct database/model/infrastructure SDK imports from Streamlit,
+   production module-scope import cycles, missing compatibility exports or
+   signatures, FastAPI route inventory drift, and accidental changes to the
+   ``StudentStore``/DSQL OCC method inventories. These are boundary/contract
+   checks, not arbitrary file-size rules.
+4. **The UI import cycle was removed.** Cookie reading now lives in the neutral
+   ``ui.auth.cookies`` helper used by both the authentication gate and runtime
+   API client. ``ui.auth_gate._cookie_value`` remains as a compatibility alias,
+   so existing tests and callers keep the same seam.
+
+### Phase 1 compatibility and migration
+
+- No database schema, migration, persisted JSON, route, request/response,
+  authentication, provider, prompt, environment-variable, widget key,
+  session-state key, copy, CSS, or visual layout changed.
+- Existing private ``.env`` values, SQLite databases, uploaded files, notebooks,
+  messages, sources, assessments, and OAuth/session records were untouched.
+- Rollback is the single local Phase 1 commit after it is created; no data
+  rollback is required.
+
+### Phase 1 verification
+
+- Complete deterministic suite: **459 passed** (the 453-test checkpoint plus 6
+  architecture contract tests), with the same 52 framework deprecation
+  warnings and no live/paid-provider call.
+- Focused architecture/auth/workspace gate: **62 passed**.
+- Ruff: **zero findings**. Compileall, ``pip check``, shell syntax, both Compose
+  configuration checks, and ``git diff --check`` passed.
+- Read-only local SQLite baseline remains ``quick_check=ok`` with zero foreign
+  key violations and zero orphan notebooks, messages, or sources.
+- Browser baselines at 1440 px and 390 px show the same student workspace before
+  and after the dependency-cycle change. No CSS or rendered component changed.
+
+### Next exact phase
+
+Phase 2 starts at ``backend/student_store.py``: extract provider-neutral
+persistence contracts plus SQLite schema/compatibility migration helpers, then
+bind cohesive operation objects from both ``StudentStore`` and
+``DsqlStudentStore``. Preserve the existing constructor, public/private seams,
+transaction boundaries, DSQL retry units, tables, indexes and automatic SQLite
+compatibility timing. Run persistence/DSQL tests and the full gate before the
+next local commit.
+
+## Previous completed phase — Quick/Strict and security hardening
+
 **Quick/Strict coaching profiles, provider cleanup, and architecture/QA
 hardening — implemented locally on 2026-08-13; immutable deployment smoke
 pending.** The working application remains the behavior specification. This

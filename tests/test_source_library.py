@@ -368,15 +368,15 @@ def test_course_material_sync_coordinator_shares_api_jobs(monkeypatch):
 
 
 def test_public_url_validation_blocks_private_networks():
-    private = lambda *_args, **_kwargs: [
-        (2, 1, 6, "", ("127.0.0.1", 443))
-    ]
+    def private(*_args, **_kwargs):
+        return [(2, 1, 6, "", ("127.0.0.1", 443))]
+
     with pytest.raises(SourceImportError, match="Private or local"):
         validate_public_url("https://localhost/private", resolver=private)
 
-    public = lambda *_args, **_kwargs: [
-        (2, 1, 6, "", ("93.184.216.34", 443))
-    ]
+    def public(*_args, **_kwargs):
+        return [(2, 1, 6, "", ("93.184.216.34", 443))]
+
     assert (
         validate_public_url("https://example.com/research", resolver=public)
         == "https://example.com/research"

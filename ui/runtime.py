@@ -32,6 +32,7 @@ from backend.source_library import CourseMaterialSyncCoordinator, LectureNotesSy
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
 from backend.workspace_service import SourceContent, WorkspaceService
+from ui.auth.cookies import cookie_value
 
 
 @st.cache_resource
@@ -110,11 +111,7 @@ def local_api_client() -> LocalApiClient:
     """
 
     def _id_cookie() -> dict[str, str]:
-        try:
-            from ui.auth_gate import _cookie_value
-        except Exception:
-            return {}
-        token = _cookie_value(str(settings.cognito_id_token_cookie_name))
+        token = cookie_value(str(settings.cognito_id_token_cookie_name))
         if not token:
             return {}
         return {str(settings.cognito_id_token_cookie_name): token}
