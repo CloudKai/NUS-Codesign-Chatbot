@@ -2,6 +2,60 @@
 
 ## Current phase
 
+**Behavior-preserving architecture refactor — Phase 5 Streamlit presentation
+boundaries completed locally on 2026-08-13.** Phase 4 remains rollbackable at
+local commit ``f2d97a8``. UI implementation ownership changed behind the same
+imports; rendered behavior, state and styling did not.
+
+### Phase 5 behavior and structure
+
+1. **Panel ownership is explicit.** Chat/composer/editing, source-library and
+   Journey/Review/transition rendering now live in ``ui.panels.chat``,
+   ``ui.panels.sources`` and ``ui.panels.studio``. The established ``ui.chat``,
+   ``ui.sources`` and ``ui.studio`` imports remain transparent module aliases,
+   preserving function identity and monkeypatch behavior as well as widget and
+   session-state keys.
+2. **Runtime services are presentation-neutral.** Cached API/application
+   resources and notebook/source/message operations now live in
+   ``ui.services.runtime``. ``ui.runtime`` remains a transparent alias, so
+   entrypoints and tests retain their current imports and patch seams.
+3. **Tests follow implementation ownership.** Static UI assertions resolve the
+   owning module with ``inspect.getfile`` instead of assuming implementation
+   remains in a historical façade filename. Rendered behavior and public
+   contracts continue to be the primary regression gates.
+4. **No presentation rewrite.** CSS, assets, copy, icons, accessibility labels,
+   component scripts, dialog/fragment decorators, rerun scopes, layout
+   proportions and responsive breakpoints are unchanged.
+
+### Phase 5 compatibility and migration
+
+- Authentication/session bridging, notebook/source/message operations,
+  Quick/Strict preferences, panel selection, uploads, composer/edit/revision
+  behavior and Journey/Review rendering are unchanged.
+- No API, database, authentication, storage, environment-variable, CSS or
+  visible UI change; no data migration. Rollback is the Phase 5 commit only.
+
+### Phase 5 verification
+
+- Complete deterministic suite: **459 passed** with the same 52 framework
+  deprecation warnings; no live or paid call.
+- UI/runtime/auth focused gate: **95 passed**.
+- Real authenticated Streamlit inspection passed in Dark and Light modes. The
+  desktop three-panel workspace and 1280, 1024, 768 and 390 px responsive states
+  rendered without document-level horizontal overflow. The appearance setting
+  was restored to System after review.
+- Ruff reports zero findings. Compileall, dependency consistency and
+  ``git diff --check`` passed.
+
+### Next exact phase
+
+Phase 6 starts at ``scripts/init_dsql.py``: extract catalog inspection,
+migration planning and execution into ``scripts.dsql`` behind the unchanged CLI
+entrypoint. Then group tests by subsystem only where pytest node collection,
+fixtures and documented commands remain compatible.
+
+## Previous completed architecture phase — Phase 4 learning and coaching
+
 **Behavior-preserving architecture refactor — Phase 4 learning and coaching
 boundaries completed locally on 2026-08-13.** Phase 3 remains rollbackable at
 local commit ``99a3288``. Domain/application ownership changed behind the same
@@ -44,14 +98,6 @@ imports; prompts, scoring and workflow behavior did not.
 - Learning/UI focused gate: **88 passed**. Coaching/revision/retrieval focused
   gate: **100 passed**.
 - Ruff reports zero findings. Compileall and ``git diff --check`` passed.
-
-### Next exact phase
-
-Phase 5 starts in ``ui/``: make ``ui.services.runtime`` own resource/application
-facades and keep ``ui.runtime`` import-compatible, then move chat, sources and
-studio implementation into ``ui.panels`` only where widget/session keys,
-decorators, rerun scope, CSS, copy and rendered behavior can remain byte-for-byte
-compatible. Update brittle source-file tests to inspect owning implementations.
 
 ## Previous completed architecture phase — Phase 3 HTTP composition
 

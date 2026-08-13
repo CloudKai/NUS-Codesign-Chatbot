@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 
+import ui.runtime as runtime_module
+import ui.sources as sources_module
+import ui.studio as studio_module
 from ui.sources import (
     _select_all_widget_key,
     _source_selected_widget_key,
@@ -12,7 +16,7 @@ from ui.sources import (
 
 
 def test_runtime_exposes_explicit_rerun_helpers_only() -> None:
-    source = Path("ui/runtime.py").read_text(encoding="utf-8")
+    source = Path(inspect.getfile(runtime_module)).read_text(encoding="utf-8")
     assert "def rerun_app()" in source
     assert "def rerun_fragment()" in source
     assert "def rerun()" not in source
@@ -41,7 +45,7 @@ def test_sources_selection_keys_are_stable() -> None:
 
 
 def test_sources_local_paths_use_fragment_rerun() -> None:
-    source = Path("ui/sources.py").read_text(encoding="utf-8")
+    source = Path(inspect.getfile(sources_module)).read_text(encoding="utf-8")
     assert "rerun_fragment()" in source
     assert "on_change=_persist_source_selected" in source
     assert "on_change=_persist_select_all_sources" in source
@@ -51,7 +55,7 @@ def test_sources_local_paths_use_fragment_rerun() -> None:
 
 
 def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
-    source = Path("ui/studio.py").read_text(encoding="utf-8")
+    source = Path(inspect.getfile(studio_module)).read_text(encoding="utf-8")
     assert "@st.fragment\ndef render_studio_panel()" in source.replace("\r\n", "\n")
     assert "rerun_fragment()" in source
     assert "_select_journey_stage" in source
@@ -109,7 +113,7 @@ def test_menu_popover_key_bumps_to_remount_closed(monkeypatch) -> None:
 
 def test_select_menus_close_after_pick() -> None:
     profile = Path("ui/profile.py").read_text(encoding="utf-8")
-    sources = Path("ui/sources.py").read_text(encoding="utf-8")
+    sources = Path(inspect.getfile(sources_module)).read_text(encoding="utf-8")
     assert "profile-language" not in profile
     assert 'close_menu_popover("source-sort", thread_id)' in sources
     assert 'menu_popover_widget_key("source-sort", thread_id)' in sources
