@@ -2,6 +2,59 @@
 
 ## Current phase
 
+**Behavior-preserving architecture refactor — Phase 3 HTTP composition
+completed locally on 2026-08-13.** Phase 2 remains rollbackable at local commit
+``16b7f14``. FastAPI implementation ownership moved; its observable contract
+did not.
+
+### Phase 3 behavior and structure
+
+1. **Thin compatibility façade.** ``backend/api.py`` is now a 25-line façade
+   re-exporting the original schemas, ``register_workspace_routes``,
+   ``create_app`` and module-level ASGI ``app``. The complete implementation is
+   owned by ``backend/http/app.py``. All callers, uvicorn imports and test
+   imports keep using ``backend.api`` unchanged.
+2. **Historical seams preserved.** The established
+   ``backend.api.validate_cognito_readiness`` monkeypatch seam still controls
+   readiness validation, and operational logs keep logger name ``backend.api``
+   so dashboards/tests do not lose events merely because the code moved.
+3. **Route contracts unchanged.** Authentication registration remains separate;
+   owner resolution is still injected through ``Depends(current_owner)``; all
+   route paths, methods, operation names, status/response behavior, streaming
+   events, headers, rate limits and exception mappings remain in the verified
+   application factory.
+4. **Deliberately bounded extraction.** Workspace/learning/coaching registrars
+   were not split in this commit after a compile-time-only trial demonstrated
+   that a line-range move could cut nested route functions. The failed
+   uncommitted attempt was fully reverted before this safer ownership move.
+   Smaller registrar extraction remains a later step, protected by this green
+   commit and the complete route inventory gate.
+
+### Phase 3 compatibility and migration
+
+- No API, schema, database, authentication, authorization, owner resolution,
+  provider, prompt, environment-variable or UI contract changed.
+- No data migration or private-file access. Rollback is the Phase 3 local commit;
+  no database/data rollback is required.
+
+### Phase 3 verification
+
+- Complete deterministic suite: **459 passed** with the same 52 framework
+  deprecation warnings; no live or paid-provider call.
+- API/auth/ownership/streaming focused gate: **74 passed**.
+- Full route/method/name inventory and protected owner-dependency inventory pass.
+- Ruff reports zero findings. Compileall and ``git diff --check`` passed.
+
+### Next exact phase
+
+Phase 4 starts with deterministic learning boundaries in
+``backend/student_journey.py``: extract stage definitions/navigation and
+Facione Review projection behind re-exports, then split request/citation helpers
+from ``CoachApplicationService`` only where private test seams stay intact.
+Source ingestion/context follows. Each group gets its own focused and full gate.
+
+## Previous completed architecture phase — Phase 2 persistence
+
 **Behavior-preserving architecture refactor — Phase 2 persistence foundation
 completed locally on 2026-08-13.** Phase 1 remains rollbackable at local commit
 ``6e2f776``. This phase changes only implementation ownership behind the
