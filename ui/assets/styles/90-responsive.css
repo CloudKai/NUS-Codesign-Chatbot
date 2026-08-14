@@ -51,13 +51,6 @@
             text-align:left !important;
         }
 
-        /* Drop "Guidance Level:" copy; keep the Quick/Complex control only. */
-        .topbar-guidance-label,
-        .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) {
-            display:none !important;
-        }
-
         .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] {
             display:flex !important;
@@ -65,11 +58,6 @@
             justify-content:flex-end !important;
             gap:.45rem !important;
             width:auto !important;
-        }
-
-        .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(1) {
-            margin-right:0 !important;
         }
 
         .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
@@ -274,17 +262,6 @@
     @media (max-width:1280px) and (min-width:1051px) {
         .st-key-current_notebook_identity {
             max-width:min(22rem,24vw);
-        }
-
-        .topbar-guidance-label,
-        .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) {
-            display:none !important;
-        }
-
-        .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(1) {
-            margin-right:.7rem !important;
         }
     }
 

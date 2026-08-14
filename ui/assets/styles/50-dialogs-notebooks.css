@@ -789,7 +789,7 @@
     .notebook-card-title {
         display:flex;
         align-items:center;
-        flex-wrap:wrap;
+        flex-wrap:nowrap;
         gap:.35rem;
         min-width:0;
         overflow:visible;
@@ -797,6 +797,13 @@
         font-size:.8rem;
         font-weight:650;
         line-height:1.2;
+    }
+
+    .notebook-card-title-text {
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
     }
 
     .notebook-current-badge {
@@ -814,11 +821,19 @@
     }
 
     .notebook-card-meta {
-        margin:0;
+        margin:.16rem 0 0;
         color:var(--cd-muted);
         font-size:.68rem;
         font-weight:520;
         line-height:1.15;
+    }
+
+    .notebook-card-activity {
+        margin:.12rem 0 0;
+        color:var(--cd-muted);
+        font-size:.67rem;
+        font-weight:450;
+        line-height:1.2;
     }
 
     .notebook-folder-active {

@@ -51,7 +51,7 @@ Never commit `.env` or embed API keys in scripts.
 - **Do not hard-code secrets** or model API keys in scripts.
 - **Prefer `.venv/bin/python`** when the virtual environment exists (as
   `start.sh` and `build.sh` do).
-- **Keep mock/Ollama paths explicit** in documentation when adding new startup
+- **Keep mock vs paid OpenAI paths explicit** in documentation when adding new startup
   modes. Paid OpenAI smoke tests require explicit user approval per root
   `AGENTS.md`.
 

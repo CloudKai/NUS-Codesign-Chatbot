@@ -70,6 +70,7 @@ modules.
 | `scripts/test_reset_learning_data.py` | Dry-run manifest, backup/quarantine, exact confirmation, stale-plan rejection |
 | `domain/test_workflow.py` | LangGraph workflow routing and structured output |
 | `domain/test_prompt_architecture.py` | Stage prompt files, composer ordering, authoritative stage selection |
+| `domain/test_bedrock_provider.py` | Bedrock Converse adapter contract with an injected fake client |
 | `domain/test_learning_service.py` | Phase transition confirmation, resolution, atomic rollback |
 | `persistence/test_student_store.py` | Notebook, folder, message, source persistence |
 | `domain/test_student_journey.py` | Stage normalization, journey helpers, review |
@@ -94,7 +95,7 @@ modules.
 - **Prefer targeted tests** after a localized change; run the full suite at
   phase boundaries and before handoff.
 - **Do not delete user data** in tests. Use the isolated paths from `conftest.py`.
-- Live Ollama/OpenAI tests stay `@pytest.mark.live` and disabled by default.
+- Live OpenAI tests stay `@pytest.mark.live` and disabled by default.
 - Patch DSQL CLI internals on `scripts.dsql.cli` when the loaded
   `scripts/init_dsql.py` wrapper re-exports implementation functions.
 
@@ -143,6 +144,6 @@ shell syntax, compileall, and mock pytest on push/PR.
 
 ## Handoff
 
-Record new test counts and any gaps (e.g. unverified Ollama/OpenAI smoke) in
+Record new test counts and any gaps (e.g. unverified OpenAI smoke) in
 [`docs/IMPLEMENTATION_STATUS.md`](../docs/IMPLEMENTATION_STATUS.md) when tests
 are part of a completed phase.

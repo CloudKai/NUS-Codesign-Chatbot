@@ -96,10 +96,9 @@ def _review_fingerprint(review: dict[str, Any]) -> str:
 
 
 def _render_stage_detail(stage: ThinkingStage) -> None:
-    """Render the stage subtitle and description block."""
+    """Render the stage description under the full-name title."""
     st.markdown(
         f'<div class="journey-stage-detail">'
-        f"<strong>{escape(stage.label)}</strong>"
         f"<span>{escape(stage.description)}</span></div>",
         unsafe_allow_html=True,
     )
@@ -231,7 +230,7 @@ def render_journey_track() -> None:
                             '<div class="journey-copy-stack">'
                             '<div class="journey-stage-heading">'
                             f'<span class="journey-short-label">'
-                            f"{escape(stage.short_label)}</span></div></div>",
+                            f"{escape(stage.label)}</span></div></div>",
                             unsafe_allow_html=True,
                         )
                         _render_stage_detail(stage)
@@ -243,7 +242,7 @@ def render_journey_track() -> None:
                         title_column.markdown(
                             '<div class="journey-stage-heading">'
                             f'<span class="journey-short-label">'
-                            f"{escape(stage.short_label)}</span></div>",
+                            f"{escape(stage.label)}</span></div>",
                             unsafe_allow_html=True,
                         )
                         chevron = "⌃" if is_preview_open else "⌵"
@@ -582,7 +581,7 @@ def render_studio_panel() -> None:
         '<div class="pane-heading"><span class="pane-title">Thinking Path</span></div>',
         unsafe_allow_html=True,
     )
-    with st.container(key="studio_scroll"):
+    with st.container(key="studio_scroll", height="stretch"):
         # Streamlit tabs always render both; preferred tab is selected via CSS/state cue.
         journey_tab, review_tab = st.tabs(["Journey", "Review"])
         with journey_tab:

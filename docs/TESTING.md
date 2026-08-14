@@ -51,7 +51,7 @@ git diff --check
 | API/client contracts | `http/test_api.py`, `http/test_api_client.py`, `http/test_workspace_api.py` |
 | Five-phase workflow and progression | `domain/test_workflow.py`, `domain/test_primary_path.py`, `domain/test_learning_service.py`, `domain/test_student_journey.py` |
 | Lecturer Research/analytics | `http/test_professor_research.py`, `http/test_professor_analytics.py`, `ui/test_professor_ui.py`, `domain/test_research_coding_domain.py`, `persistence/test_research_persistence.py` |
-| Prompts/provider boundary | `domain/test_prompt_architecture.py`, `domain/test_models_and_support.py` |
+| Prompts/provider boundary | `domain/test_prompt_architecture.py`, `domain/test_bedrock_provider.py`, `domain/test_models_and_support.py` |
 | Retrieval/citations/sources | `domain/test_retrieval.py`, `domain/test_source_library.py`, `ui/test_sources_ui.py` |
 | Persistence/migrations | `persistence/test_student_store.py`, `scripts/test_init_db.py`, `scripts/test_init_dsql.py`, `persistence/test_storage_providers.py` |
 | Idempotency/revisions/deletion | `persistence/test_coach_idempotency.py`, `persistence/test_conversation_revision.py`, `persistence/test_delete_idempotency.py` |

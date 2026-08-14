@@ -1,0 +1,190 @@
+"""Keep Journey and Review scrollable inside the Thinking Path panel.
+
+``sync_studio_scroll`` measures the studio column and assigns a max height to
+``.st-key-studio_scroll`` so Review expanders scroll without clipping, while
+the Next footer stays pinned. Prefer ``ui.layout.studio_scroll``.
+"""
+
+from __future__ import annotations
+
+import streamlit.components.v1 as components
+
+
+def sync_studio_scroll() -> None:
+    """Size the Thinking Path scroll region and enable vertical scrolling."""
+    components.html(
+        """
+<script>
+(() => {
+  const doc = window.parent.document;
+  const win = window.parent;
+
+  function panel() {
+    return doc.querySelector(".st-key-studio_panel");
+  }
+
+  function column(panel) {
+    return panel?.closest("[data-testid='stColumn']");
+  }
+
+  function scrollRoot(panel) {
+    return panel.querySelector(".st-key-studio_scroll");
+  }
+
+  function scrollTargets(panel) {
+    const root = scrollRoot(panel);
+    if (!root) return [];
+    const targets = new Set([root]);
+    const element = root.closest("[data-testid='stElementContainer']");
+    if (element) targets.add(element);
+    const layoutWrapper = root.closest("[data-testid='stLayoutWrapper']");
+    if (layoutWrapper?.querySelector(".st-key-studio_scroll") === root) {
+      targets.add(layoutWrapper);
+    }
+    const border = root.closest("[data-testid='stVerticalBlockBorderWrapper']");
+    if (border) targets.add(border);
+    return [...targets];
+  }
+
+  function clearNestedScroll(panel) {
+    const root = scrollRoot(panel);
+    if (!root) return;
+    root
+      .querySelectorAll(
+        "[data-testid='stVerticalBlock'], [data-testid='stLayoutWrapper'], [data-testid='stElementContainer'], [data-testid='stExpander'], [data-testid='stTabs'], [role='tabpanel'], [data-baseweb='tab-panel']"
+      )
+      .forEach((node) => {
+        if (node === root) return;
+        node.style.setProperty("height", "auto", "important");
+        node.style.setProperty("max-height", "none", "important");
+        node.style.setProperty("min-height", "0", "important");
+        node.style.setProperty("flex", "0 0 auto", "important");
+        node.style.setProperty("overflow", "visible", "important");
+        node.style.removeProperty("overflow-y");
+        node.style.removeProperty("overflow-x");
+        node.style.removeProperty("overscroll-behavior");
+      });
+  }
+
+  function usableBottom(studioPanel, studioColumn) {
+    const bounds = studioColumn
+      ? studioColumn.getBoundingClientRect()
+      : studioPanel.getBoundingClientRect();
+    const workspace = studioPanel.closest(".st-key-notebook_workspace");
+    const workspaceBottom = workspace
+      ? workspace.getBoundingClientRect().bottom
+      : win.innerHeight;
+    return Math.min(bounds.bottom, workspaceBottom, win.innerHeight - 6);
+  }
+
+  function apply() {
+    const studioPanel = panel();
+    if (!studioPanel) return false;
+
+    const studioColumn = column(studioPanel);
+    const bounds = studioColumn
+      ? studioColumn.getBoundingClientRect()
+      : studioPanel.getBoundingClientRect();
+    if (bounds.height < 80) return false;
+
+    const panelInner = studioPanel.querySelector("[data-testid='stVerticalBlock']");
+    if (panelInner) {
+      const panelHeight = Math.max(200, bounds.height);
+      panelInner.style.setProperty("max-height", panelHeight + "px", "important");
+      panelInner.style.setProperty("height", panelHeight + "px", "important");
+      panelInner.style.setProperty("min-height", "0", "important");
+      panelInner.style.setProperty("overflow", "hidden", "important");
+      panelInner.style.setProperty("display", "flex", "important");
+      panelInner.style.setProperty("flex-direction", "column", "important");
+    }
+
+    const heading = studioPanel.querySelector(".pane-heading");
+    const footer = studioPanel.querySelector(".st-key-thinking_path_footer");
+    const headingBottom = heading
+      ? heading.getBoundingClientRect().bottom
+      : bounds.top + 48;
+    const footerTop = footer && footer.getBoundingClientRect().height > 0
+      ? footer.getBoundingClientRect().top
+      : usableBottom(studioPanel, studioColumn);
+    const maxHeight = Math.max(140, Math.floor(footerTop - headingBottom - 10));
+
+    clearNestedScroll(studioPanel);
+
+    scrollTargets(studioPanel).forEach((node) => {
+      node.style.setProperty("flex", "1 1 auto", "important");
+      node.style.setProperty("min-height", "0", "important");
+      node.style.setProperty("max-height", maxHeight + "px", "important");
+      node.style.setProperty("height", maxHeight + "px", "important");
+      node.style.setProperty("overflow-y", "auto", "important");
+      node.style.setProperty("overflow-x", "hidden", "important");
+      node.style.setProperty("overscroll-behavior", "contain", "important");
+    });
+
+    return true;
+  }
+
+  function schedule() {
+    win.requestAnimationFrame(() => {
+      apply();
+      win.setTimeout(apply, 50);
+      win.setTimeout(apply, 200);
+    });
+  }
+
+  function bind() {
+    const studioPanel = panel();
+    if (!studioPanel) return false;
+
+    if (studioPanel.dataset.cdStudioScrollBound === "1") {
+      schedule();
+      return true;
+    }
+    studioPanel.dataset.cdStudioScrollBound = "1";
+
+    win.addEventListener("resize", schedule);
+    if (win.visualViewport) {
+      win.visualViewport.addEventListener("resize", schedule);
+    }
+
+    const studioColumn = column(studioPanel);
+    const root = scrollRoot(studioPanel);
+    if (root) {
+      const tabObserver = new win.MutationObserver(schedule);
+      tabObserver.observe(root, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["aria-selected", "hidden"],
+      });
+    }
+    if (typeof win.ResizeObserver === "function") {
+      const observer = new win.ResizeObserver(schedule);
+      observer.observe(studioPanel);
+      if (studioColumn) observer.observe(studioColumn);
+      const workspace = studioPanel.closest(".st-key-notebook_workspace");
+      if (workspace) observer.observe(workspace);
+      studioPanel.__cdStudioResizeObserver = observer;
+    } else {
+      const observer = new win.MutationObserver(schedule);
+      observer.observe(studioPanel, { childList: true, subtree: true });
+    }
+
+    schedule();
+    return true;
+  }
+
+  function boot() {
+    if (bind()) return;
+    let attempts = 0;
+    const timer = win.setInterval(() => {
+      attempts += 1;
+      if (bind() || attempts > 80) win.clearInterval(timer);
+    }, 80);
+  }
+
+  boot();
+})();
+</script>
+        """,
+        height=0,
+    )

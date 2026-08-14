@@ -83,7 +83,8 @@ def test_unauthenticated_users_see_auth_gate(logged_out_user):
     assert not app.exception
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "st-key-auth_shell" in rendered or "cd-auth-shell" in rendered
-    assert "Critical Thinking Companion" in rendered
+    assert "CDE2300 Design Thinking Companion" in rendered
+    assert "Guidance Level:" not in rendered
     assert any(
         button.label == "Sign in or create an account" for button in app.button
     )
@@ -269,8 +270,8 @@ def test_auth_gate_uses_server_authoritative_cooldown_and_same_document_redirect
     assert "button.disabled = false" not in source
     assert "streamlit.components.v1" not in source
     assert "components.html" not in source
-    assert source.count("st.html(") == 3
-    assert source.count("unsafe_allow_javascript=True") == 3
+    assert source.count("st.html(") == 4
+    assert source.count("unsafe_allow_javascript=True") == 4
     login_source = source.split("def _click_login_link", 1)[1].split(
         "@st.dialog", 1
     )[0]
@@ -385,6 +386,54 @@ def test_should_attempt_session_refresh_skips_auth_required_marker(monkeypatch):
     assert auth_gate.should_attempt_session_refresh() is False
 
 
+def test_should_attempt_session_refresh_skips_auth_refreshed_marker(monkeypatch):
+    st.session_state.clear()
+    monkeypatch.setattr(
+        auth_gate.st,
+        "query_params",
+        {"auth_refreshed": "1"},
+    )
+    assert auth_gate.should_attempt_session_refresh() is False
+
+
+def test_consume_auth_refresh_marker_strips_query_and_address_bar(monkeypatch):
+    st.session_state.clear()
+    params = {"auth_refreshed": "1", "other": "keep"}
+    html = MagicMock(name="streamlit_html")
+    monkeypatch.setattr(auth_gate.st, "query_params", params, raising=False)
+    monkeypatch.setattr(auth_gate.st, "html", html)
+    auth_gate.consume_auth_refresh_marker()
+    assert "auth_refreshed" not in params
+    assert params["other"] == "keep"
+    assert st.session_state["_auth_refresh_attempted"] is True
+    html.assert_called_once()
+    markup = html.call_args.args[0]
+    assert "replaceState" in markup
+    assert 'searchParams.delete("auth_refreshed")' in markup
+    assert html.call_args.kwargs == {"unsafe_allow_javascript": True}
+    assert auth_gate.should_attempt_session_refresh() is False
+
+
+def test_consume_auth_refresh_marker_is_noop_without_marker(monkeypatch):
+    st.session_state.clear()
+    html = MagicMock(name="streamlit_html")
+    monkeypatch.setattr(auth_gate.st, "query_params", {}, raising=False)
+    monkeypatch.setattr(auth_gate.st, "html", html)
+    auth_gate.consume_auth_refresh_marker()
+    html.assert_not_called()
+    assert "_auth_refresh_attempted" not in st.session_state
+
+
+def test_entrypoint_consumes_auth_refresh_marker_before_auth_branch():
+    source = Path("streamlit_app.py").read_text(encoding="utf-8")
+    consume_at = source.index("consume_auth_refresh_marker()")
+    user_at = source.index("user = authenticated_user()")
+    assert consume_at < user_at
+    assert "consume_auth_refresh_marker" in Path("ui/auth_gate.py").read_text(
+        encoding="utf-8"
+    )
+
+
 def test_authenticated_users_see_full_application(logged_in_user, monkeypatch):
     from ui import profile as profile_ui
 
@@ -401,6 +450,17 @@ def test_authenticated_users_see_full_application(logged_in_user, monkeypatch):
     assert 'href="http://127.0.0.1:8000/api/v1/auth/logout"' in rendered
     assert 'target="_self"' in rendered
     assert app.session_state["display_name"] == "Alex"
+    leaked = (
+        "/api/v1/auth/me",
+        "/api/v1/auth/refresh",
+        "/api/v1/ready",
+        "/api/v1/threads",
+        "/api/v1/coach",
+        "/api/v1/professor",
+        "/api/v1/preferences",
+        "/openapi.json",
+    )
+    assert all(marker not in rendered for marker in leaked)
 
 
 def test_authenticated_rerun_preserves_student_display_name(logged_in_user):

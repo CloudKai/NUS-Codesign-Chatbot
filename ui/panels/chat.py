@@ -12,7 +12,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from backend.domain import CoachRequest, CoachTurn
-from backend.models import MODEL_BY_ID, MODEL_REGISTRY, get_model
 from backend.settings import settings
 from backend.student_journey import (
     DEFAULT_STAGE,
@@ -32,103 +31,7 @@ from ui.layout.user_message_edit_layout import (
 )
 from ui.runtime import rerun_app, store, stream_coach_turn_events
 from ui.retry_keys import get_retry_key, remove_retry_key
-from ui.settings import apply_selected_model, persist_composer_model_choice
 from ui.sources import source_viewer_dialog
-
-
-def _effort_label(effort: str | None) -> str:
-    """Return a short display label for a reasoning effort value."""
-    if not effort:
-        return ""
-    key = str(effort).replace("_", " ").strip().lower()
-    aliases = {"low": "Low", "medium": "Med", "high": "High"}
-    return aliases.get(key, key.title())
-
-
-def _composer_model_chip_label(model_label: str, effort: str | None) -> str:
-    """Build the composer trigger label from model and optional effort."""
-    effort_text = _effort_label(effort)
-    if effort_text:
-        return f"{model_label} · {effort_text}"
-    return model_label
-
-
-def _close_composer_model_popover() -> None:
-    """Close the composer model popover by remounting it on the next run."""
-    st.session_state.composer_effort_menu_model = None
-    epoch = int(st.session_state.get("composer_model_popover_epoch") or 0)
-    st.session_state.composer_model_popover_epoch = epoch + 1
-
-
-def _render_composer_model_picker() -> None:
-    """Render a model chip with a side intelligence (effort) pane."""
-    current = get_model(st.session_state.selected_model)
-    current_effort = st.session_state.get("reasoning_effort")
-    expanded_model_id = str(st.session_state.get("composer_effort_menu_model") or "")
-    expanded_model = MODEL_BY_ID.get(expanded_model_id) if expanded_model_id else None
-    show_effort_pane = bool(
-        expanded_model is not None and expanded_model.reasoning_efforts
-    )
-    chip_label = _composer_model_chip_label(current.label, current_effort)
-    popover_epoch = int(st.session_state.get("composer_model_popover_epoch") or 0)
-    with st.container(key="composer_model_slot"):
-        with st.popover(
-            chip_label,
-            key=f"composer-model-popover-{popover_epoch}",
-        ):
-            # Keep the model list in a stable single column. The effort choices
-            # render as an absolutely positioned flyout beside it (CSS), so the
-            # model text does not jump when the side pane opens.
-            with st.container(key="composer_model_pane"):
-                for model in MODEL_REGISTRY:
-                    model_label = (
-                        f"{model.label}{' · Legacy' if model.deprecated else ''}"
-                    )
-                    is_current_model = model.id == current.id
-                    is_expanded = expanded_model_id == model.id
-                    row_kind = "flyout" if model.reasoning_efforts else "leaf"
-                    with st.container(
-                        key=f"composer_model_item_{row_kind}_{model.id}"
-                    ):
-                        if st.button(
-                            model_label,
-                            key=f"composer-model-{model.id}",
-                            use_container_width=True,
-                            type=(
-                                "primary"
-                                if is_current_model or is_expanded
-                                else "tertiary"
-                            ),
-                        ):
-                            if not model.reasoning_efforts:
-                                apply_selected_model(model.id)
-                                persist_composer_model_choice()
-                                _close_composer_model_popover()
-                            elif is_expanded:
-                                st.session_state.composer_effort_menu_model = None
-                            else:
-                                st.session_state.composer_effort_menu_model = (
-                                    model.id
-                                )
-                            rerun_app()
-
-            if show_effort_pane and expanded_model is not None:
-                with st.container(key="composer_effort_pane"):
-                    for effort in expanded_model.reasoning_efforts:
-                        is_active_effort = (
-                            expanded_model.id == current.id
-                            and current_effort == effort
-                        )
-                        if st.button(
-                            _effort_label(effort),
-                            key=f"composer-effort-{expanded_model.id}-{effort}",
-                            use_container_width=True,
-                            type="primary" if is_active_effort else "tertiary",
-                        ):
-                            apply_selected_model(expanded_model.id, effort=effort)
-                            persist_composer_model_choice()
-                            _close_composer_model_popover()
-                            rerun_app()
 
 
 def render_media(raw_paths: list[str]) -> None:
@@ -788,7 +691,6 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
         _confirm_edit_earlier_message_dialog()
 
     with st.container(key="chat_composer"):
-        _render_composer_model_picker()
         composer_value = st.chat_input(
             "Ask a question or share your thinking",
             key=f"composer-{st.session_state.composer_nonce}",

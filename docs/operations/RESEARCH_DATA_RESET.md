@@ -62,9 +62,16 @@ database contains zero notebooks. If learning data already exists without the
 exact marker, it leaves that data and marker unchanged and directs the operator
 to this reviewed reset procedure with a non-zero exit status. Create the
 inventory using admin IAM
-authentication:
+authentication. From a laptop, `sslmode=verify-full` with `sslrootcert=system`
+often fails (`SSL error: certificate verify failed`) because OpenSSL does not
+use the macOS Keychain. Point at Amazon Root CA 1 first (same as the
+CloudShell / laptop checklist in [`docs/deploy/AWS_STATELESS_EC2.md`](../deploy/AWS_STATELESS_EC2.md)):
 
 ```sh
+curl -fsSL -o "$HOME/AmazonRootCA1.pem" \
+  https://www.amazontrust.com/repository/AmazonRootCA1.pem
+export DSQL_SSLROOTCERT="$HOME/AmazonRootCA1.pem"
+
 .venv/bin/python scripts/reset_learning_data.py \
   --provider dsql \
   --endpoint "$DSQL_ENDPOINT" \

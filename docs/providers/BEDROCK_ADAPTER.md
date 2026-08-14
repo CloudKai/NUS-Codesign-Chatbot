@@ -1,5 +1,10 @@
 # Amazon Bedrock coach adapter handoff
 
+**Implemented** in `backend/bedrock_provider.py` and selected with
+`MODEL_PROVIDER=bedrock`. Automated tests inject a fake Converse client in
+`tests/domain/test_bedrock_provider.py` and never call AWS. Live smoke still
+requires an explicit cost cap.
+
 ## Goal
 
 Implement an Amazon Bedrock generation adapter behind the existing coach
@@ -28,8 +33,7 @@ Required invariants:
 - no database, S3, Cognito, Streamlit, or transition mutation in the adapter;
 - sync and stream paths return the same final validated contract.
 
-The existing mock provider remains the deterministic CI implementation. Do not
-make `MODEL_PROVIDER=bedrock` selectable until all adapter contract tests pass.
+The existing mock provider remains the deterministic CI implementation.
 
 ## Recommended implementation
 

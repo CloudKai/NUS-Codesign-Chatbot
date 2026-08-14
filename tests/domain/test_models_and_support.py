@@ -172,12 +172,3 @@ def test_apply_selected_model_accepts_explicit_effort(monkeypatch):
 
     apply_selected_model(DEFAULT_CHAT_MODEL_ID, effort="not-allowed")
     assert state["reasoning_effort"] == DEFAULT_REASONING_EFFORT
-
-
-def test_composer_model_chip_includes_effort_label():
-    from ui.chat import _composer_model_chip_label, _effort_label
-
-    assert _effort_label("medium") == "Med"
-    assert _composer_model_chip_label("GPT-5.6 Luna", "low") == "GPT-5.6 Luna · Low"
-    assert _composer_model_chip_label("GPT-5.6 Luna", "medium") == "GPT-5.6 Luna · Med"
-    assert _composer_model_chip_label("GPT-5.6 Luna", None) == "GPT-5.6 Luna"

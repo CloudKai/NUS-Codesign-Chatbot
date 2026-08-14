@@ -35,6 +35,7 @@ backend/
   persistence/store/          contracts, schema/migrations, extracted operations
   persistence/                DSQL, local-file, memory, and S3 adapters/ports
   providers.py                OpenAI adapter and provider selection
+  bedrock_provider.py         Amazon Bedrock Converse coach adapter
   mock_provider.py            deterministic offline coach
   auth_*.py / cognito_*.py    Cognito/OIDC boundary and cookie behavior
 tests/                        domain/, persistence/, http/, ui/, scripts/ suites

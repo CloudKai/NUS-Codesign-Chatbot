@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from html import escape
 from typing import Any
 
@@ -63,9 +64,45 @@ def thread_overview(thread: dict[str, Any]) -> dict[str, Any]:
         "progress": journey_progress(journey),
         "summary": " ".join(summary.split())[:160] or "No learning summary yet.",
         "turns": int(thread.get("studentTurnCount") or 0),
+        "messages": int(thread.get("messageCount") or 0),
+        "last_active": _relative_activity(
+            thread.get("lastActivity")
+            or thread.get("updatedAt")
+            or thread.get("createdAt")
+        ),
         "helpful": 0,
         "review": 0,
     }
+
+
+def _relative_activity(value: Any, *, now: datetime | None = None) -> str:
+    """Format a persisted activity timestamp as concise notebook metadata."""
+    raw = str(value or "").strip()
+    if not raw:
+        return "Unknown"
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return "Unknown"
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    activity_date = parsed.astimezone(current.tzinfo).date()
+    elapsed_days = max(0, (current.date() - activity_date).days)
+    if elapsed_days == 0:
+        return "today"
+    if elapsed_days == 1:
+        return "yesterday"
+    if elapsed_days < 7:
+        return f"{elapsed_days} days ago"
+    return parsed.astimezone(current.tzinfo).strftime("%d %b %Y")
+
+
+def _message_count_label(count: int) -> str:
+    """Return a correctly pluralized notebook message count."""
+    return f"{count} message{'s' if count != 1 else ''}"
 
 
 @st.dialog("Your Notebooks", width="large")
@@ -115,14 +152,22 @@ def notebooks_dialog() -> None:
                         if is_active
                         else ""
                     )
+                    notebook_title = escape(
+                        thread.get("name") or "Untitled notebook"
+                    )
                     title_column.markdown(
                         '<div class="notebook-card-copy">'
                         '<div class="notebook-card-title">'
-                        f"{escape(thread.get('name') or 'Untitled notebook')}"
+                        f'<span class="notebook-card-title-text" title="{notebook_title}">'
+                        f"{notebook_title}"
+                        "</span>"
                         f"{current_badge}</div>"
                         f'<div class="notebook-card-meta">'
-                        f"{escape(overview['stage'].short_label)} · "
-                        f"{overview['stage_index']} of {len(THINKING_STAGES)}</div>"
+                        f"{escape(overview['stage'].label)} · "
+                        f"{overview['stage_index']} of {len(THINKING_STAGES)} stages</div>"
+                        f'<div class="notebook-card-activity">'
+                        f"Last active {escape(overview['last_active'])} · "
+                        f"{escape(_message_count_label(overview['messages']))}</div>"
                         "</div>",
                         unsafe_allow_html=True,
                     )
@@ -254,7 +299,7 @@ def notebook_actions_dialog() -> None:
             current_value=current_title,
         )
         st.caption(
-            f"{overview['stage'].short_label} · phase {overview['stage_index']} "
+            f"{overview['stage'].label} · phase {overview['stage_index']} "
             f"of {len(THINKING_STAGES)}"
         )
         if applied and cleaned and cleaned != current_title:

@@ -94,12 +94,12 @@ class Settings:
     # precedence over auto_advance_stages (selection wins if both are true).
     student_stage_selection: bool = _boolean("STUDENT_STAGE_SELECTION", False)
     model_provider: str = os.getenv("MODEL_PROVIDER", "mock").strip().lower()
-    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-    ollama_chat_model: str = os.getenv("OLLAMA_CHAT_MODEL", "gpt-oss:20b")
-    ollama_embedding_model: str = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
     openai_chat_model: str = os.getenv("OPENAI_CHAT_MODEL", "gpt-5.6-luna")
     openai_timeout_seconds: float = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "110"))
     openai_max_retries: int = int(os.getenv("OPENAI_MAX_RETRIES", "0"))
+    bedrock_model_id: str = os.getenv("BEDROCK_MODEL_ID", "").strip()
+    bedrock_timeout_seconds: float = float(os.getenv("BEDROCK_TIMEOUT_SECONDS", "110"))
+    bedrock_max_retries: int = int(os.getenv("BEDROCK_MAX_RETRIES", "0"))
     api_base_url: str = os.getenv("CO_DESIGN_API_URL", "http://127.0.0.1:8000")
     public_api_base_url: str = os.getenv(
         "CO_DESIGN_PUBLIC_API_URL",
@@ -244,18 +244,24 @@ def validate_production_configuration() -> None:
         raise ValueError("MODEL_PROVIDER=mock is not allowed in production")
     if settings.mock_openai:
         raise ValueError("MOCK_OPENAI masking is not allowed in production")
-    if settings.model_provider == "ollama":
-        raise ValueError("MODEL_PROVIDER=ollama is not allowed in production")
-    if settings.model_provider != "openai":
+    if settings.model_provider == "openai":
+        if not settings.openai_api_key.strip():
+            raise ValueError("OPENAI_API_KEY is not configured")
+        if not 1 <= settings.openai_timeout_seconds <= 120:
+            raise ValueError("OPENAI_TIMEOUT_SECONDS must be between 1 and 120")
+        if not 0 <= settings.openai_max_retries <= 2:
+            raise ValueError("OPENAI_MAX_RETRIES must be between 0 and 2")
+    elif settings.model_provider == "bedrock":
+        if not settings.bedrock_model_id.strip():
+            raise ValueError("BEDROCK_MODEL_ID is not configured")
+        if not 1 <= settings.bedrock_timeout_seconds <= 120:
+            raise ValueError("BEDROCK_TIMEOUT_SECONDS must be between 1 and 120")
+        if not 0 <= settings.bedrock_max_retries <= 2:
+            raise ValueError("BEDROCK_MAX_RETRIES must be between 0 and 2")
+    else:
         raise ValueError(
             f"Unsupported MODEL_PROVIDER for production: {settings.model_provider}"
         )
-    if not settings.openai_api_key.strip():
-        raise ValueError("OPENAI_API_KEY is not configured")
-    if not 1 <= settings.openai_timeout_seconds <= 120:
-        raise ValueError("OPENAI_TIMEOUT_SECONDS must be between 1 and 120")
-    if not 0 <= settings.openai_max_retries <= 2:
-        raise ValueError("OPENAI_MAX_RETRIES must be between 0 and 2")
 
     if not settings.use_local_api:
         raise ValueError("USE_LOCAL_API must be enabled in production")

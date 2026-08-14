@@ -2,6 +2,8 @@
 
 Caddy terminates HTTPS and exposes only Streamlit plus a short allow-list of
 auth/health FastAPI routes. Private application APIs must return edge `404`.
+`/api/v1/auth/me` is loopback-only. FastAPI does not publish `/docs`, `/redoc`,
+or `/openapi.json`.
 
 ## Public routes (expect proxied responses)
 
@@ -12,9 +14,10 @@ Replace the host with the production domain when verifying live.
 curl -sS -o /dev/null -w "%{http_code}\n" https://cde2300chatbot.duckdns.org/api/v1/health
 
 # Auth entrypoints should not return Caddy's generic Not Found body
-curl -sS -o /dev/null -w "%{http_code}\n" https://cde2300chatbot.duckdns.org/api/v1/auth/me
+curl -sS -o /dev/null -w "%{http_code}\n" https://cde2300chatbot.duckdns.org/api/v1/auth/login
+curl -sS -o /dev/null -w "%{http_code}\n" https://cde2300chatbot.duckdns.org/api/v1/auth/refresh
 curl -sS -o /dev/null -w "%{http_code}\n" \
-  -X POST https://cde2300chatbot.duckdns.org/api/v1/auth/login
+  -X POST https://cde2300chatbot.duckdns.org/api/v1/auth/logout
 
 # Streamlit UI
 curl -sS -o /dev/null -w "%{http_code}\n" https://cde2300chatbot.duckdns.org/
@@ -24,6 +27,7 @@ curl -sS -o /dev/null -w "%{http_code}\n" https://cde2300chatbot.duckdns.org/
 
 ```bash
 for path in \
+  /api/v1/auth/me \
   /api/v1/ready \
   /api/v1/threads \
   /api/v1/coach/turn \

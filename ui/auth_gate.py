@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import math
 import time
+from html import escape
 from typing import Any
 from urllib.parse import ParseResult, urlparse
 
@@ -21,6 +22,7 @@ import streamlit as st
 
 from backend.settings import settings
 from ui.auth.cookies import cookie_value
+from ui.constants import PRODUCT_TITLE
 from ui.runtime import rerun_app
 
 
@@ -140,6 +142,53 @@ def auth_refresh_url() -> str | None:
     ):
         return None
     return f"{base}/api/v1/auth/refresh"
+
+
+def consume_auth_refresh_marker() -> None:
+    """Drop ``/?auth_refreshed=1`` after the FastAPI refresh bridge returns.
+
+    FastAPI redirects here so Streamlit does not immediately re-enter the
+    refresh bridge when the ID cookie is not yet readable. The login dialog
+    used to be the only consumer, so a successful refresh left the marker in
+    the address bar. Call this on every entry, signed-in or signed-out.
+    """
+    try:
+        present = st.query_params.get("auth_refreshed") == "1"
+    except Exception:
+        present = False
+    if not present:
+        return
+    st.session_state["_auth_refresh_attempted"] = True
+    try:
+        del st.query_params["auth_refreshed"]
+    except Exception:
+        try:
+            st.query_params.pop("auth_refreshed", None)
+        except Exception:
+            pass
+    _strip_auth_refreshed_from_address_bar()
+
+
+def _strip_auth_refreshed_from_address_bar() -> None:
+    """Remove the refresh marker from the visible URL without a navigation."""
+    st.html(
+        """
+<script>
+(() => {
+  try {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("auth_refreshed") !== "1") return;
+    url.searchParams.delete("auth_refreshed");
+    const query = url.searchParams.toString();
+    const next = url.pathname + (query ? "?" + query : "") + url.hash;
+    window.history.replaceState({}, "", next);
+  } catch (error) {
+  }
+})();
+</script>
+""",
+        unsafe_allow_javascript=True,
+    )
 
 
 def should_attempt_session_refresh() -> bool:
@@ -474,14 +523,7 @@ def render_login_gate() -> None:
             del st.query_params["auth_required"]
     except Exception:
         pass
-    try:
-        if st.query_params.get("auth_refreshed") == "1":
-            # Refresh bridge already ran for this browser navigation. Keep the
-            # one-shot flag so a still-signed-out paint cannot loop forever.
-            st.session_state["_auth_refresh_attempted"] = True
-            del st.query_params["auth_refreshed"]
-    except Exception:
-        pass
+    consume_auth_refresh_marker()
     try:
         if st.query_params.get("auth_error") == "1":
             st.session_state["_auth_config_error"] = (
@@ -499,7 +541,8 @@ def render_login_gate() -> None:
             '<div class="cd-auth-card">'
             '<div class="cd-auth-brand">'
             '<span class="cd-auth-brand-mark" aria-hidden="true">C</span>'
-            '<span class="cd-auth-brand-name">Critical Thinking Companion</span>'
+            '<span class="cd-auth-brand-name">'
+            f"{escape(PRODUCT_TITLE)}</span>"
             "</div>"
             '<p class="cd-auth-body">Sign in to save your notebooks, conversations, '
             "journey progress, sources, reviews, and personalised feedback.</p>"
@@ -561,16 +604,15 @@ def render_signed_out_shell() -> None:
     """Render a static, dimmed layout preview with no protected student data."""
     with st.container(key="auth_shell"):
         st.markdown(
-            """
+            f"""
 <!-- Signed-out decorative shell (behind the login dialog) -->
 <div class="cd-auth-shell" aria-hidden="true">
   <div class="cd-auth-shell-topbar">
     <div class="cd-auth-shell-brand"><span class="cd-auth-shell-mark">C</span>
-      Critical Thinking Companion</div>
+      {escape(PRODUCT_TITLE)}</div>
     <div class="cd-auth-shell-title">Untitled notebook</div>
     <div class="cd-auth-shell-actions">
       <span class="cd-auth-shell-chip">Notebooks</span>
-      <span class="cd-auth-shell-chip">Guidance Level: Quick</span>
       <span class="cd-auth-shell-avatar">S</span>
     </div>
   </div>

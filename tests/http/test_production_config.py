@@ -31,6 +31,9 @@ def _apply_valid_production_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "openai_api_key", "sk-test-not-a-real-key")
     monkeypatch.setattr(settings, "openai_timeout_seconds", 110.0)
     monkeypatch.setattr(settings, "openai_max_retries", 0)
+    monkeypatch.setattr(settings, "bedrock_model_id", "")
+    monkeypatch.setattr(settings, "bedrock_timeout_seconds", 110.0)
+    monkeypatch.setattr(settings, "bedrock_max_retries", 0)
     monkeypatch.setattr(settings, "use_local_api", True)
     monkeypatch.setattr(settings, "enable_local_code_execution", False)
     monkeypatch.setattr(settings, "course_material_sync_enabled", False)
@@ -65,12 +68,42 @@ def test_valid_production_configuration_passes(monkeypatch):
     validate_production_configuration()
 
 
+def test_valid_bedrock_production_configuration_passes_without_openai_key(monkeypatch):
+    _apply_valid_production_baseline(monkeypatch)
+    monkeypatch.setattr(settings, "model_provider", "bedrock")
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    monkeypatch.setattr(settings, "bedrock_model_id", "us.anthropic.claude-test")
+    validate_production_configuration()
+
+
+@pytest.mark.parametrize(
+    "field,value,match",
+    [
+        ("bedrock_model_id", "", r"BEDROCK_MODEL_ID"),
+        ("bedrock_timeout_seconds", 0, r"BEDROCK_TIMEOUT_SECONDS"),
+        ("bedrock_timeout_seconds", 121, r"BEDROCK_TIMEOUT_SECONDS"),
+        ("bedrock_max_retries", 3, r"BEDROCK_MAX_RETRIES"),
+    ],
+)
+def test_production_rejects_incomplete_bedrock_configuration(
+    monkeypatch, field: str, value: object, match: str
+):
+    _apply_valid_production_baseline(monkeypatch)
+    monkeypatch.setattr(settings, "model_provider", "bedrock")
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    monkeypatch.setattr(settings, "bedrock_model_id", "us.anthropic.claude-test")
+    monkeypatch.setattr(settings, field, value)
+    with pytest.raises(ValueError, match=match):
+        validate_production_configuration()
+
+
 @pytest.mark.parametrize(
     "field,value,match",
     [
         ("model_provider", "mock", r"MODEL_PROVIDER=mock"),
         ("mock_openai", True, r"MOCK_OPENAI"),
-        ("model_provider", "ollama", r"MODEL_PROVIDER=ollama"),
+        ("model_provider", "ollama", r"Unsupported MODEL_PROVIDER"),
+        ("model_provider", "unknown", r"Unsupported MODEL_PROVIDER"),
         ("openai_api_key", "", r"OPENAI_API_KEY"),
         ("openai_timeout_seconds", 0, r"OPENAI_TIMEOUT_SECONDS"),
         ("openai_timeout_seconds", 121, r"OPENAI_TIMEOUT_SECONDS"),

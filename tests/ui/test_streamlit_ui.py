@@ -77,8 +77,16 @@ def test_streamlit_notebook_workspace_smoke():
     )
     assert workspace_panel.options == ["Journey", "Chat", "Sources"]
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "Guidance Level:" in rendered
-    assert any(button.label == "Quick" for button in app.button)
+    assert "Guidance Level:" not in rendered
+    assert any(
+        control.label == "Coaching style" for control in app.segmented_control
+    )
+    coaching_style = next(
+        control
+        for control in app.segmented_control
+        if control.label == "Coaching style"
+    )
+    assert coaching_style.options == ["Quick", "Strict"]
     assert {tab.label for tab in app.tabs} >= {"Journey", "Review"}
 
     assert '<span class="pane-title">Sources</span>' in rendered
@@ -89,10 +97,18 @@ def test_streamlit_notebook_workspace_smoke():
     )
     assert notebook_title.value == "Untitled notebook"
     assert '<span class="pane-title">Thinking Path</span>' in rendered
-    assert "Critical Thinking Companion" in rendered
+    assert "CDE2300 Design Thinking Companion" in rendered
+    assert "Product Design and Innovation" in rendered
     assert 'aria-label="Critical-thinking journey"' in rendered
-    assert "Problem" in rendered
-    assert "Reflection" in rendered
+    assert 'class="journey-short-label">Problem identification</span>' in rendered
+    assert 'class="journey-short-label">Concept generation</span>' in rendered
+    assert 'class="journey-short-label">Design specification</span>' in rendered
+    assert 'class="journey-short-label">Deep analysis</span>' in rendered
+    assert 'class="journey-short-label">Reflection</span>' in rendered
+    assert 'class="journey-short-label">Problem</span>' not in rendered
+    assert 'class="journey-short-label">Concepts</span>' not in rendered
+    assert 'class="journey-short-label">Specification</span>' not in rendered
+    assert 'class="journey-short-label">Analysis</span>' not in rendered
     assert "Summary" in rendered
     assert "Critical thinking (Facione)" in rendered
     assert "Discussion summary" in rendered
@@ -264,78 +280,37 @@ def test_streamlit_notebook_workspace_smoke():
     assert "cd-profile-help-title" in rendered
     assert "cd-profile-help-body" in rendered
     assert "stTooltipHoverTarget" in rendered
-    assert "st-key-composer_model_slot" in rendered
-    assert any(
+    assert not any(
         (button.key or "").startswith("composer-model-") for button in app.button
     )
     assert not any(
         (button.key or "").startswith("composer-effort-") for button in app.button
     )
+    assert "_render_composer_model_picker" not in _implementation_source(chat_module)
     assert "st-key-chat_composer" in rendered
     assert len(app.chat_message) == 1
     assert app.chat_message[0].name == "assistant"
 
 
-def test_composer_effort_picker_updates_session_and_thread_metadata():
-    """Choosing an intelligence level updates session state and notebook metadata."""
-    from backend.models import DEFAULT_CHAT_MODEL_ID
-    from backend.student_store import StudentStore
+def test_composer_has_no_model_picker_and_keeps_default_model():
+    """Students cannot choose a model; the locked default stays in session."""
+    from backend.models import DEFAULT_CHAT_MODEL_ID, DEFAULT_REASONING_EFFORT
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    thread_id = app.session_state["thread_id"]
     assert app.session_state["selected_model"] == DEFAULT_CHAT_MODEL_ID
-    assert app.session_state["reasoning_effort"] == "low"
+    assert app.session_state["reasoning_effort"] == DEFAULT_REASONING_EFFORT
+    assert not any(
+        (button.key or "").startswith("composer-model-") for button in app.button
+    )
     assert not any(
         (button.key or "").startswith("composer-effort-") for button in app.button
     )
-
-    model_button = next(
-        button
-        for button in app.button
-        if (button.key or "") == f"composer-model-{DEFAULT_CHAT_MODEL_ID}"
-    )
-    model_button.click().run()
-    assert not app.exception
-    assert app.session_state["composer_effort_menu_model"] == DEFAULT_CHAT_MODEL_ID
-    assert {button.label for button in app.button} >= {"Low", "Med"}
-    assert "High" not in {button.label for button in app.button}
-    assert any(
-        (button.key or "").startswith("composer-effort-") for button in app.button
-    )
-
-    model_button = next(
-        button
-        for button in app.button
-        if (button.key or "") == f"composer-model-{DEFAULT_CHAT_MODEL_ID}"
-    )
-    model_button.click().run()
-    assert not app.exception
-    assert app.session_state["composer_effort_menu_model"] in (None, "")
-    assert not any(
-        (button.key or "").startswith("composer-effort-") for button in app.button
-    )
-
-    model_button = next(
-        button
-        for button in app.button
-        if (button.key or "") == f"composer-model-{DEFAULT_CHAT_MODEL_ID}"
-    )
-    model_button.click().run()
-    medium = next(
-        button
-        for button in app.button
-        if (button.key or "") == f"composer-effort-{DEFAULT_CHAT_MODEL_ID}-medium"
-    )
-    medium.click().run()
-    assert not app.exception
-    assert app.session_state["selected_model"] == DEFAULT_CHAT_MODEL_ID
-    assert app.session_state["reasoning_effort"] == "medium"
-    assert app.session_state["composer_effort_menu_model"] in (None, "")
-    assert int(app.session_state["composer_model_popover_epoch"]) >= 1
-
-    metadata = StudentStore().get_thread(thread_id).get("metadata") or {}
-    assert metadata.get("selected_model") == DEFAULT_CHAT_MODEL_ID
-    assert metadata.get("reasoning_effort") == "medium"
+    assert "_render_composer_model_picker" not in _implementation_source(chat_module)
+    assert "sync_studio_scroll" in Path("ui/workspace.py").read_text(encoding="utf-8")
+    studio_py = _implementation_source(studio_module)
+    assert "stage.short_label" not in studio_py
+    assert 'escape(stage.label)' in studio_py
+    assert 'key="studio_scroll", height="stretch"' in studio_py
 
 
 def test_add_pasted_source_then_chat_with_citation():
@@ -467,7 +442,24 @@ def test_learning_studio_and_notebook_history_controls():
     )
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "notebook-card-meta" in rendered
-    assert "of 5" in rendered
+    assert "notebook-card-activity" in rendered
+    assert "of 5 stages" in rendered
+
+
+def test_notebook_activity_helpers_format_relative_time_and_counts():
+    from datetime import datetime, timezone
+
+    from ui.notebooks import _message_count_label, _relative_activity
+
+    now = datetime(2026, 8, 12, 1, 0, tzinfo=timezone.utc)
+    assert _relative_activity("2026-08-12T01:00:00Z", now=now) == "today"
+    assert _relative_activity("2026-08-11T01:00:00Z", now=now) == "yesterday"
+    assert _relative_activity("2026-08-09T01:00:00Z", now=now) == "3 days ago"
+    assert _relative_activity("2026-07-01T01:00:00Z", now=now) == "01 Jul 2026"
+    assert _relative_activity("", now=now) == "Unknown"
+    assert _message_count_label(0) == "0 messages"
+    assert _message_count_label(1) == "1 message"
+    assert _message_count_label(2) == "2 messages"
 
 
 def test_language_theme_and_journey_has_no_manual_progression_control():
@@ -476,7 +468,7 @@ def test_language_theme_and_journey_has_no_manual_progression_control():
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     # Preferences live in the profile settings popover (content exposed to AppTest).
 
-    # Language is a select-only popover (no text caret), same idea as Guidance.
+    # Language is a select-only popover (no text caret).
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "cd-profile-language-label" in rendered
     assert "cd-profile-language-tooltip" in rendered
@@ -500,6 +492,16 @@ def test_language_theme_and_journey_has_no_manual_progression_control():
     )
     chinese.click().run()
     assert app.session_state["response_language"] == "中文"
+
+    coaching_style = next(
+        control
+        for control in app.segmented_control
+        if control.label == "Coaching style"
+    )
+    assert coaching_style.options == ["Quick", "Strict"]
+    coaching_style.set_value("Strict").run()
+    assert app.session_state["response_detail"] == "long"
+    assert app.session_state["learning_journey"]["response_detail"] == "long"
 
     # Popover content remains available for further preference changes.
     appearance = next(
@@ -687,6 +689,13 @@ def test_rename_and_icon_controls_expose_accessible_instructions():
     assert "ResizeObserver" in Path("ui/layout/sources_scroll.py").read_text(
         encoding="utf-8"
     )
+    studio_scroll = Path("ui/layout/studio_scroll.py").read_text(encoding="utf-8")
+    assert "ResizeObserver" in studio_scroll
+    assert ".st-key-studio_scroll" in studio_scroll
+    assert "[role='tabpanel']" in studio_scroll
+    assert "sync_studio_scroll" in workspace
+    assert ".st-key-studio_scroll [role=\"tabpanel\"]" in css
+    assert "overflow:visible !important;" in css
 
 
 def test_notebook_history_card_highlights_active_notebook_without_folders():

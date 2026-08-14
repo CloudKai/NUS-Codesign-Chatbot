@@ -1,9 +1,9 @@
 """Streamlit layout helpers that inject browser-side DOM/CSS adjustments.
 
 These modules exist because Streamlit does not expose first-class APIs for
-column drag-resize, sources-panel scroll sizing, or composer footer placement.
-Keep them small, side-effect free at import time, and call their ``sync_*`` /
-render helpers explicitly from panel code.
+column drag-resize, sources/studio panel scroll sizing, or composer footer
+placement. Keep them small, side-effect free at import time, and call their
+``sync_*`` / render helpers explicitly from panel code.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from ui.layout.column_resize import (
 )
 from ui.layout.composer_layout import sync_composer_layout
 from ui.layout.sources_scroll import sync_sources_scroll
+from ui.layout.studio_scroll import sync_studio_scroll
 
 __all__ = [
     "DEFAULT_WORKSPACE_WIDTHS",
@@ -27,5 +28,6 @@ __all__ = [
     "side_panel_collapsed",
     "sync_composer_layout",
     "sync_sources_scroll",
+    "sync_studio_scroll",
     "sync_workspace_column_resize",
 ]

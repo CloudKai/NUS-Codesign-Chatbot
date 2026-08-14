@@ -24,7 +24,7 @@ FastAPI (`api.py` façade → `http/app.py`)
   -> one LangGraph workflow (workflow.py)
   -> domain contracts (`domain.py`, `student_journey.py` façade → `learning/`)
   -> repositories + SQLite (repositories.py, student_store.py, research/)
-  -> providers (providers.py, mock_provider.py)
+  -> providers (providers.py, bedrock_provider.py, mock_provider.py)
   -> sources/files (`source_library.py` façade → `sources/`, `file_processing.py`)
 ```
 
@@ -46,7 +46,8 @@ FastAPI (`api.py` façade → `http/app.py`)
 | `persistence/` | Storage ports + factories: SQLite/DSQL student stores, local/S3 file storage; `persistence/store/` holds schema, migrations, and extracted source operations |
 | `repositories.py` | Narrow repository adapters over `StudentStore` |
 | `chat_service.py` | Legacy/direct chat engine retained for compatibility tests; not the current Streamlit fallback |
-| `providers.py` | Ollama and OpenAI coach provider adapters (consume composed prompts) |
+| `providers.py` | OpenAI, mock selection, and Bedrock factory wiring |
+| `bedrock_provider.py` | Amazon Bedrock Converse coach adapter (injected client; no AWS in tests) |
 | `prompts/` | Framework-neutral five-phase prompt files, loader, and composer |
 | `mock_provider.py` | Deterministic provider for tests and offline demo |
 | `source_library.py` / `sources/` | Compatibility import plus ingestion, course sync, bounded context, and image/storage projection |
@@ -73,9 +74,10 @@ FastAPI (`api.py` façade → `http/app.py`)
   status in one SQLite transaction).
 - **Structured provider failures** map to HTTP 503 at the API boundary.
 - **Mock-first testing**. Automated tests must not require paid APIs or internet.
-- **AWS production adapters are opt-in** via ``DATABASE_PROVIDER=dsql`` and
-  ``FILE_STORAGE_PROVIDER=s3``. Keep ports replaceable; never bake credentials
-  into images; tests must use mocks/fakes only.
+- **AWS production adapters are opt-in** via ``DATABASE_PROVIDER=dsql``,
+  ``FILE_STORAGE_PROVIDER=s3``, and ``MODEL_PROVIDER=bedrock``. Keep ports
+  replaceable; never bake credentials into images; tests must use mocks/fakes
+  only.
 - **Notebook isolation**. Retrieval and citations must stay scoped to the active
   notebook and selected sources.
 - **Professor/research stays one API.** Lecturer routes live in `http/app.py`

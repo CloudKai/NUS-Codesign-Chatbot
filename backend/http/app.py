@@ -198,7 +198,13 @@ def create_app(
             user_id=cached.user_id,
         )
 
-    app = FastAPI(title="Co-design local API", version="0.1.0")
+    app = FastAPI(
+        title="Co-design local API",
+        version="0.1.0",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     register_auth_routes(
         app,
         store=active_store,
@@ -685,13 +691,17 @@ def create_app(
                 ),
             ) from error
         provider = settings.model_provider
-        if provider not in {"mock", "ollama", "openai"}:
+        if provider not in {"mock", "openai", "bedrock"}:
             raise HTTPException(
                 status_code=503, detail=f"Unsupported MODEL_PROVIDER: {provider}"
             )
         if provider == "openai" and not settings.openai_api_key and not settings.mock_openai:
             raise HTTPException(
                 status_code=503, detail="OPENAI_API_KEY is not configured"
+            )
+        if provider == "bedrock" and not settings.bedrock_model_id:
+            raise HTTPException(
+                status_code=503, detail="BEDROCK_MODEL_ID is not configured"
             )
         if production_mode:
             try:

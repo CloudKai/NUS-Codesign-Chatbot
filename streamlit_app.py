@@ -1,8 +1,9 @@
 """Streamlit entrypoint for the Co-design learning notebook.
 
-Startup order matters: inject static CSS, gate on the FastAPI application
-session (``/api/v1/auth/me``), then initialize session (including appearance
-from the store), sync appearance, apply theme tokens, and render the top bar
+Startup order matters: inject static CSS, drop the one-shot
+``auth_refreshed`` query marker, gate on the FastAPI application session
+(``/api/v1/auth/me``), then initialize session (including appearance from
+the store), sync appearance, apply theme tokens, and render the top bar
 and three-column workspace. Unauthenticated visitors see only a static shell
 plus the login dialog. Prefer ``sh scripts/start.sh`` so the local API is
 running.
@@ -14,6 +15,7 @@ import streamlit as st
 
 from ui.auth_gate import (
     authenticated_user,
+    consume_auth_refresh_marker,
     current_user_claims,
     display_name_from_claims,
     logout_user,
@@ -43,6 +45,7 @@ st.set_page_config(
 )
 
 inject_template_css()
+consume_auth_refresh_marker()
 
 user = authenticated_user()
 if not user:

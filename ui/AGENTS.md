@@ -73,7 +73,7 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
 ## Hard constraints
 
 - **Presentation only.** Do not import SQLite drivers, LangChain, LangGraph,
-  OpenAI/Ollama SDKs, or read/write the filesystem directly except through
+  OpenAI SDKs, or read/write the filesystem directly except through
   backend helpers already used in this package.
 - **Import shared runtime from `ui.runtime` only.** Use `store` (workspace
   facade), `local_api_client()`, coach helpers, `rerun_app()`, and

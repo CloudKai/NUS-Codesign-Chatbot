@@ -409,3 +409,16 @@ def test_complete_fastapi_route_inventory_is_stable(tmp_path: Path) -> None:
         )
     }
     assert actual == expected
+
+
+def test_fastapi_does_not_publish_openapi_docs(tmp_path: Path) -> None:
+    """Swagger/ReDoc/OpenAPI must not advertise internal routes."""
+    from fastapi.testclient import TestClient
+
+    app = create_app(StudentStore(tmp_path / "docs-contract.sqlite3"))
+    assert app.docs_url is None
+    assert app.redoc_url is None
+    assert app.openapi_url is None
+    client = TestClient(app)
+    for path in ("/docs", "/docs/", "/redoc", "/redoc/", "/openapi.json"):
+        assert client.get(path).status_code == 404

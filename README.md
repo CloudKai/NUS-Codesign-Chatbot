@@ -35,7 +35,7 @@ it never grades the student or changes a phase by itself.
 
 - **Python 3.12+** (3.12 recommended)
 - macOS or Linux shell (`zsh` / `bash`)
-- Optional later: [Ollama](https://ollama.com/) or an OpenAI API key
+- Optional later: an OpenAI API key (paid; mock mode is the default)
 
 ---
 
@@ -166,26 +166,6 @@ No OpenAI key is required.
 
 ## Optional: live providers
 
-### Ollama (local model)
-
-```bash
-ollama pull gpt-oss:20b
-```
-
-In `.env`:
-
-```bash
-MODEL_PROVIDER=ollama
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_CHAT_MODEL=gpt-oss:20b
-```
-
-Then:
-
-```bash
-sh scripts/start.sh
-```
-
 ### OpenAI (paid — only with explicit approval / budget)
 
 In `.env`:
@@ -198,8 +178,28 @@ DEFAULT_REASONING_EFFORT=low
 MOCK_OPENAI=false
 ```
 
-Paid calls are **not** part of the default local workflow. Keep mock or Ollama
+Paid calls are **not** part of the default local workflow. Keep `MODEL_PROVIDER=mock`
 for routine development.
+
+### Amazon Bedrock (AWS inference — only with explicit approval / budget)
+
+In `.env` (no access keys):
+
+```bash
+MODEL_PROVIDER=bedrock
+AWS_REGION=us-west-2
+BEDROCK_MODEL_ID=<inference-profile-or-model-id>
+BEDROCK_TIMEOUT_SECONDS=110
+BEDROCK_MAX_RETRIES=0
+MOCK_OPENAI=false
+```
+
+Leave `OPENAI_API_KEY` empty if you are not using OpenAI. Credentials come from
+`aws sso login` locally or the EC2 instance role in production. Enable model
+access in the Bedrock console for that region, grant the runtime role
+`bedrock:InvokeModel` (and `InvokeModelWithResponseStream` if streaming) on that
+model/profile ARN only, and do not create a Knowledge Base for coaching.
+See [Bedrock adapter](docs/providers/BEDROCK_ADAPTER.md).
 
 ### Thinking Path Next confirmation
 
@@ -237,7 +237,9 @@ CLEAR and ethics research labels remain staff-facing.
 See [Research coding methodology](docs/research/METHODOLOGY.md) for operational
 definitions, limitations, and cited sources. A future Bedrock adapter must
 preserve the same provider-neutral one-call contract described in the
-[Bedrock adapter handoff](docs/providers/BEDROCK_ADAPTER.md).
+[Bedrock adapter handoff](docs/providers/BEDROCK_ADAPTER.md). The Converse
+adapter in `backend/bedrock_provider.py` is that generation path; it does not
+replace selected-source retrieval.
 
 ### Existing data and the five-phase contract
 
@@ -316,6 +318,7 @@ The production network boundary is:
 Internet :80/:443 -> Caddy
   /api/v1/auth/login           -> app:8000
   /api/v1/auth/callback        -> app:8000
+  /api/v1/auth/refresh         -> app:8000
   /api/v1/auth/logout          -> app:8000
   /api/v1/health               -> app:8000 (optional public probe)
   other /api/*                 -> 404 (never reaches FastAPI)
@@ -404,11 +407,11 @@ docker compose up -d --build
 ```
 
 > Security boundary: Caddy publicly exposes only auth browser routes
-> (`/api/v1/auth/login`, `/callback`, `/logout`) and `/api/v1/health`.
+> (`/api/v1/auth/login`, `/callback`, `/refresh`, `/logout`) and `/api/v1/health`.
 > `/api/v1/auth/me` stays on the container loopback. Cognito-authenticated
 > Streamlit sessions continue to use owner-scoped in-process services. Other
 > `/api/*` paths return 404 at Caddy and never reach FastAPI on the public
-> hostname.
+> hostname. FastAPI does not publish `/docs`, `/redoc`, or `/openapi.json`.
 
 ---
 
@@ -453,5 +456,6 @@ commit those artifacts.
 | Thinking Path never leaves Problem identification | UI started without API | Use `sh scripts/start.sh` only |
 | Coach error about local API | API not up / wrong URL | Check `:8000/api/v1/health`; keep `CO_DESIGN_API_URL=http://127.0.0.1:8000` |
 | Provider / OpenAI errors on first run | `.env` set to `openai` without a key | Set `MODEL_PROVIDER=mock` |
+| Bedrock access denied / model unavailable | Model access, IAM, or `BEDROCK_MODEL_ID` | Enable the model in Bedrock, grant invoke on that ID, match `AWS_REGION` |
 | Port already in use | Another process on 8000 or 8501 | Stop the other process, then restart `start.sh` |
 | Imports missing | Wrong Python / no venv packages | `source .venv/bin/activate` then `python -m pip install -r requirements.txt` |

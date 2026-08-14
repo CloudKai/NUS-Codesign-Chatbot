@@ -229,10 +229,13 @@ def test_composer_module_has_no_provider_sdk_dependencies():
 
 def test_providers_do_not_embed_five_stage_educational_wording():
     source = (_REPO_ROOT / "backend" / "providers.py").read_text(encoding="utf-8")
+    bedrock = (_REPO_ROOT / "backend" / "bedrock_provider.py").read_text(encoding="utf-8")
     for marker in _STAGE_MARKERS.values():
         assert marker not in source
+        assert marker not in bedrock
     assert "Stage-specific advance rule for Problem" not in source
     assert "compose_coach_prompt" in source
+    assert "compose_coach_prompt" in bedrock
 
 
 def _set_stage(store: StudentStore, thread_id: str, stage_id: str) -> None:
@@ -510,3 +513,12 @@ def test_openai_provider_rejects_missing_injected_api_key():
     """Provider validity belongs to its injected configuration, not global state."""
     with pytest.raises(ProviderUnavailableError, match="OPENAI_API_KEY"):
         OpenAICoachProvider("  ", "gpt-test")
+
+
+def test_configured_coach_provider_rejects_ollama(monkeypatch: pytest.MonkeyPatch):
+    from backend.providers import configured_coach_provider
+    from backend.settings import settings
+
+    monkeypatch.setattr(settings, "model_provider", "ollama")
+    with pytest.raises(ProviderUnavailableError, match="Unsupported MODEL_PROVIDER"):
+        configured_coach_provider()

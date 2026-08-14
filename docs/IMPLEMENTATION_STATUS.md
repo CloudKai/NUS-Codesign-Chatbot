@@ -1,6 +1,69 @@
 # Implementation status
 
-## Current phase — port architecture package splits onto this branch
+## Current phase — Amazon Bedrock coach adapter
+
+**Completed locally on 2026-08-14.** The coach provider contract now includes a
+Bedrock Converse adapter. Phase progression, citations, persistence, and
+selected-source retrieval stay in the application. Automated tests inject a
+fake client and never call AWS.
+
+### Behavior delivered
+
+1. `BedrockCoachProvider` makes one Converse call per turn with a required
+   `coach_turn` tool whose schema is the provider-neutral
+   `ProviderCoachOutput`. Markdown fences are not parsed as a fallback.
+2. The persisted notebook phase overrides a model-supplied phase. Invalid
+   coaching is rejected without persisting an assistant turn. Invalid research
+   coding is dropped independently.
+3. Images map from `CoachImageInput` data URLs to Converse image bytes;
+   unsupported MIME types fail before the model call.
+4. Provider exceptions map to category-only `ProviderUnavailableError`
+   (throttled, timeout, access denied, model unavailable, malformed,
+   truncated) without AWS bodies, credentials, prompts, or student content.
+5. `MODEL_PROVIDER=bedrock` is selectable after contract tests. Production
+   accepts OpenAI **or** Bedrock (not mock). Bedrock production requires
+   `BEDROCK_MODEL_ID` and timeout/retry bounds and does not require
+   `OPENAI_API_KEY`. Credentials stay on the AWS chain / EC2 role.
+
+### Main files changed
+
+- New: `backend/bedrock_provider.py`, `tests/domain/test_bedrock_provider.py`
+- Wiring: `backend/providers.py`, `backend/settings.py`, `backend/http/app.py`
+- Docs/config: `.env.example`, `README.md`, `docs/providers/BEDROCK_ADAPTER.md`,
+  `docs/LOCAL_DEMO_IMPLEMENTATION.md`, `docs/deploy/AWS_STATELESS_EC2.md`,
+  nested `AGENTS.md` maps
+
+### Validation evidence
+
+- Targeted: `tests/domain/test_bedrock_provider.py`,
+  `tests/http/test_production_config.py`,
+  `tests/domain/test_prompt_architecture.py` passed.
+- Full deterministic suite: **501 passed, 0 failed**. Existing
+  Starlette/httpx deprecation warnings. No live AWS, Bedrock, Cognito, DSQL,
+  S3, or paid OpenAI call.
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
+  passed. `git diff --check` passed.
+
+### Compatibility, migration, and rollback
+
+- No database schema change. Default local provider remains `mock`.
+- Production can keep `MODEL_PROVIDER=openai` until Bedrock model access and
+  IAM invoke are granted. Rollback is reverting this working tree and leaving
+  `.env` on `openai` or `mock`.
+
+### Known risks and next exact action
+
+- The pinned boto3 Converse path uses strict tool use, not
+  `outputConfig.textFormat`. Confirm the chosen model/inference profile
+  supports tool use in `us-west-2` before a live smoke.
+- Runtime IAM still needs `bedrock:InvokeModel` (and stream) on the exact
+  model/profile ARN when switching production off OpenAI.
+- Next: an explicitly approved live Bedrock smoke (one short request, stated
+  model, token/request ceiling, and cost cap), then set production
+  `MODEL_PROVIDER=bedrock` and remove `OPENAI_API_KEY` from the host `.env` if
+  OpenAI is no longer used. Do not add a Bedrock Knowledge Base for coaching.
+
+## Previous completed phase — port architecture package splits onto this branch
 
 **Completed locally on 2026-08-14.** Package ownership on
 `professor-analytics-ui` now matches the architecture-refactor *structure*
@@ -621,7 +684,7 @@ unavailable.
 5. Production readiness now verifies the configured file store, bounded S3
   list access, and SELECT access to all five required DSQL tables. The DSQL
    schema expresses non-primary uniqueness as explicit `CREATE UNIQUE INDEX  ASYNC` jobs that bootstrap waits for.
-6. The adapter-configured OpenAI/Ollama model is authoritative. Response
+6. The adapter-configured OpenAI model is authoritative. Response
   language reaches the prompt, reasoning effort restores per notebook, and
    selected sources force model-knowledge fallback off. Request/image limits
    are enforced at the API/application boundary.

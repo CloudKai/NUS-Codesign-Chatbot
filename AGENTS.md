@@ -64,8 +64,7 @@ relevant module only. For backend or migration work, read
   explicit, tested migrations with a backup and rollback path.
 - Paid OpenAI calls are prohibited unless the user explicitly approves a live
   smoke test and specifies a request/token or cost cap.
-- Automated tests must use deterministic mock providers. Local Ollama smoke
-  tests are optional and separately labelled.
+- Automated tests must use deterministic mock providers.
 
 ## Architecture constraints
 
@@ -73,7 +72,7 @@ relevant module only. For backend or migration work, read
   separate. Streamlit must not directly access SQLite, the filesystem, model
   SDKs, LangChain, or LangGraph.
 - Keep core educational logic independent of Streamlit, LangChain, LangGraph,
-  OpenAI, Ollama, SQLite, and future AWS services.
+  OpenAI, SQLite, and future AWS services.
 - Use dependency injection and narrow interfaces for repositories, file
   storage, retrieval, model providers, and the coach workflow.
 - Use one LangGraph workflow for the five research-aligned design-thinking

@@ -20,14 +20,16 @@ Students
        │           ├── Cognito
        │           ├── Aurora DSQL (structured state, role co_design_app)
        │           ├── S3 (user uploads)
-       │           └── OpenAI (temporary configured provider)
+       │           └── OpenAI or Amazon Bedrock (configured coach provider)
        └── DuckDNS cron on the host (not in the app container)
 ```
 
 Persistent state lives in **Aurora DSQL** and **S3**. Replacing the app
 container must not destroy conversations, progress, or uploads.
-Bedrock and shared course-material retrieval are a later workstream and are not
-required to validate this production path.
+Bedrock and shared course-material retrieval are separate workstreams. Coach
+generation can use `MODEL_PROVIDER=bedrock` once the instance role has invoke
+permission on the chosen model; Knowledge Base retrieval is still not required
+to validate this production path.
 
 During pre-Bedrock testing, student-upload RAG is still functional: extracted
 text is read from the selected S3-backed sources, chunked and ranked in the app
@@ -545,9 +547,10 @@ From a laptop (replace the host if the domain changes):
 ```sh
 # Public auth/health should reach FastAPI (expect 2xx/3xx/401/403 — not 404).
 curl -sI https://cde2300chatbot.duckdns.org/api/v1/health | head -n 1
-curl -sI https://cde2300chatbot.duckdns.org/api/v1/auth/me | head -n 1
+curl -sI https://cde2300chatbot.duckdns.org/api/v1/auth/refresh | head -n 1
 
-# Coaching/CRUD must be blocked at Caddy (expect HTTP 404 Not Found).
+# Coaching/CRUD and the loopback session probe must be blocked at Caddy (expect HTTP 404 Not Found).
+curl -sI https://cde2300chatbot.duckdns.org/api/v1/auth/me | head -n 1
 curl -sI https://cde2300chatbot.duckdns.org/api/v1/coach/turn | head -n 1
 curl -sI https://cde2300chatbot.duckdns.org/api/v1/threads | head -n 1
 curl -sI https://cde2300chatbot.duckdns.org/api/v1/ready | head -n 1
@@ -576,10 +579,11 @@ Grant least privilege for:
 - S3 bucket list plus read/write/delete on the uploads bucket's
   `users/*` objects
 - Optional CloudWatch logs
+- When `MODEL_PROVIDER=bedrock`: `bedrock:InvokeModel` and
+  `bedrock:InvokeModelWithResponseStream` on the exact model or
+  inference-profile ARN only (no `bedrock:*` admin)
 
 Do **not** place long-lived AWS access keys in `.env`.
-Bedrock invoke permission is intentionally not required in this phase; add it
-only with the future Bedrock/course-material implementation.
 
 ## Manual AWS Console steps still required
 

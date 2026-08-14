@@ -12,7 +12,7 @@ The target architecture is:
 ```text
 Streamlit UI -> typed FastAPI client -> FastAPI /api/v1 -> application services
     -> one LangGraph coach workflow -> model/retrieval/storage ports
-    -> Ollama or mock model, SQLite, local files, and local vector search
+    -> mock or optional OpenAI model, SQLite, local files, and local vector search
 ```
 
 OpenAI remains an optional provider. Future AWS adapters may provide Bedrock,
@@ -93,7 +93,7 @@ Use narrow dependency-injected ports, including:
 - `ResearchRepository` for immutable automated observations, append-only human
   reviews/adjudications, and attributable access audit.
 
-Local SQLite, local filesystem, local vector search, Ollama, OpenAI, and mock
+Local SQLite, local filesystem, local vector search, OpenAI, and mock
 implementations live in infrastructure. Do not leak their response schemas
 into domain or application code.
 
@@ -161,17 +161,16 @@ MODEL_PROVIDER=mock
 MOCK_OPENAI=true
 AUTO_ADVANCE_STAGES=false
 USE_LOCAL_API=true
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_CHAT_MODEL=gpt-oss:20b
-OLLAMA_EMBEDDING_MODEL=<local-embedding-model>
 OPENAI_API_KEY=
 OPENAI_CHAT_MODEL=gpt-5.6-luna
 ```
 
-Set `MODEL_PROVIDER=ollama` or `openai` in a private `.env` when needed. Do not
-hard-code a model in the workflow. Give a helpful, actionable error if Ollama is
-unavailable. The mock provider must be deterministic and support all automated
-tests without network access.
+Set `MODEL_PROVIDER=openai` or `MODEL_PROVIDER=bedrock` in a private `.env`
+when needed. Do not hard-code a model in the workflow. The mock provider must
+be deterministic and support all automated tests without network access.
+Bedrock uses the default AWS credential chain (SSO or the EC2 role) plus
+`BEDROCK_MODEL_ID`; never put access keys in `.env`. The Bedrock adapter is
+generation-only and must not call RetrieveAndGenerate.
 
 Retrieval is notebook-isolated and source-first. The current local adapter
 creates sentence-aware overlapping chunks from extracted selected-source text
@@ -194,10 +193,10 @@ Work in these verified phases:
    migration is complete.
 4. Structured educational assessment and one LangGraph workflow.
 5. Confirmation-based phase transitions and durable checkpoint state.
-6. Ollama, OpenAI, and deterministic mock provider adapters; local retrieval.
+6. OpenAI and deterministic mock provider adapters; local retrieval.
 7. Streamlit migration, source/citation integration, graph inspection, and
    visual QA.
-8. Full regression, migration, restart, local-Ollama, and optional approved
+8. Full regression, migration, restart, and optional approved
    OpenAI smoke testing.
 
 At every phase, update `IMPLEMENTATION_STATUS.md` with evidence before moving
@@ -212,10 +211,10 @@ stay/advance recommendations, confirmation/rejection, restart resumption,
 source selection, citations, notebook isolation, provider errors, streaming
 failures, upload safety, API contracts, and Streamlit client behavior.
 
-Separately gate local Ollama and OpenAI smoke tests. UI changes require browser
+Separately gate OpenAI smoke tests. UI changes require browser
 checks on desktop and 390 px mobile with a clean console.
 
 Final acceptance requires successful Streamlit and FastAPI startup, mock mode,
-Ollama operation when installed, preserved user data, streaming, grounded
+preserved user data, streaming, grounded
 citations, inspectable graph state, confirmed progress transitions, recovery
 after restart, responsive UI, passing tests, and accurate setup documentation.

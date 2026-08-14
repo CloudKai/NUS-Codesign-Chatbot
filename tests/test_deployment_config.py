@@ -1,9 +1,29 @@
 """Static safety checks for local and production Docker deployment files."""
 
+from __future__ import annotations
+
+import re
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# Browser-facing FastAPI paths Caddy may reverse-proxy. Session probe
+# ``/api/v1/auth/me`` and every coaching/CRUD route stay on loopback.
+_PUBLIC_FASTAPI_HANDLES = frozenset(
+    {
+        "/api/v1/auth/login",
+        "/api/v1/auth/callback",
+        "/api/v1/auth/refresh",
+        "/api/v1/auth/logout",
+        "/api/v1/auth/logout/callback",
+        "/api/v1/health",
+    }
+)
+_CADDY_API_HANDLE = re.compile(
+    r"(?m)^[ \t]+handle (/api/\S+) \{\n(?P<body>.*?)^[ \t]+\}",
+    re.DOTALL,
+)
 
 
 def _service_block(compose: str, service: str) -> str:
@@ -101,14 +121,6 @@ def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     caddyfile = (ROOT / "Caddyfile").read_text(encoding="utf-8")
 
     assert "cde2300chatbot.duckdns.org" in caddyfile
-    assert "handle /api/v1/auth/login" in caddyfile
-    assert "handle /api/v1/auth/callback" in caddyfile
-    assert "handle /api/v1/auth/me" in caddyfile
-    assert "handle /api/v1/auth/logout" in caddyfile
-    assert "handle /api/v1/health" in caddyfile
-    assert "handle /api/*" in caddyfile
-    assert 'respond "Not Found" 404' in caddyfile
-    assert "reverse_proxy app:8501" in caddyfile
     assert "handle_path" not in caddyfile
     assert "Strict-Transport-Security" in caddyfile
     assert "X-Content-Type-Options" in caddyfile
@@ -116,23 +128,39 @@ def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     assert "Referrer-Policy" in caddyfile
     assert "Permissions-Policy" in caddyfile
     assert "Content-Security-Policy" not in caddyfile
+    assert "reverse_proxy app:8501" in caddyfile
 
-    login_index = caddyfile.index("handle /api/v1/auth/login")
-    callback_index = caddyfile.index("handle /api/v1/auth/callback")
-    me_index = caddyfile.index("handle /api/v1/auth/me")
-    logout_index = caddyfile.index("handle /api/v1/auth/logout")
-    health_index = caddyfile.index("handle /api/v1/health")
+    handles = {
+        match.group(1): match.group("body")
+        for match in _CADDY_API_HANDLE.finditer(caddyfile)
+    }
+    assert "/api/*" in handles
+    deny_body = handles.pop("/api/*")
+    assert 'respond "Not Found" 404' in deny_body
+    assert "reverse_proxy" not in deny_body
+    assert set(handles) == _PUBLIC_FASTAPI_HANDLES
+    for path, body in handles.items():
+        assert "reverse_proxy app:8000" in body, path
+        assert 'respond "Not Found" 404' not in body
+
+    leaked = (
+        "/api/v1/auth/me",
+        "/api/v1/ready",
+        "/api/v1/threads",
+        "/api/v1/coach",
+        "/api/v1/professor",
+        "/api/v1/preferences",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+    )
+    for path in leaked:
+        assert f"handle {path}" not in caddyfile
+
+    proxied = [caddyfile.index(f"handle {path}") for path in sorted(handles)]
     block_index = caddyfile.index("handle /api/*")
     streamlit_index = caddyfile.index("handle {\n\t\treverse_proxy app:8501")
-    assert login_index < block_index
-    assert callback_index < block_index
-    assert me_index < block_index
-    assert logout_index < block_index
-    assert health_index < block_index < streamlit_index
-
-    api_block = caddyfile[block_index:streamlit_index]
-    assert "reverse_proxy app:8000" not in api_block
-    assert 'respond "Not Found" 404' in api_block
+    assert max(proxied) < block_index < streamlit_index
 
 
 def test_compose_keeps_internal_fastapi_url_for_container_local_calls():

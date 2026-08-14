@@ -65,18 +65,18 @@
     }
 
     .brand-mark {
-        width:2.9rem;
-        height:2.9rem;
+        width:2.55rem;
+        height:2.55rem;
         flex:none;
         display:grid;
         place-items:center;
-        border-radius:.75rem;
+        border-radius:.62rem;
         color:#fff;
         background:var(--cd-accent);
-        font-size:1.28rem;
-        font-weight:760;
+        font-size:1.08rem;
+        font-weight:740;
         line-height:1;
-        box-shadow:0 5px 14px color-mix(in srgb,var(--cd-accent) 22%,transparent);
+        box-shadow:none;
     }
 
     .brand-name {
@@ -87,12 +87,28 @@
         line-height:1.15;
     }
 
-    .brand-caption {
+    .brand-copy {
+        display:grid;
+        min-width:0;
+        gap:.12rem;
+    }
+
+    .brand-title {
         color:var(--cd-text);
-        font-size:1.18rem;
+        font-family:"Source Serif 4",Georgia,"Times New Roman",serif;
+        font-size:1rem;
         font-weight:700;
+        line-height:1.15;
+        letter-spacing:-.015em;
+        white-space:nowrap;
+    }
+
+    .brand-subtitle {
+        color:var(--cd-muted);
+        font-size:.69rem;
+        font-weight:500;
         line-height:1.2;
-        letter-spacing:-.02em;
+        letter-spacing:.005em;
         white-space:nowrap;
     }
 
@@ -817,8 +833,33 @@
         overscroll-behavior:contain;
     }
 
+    .st-key-studio_panel > [data-testid="stElementContainer"].st-key-studio_scroll,
+    .st-key-studio_panel > [data-testid="stLayoutWrapper"]:has(.st-key-studio_scroll),
+    .st-key-studio_panel > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(.st-key-studio_scroll) {
+        flex:1 1 auto !important;
+        min-height:0 !important;
+        max-height:100% !important;
+        overflow:hidden !important;
+        display:flex !important;
+        flex-direction:column !important;
+    }
+
+    .st-key-studio_panel > [data-testid="stLayoutWrapper"]:has(.st-key-studio_scroll)
+    [data-testid="stVerticalBlockBorderWrapper"],
+    .st-key-studio_panel > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(.st-key-studio_scroll)
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        flex:1 1 auto !important;
+        min-height:0 !important;
+        max-height:100% !important;
+        overflow-y:auto !important;
+        overflow-x:hidden !important;
+        overscroll-behavior:contain;
+    }
+
     .st-key-sources_panel > [data-testid="stLayoutWrapper"]:has(iframe[height="0"]),
-    .st-key-sources_panel > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(iframe[height="0"]) {
+    .st-key-sources_panel > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(iframe[height="0"]),
+    .st-key-studio_panel > [data-testid="stLayoutWrapper"]:has(iframe[height="0"]),
+    .st-key-studio_panel > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(iframe[height="0"]) {
         flex:0 0 auto !important;
         min-height:0 !important;
         max-height:0 !important;
@@ -869,7 +910,9 @@
     }
 
     .st-key-sources_scroll > [data-testid="stVerticalBlock"],
-    .st-key-sources_scroll > [data-testid="stLayoutWrapper"] {
+    .st-key-sources_scroll > [data-testid="stLayoutWrapper"],
+    .st-key-studio_scroll > [data-testid="stVerticalBlock"],
+    .st-key-studio_scroll > [data-testid="stLayoutWrapper"] {
         height:auto !important;
         max-height:none !important;
         min-height:0 !important;
@@ -880,7 +923,14 @@
     .st-key-sources_scroll [data-testid="stLayoutWrapper"],
     .st-key-sources_scroll [data-testid="stElementContainer"],
     .st-key-sources_scroll [data-testid="stExpander"],
-    .st-key-sources_scroll [data-testid="stVerticalBlock"]:not(.st-key-sources_scroll) {
+    .st-key-sources_scroll [data-testid="stVerticalBlock"]:not(.st-key-sources_scroll),
+    .st-key-studio_scroll [data-testid="stLayoutWrapper"],
+    .st-key-studio_scroll [data-testid="stElementContainer"],
+    .st-key-studio_scroll [data-testid="stExpander"],
+    .st-key-studio_scroll [data-testid="stVerticalBlock"]:not(.st-key-studio_scroll),
+    .st-key-studio_scroll [data-testid="stTabs"],
+    .st-key-studio_scroll [role="tabpanel"],
+    .st-key-studio_scroll [data-baseweb="tab-panel"] {
         height:auto !important;
         max-height:none !important;
         min-height:0 !important;
@@ -911,6 +961,9 @@
     }
 
     .st-key-studio_scroll [role="tablist"] {
+        position:sticky;
+        top:0;
+        z-index:3;
         width:100%;
         height:2.55rem;
         display:grid !important;
