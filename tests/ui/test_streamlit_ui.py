@@ -87,6 +87,9 @@ def test_streamlit_notebook_workspace_smoke():
         if control.label == "Coaching style"
     )
     assert coaching_style.options == ["Quick", "Strict"]
+    assert coaching_style.value == "Strict"
+    assert app.session_state["response_detail"] == "long"
+    assert app.session_state["learning_journey"]["response_detail"] == "long"
     assert {tab.label for tab in app.tabs} >= {"Journey", "Review"}
 
     assert '<span class="pane-title">Sources</span>' in rendered
@@ -499,6 +502,10 @@ def test_language_theme_and_journey_has_no_manual_progression_control():
         if control.label == "Coaching style"
     )
     assert coaching_style.options == ["Quick", "Strict"]
+    assert coaching_style.value == "Strict"
+    coaching_style.set_value("Quick").run()
+    assert app.session_state["response_detail"] == "short"
+    assert app.session_state["learning_journey"]["response_detail"] == "short"
     coaching_style.set_value("Strict").run()
     assert app.session_state["response_detail"] == "long"
     assert app.session_state["learning_journey"]["response_detail"] == "long"

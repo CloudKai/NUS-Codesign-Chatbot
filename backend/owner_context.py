@@ -19,6 +19,7 @@ from fastapi import HTTPException, Request
 from backend.application import CoachApplicationService
 from backend.auth_oidc import CognitoIdentity, CognitoOIDCClient, CognitoOIDCError
 from backend.auth_profiles import store_identifier_for_sub, sync_authenticated_user
+from backend.bedrock_retrieve import configured_context_retriever
 from backend.learning_service import LearningProgressService
 from backend.persistence.factory import create_student_store
 from backend.providers import configured_coach_provider
@@ -160,6 +161,7 @@ class OwnerResolver:
             learning,
             auto_advance_stages=self._auto_advance_stages
             and not settings.student_stage_selection,
+            retriever=configured_context_retriever(),
         )
         resolved_user_id = str(user_id or getattr(store, "owner_id", "") or "")
         return OwnerServices(

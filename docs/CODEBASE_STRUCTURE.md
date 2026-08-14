@@ -29,7 +29,8 @@ backend/
   research/                   observation/review/adjudication models and adapters
   source_library.py           source compatibility alias
   sources/                    ingestion, course sync, context, image projection
-  retrieval.py                retrieval port and local chunk retriever
+  retrieval.py                retrieval port, local chunk retriever, composite splitter
+  bedrock_retrieve.py         Bedrock Knowledge Base Retrieve adapter
   repositories.py             narrow store-backed repository adapters
   student_store.py            stable persistence facade and remaining operations
   persistence/store/          contracts, schema/migrations, extracted operations

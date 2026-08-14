@@ -5,6 +5,7 @@ Existing imports remain stable while the domain is split into cohesive modules.
 """
 
 from backend.learning.journey import (
+    DEFAULT_RESPONSE_DETAIL,
     FACIONE_DIMENSIONS,
     FACIONE_SCORE_LABELS,
     RESPONSE_DETAILS,
@@ -33,6 +34,7 @@ from backend.learning.stages import (
 )
 
 __all__ = [
+    "DEFAULT_RESPONSE_DETAIL",
     "DEFAULT_STAGE",
     "FACIONE_DIMENSIONS",
     "FACIONE_SCORE_LABELS",

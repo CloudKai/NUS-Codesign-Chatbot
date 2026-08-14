@@ -140,6 +140,7 @@ def test_retrieval_source_normalization_keeps_course_group_and_image_label():
                 "title": "Week 2",
                 "kind": "file",
                 "extractedText": "Evaluation methods",
+                "object_key": "course/lectureNotes/week2.pdf",
                 "metadata": {"course_material_group": "Lecture Notes"},
             },
             {
@@ -154,6 +155,7 @@ def test_retrieval_source_normalization_keeps_course_group_and_image_label():
 
     assert sources[0].label == "S1"
     assert sources[0].group == "Lecture Notes"
+    assert sources[0].object_key == "course/lectureNotes/week2.pdf"
     assert sources[1].label == "S2"
     assert "Image source" in sources[1].text
 

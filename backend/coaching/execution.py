@@ -33,6 +33,7 @@ from backend.retrieval import (
 )
 from backend.source_library import image_inputs_for_source_ids, selected_source_context
 from backend.student_journey import (
+    DEFAULT_RESPONSE_DETAIL,
     advanced_stage_response,
     current_stage,
     normalize_journey,
@@ -733,6 +734,8 @@ class CoachApplicationService:
                 "response_detail": journey["response_detail"],
                 "allow_model_knowledge": allow_model_knowledge,
                 "conversation_revision": conversation_revision,
+                "student_id": str(getattr(self._store, "identifier", "") or "").strip()
+                or None,
             }
         )
 
@@ -777,11 +780,11 @@ class CoachApplicationService:
             else str(
                 (metadata.get("learning_journey") or {}).get("response_detail")
                 or metadata.get("response_detail")
-                or "short"
+                or DEFAULT_RESPONSE_DETAIL
             )
         )
         if detail not in {"short", "long"}:
-            detail = "short"
+            detail = DEFAULT_RESPONSE_DETAIL
         resumed = None
         resume_fn = getattr(self._store, "try_resume_revision_result", None)
         if callable(resume_fn):

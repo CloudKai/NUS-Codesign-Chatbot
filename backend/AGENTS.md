@@ -25,6 +25,7 @@ FastAPI (`api.py` façade → `http/app.py`)
   -> domain contracts (`domain.py`, `student_journey.py` façade → `learning/`)
   -> repositories + SQLite (repositories.py, student_store.py, research/)
   -> providers (providers.py, bedrock_provider.py, agentcore_provider.py, mock_provider.py)
+  -> retrieval (retrieval.py, bedrock_retrieve.py)
   -> sources/files (`source_library.py` façade → `sources/`, `file_processing.py`)
 ```
 
@@ -38,7 +39,7 @@ FastAPI (`api.py` façade → `http/app.py`)
 | `api_client.py` | Typed client used by Streamlit when `USE_LOCAL_API=true` |
 | `workspace_service.py` | Notebook/history/source/preference CRUD application service; student transcript export |
 | `workflow.py` | Single LangGraph coach workflow wrapper (not one agent per phase) |
-| `student_journey.py` / `learning/` | Compatibility imports plus the five research-aligned phases, journey normalization, review helpers, and questions |
+| `student_journey.py` / `learning/` | Compatibility imports plus the five research-aligned phases, journey normalization, review helpers, and questions. New journeys default to Strict (`response_detail=long`). |
 | `learning_service.py` | Confirmation-gated phase transitions and learning progression |
 | `student_store.py` | SQLite/DSQL-compatible student, conversation, source, research, review, and audit persistence |
 | `research/` | Provider-neutral research observations, human review/adjudication models, and repository adapter |
@@ -49,10 +50,11 @@ FastAPI (`api.py` façade → `http/app.py`)
 | `providers.py` | OpenAI, mock selection, Bedrock and AgentCore factory wiring |
 | `bedrock_provider.py` | Amazon Bedrock Converse coach adapter (injected client; no AWS in tests) |
 | `agentcore_provider.py` | AgentCore Runtime coach adapter (injected client; no AWS in tests) |
+| `bedrock_retrieve.py` | Bedrock Knowledge Base `Retrieve` adapter for selected locked course sources |
 | `prompts/` | Framework-neutral five-phase prompt files, loader, and composer |
 | `mock_provider.py` | Deterministic provider for tests and offline demo |
 | `source_library.py` / `sources/` | Compatibility import plus ingestion, course sync, bounded context, and image/storage projection |
-| `retrieval.py` | Provider-neutral retrieval port + deterministic local selected-source chunk retriever |
+| `retrieval.py` | Provider-neutral retrieval port, local chunk retriever, and composite KB/local splitter |
 | `file_processing.py` | Upload storage, text extraction, safe paths |
 | `settings.py` | Environment-driven configuration (`Settings`) |
 | `models.py` | Model registry and allowed model IDs |

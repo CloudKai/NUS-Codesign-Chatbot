@@ -271,6 +271,9 @@ class CoachRequest(BaseModel):
     student_message: str = Field(min_length=1, max_length=12_000)
     current_stage: str
     response_detail: str = Field(pattern="^(short|long)$")
+    # Server-filled owner identifier for AgentCore harness compatibility.
+    # Never a notebook id; clients cannot make this authoritative.
+    student_id: str | None = Field(default=None, max_length=128)
     source_ids: list[str] = Field(default_factory=list)
     source_context: str = ""
     student_project_context: str = ""

@@ -120,6 +120,7 @@ def _request(thread_id: str, *, key: str | None = None) -> CoachRequest:
 def test_style_switch_during_provider_rolls_back_stale_profile_and_research(tmp_path):
     store = StudentStore(tmp_path / "style-race.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="guided")
+    store.update_thread(thread_id, metadata={"response_detail": "short"})
     provider = _CallbackProvider(
         lambda: store.update_thread(thread_id, metadata={"response_detail": "long"})
     )

@@ -214,8 +214,13 @@ AGENTCORE_RUNTIME_ARN=arn:aws:bedrock-agentcore:us-west-2:<account>:runtime/<id>
 AGENTCORE_QUALIFIER=DEFAULT
 AGENTCORE_TIMEOUT_SECONDS=110
 AGENTCORE_MAX_RETRIES=0
+KNOWLEDGE_BASE_ID=JUQNP8AZAZ
 MOCK_OPENAI=false
 ```
+
+Optional `KNOWLEDGE_BASE_ID` runs Bedrock `Retrieve` for selected Lecture
+Notes/Readings and maps hits onto `[S#]`. Student uploads stay local. The
+coaching specialist still has zero Knowledge Base tools.
 
 Do not merge the POC CDK app as a second student UI. Apply
 [scripts/agentcore/harness_patch/README.md](scripts/agentcore/harness_patch/README.md)
@@ -231,10 +236,10 @@ Default: `AUTO_ADVANCE_STAGES=false`. After the coach recommends the next stage:
 2. Read the warning that confirming early can make the process less critical.
 3. Press **Next** again in the dialog to confirm (or Cancel).
 
-Quick coaching uses the practical evidence threshold; Strict requires clearer,
-more consistently demonstrated reasoning before recommending advancement. The
-profiles retain separate cumulative Review evidence. To restore silent
-auto-advance:
+New notebooks default to Strict coaching. Quick uses the practical evidence
+threshold; Strict requires clearer, more consistently demonstrated reasoning
+before recommending advancement. The profiles retain separate cumulative Review
+evidence. To restore silent auto-advance:
 
 ```bash
 AUTO_ADVANCE_STAGES=true

@@ -22,6 +22,7 @@ def _set_first_phase(store: StudentStore, thread_id: str) -> None:
                 "current_stage": "problem_identification",
                 "completed_stages": [],
                 "stage_notes": {},
+                "response_detail": "short",
             },
         },
     )

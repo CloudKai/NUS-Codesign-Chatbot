@@ -75,6 +75,7 @@ def test_auth_logout_callback_always_expires_base_auth_cookies(tmp_path, monkeyp
 def test_local_api_runs_a_mock_turn_and_auto_advances(tmp_path):
     store = StudentStore(tmp_path / "api.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    store.update_thread(thread_id, metadata={"response_detail": "short"})
     client = TestClient(create_app(store, auto_advance_stages=True))
 
     health = client.get("/api/v1/health")
@@ -135,6 +136,7 @@ def test_local_api_runs_a_mock_turn_and_auto_advances(tmp_path):
 def test_local_api_can_retain_confirmation_mode(tmp_path, caplog):
     store = StudentStore(tmp_path / "manual-api.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    store.update_thread(thread_id, metadata={"response_detail": "short"})
     client = TestClient(create_app(store, auto_advance_stages=False))
     request = {
         "thread_id": thread_id,

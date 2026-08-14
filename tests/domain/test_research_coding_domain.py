@@ -187,6 +187,7 @@ def test_application_converts_research_quotes_to_offsets_and_persists_atomically
         LearningProgressService(store, notebooks, transitions),
     )
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    store.update_thread(thread_id, metadata={"response_detail": "short"})
     message = "I compared privacy and fairness before choosing the design."
     turn = service.submit(
         CoachRequest(

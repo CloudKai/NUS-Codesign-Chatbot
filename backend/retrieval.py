@@ -1,10 +1,9 @@
 """Provider-neutral retrieval contracts and local selected-source retrieval.
 
-The current development adapter chunks the text already stored for selected
-notebook sources and ranks those chunks deterministically. A future Bedrock
-Knowledge Base adapter implements :class:`ContextRetriever` and returns the
-same :class:`RetrievalResult`; prompt composition, coaching, and citations do
-not need to change.
+The local adapter chunks the text already stored for selected notebook sources
+and ranks those chunks deterministically. Production can inject a Bedrock
+Knowledge Base ``Retrieve`` adapter behind the same :class:`ContextRetriever`
+port. Prompt composition, coaching, and citations do not need to change.
 
 Retrieval is deliberately read-only. Callers must pass only sources already
 authorized and selected for the active notebook.
@@ -13,7 +12,7 @@ authorized and selected for the active notebook.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 import re
 from typing import Any, Iterable, Protocol, Sequence
@@ -90,6 +89,7 @@ class RetrievalSource:
     mime: str = "application/octet-stream"
     url: str | None = None
     group: str | None = None
+    object_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -135,6 +135,74 @@ class ContextRetriever(Protocol):
         """Return bounded chunks drawn only from ``query.sources``."""
 
 
+_COURSE_MATERIAL_GROUPS = frozenset({"lecturenotes", "readings"})
+
+
+def is_course_retrieval_source(source: RetrievalSource) -> bool:
+    """Return whether *source* is a locked Lecture Notes or Readings object.
+
+    Student uploads stay on the local retriever. Course objects are identified
+    by ``course_material_group`` or a ``course/`` object key.
+    """
+    group = str(source.group or "").replace(" ", "").replace("_", "").casefold()
+    if group in _COURSE_MATERIAL_GROUPS:
+        return True
+    key = str(source.object_key or "").strip().lstrip("/")
+    return key.startswith("course/")
+
+
+class CompositeContextRetriever:
+    """Split course sources onto a Knowledge Base retriever and the rest locally.
+
+    When the knowledge-base adapter is absent, every selected source uses the
+    local retriever. Knowledge Base misses stay empty for course sources
+    (evidence-gap composer rules) instead of dumping whole PDFs locally.
+    """
+
+    def __init__(
+        self,
+        *,
+        knowledge_base: ContextRetriever | None,
+        local: ContextRetriever | None = None,
+        max_context_chars: int = 16_000,
+    ) -> None:
+        """Compose two retrievers behind one selected-source port.
+
+        Args:
+            knowledge_base: Optional Bedrock ``Retrieve`` adapter for course
+                Lecture Notes/Readings.
+            local: Retriever for student uploads (defaults to
+                :class:`LocalChunkRetriever`).
+            max_context_chars: Combined prompt budget after both adapters run.
+        """
+        self._knowledge_base = knowledge_base
+        self._local = local or LocalChunkRetriever()
+        self._max_context_chars = max_context_chars
+
+    def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
+        """Retrieve course hits from the KB adapter and uploads from local."""
+        if self._knowledge_base is None:
+            return self._local.retrieve(query)
+        course = tuple(
+            source for source in query.sources if is_course_retrieval_source(source)
+        )
+        uploads = tuple(
+            source
+            for source in query.sources
+            if not is_course_retrieval_source(source)
+        )
+        chunks: list[RetrievedChunk] = []
+        if course:
+            kb_result = self._knowledge_base.retrieve(replace(query, sources=course))
+            chunks.extend(kb_result.chunks)
+        if uploads:
+            local_result = self._local.retrieve(replace(query, sources=uploads))
+            chunks.extend(local_result.chunks)
+        return bounded_retrieval_result(
+            chunks, max_context_chars=self._max_context_chars
+        )
+
+
 @dataclass(frozen=True)
 class _Candidate:
     source: RetrievalSource
@@ -167,6 +235,14 @@ def retrieval_sources_from_notebook(
         group = " ".join(
             str(metadata.get("course_material_group") or "").split()
         ).strip()
+        object_key = " ".join(
+            str(
+                source.get("object_key")
+                or metadata.get("object_key")
+                or source.get("path")
+                or ""
+            ).split()
+        ).strip()
         normalized.append(
             RetrievalSource(
                 source_id=str(source.get("id") or "").strip(),
@@ -183,6 +259,7 @@ def retrieval_sources_from_notebook(
                 ),
                 url=str(source.get("sourceUrl") or "").strip() or None,
                 group=group or None,
+                object_key=object_key or None,
             )
         )
     return tuple(source for source in normalized if source.source_id)

@@ -18,9 +18,19 @@ Each coach turn makes **one** `InvokeAgentRuntime` call with:
   "phase": "coaching",
   "topic": "problem_identification",
   "output_contract": "coach_turn",
-  "prompt": "<compose_coach_prompt text>"
+  "student_id": "cognito:<sub>",
+  "messages": [
+    {"role": "user", "content": [{"text": "<prior DSQL turn>"}]},
+    {"role": "assistant", "content": [{"text": "<prior coach reply>"}]},
+    {"role": "user", "content": [{"text": "<compose_coach_prompt text>"}]}
+  ]
 }
 ```
+
+`student_id` is the store owner identifier, never a notebook id. Bounded DSQL
+history (same cap as the composer) is sent as Converse `messages` so the
+harness can use caller-supplied history instead of AgentCore Memory. A fresh
+`runtimeSessionId` (`stateless-…`) is still used per invoke.
 
 Invariants:
 
@@ -50,6 +60,7 @@ AGENTCORE_RUNTIME_ARN=arn:aws:bedrock-agentcore:us-west-2:<account>:runtime/<id>
 AGENTCORE_QUALIFIER=DEFAULT
 AGENTCORE_TIMEOUT_SECONDS=110
 AGENTCORE_MAX_RETRIES=0
+KNOWLEDGE_BASE_ID=JUQNP8AZAZ
 MOCK_OPENAI=false
 ```
 
@@ -85,8 +96,9 @@ Keep these off the Thinking Path unless a later phase explicitly adds them:
 1. Harness `coach_turn` JSON must be deployed to `DEFAULT` before live AgentCore
    coaching can persist assessments (overlay already in
    `scripts/agentcore/harness_patch/`).
-2. Optional separate **Ask the course** mode using KB `Retrieve` mapped onto
-   locked course `source_id`s, still saved in DSQL. Do not give the coaching
+2. Optional separate **Ask the course** Q&A mode (POC `phase=qa` specialist).
+   Selected-source Bedrock `Retrieve` for locked Lecture Notes/Readings is
+   already wired into the coaching composer. Do not give the coaching
    specialist unrestricted KB tools. Do not call `RetrieveAndGenerate`.
 3. Do **not** add critique-every-Nth-turn, replace Review with a scoring
    specialist, restore a sixth `ethics_critical` stage, or merge the CDK

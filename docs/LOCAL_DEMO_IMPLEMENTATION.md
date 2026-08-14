@@ -184,9 +184,12 @@ and records stable source/chunk audit mappings on the assistant message. It
 retrieves only selected sources from the active notebook and returns citations
 that open the correct source. Student uploads remain private. Enforce existing
 file-count and size limits, prevent path traversal, validate content types
-where practical, and preserve legacy source attachments. Future Bedrock
-Knowledge Base retrieval replaces only the retrieval adapter and must retain
-the same notebook/source filter, chunk-result contract, and citation mapping.
+where practical, and preserve legacy source attachments. When
+``KNOWLEDGE_BASE_ID`` is set outside mock mode, locked Lecture Notes/Readings
+use Bedrock Knowledge Base ``Retrieve`` (never ``RetrieveAndGenerate``) mapped
+onto selected ``[S#]`` labels; student uploads stay on the local chunk
+retriever. The composer, citations, and coaching specialist tools do not
+change.
 
 ## Development sequence
 

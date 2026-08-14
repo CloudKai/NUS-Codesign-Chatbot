@@ -199,13 +199,13 @@ def test_edit_and_resend_replaces_later_turns_and_uses_revised_prompt(
     first = engine.submit(
         thread_id,
         "Old prompt",
-        ChatOptions(model_id="gpt-5.4"),
+        ChatOptions(model_id="gpt-5.4", response_detail="short"),
     )
     list(first)
     second = engine.submit(
         thread_id,
         "Later prompt",
-        ChatOptions(model_id="gpt-5.4"),
+        ChatOptions(model_id="gpt-5.4", response_detail="short"),
     )
     list(second)
 
@@ -214,6 +214,7 @@ def test_edit_and_resend_replaces_later_turns_and_uses_revised_prompt(
         "Revised prompt",
         ChatOptions(
             model_id="gpt-5.4-mini",
+            response_detail="short",
             existing_user_message_id=first.user_message_id,
         ),
     )

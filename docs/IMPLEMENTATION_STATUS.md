@@ -1,6 +1,113 @@
 # Implementation status
 
-## Current phase — DSQL-only transcript + student download
+## Current phase — POC-style DSQL history messages + selected-source KB Retrieve
+
+**Completed locally on 2026-08-15.** AgentCore invokes send bounded DSQL
+history as Converse `messages` (POC Memory equivalent) while remaining
+stateless. Locked Lecture Notes/Readings can use Bedrock Knowledge Base
+`Retrieve` mapped onto selected `[S#]` labels. FastAPI/Streamlit/DSQL stay.
+The coaching specialist still has zero KB tools.
+
+### Behavior delivered
+
+1. `AgentCoreCoachProvider` always sends `messages`: last six DSQL turns plus
+   the composed current turn (and images). `student_id` is the store owner
+   identifier, never a notebook id. `runtimeSessionId` stays `stateless-…`.
+2. `BedrockKnowledgeBaseRetriever` calls `Retrieve` only, maps
+   `s3://…/course/…` onto locked source `object_key` values, and drops foreign
+   or unselected keys. `CompositeContextRetriever` keeps student uploads on
+   `LocalChunkRetriever`.
+3. `configured_context_retriever()` injects the composite when
+   `KNOWLEDGE_BASE_ID` is set and the provider is not mock. Pytest keeps the
+   local retriever.
+
+### Main files changed
+
+- `backend/agentcore_provider.py`, `backend/domain.py`,
+  `backend/coaching/execution.py`, `backend/retrieval.py`,
+  `backend/bedrock_retrieve.py`, `backend/owner_context.py`,
+  `backend/settings.py`
+- Tests: `tests/domain/test_agentcore_provider.py`,
+  `tests/domain/test_bedrock_retrieve.py`, `tests/domain/test_retrieval.py`,
+  `tests/conftest.py`
+- Docs: `docs/providers/AGENTCORE_ADAPTER.md`,
+  `docs/PROMPT_ARCHITECTURE.md`, `docs/LOCAL_DEMO_IMPLEMENTATION.md`,
+  `.env.example`
+
+### Validation evidence
+
+- Full deterministic suite: **544 passed, 0 failed**. Existing Starlette/httpx
+  deprecation warnings. No live AWS or paid OpenAI call from pytest.
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
+  passed. `git diff --check` passed.
+
+### Compatibility, migration, and rollback
+
+- No schema change. Empty `KNOWLEDGE_BASE_ID` keeps local retrieval. Rollback
+  is reverting this working tree.
+
+### Known risks and next exact action
+
+- Live AgentCore still streams prose until
+  `scripts/agentcore/harness_patch/README.md` is applied and `DEFAULT` is
+  READY. Set `KNOWLEDGE_BASE_ID=JUQNP8AZAZ` on EC2 after that cutover.
+- Next: deploy the harness patch, then one approved
+  `scripts/agentcore_smoke.py --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`.
+  Never restore six stages.
+
+## Previous completed phase — Strict coaching style by default
+
+**Completed locally on 2026-08-15.** New notebooks and empty progress blobs
+default to Strict coaching (`response_detail=long`). Students can still choose
+Quick. Notebooks that already persisted Quick stay Quick.
+
+### Behavior delivered
+
+1. Canonical default is `DEFAULT_RESPONSE_DETAIL = "long"` in
+   `backend/learning/journey.py`. Session, composer, store fallbacks, and the
+   profile **Coaching style** control all use that constant.
+2. Mock Strict still waits for a second follow-up before ADVANCE; Quick still
+   advances after one. Two-turn HTTP fixtures pin Quick so they stay independent
+   of the product default.
+3. Streamlit AppTest confirmation/auto-advance paths send three turns so Strict
+   can recommend the next stage.
+
+### Main files changed
+
+- Domain/UI: `backend/learning/journey.py`, `backend/student_store.py`,
+  `backend/coaching/execution.py`, `backend/chat_service.py`,
+  `backend/prompts/composer.py`, `ui/session.py`, `ui/notebooks.py`,
+  `ui/panels/chat.py`
+- Tests: `tests/domain/test_student_journey.py`, `tests/ui/test_streamlit_ui.py`,
+  `tests/ui/test_streamlit_api_mode.py`, plus Quick pins in primary-path and HTTP
+  two-turn ADVANCE tests
+- Docs: `README.md`, `DESIGN.md`, `backend/AGENTS.md`, `ui/AGENTS.md`,
+  `docs/IMPLEMENTATION_STATUS.md`
+
+### Validation evidence
+
+- Targeted journey, Streamlit, primary-path, and HTTP confirmation tests passed.
+- Full deterministic suite: **536 passed, 0 failed**. Existing Starlette/httpx
+  deprecation warnings. No live AWS or paid OpenAI call from pytest.
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
+  passed. `git diff --check` passed.
+
+### Compatibility, migration, and rollback
+
+- No schema change. Empty `progress_text` now reads as Strict. Explicit
+  `response_detail=short` notebooks are unchanged. Rollback is reverting this
+  working tree.
+
+### Known risks and next exact action
+
+- Live AgentCore still streams prose until
+  `scripts/agentcore/harness_patch/README.md` is applied and `DEFAULT` is
+  READY on a new version.
+- Next: deploy that harness patch, then one approved
+  `scripts/agentcore_smoke.py --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`.
+  Never restore six stages.
+
+## Previous completed phase — DSQL-only transcript + student download
 
 **Completed locally on 2026-08-15.** Aurora DSQL / SQLite `messages` remain the
 only durable chat transcript. AgentCore stays generation-only (stateless

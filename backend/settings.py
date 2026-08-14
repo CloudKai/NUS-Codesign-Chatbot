@@ -109,6 +109,8 @@ class Settings:
         os.getenv("AGENTCORE_TIMEOUT_SECONDS", "110")
     )
     agentcore_max_retries: int = int(os.getenv("AGENTCORE_MAX_RETRIES", "0"))
+    knowledge_base_id: str = os.getenv("KNOWLEDGE_BASE_ID", "").strip()
+    knowledge_base_region: str = os.getenv("KNOWLEDGE_BASE_REGION", "").strip()
     course_materials_bucket: str = field(
         default_factory=lambda: os.getenv("COURSE_MATERIALS_BUCKET", "").strip()
     )

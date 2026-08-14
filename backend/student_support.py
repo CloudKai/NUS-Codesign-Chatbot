@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .student_journey import current_stage, normalize_journey
+from .student_journey import DEFAULT_RESPONSE_DETAIL, current_stage, normalize_journey
 
 
 @dataclass(frozen=True)
@@ -137,7 +137,7 @@ def build_student_instructions(
     rubric: str = "",
     course_context: str = "",
     thinking_stage_id: str = "problem_identification",
-    response_detail: str = "short",
+    response_detail: str = DEFAULT_RESPONSE_DETAIL,
     response_language: str = "English",
 ) -> str:
     mode = get_support_mode(mode_id)

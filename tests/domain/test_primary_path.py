@@ -18,9 +18,15 @@ def _advance_message(stage_id: str) -> str:
     )
 
 
+def _use_quick_style(store: StudentStore, thread_id: str) -> None:
+    """Pin Quick so two-turn mock ADVANCE stays independent of the Strict default."""
+    store.update_thread(thread_id, metadata={"response_detail": "short"})
+
+
 def test_confirmation_mode_advances_through_all_six_stages(tmp_path):
     store = StudentStore(tmp_path / "six-stages.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _use_quick_style(store, thread_id)
     client = TestClient(create_app(store, auto_advance_stages=False))
 
     for index, stage in enumerate(THINKING_STAGES[:-1]):
@@ -68,6 +74,7 @@ def test_confirmation_mode_advances_through_all_six_stages(tmp_path):
 def test_rejected_and_stale_transitions_do_not_advance(tmp_path):
     store = StudentStore(tmp_path / "stale.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _use_quick_style(store, thread_id)
     client = TestClient(create_app(store, auto_advance_stages=False))
 
     client.post(
@@ -132,6 +139,7 @@ def test_restart_recovers_messages_journey_and_pending_transition(tmp_path):
     database = tmp_path / "restart.sqlite3"
     store = StudentStore(database)
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _use_quick_style(store, thread_id)
     client = TestClient(create_app(store, auto_advance_stages=False))
 
     client.post(
@@ -180,6 +188,7 @@ def test_completed_turn_rolls_back_without_phantom_pending_message(
 
     store = StudentStore(tmp_path / "turn-rollback.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _use_quick_style(store, thread_id)
     client = TestClient(create_app(store, auto_advance_stages=False))
     real_dump = student_store_module._dump
 

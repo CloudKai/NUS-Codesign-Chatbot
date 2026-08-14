@@ -10,8 +10,10 @@ Production coaching uses the AgentCore ``coaching`` specialist with
 ``output_contract=coach_turn``. Thinking Path stages stay in DSQL; only the
 runtime *topic* key maps ``deep_analysis`` to the POC ``ethics_critical``
 label. Invokes are stateless (a fresh ``runtimeSessionId`` per turn) so the
-runtime LRU cache is not a second transcript. This adapter does not call
-RetrieveAndGenerate.
+runtime LRU cache is not a second transcript. Bounded DSQL history is sent as
+Converse ``messages`` (POC Memory equivalent) plus the composed current turn.
+``student_id`` is the store owner identifier, never a notebook id. This adapter
+does not call RetrieveAndGenerate.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from .domain import (
     ProviderCoachOutput,
 )
 from .prompts import compose_coach_prompt
+from .prompts.composer import MAX_RECENT_MESSAGE_CHARS, MAX_RECENT_MESSAGES
 from .providers import ProviderUnavailableError
 
 _GENERIC_FAILURE = "AgentCore could not create a structured coaching turn"
@@ -373,6 +376,49 @@ def _stateless_session_id() -> str:
     return f"stateless-{uuid.uuid4().hex}"
 
 
+def _clip_message_text(value: Any, *, limit: int = MAX_RECENT_MESSAGE_CHARS) -> str:
+    """Return a bounded plain-text body for one Converse content block."""
+    cleaned = " ".join(str(value or "").split()).strip()
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[: max(1, limit - 1)].rstrip() + "…"
+
+
+def _history_converse_messages(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Map bounded DSQL history onto Converse user/assistant messages.
+
+    Args:
+        history: Canonical notebook messages already loaded from the store.
+
+    Returns:
+        At most ``MAX_RECENT_MESSAGES`` Converse messages. Unknown roles and
+        empty bodies are skipped so the harness ``messages`` path stays valid.
+    """
+    selected = list(history or [])[-MAX_RECENT_MESSAGES:]
+    messages: list[dict[str, Any]] = []
+    for item in selected:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        if role not in {"user", "assistant"}:
+            continue
+        text = _clip_message_text(item.get("content"))
+        if not text:
+            continue
+        messages.append({"role": role, "content": [{"text": text}]})
+    return messages
+
+
+def _current_turn_content(
+    prompt: str, images: list[CoachImageInput]
+) -> list[dict[str, Any]]:
+    """Build the current-turn Converse content blocks, including images."""
+    content: list[dict[str, Any]] = [{"text": prompt}]
+    for image in images:
+        content.append(_payload_image_block(image))
+    return content
+
+
 class AgentCoreCoachProvider:
     """Call Bedrock AgentCore Runtime for one validated structured coaching turn."""
 
@@ -439,20 +485,30 @@ class AgentCoreCoachProvider:
         return self._client
 
     def _invoke_payload(self, request: CoachRequest) -> dict[str, Any]:
-        """Build the JSON payload for one coaching InvokeAgentRuntime call."""
+        """Build the JSON payload for one coaching InvokeAgentRuntime call.
+
+        Always sends Converse ``messages``: bounded DSQL history plus the
+        composed current turn. A top-level ``prompt`` string is never used, so
+        the live harness ``_extract_prompt`` takes the caller-supplied history
+        instead of AgentCore Memory.
+        """
         prompt = compose_coach_prompt(request).composed_text
+        messages = _history_converse_messages(list(request.history))
+        messages.append(
+            {
+                "role": "user",
+                "content": _current_turn_content(prompt, list(request.image_inputs)),
+            }
+        )
         payload: dict[str, Any] = {
             "phase": _PHASE,
             "topic": agentcore_topic_for_stage(request.current_stage),
             "output_contract": _OUTPUT_CONTRACT,
+            "messages": messages,
         }
-        if request.image_inputs:
-            content: list[dict[str, Any]] = [{"text": prompt}]
-            for image in request.image_inputs:
-                content.append(_payload_image_block(image))
-            payload["messages"] = [{"role": "user", "content": content}]
-        else:
-            payload["prompt"] = prompt
+        student_id = " ".join(str(request.student_id or "").split()).strip()
+        if student_id and student_id != str(request.thread_id or "").strip():
+            payload["student_id"] = student_id[:128]
         return payload
 
     def assess(self, request: CoachRequest) -> ProviderAssessmentResult:

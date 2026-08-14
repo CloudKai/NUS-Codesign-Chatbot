@@ -58,7 +58,7 @@ from .persistence.store.migrations import (
     repair_misbound_notebook_foreign_key,
 )
 from .settings import settings
-from .student_journey import DEFAULT_STAGE
+from .student_journey import DEFAULT_RESPONSE_DETAIL, DEFAULT_STAGE
 from . import workflow_contract as _workflow_contract
 from .workflow_contract import workflow_contract_is_ready, workflow_contract_payload
 
@@ -958,7 +958,7 @@ class StudentStore:
             "stage_notes": progress.get("stage_notes") or {},
             "working_conclusion": progress.get("working_conclusion") or "",
             "critical_reflection": progress.get("critical_reflection") or "",
-            "response_detail": progress.get("response_detail") or "short",
+            "response_detail": progress.get("response_detail") or DEFAULT_RESPONSE_DETAIL,
         }
         metadata: dict[str, Any] = {
             **settings_blob,
@@ -1147,7 +1147,7 @@ class StudentStore:
             progress["response_detail"] = (
                 journey.get("response_detail")
                 or metadata.get("response_detail")
-                or "short"
+                or DEFAULT_RESPONSE_DETAIL
             )
         if "completed_stages" not in progress:
             progress["completed_stages"] = journey.get("completed_stages") or []
@@ -1871,7 +1871,7 @@ class StudentStore:
             current_meta = dict(thread.get("metadata") or {})
             current_journey = dict(current_meta.get("learning_journey") or {})
             active_detail = str(
-                current_journey.get("response_detail") or "short"
+                current_journey.get("response_detail") or DEFAULT_RESPONSE_DETAIL
             ).lower()
             if expected_detail is not None and active_detail != expected_detail:
                 raise CoachingStyleConflictError(

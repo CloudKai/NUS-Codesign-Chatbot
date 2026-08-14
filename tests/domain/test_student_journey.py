@@ -16,6 +16,14 @@ from backend.student_journey import (
 )
 
 
+def test_default_journey_uses_strict_coaching_style():
+    journey = default_journey()
+    assert journey["response_detail"] == "long"
+    assert normalize_journey({})["response_detail"] == "long"
+    assert normalize_journey({"response_detail": "short"})["response_detail"] == "short"
+    assert normalize_journey({"response_detail": "unknown"})["response_detail"] == "long"
+
+
 def test_journey_advances_through_all_critical_thinking_stages():
     journey = default_journey()
     assert current_stage(journey).id == "problem_identification"

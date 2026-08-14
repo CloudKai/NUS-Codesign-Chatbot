@@ -140,6 +140,8 @@ def test_authenticated_production_critical_path_survives_restart_and_cleanup(
     )
     assert created.status_code == 200
     thread_id = created.json()["id"]
+    student_store = StudentStore(database, identifier="cognito:critical-path-student")
+    student_store.update_thread(thread_id, metadata={"response_detail": "short"})
 
     evidence = b"Older pedestrians need longer crossing intervals at low-light junctions."
     uploaded = client.post(

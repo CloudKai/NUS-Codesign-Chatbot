@@ -10,6 +10,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from backend.student_journey import (
+    DEFAULT_RESPONSE_DETAIL,
     DEFAULT_STAGE,
     THINKING_STAGES,
     current_stage,
@@ -40,7 +41,9 @@ def thread_overview(thread: dict[str, Any]) -> dict[str, Any]:
         if isinstance(metadata.get("learning_journey"), dict)
         else {
             "current_stage": metadata.get("thinking_stage", DEFAULT_STAGE),
-            "response_detail": metadata.get("response_detail", "short"),
+            "response_detail": metadata.get(
+                "response_detail", DEFAULT_RESPONSE_DETAIL
+            ),
         }
     )
     stage = current_stage(journey)

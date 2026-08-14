@@ -14,6 +14,7 @@ import streamlit.components.v1 as components
 from backend.domain import CoachRequest, CoachTurn
 from backend.settings import settings
 from backend.student_journey import (
+    DEFAULT_RESPONSE_DETAIL,
     DEFAULT_STAGE,
     STAGE_BY_ID,
     advanced_stage_response,
@@ -622,7 +623,8 @@ def _submit_pending_edit(
             idempotency_key=idempotency_key,
             model_id=model_id,
             reasoning_effort=reasoning_effort,
-            response_detail=st.session_state.get("response_detail") or "short",
+            response_detail=st.session_state.get("response_detail")
+            or DEFAULT_RESPONSE_DETAIL,
             response_language=st.session_state.get("response_language") or "English",
         )
         thinking.update(label="Coach reply ready", state="complete")

@@ -28,6 +28,7 @@ from .source_library import (
     source_image_input,
 )
 from .student_journey import (
+    DEFAULT_RESPONSE_DETAIL,
     complete_and_advance,
     current_stage,
     default_journey,
@@ -47,7 +48,7 @@ class ChatOptions:
     local_analysis: bool = False
     assignment: dict[str, str] = field(default_factory=dict)
     thinking_stage: str = "problem_identification"
-    response_detail: str = "short"
+    response_detail: str = DEFAULT_RESPONSE_DETAIL
     response_language: str = "English"
     source_ids: list[str] = field(default_factory=list)
     allow_model_knowledge: bool = False

@@ -105,9 +105,10 @@ latency or duplicate application persistence.
   citations. Application `[S#]` citations come from the selected-source prompt
   contract; verify the chosen model/API combination rather than assuming native
   provider citations are available.
-- Keep Bedrock Knowledge Base retrieval as a separate `ContextRetriever`
-  adapter. Do not use `RetrieveAndGenerate`, because it would bypass the
-  application's prompt, ownership, phase, and citation boundaries.
+- Knowledge Base retrieval is a separate `ContextRetriever` in
+  `backend/bedrock_retrieve.py`. Do not use `RetrieveAndGenerate`, because it
+  would bypass the application's prompt, ownership, phase, and citation
+  boundaries.
 
 Official references:
 

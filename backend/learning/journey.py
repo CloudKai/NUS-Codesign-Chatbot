@@ -13,6 +13,7 @@ from backend.learning.stages import (
 )
 
 RESPONSE_DETAILS = ("short", "long")
+DEFAULT_RESPONSE_DETAIL = "long"
 _STAGE_DECISION = re.compile(
     r"<!--\s*stage\s*:\s*(advance|stay)\s*-->",
     re.IGNORECASE,
@@ -111,13 +112,19 @@ _STAGE_GUIDANCE: dict[str, tuple[str, str, str]] = {
 
 
 def default_journey() -> dict[str, Any]:
+    """Return a Focus-stage journey with Strict coaching as the default style.
+
+    Returns:
+        A normalized learning-journey dict. ``response_detail`` is ``long``
+        (student-facing Strict). Persisted Quick notebooks keep ``short``.
+    """
     return {
         "current_stage": DEFAULT_STAGE,
         "completed_stages": [],
         "stage_notes": {},
         "working_conclusion": "",
         "critical_reflection": "",
-        "response_detail": "short",
+        "response_detail": DEFAULT_RESPONSE_DETAIL,
     }
 
 
@@ -157,8 +164,10 @@ def normalize_journey(value: Any) -> dict[str, Any]:
         }
     journey["working_conclusion"] = str(raw.get("working_conclusion", "")).strip()
     journey["critical_reflection"] = str(raw.get("critical_reflection", "")).strip()
-    detail = str(raw.get("response_detail", "short")).lower()
-    journey["response_detail"] = detail if detail in RESPONSE_DETAILS else "short"
+    detail = str(raw.get("response_detail", DEFAULT_RESPONSE_DETAIL)).lower()
+    journey["response_detail"] = (
+        detail if detail in RESPONSE_DETAILS else DEFAULT_RESPONSE_DETAIL
+    )
     return journey
 
 

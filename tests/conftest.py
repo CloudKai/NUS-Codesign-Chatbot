@@ -38,6 +38,7 @@ os.environ["FILE_STORAGE_PROVIDER"] = "local"
 os.environ.pop("DSQL_SSLROOTCERT", None)
 os.environ.pop("COURSE_MATERIALS_BUCKET", None)
 os.environ.pop("AGENTCORE_RUNTIME_ARN", None)
+os.environ.pop("KNOWLEDGE_BASE_ID", None)
 
 
 def _clear_streamlit_runtime_caches() -> None:
@@ -84,6 +85,7 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.delenv("DSQL_SSLROOTCERT", raising=False)
     monkeypatch.delenv("COURSE_MATERIALS_BUCKET", raising=False)
     monkeypatch.delenv("AGENTCORE_RUNTIME_ARN", raising=False)
+    monkeypatch.delenv("KNOWLEDGE_BASE_ID", raising=False)
 
     from backend import settings as settings_module
     from backend.persistence.factory import reset_file_storage_cache
@@ -108,6 +110,8 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(settings_module.settings, "course_materials_bucket", "")
     monkeypatch.setattr(settings_module.settings, "agentcore_runtime_arn", "")
     monkeypatch.setattr(settings_module.settings, "agentcore_runtime_id", "")
+    monkeypatch.setattr(settings_module.settings, "knowledge_base_id", "")
+    monkeypatch.setattr(settings_module.settings, "knowledge_base_region", "")
     monkeypatch.setattr(settings_module.settings, "dsql_sslrootcert", "")
     monkeypatch.setattr(settings_module.settings, "openai_api_key", "")
     monkeypatch.setattr(settings_module.settings, "openai_timeout_seconds", 110.0)

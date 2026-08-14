@@ -19,7 +19,8 @@ shared prompt + stage file  (backend/prompts/)
     ↓
 selected notebook sources (DSQL/SQLite metadata + S3/local extracted text)
     ↓
-LocalChunkRetriever (query-time chunks + deterministic lexical ranking)
+LocalChunkRetriever, or CompositeContextRetriever (Bedrock Retrieve for
+locked course sources + local chunks for student uploads)
     ↓
 RetrievalResult.context → PromptContext.retrieved_course_context
     ↓
@@ -55,8 +56,10 @@ The retriever sees full extracted text locally, but the generation model sees
 only the selected excerpts. Citation previews are focused around the matching
 query evidence instead of the beginning of the document. Production generation
 may use AgentCore Runtime (`MODEL_PROVIDER=agentcore`); the user payload is
-still this application's composed CDE2300 prompt. Do not copy the POC CDE2500
-Q&A specialist prompt. Coaching must not receive Knowledge Base tools.
+this application's composed CDE2300 prompt plus bounded DSQL history as
+Converse `messages`. Do not copy the POC CDE2500 Q&A specialist prompt.
+Coaching must not receive Knowledge Base tools. Course grounding uses
+server-side `Retrieve` when `KNOWLEDGE_BASE_ID` is set.
 
 ## Prompt structure
 
@@ -76,7 +79,7 @@ stage, or runtime instructions. The grounding rules require claim-level `[S#]`
 citations, prohibit invented sources/quotes, and tell the coach to identify an
 evidence gap when the retrieved excerpts do not answer the question.
 
-## Future architecture
+## Production Knowledge Base path
 
 ```text
 Streamlit
@@ -88,6 +91,7 @@ DSQL current_stage
 selected source IDs + notebook/user filter
     ↓
 Bedrock Knowledge Base `Retrieve` adapter implementing ContextRetriever
+(locked Lecture Notes/Readings only; student uploads stay local)
     ↓
 RetrievalResult (stable source IDs/labels + chunks)
     ↓
@@ -96,20 +100,19 @@ same PromptComposer + same educational workflow
 configured generation provider (AgentCore Runtime, or Bedrock/OpenAI fallback)
 ```
 
-For the Bedrock phase, implement a new `ContextRetriever` adapter and inject it
-into `CoachApplicationService`. The adapter must:
+`backend/bedrock_retrieve.py` implements this adapter and is injected into
+`CoachApplicationService` when `KNOWLEDGE_BASE_ID` is set and the provider is
+not mock. It:
 
-- filter retrieval by authenticated user/notebook and the selected source IDs;
-- store the durable application `source_id` in Knowledge Base metadata;
-- map results back to the existing selected-source `[S#]` order;
-- return bounded `RetrievedChunk` values with location metadata where
-  available;
-- use Knowledge Base `Retrieve`, then feed the existing composer/workflow, so
+- filters retrieval by the selected source IDs already loaded for the notebook;
+- maps S3 locations onto locked course `object_key` values and `[S#]` labels;
+- returns bounded `RetrievedChunk` values;
+- uses Knowledge Base `Retrieve`, then feeds the existing composer/workflow, so
   stage decisions and persistence do not move into `RetrieveAndGenerate`;
-- reject results whose source IDs or labels are outside the selected notebook.
+- drops results whose S3 keys are outside the selected notebook sources.
 
-The application already enforces the final scope check, so a faulty future
-adapter cannot introduce another notebook's chunk.
+The application already enforces the final scope check, so a faulty adapter
+cannot introduce another notebook's chunk.
 
 ## Package layout
 
@@ -119,7 +122,8 @@ adapter cannot introduce another notebook's chunk.
 | `backend/prompts/stages/{focus,evidence,assumptions,perspectives,synthesis,conclusion}.md` | Stage purpose, coaching strategy, advance/stay criteria |
 | `backend/prompts/loader.py` | UTF-8 load + in-process cache; stage IDs from `STAGE_BY_ID` |
 | `backend/prompts/composer.py` | Ordered composition with explicit delimiters |
-| `backend/retrieval.py` | Retrieval port, local chunker/ranker, stable chunk metadata |
+| `backend/retrieval.py` | Retrieval port, local chunker/ranker, composite splitter |
+| `backend/bedrock_retrieve.py` | Bedrock Knowledge Base `Retrieve` adapter (injected client in tests) |
 | `backend/application.py` | Authoritative source selection, retrieval injection, citation filtering, audit persistence |
 
 ## Local preview (no network)

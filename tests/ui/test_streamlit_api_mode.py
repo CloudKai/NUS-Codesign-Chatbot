@@ -52,6 +52,9 @@ def test_authenticated_inprocess_path_confirms_pending_transition():
     app.chat_input[0].set_value(
         "Which design gives older pedestrians enough time and visibility?"
     ).run()
+    app.chat_input[0].set_value(
+        "Older adults near schools need a longer crossing interval than the current signal."
+    ).run()
 
     next_button = next(
         button for button in app.button if button.key == "thinking-path-next"
@@ -84,6 +87,11 @@ def test_streamlit_api_mode_confirmation_creates_pending_transition(monkeypatch)
         ).run()
         assert not app.exception
 
+        app.chat_input[0].set_value(
+            "Older adults near schools need a longer crossing interval than the current signal."
+        ).run()
+        assert not app.exception
+
         pending = client.pending_transition(thread_id)
         assert pending is not None
         assert pending.to_stage == "concept_generation"
@@ -111,6 +119,11 @@ def test_streamlit_api_mode_auto_advance_moves_thinking_path(monkeypatch):
 
         app.chat_input[0].set_value(
             "Which design gives older pedestrians enough time and visibility?"
+        ).run()
+        assert not app.exception
+
+        app.chat_input[0].set_value(
+            "Older adults near schools need a longer crossing interval than the current signal."
         ).run()
         assert not app.exception
 

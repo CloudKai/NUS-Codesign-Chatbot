@@ -3,17 +3,17 @@
 Composition only: no Streamlit, model-provider SDKs, cloud retrieval SDKs,
 or persistence imports.
 
-Current seam (selected sources → local chunk retrieval → composer → provider)::
+Current seam (selected sources → retriever → composer → provider)::
 
     Query-ranked excerpts from selected notebook sources
             ↓
     PromptComposer.compose / compose_coach_prompt
             ↓
-    configured generation provider (local OpenAI test path today)
+    configured generation provider (mock, OpenAI, Bedrock, or AgentCore)
 
-Future seam (Knowledge Base replaces only the retriever implementation)::
+Knowledge Base seam (same composer; Retrieve adapter only)::
 
-    Bedrock Knowledge Base retrieved chunks
+    Bedrock Knowledge Base retrieved chunks for locked course sources
             ↓  (becomes PromptContext.retrieved_course_context)
     PromptComposer  (unchanged composition contract)
             ↓
@@ -68,7 +68,7 @@ class PromptContext(BaseModel):
     conversation_summary: str = ""
     recent_messages: list[dict[str, Any]] = Field(default_factory=list)
     student_message: str = ""
-    response_detail: str = "short"
+    response_detail: str = "long"
     allow_model_knowledge: bool = False
     response_language: str = "English"
     image_note: str = ""

@@ -201,6 +201,13 @@ def _decoded_payload(call: dict[str, Any]) -> dict[str, Any]:
     return json.loads(str(raw))
 
 
+def _current_turn_text(payload: dict[str, Any]) -> str:
+    """Return the composed current-turn text from Converse messages."""
+    messages = payload["messages"]
+    assert messages[-1]["role"] == "user"
+    return str(messages[-1]["content"][0]["text"])
+
+
 def test_agentcore_provider_rejects_missing_runtime_arn():
     with pytest.raises(ProviderUnavailableError, match="AGENTCORE_RUNTIME_ARN"):
         AgentCoreCoachProvider("  ", client=FakeAgentCoreRuntime(payload=_output()))
@@ -223,8 +230,9 @@ def test_valid_structured_coaching_and_research_coding():
     assert payload["phase"] == "coaching"
     assert payload["topic"] == "problem_identification"
     assert payload["output_contract"] == "coach_turn"
-    assert payload["prompt"] == compose_coach_prompt(_request()).composed_text
-    assert _STAGE_MARKERS["problem_identification"] in payload["prompt"]
+    assert "prompt" not in payload
+    assert _current_turn_text(payload) == compose_coach_prompt(_request()).composed_text
+    assert _STAGE_MARKERS["problem_identification"] in _current_turn_text(payload)
     assert "RetrieveAndGenerate" not in json.dumps(payload)
 
 
@@ -235,7 +243,7 @@ def test_deep_analysis_maps_only_to_agentcore_ethics_critical_topic():
     assert result.assessment.current_stage == "deep_analysis"
     payload = _decoded_payload(client.calls[0])
     assert payload["topic"] == "ethics_critical"
-    assert _STAGE_MARKERS["deep_analysis"] in payload["prompt"]
+    assert _STAGE_MARKERS["deep_analysis"] in _current_turn_text(payload)
 
 
 def test_stateless_session_ids_are_unique_per_invoke():
@@ -267,10 +275,55 @@ def test_runtime_session_is_never_notebook_memory_or_history():
         "memory_id",
         "sessionId",
         "history",
-        "student_id",
         "runtimeSessionId",
     ):
         assert forbidden not in payload
+    assert "student_id" not in payload
+
+
+def test_agentcore_payload_sends_bounded_history_and_owner_student_id():
+    """DSQL history is Converse messages; student_id is the store owner, not the notebook."""
+    client = FakeAgentCoreRuntime(payload=_output())
+    history = [
+        {"role": "user", "content": f"Earlier student turn {index}."}
+        for index in range(8)
+    ]
+    history.append({"role": "assistant", "content": "Earlier coach reply."})
+    _provider(client).assess(
+        _request(
+            thread_id="thread-notebook-id",
+            student_id="cognito:critical-path-student",
+            history=history,
+        )
+    )
+    payload = _decoded_payload(client.calls[0])
+    assert payload["student_id"] == "cognito:critical-path-student"
+    assert payload["student_id"] != "thread-notebook-id"
+    messages = payload["messages"]
+    assert all(item["role"] in {"user", "assistant"} for item in messages)
+    assert messages[-1]["role"] == "user"
+    assert _STAGE_MARKERS["problem_identification"] in messages[-1]["content"][0]["text"]
+    prior = messages[:-1]
+    assert len(prior) == 6
+    assert prior[0]["content"][0]["text"] == "Earlier student turn 3."
+    assert prior[-1]["role"] == "assistant"
+
+
+def test_application_path_stamps_store_identifier_as_student_id(tmp_path):
+    store = StudentStore(
+        tmp_path / "agentcore-owner.sqlite3", identifier="cognito:owner-sub"
+    )
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    store.add_message(thread_id, "user", "I framed the crossing problem.")
+    store.add_message(thread_id, "assistant", "Who is affected at night?")
+    client = FakeAgentCoreRuntime(payload=_output())
+    _service(store, _provider(client)).submit(_request(thread_id=thread_id))
+    payload = _decoded_payload(client.calls[0])
+    assert payload["student_id"] == "cognito:owner-sub"
+    assert payload["student_id"] != thread_id
+    prior = payload["messages"][:-1]
+    assert prior[0]["content"][0]["text"] == "I framed the crossing problem."
+    assert prior[1]["content"][0]["text"] == "Who is affected at night?"
 
 
 def test_valid_agentcore_turn_persists_only_in_student_store(tmp_path):
@@ -349,7 +402,7 @@ def test_images_are_mapped_into_runtime_messages():
     _provider(client).assess(_request(image_inputs=[image]))
     payload = _decoded_payload(client.calls[0])
     assert "prompt" not in payload
-    content = payload["messages"][0]["content"]
+    content = payload["messages"][-1]["content"]
     assert content[0]["text"] == compose_coach_prompt(
         _request(image_inputs=[image])
     ).composed_text
