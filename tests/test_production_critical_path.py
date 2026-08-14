@@ -82,7 +82,7 @@ def _turn(thread_id: str, message: str, source_id: str) -> dict[str, Any]:
     return {
         "thread_id": thread_id,
         "student_message": message,
-        "current_stage": "focus",
+        "current_stage": "problem_identification",
         "response_detail": "short",
         "source_ids": [source_id],
     }
@@ -238,8 +238,8 @@ def test_authenticated_production_critical_path_survives_restart_and_cleanup(
     ]
     pending = turn["pending_transition"]
     assert pending is not None
-    assert pending["from_stage"] == "focus"
-    assert pending["to_stage"] == "evidence"
+    assert pending["from_stage"] == "problem_identification"
+    assert pending["to_stage"] == "concept_generation"
     messages_before_restart = client.get(
         f"/api/v1/threads/{thread_id}/messages", cookies=cookies
     ).json()
@@ -269,7 +269,7 @@ def test_authenticated_production_critical_path_survives_restart_and_cleanup(
     state = restarted.get(
         f"/api/v1/threads/{thread_id}/learning-state", cookies=cookies
     )
-    assert state.json()["learning_journey"]["current_stage"] == "evidence"
+    assert state.json()["learning_journey"]["current_stage"] == "concept_generation"
 
     storage = get_file_storage()
     assert len(storage._objects) == 2  # raw upload plus extracted text

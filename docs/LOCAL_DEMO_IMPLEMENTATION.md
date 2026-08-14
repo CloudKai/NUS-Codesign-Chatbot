@@ -27,14 +27,18 @@ capabilities:
 - notebooks, folders, history, source upload/selection/preview/download/removal;
 - source-grounded conversation, stable citations, streaming, model selection,
   short/long response modes, and local persistence;
-- the six thinking stages: Focus, Evidence, Assumptions, Perspectives,
-  Synthesis, and Conclusion;
+- the five research-aligned phases: Problem identification, Concept generation,
+  Design specification, Deep analysis, and Reflection;
 - prompt summaries, learning summaries, working conclusions, changes in
   understanding, and critical-understanding assessment.
 
-Existing SQLite data, local source files, thread identities, and user-visible
-entrypoints must remain usable. Schema changes require explicit migrations,
-safe defaults, backup instructions, and a tested rollback path.
+Existing local source files, account identities, and user-visible entrypoints
+must remain safe. The old six-stage and new five-phase learning contracts are
+not silently mapped. Non-empty databases without the exact workflow marker
+fail readiness until an explicit, inventoried reset/bootstrap is approved.
+SQLite reset creates a recoverable backup and file quarantine and preserves
+users/auth records; DSQL reset is admin-only and explicit. Schema changes
+require safe initialization, backup instructions, and tested rollback paths.
 
 ## Target layers and interfaces
 
@@ -66,7 +70,9 @@ Use narrow dependency-injected ports, including:
 - `ChatModelProvider` and `EmbeddingProvider`;
 - `KnowledgeRepository`, `ConversationRepository`, `NotebookRepository`,
   `LearningStateRepository`, and `PhaseTransitionRepository`;
-- `FileStorage`, `CoachWorkflow`, and `ModelRouter`.
+- `FileStorage`, `CoachWorkflow`, and `ModelRouter`;
+- `ResearchRepository` for immutable automated observations, append-only human
+  reviews/adjudications, and attributable access audit.
 
 Local SQLite, local filesystem, local vector search, Ollama, OpenAI, and mock
 implementations live in infrastructure. Do not leak their response schemas
@@ -93,13 +99,29 @@ Its steps are:
 9. Update summaries, conclusion, understanding change, and learning state.
 10. Persist conversation, source snapshot, usage, and graph state.
 
-Each assessment includes: current stage, contribution summary, stage-specific
+Each assessment includes: current phase, contribution summary, phase-specific
 assessment, evidence, assumptions, missing reasoning elements,
 critical-understanding level, confidence, stay/advance recommendation,
 rationale, guidance questions, updated learning summary, working conclusion,
 understanding change, citations, Facione dimension scores (0–4 Holistic rubric
 plus not-started), supportive review strengths and improvements for the current
-stage (may be empty), and user-facing response.
+phase (may be empty), and user-facing response.
+
+The same single provider result may also include optional provisional research
+coding. It is soft-validated independently from coaching: one dominant CLEAR
+strategy, no more than two Facione behaviour occurrences, design-ethics
+concepts, and evidence quotes that the application resolves to offsets in the
+current student utterance. Invalid research coding never discards a valid
+coach turn. Research codes do not award Review points, complete a phase, or
+force progression. Only Reflection may yield a provisional holistic candidate.
+
+Lecturer/admin access is attributable. Protected professor routes expose an
+aggregate summary, paginated observation queue, notebook detail/transcript,
+append-only review/adjudication, and formula-safe CSV. Every identifiable read
+or export writes an access audit first and fails closed when auditing fails.
+Students receive the established Review projection plus Facione behaviour
+occurrences and the provisional Reflection candidate; CLEAR and ethics labels
+remain research-review data.
 
 Only the student's explicit confirmation may apply an advancement in the safe
 default mode (`AUTO_ADVANCE_STAGES=false`). The system must persist the
@@ -166,7 +188,7 @@ targeted tests.
 ## Required verification
 
 Automated tests must require no paid API or internet connection. Cover domain
-validation, repository contracts, migration, graph routing, all six stages,
+validation, repository contracts, migration, graph routing, all five phases,
 stay/advance recommendations, confirmation/rejection, restart resumption,
 source selection, citations, notebook isolation, provider errors, streaming
 failures, upload safety, API contracts, and Streamlit client behavior.

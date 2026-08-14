@@ -10,10 +10,12 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
+from backend.student_journey import THINKING_STAGES
 from ui.auth_gate import app_logout_url, logout_user
 from ui.runtime import local_api_client
 
-_PAGES = ("Overview", "Students", "Critical Thinking", "Engagement")
+_PAGES = ("Overview", "Students", "Critical Thinking", "Engagement", "Research")
+_PHASE_LABELS = tuple(stage.label.title() for stage in THINKING_STAGES)
 
 
 def _score(value: Any) -> str:
@@ -266,12 +268,7 @@ def _render_students(client) -> None:
             [
                 "All",
                 "Not started",
-                "Focus",
-                "Evidence",
-                "Assumptions",
-                "Perspectives",
-                "Synthesis",
-                "Conclusion",
+                *_PHASE_LABELS,
             ],
             key="professor_stage_filter",
         )
@@ -308,7 +305,7 @@ def _render_students(client) -> None:
             "Student": row["name"],
             "Email": row.get("email") or "—",
             "Stage": row.get("current_stage") or "Not started",
-            "Progress": f"{row['stage_progress']} / 6",
+            "Progress": f"{row['stage_progress']} / {len(_PHASE_LABELS)}",
             "Facione": _score(row.get("facione_overall")),
             "Messages": row["student_messages"],
             "Active days": row["active_days"],
@@ -348,14 +345,7 @@ def _render_student_detail(client: Any, data: dict[str, Any]) -> None:
     st.markdown("#### Learning progress")
     completed = set(data.get("completed_stages", []))
     progress_parts: list[str] = []
-    for stage in (
-        "Focus",
-        "Evidence",
-        "Assumptions",
-        "Perspectives",
-        "Synthesis",
-        "Conclusion",
-    ):
+    for stage in _PHASE_LABELS:
         if stage in completed:
             marker = "✓"
         elif stage == student.get("current_stage"):
@@ -521,7 +511,8 @@ def _render_engagement(client) -> None:
                 weekly, x="week", y="active_students",
                 x_label="Week", y_label="Active students",
             )
-        else: st.info("No student activity has been recorded yet.")
+        else:
+            st.info("No student activity has been recorded yet.")
     with right:
         st.markdown("#### Student messages by week")
         weekly_messages = data.get("weekly_messages", [])
@@ -562,6 +553,335 @@ def _render_engagement(client) -> None:
     _attention_table(data.get("inactive_students", []))
 
 
+def _research_codes(values: Any) -> str:
+    """Render a compact list of provisional or human codes."""
+    if not isinstance(values, list) or not values:
+        return "None recorded"
+    return ", ".join(str(value).replace("_", " ").title() for value in values)
+
+
+def _research_code_label(value: str | None) -> str:
+    """Render a canonical research code without changing its stored value."""
+    if value is None:
+        return "Not assigned"
+    return str(value).replace("_", " ").replace("-", " ").title()
+
+
+def _render_research_observation(observation: dict[str, Any]) -> None:
+    """Render automated codes with provenance and no validity overclaim."""
+    status = escape(str(observation.get("coding_status") or "uncoded").title())
+    phase = escape(str(observation.get("phase_id") or "Unknown").replace("_", " ").title())
+    clear = escape(_research_code_label(observation.get("dominant_clear")))
+    st.markdown(
+        '<div class="research-coding-card">'
+        f'<p class="research-coding-meta">{phase} · {status}</p>'
+        f'<h4>Dominant CLEAR · {clear}</h4>'
+        f'<p><b>Facione behaviours</b><br>{escape(_research_codes(observation.get("facione_behaviors")))}</p>'
+        f'<p><b>Ethics concepts</b><br>{escape(_research_codes(observation.get("ethics_concepts")))}</p>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    evidence = observation.get("evidence") or []
+    if evidence:
+        st.caption("Evidence offsets refer to the immutable student utterance.")
+        for index, item in enumerate(evidence, start=1):
+            if not isinstance(item, dict):
+                continue
+            st.markdown(
+                f"**Evidence {index}** · characters {item.get('start_offset', 0)}–"
+                f"{item.get('end_offset', 0)} · confidence "
+                f"{float(item.get('confidence') or 0):.2f}\n\n"
+                f"{item.get('rationale') or ''}"
+            )
+    st.caption(
+        "Automated coding is provisional research support—not a grade, diagnosis, "
+        "or validated measurement of student ability."
+    )
+
+
+def _render_research_validation(client: Any, observation: dict[str, Any]) -> None:
+    """Render append-only human review and optional adjudication controls."""
+    observation_id = str(observation.get("id") or "")
+    reviews = list(observation.get("reviews") or [])
+    adjudications = list(observation.get("adjudications") or [])
+    st.markdown("#### Human validation")
+    st.caption(
+        "Reviews are append-only and attributed to your authenticated staff account."
+    )
+    with st.form(f"research_review_{observation_id}"):
+        status = st.selectbox(
+            "Validation decision",
+            ["confirmed", "amended", "rejected"],
+            format_func=lambda value: value.title(),
+            key=f"research_review_status_{observation_id}",
+        )
+        coding_status = st.selectbox(
+            "Validated coding status",
+            ["coded", "partial", "uncoded"],
+            index=["coded", "partial", "uncoded"].index(
+                str(observation.get("coding_status") or "uncoded")
+            ),
+            key=f"research_review_coding_status_{observation_id}",
+        )
+        clear_options: list[str | None] = [
+            None, "concise", "logical", "explicit", "adaptive", "reflective"
+        ]
+        automated_clear = str(observation.get("dominant_clear") or "").casefold() or None
+        dominant_clear = st.selectbox(
+            "Validated dominant CLEAR strategy",
+            clear_options,
+            index=(
+                clear_options.index(automated_clear)
+                if automated_clear in clear_options
+                else 0
+            ),
+            format_func=_research_code_label,
+            key=f"research_review_clear_{observation_id}",
+        )
+        facione_options = [
+            "analysis", "interpretation", "inference", "evaluation",
+            "explanation", "self_regulation",
+        ]
+        facione_behaviors = st.multiselect(
+            "Validated Facione behaviours (up to 2)",
+            facione_options,
+            default=[
+                value for value in (
+                    str(item).casefold().replace("-", "_")
+                    for item in observation.get("facione_behaviors") or []
+                ) if value in facione_options
+            ],
+            max_selections=2,
+            format_func=_research_code_label,
+            key=f"research_review_facione_{observation_id}",
+        )
+        ethics_options = [
+            "fairness", "privacy", "transparency", "non_maleficence",
+            "responsibility",
+        ]
+        ethics_concepts = st.multiselect(
+            "Validated ethics concepts",
+            ethics_options,
+            default=[
+                value for value in (
+                    str(item).casefold().replace("-", "_")
+                    for item in observation.get("ethics_concepts") or []
+                ) if value in ethics_options
+            ],
+            format_func=_research_code_label,
+            key=f"research_review_ethics_{observation_id}",
+        )
+        notes = st.text_area(
+            "Review rationale",
+            max_chars=2_000,
+            placeholder="Explain the evidence for this validation decision.",
+            key=f"research_review_notes_{observation_id}",
+        )
+        submitted = st.form_submit_button("Submit validation")
+        if submitted:
+            if not notes.strip():
+                st.error("Add a rationale before submitting the validation.")
+            elif coding_status == "coded" and dominant_clear is None:
+                st.error("Choose one dominant CLEAR strategy for a coded review.")
+            elif coding_status != "coded" and dominant_clear is not None:
+                st.error("Only a fully coded review can assign a CLEAR strategy.")
+            else:
+                payload: dict[str, Any] = {
+                    "observation_id": observation_id,
+                    "status": status,
+                    "coding_status": coding_status,
+                    "dominant_clear": dominant_clear,
+                    "facione_behaviors": facione_behaviors,
+                    "ethics_concepts": ethics_concepts,
+                    "evidence": observation.get("evidence"),
+                    "holistic_candidate": observation.get("holistic_candidate"),
+                    "notes": notes.strip(),
+                }
+                client.professor_submit_research_review(payload)
+                st.success("Validation recorded.")
+    if reviews:
+        st.markdown("##### Review history")
+        st.dataframe(
+            [
+                {
+                    "Status": item.get("status", ""),
+                    "Reviewer": item.get("reviewer_user_id", ""),
+                    "Notes": item.get("notes") or "—",
+                    "Created": _when(item.get("created_at")),
+                }
+                for item in reviews
+            ],
+            hide_index=True,
+            width="stretch",
+        )
+    if len(reviews) >= 2:
+        with st.expander("Adjudicate reviews"):
+            with st.form(f"research_adjudication_{observation_id}"):
+                decision = st.selectbox(
+                    "Adjudication decision",
+                    ["confirmed", "amended", "rejected"],
+                    format_func=lambda value: value.title(),
+                    key=f"research_adjudication_decision_{observation_id}",
+                )
+                rationale = st.text_area(
+                    "Adjudication rationale",
+                    max_chars=2_000,
+                    key=f"research_adjudication_notes_{observation_id}",
+                )
+                if st.form_submit_button("Submit adjudication"):
+                    if not rationale.strip():
+                        st.error("Add a rationale before submitting the adjudication.")
+                    else:
+                        client.professor_submit_research_adjudication(
+                            {
+                                "observation_id": observation_id,
+                                "referenced_review_ids": [
+                                    str(item.get("id") or "") for item in reviews
+                                    if item.get("id")
+                                ],
+                                "decision": decision,
+                                "notes": rationale.strip(),
+                            }
+                        )
+                        st.success("Adjudication recorded.")
+    if adjudications:
+        st.caption(f"{len(adjudications)} adjudication record(s) retained.")
+
+
+def _render_research(client: Any) -> None:
+    """Render an audited queue-to-transcript-to-validation research workflow."""
+    summary = client.professor_research_summary()
+    st.markdown("### Research coding review")
+    st.caption(
+        "Review immutable automated observations against student utterances, then "
+        "record independent human validation."
+    )
+    metrics = st.columns(4, gap="small")
+    status_counts = summary.get("coding_status") or {}
+    with metrics[0]:
+        _metric("Active observations", str(summary.get("active_observations", 0)))
+    with metrics[1]:
+        _metric("Coded", str(status_counts.get("coded", 0)))
+    with metrics[2]:
+        _metric("Partial", str(status_counts.get("partial", 0)))
+    with metrics[3]:
+        confidence = summary.get("mean_confidence")
+        _metric(
+            "Mean evidence confidence",
+            "Not available" if confidence is None else f"{float(confidence):.2f}",
+        )
+
+    filters = st.columns([1.4, 1, 1, 0.8], gap="small")
+    with filters[0]:
+        search = st.text_input(
+            "Search research queue",
+            placeholder="Student or notebook",
+            key="research_queue_search",
+        )
+    with filters[1]:
+        status = st.selectbox(
+            "Coding status",
+            ["All", "coded", "partial", "uncoded"],
+            format_func=lambda value: value.title(),
+            key="research_queue_status",
+        )
+    phase_options = ["All", *sorted((summary.get("phases") or {}).keys())]
+    with filters[2]:
+        phase = st.selectbox(
+            "Phase", phase_options, key="research_queue_phase"
+        )
+    with filters[3]:
+        if st.button("Prepare CSV", key="research_prepare_export"):
+            st.session_state["research_export_csv"] = client.professor_research_export(
+                coding_status=None if status == "All" else status,
+                phase=None if phase == "All" else phase,
+            )
+        export_data = st.session_state.get("research_export_csv")
+        if export_data:
+            st.download_button(
+                "Download CSV",
+                data=export_data,
+                file_name="research-observations.csv",
+                mime="text/csv",
+                key="research_download_export",
+            )
+
+    queue = client.professor_research_queue(
+        search=search,
+        coding_status=None if status == "All" else status,
+        phase=None if phase == "All" else phase,
+        limit=100,
+        offset=0,
+    )
+    items = list(queue.get("items") or [])
+    st.radio(
+        "Research workflow step",
+        ["Queue", "Transcript", "Validate"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="research_mobile_step",
+    )
+    with st.container(key="research_workspace"):
+        queue_pane, transcript_pane, coding_pane = st.columns(
+            [0.9, 1.2, 1.05], gap="medium"
+        )
+        with queue_pane:
+            st.markdown('<div class="research-pane-marker research-queue-marker"></div>', unsafe_allow_html=True)
+            st.markdown("#### Validation queue")
+            st.caption(f"{queue.get('total', 0)} active observation(s)")
+            if not items:
+                st.info("No research observations match these filters.")
+                return
+            labels = {
+                item["observation_id"]: (
+                    f"{item['student_name']} · {str(item.get('phase') or '').replace('_', ' ').title()} "
+                    f"· {str(item.get('coding_status') or '').title()}"
+                )
+                for item in items
+            }
+            selected_id = st.selectbox(
+                "Observation",
+                [item["observation_id"] for item in items],
+                format_func=lambda value: labels[value],
+                key="research_selected_observation",
+            )
+            selected = next(item for item in items if item["observation_id"] == selected_id)
+            st.markdown(
+                f"**{selected['student_name']}**\n\n"
+                f"{str(selected.get('phase') or '').replace('_', ' ').title()} · "
+                f"{str(selected.get('coding_status') or '').title()}"
+            )
+
+        detail = client.professor_research_notebook(selected["notebook_id"])
+        observations = list(detail.get("observations") or [])
+        observation = next(
+            (item for item in observations if str(item.get("id")) == selected_id),
+            observations[0] if observations else {},
+        )
+        with transcript_pane:
+            st.markdown('<div class="research-pane-marker research-transcript-marker"></div>', unsafe_allow_html=True)
+            st.markdown("#### Student transcript")
+            student = detail.get("student") or {}
+            st.caption(
+                f"{student.get('name') or 'Student'} · {detail.get('title') or 'Notebook'}"
+            )
+            with st.container(key="research_transcript_scroll"):
+                for message in detail.get("transcript") or []:
+                    speaker = "Student" if message.get("role") == "user" else "Coach"
+                    st.markdown(
+                        f"**{speaker}** · {_when(message.get('created_at'))}\n\n"
+                        f"{message.get('content') or ''}"
+                    )
+        with coding_pane:
+            st.markdown('<div class="research-pane-marker research-validation-marker"></div>', unsafe_allow_html=True)
+            st.markdown("#### Automated coding")
+            if observation:
+                _render_research_observation(observation)
+                _render_research_validation(client, observation)
+            else:
+                st.info("No active automated observation is available.")
+
+
 def render_professor_dashboard() -> None:
     """Render the authorised professor dashboard through FastAPI only.
 
@@ -572,9 +892,15 @@ def render_professor_dashboard() -> None:
     page = _render_header()
     try:
         client = local_api_client()
-        if page == "Overview": _render_overview(client)
-        elif page == "Students": _render_students(client)
-        elif page == "Critical Thinking": _render_critical_thinking(client)
-        else: _render_engagement(client)
+        if page == "Overview":
+            _render_overview(client)
+        elif page == "Students":
+            _render_students(client)
+        elif page == "Critical Thinking":
+            _render_critical_thinking(client)
+        elif page == "Engagement":
+            _render_engagement(client)
+        else:
+            _render_research(client)
     except Exception:  # noqa: BLE001 - do not expose backend/student data in UI errors
         st.error("Professor analytics is unavailable right now. Please try again shortly.")

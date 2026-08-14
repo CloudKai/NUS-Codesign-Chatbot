@@ -9,6 +9,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from backend.student_journey import (
+    DEFAULT_STAGE,
     THINKING_STAGES,
     current_stage,
     journey_progress,
@@ -37,7 +38,7 @@ def thread_overview(thread: dict[str, Any]) -> dict[str, Any]:
         metadata.get("learning_journey")
         if isinstance(metadata.get("learning_journey"), dict)
         else {
-            "current_stage": metadata.get("thinking_stage", "focus"),
+            "current_stage": metadata.get("thinking_stage", DEFAULT_STAGE),
             "response_detail": metadata.get("response_detail", "short"),
         }
     )
@@ -121,7 +122,7 @@ def notebooks_dialog() -> None:
                         f"{current_badge}</div>"
                         f'<div class="notebook-card-meta">'
                         f"{escape(overview['stage'].short_label)} · "
-                        f"{overview['stage_index']} of 6</div>"
+                        f"{overview['stage_index']} of {len(THINKING_STAGES)}</div>"
                         "</div>",
                         unsafe_allow_html=True,
                     )
@@ -253,7 +254,8 @@ def notebook_actions_dialog() -> None:
             current_value=current_title,
         )
         st.caption(
-            f"{overview['stage'].short_label} · phase {overview['stage_index']} of 6"
+            f"{overview['stage'].short_label} · phase {overview['stage_index']} "
+            f"of {len(THINKING_STAGES)}"
         )
         if applied and cleaned and cleaned != current_title:
             store.update_thread(thread_id, name=cleaned)

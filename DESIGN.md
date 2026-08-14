@@ -25,7 +25,7 @@ contextual dialogs instead of competing with the discussion.
 
 ### Thinking is a journey
 
-The six critical-thinking stages are persistent and easy to scan. The active stage receives
+The five research-aligned design-thinking phases are persistent and easy to scan. The active phase receives
 the strongest emphasis; future stages remain visible without looking disabled.
 
 ### Feedback must lead to action
@@ -70,7 +70,7 @@ Top bar
 ├── Product identity
 ├── Current notebook title
 ├── Section switcher: Journey | Review | Chat | Sources | Notebooks
-├── Guidance (Quick / Complex)
+├── Coaching style (Quick / Strict)
 └── Profile avatar
     ├── Display name
     ├── Appearance
@@ -240,14 +240,13 @@ its visible stroke aligns with the title, without moving the target itself.
 
 ### Thinking Path: Journey
 
-The journey contains six ordered stages:
+The journey contains five ordered phases:
 
-1. Focus
-2. Evidence
-3. Assumptions
-4. Perspectives
-5. Synthesis
-6. Conclusion
+1. Problem identification
+2. Concept generation
+3. Design specification
+4. Deep analysis
+5. Reflection
 
 Rules:
 
@@ -259,9 +258,9 @@ Rules:
 - Opening it reveals three stage-relevant options.
 - Treat those questions as view-only guidance. They never populate, submit, or otherwise
 modify the discussion composer.
-- Keep the six-stage track compact enough to remain fully visible in the desktop panel
+- Keep the five-phase track compact enough to remain fully visible in the desktop panel
 without routine vertical scrolling.
-- Do not show a separate “N of 6” counter; the numbered stages already communicate
+- Do not show a separate phase counter; the numbered phases already communicate
 position and total length.
 - Align the active stage’s title, description, and suggested-question control beneath
 the stage name rather than beneath its number.
@@ -296,7 +295,7 @@ Required sections:
 
 Avoid:
 
-- Repeating “1 of 6” or progress history inside Review.
+- Repeating a phase counter or progress history inside Review.
 - Generic praise without evidence or a next action.
 - Duplicate summaries with different labels.
 - Charts, dashboards, or analytics beyond the Facione icon table.
@@ -476,7 +475,7 @@ must not overlap adjacent controls.
 
 - “Name the specific group, setting, or context you want to study.”
 - “Choose one outcome that would show meaningful change.”
-- “You’re about to mark Focus as complete and continue to Evidence.”
+- “You’re about to mark Problem identification as complete and continue to Concept generation.”
 
 
 
@@ -526,4 +525,3 @@ A design change is complete when:
 6. Semantic labels and keyboard interaction remain intact.
 7. Automated tests pass.
 8. Visual QA is captured and documented.
-

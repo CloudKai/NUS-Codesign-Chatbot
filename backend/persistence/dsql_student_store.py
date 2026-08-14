@@ -8,11 +8,17 @@ DbConnect role and never issue CREATE/ALTER/INDEX DDL — schema bootstrap is
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from typing import Any, Callable
 
-from backend.student_store import NOTEBOOK_CHILD_TABLES, StudentStore
+from backend.student_store import (
+    NOTEBOOK_CHILD_DELETE_PLAN,
+    RESEARCH_WORKFLOW_CONTRACT_KEY,
+    RESEARCH_WORKFLOW_CONTRACT_VERSION,
+    StudentStore,
+)
 
 from .dsql_connection import (
     DsqlConnectionProxy,
@@ -49,6 +55,10 @@ _OCC_WRITE_METHODS = (
     "set_source_selected",
     "set_all_sources_selected",
     "rename_source",
+    "append_research_review",
+    "append_research_adjudication",
+    "record_research_access_event",
+    "set_system_metadata",
 )
 
 
@@ -116,8 +126,25 @@ class DsqlStudentStore(StudentStore):
                     "notebooks",
                     "messages",
                     "sources",
+                    "research_observations",
+                    "research_reviews",
+                    "research_adjudications",
+                    "research_access_events",
+                    "system_metadata",
                 ):
                     connection.execute(f"SELECT * FROM {table} LIMIT 0").fetchall()
+                marker = connection.execute(
+                    "SELECT value_text FROM system_metadata WHERE key=?",
+                    (RESEARCH_WORKFLOW_CONTRACT_KEY,),
+                ).fetchone()
+                if not marker:
+                    raise RuntimeError("Research workflow contract is not ready")
+                try:
+                    payload = json.loads(str(marker["value_text"] or "{}"))
+                except (TypeError, ValueError):
+                    payload = {}
+                if payload.get("version") != RESEARCH_WORKFLOW_CONTRACT_VERSION:
+                    raise RuntimeError("Research workflow contract is not ready")
 
         run_dsql_transaction(_ping)
 
@@ -160,9 +187,9 @@ class DsqlStudentStore(StudentStore):
 
             def _delete() -> None:
                 with self._lock, self._connect() as connection:
-                    for table in NOTEBOOK_CHILD_TABLES:
+                    for table, predicate in NOTEBOOK_CHILD_DELETE_PLAN:
                         connection.execute(
-                            f"DELETE FROM {table} WHERE notebook_id = ?",
+                            f"DELETE FROM {table} WHERE {predicate}",
                             (thread_id,),
                         )
                     connection.execute(

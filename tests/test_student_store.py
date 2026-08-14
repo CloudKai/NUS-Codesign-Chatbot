@@ -32,7 +32,7 @@ def test_chat_history_and_notebook_state(tmp_path):
         "Consider signal timing studies.",
         metadata={
             "assessment": {
-                "current_stage": "focus",
+                "current_stage": "problem_identification",
                 "contribution_summary": "Crossing times",
                 "stage_assessment": "Clear focus",
                 "critical_understanding_level": "Emerging",
@@ -47,7 +47,7 @@ def test_chat_history_and_notebook_state(tmp_path):
         thread_id,
         metadata={
             "learning_journey": {
-                "current_stage": "focus",
+                "current_stage": "problem_identification",
                 "completed_stages": [],
                 "response_detail": "short",
             },
@@ -58,7 +58,7 @@ def test_chat_history_and_notebook_state(tmp_path):
     thread = store.get_thread(thread_id)
     assert thread is not None
     assert thread["name"] == "Central question"
-    assert thread["metadata"]["thinking_stage"] == "focus"
+    assert thread["metadata"]["thinking_stage"] == "problem_identification"
     assert thread["metadata"]["selected_model"] == "mock"
     assert store.list_threads("central")[0]["id"] == thread_id
 
@@ -93,7 +93,7 @@ def test_notebook_update_reads_and_writes_on_one_connection(tmp_path, monkeypatc
 
     assert connection_count == 1
     thread = store.get_thread(thread_id) or {}
-    assert thread["metadata"]["thinking_stage"] == "focus"
+    assert thread["metadata"]["thinking_stage"] == "problem_identification"
     assert thread["metadata"]["response_detail"] == "long"
 
 
@@ -173,10 +173,10 @@ def test_stage_decision_lives_on_assistant_message(tmp_path):
     created = store.create_phase_transition(
         {
             "thread_id": thread_id,
-            "from_stage": "focus",
-            "to_stage": "evidence",
+            "from_stage": "problem_identification",
+            "to_stage": "concept_generation",
             "assessment": {
-                "current_stage": "focus",
+                "current_stage": "problem_identification",
                 "contribution_summary": "Ready",
                 "stage_assessment": "Clear",
                 "critical_understanding_level": "Emerging",
@@ -190,7 +190,7 @@ def test_stage_decision_lives_on_assistant_message(tmp_path):
     pending = store.get_pending_phase_transition(thread_id)
     assert pending is not None
     assert pending["id"] == created["id"]
-    assert pending["to_stage"] == "evidence"
+    assert pending["to_stage"] == "concept_generation"
 
     store.add_message(
         thread_id,
@@ -213,18 +213,18 @@ def test_stage_decision_lives_on_assistant_message(tmp_path):
         accepted=True,
         metadata_patch={
             "learning_journey": {
-                "current_stage": "evidence",
-                "completed_stages": ["focus"],
-                "stage_notes": {"focus": "Done"},
+                "current_stage": "concept_generation",
+                "completed_stages": ["problem_identification"],
+                "stage_notes": {"problem_identification": "Done"},
                 "response_detail": "short",
             },
-            "thinking_stage": "evidence",
+            "thinking_stage": "concept_generation",
         },
-        expected_from_stage="focus",
+        expected_from_stage="problem_identification",
     )
     assert resolved["status"] == "confirmed"
     thread = store.get_thread(thread_id) or {}
-    assert thread["metadata"]["thinking_stage"] == "evidence"
+    assert thread["metadata"]["thinking_stage"] == "concept_generation"
     assert store.get_pending_phase_transition(thread_id) is None
 
 
@@ -498,7 +498,7 @@ def test_legacy_workspace_is_preserved_and_copied_into_five_tables(tmp_path):
                 "legacy-user",
                 "legacy-login-key",
                 '["research"]',
-                '{"thinking_stage":"evidence","response_detail":"long"}',
+                '{"thinking_stage":"concept_generation","response_detail":"long"}',
             ),
         )
         connection.execute(
@@ -538,7 +538,7 @@ def test_legacy_workspace_is_preserved_and_copied_into_five_tables(tmp_path):
 
     assert store.owner_id == "legacy-user"
     assert store.get_thread("legacy-thread")["metadata"]["thinking_stage"] == (
-        "evidence"
+        "concept_generation"
     )
     assert store.get_messages("legacy-thread")[0]["content"] == (
         "What does the evidence show?"
@@ -553,7 +553,7 @@ def test_legacy_workspace_is_preserved_and_copied_into_five_tables(tmp_path):
     retrieval = LocalChunkRetriever().retrieve(
         RetrievalQuery(
             current_message="What evidence concerns older pedestrians?",
-            current_stage="evidence",
+            current_stage="concept_generation",
             sources=retrieval_sources_from_notebook([source]),
         )
     )
@@ -618,7 +618,7 @@ def test_cognito_store_repairs_preexisting_split_owner_without_losing_notebooks(
         connection.execute(
             "INSERT INTO notebooks "
             "(id, user_id, title, current_stage, progress_text, settings_text, "
-            "created_at, updated_at) VALUES (?, ?, ?, 'focus', '{}', '{}', ?, ?)",
+            "created_at, updated_at) VALUES (?, ?, ?, 'problem_identification', '{}', '{}', ?, ?)",
             (
                 "split-notebook",
                 "split-duplicate",
@@ -674,7 +674,7 @@ def test_startup_repairs_users_legacy_notebook_foreign_key_without_data_loss(
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
                 title TEXT,
-                current_stage TEXT NOT NULL DEFAULT 'focus',
+                current_stage TEXT NOT NULL DEFAULT 'problem_identification',
                 progress_text TEXT NOT NULL DEFAULT '{}',
                 settings_text TEXT NOT NULL DEFAULT '{}',
                 conversation_revision INTEGER NOT NULL DEFAULT 0,

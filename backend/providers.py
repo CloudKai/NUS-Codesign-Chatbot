@@ -2,7 +2,7 @@
 
 Providers consume a server-composed prompt from ``backend.prompts`` and focus on
 invocation, structured output, model arguments, and error translation. They do
-not own six-stage educational wording. When ``CoachRequest.image_inputs`` is
+not own five-stage educational wording. When ``CoachRequest.image_inputs`` is
 present, Ollama receives base64 ``images`` and OpenAI receives multimodal
 ``input_image`` parts alongside the composed text prompt.
 """
@@ -14,7 +14,13 @@ from typing import Any
 import httpx
 from openai import OpenAI
 
-from .domain import CoachRequest, ProviderCoachOutput, StageDecision, openai_strict_schema
+from .domain import (
+    CoachRequest,
+    ProviderAssessmentResult,
+    ProviderCoachOutput,
+    StageDecision,
+    openai_strict_schema,
+)
 from .mock_provider import DeterministicCoachProvider
 from .prompts import compose_coach_prompt
 from .settings import settings
@@ -39,12 +45,18 @@ def _image_data_payloads(request: CoachRequest) -> list[str]:
 class OllamaCoachProvider:
     """Call a local Ollama chat model and validate its JSON coaching result."""
 
+    provider_id = "ollama"
+
     def __init__(self, base_url: str, model: str, timeout_seconds: float = 90.0) -> None:
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._timeout_seconds = timeout_seconds
 
-    def assess(self, request: CoachRequest) -> tuple[str, Any]:
+    def model_id_for(self, request: CoachRequest) -> str:
+        """Return the actual Ollama model invoked for this request."""
+        return self._model
+
+    def assess(self, request: CoachRequest) -> ProviderAssessmentResult:
         """Generate a JSON turn from Ollama without exposing provider details upstream."""
         schema = openai_strict_schema(ProviderCoachOutput)
         prompt = compose_coach_prompt(request).composed_text
@@ -85,11 +97,17 @@ class OllamaCoachProvider:
         assessment = turn.assessment.model_copy(
             update={"current_stage": request.current_stage}
         )
-        return turn.response_text, assessment
+        return ProviderAssessmentResult(
+            response_text=turn.response_text,
+            assessment=assessment,
+            research_coding=turn.research_coding,
+        )
 
 
 class OpenAICoachProvider:
     """Call the OpenAI Responses API for a validated structured coaching assessment."""
+
+    provider_id = "openai"
 
     def __init__(
         self,
@@ -111,7 +129,11 @@ class OpenAICoachProvider:
         self._model = model
         self._reasoning_effort = reasoning_effort
 
-    def assess(self, request: CoachRequest) -> tuple[str, Any]:
+    def model_id_for(self, request: CoachRequest) -> str:
+        """Return the actual OpenAI model invoked for this request."""
+        return self._model
+
+    def assess(self, request: CoachRequest) -> ProviderAssessmentResult:
         """Request JSON-schema output from the optional paid OpenAI provider."""
         try:
             prompt = compose_coach_prompt(request).composed_text
@@ -160,7 +182,11 @@ class OpenAICoachProvider:
         assessment = turn.assessment.model_copy(
             update={"current_stage": request.current_stage}
         )
-        return turn.response_text, assessment
+        return ProviderAssessmentResult(
+            response_text=turn.response_text,
+            assessment=assessment,
+            research_coding=turn.research_coding,
+        )
 
 
 def configured_coach_provider():

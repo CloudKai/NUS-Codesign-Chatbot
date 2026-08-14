@@ -80,8 +80,8 @@ def test_streamlit_notebook_workspace_smoke():
     assert '<span class="pane-title">Thinking Path</span>' in rendered
     assert "Critical Thinking Companion" in rendered
     assert 'aria-label="Critical-thinking journey"' in rendered
-    assert "Focus" in rendered
-    assert "Conclusion" in rendered
+    assert "Problem" in rendered
+    assert "Reflection" in rendered
     assert "Summary" in rendered
     assert "Critical thinking (Facione)" in rendered
     assert "Discussion summary" in rendered
@@ -90,8 +90,8 @@ def test_streamlit_notebook_workspace_smoke():
         "Strengths",
         "Areas for improvement",
         "Working conclusion",
-        "Define the focus",
-        "Examine evidence",
+        "Problem identification",
+        "Concept generation",
         "Lecture Notes · 0",
         "Readings · 0",
         "My Sources · 0",
@@ -109,7 +109,7 @@ def test_streamlit_notebook_workspace_smoke():
     assert "_render_source_sort_dropdown" in sources_py
     assert "personal_sources_all" in sources_py
     assert "Select all sources" in sources_py
-    assert "Clarify the question, problem, or claim" in rendered
+    assert "Frame the design problem, who it affects, and why it matters." in rendered
     assert "Add your first source" in rendered
     assert "Loading course materials in the background…" in Path("ui/sources.py").read_text(
         encoding="utf-8"
@@ -462,7 +462,7 @@ def test_learning_studio_and_notebook_history_controls():
     )
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "notebook-card-meta" in rendered
-    assert "of 6" in rendered
+    assert "of 5" in rendered
 
 
 def test_language_theme_and_journey_has_no_manual_progression_control():
@@ -514,7 +514,7 @@ def test_language_theme_and_journey_has_no_manual_progression_control():
     assert restored.session_state["setting_appearance"] == "Dark"
     assert StudentStore().get_user_preferences().get("appearance") == "Dark"
 
-    assert app.session_state["learning_journey"]["current_stage"] == "focus"
+    assert app.session_state["learning_journey"]["current_stage"] == "problem_identification"
     assert not any(button.label == "Work on this stage" for button in app.button)
     assert not app.exception
 
@@ -529,7 +529,7 @@ def test_journey_work_on_this_stage_appears_when_selection_enabled(monkeypatch):
     select_buttons = [
         button for button in app.button if button.label == "Work on this stage"
     ]
-    assert len(select_buttons) == 5
+    assert len(select_buttons) == 4
     captions = "\n".join(caption.value or "" for caption in app.caption)
     assert "Choose a stage to work on." in captions
     assert not app.exception
@@ -747,7 +747,7 @@ def test_legacy_chat_turn_does_not_move_the_learning_stage_without_confirmation(
     ).run()
 
     assert not app.exception
-    assert app.session_state["learning_journey"]["current_stage"] == "focus"
+    assert app.session_state["learning_journey"]["current_stage"] == "problem_identification"
     assert app.session_state["learning_journey"]["completed_stages"] == []
 
 

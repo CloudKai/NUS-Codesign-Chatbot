@@ -64,7 +64,7 @@ def test_authenticated_inprocess_path_confirms_pending_transition():
     confirm.click().run()
 
     assert not app.exception
-    assert app.session_state["learning_journey"]["current_stage"] == "evidence"
+    assert app.session_state["learning_journey"]["current_stage"] == "concept_generation"
 
 
 def test_streamlit_api_mode_confirmation_creates_pending_transition(monkeypatch):
@@ -86,10 +86,10 @@ def test_streamlit_api_mode_confirmation_creates_pending_transition(monkeypatch)
 
         pending = client.pending_transition(thread_id)
         assert pending is not None
-        assert pending.to_stage == "evidence"
+        assert pending.to_stage == "concept_generation"
         state = client.learning_state(thread_id)
-        assert (state.get("learning_journey") or {}).get("current_stage", "focus") == (
-            "focus"
+        assert (state.get("learning_journey") or {}).get("current_stage", "problem_identification") == (
+            "problem_identification"
         )
         rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
         assert "recommended a next step" in rendered.lower() or pending is not None
@@ -116,8 +116,8 @@ def test_streamlit_api_mode_auto_advance_moves_thinking_path(monkeypatch):
 
         assert client.pending_transition(thread_id) is None
         state = client.learning_state(thread_id)
-        assert (state.get("learning_journey") or {}).get("current_stage") == "evidence"
-        assert app.session_state["learning_journey"]["current_stage"] == "evidence"
+        assert (state.get("learning_journey") or {}).get("current_stage") == "concept_generation"
+        assert app.session_state["learning_journey"]["current_stage"] == "concept_generation"
     finally:
         client.close()
 

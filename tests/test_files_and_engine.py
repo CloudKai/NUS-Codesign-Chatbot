@@ -1,4 +1,3 @@
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -140,7 +139,7 @@ def test_mock_student_turn_streams_and_persists(tmp_path, monkeypatch):
             model_id="gpt-5.4-mini",
             support_mode="critical-thinking",
             assignment={"title": "Research report"},
-            thinking_stage="evidence",
+            thinking_stage="concept_generation",
             response_detail="long",
         ),
         [("notes.txt", b"Sample size: 12", "text/plain")],
@@ -153,7 +152,7 @@ def test_mock_student_turn_streams_and_persists(tmp_path, monkeypatch):
     from backend.models import DEFAULT_CHAT_MODEL_ID
 
     assert messages[-1]["metadata"]["model"] == DEFAULT_CHAT_MODEL_ID
-    assert messages[-1]["metadata"]["thinking_stage"] == "evidence"
+    assert messages[-1]["metadata"]["thinking_stage"] == "concept_generation"
     assert messages[-1]["metadata"]["response_detail"] == "long"
     # OpenAI continuation state is no longer persisted; messages are canonical.
     assert "response_id" not in messages[-1]["metadata"]
@@ -174,12 +173,12 @@ def test_mock_short_mode_is_concise_and_stage_specific(tmp_path, monkeypatch):
         "What assumption should I inspect first?",
         ChatOptions(
             model_id="gpt-5.4",
-            thinking_stage="assumptions",
+            thinking_stage="design_specification",
             response_detail="short",
         ),
     )
     rendered = "".join(stream)
-    assert "Surface assumptions" in rendered
+    assert "Design specification" in rendered
     assert "**Next:**" in rendered
     assert "critical-thinking pass" not in rendered
     assert "Your question:" not in rendered

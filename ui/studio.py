@@ -1,6 +1,6 @@
 """Thinking Path studio panel and learning review.
 
-Renders the six-stage journey, confirmation-gated pending transitions (when
+Renders the configured Thinking Path, confirmation-gated pending transitions (when
 auto-advance is off), and Review cards. Review
 summary and Facione scores come from the latest coach assessment when present;
 strengths and improvement areas nest one expander per Thinking Path stage,
@@ -39,6 +39,14 @@ _STAGE_SELECT_ERROR = "The Thinking Path stage could not be updated. Try again."
 _TRANSITION_RESOLVE_ERROR = (
     "The stage recommendation could not be updated. Try again."
 )
+_FACIONE_ACTIVITY_LABELS = (
+    ("analysis", "Analysis"),
+    ("interpretation", "Interpretation"),
+    ("inference", "Inference"),
+    ("evaluation", "Evaluation"),
+    ("explanation", "Explanation"),
+    ("self_regulation", "Self-Regulation"),
+)
 
 
 def _review_fingerprint(review: dict[str, Any]) -> str:
@@ -67,10 +75,19 @@ def _review_fingerprint(review: dict[str, Any]) -> str:
         improvement_parts.append(
             f"{section.get('stage_id')}:{';'.join(str(item) for item in items)}"
         )
+    behavior_counts = review.get("facione_behavior_counts") or {}
+    behavior_part = ",".join(
+        f"{key}:{behavior_counts.get(key, 0)}"
+        for key, _label in _FACIONE_ACTIVITY_LABELS
+    )
+    holistic = review.get("facione_holistic_candidate") or {}
     return "|".join(
         [
             str(review.get("summary") or ""),
             facione_part,
+            behavior_part,
+            str(holistic.get("score") or ""),
+            str(holistic.get("rationale") or ""),
             str(review.get("conclusion") or ""),
             *strength_parts,
             *improvement_parts,
@@ -145,7 +162,7 @@ def _select_journey_stage(stage_id: str) -> None:
 
 
 def render_journey_track() -> None:
-    """Render the six-stage roadmap with progress and stage guidance."""
+    """Render the configured roadmap with progress and phase guidance."""
     journey = normalize_journey(st.session_state.learning_journey)
     completed = set(journey["completed_stages"])
     current_id = journey["current_stage"]
@@ -164,7 +181,7 @@ def render_journey_track() -> None:
     st.markdown(
         progress_bar_html(
             completed=completed_count,
-            total=6,
+            total=len(THINKING_STAGES),
             label="Thinking path",
             heading="Current focus",
         ),
@@ -173,12 +190,11 @@ def render_journey_track() -> None:
     if selection_enabled:
         st.caption("Choose a stage to work on.")
     stage_icons = {
-        "focus": "my_location",
-        "evidence": "find_in_page",
-        "assumptions": "balance",
-        "perspectives": "groups",
-        "synthesis": "extension",
-        "conclusion": "check_circle",
+        "problem_identification": "problem",
+        "concept_generation": "lightbulb",
+        "design_specification": "design_services",
+        "deep_analysis": "manage_search",
+        "reflection": "fact_check",
     }
     with st.container(key="journey_track"):
         st.markdown(
@@ -356,7 +372,9 @@ def render_learning_review(journey: dict[str, Any]) -> None:
     ) == "Review":
         st.session_state.review_seen_fingerprint = fingerprint
 
-    current_stage_id = str(journey.get("current_stage") or "focus")
+    current_stage_id = str(
+        journey.get("current_stage") or THINKING_STAGES[0].id
+    )
     st.markdown(
         review_card_html(
             label="Summary",
@@ -368,6 +386,42 @@ def render_learning_review(journey: dict[str, Any]) -> None:
         facione_scores_table_html(review.get("facione_scores")),
         unsafe_allow_html=True,
     )
+    behavior_counts = review.get("facione_behavior_counts") or {}
+    demonstrated = [
+        f"{label}: {max(0, int(behavior_counts.get(key, 0) or 0))} "
+        f"{'contribution' if int(behavior_counts.get(key, 0) or 0) == 1 else 'contributions'}"
+        for key, label in _FACIONE_ACTIVITY_LABELS
+        if int(behavior_counts.get(key, 0) or 0) > 0
+    ]
+    if demonstrated:
+        st.markdown(
+            review_card_html(
+                label="Thinking activity",
+                body="",
+                items=demonstrated,
+            ),
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "Automated, provisional observations of reasoning demonstrated in "
+            "your active conversation. Intended to support reflection, not grading."
+        )
+    holistic = review.get("facione_holistic_candidate")
+    if isinstance(holistic, dict):
+        score = holistic.get("score")
+        rationale = str(holistic.get("rationale") or "").strip()
+        if score and rationale:
+            st.markdown(
+                review_card_html(
+                    label="Reflection profile",
+                    body=f"{score} / 4 · {rationale}",
+                ),
+                unsafe_allow_html=True,
+            )
+            st.caption(
+                "A provisional whole-conversation candidate shown only in "
+                "Reflection. It is not a grade."
+            )
     with st.expander("Strengths", expanded=False):
         _render_review_stage_expanders(
             sections=review.get("strength_sections"),

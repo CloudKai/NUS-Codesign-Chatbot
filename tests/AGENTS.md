@@ -44,7 +44,11 @@ default `StudentStore()` path.
 | `test_storage_providers.py` | SQLite/local defaults, DSQL/S3 provider selection, mocked DSQL auth + S3 (no AWS calls) |
 | `test_runtime_auth.py` | Cognito owner isolation vs single-owner local API |
 | `test_workspace_api.py` | Notebook/source/preference CRUD API and path redaction |
-| `test_primary_path.py` | All six stages, stale/reject, restart, notebook isolation, schema |
+| `test_primary_path.py` | All five phases, stale/reject, restart, notebook isolation, schema |
+| `test_research_coding_domain.py` | Structured provisional CLEAR/Facione/ethics coding and one-call integration |
+| `test_research_persistence.py` | Offset-only observations, revisions, human decisions, audit, workflow marker |
+| `test_professor_research.py` | Attributable lecturer Research API, review/adjudication, audited CSV |
+| `test_reset_learning_data.py` | Dry-run manifest, backup/quarantine, exact confirmation, stale-plan rejection |
 | `test_workflow.py` | LangGraph workflow routing and structured output |
 | `test_prompt_architecture.py` | Stage prompt files, composer ordering, authoritative stage selection, no raw prompts in API |
 | `test_learning_service.py` | Phase transition confirmation, resolution, atomic rollback |

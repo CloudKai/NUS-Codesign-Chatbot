@@ -37,6 +37,7 @@ from .loader import load_shared_prompt, load_stage_prompt
 EMPTY_RETRIEVED_COURSE_CONTEXT = (
     "No retrieved source context was provided for this turn."
 )
+COACH_PROMPT_VERSION = "five-phase-research-v1"
 
 # Bound dynamic sections so composition never injects whole PDFs or unbounded history.
 # Retrieved context is capped economically for the temporary pre-Bedrock OpenAI
@@ -127,7 +128,7 @@ def _runtime_instructions(context: PromptContext) -> str:
         )
     else:
         parts.append(
-            "Guidance mode: Complex. Recommend advance only when the "
+            "Guidance mode: Strict. Recommend advance only when the "
             "contribution is thorough for this stage—specific claims, clear "
             "reasoning, and limited ambiguity. Prefer stay when important "
             "elements are still missing."
@@ -171,7 +172,9 @@ def _runtime_instructions(context: PromptContext) -> str:
             "supported claim; do not expose internal excerpt/chunk identifiers."
         )
     parts.append(
-        "Return only the required structured JSON result. Include Facione scores "
+        "Return only the required one-call structured JSON envelope containing "
+        "the complete coaching result and optional provisional research coding. "
+        "Research coding must never alter coaching or stage progression. Include Facione scores "
         "for all six dimensions using 0=not started, 1=Weak, 2=Unacceptable, "
         "3=Acceptable, 4=Strong. Keep learning_summary synthesized—never paste "
         "prompts. Review strengths and improvements must be specific to this "

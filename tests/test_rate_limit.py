@@ -95,7 +95,7 @@ def test_api_returns_429_with_retry_after_for_active_limit(tmp_path, monkeypatch
             json={
                 "thread_id": thread_id,
                 "student_message": "first",
-                "current_stage": "focus",
+                "current_stage": "problem_identification",
                 "response_detail": "short",
                 "idempotency_key": "rate-1",
             },
@@ -109,7 +109,7 @@ def test_api_returns_429_with_retry_after_for_active_limit(tmp_path, monkeypatch
             json={
                 "thread_id": thread_id,
                 "student_message": "second",
-                "current_stage": "focus",
+                "current_stage": "problem_identification",
                 "response_detail": "short",
                 "idempotency_key": "rate-2",
             },
@@ -154,7 +154,7 @@ def test_api_same_key_waiters_converge_under_active_limit(tmp_path, monkeypatch)
     payload = {
         "thread_id": thread_id,
         "student_message": "Assess this shared claim.",
-        "current_stage": "focus",
+        "current_stage": "problem_identification",
         "response_detail": "short",
         "idempotency_key": "same-key-under-limit",
     }

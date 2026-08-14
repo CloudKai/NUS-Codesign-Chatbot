@@ -23,7 +23,13 @@ from .models import (
 )
 from .repository import ProfessorAnalyticsRepository
 
-STAGES = ("focus", "evidence", "assumptions", "perspectives", "synthesis", "conclusion")
+STAGES = (
+    "problem_identification",
+    "concept_generation",
+    "design_specification",
+    "deep_analysis",
+    "reflection",
+)
 DIMENSIONS = (
     ("analysis", "Analysis"),
     ("interpretation", "Interpretation"),
@@ -296,7 +302,7 @@ class ProfessorAnalyticsService:
             if not notebook_id:
                 continue
             notebook = value["notebooks"].setdefault(str(notebook_id), {
-                "id": str(notebook_id), "title": str(row.get("title") or "Untitled notebook"), "stage": str(row.get("current_stage") or "focus").lower(),
+                "id": str(notebook_id), "title": str(row.get("title") or "Untitled notebook"), "stage": str(row.get("current_stage") or "problem_identification").lower(),
                 "progress": self._json(row.get("progress_text")), "updated_at": row.get("notebook_updated_at"),
                 "messages": [], "assessments": [], "last_activity": None,
             })
@@ -470,8 +476,19 @@ class ProfessorAnalyticsService:
             wording = "No student activity recorded" if last is None else f"No activity for {inactive_for.days} days"
             signals.append(AttentionSignal(code="inactive", reason=wording))
         primary_turns = value["primary_student_messages"]
-        if value["stage"] == "focus" and primary_turns >= self._rules.focus_turns:
-            signals.append(AttentionSignal(code="focus_after_activity", reason=f"Currently at Focus after {primary_turns} student turns in the current notebook"))
+        if (
+            value["stage"] == "problem_identification"
+            and primary_turns >= self._rules.focus_turns
+        ):
+            signals.append(
+                AttentionSignal(
+                    code="problem_identification_after_activity",
+                    reason=(
+                        "Currently at Problem Identification after "
+                        f"{primary_turns} student turns in the current notebook"
+                    ),
+                )
+            )
         if primary_turns >= self._rules.limited_progress_turns and len(value["completed_stages"]) <= self._rules.limited_progress_completed_stages:
             signals.append(AttentionSignal(code="limited_progress", reason=f"{primary_turns} student turns in the current notebook with {len(value['completed_stages'])} completed stage(s)"))
         latest = value.get("latest_assessment") or {}

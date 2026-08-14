@@ -54,7 +54,7 @@ def _seed_user(store: StudentStore, sub: str, role: str) -> dict:
 
 
 def _assessment(**scores: int) -> dict:
-    return {"facione_scores": {key: scores.get(key, 0) for key in ("analysis", "interpretation", "inference", "evaluation", "explanation", "self_regulation")}, "current_stage": "evidence"}
+    return {"facione_scores": {key: scores.get(key, 0) for key in ("analysis", "interpretation", "inference", "evaluation", "explanation", "self_regulation")}, "current_stage": "concept_generation"}
 
 
 def _seed_student_activity(store: StudentStore, *, sub: str, now: datetime, messages: int = 2) -> str:
@@ -152,7 +152,7 @@ def test_conversations_sessions_primary_assessment_and_not_started_are_truthful(
     newer = student_store.create_thread(
         name="New discussion", model_id="mock", support_mode="critical-thinking"
     )
-    student_store.add_message(newer, "user", "New focus")
+    student_store.add_message(newer, "user", "New problem framing")
     student_store.add_message(
         newer, "assistant", "New coaching",
         metadata={"assessment": _assessment(analysis=1, evaluation=1)},

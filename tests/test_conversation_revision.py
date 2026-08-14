@@ -208,7 +208,7 @@ def test_normal_submit_does_not_bump_revision_and_stamps_messages(
         CoachRequest(
             thread_id=thread_id,
             student_message="First turn.",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
             idempotency_key="send-only",
         )
@@ -238,7 +238,7 @@ def test_assessment_text_populated_on_assistant_null_on_user(tmp_path, monkeypat
         CoachRequest(
             thread_id=thread_id,
             student_message="Assess me.",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
             idempotency_key="assess-1",
         )
@@ -279,7 +279,7 @@ def test_revise_latest_supersedes_retains_and_links_previous_message_id(
         CoachRequest(
             thread_id=thread_id,
             student_message="Original focus claim.",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
             idempotency_key="send-1",
         )
@@ -348,7 +348,7 @@ def test_revise_earlier_keeps_downstream_physically_excludes_from_active(
         CoachRequest(
             thread_id=thread_id,
             student_message="Focus message one.",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
             idempotency_key="a1",
         )
@@ -356,8 +356,8 @@ def test_revise_earlier_keeps_downstream_physically_excludes_from_active(
     assert first.pending_transition is not None
     coach._progress.resolve(thread_id, first.pending_transition.id, accepted=True)
     thread = store.get_thread(thread_id) or {}
-    stage = (thread.get("metadata") or {}).get("thinking_stage") or "evidence"
-    assert stage == "evidence"
+    stage = (thread.get("metadata") or {}).get("thinking_stage") or "concept_generation"
+    assert stage == "concept_generation"
     coach.submit(
         CoachRequest(
             thread_id=thread_id,
@@ -416,8 +416,8 @@ def test_revise_earlier_keeps_downstream_physically_excludes_from_active(
 
     thread = store.get_thread(thread_id) or {}
     assert int(thread.get("conversation_revision") or 0) == 1
-    assert (thread.get("metadata") or {}).get("thinking_stage") == "focus"
-    assert "evidence" not in (
+    assert (thread.get("metadata") or {}).get("thinking_stage") == "problem_identification"
+    assert "concept_generation" not in (
         (thread.get("metadata") or {}).get("learning_journey") or {}
     ).get("completed_stages", [])
 
@@ -432,7 +432,7 @@ def test_get_messages_active_only_and_at_revision_ownership(tmp_path, monkeypatc
         CoachRequest(
             thread_id=thread_id,
             student_message="Original",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
             idempotency_key="ap-1",
         )
@@ -479,7 +479,7 @@ def test_double_edit_previous_message_id_lineage(tmp_path, monkeypatch):
         CoachRequest(
             thread_id=thread_id,
             student_message="Focus A.",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
             idempotency_key="seq-1",
         )
@@ -489,7 +489,7 @@ def test_double_edit_previous_message_id_lineage(tmp_path, monkeypatch):
         CoachRequest(
             thread_id=thread_id,
             student_message="Evidence B.",
-            current_stage="evidence",
+            current_stage="concept_generation",
             response_detail="short",
             idempotency_key="seq-2",
         )
@@ -542,7 +542,7 @@ def test_stale_persist_rejected_after_revision(tmp_path):
         thread_id,
         "user",
         "Hello",
-        metadata={"thinking_stage": "focus"},
+        metadata={"thinking_stage": "problem_identification"},
     )
     store.add_message(thread_id, "assistant", "Reply")
     result = store.revise_conversation_from_user_message(
@@ -550,7 +550,7 @@ def test_stale_persist_rejected_after_revision(tmp_path):
         user_id,
         "Hello edited",
         model_id="mock",
-        metadata={"thinking_stage": "focus"},
+        metadata={"thinking_stage": "problem_identification"},
     )
     assert result.conversation_revision == 1
     replacement_id = result.edited_message_id
@@ -559,14 +559,14 @@ def test_stale_persist_rejected_after_revision(tmp_path):
     with pytest.raises(ConversationRevisionConflictError):
         store.persist_coach_turn(
             thread_id,
-            expected_stage="focus",
+            expected_stage="problem_identification",
             expected_conversation_revision=0,
             user_content="Hello edited",
-            user_metadata={"thinking_stage": "focus"},
+            user_metadata={"thinking_stage": "problem_identification"},
             assistant_content="Stale reply",
             assistant_metadata={
                 "assessment": {
-                    "current_stage": "focus",
+                    "current_stage": "problem_identification",
                     "contribution_summary": "x",
                     "stage_assessment": "x",
                     "critical_understanding_level": "Emerging",
@@ -590,7 +590,7 @@ def test_revise_cas_conflict_rolls_back(tmp_path):
         thread_id,
         "user",
         "Hello",
-        metadata={"thinking_stage": "focus"},
+        metadata={"thinking_stage": "problem_identification"},
     )
     store.add_message(thread_id, "assistant", "Reply")
     barrier = __import__("threading").Barrier(2)
@@ -605,7 +605,7 @@ def test_revise_cas_conflict_rolls_back(tmp_path):
                 user_id,
                 content,
                 model_id="mock",
-                metadata={"thinking_stage": "focus"},
+                metadata={"thinking_stage": "problem_identification"},
             )
             outcomes.append("ok")
         except ConversationRevisionConflictError:
@@ -649,7 +649,7 @@ def test_persist_cas_rowcount_zero_raises_conflict(tmp_path):
         thread_id,
         "user",
         "Hello",
-        metadata={"thinking_stage": "focus"},
+        metadata={"thinking_stage": "problem_identification"},
     )
     store.add_message(thread_id, "assistant", "Reply")
 
@@ -701,14 +701,14 @@ def test_persist_cas_rowcount_zero_raises_conflict(tmp_path):
     with pytest.raises(ConversationRevisionConflictError):
         store.persist_coach_turn(
             thread_id,
-            expected_stage="focus",
+            expected_stage="problem_identification",
             expected_conversation_revision=0,
             user_content="Hello again",
-            user_metadata={"thinking_stage": "focus"},
+            user_metadata={"thinking_stage": "problem_identification"},
             assistant_content="CAS miss reply",
             assistant_metadata={
                 "assessment": {
-                    "current_stage": "focus",
+                    "current_stage": "problem_identification",
                     "contribution_summary": "x",
                     "stage_assessment": "x",
                     "critical_understanding_level": "Emerging",
@@ -732,7 +732,7 @@ def test_old_idempotency_key_revoked_after_edit(tmp_path, monkeypatch):
         CoachRequest(
             thread_id=thread_id,
             student_message="Original",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
             idempotency_key="old-key",
         )
@@ -764,7 +764,7 @@ def test_old_pending_transition_cannot_resolve_after_supersede(
         CoachRequest(
             thread_id=thread_id,
             student_message="Ready to move on with a clear focus.",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
             idempotency_key="pending-1",
         )
@@ -839,7 +839,7 @@ def test_provider_failure_after_revise_keeps_historical_rows(tmp_path, monkeypat
         CoachRequest(
             thread_id=thread_id,
             student_message="Focus A.",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
             idempotency_key="pf-1",
         )
@@ -849,7 +849,7 @@ def test_provider_failure_after_revise_keeps_historical_rows(tmp_path, monkeypat
         CoachRequest(
             thread_id=thread_id,
             student_message="Evidence B.",
-            current_stage="evidence",
+            current_stage="concept_generation",
             response_detail="short",
             idempotency_key="pf-2",
         )
@@ -895,7 +895,7 @@ def test_provider_failure_after_revise_keeps_historical_rows(tmp_path, monkeypat
     assert active[0]["content"] == "Edited after supersede."
     thread = store.get_thread(thread_id) or {}
     assert int(thread.get("conversation_revision") or 0) == 1
-    assert (thread.get("metadata") or {}).get("thinking_stage") == "focus"
+    assert (thread.get("metadata") or {}).get("thinking_stage") == "problem_identification"
 
 
 def test_revise_excludes_edited_and_replacement_from_provider_history(
@@ -910,7 +910,7 @@ def test_revise_excludes_edited_and_replacement_from_provider_history(
         CoachRequest(
             thread_id=thread_id,
             student_message="Original text.",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
             idempotency_key="hist-1",
         )
@@ -944,7 +944,7 @@ def test_fingerprint_includes_conversation_revision():
     base = {
         "thread_id": "t1",
         "student_message": "same",
-        "current_stage": "focus",
+        "current_stage": "problem_identification",
         "response_detail": "short",
         "idempotency_key": "k",
     }
@@ -968,7 +968,7 @@ def test_reject_revise_assistant_message(tmp_path, monkeypatch):
         CoachRequest(
             thread_id=thread_id,
             student_message="Hello",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
             idempotency_key="as-1",
         )
@@ -992,7 +992,7 @@ def test_revise_idempotent_replay_same_new_key(tmp_path, monkeypatch):
         CoachRequest(
             thread_id=thread_id,
             student_message="Original",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
             idempotency_key="ir-1",
         )
@@ -1053,7 +1053,7 @@ def test_persist_before_complete_retry_recovers_without_second_bump(
         CoachRequest(
             thread_id=thread_id,
             student_message="Original",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
             idempotency_key="recover-seed",
         )
@@ -1103,7 +1103,7 @@ def test_revise_cas_rowcount_zero_raises_conflict_and_rolls_back(tmp_path):
         thread_id,
         "user",
         "Hello",
-        metadata={"thinking_stage": "focus"},
+        metadata={"thinking_stage": "problem_identification"},
     )
     store.add_message(thread_id, "assistant", "Reply")
     rows_before = _raw_messages(store, thread_id)
@@ -1158,7 +1158,7 @@ def test_revise_cas_rowcount_zero_raises_conflict_and_rolls_back(tmp_path):
             user_id,
             "Hello edited",
             model_id="mock",
-            metadata={"thinking_stage": "focus"},
+            metadata={"thinking_stage": "problem_identification"},
         )
     assert _raw_messages(store, thread_id) == rows_before
     assert int((store.get_thread(thread_id) or {}).get("conversation_revision") or 0) == 0
@@ -1180,7 +1180,7 @@ def test_revise_preserves_sources_ownership_and_refs(tmp_path, monkeypatch):
         CoachRequest(
             thread_id=thread_id,
             student_message="Original with sources.",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
             idempotency_key="src-1",
         )
@@ -1221,7 +1221,7 @@ def test_sqlite_migration_adds_notebook_and_message_revision_columns(tmp_path):
                 id TEXT PRIMARY KEY,
                 user_id TEXT NOT NULL,
                 title TEXT,
-                current_stage TEXT NOT NULL DEFAULT 'focus',
+                current_stage TEXT NOT NULL DEFAULT 'problem_identification',
                 progress_text TEXT NOT NULL DEFAULT '{}',
                 settings_text TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL,
@@ -1308,7 +1308,7 @@ def test_select_learning_stage_rejects_only_active_pending(tmp_path, monkeypatch
         CoachRequest(
             thread_id=thread_id,
             student_message="Ready to move on with a clear focus.",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
             idempotency_key="stage-pending-1",
         )
@@ -1333,7 +1333,7 @@ def test_select_learning_stage_rejects_only_active_pending(tmp_path, monkeypatch
             (superseded_pending_id, thread_id),
         )
         connection.commit()
-    store.select_learning_stage(thread_id, "evidence")
+    store.select_learning_stage(thread_id, "concept_generation")
     revision = int(store.get_thread(thread_id)["conversation_revision"] or 0)
     with store._connect() as connection:
         after = connection.execute(
@@ -1371,7 +1371,7 @@ def test_provider_failure_retry_same_key_does_not_double_bump(tmp_path, monkeypa
         CoachRequest(
             thread_id=thread_id,
             student_message="First prompt",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
             idempotency_key="retry-seed",
         )

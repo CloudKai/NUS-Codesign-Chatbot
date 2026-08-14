@@ -4,7 +4,19 @@ from __future__ import annotations
 
 import re
 
-from .domain import CoachRequest, EducationalAssessment, FacioneDimensionScores, StageDecision
+from .domain import (
+    ClearCode,
+    CoachRequest,
+    EducationalAssessment,
+    FacioneBehavior,
+    FacioneDimensionScores,
+    HolisticCandidate,
+    ProviderAssessmentResult,
+    ProvisionalResearchCoding,
+    ResearchCodingStatus,
+    ResearchEvidence,
+    StageDecision,
+)
 from .prompts import PreparedCoachPrompt, compose_coach_prompt
 from .student_journey import (
     STAGE_BY_ID,
@@ -17,6 +29,82 @@ from .student_journey import (
 
 _CITATION_LABEL = re.compile(r"S\d+")
 _MAX_GROUNDED_EXCERPT_CHARS = 320
+_CLEAR_BY_STAGE = {
+    "problem_identification": ClearCode.CONCISE,
+    "concept_generation": ClearCode.ADAPTIVE,
+    "design_specification": ClearCode.EXPLICIT,
+    "deep_analysis": ClearCode.LOGICAL,
+    "reflection": ClearCode.REFLECTIVE,
+}
+_FACIONE_BEHAVIORS_BY_STAGE = {
+    "problem_identification": [FacioneBehavior.ANALYSIS, FacioneBehavior.INTERPRETATION],
+    "concept_generation": [FacioneBehavior.INFERENCE, FacioneBehavior.INTERPRETATION],
+    "design_specification": [FacioneBehavior.EXPLANATION, FacioneBehavior.INFERENCE],
+    "deep_analysis": [FacioneBehavior.ANALYSIS, FacioneBehavior.EVALUATION],
+    "reflection": [FacioneBehavior.SELF_REGULATION, FacioneBehavior.EVALUATION],
+}
+
+
+def _prior_assessed_turns(request: CoachRequest) -> int:
+    """Count prior assessments eligible for the active Quick/Strict profile.
+
+    Profile-tagged Quick assessments do not satisfy Strict. Untagged legacy
+    assessments remain eligible for both profiles so existing conversations do
+    not lose progression after this internal metadata was introduced.
+    """
+    active_profile = "strict" if request.response_detail == "long" else "quick"
+    count = 0
+    for message in request.history:
+        if message.get("role") != "assistant":
+            continue
+        metadata = message.get("metadata") or {}
+        if not isinstance(metadata, dict) or not isinstance(
+            metadata.get("assessment"), dict
+        ):
+            continue
+        if str(metadata.get("thinking_stage") or "") != request.current_stage:
+            continue
+        profile = str(metadata.get("coaching_profile") or "").strip().lower()
+        if not profile:
+            research = metadata.get("research_coding")
+            if isinstance(research, dict):
+                profile = str(research.get("coaching_profile") or "").strip().lower()
+        if not profile or profile == active_profile:
+            count += 1
+    return count
+
+
+def _mock_research_coding(
+    request: CoachRequest,
+) -> ProvisionalResearchCoding:
+    """Return explicit stage-based research coding without text heuristics."""
+    quote = request.student_message.strip()[:2_000]
+    holistic = (
+        HolisticCandidate(
+            score=2,
+            rationale=(
+                "The contribution shows some reflective reasoning, with important "
+                "opportunities to deepen evaluation across the conversation."
+            ),
+            evidence_quotes=[quote],
+        )
+        if request.current_stage == "reflection"
+        else None
+    )
+    return ProvisionalResearchCoding(
+        coding_status=ResearchCodingStatus.CODED,
+        dominant_clear=_CLEAR_BY_STAGE[request.current_stage],
+        facione_behaviors=_FACIONE_BEHAVIORS_BY_STAGE[request.current_stage],
+        ethics_concepts=[],
+        evidence=[
+            ResearchEvidence(
+                quote=quote,
+                rationale="The quoted contribution is the direct evidence used for this provisional coding.",
+                confidence=0.7,
+            )
+        ],
+        holistic_candidate=holistic,
+    )
 
 
 def _mock_grounded_evidence(request: CoachRequest) -> tuple[str, str] | None:
@@ -84,7 +172,7 @@ def _mock_review_feedback(
     """Return supportive stage feedback for the mock assessment."""
     if not has_contribution:
         return [], []
-    if stage_id == "focus":
+    if stage_id == "problem_identification":
         strengths = [
             "You named a concrete design challenge worth examining.",
         ]
@@ -96,12 +184,12 @@ def _mock_review_feedback(
             ]
         )
         return strengths, improvements
-    if stage_id == "evidence":
-        strengths = ["You are starting to look for concrete support for the idea."]
+    if stage_id == "concept_generation":
+        strengths = ["You are starting to connect a concept to the identified need."]
         improvements = (
             []
             if is_advancing
-            else ["Point to one source finding and one limit of that evidence."]
+            else ["Compare this concept with one meaningfully different alternative."]
         )
         return strengths, improvements
     strengths = [
@@ -123,17 +211,23 @@ class DeterministicCoachProvider:
     on this instance for tests and is never returned through normal APIs.
     """
 
+    provider_id = "mock"
+
     def __init__(self, recommendation: StageDecision | None = None):
         self.recommendation = recommendation
         self.last_prepared_prompt: PreparedCoachPrompt | None = None
         self.last_stage_id: str | None = None
 
-    def assess(self, request: CoachRequest) -> tuple[str, EducationalAssessment]:
+    def model_id_for(self, request: CoachRequest) -> str:
+        """Return the deterministic implementation version used for this turn."""
+        return "deterministic-v1"
+
+    def assess(self, request: CoachRequest) -> ProviderAssessmentResult:
         """Build a repeatable coaching turn with visible, guided progression.
 
         An explicit recommendation keeps unit tests fully controllable. In the
         normal local demonstration, Quick guidance recommends advance after one
-        follow-up contribution at the stage; Complex waits for a second follow-up
+        follow-up contribution at the stage; Strict waits for a second follow-up
         so progression is a little stricter. This is turn-based demo behavior, not
         a claim that the mock provider semantically evaluated the writing.
         """
@@ -141,16 +235,11 @@ class DeterministicCoachProvider:
         self.last_prepared_prompt = prepared
         self.last_stage_id = request.current_stage
         stage = STAGE_BY_ID[request.current_stage]
-        prior_stage_contributions = sum(
-            1
-            for message in request.history
-            if message.get("role") == "user"
-            and (message.get("metadata") or {}).get("thinking_stage") == stage.id
-        )
+        prior_stage_contributions = _prior_assessed_turns(request)
         advance_after = 2 if request.response_detail == "long" else 1
         guided_recommendation = (
             StageDecision.ADVANCE
-            if prior_stage_contributions >= advance_after and stage.id != "conclusion"
+            if prior_stage_contributions >= advance_after and stage.id != "reflection"
             else StageDecision.STAY
         )
         recommendation = self.recommendation or guided_recommendation
@@ -228,4 +317,8 @@ class DeterministicCoachProvider:
                 "That's an interesting direction. Let's make this step a little more "
                 f"precise.\n\n{evidence_block}{question}"
             )
-        return response, assessment
+        return ProviderAssessmentResult(
+            response_text=response,
+            assessment=assessment,
+            research_coding=_mock_research_coding(request),
+        )

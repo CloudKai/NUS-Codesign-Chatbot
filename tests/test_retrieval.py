@@ -62,7 +62,7 @@ def test_local_retriever_finds_relevant_late_document_chunk():
     ).retrieve(
         RetrievalQuery(
             current_message="What evidence quantifies thermal battery degradation?",
-            current_stage="evidence",
+            current_stage="concept_generation",
             sources=sources,
         )
     )
@@ -92,7 +92,7 @@ def test_local_retriever_preserves_stable_labels_and_source_diversity():
     result = LocalChunkRetriever(max_chunks=4).retrieve(
         RetrievalQuery(
             current_message="What evidence concerns crossing time for older adults?",
-            current_stage="evidence",
+            current_stage="concept_generation",
             sources=sources,
         )
     )
@@ -122,7 +122,7 @@ def test_local_retriever_generic_query_uses_bounded_representative_fallback():
     ).retrieve(
         RetrievalQuery(
             current_message="What do these say?",
-            current_stage="focus",
+            current_stage="problem_identification",
             sources=sources,
         )
     )
@@ -197,7 +197,7 @@ def test_application_retrieval_is_selected_notebook_scoped_and_audited(tmp_path)
         CoachRequest(
             thread_id=notebook,
             student_message="What thermal battery evidence is available?",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
         )
     )
@@ -252,7 +252,7 @@ def test_citation_preview_uses_retrieved_excerpt_not_document_beginning(
         CoachRequest(
             thread_id=notebook,
             student_message="What quantified thermal degradation was reported?",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
         )
     )
@@ -301,7 +301,7 @@ def test_application_rejects_out_of_scope_retriever_result(tmp_path):
             CoachRequest(
                 thread_id=notebook,
                 student_message="Use the source.",
-                current_stage="focus",
+                current_stage="problem_identification",
                 response_detail="short",
             )
         )
@@ -350,7 +350,7 @@ def test_application_rebuilds_context_from_adapter_chunks(tmp_path):
         CoachRequest(
             thread_id=notebook,
             student_message="Use the selected evidence.",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
         )
     )

@@ -12,6 +12,21 @@ from backend.domain import CoachRequest
 from backend.student_store import StudentStore
 
 
+def _set_first_phase(store: StudentStore, thread_id: str) -> None:
+    """Set the five-phase domain default until persisted defaults are migrated."""
+    store.update_thread(
+        thread_id,
+        metadata={
+            "thinking_stage": "problem_identification",
+            "learning_journey": {
+                "current_stage": "problem_identification",
+                "completed_stages": [],
+                "stage_notes": {},
+            },
+        },
+    )
+
+
 def _client_for_store(store: StudentStore, *, auto_advance: bool) -> LocalApiClient:
     """Build an in-process client bound to one isolated StudentStore."""
     app = create_app(store, auto_advance_stages=auto_advance)
@@ -21,6 +36,7 @@ def _client_for_store(store: StudentStore, *, auto_advance: bool) -> LocalApiCli
 def test_api_client_health_and_confirmation_round_trip(tmp_path):
     store = StudentStore(tmp_path / "client.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _set_first_phase(store, thread_id)
     client = _client_for_store(store, auto_advance=False)
     try:
         assert client.health() == {"status": "ok", "mode": "local"}
@@ -29,7 +45,7 @@ def test_api_client_health_and_confirmation_round_trip(tmp_path):
             CoachRequest(
                 thread_id=thread_id,
                 student_message="I want to evaluate a crossing design.",
-                current_stage="focus",
+                current_stage="problem_identification",
                 response_detail="short",
             )
         )
@@ -41,7 +57,7 @@ def test_api_client_health_and_confirmation_round_trip(tmp_path):
                 student_message=(
                     "Which crossing design gives older pedestrians enough time?"
                 ),
-                current_stage="focus",
+                current_stage="problem_identification",
                 response_detail="short",
             )
         )
@@ -53,7 +69,7 @@ def test_api_client_health_and_confirmation_round_trip(tmp_path):
         resolved = client.resolve_transition(thread_id, pending.id, accepted=True)
         assert resolved.status.value == "confirmed"
         state = client.learning_state(thread_id)
-        assert (state.get("learning_journey") or {}).get("current_stage") == "evidence"
+        assert (state.get("learning_journey") or {}).get("current_stage") == "concept_generation"
         assert client.pending_transition(thread_id) is None
     finally:
         client.close()
@@ -62,13 +78,14 @@ def test_api_client_health_and_confirmation_round_trip(tmp_path):
 def test_api_client_auto_advance_mode(tmp_path):
     store = StudentStore(tmp_path / "client-auto.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _set_first_phase(store, thread_id)
     client = _client_for_store(store, auto_advance=True)
     try:
         client.coach_turn(
             CoachRequest(
                 thread_id=thread_id,
                 student_message="I want to evaluate a crossing design.",
-                current_stage="focus",
+                current_stage="problem_identification",
                 response_detail="short",
             )
         )
@@ -78,14 +95,14 @@ def test_api_client_auto_advance_mode(tmp_path):
                 student_message=(
                     "Which crossing design gives older pedestrians enough time?"
                 ),
-                current_stage="focus",
+                current_stage="problem_identification",
                 response_detail="short",
             )
         )
-        assert follow_up.auto_advanced_to == "evidence"
+        assert follow_up.auto_advanced_to == "concept_generation"
         assert follow_up.pending_transition is None
         state = client.learning_state(thread_id)
-        assert (state.get("learning_journey") or {}).get("current_stage") == "evidence"
+        assert (state.get("learning_journey") or {}).get("current_stage") == "concept_generation"
     finally:
         client.close()
 
@@ -99,7 +116,7 @@ def test_api_client_raises_for_missing_notebook(tmp_path):
                 CoachRequest(
                     thread_id="missing-thread",
                     student_message="No notebook here.",
-                    current_stage="focus",
+                    current_stage="problem_identification",
                     response_detail="short",
                 )
             )
@@ -110,6 +127,7 @@ def test_api_client_raises_for_missing_notebook(tmp_path):
 def test_api_client_ready_stream_and_graph(tmp_path):
     store = StudentStore(tmp_path / "client-stream.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _set_first_phase(store, thread_id)
     client = _client_for_store(store, auto_advance=False)
     try:
         ready = client.ready()
@@ -121,7 +139,7 @@ def test_api_client_ready_stream_and_graph(tmp_path):
                 CoachRequest(
                     thread_id=thread_id,
                     student_message="I want to evaluate a crossing design.",
-                    current_stage="focus",
+                    current_stage="problem_identification",
                     response_detail="short",
                 )
             )
@@ -251,3 +269,54 @@ def test_course_sync_uses_explicit_cookie_snapshot_without_worker_provider_call(
     assert session.received_cookies == {
         "co_design_id": "short-lived-id-token"
     }
+
+
+def test_professor_research_client_uses_versioned_routes_and_server_identity() -> None:
+    """Research client methods preserve paths and never add reviewer identity."""
+    calls: list[tuple[str, str, dict]] = []
+
+    class _Session:
+        def get(self, url, **kwargs):
+            calls.append(("GET", url, kwargs))
+            if url.endswith("export.csv"):
+                return httpx.Response(
+                    200,
+                    content=b"observation_id\nobservation-1\n",
+                    request=httpx.Request("GET", url),
+                )
+            payload = {"items": [], "total": 0, "limit": 25, "offset": 0}
+            if url.endswith("summary"):
+                payload = {"active_observations": 0}
+            elif "/notebooks/" in url:
+                payload = {"notebook_id": "notebook/one"}
+            return httpx.Response(
+                200, json=payload, request=httpx.Request("GET", url)
+            )
+
+        def post(self, url, **kwargs):
+            calls.append(("POST", url, kwargs))
+            return httpx.Response(
+                201,
+                json={"id": "record-1", **kwargs.get("json", {})},
+                request=httpx.Request("POST", url),
+            )
+
+    client = LocalApiClient("http://testserver", session=_Session())
+    assert client.professor_research_summary()["active_observations"] == 0
+    client.professor_research_queue(coding_status="coded", limit=25)
+    assert client.professor_research_notebook("notebook/one")["notebook_id"] == "notebook/one"
+    review = client.professor_submit_research_review(
+        {"observation_id": "observation-1", "status": "confirmed"}
+    )
+    assert "reviewer_user_id" not in review
+    assert client.professor_research_export(phase="reflection").startswith(
+        b"observation_id"
+    )
+
+    assert any(url.endswith("/api/v1/professor/research/summary") for _, url, _ in calls)
+    assert any("notebook%2Fone" in url for _, url, _ in calls)
+    assert all(
+        "reviewer_user_id" not in (kwargs.get("json") or {})
+        for method, _url, kwargs in calls
+        if method == "POST"
+    )

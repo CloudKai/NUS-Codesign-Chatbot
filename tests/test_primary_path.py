@@ -59,7 +59,7 @@ def test_confirmation_mode_advances_through_all_six_stages(tmp_path):
         assert state["learning_journey"]["current_stage"] == THINKING_STAGES[index + 1].id
 
     final = client.get(f"/api/v1/threads/{thread_id}/learning-state").json()
-    assert final["learning_journey"]["current_stage"] == "conclusion"
+    assert final["learning_journey"]["current_stage"] == "reflection"
     assert set(final["learning_journey"]["completed_stages"]) == {
         stage.id for stage in THINKING_STAGES[:-1]
     }
@@ -75,7 +75,7 @@ def test_rejected_and_stale_transitions_do_not_advance(tmp_path):
         json={
             "thread_id": thread_id,
             "student_message": "I want to evaluate a crossing design.",
-            "current_stage": "focus",
+            "current_stage": "problem_identification",
             "response_detail": "short",
         },
     )
@@ -83,8 +83,8 @@ def test_rejected_and_stale_transitions_do_not_advance(tmp_path):
         "/api/v1/coach/turn",
         json={
             "thread_id": thread_id,
-            "student_message": _advance_message("focus"),
-            "current_stage": "focus",
+            "student_message": _advance_message("problem_identification"),
+            "current_stage": "problem_identification",
             "response_detail": "short",
         },
     )
@@ -96,15 +96,15 @@ def test_rejected_and_stale_transitions_do_not_advance(tmp_path):
     )
     assert rejected.status_code == 200
     state = client.get(f"/api/v1/threads/{thread_id}/learning-state").json()
-    assert (state.get("learning_journey") or {}).get("current_stage", "focus") == "focus"
+    assert (state.get("learning_journey") or {}).get("current_stage", "problem_identification") == "problem_identification"
 
     # Create a fresh recommendation, then move the journey out from under it.
     follow_up = client.post(
         "/api/v1/coach/turn",
         json={
             "thread_id": thread_id,
-            "student_message": _advance_message("focus") + " Again.",
-            "current_stage": "focus",
+            "student_message": _advance_message("problem_identification") + " Again.",
+            "current_stage": "problem_identification",
             "response_detail": "short",
         },
     )
@@ -113,11 +113,11 @@ def test_rejected_and_stale_transitions_do_not_advance(tmp_path):
         thread_id,
         metadata={
             "learning_journey": {
-                "current_stage": "evidence",
-                "completed_stages": ["focus"],
+                "current_stage": "concept_generation",
+                "completed_stages": ["problem_identification"],
                 "stage_notes": {},
             },
-            "thinking_stage": "evidence",
+            "thinking_stage": "concept_generation",
         },
     )
     stale = client.post(
@@ -139,7 +139,7 @@ def test_restart_recovers_messages_journey_and_pending_transition(tmp_path):
         json={
             "thread_id": thread_id,
             "student_message": "I want to evaluate a crossing design.",
-            "current_stage": "focus",
+            "current_stage": "problem_identification",
             "response_detail": "short",
         },
     )
@@ -147,8 +147,8 @@ def test_restart_recovers_messages_journey_and_pending_transition(tmp_path):
         "/api/v1/coach/turn",
         json={
             "thread_id": thread_id,
-            "student_message": _advance_message("focus"),
-            "current_stage": "focus",
+            "student_message": _advance_message("problem_identification"),
+            "current_stage": "problem_identification",
             "response_detail": "short",
         },
     )
@@ -195,8 +195,8 @@ def test_completed_turn_rolls_back_without_phantom_pending_message(
             "/api/v1/coach/turn",
             json={
                 "thread_id": thread_id,
-                "student_message": _advance_message("focus"),
-                "current_stage": "focus",
+                "student_message": _advance_message("problem_identification"),
+                "current_stage": "problem_identification",
                 "response_detail": "short",
             },
         )
@@ -225,7 +225,7 @@ def test_sources_and_history_stay_isolated_across_notebooks(tmp_path):
         json={
             "thread_id": thread_b,
             "student_message": "Using another notebook's source.",
-            "current_stage": "focus",
+            "current_stage": "problem_identification",
             "response_detail": "short",
             "source_ids": [source_a["id"]],
         },
@@ -238,7 +238,7 @@ def test_sources_and_history_stay_isolated_across_notebooks(tmp_path):
         json={
             "thread_id": thread_a,
             "student_message": "Notebook A contribution.",
-            "current_stage": "focus",
+            "current_stage": "problem_identification",
             "response_detail": "short",
             "source_ids": [source_a["id"]],
         },
@@ -258,10 +258,10 @@ def test_phase_transitions_persist_on_messages_across_reopen(tmp_path):
     created = reopened.create_phase_transition(
         {
             "thread_id": thread_id,
-            "from_stage": "focus",
-            "to_stage": "evidence",
+            "from_stage": "problem_identification",
+            "to_stage": "concept_generation",
             "assessment": {
-                "current_stage": "focus",
+                "current_stage": "problem_identification",
                 "contribution_summary": "Schema check",
                 "stage_assessment": "Ready for schema compatibility.",
                 "critical_understanding_level": "Emerging",

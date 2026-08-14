@@ -6,8 +6,9 @@ and reconnects. Asynchronous index builds return a ``job_id``; after commit the
 script calls the ``sys.wait_for_job`` procedure on a dedicated autocommit
 connection before continuing. After CREATE/INDEX bootstrap it inspects
 ``information_schema`` and ALTERs only missing revision columns on
-``notebooks`` and ``messages`` (additive, idempotent). It never runs at
-application startup.
+``notebooks`` and ``messages`` (additive, idempotent). It initializes the
+five-phase workflow marker only when no notebooks exist; populated unmarked
+data remains reset-gated. It never runs at application startup.
 
 Admin auth uses ``generate_db_connect_admin_auth_token`` (DbConnectAdmin).
 Runtime traffic must use ``DSQL_USER=co_design_app`` with DbConnect only.
@@ -35,8 +36,10 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO co_design
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -50,6 +53,11 @@ from backend.persistence.dsql_schema import (  # noqa: E402
     RUNTIME_GRANT_SQL,
     RUNTIME_ROLE_NAME,
     iter_dsql_ddl_statements,
+)
+from backend.workflow_contract import (  # noqa: E402
+    WORKFLOW_CONTRACT_KEY,
+    workflow_contract_is_ready,
+    workflow_contract_payload,
 )
 from backend.settings import settings  # noqa: E402
 
@@ -566,6 +574,74 @@ def _apply_admin_statements(
     return applied
 
 
+def initialize_empty_workflow_contract(
+    *,
+    endpoint: str,
+    region: str,
+    database: str = "postgres",
+    admin_user: str = "admin",
+    connect_fn: Callable[..., Any] | None = None,
+    token_provider: Callable[[], str] | None = None,
+) -> str:
+    """Initialize the five-phase marker only when no notebooks exist.
+
+    Returns ``initialized`` after writing the marker, ``already-ready`` when a
+    populated database already has the exact marker, or ``requires-reset``
+    when populated learning data cannot be safely interpreted. Existing
+    learning records are never modified by this bootstrap step.
+    """
+    connection = _connect_admin(
+        endpoint=endpoint,
+        region=region,
+        database=database,
+        admin_user=admin_user,
+        connect_fn=connect_fn,
+        token_provider=token_provider,
+    )
+    try:
+        count_row = connection.execute(
+            "SELECT COUNT(*) AS total FROM notebooks"
+        ).fetchone()
+        notebook_count = int(count_row["total"] if count_row else 0)
+        marker_row = connection.execute(
+            "SELECT value_text FROM system_metadata WHERE key=?",
+            (WORKFLOW_CONTRACT_KEY,),
+        ).fetchone()
+        try:
+            marker = json.loads(str(marker_row["value_text"])) if marker_row else None
+        except (TypeError, json.JSONDecodeError):
+            marker = None
+
+        if notebook_count > 0:
+            connection.rollback()
+            return "already-ready" if workflow_contract_is_ready(marker) else "requires-reset"
+
+        connection.execute(
+            """
+            INSERT INTO system_metadata (key, value_text, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT (key) DO UPDATE SET
+                value_text=excluded.value_text,
+                updated_at=excluded.updated_at
+            """,
+            (
+                WORKFLOW_CONTRACT_KEY,
+                json.dumps(workflow_contract_payload(), separators=(",", ":")),
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        connection.commit()
+        return "initialized"
+    except Exception:
+        try:
+            connection.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        raise
+    finally:
+        connection.close()
+
+
 def apply_missing_revision_columns(
     *,
     endpoint: str,
@@ -744,6 +820,7 @@ def main(argv: list[str] | None = None) -> int:
             "Admin-only Aurora DSQL schema bootstrap. "
             "One DDL per transaction; waits for ASYNC index jobs; "
             "additive notebook/message revision ALTERs from catalog; "
+            "five-phase marker only for an empty database; "
             "not used by application startup."
         )
     )
@@ -778,7 +855,23 @@ def main(argv: list[str] | None = None) -> int:
         database=str(args.database or "postgres"),
         admin_user=str(args.admin_user or "admin"),
     )
+    workflow_status = initialize_empty_workflow_contract(
+        endpoint=str(args.endpoint or ""),
+        region=str(args.region or ""),
+        database=str(args.database or "postgres"),
+        admin_user=str(args.admin_user or "admin"),
+    )
     print(f"Applied {len(applied)} DSQL DDL statement(s) as {args.admin_user}.")
+    if workflow_status == "requires-reset":
+        print(
+            "Workflow marker not changed: existing learning data requires the "
+            "reviewed reset procedure in docs/operations/RESEARCH_DATA_RESET.md."
+        )
+        return 2
+    elif workflow_status == "initialized":
+        print("Initialized the five-phase workflow marker on the empty database.")
+    else:
+        print("The existing five-phase workflow marker is ready.")
     print()
     print("Next: grant runtime privileges to the application role (no ARNs in Git):")
     print(RUNTIME_GRANT_SQL)

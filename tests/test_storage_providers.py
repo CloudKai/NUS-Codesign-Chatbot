@@ -66,14 +66,29 @@ class _OccError(Exception):
 class _FakeDsqlConnection:
     """Minimal DSQL connection stand-in that records SQL and never talks to AWS."""
 
-    def __init__(self, recorder: list[str] | None = None):
+    def __init__(
+        self, recorder: list[str] | None = None, *, research_ready: bool = True
+    ):
         self.recorder = recorder if recorder is not None else []
         self.closed = False
         self._rows: dict[str, Any] = {}
+        self.research_ready = research_ready
 
     def execute(self, sql: str, params: Any = None) -> Any:
         self.recorder.append(sql.strip())
         upper = sql.strip().upper()
+        if upper.startswith("SELECT VALUE_TEXT FROM SYSTEM_METADATA WHERE KEY"):
+            payload = (
+                '{"version":"cde2300-five-phase-v1"}'
+                if self.research_ready
+                else None
+            )
+
+            class _R:
+                def fetchone(self_inner):
+                    return {"value_text": payload} if payload else None
+
+            return _R()
         if upper.startswith("SELECT ID FROM USERS WHERE IDENTIFIER"):
             identifier = (params or [None])[0]
             owner = self._rows.get(("user", identifier))
@@ -333,7 +348,7 @@ def test_dsql_student_store_rejects_admin_runtime(monkeypatch):
         )
 
 
-def test_dsql_readiness_checks_all_five_tables_and_runtime_grants():
+def test_dsql_readiness_checks_all_runtime_tables_and_contract_marker():
     recorder: list[str] = []
     store = DsqlStudentStore(
         identifier="__readiness__",
@@ -344,8 +359,59 @@ def test_dsql_readiness_checks_all_five_tables_and_runtime_grants():
     store.ping()
 
     joined = "\n".join(recorder).lower()
-    for table in ("users", "oauth_login_states", "notebooks", "messages", "sources"):
+    for table in (
+        "users",
+        "oauth_login_states",
+        "notebooks",
+        "messages",
+        "sources",
+        "research_observations",
+        "research_reviews",
+        "research_adjudications",
+        "research_access_events",
+        "system_metadata",
+    ):
         assert f"select * from {table} limit 0" in joined
+    assert "select value_text from system_metadata where key" in joined
+
+
+def test_dsql_readiness_fails_without_explicit_workflow_contract_marker():
+    store = DsqlStudentStore(
+        identifier="__readiness__",
+        ensure_owner=False,
+        connection_factory=lambda: _FakeDsqlConnection(research_ready=False),
+    )
+
+    with pytest.raises(RuntimeError, match="workflow contract"):
+        store.ping()
+
+
+def test_dsql_notebook_delete_uses_observation_joins_for_research_children(
+    monkeypatch,
+):
+    recorder: list[str] = []
+    store = DsqlStudentStore(
+        identifier="__delete__",
+        ensure_owner=False,
+        connection_factory=lambda: _FakeDsqlConnection(recorder),
+    )
+    store.owner_id = "owner-1"
+    monkeypatch.setattr(store, "get_thread", lambda _thread_id: {"id": "notebook-1"})
+    monkeypatch.setattr(store, "_cleanup_notebook_files", lambda _thread_id: None)
+
+    store.delete_thread("notebook-1")
+
+    deletes = [sql.lower() for sql in recorder if sql.upper().startswith("DELETE")]
+    assert "delete from research_adjudications where observation_id in" in deletes[0]
+    assert "delete from research_reviews where observation_id in" in deletes[1]
+    assert "from research_observations where notebook_id = ?" in deletes[0]
+    assert "from research_observations where notebook_id = ?" in deletes[1]
+    assert deletes[2].startswith(
+        "delete from research_access_events where notebook_id = ?"
+    )
+    assert deletes[3].startswith(
+        "delete from research_observations where notebook_id = ?"
+    )
 
 
 def test_validate_storage_configuration_requires_production_fields(monkeypatch):
@@ -503,6 +569,16 @@ def test_dsql_schema_has_no_partial_index_where_predicate():
     assert "CREATE TABLE IF NOT EXISTS messages" in DSQL_SCHEMA
     assert "CREATE TABLE IF NOT EXISTS sources" in DSQL_SCHEMA
     assert "CREATE TABLE IF NOT EXISTS oauth_login_states" in DSQL_SCHEMA
+    assert "current_stage TEXT NOT NULL DEFAULT 'problem_identification'" in DSQL_SCHEMA
+    for research_table in (
+        "research_observations",
+        "research_reviews",
+        "research_adjudications",
+        "research_access_events",
+        "system_metadata",
+    ):
+        assert f"CREATE TABLE IF NOT EXISTS {research_table}" in DSQL_SCHEMA
+    assert "FOREIGN KEY" not in DSQL_SCHEMA.upper()
     for legacy in (
         "threads",
         "steps",

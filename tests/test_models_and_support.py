@@ -2,7 +2,6 @@ from backend.models import (
     DEFAULT_CHAT_MODEL_ID,
     DEFAULT_REASONING_EFFORT,
     LOCKED_CHAT_MODEL_ID,
-    LOCKED_REASONING_EFFORT,
     MODEL_REGISTRY,
     get_model,
     validate_reasoning,
@@ -77,7 +76,7 @@ def test_mock_provider_includes_facione_scores():
         CoachRequest(
             thread_id="t1",
             student_message="I want to study safer crossings for older adults near schools.",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
         )
     )
@@ -122,7 +121,7 @@ def test_prompt_preserves_student_authorship_and_context():
         assignment_brief="Assess the proposal.",
         rubric="Use credible primary evidence.",
         course_context="Public policy",
-        thinking_stage_id="assumptions",
+        thinking_stage_id="design_specification",
         response_detail="long",
         response_language="中文",
     )
@@ -132,7 +131,7 @@ def test_prompt_preserves_student_authorship_and_context():
     assert "policy brief" in lowered
     assert "credible primary evidence" in prompt
     assert "Evidence Reviewer" in prompt
-    assert "Surface assumptions" in prompt
+    assert "Design specification" in prompt
     assert "Response detail: Long" in prompt
     assert "Respond in 中文" in prompt
 

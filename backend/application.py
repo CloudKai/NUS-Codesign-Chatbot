@@ -13,10 +13,15 @@ from .domain import (
     CoachImageInput,
     CoachRequest,
     CoachTurn,
+    ProvisionalResearchCoding,
+    RESEARCH_CODING_VERSION,
+    ResearchCodingStatus,
     RetrievalChunkReference,
 )
 from .learning_service import LearningProgressService
 from .models import DEFAULT_CHAT_MODEL_ID, get_model, validate_reasoning
+from .prompts.composer import COACH_PROMPT_VERSION
+from .research.models import ResearchEvidenceSpan, ResearchObservationCreate
 from .repositories import NotebookRepository
 from .retrieval import (
     ContextRetriever,
@@ -34,7 +39,7 @@ from .student_journey import (
     personalized_stage_questions,
 )
 from .student_store import (
-    ConversationRevisionConflictError,
+    AtomicAutoAdvance,
     CoachRequestInProgressError,
     StudentStore,
 )
@@ -42,6 +47,88 @@ from .title_service import NotebookTitleService
 from .workflow import CoachWorkflow
 
 _CITATION_LABEL = re.compile(r"\[(S\d+)\]")
+
+
+def _quote_offsets(text: str, quote: str) -> tuple[int, int] | None:
+    """Locate one exact provider quotation in persisted student-message text."""
+    bounded_text = str(text or "").strip()
+    bounded_quote = str(quote or "").strip()
+    if not bounded_quote:
+        return None
+    start = bounded_text.find(bounded_quote)
+    if start < 0:
+        return None
+    return start, start + len(bounded_quote)
+
+
+def _research_observation_from_coding(
+    coding: ProvisionalResearchCoding | None,
+    request: CoachRequest,
+    *,
+    provider: str,
+    model_id: str | None = None,
+) -> ResearchObservationCreate | None:
+    """Convert transient provider quotes into offset-only persistence input.
+
+    Exact matching deliberately fails closed: non-uncoded research with no
+    evidence, or any quoted research evidence that cannot be located in the
+    current student contribution, is not persisted. A malformed Reflection
+    candidate is dropped independently so otherwise valid occurrence coding
+    can still be retained. Raw quote text never crosses this boundary.
+    """
+    if coding is None:
+        return None
+    student_message = str(request.student_message or "").strip()
+    evidence: list[ResearchEvidenceSpan] = []
+    for item in coding.evidence:
+        offsets = _quote_offsets(student_message, item.quote)
+        if offsets is None:
+            return None
+        evidence.append(
+            ResearchEvidenceSpan(
+                start_offset=offsets[0],
+                end_offset=offsets[1],
+                rationale=" ".join(item.rationale.split())[:500],
+                confidence=item.confidence,
+            )
+        )
+    if coding.coding_status is not ResearchCodingStatus.UNCODED and not evidence:
+        return None
+
+    holistic_payload: dict[str, Any] | None = None
+    candidate = coding.holistic_candidate
+    if candidate is not None and request.current_stage == "reflection":
+        holistic_spans: list[dict[str, int]] = []
+        for quote in candidate.evidence_quotes:
+            offsets = _quote_offsets(student_message, quote)
+            if offsets is None:
+                holistic_spans = []
+                break
+            holistic_spans.append(
+                {"start_offset": offsets[0], "end_offset": offsets[1]}
+            )
+        if not candidate.evidence_quotes or holistic_spans:
+            holistic_payload = {
+                "score": candidate.score,
+                "rationale": " ".join(candidate.rationale.split())[:1_000],
+                "evidence_spans": holistic_spans,
+            }
+
+    return ResearchObservationCreate(
+        coding_status=coding.coding_status.value,
+        dominant_clear=(coding.dominant_clear.value if coding.dominant_clear else None),
+        facione_behaviors=[value.value for value in coding.facione_behaviors],
+        ethics_concepts=[value.value for value in coding.ethics_concepts],
+        evidence=evidence,
+        holistic_candidate=holistic_payload,
+        coding_version=RESEARCH_CODING_VERSION,
+        prompt_version=COACH_PROMPT_VERSION,
+        provider=str(provider or "unknown").strip() or "unknown",
+        model_id=str(model_id or request.model_id or "unknown").strip() or "unknown",
+        coaching_profile=("strict" if request.response_detail == "long" else "quick"),
+        phase_id=request.current_stage,
+        metadata={"source": "coach_provider", "one_call": True},
+    )
 
 
 def _history_signature(messages: list[dict[str, Any]]) -> list[tuple[str, str]]:
@@ -298,6 +385,13 @@ class CoachApplicationService:
         idempotency_fingerprint: str | None = None,
     ) -> CoachTurn:
         """Execute the original authoritative workflow path exactly once."""
+        contract_ready = getattr(
+            self._store, "research_workflow_contract_ready", None
+        )
+        if callable(contract_ready) and not contract_ready():
+            raise ValueError(
+                "Research workflow contract is not ready; use explicit reset/bootstrap"
+            )
         prepared_request = self._authoritative_request(request)
         initial_thread = self._notebooks.get_thread(prepared_request.thread_id)
         if not initial_thread:
@@ -310,6 +404,14 @@ class CoachApplicationService:
             message.get("role") == "user" for message in prepared_request.history
         )
         turn = self._workflow.run(prepared_request)
+        research_observation = _research_observation_from_coding(
+            self._workflow.take_provisional_research_coding(
+                prepared_request.thread_id
+            ),
+            prepared_request,
+            provider=self._workflow.provider_id,
+            model_id=self._workflow.model_id_for(prepared_request),
+        )
         citations = self._relevant_citations(prepared_request, turn)
         turn = turn.model_copy(
             update={
@@ -333,12 +435,51 @@ class CoachApplicationService:
             if should_generate_title
             else None
         )
+        from backend.settings import settings as runtime_settings
+
+        auto_advance: AtomicAutoAdvance | None = None
+        if (
+            self._auto_advance_stages
+            and not runtime_settings.student_stage_selection
+            and self._progress is not None
+            and turn.pending_transition is not None
+        ):
+            pending = turn.pending_transition
+            questions = turn.assessment.guidance_questions or list(
+                personalized_stage_questions(
+                    pending.to_stage,
+                    prepared_request.student_message,
+                    has_course_sources=bool(prepared_request.source_ids),
+                )
+            )
+            auto_advance = AtomicAutoAdvance(
+                transition_id=pending.id,
+                from_stage=pending.from_stage,
+                to_stage=pending.to_stage,
+                contribution_summary=turn.assessment.contribution_summary,
+            )
+            turn = turn.model_copy(
+                update={
+                    "response_text": advanced_stage_response(
+                        turn.response_text,
+                        pending.from_stage,
+                        pending.to_stage,
+                        questions,
+                    ),
+                    "assessment": turn.assessment.model_copy(
+                        update={"guidance_questions": questions}
+                    ),
+                    "pending_transition": None,
+                    "auto_advanced_to": pending.to_stage,
+                }
+            )
         self._store.persist_coach_turn(
             prepared_request.thread_id,
             expected_stage=prepared_request.current_stage,
             expected_conversation_revision=int(
                 prepared_request.conversation_revision or 0
             ),
+            expected_response_detail=prepared_request.response_detail,
             user_content=prepared_request.student_message,
             user_metadata={
                 "thinking_stage": prepared_request.current_stage,
@@ -353,19 +494,45 @@ class CoachApplicationService:
             assistant_content=turn.response_text,
             assistant_message_id=transition_id,
             assistant_metadata={
-                "thinking_stage": prepared_request.current_stage,
+                "thinking_stage": (
+                    auto_advance.to_stage
+                    if auto_advance is not None
+                    else prepared_request.current_stage
+                ),
                 "assessment": turn.assessment.model_dump(mode="json"),
                 "pending_transition_id": transition_id,
                 "proposed_stage": (
-                    turn.pending_transition.to_stage if turn.pending_transition else None
+                    auto_advance.to_stage
+                    if auto_advance is not None
+                    else (
+                        turn.pending_transition.to_stage
+                        if turn.pending_transition
+                        else None
+                    )
                 ),
-                "decision_status": "pending" if turn.pending_transition else None,
+                "decision_status": (
+                    "confirmed"
+                    if auto_advance is not None
+                    else ("pending" if turn.pending_transition else None)
+                ),
                 "from_stage": (
-                    turn.pending_transition.from_stage
-                    if turn.pending_transition
-                    else None
+                    auto_advance.from_stage
+                    if auto_advance is not None
+                    else (
+                        turn.pending_transition.from_stage
+                        if turn.pending_transition
+                        else None
+                    )
+                ),
+                **(
+                    {"auto_advanced_to": auto_advance.to_stage}
+                    if auto_advance is not None
+                    else {}
                 ),
                 "workflow": "langgraph",
+                "coaching_profile": (
+                    "strict" if prepared_request.response_detail == "long" else "quick"
+                ),
                 "source_ids": prepared_request.source_ids,
                 "retrieval_refs": retrieval_refs,
                 "source_refs": source_refs,
@@ -387,73 +554,9 @@ class CoachApplicationService:
             idempotency_key=prepared_request.idempotency_key,
             idempotency_lease_token=idempotency_lease_token,
             idempotency_fingerprint=idempotency_fingerprint,
+            research_observation=research_observation,
+            auto_advance=auto_advance,
         )
-        # Selection mode disables auto-advance even if the coach service was
-        # constructed with auto_advance_stages=True.
-        from backend.settings import settings as runtime_settings
-
-        if (
-            self._auto_advance_stages
-            and not runtime_settings.student_stage_selection
-            and self._progress is not None
-            and turn.pending_transition is not None
-        ):
-            next_stage_id = turn.pending_transition.to_stage
-            self._progress.resolve(
-                prepared_request.thread_id,
-                turn.pending_transition.id,
-                accepted=True,
-            )
-            questions = turn.assessment.guidance_questions or list(
-                personalized_stage_questions(
-                    next_stage_id,
-                    prepared_request.student_message,
-                    has_course_sources=bool(prepared_request.source_ids),
-                )
-            )
-            turn = turn.model_copy(
-                update={
-                    "response_text": advanced_stage_response(
-                        turn.response_text,
-                        prepared_request.current_stage,
-                        next_stage_id,
-                        questions,
-                    ),
-                    "assessment": turn.assessment.model_copy(
-                        update={"guidance_questions": questions}
-                    ),
-                    "pending_transition": None,
-                    "auto_advanced_to": next_stage_id,
-                }
-            )
-            self._store.add_message(
-                prepared_request.thread_id,
-                "assistant",
-                turn.response_text,
-                message_id=transition_id,
-                metadata={
-                    "thinking_stage": next_stage_id,
-                    "assessment": turn.assessment.model_dump(mode="json"),
-                    "pending_transition_id": transition_id,
-                    "auto_advanced_to": next_stage_id,
-                    "workflow": "langgraph",
-                    "source_ids": prepared_request.source_ids,
-                    "retrieval_refs": retrieval_refs,
-                    **(
-                        {"coach_idempotency_key": prepared_request.idempotency_key}
-                        if prepared_request.idempotency_key
-                        else {}
-                    ),
-                    "source_refs": [
-                        {
-                            "id": citation.source_id,
-                            "label": citation.label,
-                            "title": citation.title,
-                        }
-                        for citation in turn.assessment.citations
-                    ],
-                },
-            )
         return turn
 
     def _authoritative_request(self, request: CoachRequest) -> CoachRequest:
@@ -627,6 +730,7 @@ class CoachApplicationService:
                 "model_id": selected_model.id,
                 "reasoning_effort": selected_effort,
                 "response_language": response_language or "English",
+                "response_detail": journey["response_detail"],
                 "allow_model_knowledge": allow_model_knowledge,
                 "conversation_revision": conversation_revision,
             }

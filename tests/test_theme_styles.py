@@ -41,6 +41,7 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
         "50-dialogs-notebooks.css": ".st-key-notebook_library_scroll",
         "55-auth.css": ".cd-auth-redirecting",
         "60-profile-topbar.css": ".st-key-profile_menu_root",
+        "70-professor.css": ".st-key-research_workspace",
         "90-responsive.css": "@media (max-width:1050px)",
     }
     for name, marker in markers.items():

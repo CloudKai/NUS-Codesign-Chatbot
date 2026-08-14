@@ -24,6 +24,11 @@ and scopes every notebook/source/message operation to that owner. The shared
 Both paths support Thinking Path progression, structured assessments, Review
 personalization, and selected image grounding.
 
+The current research workflow uses five phases: **Problem identification**,
+**Concept generation**, **Design specification**, **Deep analysis**, and
+**Reflection**. Automated research coding is provisional and evidence-linked;
+it never grades the student or changes a phase by itself.
+
 ---
 
 ## Prerequisites
@@ -204,12 +209,44 @@ Default: `AUTO_ADVANCE_STAGES=false`. After the coach recommends the next stage:
 2. Read the warning that confirming early can make the process less critical.
 3. Press **Next** again in the dialog to confirm (or Cancel).
 
-Quick guidance is a lighter advance bar; Complex is stricter. To restore silent
+Quick coaching uses the practical evidence threshold; Strict requires clearer,
+more consistently demonstrated reasoning before recommending advancement. The
+profiles retain separate cumulative Review evidence. To restore silent
 auto-advance:
 
 ```bash
 AUTO_ADVANCE_STAGES=true
 ```
+
+## Research review and lecturer visibility
+
+Each coach turn may include a separately validated, provisional observation of
+the current student utterance: one dominant CLEAR strategy, up to two Facione
+behaviours, optional design-ethics concepts, and evidence offsets. Raw quote
+copies are not stored in the research record. These codes do not award Facione
+points, complete a phase, or determine a grade.
+
+Authenticated users with persisted `lecturer` or `admin` roles can use the
+professor **Research** view to see attributable student/notebook context,
+inspect the active transcript, submit append-only reviews or adjudications, and
+export filtered CSV. Identifiable reads and exports are themselves audited and
+fail closed if the audit write fails. Students see their existing Review plus
+Facione behaviour occurrences and a clearly provisional Reflection candidate;
+CLEAR and ethics research labels remain staff-facing.
+
+See [Research coding methodology](docs/research/METHODOLOGY.md) for operational
+definitions, limitations, and cited sources. A future Bedrock adapter must
+preserve the same provider-neutral one-call contract described in the
+[Bedrock adapter handoff](docs/providers/BEDROCK_ADAPTER.md).
+
+### Existing data and the five-phase contract
+
+The six-stage and five-phase workflows are not silently mapped because their
+educational meanings differ. A non-empty database without the exact workflow
+marker fails readiness. Use the supported `scripts/start.sh` path and follow
+[Research data reset](docs/operations/RESEARCH_DATA_RESET.md) to inventory and
+back up learning data before any explicit reset. The reset is never automatic;
+accounts and authentication identities are preserved.
 
 ---
 
@@ -377,11 +414,15 @@ docker compose up -d --build
 
 ## Tests
 
+Install the pinned development tools with `python -m pip install -r requirements-dev.txt`,
+then run:
+
 ```bash
 source .venv/bin/activate
 python -m pytest -q
+ruff check .
 PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \
-  python -m compileall -q backend ui streamlit_app.py
+  python -m compileall -q backend ui scripts streamlit_app.py tests
 ```
 
 ### Headed Cognito browser smoke
@@ -409,7 +450,7 @@ commit those artifacts.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Progress bar never leaves Focus | UI started without API | Use `sh scripts/start.sh` only |
+| Thinking Path never leaves Problem identification | UI started without API | Use `sh scripts/start.sh` only |
 | Coach error about local API | API not up / wrong URL | Check `:8000/api/v1/health`; keep `CO_DESIGN_API_URL=http://127.0.0.1:8000` |
 | Provider / OpenAI errors on first run | `.env` set to `openai` without a key | Set `MODEL_PROVIDER=mock` |
 | Port already in use | Another process on 8000 or 8501 | Stop the other process, then restart `start.sh` |

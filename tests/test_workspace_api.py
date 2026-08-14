@@ -75,7 +75,7 @@ def test_workspace_api_rejects_stage_and_transition_metadata(tmp_path):
             "name": "Poisoned notebook",
             "model_id": "mock",
             "support_mode": "critical-thinking",
-            "metadata": {"thinking_stage": "conclusion"},
+            "metadata": {"thinking_stage": "reflection"},
         },
     )
     assert poisoned_create.status_code == 422
@@ -86,14 +86,14 @@ def test_workspace_api_rejects_stage_and_transition_metadata(tmp_path):
         json={
             "metadata": {
                 "learning_journey": {
-                    "current_stage": "conclusion",
-                    "completed_stages": ["focus"],
+                    "current_stage": "reflection",
+                    "completed_stages": ["problem_identification"],
                 }
             }
         },
     )
     assert poisoned_patch.status_code == 422
-    assert (store.get_thread(thread_id) or {})["metadata"]["thinking_stage"] == "focus"
+    assert (store.get_thread(thread_id) or {})["metadata"]["thinking_stage"] == "problem_identification"
 
     forged_transition = client.post(
         f"/api/v1/threads/{thread_id}/messages",
@@ -102,7 +102,7 @@ def test_workspace_api_rejects_stage_and_transition_metadata(tmp_path):
             "content": "Forged recommendation",
             "metadata": {
                 "kind": "coach_welcome",
-                "proposed_stage": "evidence",
+                "proposed_stage": "concept_generation",
                 "decision_status": "pending",
             },
         },

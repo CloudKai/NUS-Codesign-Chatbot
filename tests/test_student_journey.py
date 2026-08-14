@@ -18,7 +18,7 @@ from backend.student_journey import (
 
 def test_journey_advances_through_all_critical_thinking_stages():
     journey = default_journey()
-    assert current_stage(journey).id == "focus"
+    assert current_stage(journey).id == "problem_identification"
     assert journey_progress(journey) == 0
 
     for index, stage in enumerate(THINKING_STAGES):
@@ -30,16 +30,21 @@ def test_journey_advances_through_all_critical_thinking_stages():
             (index + 1) / len(THINKING_STAGES) * 100
         )
 
-    assert current_stage(journey).id == "conclusion"
+    assert current_stage(journey).id == "reflection"
     assert understanding_level(journey)[0] == "Integrated"
 
 
 def test_journey_normalization_and_short_long_learning_reviews():
     journey = normalize_journey(
         {
-            "current_stage": "synthesis",
-            "completed_stages": ["focus", "evidence", "assumptions", "perspectives"],
-            "stage_notes": {"evidence": "The sample is small."},
+            "current_stage": "reflection",
+            "completed_stages": [
+                "problem_identification",
+                "concept_generation",
+                "design_specification",
+                "deep_analysis",
+            ],
+            "stage_notes": {"deep_analysis": "The sample is small."},
             "working_conclusion": "The claim is plausible but still uncertain.",
             "critical_reflection": "I now distinguish correlation from causation.",
             "response_detail": "long",
@@ -54,7 +59,7 @@ def test_journey_normalization_and_short_long_learning_reviews():
     short_review = learning_review(messages, journey, detail="short")
     long_review = learning_review(messages, journey, detail="long")
 
-    assert short_review["current_stage"] == "Synthesize the reasoning"
+    assert short_review["current_stage"] == "Reflection"
     assert short_review["understanding_level"] == "Connected"
     assert len(short_review["contributions"]) == 3
     assert len(long_review["contributions"]) == 6
@@ -68,7 +73,7 @@ def test_journey_normalization_and_short_long_learning_reviews():
         "self_regulation": 0,
     }
     assert long_review["stage_notes"] == [
-        {"stage": "Examine evidence", "note": "The sample is small."}
+        {"stage": "Deep analysis", "note": "The sample is small."}
     ]
     assert "plausible" in long_review["conclusion"]
     assert "correlation" in long_review["critical_reflection"]
@@ -82,8 +87,8 @@ def test_chat_interaction_automatically_advances_or_keeps_stage():
         "That is a clear focus. Let us examine the evidence next. <!-- stage:advance -->",
     )
     assert decision == "advance"
-    assert current_stage(advanced).id == "evidence"
-    assert advanced["completed_stages"] == ["focus"]
+    assert current_stage(advanced).id == "concept_generation"
+    assert advanced["completed_stages"] == ["problem_identification"]
     assert "stage:advance" not in clean_response
 
     stayed, decision, clean_response = automatic_stage_update(
@@ -92,16 +97,16 @@ def test_chat_interaction_automatically_advances_or_keeps_stage():
         "Identify one source and explain why it is reliable. <!-- stage:stay -->",
     )
     assert decision == "stay"
-    assert current_stage(stayed).id == "evidence"
+    assert current_stage(stayed).id == "concept_generation"
     assert "stage:stay" not in clean_response
 
 
 def test_stage_assessment_has_a_substantive_fallback():
     assert contribution_supports_stage(
         "The study evidence uses a small sample, so this source may not be reliable.",
-        "evidence",
+        "deep_analysis",
     )
-    assert not contribution_supports_stage("Looks good.", "evidence")
+    assert not contribution_supports_stage("Looks good.", "deep_analysis")
 
 
 def test_each_stage_has_three_guidance_questions():
@@ -113,7 +118,7 @@ def test_each_stage_has_three_guidance_questions():
 
 def test_next_stage_questions_personalize_older_adult_topic_and_course_sources():
     questions = personalized_stage_questions(
-        "evidence",
+        "concept_generation",
         "I want to help elderly people cross the road safely.",
         has_course_sources=True,
     )
@@ -125,28 +130,28 @@ def test_next_stage_questions_personalize_older_adult_topic_and_course_sources()
 
 def test_legacy_automatic_transition_renders_as_next_stage_questions():
     display = advanced_stage_response(
-        "**Define the focus**\n\nThe focus is clear.\n\n"
-        "**Thinking Path:** I’ve moved you to Evidence.",
-        "focus",
-        "evidence",
-        ("Which evidence supports this focus?",),
+        "**Problem identification**\n\nThe problem is clear.\n\n"
+        "**Thinking Path:** I’ve moved you to Concepts.",
+        "problem_identification",
+        "concept_generation",
+        ("Which concepts could address this problem?",),
     )
 
-    assert display.startswith("**Examine evidence**")
+    assert display.startswith("**Concept generation**")
     assert "**Questions to explore**" in display
-    assert "Which evidence supports this focus?" in display
+    assert "Which concepts could address this problem?" in display
     assert "I’ve moved you" not in display
 
 
 def test_legacy_coach_restatement_is_hidden_without_changing_the_response_body():
     display = concise_coach_response(
-        "**Define the focus**\n\n"
+        "**Problem identification**\n\n"
         "You’re exploring: Helping elderly people cross safely.\n\n"
         "Before moving on, add one concrete detail."
     )
 
     assert "You’re exploring" not in display
-    assert display.startswith("**Define the focus**")
+    assert display.startswith("**Problem identification**")
     assert "Before moving on" in display
 
 
@@ -173,7 +178,7 @@ def test_learning_review_personalizes_from_latest_assessment():
             "content": "Add one concrete detail.",
             "metadata": {
                 "assessment": {
-                    "current_stage": "focus",
+                    "current_stage": "problem_identification",
                     "contribution_summary": "Crossing safety for older adults near schools.",
                     "stage_assessment": (
                         "You named a group and setting, which makes the focus workable."
@@ -215,12 +220,12 @@ def test_learning_review_personalizes_from_latest_assessment():
     focus_strengths = next(
         section["items"]
         for section in review["strength_sections"]
-        if section["stage_id"] == "focus"
+        if section["stage_id"] == "problem_identification"
     )
     focus_improvements = next(
         section["items"]
         for section in review["improvement_sections"]
-        if section["stage_id"] == "focus"
+        if section["stage_id"] == "problem_identification"
     )
     assert "group and setting" in focus_strengths[0]
     assert "Crossing safety for older adults" not in " ".join(focus_strengths)
@@ -232,15 +237,15 @@ def test_learning_review_personalizes_from_latest_assessment():
 
 def test_learning_review_keeps_feedback_by_stage():
     journey = default_journey()
-    journey["current_stage"] = "evidence"
-    journey["completed_stages"] = ["focus"]
+    journey["current_stage"] = "concept_generation"
+    journey["completed_stages"] = ["problem_identification"]
     messages = [
         {
             "role": "assistant",
             "content": "Focus reply",
             "metadata": {
                 "assessment": {
-                    "current_stage": "focus",
+                    "current_stage": "problem_identification",
                     "recommendation": "advance",
                     "review_strengths": ["Named who is affected."],
                     "review_improvements": ["Clarify the success outcome."],
@@ -255,7 +260,7 @@ def test_learning_review_keeps_feedback_by_stage():
             "content": "Evidence reply",
             "metadata": {
                 "assessment": {
-                    "current_stage": "evidence",
+                    "current_stage": "concept_generation",
                     "recommendation": "stay",
                     "review_strengths": ["Started checking source quality."],
                     "review_improvements": ["Name one limit of the evidence."],
@@ -271,9 +276,9 @@ def test_learning_review_keeps_feedback_by_stage():
         section["stage_id"]: section["items"]
         for section in review["strength_sections"]
     }
-    assert by_stage["focus"] == ["Named who is affected."]
-    assert by_stage["evidence"] == ["Started checking source quality."]
-    assert by_stage["assumptions"] == []
+    assert by_stage["problem_identification"] == ["Named who is affected."]
+    assert by_stage["concept_generation"] == ["Started checking source quality."]
+    assert by_stage["design_specification"] == []
     assert review["improvement_areas"] == ["Name one limit of the evidence."]
 
 
@@ -303,3 +308,70 @@ def test_learning_review_clamps_invalid_facione_scores():
     assert review["facione_scores"]["interpretation"] == 0
     assert review["facione_scores"]["inference"] == 0
     assert review["facione_scores"]["evaluation"] == 0
+
+
+def test_learning_review_projects_only_student_safe_research_facione_fields():
+    messages = [
+        {
+            "role": "user",
+            "content": "I compared the options before selecting one.",
+        },
+        {
+            "role": "assistant",
+            "metadata": {
+                "assessment": {
+                    "current_stage": "deep_analysis",
+                    "recommendation": "stay",
+                    "facione_scores": {"analysis": 3},
+                },
+                "research_coding": {
+                    "coding_status": "coded",
+                    "dominant_clear": "logical",
+                    "facione_behaviors": ["analysis", "evaluation"],
+                    "ethics_concepts": ["fairness"],
+                    "holistic_candidate": {"score": 4, "rationale": "Wrong phase"},
+                },
+            },
+        },
+        {
+            "role": "user",
+            "content": "I revised the constraint after testing it.",
+        },
+        {
+            "role": "assistant",
+            "metadata": {
+                "assessment": {
+                    "current_stage": "reflection",
+                    "recommendation": "stay",
+                    "facione_scores": {"analysis": 1, "self_regulation": 2},
+                },
+                "research_coding": {
+                    "coding_status": "coded",
+                    "dominant_clear": "reflective",
+                    "facione_behaviors": ["analysis", "self_regulation"],
+                    "ethics_concepts": ["responsibility"],
+                    "holistic_candidate": {
+                        "score": 3,
+                        "rationale": "The conversation shows adequate reflective reasoning.",
+                        "evidence_spans": [
+                            {"start_offset": 0, "end_offset": 42}
+                        ],
+                    },
+                },
+            },
+        },
+    ]
+
+    review = learning_review(messages, default_journey())
+
+    assert review["facione_scores"]["analysis"] == 3
+    assert review["facione_behavior_counts"]["analysis"] == 2
+    assert review["facione_behavior_counts"]["evaluation"] == 1
+    assert review["facione_behavior_counts"]["self_regulation"] == 1
+    assert review["facione_holistic_candidate"] == {
+        "score": 3,
+        "rationale": "The conversation shows adequate reflective reasoning.",
+        "evidence_quotes": ["I revised the constraint after testing it."],
+    }
+    assert "dominant_clear" not in review
+    assert "ethics_concepts" not in review

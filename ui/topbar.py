@@ -18,7 +18,7 @@ from ui.settings import apply_selected_model
 
 GUIDANCE_LABELS = {
     "short": "Quick",
-    "long": "Complex",
+    "long": "Strict",
 }
 
 

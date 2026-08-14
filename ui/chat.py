@@ -15,6 +15,7 @@ from backend.domain import CoachRequest, CoachTurn
 from backend.models import MODEL_BY_ID, MODEL_REGISTRY, get_model
 from backend.settings import settings
 from backend.student_journey import (
+    DEFAULT_STAGE,
     STAGE_BY_ID,
     advanced_stage_response,
     concise_coach_response,
@@ -457,7 +458,7 @@ def render_message(message: dict[str, Any]) -> None:
             )
             display_content = advanced_stage_response(
                 display_content,
-                str(metadata.get("thinking_stage") or "focus"),
+                str(metadata.get("thinking_stage") or DEFAULT_STAGE),
                 auto_advanced_to,
                 questions,
             )

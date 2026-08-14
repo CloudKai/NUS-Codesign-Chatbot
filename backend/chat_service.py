@@ -46,7 +46,7 @@ class ChatOptions:
     image_generation: bool = False
     local_analysis: bool = False
     assignment: dict[str, str] = field(default_factory=dict)
-    thinking_stage: str = "focus"
+    thinking_stage: str = "problem_identification"
     response_detail: str = "short"
     response_language: str = "English"
     source_ids: list[str] = field(default_factory=list)

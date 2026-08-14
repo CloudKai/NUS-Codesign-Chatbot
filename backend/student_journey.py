@@ -16,46 +16,39 @@ class ThinkingStage:
 
 THINKING_STAGES: tuple[ThinkingStage, ...] = (
     ThinkingStage(
-        "focus",
-        "Define the focus",
-        "Focus",
-        "Clarify the question, problem, or claim you are trying to address.",
-        "What exactly are you trying to understand, explain, or argue?",
+        "problem_identification",
+        "Problem identification",
+        "Problem",
+        "Frame the design problem, who it affects, and why it matters.",
+        "What problem are you addressing, for whom, and in what context?",
     ),
     ThinkingStage(
-        "evidence",
-        "Examine evidence",
-        "Evidence",
-        "Identify the relevant evidence and judge its quality and limits.",
-        "Which evidence matters most, and how reliable is it?",
+        "concept_generation",
+        "Concept generation",
+        "Concepts",
+        "Generate and compare plausible concepts that respond to the problem.",
+        "What distinct concepts could address the problem, and why might each help?",
     ),
     ThinkingStage(
-        "assumptions",
-        "Surface assumptions",
-        "Assumptions",
-        "Make the hidden premises and interpretations in your reasoning explicit.",
-        "What are you assuming, and which assumption is most uncertain?",
+        "design_specification",
+        "Design specification",
+        "Specification",
+        "Turn the selected concept into explicit requirements, behavior, and constraints.",
+        "What must the design do, under which constraints, and how will success be judged?",
     ),
     ThinkingStage(
-        "perspectives",
-        "Compare perspectives",
-        "Perspectives",
-        "Test alternatives, objections, and plausible competing explanations.",
-        "What is the strongest alternative explanation or counterargument?",
+        "deep_analysis",
+        "Deep analysis",
+        "Analysis",
+        "Test the specified design against evidence, trade-offs, risks, and alternatives.",
+        "What evidence, trade-off, or risk most challenges the current design?",
     ),
     ThinkingStage(
-        "synthesis",
-        "Synthesize the reasoning",
-        "Synthesis",
-        "Weigh the evidence and alternatives, then refine the position.",
-        "How should your claim change after considering the evidence and alternatives?",
-    ),
-    ThinkingStage(
-        "conclusion",
-        "Form a conclusion",
-        "Conclusion",
-        "State a qualified conclusion, its limits, and the next justified step.",
-        "What can you conclude now, with what confidence, and what remains unresolved?",
+        "reflection",
+        "Reflection",
+        "Reflection",
+        "Evaluate and revise the design reasoning, including limits and next steps.",
+        "How has your design reasoning changed, and what remains uncertain?",
     ),
 )
 
@@ -83,98 +76,78 @@ _IMAGE_EVIDENCE_BOILERPLATE = re.compile(
     r"evidence\.?\s*(?:\n\n|$)"
 )
 _STAGE_SIGNALS: dict[str, tuple[str, ...]] = {
-    "focus": (
-        "question",
+    "problem_identification": (
         "problem",
-        "claim",
-        "focus",
-        "understand",
-        "evaluate",
-        "compare",
-        "whether",
+        "need",
+        "stakeholder",
+        "context",
+        "affected",
+        "scope",
+        "goal",
     ),
-    "evidence": (
-        "evidence",
-        "source",
-        "data",
-        "study",
-        "result",
-        "finding",
-        "example",
-        "reliable",
-        "sample",
-    ),
-    "assumptions": (
-        "assume",
-        "assumption",
-        "because",
-        "depends",
-        "implies",
-        "premise",
-        "believe",
-        "uncertain",
-    ),
-    "perspectives": (
+    "concept_generation": (
+        "idea",
+        "concept",
         "alternative",
-        "counter",
-        "however",
-        "another",
-        "perspective",
-        "objection",
-        "although",
-        "whereas",
+        "option",
+        "approach",
+        "could",
+        "compare",
     ),
-    "synthesis": (
-        "overall",
-        "therefore",
-        "weigh",
-        "balance",
-        "combined",
-        "considering",
-        "stronger",
-        "suggests",
+    "design_specification": (
+        "requirement",
+        "constraint",
+        "criteria",
+        "feature",
+        "function",
+        "measure",
+        "must",
     ),
-    "conclusion": (
-        "conclude",
-        "conclusion",
-        "confidence",
-        "confident",
+    "deep_analysis": (
+        "evidence",
+        "trade-off",
+        "risk",
         "limitation",
-        "remains",
-        "qualified",
+        "test",
+        "feasible",
+        "ethic",
+        "impact",
+    ),
+    "reflection": (
+        "reflect",
+        "revised",
+        "changed",
+        "learned",
+        "limitation",
+        "uncertain",
         "next step",
     ),
 }
 _STAGE_GUIDANCE: dict[str, tuple[str, str, str]] = {
-    "focus": (
-        "What exactly are you trying to understand, explain, or argue?",
-        "Can you state the central question or claim in one clear sentence?",
-        "What would a useful answer help you decide or do?",
+    "problem_identification": (
+        "What problem are you addressing, for whom, and in what context?",
+        "What evidence shows that this problem matters to the affected people?",
+        "What is inside the scope of this design challenge, and what is outside it?",
     ),
-    "evidence": (
-        "Which evidence matters most, and how reliable is it?",
-        "What does the strongest source directly support?",
-        "What limitation could weaken that evidence?",
+    "concept_generation": (
+        "What distinct concepts could address the problem?",
+        "How does each concept respond to the needs you identified?",
+        "Which concept is worth developing, and what makes it more promising?",
     ),
-    "assumptions": (
-        "What are you assuming, and which assumption is most uncertain?",
-        "Which unstated premise connects your evidence to your claim?",
-        "What changes if that premise is false?",
+    "design_specification": (
+        "What must the design do, and for whom?",
+        "Which constraints and success criteria need to be explicit?",
+        "How should the design behave in one important use scenario?",
     ),
-    "perspectives": (
-        "What is the strongest alternative explanation or counterargument?",
-        "Who might interpret the same evidence differently, and why?",
-        "What would the strongest critic say about your reasoning?",
+    "deep_analysis": (
+        "What evidence most strongly supports or challenges the design?",
+        "Which trade-off, risk, or unintended consequence matters most?",
+        "How would the design perform under a difficult but plausible scenario?",
     ),
-    "synthesis": (
-        "How should your claim change after considering the evidence and alternatives?",
-        "Which considerations deserve the most weight?",
-        "Where do the competing perspectives agree or remain unresolved?",
-    ),
-    "conclusion": (
-        "What can you conclude now, with what confidence, and what remains unresolved?",
-        "Which limitation should qualify your conclusion?",
-        "What is the most justified next step?",
+    "reflection": (
+        "How has your design reasoning changed through this process?",
+        "Which assumption or limitation most needs further attention?",
+        "What would you revise next, and why?",
     ),
 }
 
@@ -271,7 +244,7 @@ def personalized_stage_questions(
         else "the course materials"
     )
 
-    if stage_id == "evidence":
+    if stage_id == "concept_generation":
         population_question = (
             "Which group of older adults are you focusing on—for example, people "
             "with limited mobility, slower walking speeds, visual impairments, or "
@@ -282,30 +255,24 @@ def personalized_stage_questions(
         )
         return (
             population_question,
-            f"What evidence in {evidence_reference} supports that focus, and what are "
-            "the limits of that evidence?",
+            f"What different concepts could respond to that need, using what you found in {evidence_reference}?",
         )
-    if stage_id == "assumptions":
+    if stage_id == "design_specification":
         subject = "older adults" if older_adult_topic else "the people in your chosen context"
         return (
-            f"What are you assuming about {subject}, and which assumption is least certain?",
-            f"Does {evidence_reference} support that assumption, challenge it, or leave it unresolved?",
+            f"What must the design do for {subject} in one important use scenario?",
+            "Which requirement, constraint, and success criterion should be made explicit?",
         )
-    if stage_id == "perspectives":
+    if stage_id == "deep_analysis":
         subject = "older adults, caregivers, and road users" if older_adult_topic else "the affected groups"
         return (
-            f"How might {subject} view the problem differently?",
-            f"Which perspective is missing from {evidence_reference}, and why might it matter?",
+            f"Which trade-off or risk could affect {subject} most?",
+            f"What does {evidence_reference} support, and what important limitation remains?",
         )
-    if stage_id == "synthesis":
+    if stage_id == "reflection":
         return (
-            "Which pieces of evidence should carry the most weight in your current reasoning?",
-            f"How should your idea change after comparing the tensions or limits in {evidence_reference}?",
-        )
-    if stage_id == "conclusion":
-        return (
-            "What can you conclude now, and how confident are you in that conclusion?",
-            f"Which limitation in {evidence_reference} should qualify your conclusion?",
+            "How has your design reasoning changed, and what prompted that change?",
+            f"Which limitation in {evidence_reference} should shape your next revision?",
         )
     return stage_guidance_questions(stage_id)[:2]
 
@@ -370,7 +337,7 @@ def stage_selection_enabled() -> bool:
 
 
 def next_stage_id(stage_id: str) -> str | None:
-    """Return the id of the stage after ``stage_id``, or None at Conclusion."""
+    """Return the id of the phase after ``stage_id``, or None at Reflection."""
     if stage_id not in STAGE_BY_ID:
         return None
     index = next(index for index, item in enumerate(THINKING_STAGES) if item.id == stage_id)
@@ -436,9 +403,9 @@ def automatic_stage_update(
             normalized,
             note=student_contribution,
         )
-        if stage.id in {"synthesis", "conclusion"}:
+        if stage.id in {"design_specification", "deep_analysis", "reflection"}:
             normalized["working_conclusion"] = student_contribution.strip()
-        if stage.id != "focus":
+        if stage.id != "problem_identification":
             normalized["critical_reflection"] = (
                 f"The discussion advanced from {stage.label.lower()} after the student "
                 "made the reasoning for this stage explicit."
@@ -453,13 +420,13 @@ def journey_progress(journey: dict[str, Any]) -> int:
 
 def understanding_level(journey: dict[str, Any]) -> tuple[str, str]:
     completed = len(normalize_journey(journey)["completed_stages"])
-    if completed <= 1:
-        return "Emerging", "You are clarifying the problem and beginning to identify relevant reasoning."
-    if completed <= 3:
-        return "Developing", "You are connecting evidence, assumptions, and alternative perspectives."
-    if completed <= 5:
-        return "Connected", "You are synthesizing competing considerations into a defensible position."
-    return "Integrated", "You have worked through the full reasoning cycle and recorded a conclusion."
+    if completed == 0:
+        return "Emerging", "You are identifying the problem, people, and context for the design."
+    if completed <= 2:
+        return "Developing", "You are generating concepts and making the design requirements explicit."
+    if completed <= 4:
+        return "Connected", "You are analysing trade-offs and reflecting on how the design should change."
+    return "Integrated", "You have worked through the full five-phase design reasoning cycle."
 
 
 def _student_messages(messages: Iterable[dict[str, Any]]) -> list[str]:
@@ -503,6 +470,87 @@ def _normalize_facione_scores(raw: Any) -> dict[str, int]:
             value = 0
         normalized[key] = max(0, min(4, value))
     return normalized
+
+
+def _cumulative_facione_scores(
+    messages: Iterable[dict[str, Any]],
+) -> dict[str, int]:
+    """Keep the strongest numeric Facione evidence across active assessments."""
+    cumulative = _normalize_facione_scores(None)
+    for assessment in _assessments(messages):
+        scores = _normalize_facione_scores(assessment.get("facione_scores"))
+        for key, _label in FACIONE_DIMENSIONS:
+            cumulative[key] = max(cumulative[key], scores[key])
+    return cumulative
+
+
+def _research_facione_projection(
+    messages: Iterable[dict[str, Any]],
+) -> tuple[dict[str, int], dict[str, Any] | None]:
+    """Project student-safe Facione behavior counts and Reflection candidate.
+
+    CLEAR and ethics research codes intentionally remain outside this payload.
+    Callers supply only the active branch, so revised/superseded observations do
+    not contribute.
+    """
+    valid_behaviors = {key for key, _label in FACIONE_DIMENSIONS}
+    counts = {key: 0 for key, _label in FACIONE_DIMENSIONS}
+    latest_holistic: dict[str, Any] | None = None
+    latest_student_message = ""
+    for message in messages:
+        if message.get("role") == "user":
+            latest_student_message = str(message.get("content") or "").strip()
+            continue
+        if message.get("role") != "assistant":
+            continue
+        metadata = message.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            continue
+        coding = metadata.get("research_coding")
+        if not isinstance(coding, dict):
+            continue
+        raw_behaviors = coding.get("facione_behaviors")
+        if isinstance(raw_behaviors, list):
+            for behavior in set(str(item).strip() for item in raw_behaviors):
+                if behavior in valid_behaviors:
+                    counts[behavior] += 1
+        assessment = metadata.get("assessment")
+        phase_id = str(coding.get("phase_id") or "").strip()
+        assessment_stage = (
+            str(assessment.get("current_stage") or "").strip()
+            if isinstance(assessment, dict)
+            else ""
+        )
+        if phase_id != "reflection" and assessment_stage != "reflection":
+            continue
+        candidate = coding.get("holistic_candidate")
+        if not isinstance(candidate, dict):
+            continue
+        try:
+            score = int(candidate.get("score"))
+        except (TypeError, ValueError):
+            continue
+        rationale = " ".join(str(candidate.get("rationale") or "").split()).strip()
+        quotes: list[str] = []
+        raw_spans = candidate.get("evidence_spans")
+        if isinstance(raw_spans, list):
+            for span in raw_spans[:3]:
+                if not isinstance(span, dict):
+                    continue
+                try:
+                    start = int(span.get("start_offset"))
+                    end = int(span.get("end_offset"))
+                except (TypeError, ValueError):
+                    continue
+                if 0 <= start < end <= len(latest_student_message):
+                    quotes.append(latest_student_message[start:end])
+        if 1 <= score <= 4 and rationale:
+            latest_holistic = {
+                "score": score,
+                "rationale": rationale[:1_000],
+                "evidence_quotes": quotes,
+            }
+    return counts, latest_holistic
 
 
 def _review_summary(assessment: dict[str, Any] | None) -> str:
@@ -680,8 +728,9 @@ def learning_review(
         ),
         [],
     )
-    facione_scores = _normalize_facione_scores(
-        (assessment or {}).get("facione_scores") if assessment else None
+    facione_scores = _cumulative_facione_scores(message_list)
+    facione_behavior_counts, facione_holistic_candidate = (
+        _research_facione_projection(message_list)
     )
     summary = _review_summary(assessment)
     completed_labels = [
@@ -723,6 +772,8 @@ def learning_review(
         "contributions": contributions,
         "summary": summary,
         "facione_scores": facione_scores,
+        "facione_behavior_counts": facione_behavior_counts,
+        "facione_holistic_candidate": facione_holistic_candidate,
         "stage_notes": notes,
         "conclusion": conclusion,
         "critical_reflection": critical_reflection,

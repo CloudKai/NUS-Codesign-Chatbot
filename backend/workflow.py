@@ -22,6 +22,8 @@ from .domain import (
     CoachTurn,
     EducationalAssessment,
     PendingPhaseTransition,
+    ProviderAssessmentResult,
+    ProvisionalResearchCoding,
     StageDecision,
 )
 from .repositories import PhaseTransitionRepository
@@ -31,12 +33,27 @@ from .student_journey import THINKING_STAGES
 class AssessmentProvider(Protocol):
     """Generate a validated educational assessment for one workflow request."""
 
-    def assess(self, request: CoachRequest) -> tuple[str, EducationalAssessment]:
-        """Return student-facing coaching text and a structured assessment."""
+    def assess(
+        self, request: CoachRequest
+    ) -> ProviderAssessmentResult | tuple[str, EducationalAssessment]:
+        """Return one provider result; legacy two-item adapters remain accepted."""
+
+
+def _provider_result(
+    value: ProviderAssessmentResult | tuple[str, EducationalAssessment],
+) -> ProviderAssessmentResult:
+    """Normalize the internal provider result without making another model call."""
+    if isinstance(value, ProviderAssessmentResult):
+        return value
+    response_text, assessment = value
+    return ProviderAssessmentResult(
+        response_text=response_text,
+        assessment=assessment,
+    )
 
 
 def _next_stage(stage_id: str) -> str | None:
-    """Return the following stage, or ``None`` for terminal Conclusion."""
+    """Return the following stage, or ``None`` for terminal Reflection."""
     stage_ids = [stage.id for stage in THINKING_STAGES]
     try:
         index = stage_ids.index(stage_id)
@@ -50,7 +67,7 @@ def _next_stage(stage_id: str) -> str | None:
 def _normalize_terminal_assessment(
     request: CoachRequest, assessment: EducationalAssessment
 ) -> EducationalAssessment:
-    """Prevent a provider from recommending advancement beyond Conclusion."""
+    """Prevent a provider from recommending advancement beyond Reflection."""
     if (
         request.current_stage == THINKING_STAGES[-1].id
         and assessment.recommendation is StageDecision.ADVANCE
@@ -59,7 +76,7 @@ def _normalize_terminal_assessment(
             update={
                 "recommendation": StageDecision.STAY,
                 "recommendation_rationale": (
-                    "Conclusion is the terminal Thinking Path stage; the student's "
+                    "Reflection is the terminal Thinking Path stage; the student's "
                     "work remains here for final calibration or completion."
                 ),
             }
@@ -76,6 +93,26 @@ class CoachWorkflow:
     _checkpointer: Any = field(default=None, init=False, repr=False)
     _graph: Any = field(default=None, init=False, repr=False)
     _last_graph_state: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
+    _last_research_coding: dict[str, ProvisionalResearchCoding | None] = field(
+        default_factory=dict, init=False, repr=False
+    )
+
+    @property
+    def provider_id(self) -> str:
+        """Return the actual injected provider identifier for provenance."""
+        explicit = str(getattr(self.provider, "provider_id", "") or "").strip()
+        if explicit:
+            return explicit
+        return type(self.provider).__name__.removesuffix("CoachProvider").lower()
+
+    def model_id_for(self, request: CoachRequest) -> str:
+        """Return the actual injected provider model used for this request."""
+        resolver = getattr(self.provider, "model_id_for", None)
+        if callable(resolver):
+            resolved = str(resolver(request) or "").strip()
+            if resolved:
+                return resolved
+        return str(request.model_id or "unknown").strip() or "unknown"
 
     def run(self, request: CoachRequest) -> CoachTurn:
         """Produce coaching output without mutating the student's current stage.
@@ -93,7 +130,8 @@ class CoachWorkflow:
 
     def _run_sequential(self, request: CoachRequest) -> CoachTurn:
         """Portable non-graph path used when LangGraph is unavailable."""
-        response_text, assessment = self.provider.assess(request)
+        provider_result = _provider_result(self.provider.assess(request))
+        response_text, assessment = provider_result
         assessment = _normalize_terminal_assessment(request, assessment)
         if assessment.current_stage != request.current_stage:
             raise ValueError("Assessment stage does not match the active journey stage")
@@ -101,7 +139,7 @@ class CoachWorkflow:
         if assessment.recommendation is StageDecision.ADVANCE:
             next_stage = _next_stage(request.current_stage)
             if next_stage is None:
-                raise ValueError("Conclusion cannot advance to another stage")
+                raise ValueError("Reflection cannot advance to another stage")
             pending = PendingPhaseTransition(
                 id=str(uuid4()),
                 thread_id=request.thread_id,
@@ -120,6 +158,7 @@ class CoachWorkflow:
             "turn": turn.model_dump(mode="json"),
             "mode": "sequential",
         }
+        self._last_research_coding[request.thread_id] = provider_result.research_coding
         return turn
 
     def _run_graph(self, request: CoachRequest) -> CoachTurn:
@@ -131,13 +170,18 @@ class CoachWorkflow:
                 "checkpoint_ns": "coach",
             }
         }
-        result = graph.invoke(
-            {
-                "request": request.model_dump(mode="json"),
-                "steps_completed": [],
-            },
-            config=config,
-        )
+        self._last_research_coding.pop(request.thread_id, None)
+        try:
+            result = graph.invoke(
+                {
+                    "request": request.model_dump(mode="json"),
+                    "steps_completed": [],
+                },
+                config=config,
+            )
+        except Exception:
+            self._last_research_coding.pop(request.thread_id, None)
+            raise
         turn = CoachTurn.model_validate(result["turn"])
         self._last_graph_state[request.thread_id] = {
             "steps": list(result.get("steps_completed") or []),
@@ -154,6 +198,18 @@ class CoachWorkflow:
         """Return the latest inspectable graph summary for a notebook."""
         return self._last_graph_state.get(thread_id)
 
+    def provisional_research_coding(
+        self, thread_id: str
+    ) -> ProvisionalResearchCoding | None:
+        """Return the latest internal coding result without changing CoachTurn."""
+        return self._last_research_coding.get(thread_id)
+
+    def take_provisional_research_coding(
+        self, thread_id: str
+    ) -> ProvisionalResearchCoding | None:
+        """Consume transient coding after its provider quotes become offsets."""
+        return self._last_research_coding.pop(thread_id, None)
+
     def _ensure_graph(self):
         """Build and cache the multi-step LangGraph runtime once."""
         if self._graph is not None:
@@ -169,7 +225,7 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
       load_context → assess → recommend → format
 
     Uses an in-memory checkpointer so local demos can inspect per-thread state
-    without AWS. Does not create six agents.
+    without AWS. Does not create five agents.
     """
     try:
         from langgraph.checkpoint.memory import MemorySaver
@@ -192,7 +248,8 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
 
     def assess(state: dict) -> dict:
         request = CoachRequest.model_validate(state["request"])
-        response_text, assessment = workflow.provider.assess(request)
+        provider_result = _provider_result(workflow.provider.assess(request))
+        response_text, assessment = provider_result
         assessment = _normalize_terminal_assessment(request, assessment)
         if assessment.current_stage != request.current_stage:
             raise ValueError(
@@ -200,6 +257,9 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
             )
         steps = list(state.get("steps_completed") or [])
         steps.append("assess")
+        workflow._last_research_coding[request.thread_id] = (
+            provider_result.research_coding
+        )
         return {
             "request": request.model_dump(mode="json"),
             "response_text": response_text,
@@ -214,7 +274,7 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
         if assessment.recommendation is StageDecision.ADVANCE:
             next_stage = _next_stage(request.current_stage)
             if next_stage is None:
-                raise ValueError("Conclusion cannot advance to another stage")
+                raise ValueError("Reflection cannot advance to another stage")
             pending = PendingPhaseTransition(
                 id=str(uuid4()),
                 thread_id=request.thread_id,

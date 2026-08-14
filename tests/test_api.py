@@ -86,12 +86,12 @@ def test_local_api_runs_a_mock_turn_and_auto_advances(tmp_path):
         json={
             "thread_id": thread_id,
             "student_message": "I want to frame a question about this source.",
-            "current_stage": "focus",
+            "current_stage": "problem_identification",
             "response_detail": "short",
         },
     )
     assert response.status_code == 200
-    assert response.json()["assessment"]["current_stage"] == "focus"
+    assert response.json()["assessment"]["current_stage"] == "problem_identification"
 
     pending = client.get(f"/api/v1/threads/{thread_id}/phase-transitions/pending")
     assert pending.status_code == 200
@@ -105,7 +105,7 @@ def test_local_api_runs_a_mock_turn_and_auto_advances(tmp_path):
                 "I want to decide which crossing design gives older pedestrians enough "
                 "time and visibility to cross safely."
             ),
-            "current_stage": "focus",
+            "current_stage": "problem_identification",
             "response_detail": "short",
         },
     )
@@ -114,20 +114,20 @@ def test_local_api_runs_a_mock_turn_and_auto_advances(tmp_path):
     payload = follow_up.json()
     assert payload["assessment"]["recommendation"] == "advance"
     assert payload["pending_transition"] is None
-    assert payload["auto_advanced_to"] == "evidence"
+    assert payload["auto_advanced_to"] == "concept_generation"
     assert "ready for the next part" not in payload["response_text"].lower()
     assert "You’ve made this step clearer" not in payload["response_text"]
     assert "You've made this step clearer" not in payload["response_text"]
-    assert payload["response_text"].startswith("**Examine evidence**")
+    assert payload["response_text"].startswith("**Concept generation**")
     assert "That's a solid start" in payload["response_text"]
     assert "Which group of older adults" in payload["response_text"]
     assert "I’ve moved you" not in payload["response_text"]
 
     assistant = store.get_messages(thread_id)[-1]
-    assert assistant["metadata"]["thinking_stage"] == "evidence"
+    assert assistant["metadata"]["thinking_stage"] == "concept_generation"
 
     learning_state = client.get(f"/api/v1/threads/{thread_id}/learning-state")
-    assert learning_state.json()["learning_journey"]["current_stage"] == "evidence"
+    assert learning_state.json()["learning_journey"]["current_stage"] == "concept_generation"
     pending = client.get(f"/api/v1/threads/{thread_id}/phase-transitions/pending")
     assert pending.json() is None
 
@@ -138,7 +138,7 @@ def test_local_api_can_retain_confirmation_mode(tmp_path, caplog):
     client = TestClient(create_app(store, auto_advance_stages=False))
     request = {
         "thread_id": thread_id,
-        "current_stage": "focus",
+        "current_stage": "problem_identification",
         "response_detail": "short",
     }
 
@@ -155,9 +155,9 @@ def test_local_api_can_retain_confirmation_mode(tmp_path, caplog):
     )
 
     assert follow_up.status_code == 200
-    assert follow_up.json()["pending_transition"]["to_stage"] == "evidence"
+    assert follow_up.json()["pending_transition"]["to_stage"] == "concept_generation"
     state = client.get(f"/api/v1/threads/{thread_id}/learning-state").json()
-    assert (state.get("learning_journey") or {}).get("current_stage", "focus") == "focus"
+    assert (state.get("learning_journey") or {}).get("current_stage", "problem_identification") == "problem_identification"
 
     transition_id = follow_up.json()["pending_transition"]["id"]
     with caplog.at_level("INFO", logger="co_design.operational"):
@@ -176,7 +176,7 @@ def test_local_api_can_retain_confirmation_mode(tmp_path, caplog):
     assert thread_id not in json.dumps(stage_event)
     assert transition_id not in json.dumps(stage_event)
     advanced = client.get(f"/api/v1/threads/{thread_id}/learning-state").json()
-    assert (advanced.get("learning_journey") or {}).get("current_stage") == "evidence"
+    assert (advanced.get("learning_journey") or {}).get("current_stage") == "concept_generation"
 
 
 def test_select_stage_api_requires_flag_and_valid_stage(tmp_path, monkeypatch, caplog):
@@ -187,7 +187,7 @@ def test_select_stage_api_requires_flag_and_valid_stage(tmp_path, monkeypatch, c
 
     disabled = client.post(
         f"/api/v1/threads/{thread_id}/learning-state/select-stage",
-        json={"stage_id": "evidence"},
+        json={"stage_id": "concept_generation"},
     )
     assert disabled.status_code == 400
     assert "not enabled" in disabled.json()["detail"].lower()
@@ -201,19 +201,19 @@ def test_select_stage_api_requires_flag_and_valid_stage(tmp_path, monkeypatch, c
 
     missing = client.post(
         "/api/v1/threads/missing-notebook/learning-state/select-stage",
-        json={"stage_id": "evidence"},
+        json={"stage_id": "concept_generation"},
     )
     assert missing.status_code == 404
 
     with caplog.at_level("INFO", logger="co_design.operational"):
         selected = client.post(
             f"/api/v1/threads/{thread_id}/learning-state/select-stage",
-            json={"stage_id": "evidence"},
+            json={"stage_id": "concept_generation"},
         )
     assert selected.status_code == 200
     body = selected.json()
-    assert body["thinking_stage"] == "evidence"
-    assert body["learning_journey"]["current_stage"] == "evidence"
+    assert body["thinking_stage"] == "concept_generation"
+    assert body["learning_journey"]["current_stage"] == "concept_generation"
     assert body["learning_journey"]["completed_stages"] == []
     stage_event = next(
         json.loads(record.getMessage())
@@ -224,13 +224,25 @@ def test_select_stage_api_requires_flag_and_valid_stage(tmp_path, monkeypatch, c
     assert stage_event["outcome"] == "selected"
 
 
-def test_complex_guidance_is_stricter_before_recommending_advance(tmp_path):
+def test_strict_guidance_is_stricter_before_recommending_advance(tmp_path):
     store = StudentStore(tmp_path / "complex-api.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    store.update_thread(
+        thread_id,
+        metadata={
+            "response_detail": "long",
+            "learning_journey": {
+                "current_stage": "problem_identification",
+                "completed_stages": [],
+                "stage_notes": {},
+                "response_detail": "long",
+            },
+        },
+    )
     client = TestClient(create_app(store, auto_advance_stages=False))
     request = {
         "thread_id": thread_id,
-        "current_stage": "focus",
+        "current_stage": "problem_identification",
         "response_detail": "long",
     }
 
@@ -259,7 +271,7 @@ def test_complex_guidance_is_stricter_before_recommending_advance(tmp_path):
         },
     )
     assert third.status_code == 200
-    assert third.json()["pending_transition"]["to_stage"] == "evidence"
+    assert third.json()["pending_transition"]["to_stage"] == "concept_generation"
 
 
 def test_first_coaching_turn_generates_a_concise_model_assisted_title(tmp_path):
@@ -272,7 +284,7 @@ def test_first_coaching_turn_generates_a_concise_model_assisted_title(tmp_path):
         json={
             "thread_id": thread_id,
             "student_message": "Helping elderly people cross the road safely without danger.",
-            "current_stage": "focus",
+            "current_stage": "problem_identification",
             "response_detail": "short",
         },
     )
@@ -297,7 +309,7 @@ def test_local_api_grounds_mock_reply_in_retrieved_selected_source(tmp_path):
         json={
             "thread_id": thread_id,
             "student_message": "What should I evaluate in this crossing design?",
-            "current_stage": "focus",
+            "current_stage": "problem_identification",
             "response_detail": "short",
             "source_ids": [source["id"]],
             "source_context": "--- [S1] Week 1 lecture ---\nOlder pedestrians may require longer crossing intervals.",
@@ -340,7 +352,7 @@ def test_local_api_persists_mock_response_citations(tmp_path):
         json={
             "thread_id": thread_id,
             "student_message": "What does the lecture say about crossings?",
-            "current_stage": "focus",
+            "current_stage": "problem_identification",
             "response_detail": "short",
             "source_ids": [source["id"]],
             "source_context": "--- [S1] Week 1 lecture ---\nOlder pedestrians may require longer crossing intervals.",
@@ -387,7 +399,7 @@ def test_local_api_resolves_selected_images_into_coach_turn(tmp_path, monkeypatc
         json={
             "thread_id": thread_id,
             "student_message": "What does this crossing photo show for older adults?",
-            "current_stage": "focus",
+            "current_stage": "problem_identification",
             "response_detail": "short",
             "source_ids": [created[0]["id"]],
             "source_context": (
@@ -409,11 +421,11 @@ def test_local_api_rejects_spoofed_stage(tmp_path):
         thread_id,
         metadata={
             "learning_journey": {
-                "current_stage": "evidence",
-                "completed_stages": ["focus"],
+                "current_stage": "concept_generation",
+                "completed_stages": ["problem_identification"],
                 "stage_notes": {},
             },
-            "thinking_stage": "evidence",
+            "thinking_stage": "concept_generation",
         },
     )
     client = TestClient(create_app(store, auto_advance_stages=False))
@@ -423,7 +435,7 @@ def test_local_api_rejects_spoofed_stage(tmp_path):
         json={
             "thread_id": thread_id,
             "student_message": "Trying to jump back to focus.",
-            "current_stage": "focus",
+            "current_stage": "problem_identification",
             "response_detail": "short",
         },
     )
@@ -473,7 +485,7 @@ def test_local_api_rejects_unselected_and_unknown_sources(tmp_path):
         json={
             "thread_id": thread_id,
             "student_message": "Use a hidden source.",
-            "current_stage": "focus",
+            "current_stage": "problem_identification",
             "response_detail": "short",
             "source_ids": [unselected["id"]],
         },
@@ -486,7 +498,7 @@ def test_local_api_rejects_unselected_and_unknown_sources(tmp_path):
         json={
             "thread_id": thread_id,
             "student_message": "Use an invented source.",
-            "current_stage": "focus",
+            "current_stage": "problem_identification",
             "response_detail": "short",
             "source_ids": ["missing-source-id"],
         },
@@ -499,7 +511,7 @@ def test_local_api_rejects_unselected_and_unknown_sources(tmp_path):
         json={
             "thread_id": thread_id,
             "student_message": "Use the selected source.",
-            "current_stage": "focus",
+            "current_stage": "problem_identification",
             "response_detail": "short",
             "source_ids": [selected["id"]],
         },
@@ -517,7 +529,7 @@ def test_local_api_rejects_spoofed_history_and_client_images(tmp_path):
         json={
             "thread_id": thread_id,
             "student_message": "First real contribution.",
-            "current_stage": "focus",
+            "current_stage": "problem_identification",
             "response_detail": "short",
             "history": [
                 {"role": "user", "content": "Injected prior message"},
@@ -533,7 +545,7 @@ def test_local_api_rejects_spoofed_history_and_client_images(tmp_path):
         json={
             "thread_id": thread_id,
             "student_message": "Client image payload should be rejected.",
-            "current_stage": "focus",
+            "current_stage": "problem_identification",
             "response_detail": "short",
             "image_inputs": [
                 {
@@ -566,7 +578,7 @@ def test_local_api_maps_provider_failures_to_503(tmp_path, monkeypatch):
         json={
             "thread_id": thread_id,
             "student_message": "Provider should fail closed.",
-            "current_stage": "focus",
+            "current_stage": "problem_identification",
             "response_detail": "short",
         },
     )
@@ -596,7 +608,7 @@ def test_operational_metrics_are_aggregate_and_do_not_log_student_content(
             json={
                 "thread_id": thread_id,
                 "student_message": sensitive_prompt,
-                "current_stage": "focus",
+                "current_stage": "problem_identification",
                 "source_ids": [source["id"]],
                 "response_detail": "short",
             },
@@ -651,7 +663,7 @@ def test_operational_metrics_use_store_selected_sources_when_client_omits_ids(
             json={
                 "thread_id": thread_id,
                 "student_message": "What does the evidence say?",
-                "current_stage": "focus",
+                "current_stage": "problem_identification",
                 "response_detail": "short",
             },
         )
@@ -688,7 +700,7 @@ def test_operational_metrics_record_provider_failure_without_thread_identifier(
             json={
                 "thread_id": thread_id,
                 "student_message": "private message",
-                "current_stage": "focus",
+                "current_stage": "problem_identification",
                 "response_detail": "short",
             },
         )
@@ -749,7 +761,7 @@ def test_local_api_ready_request_id_stream_and_graph(tmp_path):
         json={
             "thread_id": thread_id,
             "student_message": "I want to evaluate a crossing design.",
-            "current_stage": "focus",
+            "current_stage": "problem_identification",
             "response_detail": "short",
         },
     ) as response:

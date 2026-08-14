@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Callable, Iterator, Mapping, Protocol
+from urllib.parse import quote
 
 import httpx
 
@@ -216,6 +217,87 @@ class LocalApiClient:
         )
         response.raise_for_status()
         return response.json()
+
+    def professor_research_summary(self) -> dict[str, Any]:
+        """Return aggregate automated research-coding status."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/research/summary",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_research_queue(self, **filters: Any) -> dict[str, Any]:
+        """Return an audited page of identifiable research observations."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/research/queue",
+            params={
+                key: value
+                for key, value in filters.items()
+                if value not in (None, "")
+            },
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_research_notebook(
+        self,
+        notebook_id: str,
+        *,
+        observation_limit: int = 100,
+        observation_offset: int = 0,
+    ) -> dict[str, Any]:
+        """Return one audited research notebook detail."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/research/notebooks/"
+            f"{quote(notebook_id, safe='')}",
+            params={
+                "observation_limit": observation_limit,
+                "observation_offset": observation_offset,
+            },
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_submit_research_review(
+        self, payload: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Append one human validation; reviewer identity stays server-side."""
+        response = self._http.post(
+            f"{self._base_url}/api/v1/professor/research/reviews",
+            json=dict(payload),
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_submit_research_adjudication(
+        self, payload: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Append one adjudication; actor identity stays server-side."""
+        response = self._http.post(
+            f"{self._base_url}/api/v1/professor/research/adjudications",
+            json=dict(payload),
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_research_export(self, **filters: Any) -> bytes:
+        """Return an audited formula-safe research CSV export."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/research/export.csv",
+            params={
+                key: value
+                for key, value in filters.items()
+                if value not in (None, "")
+            },
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return bytes(response.content)
 
     def get_preferences(self) -> dict[str, Any]:
         """Return local user preferences."""

@@ -36,10 +36,11 @@ FastAPI (api.py)
 | `api.py` | FastAPI `/api/v1` routes (coach + workspace CRUD), app factory, structured errors |
 | `api_client.py` | Typed client used by Streamlit when `USE_LOCAL_API=true` |
 | `workspace_service.py` | Notebook/history/source/preference CRUD application service |
-| `workflow.py` | Single LangGraph coach workflow wrapper (not six agents) |
-| `student_journey.py` | Six thinking stages, journey normalization, review helpers, stage questions |
+| `workflow.py` | Single LangGraph coach workflow wrapper (not one agent per phase) |
+| `student_journey.py` | Five research-aligned phases, journey normalization, review helpers, phase questions |
 | `learning_service.py` | Confirmation-gated phase transitions and learning progression |
-| `student_store.py` | Five-table SQLite/DSQL-compatible store for users, OAuth state, notebooks, messages, sources |
+| `student_store.py` | SQLite/DSQL-compatible student, conversation, source, research, review, and audit persistence |
+| `research/` | Provider-neutral research observations, human review/adjudication models, and repository adapter |
 | `persistence/` | Storage ports + factories: SQLite/DSQL student stores, local/S3 file storage |
 | `repositories.py` | Narrow repository adapters over `StudentStore` |
 | `chat_service.py` | Legacy/direct chat engine (`StudentChatEngine`); OpenAI continuation state is not persisted |
@@ -58,7 +59,7 @@ FastAPI (api.py)
 ## Hard constraints
 
 - **No Streamlit imports** in any `backend/` module.
-- **One workflow** for all six stages. Do not create six autonomous agents.
+- **One workflow** for all five phases. Do not create autonomous agents per phase.
 - **Structured assessments** at provider boundaries. Validate before persisting.
 - **Confirmation-gated advancement** when not in automatic-resolve mode. Persist
   recommendations and student decisions; never use hidden HTML markers or keyword

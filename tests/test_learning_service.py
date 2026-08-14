@@ -28,7 +28,7 @@ def test_confirmed_recommendation_is_the_only_way_to_advance(tmp_path):
     request = CoachRequest(
         thread_id=thread_id,
         student_message="My central claim is that the evidence needs evaluation.",
-        current_stage="focus",
+        current_stage="problem_identification",
         response_detail="short",
     )
     pending = workflow.run(request).pending_transition
@@ -41,8 +41,8 @@ def test_confirmed_recommendation_is_the_only_way_to_advance(tmp_path):
 
     assert resolved.status is TransitionStatus.CONFIRMED
     thread = store.get_thread(thread_id) or {}
-    assert thread["metadata"]["thinking_stage"] == "evidence"
-    assert thread["metadata"]["learning_journey"]["completed_stages"] == ["focus"]
+    assert thread["metadata"]["thinking_stage"] == "concept_generation"
+    assert thread["metadata"]["learning_journey"]["completed_stages"] == ["problem_identification"]
 
 
 def test_rejected_recommendation_keeps_current_stage(tmp_path):
@@ -56,7 +56,7 @@ def test_rejected_recommendation_keeps_current_stage(tmp_path):
         CoachRequest(
             thread_id=thread_id,
             student_message="I have defined a focused question.",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
         )
     ).pending_transition
@@ -69,9 +69,9 @@ def test_rejected_recommendation_keeps_current_stage(tmp_path):
 
     assert resolved.status is TransitionStatus.REJECTED
     thread = store.get_thread(thread_id) or {}
-    assert (thread.get("metadata") or {}).get("thinking_stage", "focus") == "focus"
+    assert (thread.get("metadata") or {}).get("thinking_stage", "problem_identification") == "problem_identification"
     journey = (thread.get("metadata") or {}).get("learning_journey") or {}
-    assert journey.get("current_stage", "focus") == "focus"
+    assert journey.get("current_stage", "problem_identification") == "problem_identification"
     assert journey.get("completed_stages") in (None, [])
 
 
@@ -88,7 +88,7 @@ def test_accepted_transition_rolls_back_when_journey_write_fails(tmp_path, monke
         CoachRequest(
             thread_id=thread_id,
             student_message="I have defined a focused question.",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
         )
     ).pending_transition
@@ -116,7 +116,7 @@ def test_accepted_transition_rolls_back_when_journey_write_fails(tmp_path, monke
     assert transitions.get_pending(thread_id) is not None
     thread = store.get_thread(thread_id) or {}
     journey = (thread.get("metadata") or {}).get("learning_journey") or {}
-    assert journey.get("current_stage", "focus") == "focus"
+    assert journey.get("current_stage", "problem_identification") == "problem_identification"
 
 
 def test_select_stage_requires_flag(tmp_path, monkeypatch):
@@ -126,7 +126,7 @@ def test_select_stage_requires_flag(tmp_path, monkeypatch):
     service = _learning_service(store)
 
     with pytest.raises(ValueError, match="not enabled"):
-        service.select_stage(thread_id, "evidence")
+        service.select_stage(thread_id, "concept_generation")
 
 
 def test_select_stage_rejects_unknown_stage(tmp_path, monkeypatch):
@@ -145,14 +145,14 @@ def test_select_stage_updates_journey_without_completing_skipped(tmp_path, monke
     monkeypatch.setattr(settings, "student_stage_selection", True)
     service = _learning_service(store)
 
-    metadata = service.select_stage(thread_id, "synthesis")
+    metadata = service.select_stage(thread_id, "reflection")
 
     journey = metadata["learning_journey"]
-    assert journey["current_stage"] == "synthesis"
+    assert journey["current_stage"] == "reflection"
     assert journey.get("completed_stages") == []
-    assert metadata["thinking_stage"] == "synthesis"
+    assert metadata["thinking_stage"] == "reflection"
     thread = store.get_thread(thread_id) or {}
-    assert thread["metadata"]["thinking_stage"] == "synthesis"
+    assert thread["metadata"]["thinking_stage"] == "reflection"
 
 
 def test_select_stage_rejects_pending_transition(tmp_path, monkeypatch):
@@ -166,7 +166,7 @@ def test_select_stage_rejects_pending_transition(tmp_path, monkeypatch):
         CoachRequest(
             thread_id=thread_id,
             student_message="I have defined a focused question.",
-            current_stage="focus",
+            current_stage="problem_identification",
             response_detail="short",
         )
     ).pending_transition
@@ -176,9 +176,9 @@ def test_select_stage_rejects_pending_transition(tmp_path, monkeypatch):
 
     monkeypatch.setattr(settings, "student_stage_selection", True)
     service = LearningProgressService(store, notebooks, transitions)
-    service.select_stage(thread_id, "perspectives")
+    service.select_stage(thread_id, "deep_analysis")
 
     assert transitions.get_pending(thread_id) is None
     thread = store.get_thread(thread_id) or {}
-    assert thread["metadata"]["thinking_stage"] == "perspectives"
+    assert thread["metadata"]["thinking_stage"] == "deep_analysis"
     assert thread["metadata"]["learning_journey"]["completed_stages"] == []

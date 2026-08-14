@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Application settings loaded from the project ``.env`` file.
 
 Fallback defaults match ``.env.example``: mock provider, confirmation-mode
@@ -8,6 +6,8 @@ so a missing ``.env`` stays cost-safe. Production selects Aurora DSQL and S3
 via ``DATABASE_PROVIDER`` / ``FILE_STORAGE_PROVIDER`` and must set
 ``APP_ENV=production`` so ``validate_production_configuration`` fail-closes.
 """
+
+from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field

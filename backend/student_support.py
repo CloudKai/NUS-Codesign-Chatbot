@@ -136,7 +136,7 @@ def build_student_instructions(
     assignment_brief: str = "",
     rubric: str = "",
     course_context: str = "",
-    thinking_stage_id: str = "focus",
+    thinking_stage_id: str = "problem_identification",
     response_detail: str = "short",
     response_language: str = "English",
 ) -> str:

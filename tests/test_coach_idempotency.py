@@ -48,7 +48,7 @@ def _request(thread_id: str, *, key: str, message: str = "Assess this claim.") -
     return CoachRequest(
         thread_id=thread_id,
         student_message=message,
-        current_stage="focus",
+        current_stage="problem_identification",
         response_detail="short",
         idempotency_key=key,
     )
@@ -158,7 +158,7 @@ def test_api_accepts_header_only_and_rejects_header_body_disagreement(tmp_path):
     payload = {
         "thread_id": thread_id,
         "student_message": "Assess this claim.",
-        "current_stage": "focus",
+        "current_stage": "problem_identification",
         "response_detail": "short",
     }
 
@@ -201,7 +201,7 @@ def test_api_maps_an_active_duplicate_to_retryable_conflict(tmp_path, monkeypatc
     payload = {
         "thread_id": thread_id,
         "student_message": "Assess this claim.",
-        "current_stage": "focus",
+        "current_stage": "problem_identification",
         "response_detail": "short",
         "idempotency_key": "occupied-key",
     }
@@ -227,7 +227,7 @@ def test_api_maps_payload_mismatch_to_conflict(tmp_path):
     payload = {
         "thread_id": thread_id,
         "student_message": "Assess this claim.",
-        "current_stage": "focus",
+        "current_stage": "problem_identification",
         "response_detail": "short",
         "idempotency_key": "payload-conflict-key",
     }
@@ -322,7 +322,7 @@ def test_complete_is_idempotent_after_waiter_promotes_persisted_turn(tmp_path):
 
     store.persist_coach_turn(
         thread_id,
-        expected_stage="focus",
+        expected_stage="problem_identification",
         expected_conversation_revision=0,
         user_content="Assess this claim.",
         user_metadata={"coach_idempotency_key": key},
@@ -339,7 +339,7 @@ def test_complete_is_idempotent_after_waiter_promotes_persisted_turn(tmp_path):
                 "citations": [],
             },
             "coach_idempotency_key": key,
-            "from_stage": "focus",
+            "from_stage": "problem_identification",
         },
         summary_metadata={},
         idempotency_marker_id=claimed.marker_id,
@@ -432,7 +432,7 @@ def test_expired_lease_cannot_commit_after_another_worker_claims_it(tmp_path):
     with pytest.raises(CoachRequestLeaseLostError):
         store.persist_coach_turn(
             thread_id,
-            expected_stage="focus",
+            expected_stage="problem_identification",
         expected_conversation_revision=0,
             user_content="This old worker must not persist.",
             user_metadata={},
@@ -595,7 +595,7 @@ def test_dsql_expired_lease_rejects_the_stale_worker(tmp_path):
     with pytest.raises(CoachRequestLeaseLostError):
         first_store.persist_coach_turn(
             thread_id,
-            expected_stage="focus",
+            expected_stage="problem_identification",
         expected_conversation_revision=0,
             user_content="The stale worker must roll back.",
             user_metadata={},

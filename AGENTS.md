@@ -76,8 +76,8 @@ relevant module only. For backend or migration work, read
   OpenAI, Ollama, SQLite, and future AWS services.
 - Use dependency injection and narrow interfaces for repositories, file
   storage, retrieval, model providers, and the coach workflow.
-- Use one LangGraph workflow for the six critical-thinking stages. Do not
-  create six autonomous agents.
+- Use one LangGraph workflow for the five research-aligned design-thinking
+  phases. Do not create autonomous agents per phase.
 - Model-generated stage recommendations must be structured, validated,
   persisted, shown to the student, and explicitly confirmed before a stage
   changes. Never use hidden HTML comments, keyword heuristics, or unrestricted

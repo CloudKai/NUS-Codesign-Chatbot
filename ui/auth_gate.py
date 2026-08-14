@@ -589,12 +589,11 @@ def render_signed_out_shell() -> None:
       <div class="cd-auth-shell-pane-title">Thinking Path</div>
       <div class="cd-auth-shell-tabs"><span class="is-active">Journey</span><span>Review</span></div>
       <div class="cd-auth-shell-muted">Your critical-thinking journey</div>
-      <div class="cd-auth-shell-stage is-active">Focus</div>
-      <div class="cd-auth-shell-stage">Evidence</div>
-      <div class="cd-auth-shell-stage">Assumptions</div>
-      <div class="cd-auth-shell-stage">Perspectives</div>
-      <div class="cd-auth-shell-stage">Synthesis</div>
-      <div class="cd-auth-shell-stage">Conclusion</div>
+      <div class="cd-auth-shell-stage is-active">Problem identification</div>
+      <div class="cd-auth-shell-stage">Concept generation</div>
+      <div class="cd-auth-shell-stage">Design specification</div>
+      <div class="cd-auth-shell-stage">Deep analysis</div>
+      <div class="cd-auth-shell-stage">Reflection</div>
     </aside>
     <section class="cd-auth-shell-panel cd-auth-shell-coach">
       <div class="cd-auth-shell-pane-title">Coach</div>

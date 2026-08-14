@@ -22,7 +22,7 @@ def test_coach_turn_logs_omit_thread_id_and_message_text(tmp_path, caplog):
             json={
                 "thread_id": thread_id,
                 "student_message": secret_message,
-                "current_stage": "focus",
+                "current_stage": "problem_identification",
                 "response_detail": "short",
                 "idempotency_key": "privacy-log-1",
             },

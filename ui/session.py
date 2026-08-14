@@ -19,7 +19,7 @@ from backend.models import (
     get_model,
     validate_reasoning,
 )
-from backend.student_journey import default_journey, normalize_journey
+from backend.student_journey import DEFAULT_STAGE, default_journey, normalize_journey
 from backend.student_support import DEFAULT_SUPPORT_MODE
 
 from ui.coach_welcome import seed_coach_welcome
@@ -208,7 +208,7 @@ def select_thread(thread_id: str, should_rerun: bool = True) -> None:
     raw_journey = metadata.get("learning_journey")
     if not isinstance(raw_journey, dict):
         raw_journey = {
-            "current_stage": metadata.get("thinking_stage", "focus"),
+            "current_stage": metadata.get("thinking_stage", DEFAULT_STAGE),
             "response_detail": metadata.get("response_detail", "short"),
         }
     journey = normalize_journey(raw_journey)

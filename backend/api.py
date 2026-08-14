@@ -9,7 +9,7 @@ from typing import Any
 from urllib.parse import quote, urlparse
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import (
     JSONResponse,
     RedirectResponse,
@@ -65,6 +65,16 @@ from .professor_analytics.repository import (
     ProfessorAnalyticsUnavailable,
 )
 from .professor_analytics.service import ProfessorAnalyticsService
+from .professor_analytics.research import (
+    ProfessorResearchService,
+    ResearchAdjudicationRequest,
+    ResearchNotebookDetailResponse,
+    ResearchQueueResponse,
+    ResearchReviewRequest,
+    ResearchSummaryResponse,
+)
+from .research.models import ResearchAdjudication, ResearchReview
+from .research.repository import StudentStoreResearchRepository
 
 logger = logging.getLogger(__name__)
 
@@ -359,6 +369,26 @@ def create_app(
         """Build a read-only analytics service for one authorised request."""
         return ProfessorAnalyticsService(ProfessorAnalyticsRepository(owner.store))
 
+    def _research_service(owner: OwnerServices) -> ProfessorResearchService:
+        """Build the research application service over its narrow repository."""
+        return ProfessorResearchService(StudentStoreResearchRepository(owner.store))
+
+    def _professor_role(owner: OwnerServices) -> str:
+        """Reload the already-authorised persisted staff role for audit context."""
+        profile = owner.store.get_user_by_id(owner.user_id) or {}
+        return str(profile.get("role") or "student").strip().lower()
+
+    def _research_unavailable(request: Request) -> HTTPException:
+        """Log only correlation context and return a privacy-safe 503."""
+        logger.warning(
+            "Professor research operation unavailable request_id=%s",
+            getattr(request.state, "request_id", "unknown"),
+        )
+        return HTTPException(
+            status_code=503,
+            detail="Professor research data is temporarily unavailable",
+        )
+
     @app.get("/api/v1/professor/overview", response_model=OverviewResponse)
     def professor_overview(
         owner: OwnerServices = Depends(current_professor),
@@ -434,6 +464,147 @@ def create_app(
     ) -> EngagementResponse:
         """Return usage/session analytics, kept distinct from performance."""
         return _professor_service(owner).engagement()
+
+    @app.get(
+        "/api/v1/professor/research/summary",
+        response_model=ResearchSummaryResponse,
+    )
+    def professor_research_summary(
+        request: Request,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> ResearchSummaryResponse:
+        """Return aggregate research-coding counts without identities."""
+        try:
+            return _research_service(owner).summary()
+        except Exception as error:
+            raise _research_unavailable(request) from error
+
+    @app.get(
+        "/api/v1/professor/research/queue",
+        response_model=ResearchQueueResponse,
+    )
+    def professor_research_queue(
+        request: Request,
+        coding_status: str | None = Query(default=None, max_length=16),
+        phase: str | None = Query(default=None, max_length=80),
+        search: str = Query(default="", max_length=120),
+        limit: int = Query(default=25, ge=1, le=100),
+        offset: int = Query(default=0, ge=0, le=10_000),
+        owner: OwnerServices = Depends(current_professor),
+    ) -> ResearchQueueResponse:
+        """Return an audited, filtered page of identifiable observations."""
+        try:
+            return _research_service(owner).queue(
+                actor_user_id=owner.user_id,
+                actor_role=_professor_role(owner),
+                request_id=str(getattr(request.state, "request_id", "unknown")),
+                coding_status=coding_status,
+                phase=phase,
+                search=search,
+                limit=limit,
+                offset=offset,
+            )
+        except ValueError as error:
+            raise _value_error(error) from error
+        except Exception as error:
+            raise _research_unavailable(request) from error
+
+    @app.get(
+        "/api/v1/professor/research/notebooks/{notebook_id}",
+        response_model=ResearchNotebookDetailResponse,
+    )
+    def professor_research_notebook(
+        notebook_id: str,
+        request: Request,
+        observation_limit: int = Query(default=100, ge=1, le=100),
+        observation_offset: int = Query(default=0, ge=0, le=10_000),
+        owner: OwnerServices = Depends(current_professor),
+    ) -> ResearchNotebookDetailResponse:
+        """Return one audited transcript with automated and human coding."""
+        try:
+            detail = _research_service(owner).notebook_detail(
+                notebook_id,
+                actor_user_id=owner.user_id,
+                actor_role=_professor_role(owner),
+                request_id=str(getattr(request.state, "request_id", "unknown")),
+                transcript_loader=_professor_service(owner).conversation_transcript,
+                observation_limit=observation_limit,
+                observation_offset=observation_offset,
+            )
+        except Exception as error:
+            raise _research_unavailable(request) from error
+        if detail is None:
+            raise HTTPException(status_code=404, detail="Research notebook not found")
+        return detail
+
+    @app.post(
+        "/api/v1/professor/research/reviews",
+        response_model=ResearchReview,
+        status_code=201,
+    )
+    def professor_research_review(
+        payload: ResearchReviewRequest,
+        request: Request,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> ResearchReview:
+        """Append a review with reviewer identity derived from authentication."""
+        try:
+            return _research_service(owner).submit_review(
+                payload, reviewer_user_id=owner.user_id
+            )
+        except ValueError as error:
+            raise _value_error(error) from error
+        except Exception as error:
+            raise _research_unavailable(request) from error
+
+    @app.post(
+        "/api/v1/professor/research/adjudications",
+        response_model=ResearchAdjudication,
+        status_code=201,
+    )
+    def professor_research_adjudication(
+        payload: ResearchAdjudicationRequest,
+        request: Request,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> ResearchAdjudication:
+        """Append an adjudication with server-derived staff identity."""
+        try:
+            return _research_service(owner).submit_adjudication(
+                payload, adjudicator_user_id=owner.user_id
+            )
+        except ValueError as error:
+            raise _value_error(error) from error
+        except Exception as error:
+            raise _research_unavailable(request) from error
+
+    @app.get("/api/v1/professor/research/export.csv")
+    def professor_research_export(
+        request: Request,
+        coding_status: str | None = Query(default=None, max_length=16),
+        phase: str | None = Query(default=None, max_length=80),
+        owner: OwnerServices = Depends(current_professor),
+    ) -> Response:
+        """Return an audited, formula-safe CSV export of active observations."""
+        try:
+            content = _research_service(owner).export_csv(
+                actor_user_id=owner.user_id,
+                actor_role=_professor_role(owner),
+                request_id=str(getattr(request.state, "request_id", "unknown")),
+                coding_status=coding_status,
+                phase=phase,
+            )
+        except ValueError as error:
+            raise _value_error(error) from error
+        except Exception as error:
+            raise _research_unavailable(request) from error
+        return Response(
+            content=content,
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="research-observations.csv"',
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @app.get("/api/v1/auth/logout/callback")
     def auth_logout_callback(request: Request) -> RedirectResponse:

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import re
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from backend.persistence.dsql_schema import DSQL_SCHEMA, iter_dsql_ddl_statements
 
@@ -20,10 +22,115 @@ apply_missing_revision_columns = _INIT_DSQL.apply_missing_revision_columns
 apply_revision_null_backfills = _INIT_DSQL.apply_revision_null_backfills
 build_revision_null_backfill_update = _INIT_DSQL.build_revision_null_backfill_update
 column_default_is_zero = _INIT_DSQL.column_default_is_zero
+initialize_empty_workflow_contract = _INIT_DSQL.initialize_empty_workflow_contract
 plan_missing_message_revision_statements = _INIT_DSQL.plan_missing_message_revision_statements
 plan_missing_notebooks_conversation_revision_statements = (
     _INIT_DSQL.plan_missing_notebooks_conversation_revision_statements
 )
+
+
+class _SingleRowResult:
+    """Minimal fetch result for workflow-contract bootstrap tests."""
+
+    def __init__(self, row: dict[str, Any] | None):
+        self._row = row
+
+    def fetchone(self) -> dict[str, Any] | None:
+        return self._row
+
+
+class _WorkflowContractConnection:
+    """Record workflow-marker reads and writes without a live DSQL cluster."""
+
+    def __init__(self, *, notebook_count: int, marker: dict[str, str] | None):
+        self.notebook_count = notebook_count
+        self.marker = marker
+        self.committed = False
+        self.rolled_back = False
+        self.closed = False
+
+    def execute(self, sql: str, params: Any = None) -> _SingleRowResult:
+        upper = " ".join(sql.upper().split())
+        if upper.startswith("SELECT COUNT(*) AS TOTAL FROM NOTEBOOKS"):
+            return _SingleRowResult({"total": self.notebook_count})
+        if upper.startswith("SELECT VALUE_TEXT FROM SYSTEM_METADATA"):
+            value = json.dumps(self.marker) if self.marker is not None else None
+            return _SingleRowResult({"value_text": value} if value else None)
+        if upper.startswith("INSERT INTO SYSTEM_METADATA"):
+            self.marker = json.loads(str((params or (None, None))[1]))
+            return _SingleRowResult(None)
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    def commit(self) -> None:
+        self.committed = True
+
+    def rollback(self) -> None:
+        self.rolled_back = True
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _initialize_contract(connection: _WorkflowContractConnection) -> str:
+    with patch.object(_INIT_DSQL, "_connect_admin", return_value=connection):
+        return initialize_empty_workflow_contract(
+            endpoint="ep.example",
+            region="us-west-2",
+            token_provider=lambda: "admin-tok",
+        )
+
+
+def test_empty_dsql_bootstrap_initializes_exact_workflow_contract():
+    connection = _WorkflowContractConnection(
+        notebook_count=0,
+        marker={"version": "retired-contract"},
+    )
+
+    assert _initialize_contract(connection) == "initialized"
+    assert connection.marker == {"version": "cde2300-five-phase-v1"}
+    assert connection.committed is True
+    assert connection.rolled_back is False
+    assert connection.closed is True
+
+
+def test_populated_dsql_bootstrap_never_invents_missing_contract():
+    connection = _WorkflowContractConnection(notebook_count=2, marker=None)
+
+    assert _initialize_contract(connection) == "requires-reset"
+    assert connection.marker is None
+    assert connection.committed is False
+    assert connection.rolled_back is True
+    assert connection.closed is True
+
+
+def test_populated_dsql_bootstrap_preserves_ready_contract():
+    marker = {"version": "cde2300-five-phase-v1"}
+    connection = _WorkflowContractConnection(notebook_count=2, marker=marker)
+
+    assert _initialize_contract(connection) == "already-ready"
+    assert connection.marker == marker
+    assert connection.committed is False
+    assert connection.rolled_back is True
+    assert connection.closed is True
+
+
+def test_main_fails_closed_when_existing_dsql_data_requires_reset(capsys):
+    with (
+        patch.object(_INIT_DSQL, "apply_dsql_schema", return_value=[]),
+        patch.object(
+            _INIT_DSQL,
+            "initialize_empty_workflow_contract",
+            return_value="requires-reset",
+        ),
+    ):
+        result = _INIT_DSQL.main(
+            ["--endpoint", "ep.example", "--region", "us-west-2"]
+        )
+
+    assert result == 2
+    output = capsys.readouterr().out
+    assert "Workflow marker not changed" in output
+    assert "grant runtime privileges" not in output
 
 
 def _messages_create_sql() -> str:

@@ -125,8 +125,6 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     # Default UI tests run as an authenticated Cognito student so existing
     # AppTest suites keep exercising the full application. Auth-gate tests
     # override ``is_logged_in`` / ``authenticated_user`` explicitly.
-    import streamlit as st
-
     from ui import auth_gate as auth_gate_module
 
     _default_user = {

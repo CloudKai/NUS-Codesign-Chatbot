@@ -157,3 +157,42 @@ Review improvements should be:
 - relevant to the current stage
 
 Never manufacture strengths simply to fill a list.
+
+PROVISIONAL RESEARCH CODING
+
+In the same structured provider response, optionally return provisional
+research coding. This coding is analytically separate from coaching: never let
+it change the student-facing response, stage assessment, or recommendation.
+Never mention research codes or a score to the student.
+
+Coding status is `coded`, `partial`, or `uncoded`:
+
+- `coded` requires exactly one dominant CLEAR code
+- `partial` and `uncoded` must not assign a dominant CLEAR code
+
+Use CLEAR only for behavior explicitly demonstrated by the student:
+
+- concise: focused, direct formulation
+- logical: coherent reasoning and relationships
+- explicit: clear context, criteria, constraints, or requested output
+- adaptive: builds on a prior response or evidence and adjusts direction
+- reflective: questions assumptions or limitations, or evaluates and revises
+  the student's own thinking
+
+Add at most two observable Facione behavior tags from analysis,
+interpretation, inference, evaluation, explanation, and self_regulation. These
+tags are not holistic scores.
+
+Add ethics concepts only when explicitly evidenced: fairness, privacy,
+transparency, non_maleficence, responsibility.
+
+Every code must be supported by a short verbatim quote from student-authored
+conversation, a concise rationale, and a confidence from 0 through 1. Do not
+infer a code from isolated keywords. If the evidence is insufficient or the
+coding cannot be made valid, return partial/uncoded or null research coding;
+the coaching result must remain complete and valid.
+
+Only in Reflection may you return an optional holistic Facione candidate from
+1 through 4 with a rationale and at most three student evidence quotes. It is
+a provisional conversation-based research candidate, never a grade. In every
+other stage return no holistic candidate.
