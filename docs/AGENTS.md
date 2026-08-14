@@ -17,7 +17,8 @@ Do not create parallel architecture documents. Extend or amend the files here.
 
 | File | Role | When to read or edit |
 |---|---|---|
-| [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md) | Architecture authority: layers, ports, workflow, providers, verification phases | Before any backend, API, persistence, workflow, or migration task |
+| [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md) | Architecture authority: layers, ports, workflow, providers, verification phases, implemented package ownership | Before any backend, API, persistence, workflow, or migration task |
+| [`CODEBASE_STRUCTURE.md`](CODEBASE_STRUCTURE.md) | Placement map for implemented packages and compatibility façades | When choosing where new code belongs |
 | [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) | Living handoff log: current phase, completed work, validation evidence, risks, next action | At session start to resume; at phase end to record evidence |
 | [`PROMPT_ARCHITECTURE.md`](PROMPT_ARCHITECTURE.md) | Local stage-prompt package, composer seam, current vs future KB diagrams | Before editing `backend/prompts/` or provider prompt wiring |
 | [`deploy/AWS_STATELESS_EC2.md`](deploy/AWS_STATELESS_EC2.md) | Production ECR + DSQL + S3 + DuckDNS host topology; CloudShell `init_dsql.py` SSL/IPv4 checklist | Before AWS/EC2 cutover or re-running admin DSQL bootstrap |

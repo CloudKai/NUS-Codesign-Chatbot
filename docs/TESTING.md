@@ -40,8 +40,7 @@ APP_IMAGE=co-design:test docker compose -f compose.prod.yaml config --quiet
 git diff --check
 ```
 
-`scripts/build.sh` currently runs compileall plus pytest, but standalone checks
-should include `scripts/` until the script is updated to do so itself.
+`scripts/build.sh` runs compileall (including `scripts/`) plus pytest.
 
 ## Coverage map
 
@@ -50,7 +49,8 @@ should include `scripts/` until the script is updated to do so itself.
 | Auth cookies, refresh, OAuth state, logout | `http/test_app_sessions.py`, `ui/test_auth_gate.py`, `http/test_cognito_token_jwks.py` |
 | Owner isolation | `http/test_multiuser_ownership.py`, `http/test_runtime_auth.py`, `http/test_production_critical_path.py` |
 | API/client contracts | `http/test_api.py`, `http/test_api_client.py`, `http/test_workspace_api.py` |
-| Six-stage workflow and progression | `domain/test_workflow.py`, `domain/test_primary_path.py`, `domain/test_learning_service.py`, `domain/test_student_journey.py` |
+| Five-phase workflow and progression | `domain/test_workflow.py`, `domain/test_primary_path.py`, `domain/test_learning_service.py`, `domain/test_student_journey.py` |
+| Lecturer Research/analytics | `http/test_professor_research.py`, `http/test_professor_analytics.py`, `ui/test_professor_ui.py`, `domain/test_research_coding_domain.py`, `persistence/test_research_persistence.py` |
 | Prompts/provider boundary | `domain/test_prompt_architecture.py`, `domain/test_models_and_support.py` |
 | Retrieval/citations/sources | `domain/test_retrieval.py`, `domain/test_source_library.py`, `ui/test_sources_ui.py` |
 | Persistence/migrations | `persistence/test_student_store.py`, `scripts/test_init_db.py`, `scripts/test_init_dsql.py`, `persistence/test_storage_providers.py` |
@@ -59,7 +59,7 @@ should include `scripts/` until the script is updated to do so itself.
 | Streamlit behavior | `ui/test_streamlit_ui.py`, `ui/test_streamlit_api_mode.py`, `ui/test_rerun_scope.py`, `ui/test_theme_styles.py` |
 | Production configuration/edge | `http/test_production_config.py`, `test_deployment_config.py` |
 | Logging/rate limits | `http/test_privacy_logging.py`, `http/test_rate_limit.py` |
-| Mock concurrency diagnostic | `scripts/test_load_probe.py` |
+| Architecture façades and inventories | `test_architecture_contracts.py` |
 
 ## Regression workflow
 

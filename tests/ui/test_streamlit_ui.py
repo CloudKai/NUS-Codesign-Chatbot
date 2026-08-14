@@ -1,8 +1,19 @@
+import inspect
 from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
 
+import ui.chat as chat_module
+import ui.sources as sources_module
+import ui.studio as studio_module
+
 from backend.settings import settings
+
+
+
+def _implementation_source(module: object) -> str:
+    """Read the module that owns behavior behind a compatibility alias."""
+    return Path(inspect.getfile(module)).read_text(encoding="utf-8")
 
 
 def test_chat_composer_attachment_error_is_recoverable(monkeypatch):
@@ -96,7 +107,7 @@ def test_streamlit_notebook_workspace_smoke():
         "Readings · 0",
         "My Sources · 0",
     }
-    sources_py = Path("ui/sources.py").read_text(encoding="utf-8")
+    sources_py = _implementation_source(sources_module)
     my_sources_at = sources_py.index('f"My Sources · {len(personal_sources)}"')
     lecture_at = sources_py.index('f"{group} · {len(group_all)}"')
     assert my_sources_at < lecture_at
@@ -111,19 +122,17 @@ def test_streamlit_notebook_workspace_smoke():
     assert "Select all sources" in sources_py
     assert "Frame the design problem, who it affects, and why it matters." in rendered
     assert "Add your first source" in rendered
-    assert "Loading course materials in the background…" in Path("ui/sources.py").read_text(
-        encoding="utf-8"
+    assert "Loading course materials in the background…" in _implementation_source(
+        sources_module
     )
     assert 'st.session_state["source_upload_error"] = str(exc)' not in sources_py
     assert "st.error(str(exc))" not in sources_py
-    assert "st.error(str(exc))" not in Path("ui/studio.py").read_text(encoding="utf-8")
-    assert "_STAGE_SELECT_ERROR" in Path("ui/studio.py").read_text(encoding="utf-8")
-    assert "_TRANSITION_RESOLVE_ERROR" in Path("ui/studio.py").read_text(
-        encoding="utf-8"
-    )
-    assert 'click Send' in Path("ui/chat.py").read_text(encoding="utf-8")
-    assert "st.session_state.pop(\"pending_edit\", None)" in Path("ui/chat.py").read_text(
-        encoding="utf-8"
+    assert "st.error(str(exc))" not in _implementation_source(studio_module)
+    assert "_STAGE_SELECT_ERROR" in _implementation_source(studio_module)
+    assert "_TRANSITION_RESOLVE_ERROR" in _implementation_source(studio_module)
+    assert 'click Send' in _implementation_source(chat_module)
+    assert "st.session_state.pop(\"pending_edit\", None)" in _implementation_source(
+        chat_module
     )
     assert "_SOURCE_UPLOAD_ERROR" in sources_py
     assert "_SOURCE_SYNC_ERROR" in sources_py
@@ -158,7 +167,7 @@ def test_streamlit_notebook_workspace_smoke():
     assert "__cdUserEditCleanup" in edit_layout
     assert "--cd-user-bubble-max-rows:8" in rendered
     assert "--cd-user-bubble-max-height" in rendered
-    chat_py = Path("ui/chat.py").read_text(encoding="utf-8")
+    chat_py = _implementation_source(chat_module)
     assert "USER_MESSAGE_EDIT_HEIGHT_PX" in chat_py
     assert '"height": USER_MESSAGE_EDIT_HEIGHT_PX' in chat_py or (
         "height=USER_MESSAGE_EDIT_HEIGHT_PX" in chat_py
@@ -185,15 +194,11 @@ def test_streamlit_notebook_workspace_smoke():
     assert ".conversation-revision-label" not in Path(
         "ui/assets/styles/30-chat.css"
     ).read_text(encoding="utf-8")
-    assert 'appearance == "Dark"' in Path("ui/chat.py").read_text(encoding="utf-8")
-    assert "#5B6B7C" in Path("ui/chat.py").read_text(encoding="utf-8")
-    assert "rgba(255, 255, 255, 0.35)" in Path("ui/chat.py").read_text(
-        encoding="utf-8"
-    )
-    assert "#9AA8B5" in Path("ui/chat.py").read_text(encoding="utf-8")
-    assert "rgba(15, 20, 25, 0.72)" not in Path("ui/chat.py").read_text(
-        encoding="utf-8"
-    )
+    assert 'appearance == "Dark"' in _implementation_source(chat_module)
+    assert "#5B6B7C" in _implementation_source(chat_module)
+    assert "rgba(255, 255, 255, 0.35)" in _implementation_source(chat_module)
+    assert "#9AA8B5" in _implementation_source(chat_module)
+    assert "rgba(15, 20, 25, 0.72)" not in _implementation_source(chat_module)
     assert "writing-mode:horizontal-tb" in rendered
     assert "grid-template-columns:minmax(0,1fr) auto" in rendered
     assert "stChatInputTextArea" in rendered
@@ -656,7 +661,7 @@ def test_rename_and_icon_controls_expose_accessible_instructions():
     from ui.theme import _template_stylesheet
 
     rename_source = Path("ui/rename.py").read_text(encoding="utf-8")
-    sources = Path("ui/sources.py").read_text(encoding="utf-8")
+    sources = _implementation_source(sources_module)
     profile = Path("ui/profile.py").read_text(encoding="utf-8")
     workspace = Path("ui/workspace.py").read_text(encoding="utf-8")
     css = _template_stylesheet()

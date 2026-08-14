@@ -40,6 +40,25 @@ SQLite reset creates a recoverable backup and file quarantine and preserves
 users/auth records; DSQL reset is admin-only and explicit. Schema changes
 require safe initialization, backup instructions, and tested rollback paths.
 
+## Implemented package ownership
+
+The layers above are the behavior contract. Current code ownership:
+
+| Concern | Implementation | Compatibility import |
+|---|---|---|
+| FastAPI composition, student and professor routes | `backend/http/app.py` | `backend/api.py` |
+| Five-phase journey, review, Facione projection | `backend/learning/` | `backend/student_journey.py` |
+| Coach-turn execution, research-observation persist | `backend/coaching/execution.py` | `backend/application.py` |
+| Source ingestion, course sync, context, image projection | `backend/sources/` | `backend/source_library.py` |
+| Chat, sources, Journey/Review, runtime facade | `ui/panels/`, `ui/services/runtime.py` | `ui/chat.py`, `ui/sources.py`, `ui/studio.py`, `ui/runtime.py` |
+| DSQL admin bootstrap (five-phase marker + research DDL) | `scripts/dsql/cli.py` | `scripts/init_dsql.py` |
+
+Leave `ui/professor.py`, professor CSS, `backend/professor_analytics/`, and
+`backend/research/` in place. Keep research SQL on `StudentStore`. Do not
+restore six coaching stages or drop professor/research routes.
+
+See [`CODEBASE_STRUCTURE.md`](CODEBASE_STRUCTURE.md) for the placement map.
+
 ## Target layers and interfaces
 
 ### Presentation
@@ -80,8 +99,8 @@ into domain or application code.
 
 ## Educational workflow
 
-Build one LangGraph workflow, not six agents. Give it explicit typed state and
-durable per-thread checkpoints.
+Build one LangGraph workflow, not one agent per phase. Give it explicit typed
+state and durable per-thread checkpoints.
 
 Its steps are:
 

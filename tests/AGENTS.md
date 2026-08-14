@@ -23,7 +23,8 @@ gives every test its own temporary data/database/files/lecture-notes tree and:
 
 - Forces `MOCK_OPENAI=true`, `MODEL_PROVIDER=mock`, and clears `OPENAI_API_KEY`
   (asserted each test).
-- Defaults `USE_LOCAL_API=false` for legacy AppTest; API-mode UI tests opt in.
+- Defaults `USE_LOCAL_API=false` for in-process `CoachApplicationService`
+  AppTest; API-mode UI tests opt in.
 - Defaults `AUTO_ADVANCE_STAGES=false`.
 - Monkeypatches `backend.settings.settings` paths onto the per-test tree.
 - Clears Streamlit `cache_resource` handles so AppTest does not reuse a store.
@@ -32,72 +33,96 @@ Do not point tests at a developer's real `data/` directory. Prefer explicit
 `StudentStore(tmp_path / "...")` for backend tests; AppTest uses the isolated
 default `StudentStore()` path.
 
-## Test file map
+## Test package map
+
+Tests are organized by owning subsystem. Repository-wide architecture and
+deployment contracts remain at the root. Subdirectories have **no**
+`__init__.py`, so `http` and `ui` test folders cannot shadow application
+modules.
+
+| Package | Covers |
+|---|---|
+| `domain/` | Five-phase coaching, learning, prompts, workflow, retrieval, sources, research coding |
+| `persistence/` | StudentStore, revisions, idempotency, research persistence, storage adapters |
+| `http/` | FastAPI, auth, ownership, API clients, professor analytics/research, production paths |
+| `ui/` | Streamlit AppTest, presentation state, themes, auth gate, professor UI |
+| `scripts/` | SQLite/DSQL administration and learning-data reset |
+
+## Detailed test map
 
 | File | Covers |
 |---|---|
-| `test_api.py` | FastAPI `/api/v1` health, coaching turn, transitions, integrity guards; legacy Streamlit-cookie logout callback |
-| `test_api_client.py` | Typed `LocalApiClient` confirmation + auto-advance contracts; `/auth/me` session mapping |
-| `test_app_sessions.py` | Cognito refresh/ID cookie sessions, OAuth state binder, callback/logout, redirect URI precedence |
-| `test_auth_gate.py` | Streamlit auth gate, Redirecting UX, Cognito profile upsert, owner binding, no `st.login`/`st.user` authority |
+| `test_architecture_contracts.py` | Façade signatures, StudentStore/OCC inventories, professor-inclusive FastAPI routes |
 | `test_deployment_config.py` | Compose/Caddy/Dockerfile production auth route allow-list, Cognito redirect, stateless prod compose |
-| `test_storage_providers.py` | SQLite/local defaults, DSQL/S3 provider selection, mocked DSQL auth + S3 (no AWS calls) |
-| `test_runtime_auth.py` | Cognito owner isolation vs single-owner local API |
-| `test_workspace_api.py` | Notebook/source/preference CRUD API and path redaction |
-| `test_primary_path.py` | All five phases, stale/reject, restart, notebook isolation, schema |
-| `test_research_coding_domain.py` | Structured provisional CLEAR/Facione/ethics coding and one-call integration |
-| `test_research_persistence.py` | Offset-only observations, revisions, human decisions, audit, workflow marker |
-| `test_professor_research.py` | Attributable lecturer Research API, review/adjudication, audited CSV |
-| `test_reset_learning_data.py` | Dry-run manifest, backup/quarantine, exact confirmation, stale-plan rejection |
-| `test_workflow.py` | LangGraph workflow routing and structured output |
-| `test_prompt_architecture.py` | Stage prompt files, composer ordering, authoritative stage selection, no raw prompts in API |
-| `test_learning_service.py` | Phase transition confirmation, resolution, atomic rollback |
-| `test_student_store.py` | Notebook, folder, message, source persistence |
-| `test_student_journey.py` | Stage normalization, journey helpers, review |
-| `test_source_library.py` | Source import, lecture sync, locked course groups |
-| `test_title_service.py` | Notebook title shortening and legacy replacement |
-| `test_files_and_engine.py` | Upload processing and chat engine behavior |
-| `test_models_and_support.py` | Model registry and support-mode helpers |
-| `test_streamlit_ui.py` | AppTest smoke against `streamlit_app.py` (legacy path) |
-| `test_theme_styles.py` | Ordered CSS partial manifest and assembled stylesheet contracts (incl. auth) |
-| `test_streamlit_api_mode.py` | AppTest API confirmation + auto-advance; one legacy fallback |
-| `test_rename.py` | Enter-only rename draft helpers and epochs |
-| `test_init_db.py` | Safe `init_db.py` refuse-existing / `--force` behavior |
+| `http/test_api.py` | FastAPI `/api/v1` health, coaching turn, transitions, integrity guards |
+| `http/test_api_client.py` | Typed `LocalApiClient` confirmation + auto-advance contracts; `/auth/me` session mapping |
+| `http/test_app_sessions.py` | Cognito refresh/ID cookie sessions, OAuth state binder, callback/logout |
+| `http/test_professor_analytics.py` | Lecturer overview/engagement analytics API |
+| `http/test_professor_research.py` | Attributable lecturer Research API, review/adjudication, audited CSV |
+| `ui/test_auth_gate.py` | Streamlit auth gate, Redirecting UX, Cognito profile upsert, owner binding |
+| `ui/test_professor_ui.py` | Professor workbench AppTest contracts |
+| `persistence/test_storage_providers.py` | SQLite/local defaults, DSQL/S3 provider selection, mocked DSQL auth + S3 |
+| `http/test_runtime_auth.py` | Cognito owner isolation vs single-owner local API |
+| `http/test_workspace_api.py` | Notebook/source/preference CRUD API and path redaction |
+| `domain/test_primary_path.py` | All five phases, stale/reject, restart, notebook isolation, schema |
+| `domain/test_research_coding_domain.py` | Structured provisional CLEAR/Facione/ethics coding |
+| `persistence/test_research_persistence.py` | Offset-only observations, revisions, human decisions, audit, workflow marker |
+| `scripts/test_reset_learning_data.py` | Dry-run manifest, backup/quarantine, exact confirmation, stale-plan rejection |
+| `domain/test_workflow.py` | LangGraph workflow routing and structured output |
+| `domain/test_prompt_architecture.py` | Stage prompt files, composer ordering, authoritative stage selection |
+| `domain/test_learning_service.py` | Phase transition confirmation, resolution, atomic rollback |
+| `persistence/test_student_store.py` | Notebook, folder, message, source persistence |
+| `domain/test_student_journey.py` | Stage normalization, journey helpers, review |
+| `domain/test_source_library.py` | Source import, lecture sync, locked course groups |
+| `domain/test_title_service.py` | Notebook title shortening and legacy replacement |
+| `domain/test_files_and_engine.py` | Upload processing and chat engine behavior |
+| `domain/test_models_and_support.py` | Model registry and support-mode helpers |
+| `ui/test_streamlit_ui.py` | AppTest smoke against `streamlit_app.py` (in-process path) |
+| `ui/test_theme_styles.py` | Ordered CSS partial manifest and assembled stylesheet contracts |
+| `ui/test_streamlit_api_mode.py` | AppTest API confirmation + auto-advance |
+| `ui/test_rename.py` | Enter-only rename draft helpers and epochs |
+| `scripts/test_init_db.py` | Safe `init_db.py` refuse-existing / `--force` behavior |
+| `scripts/test_init_dsql.py` | Additive DSQL revision planning and five-phase/research bootstrap |
 
 ## Hard constraints
 
 - **Deterministic mocks only** for automated runs. No network or paid API calls.
 - **AppTest loads `streamlit_app.py`**, not individual `ui/` modules. The
   entrypoint must import panels so dialogs and fragments register correctly.
-- **Source-file assertions** must track moved strings. If UI copy moves from
-  `streamlit_app.py` to `ui/sources.py`, update the test path accordingly.
+- **Source-file assertions** must resolve the owning module with
+  `inspect.getfile` so they still pass through compatibility aliases.
 - **Prefer targeted tests** after a localized change; run the full suite at
   phase boundaries and before handoff.
 - **Do not delete user data** in tests. Use the isolated paths from `conftest.py`.
 - Live Ollama/OpenAI tests stay `@pytest.mark.live` and disabled by default.
+- Patch DSQL CLI internals on `scripts.dsql.cli` when the loaded
+  `scripts/init_dsql.py` wrapper re-exports implementation functions.
 
 ## Common edit paths
 
 **New backend behavior**
 
 Add or extend the closest subsystem test file. Mirror production module
-boundaries — e.g. source changes go in `test_source_library.py`.
+boundaries — e.g. source changes go in `domain/test_source_library.py`.
 
 **New Streamlit UI control or copy**
 
-Extend `test_streamlit_ui.py` (legacy) or `test_streamlit_api_mode.py` (API).
-Assert on rendered output (`app.markdown`, `app.button`, etc.) when possible.
+Extend `ui/test_streamlit_ui.py` (in-process) or `ui/test_streamlit_api_mode.py`
+(API). Assert on rendered output (`app.markdown`, `app.button`, etc.) when
+possible.
 
 **API contract change**
 
-Update `test_api.py`, `test_api_client.py`, and `backend/api_client.py` together.
+Update `http/test_api.py`, `http/test_api_client.py`, and
+`backend/api_client.py` together. If the public route inventory changes, update
+`test_architecture_contracts.py`.
 
 ## Validation
 
 Targeted:
 
 ```sh
-.venv/bin/python -m pytest -q tests/test_<module>.py
+.venv/bin/python -m pytest -q tests/<subsystem>/test_<module>.py
 ```
 
 Full suite:
@@ -110,7 +135,7 @@ With compile check:
 
 ```sh
 PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \
-  .venv/bin/python -m compileall -q backend ui streamlit_app.py tests
+  .venv/bin/python -m compileall -q backend ui streamlit_app.py tests scripts
 ```
 
 CI: [`.github/workflows/mock-ci.yml`](../.github/workflows/mock-ci.yml) runs

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-_INIT_DB_PATH = Path(__file__).resolve().parents[1] / "scripts" / "init_db.py"
+_INIT_DB_PATH = Path(__file__).resolve().parents[2] / "scripts" / "init_db.py"
 _SPEC = importlib.util.spec_from_file_location("co_design_init_db", _INIT_DB_PATH)
 assert _SPEC is not None and _SPEC.loader is not None
 _INIT_DB = importlib.util.module_from_spec(_SPEC)

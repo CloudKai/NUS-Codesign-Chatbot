@@ -45,7 +45,7 @@ from backend.student_journey import STAGE_BY_ID, THINKING_STAGES
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 _STAGES_DIR = _REPO_ROOT / "backend" / "prompts" / "stages"
 _STAGE_MARKERS = {
     "problem_identification": "STAGE: PROBLEM IDENTIFICATION",

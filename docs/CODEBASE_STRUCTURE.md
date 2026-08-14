@@ -10,20 +10,23 @@ remain in [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md).
 streamlit_app.py              thin Streamlit entrypoint
 ui/                           presentation, dialogs, session/view state, CSS
   panels/                     chat, source, Journey/Review implementations
+  professor.py                lecturer Research/analytics workbench (not aliased)
   services/                   cached API/application resource facades
 backend/
   api.py                      FastAPI compatibility facade
   http/app.py                 FastAPI composition, routes and HTTP errors
   api_client.py               typed client used by Streamlit
   application.py              coaching compatibility facade
-  coaching/                   durable execution and citation projection
+  coaching/                   durable coach-turn execution
   workspace_service.py        notebook/message/source/preference use cases
   learning_service.py         transition confirmation and stage selection
   domain.py                   Pydantic API/workflow contracts
   student_journey.py          learning compatibility facade
-  learning/                   stages, journey rules and review projection
+  learning/                   five-phase stages, journey rules and review projection
   workflow.py                 one LangGraph coach workflow
-  prompts/                    shared and stage-specific provider-neutral prompts
+  prompts/                    shared and five-phase provider-neutral prompts
+  professor_analytics/        lecturer overview and Research application services
+  research/                   observation/review/adjudication models and adapters
   source_library.py           source compatibility alias
   sources/                    ingestion, course sync, context, image projection
   retrieval.py                retrieval port and local chunk retriever
@@ -57,7 +60,8 @@ composition root so AppTest can load the complete application.
 
 Public request and response models belong in `backend/domain.py`.
 `backend/http/app.py` is the application/owner composition root and owns workspace
-CRUD, coach, learning, graph, readiness, and transition HTTP orchestration.
+CRUD, coach, learning, graph, readiness, transition, and professor/research HTTP
+orchestration. Do not split professor routes into a second app.
 Routes validate HTTP input, call an application service, and map structured
 failures. Mirror client changes in `backend/api_client.py` and contract tests.
 
@@ -68,9 +72,9 @@ construction in route functions.
 
 Use `CoachApplicationService` for coaching-turn orchestration,
 `WorkspaceService` for workspace CRUD, and `LearningProgressService` for stage
-decisions. Keep stage definitions and review projections in
+decisions. Keep the five research-aligned phase definitions and review projections in
 `backend/learning/`; keep provider-neutral request/assessment contracts in
-`domain.py`.
+`domain.py`. Lecturer Research coding models stay in `backend/research/`.
 
 Use a focused class when it owns dependencies or state. Prefer a typed pure
 function for deterministic transformations. Do not add wrapper classes or
@@ -101,6 +105,7 @@ imports while implementations live in `ui.panels` and `ui.services`.
 `backend.source_library` preserve established imports while implementation is
 owned by `backend.http`, `backend.coaching`, `backend.learning` and
 `backend.sources`.
+`ui/professor.py` and `ui/assets/styles/70-professor.css` stay in place.
 `ui/column_resize.py`, `ui/sources_scroll.py`, and `ui/composer_layout.py`
 re-export the corresponding `ui.layout` modules. `StudentChatEngine` in
 `backend/chat_service.py` is retained for compatibility tests and is not the
@@ -116,7 +121,8 @@ behavior.
 | Edit/revise/idempotency | `coaching/execution.py`, repositories/store | persistence revision and idempotency suites |
 | Authentication/owner isolation | auth modules, `owner_context.py` | session, auth-gate, ownership, critical-path suites |
 | SQLite/DSQL/S3 | `persistence/`, `student_store.py` | storage, migration, delete-idempotency suites |
-| Streamlit layout or copy | owning `ui/` panel and CSS partial | AppTest plus desktop/390 px browser review |
+| Streamlit layout or copy | owning `ui/panels/` module or `ui/professor.py` and CSS partial | AppTest plus desktop/390 px browser review |
+| Lecturer Research/analytics | `professor_analytics/`, `research/`, `ui/professor.py` | professor HTTP/UI and research persistence suites |
 | Deployment boundary | Compose, Dockerfile, Caddy, scripts | production/deployment tests and config validation |
 
 ## Remaining large-module boundaries
@@ -125,8 +131,8 @@ The refactor deliberately did not impose an arbitrary line limit. The largest
 remaining modules have materially coupled transaction or framework behavior:
 
 - `backend/student_store.py` retains notebook/message/revision/coach-request
-  operations whose SQLite/DSQL transaction and private compatibility seams need
-  separate bounded extractions.
+  operations plus research observation/review/adjudication/audit SQL. Those
+  research writes stay on the store so coach-turn persist remains atomic.
 - `backend/http/app.py` still registers closure-heavy learning/coaching routes;
   the stable route and dependency inventory is the prerequisite for moving each
   registrar independently.

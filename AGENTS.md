@@ -109,7 +109,7 @@ Use the project virtual environment when present:
 ```sh
 .venv/bin/python -m pytest -q
 PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \\
-  .venv/bin/python -m compileall -q backend ui streamlit_app.py
+  .venv/bin/python -m compileall -q backend ui streamlit_app.py tests scripts
 ```
 
 `scripts/build.sh` is validation-only (`compileall` + mock `pytest`) and does

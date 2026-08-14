@@ -1,6 +1,92 @@
 # Implementation status
 
-## Current phase — research-aligned five-phase coach and lecturer validation
+## Current phase — port architecture package splits onto this branch
+
+**Completed locally on 2026-08-14.** Package ownership on
+`professor-analytics-ui` now matches the architecture-refactor *structure*
+(façades, focused packages, grouped tests) without merging that branch. Five
+research-aligned phases, professor analytics/Research, CSS, widget keys, and
+routes are unchanged.
+
+### Behavior delivered
+
+1. **Contracts locked first.** `tests/test_architecture_contracts.py` snapshots
+   this branch’s façade signatures, `StudentStore` public methods including
+   research/review/audit/workflow-marker APIs, DSQL OCC writes including
+   `append_research_*` / `set_system_metadata`, and the complete FastAPI route
+   inventory including `/api/v1/professor/*`.
+2. **Persistence seam only.** Store contracts, SQLite schema/migrations, and
+   source operations live under `backend/persistence/store/`. Research
+   observation/review/adjudication/audit SQL stays on `StudentStore`.
+3. **One FastAPI composition root.** `create_app` and all student+professor
+   routes live in `backend/http/app.py`. `backend/api.py` remains the import
+   façade, including monkeypatch seams for Cognito readiness and
+   `StudentStoreResearchRepository`.
+4. **Learning and coaching packages.** Five phases live in
+   `backend/learning/`; `CoachApplicationService` (including research-observation
+   persist and quote-offset handling) lives in `backend/coaching/execution.py`.
+   `backend/student_journey.py` and `backend/application.py` are façades.
+5. **Streamlit presentation aliases.** Chat/sources/studio/runtime
+   implementations live in `ui/panels/` and `ui/services/runtime.py`.
+   `ui/professor.py` and professor CSS were not moved. Cookie helpers live in
+   `ui/auth/cookies.py` with `_cookie_value` still patchable on `auth_gate`.
+6. **DSQL CLI and tests.** Implementation is `scripts/dsql/cli.py` (five-phase
+   marker + research DDL). `scripts/init_dsql.py` re-exports it. Tests are
+   grouped under `domain/`, `http/`, `persistence/`, `ui/`, and `scripts/` with
+   no `__init__.py`. Mock CI focused paths and compileall include `scripts/`.
+7. **Source package.** `backend/sources/library.py` owns ingestion/course sync;
+   `context.py` and `projection.py` own bounded context and image/storage
+   projection. `backend/source_library.py` is a `sys.modules` alias.
+
+### Main files changed
+
+- New packages: `backend/http/`, `backend/learning/`, `backend/coaching/`,
+  `backend/persistence/store/`, `backend/sources/`, `ui/panels/`,
+  `ui/services/`, `ui/auth/`, `scripts/dsql/`.
+- Compatibility façades: `backend/api.py`, `backend/application.py`,
+  `backend/student_journey.py`, `backend/source_library.py`, `ui/chat.py`,
+  `ui/sources.py`, `ui/studio.py`, `ui/runtime.py`, `scripts/init_dsql.py`.
+- Tests: `tests/test_architecture_contracts.py`; existing scenarios relocated
+  under subsystem directories; UI source-file assertions use `inspect.getfile`;
+  DSQL workflow-contract patches target `scripts.dsql.cli`.
+- Docs/guides: `docs/LOCAL_DEMO_IMPLEMENTATION.md`,
+  `docs/CODEBASE_STRUCTURE.md`, `docs/TESTING.md`, nested `AGENTS.md`,
+  `.github/workflows/mock-ci.yml`, `scripts/build.sh`.
+
+### Validation evidence
+
+- Architecture contract tests passed before and after each move.
+- Complete deterministic suite: **462 passed, 0 failed** (456 prior tests plus
+  6 architecture-contract tests); existing Starlette/httpx deprecation
+  warnings; no live AWS/Cognito/DSQL/S3/provider or paid call.
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
+  passed. `git diff --check` passed. Ruff is pinned in `requirements-dev.txt`
+  but was not installed in this local venv, so Ruff is not claimed here.
+- AppTest coverage for student Journey/Review and professor UI remains in the
+  mock suite. An isolated `scripts/start.sh` browser session was not repeated
+  in this pass.
+
+### Compatibility, migration, and rollback
+
+- No product, route, schema, authentication, provider/prompt, CSS, copy, or
+  widget-key change. Historical import paths and monkeypatch targets remain.
+- `codex/architecture-refactor` was used only as a pattern reference and was
+  not merged (that branch’s six Facione stages and missing professor/research
+  must not land here).
+- No database write, migration, or learning-data reset. Rollback is reverting
+  this working tree.
+
+### Known risks and next exact action
+
+- Aliases must keep replacing the module object (`sys.modules[__name__] = …`)
+  or re-exporting the same function objects; rebinding names breaks patches.
+- `StudentStore` remains large by design. Research SQL stays there so
+  coach-turn persist stays atomic.
+- If refactoring continues, start with one independently reviewed slice of
+  `StudentStore` notebook/message operations or one closure-complete HTTP route
+  registrar. Preserve the existing compatibility/OCC/route inventories first.
+
+## Previous completed phase — research-aligned five-phase coach and lecturer validation
 
 **Implemented on 2026-08-14.** The original Replit workflow, supplied system
 architecture/V&V materials, and the cited research have been translated into a

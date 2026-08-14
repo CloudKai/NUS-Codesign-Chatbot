@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from backend.persistence.dsql_schema import DSQL_SCHEMA, iter_dsql_ddl_statements
 
-_INIT_DSQL_PATH = Path(__file__).resolve().parents[1] / "scripts" / "init_dsql.py"
+_INIT_DSQL_PATH = Path(__file__).resolve().parents[2] / "scripts" / "init_dsql.py"
 _SPEC = importlib.util.spec_from_file_location("co_design_init_dsql_tests", _INIT_DSQL_PATH)
 assert _SPEC is not None and _SPEC.loader is not None
 _INIT_DSQL = importlib.util.module_from_spec(_SPEC)
@@ -72,7 +72,7 @@ class _WorkflowContractConnection:
 
 
 def _initialize_contract(connection: _WorkflowContractConnection) -> str:
-    with patch.object(_INIT_DSQL, "_connect_admin", return_value=connection):
+    with patch("scripts.dsql.cli._connect_admin", return_value=connection):
         return initialize_empty_workflow_contract(
             endpoint="ep.example",
             region="us-west-2",
@@ -116,10 +116,9 @@ def test_populated_dsql_bootstrap_preserves_ready_contract():
 
 def test_main_fails_closed_when_existing_dsql_data_requires_reset(capsys):
     with (
-        patch.object(_INIT_DSQL, "apply_dsql_schema", return_value=[]),
-        patch.object(
-            _INIT_DSQL,
-            "initialize_empty_workflow_contract",
+        patch("scripts.dsql.cli.apply_dsql_schema", return_value=[]),
+        patch(
+            "scripts.dsql.cli.initialize_empty_workflow_contract",
             return_value="requires-reset",
         ),
     ):

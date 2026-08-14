@@ -46,7 +46,7 @@ from backend.persistence.s3_files import (
 from backend.settings import settings
 from backend.student_store import StudentStore
 
-_INIT_DSQL_PATH = Path(__file__).resolve().parents[1] / "scripts" / "init_dsql.py"
+_INIT_DSQL_PATH = Path(__file__).resolve().parents[2] / "scripts" / "init_dsql.py"
 _SPEC = importlib.util.spec_from_file_location("co_design_init_dsql", _INIT_DSQL_PATH)
 assert _SPEC is not None and _SPEC.loader is not None
 _INIT_DSQL = importlib.util.module_from_spec(_SPEC)

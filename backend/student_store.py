@@ -20,16 +20,43 @@ compatibility wrappers over ``notebooks`` so API and UI churn stays limited.
 
 from __future__ import annotations
 
-import json
 import shutil
 import sqlite3
 import threading
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .persistence.store.contracts import (
+    AtomicAutoAdvance,
+    COACH_IDEMPOTENCY_MARKER as _COACH_IDEMPOTENCY_MARKER,
+    CoachIdempotencyConflictError,
+    CoachingStyleConflictError,
+    CoachRequestInProgressError,
+    CoachRequestLeaseLostError,
+    CoachRequestReservation,
+    ConversationRevisionConflictError,
+    ConversationRevisionResult,
+    PROGRESS_KEYS as _PROGRESS_KEYS,
+    SETTINGS_KEYS as _SETTINGS_KEYS,
+    dump_json as _dump,
+    load_json as _load,
+    utc_now,
+)
+from .persistence.store.sqlite_schema import (
+    NOTEBOOK_CHILD_DELETE_PLAN,
+    NOTEBOOK_CHILD_TABLES,
+    SQLITE_SCHEMA as SCHEMA,
+)
+from .persistence.store.operations import StoreOperations, bind_store_operations
+from .persistence.store.migrations import (
+    migrate_message_revisions,
+    migrate_notebook_revision,
+    migrate_oauth_login_states,
+    migrate_users_table,
+    repair_misbound_notebook_foreign_key,
+)
 from .settings import settings
 from .student_journey import DEFAULT_STAGE
 from . import workflow_contract as _workflow_contract
@@ -39,332 +66,8 @@ if TYPE_CHECKING:
     from .research.models import ResearchObservationCreate
 
 
-_COACH_IDEMPOTENCY_MARKER = "coach_idempotency"
 RESEARCH_WORKFLOW_CONTRACT_KEY = _workflow_contract.WORKFLOW_CONTRACT_KEY
 RESEARCH_WORKFLOW_CONTRACT_VERSION = _workflow_contract.WORKFLOW_CONTRACT_VERSION
-
-
-class CoachIdempotencyConflictError(ValueError):
-    """Raised when one idempotency key is reused for a different coach request."""
-
-
-class CoachRequestLeaseLostError(RuntimeError):
-    """Raised when an expired reservation was claimed by another worker."""
-
-
-class CoachRequestInProgressError(RuntimeError):
-    """Raised when another worker still owns an active coach request lease."""
-
-
-class ConversationRevisionConflictError(ValueError):
-    """Raised when a coach result targets a stale conversation_revision."""
-
-
-class CoachingStyleConflictError(ConversationRevisionConflictError):
-    """Raised when a coach result targets a stale Quick/Strict preference."""
-
-
-@dataclass(frozen=True)
-class AtomicAutoAdvance:
-    """Confirmed stage transition applied with its completed coach turn."""
-
-    transition_id: str
-    from_stage: str
-    to_stage: str
-    contribution_summary: str
-
-
-@dataclass(frozen=True)
-class ConversationRevisionResult:
-    """Authoritative notebook state after an append-only conversation revision.
-
-    ``edited_message_id`` is the new replacement user-message id (not the
-    superseded original). ``surviving_history`` is the active branch at the
-    new notebook revision.
-    """
-
-    thread_id: str
-    edited_message_id: str
-    conversation_revision: int
-    current_stage: str
-    surviving_history: list[dict[str, Any]]
-
-
-@dataclass(frozen=True)
-class CoachRequestReservation:
-    """Durable state returned while reserving one coach request key."""
-
-    state: str
-    marker_id: str
-    lease_token: str | None = None
-    turn_payload: dict[str, Any] | None = None
-
-
-def utc_now() -> str:
-    """Return an ISO-8601 UTC timestamp string."""
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _dump(value: Any) -> str:
-    """Serialize *value* as JSON text for TEXT columns."""
-    return json.dumps(value, ensure_ascii=False)
-
-
-def _load(value: str | None, default: Any) -> Any:
-    """Deserialize a JSON TEXT column, returning *default* on empty/invalid."""
-    if not value:
-        return default
-    try:
-        return json.loads(value)
-    except (TypeError, json.JSONDecodeError):
-        return default
-
-
-# Progress blob keys (never include current_stage — that is notebooks.current_stage).
-_PROGRESS_KEYS = frozenset(
-    {
-        "completed_stages",
-        "stage_notes",
-        "working_conclusion",
-        "critical_reflection",
-        "response_detail",
-        "learning_summary",
-        "understanding_change",
-        "critical_understanding",
-    }
-)
-
-# Notebook settings blob keys.
-_SETTINGS_KEYS = frozenset(
-    {
-        "selected_model",
-        "reasoning_effort",
-        "support_mode",
-        "assignment",
-        "response_language",
-        "allow_model_knowledge",
-        "display_name",
-        "last_workflow_user_message_id",
-        "tags",
-        "revoked_coach_idempotency_keys",
-    }
-)
-
-
-SCHEMA = """
-PRAGMA foreign_keys = ON;
-
-CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    identifier TEXT NOT NULL UNIQUE,
-    cognito_sub TEXT,
-    email TEXT,
-    display_name TEXT,
-    role TEXT NOT NULL DEFAULT 'student',
-    preferences_text TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    updated_at TEXT,
-    last_login_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS oauth_login_states (
-    state TEXT PRIMARY KEY,
-    code_verifier TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS notebooks (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    title TEXT,
-    current_stage TEXT NOT NULL DEFAULT 'problem_identification',
-    progress_text TEXT NOT NULL DEFAULT '{}',
-    settings_text TEXT NOT NULL DEFAULT '{}',
-    conversation_revision INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_notebooks_user_updated
-ON notebooks(user_id, updated_at);
-
-CREATE TABLE IF NOT EXISTS messages (
-    id TEXT PRIMARY KEY,
-    notebook_id TEXT NOT NULL,
-    role TEXT NOT NULL,
-    content TEXT NOT NULL,
-    is_error INTEGER NOT NULL DEFAULT 0,
-    assessment_text TEXT,
-    cited_source_ids_text TEXT,
-    proposed_stage TEXT,
-    decision_status TEXT,
-    decision_at TEXT,
-    metadata_text TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    conversation_revision INTEGER NOT NULL DEFAULT 0,
-    previous_message_id TEXT,
-    superseded_at_revision INTEGER,
-    FOREIGN KEY (notebook_id) REFERENCES notebooks(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_messages_notebook_created
-ON messages(notebook_id, created_at, id);
-
-CREATE INDEX IF NOT EXISTS idx_messages_notebook_decision
-ON messages(notebook_id, decision_status, created_at);
-
-CREATE TABLE IF NOT EXISTS sources (
-    id TEXT PRIMARY KEY,
-    notebook_id TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    title TEXT NOT NULL,
-    content_type TEXT,
-    byte_size INTEGER NOT NULL DEFAULT 0,
-    object_key TEXT,
-    extracted_text_key TEXT,
-    source_url TEXT,
-    selected INTEGER NOT NULL DEFAULT 1,
-    metadata_text TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    FOREIGN KEY (notebook_id) REFERENCES notebooks(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_sources_notebook_created
-ON sources(notebook_id, created_at, id);
-
-CREATE TABLE IF NOT EXISTS research_observations (
-    id TEXT PRIMARY KEY,
-    notebook_id TEXT NOT NULL,
-    user_message_id TEXT NOT NULL,
-    assistant_message_id TEXT NOT NULL UNIQUE,
-    conversation_revision INTEGER NOT NULL DEFAULT 0,
-    coding_status TEXT NOT NULL,
-    coding_version TEXT NOT NULL,
-    prompt_version TEXT NOT NULL,
-    provider TEXT NOT NULL,
-    model_id TEXT NOT NULL,
-    coaching_profile TEXT NOT NULL,
-    phase_id TEXT NOT NULL,
-    dominant_clear TEXT,
-    facione_behaviors_text TEXT NOT NULL DEFAULT '[]',
-    ethics_concepts_text TEXT NOT NULL DEFAULT '[]',
-    evidence_text TEXT NOT NULL DEFAULT '[]',
-    holistic_candidate_text TEXT,
-    metadata_text TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (notebook_id) REFERENCES notebooks(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_message_id) REFERENCES messages(id) ON DELETE CASCADE,
-    FOREIGN KEY (assistant_message_id) REFERENCES messages(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_research_observations_notebook_created
-ON research_observations(notebook_id, created_at, id);
-
-CREATE INDEX IF NOT EXISTS idx_research_observations_status_created
-ON research_observations(coding_status, created_at, id);
-
-CREATE TABLE IF NOT EXISTS research_reviews (
-    id TEXT PRIMARY KEY,
-    observation_id TEXT NOT NULL,
-    reviewer_user_id TEXT NOT NULL,
-    status TEXT NOT NULL,
-    coding_status TEXT,
-    dominant_clear TEXT,
-    facione_behaviors_text TEXT,
-    ethics_concepts_text TEXT,
-    evidence_text TEXT,
-    holistic_candidate_text TEXT,
-    notes TEXT,
-    supersedes_review_id TEXT,
-    metadata_text TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (observation_id) REFERENCES research_observations(id) ON DELETE CASCADE,
-    FOREIGN KEY (reviewer_user_id) REFERENCES users(id),
-    FOREIGN KEY (supersedes_review_id) REFERENCES research_reviews(id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_research_reviews_observation_created
-ON research_reviews(observation_id, created_at, id);
-
-CREATE TABLE IF NOT EXISTS research_adjudications (
-    id TEXT PRIMARY KEY,
-    observation_id TEXT NOT NULL,
-    adjudicator_user_id TEXT NOT NULL,
-    decision TEXT NOT NULL,
-    coding_status TEXT,
-    dominant_clear TEXT,
-    facione_behaviors_text TEXT,
-    ethics_concepts_text TEXT,
-    evidence_text TEXT,
-    holistic_candidate_text TEXT,
-    notes TEXT,
-    supersedes_adjudication_id TEXT,
-    referenced_review_ids_text TEXT NOT NULL DEFAULT '[]',
-    metadata_text TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (observation_id) REFERENCES research_observations(id) ON DELETE CASCADE,
-    FOREIGN KEY (adjudicator_user_id) REFERENCES users(id),
-    FOREIGN KEY (supersedes_adjudication_id) REFERENCES research_adjudications(id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_research_adjudications_observation_created
-ON research_adjudications(observation_id, created_at, id);
-
-CREATE TABLE IF NOT EXISTS research_access_events (
-    id TEXT PRIMARY KEY,
-    actor_user_id TEXT NOT NULL,
-    action TEXT NOT NULL,
-    scope TEXT NOT NULL,
-    request_id TEXT NOT NULL,
-    target_user_id TEXT,
-    target_count INTEGER,
-    notebook_id TEXT,
-    observation_id TEXT,
-    filters_text TEXT NOT NULL DEFAULT '{}',
-    metadata_text TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_research_access_actor_created
-ON research_access_events(actor_user_id, created_at, id);
-
-CREATE INDEX IF NOT EXISTS idx_research_access_request
-ON research_access_events(request_id, created_at, id);
-
-CREATE TABLE IF NOT EXISTS system_metadata (
-    key TEXT PRIMARY KEY,
-    value_text TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-"""
-
-
-# Child rows deleted explicitly when a notebook is removed (DSQL has no FK
-# cascade). Reviews and adjudications are linked indirectly through an
-# observation, so a flat ``WHERE notebook_id`` loop is not correct.
-NOTEBOOK_CHILD_DELETE_PLAN = (
-    (
-        "research_adjudications",
-        "observation_id IN (SELECT id FROM research_observations WHERE notebook_id = ?)",
-    ),
-    (
-        "research_reviews",
-        "observation_id IN (SELECT id FROM research_observations WHERE notebook_id = ?)",
-    ),
-    ("research_access_events", "notebook_id = ?"),
-    ("research_observations", "notebook_id = ?"),
-    ("messages", "notebook_id = ?"),
-    ("sources", "notebook_id = ?"),
-)
-
-# Backwards-compatible inventory for schema/admin tooling. Runtime deletion
-# must use NOTEBOOK_CHILD_DELETE_PLAN because predicates differ by table.
-NOTEBOOK_CHILD_TABLES = tuple(
-    table for table, _predicate in NOTEBOOK_CHILD_DELETE_PLAN
-)
 
 
 class StudentStore:
@@ -386,6 +89,7 @@ class StudentStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.identifier = identifier
         self._lock = threading.RLock()
+        self._operations: StoreOperations = bind_store_operations(self)
         with self._connect() as connection:
             connection.executescript(SCHEMA)
             self._migrate_oauth_login_states(connection)
@@ -433,193 +137,37 @@ class StudentStore:
                 "Research workflow contract is not ready; use explicit reset/bootstrap"
             )
 
+    def _bound_operations(self) -> StoreOperations:
+        """Return operation groups, binding lazily for legacy test constructors."""
+        operations = getattr(self, "_operations", None)
+        if operations is None:
+            operations = bind_store_operations(self)
+            self._operations = operations
+        return operations
+
     @staticmethod
     def _migrate_oauth_login_states(connection: sqlite3.Connection) -> None:
-        """Rebuild legacy camelCase ``oauth_login_states`` to snake_case columns.
-
-        Older local DBs still have Streamlit-era ``codeVerifier`` / ``expiresAt``
-        columns. ``CREATE TABLE IF NOT EXISTS`` does not rename them, so login
-        then fails with ``no such column: expires_at`` and the browser sees a
-        blank/white page. Rows are one-time PKCE state and safe to remap or drop.
-        """
-        rows = connection.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-            ("oauth_login_states",),
-        ).fetchall()
-        if not rows:
-            return
-        columns = {
-            str(row[1])
-            for row in connection.execute("PRAGMA table_info(oauth_login_states)")
-        }
-        if {"state", "code_verifier", "created_at", "expires_at"}.issubset(columns):
-            return
-        connection.execute(
-            "ALTER TABLE oauth_login_states RENAME TO oauth_login_states_legacy"
-        )
-        connection.execute(
-            """
-            CREATE TABLE oauth_login_states (
-                state TEXT PRIMARY KEY,
-                code_verifier TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                expires_at TEXT NOT NULL
-            )
-            """
-        )
-        legacy = {
-            str(row[1])
-            for row in connection.execute(
-                "PRAGMA table_info(oauth_login_states_legacy)"
-            )
-        }
-        if {
-            "state",
-            "codeVerifier",
-            "createdAt",
-            "expiresAt",
-        }.issubset(legacy):
-            connection.execute(
-                """
-                INSERT INTO oauth_login_states
-                  (state, code_verifier, created_at, expires_at)
-                SELECT state, codeVerifier, createdAt, expiresAt
-                FROM oauth_login_states_legacy
-                """
-            )
-        connection.execute("DROP TABLE oauth_login_states_legacy")
+        """Rebuild legacy camelCase ``oauth_login_states`` to snake_case columns."""
+        migrate_oauth_login_states(connection)
 
     @staticmethod
     def _migrate_users_table(connection: sqlite3.Connection) -> None:
-        """Extend legacy camelCase ``users`` rows for the five-table schema.
-
-        Local demo DBs often still have ``displayName`` / ``cognitoSub`` /
-        ``createdAt`` / ``metadata`` from the pre-Cognito store. Cognito
-        callback upserts require snake_case columns; without this migration
-        sign-in completes at Cognito then fails with ``auth_error=1``.
-
-        This migration is deliberately additive. Renaming and dropping the old
-        ``users`` table makes SQLite rewrite legacy foreign keys to
-        ``users_legacy`` and then cascade-delete old threads, sources, and
-        messages. Keeping the original table identity preserves those rows
-        while the compatibility migration copies them into the five-table
-        layout.
-        """
-        rows = connection.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-            ("users",),
-        ).fetchall()
-        if not rows:
-            return
-        columns = {
-            str(row[1]) for row in connection.execute("PRAGMA table_info(users)")
-        }
-        expected = {
-            "id",
-            "identifier",
-            "cognito_sub",
-            "email",
-            "display_name",
-            "role",
-            "preferences_text",
-            "created_at",
-            "updated_at",
-            "last_login_at",
-        }
-        if expected.issubset(columns):
-            return
-
-        additions = {
-            "cognito_sub": "TEXT",
-            "email": "TEXT",
-            "display_name": "TEXT",
-            "role": "TEXT NOT NULL DEFAULT 'student'",
-            "preferences_text": "TEXT NOT NULL DEFAULT '{}'",
-            "created_at": "TEXT NOT NULL DEFAULT ''",
-            "updated_at": "TEXT",
-            "last_login_at": "TEXT",
-        }
-        for name, declaration in additions.items():
-            if name not in columns:
-                connection.execute(
-                    f"ALTER TABLE users ADD COLUMN {name} {declaration}"
-                )
-
-        # Copy old values only when their camelCase source columns exist.
-        copies = {
-            "cognito_sub": "cognitoSub",
-            "display_name": "displayName",
-            "preferences_text": "metadata",
-            "created_at": "createdAt",
-            "updated_at": "updatedAt",
-            "last_login_at": "lastLoginAt",
-        }
-        for target, source in copies.items():
-            if source not in columns:
-                continue
-            connection.execute(
-                f"UPDATE users SET {target}={source} "
-                f"WHERE {source} IS NOT NULL AND TRIM(CAST({source} AS TEXT)) != ''"
-            )
-        connection.execute(
-            "UPDATE users SET display_name='Student' "
-            "WHERE display_name IS NULL OR TRIM(display_name)=''"
-        )
-        connection.execute(
-            "UPDATE users SET role='student' WHERE role IS NULL OR TRIM(role)=''"
-        )
-        connection.execute(
-            "UPDATE users SET preferences_text='{}' "
-            "WHERE preferences_text IS NULL OR TRIM(preferences_text)=''"
-        )
+        """Extend legacy camelCase ``users`` rows for the five-table schema."""
+        migrate_users_table(connection)
 
     @staticmethod
     def _migrate_notebooks_conversation_revision(
         connection: sqlite3.Connection,
     ) -> None:
         """Add/repair ``conversation_revision`` for edit/revise CAS on existing DBs."""
-        columns = {
-            str(row["name"])
-            for row in connection.execute("PRAGMA table_info(notebooks)")
-        }
-        if "conversation_revision" not in columns:
-            connection.execute(
-                "ALTER TABLE notebooks ADD COLUMN conversation_revision "
-                "INTEGER NOT NULL DEFAULT 0"
-            )
-            return
-        connection.execute(
-            "UPDATE notebooks SET conversation_revision = 0 "
-            "WHERE conversation_revision IS NULL"
-        )
+        migrate_notebook_revision(connection)
 
     @staticmethod
     def _migrate_messages_revision_columns(
         connection: sqlite3.Connection,
     ) -> None:
         """Add/repair append-only message revision columns on existing local DBs."""
-        columns = {
-            str(row["name"])
-            for row in connection.execute("PRAGMA table_info(messages)")
-        }
-        if "conversation_revision" not in columns:
-            connection.execute(
-                "ALTER TABLE messages ADD COLUMN conversation_revision "
-                "INTEGER NOT NULL DEFAULT 0"
-            )
-        else:
-            connection.execute(
-                "UPDATE messages SET conversation_revision = 0 "
-                "WHERE conversation_revision IS NULL"
-            )
-        if "previous_message_id" not in columns:
-            connection.execute(
-                "ALTER TABLE messages ADD COLUMN previous_message_id TEXT"
-            )
-        if "superseded_at_revision" not in columns:
-            connection.execute(
-                "ALTER TABLE messages ADD COLUMN superseded_at_revision INTEGER"
-            )
+        migrate_message_revisions(connection)
 
     @staticmethod
     def _notebook_revision_value(row: Any) -> int:
@@ -740,105 +288,8 @@ class StudentStore:
     def _repair_misbound_local_foreign_keys(
         connection: sqlite3.Connection,
     ) -> None:
-        """Repair notebooks created by the retired destructive user migration.
-
-        A previous local compatibility migration renamed ``users`` to
-        ``users_legacy`` before rebuilding it. SQLite consequently rewrote the
-        existing ``notebooks.user_id`` foreign key to reference that temporary
-        name. Dropping the temporary table left Cognito-authenticated notebook
-        creation failing with ``no such table: main.users_legacy``.
-
-        Rebuilding ``notebooks`` is SQLite-only, transactional, and preserves
-        its primary keys, so existing ``messages`` and ``sources`` continue to
-        reference the same notebooks. Production DSQL never invokes this
-        initializer and its schema is intentionally unchanged.
-        """
-        foreign_keys = connection.execute(
-            "PRAGMA foreign_key_list(notebooks)"
-        ).fetchall()
-        user_key = next(
-            (row for row in foreign_keys if str(row["from"]) == "user_id"),
-            None,
-        )
-        if user_key is None or str(user_key["table"]) == "users":
-            return
-
-        expected_columns = (
-            "id",
-            "user_id",
-            "title",
-            "current_stage",
-            "progress_text",
-            "settings_text",
-            "conversation_revision",
-            "created_at",
-            "updated_at",
-        )
-        actual_columns = tuple(
-            str(row["name"])
-            for row in connection.execute("PRAGMA table_info(notebooks)")
-        )
-        if actual_columns != expected_columns:
-            raise RuntimeError(
-                "Cannot safely repair the local notebooks foreign key because "
-                f"its columns differ from the expected schema: {actual_columns!r}"
-            )
-
-        # PRAGMA foreign_keys is ignored inside an active transaction. Commit
-        # preceding additive migrations before entering this isolated rebuild.
-        connection.commit()
-        connection.execute("PRAGMA foreign_keys = OFF")
-        try:
-            connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
-                """
-                CREATE TABLE notebooks_fk_repair (
-                    id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    title TEXT,
-                    current_stage TEXT NOT NULL DEFAULT 'problem_identification',
-                    progress_text TEXT NOT NULL DEFAULT '{}',
-                    settings_text TEXT NOT NULL DEFAULT '{}',
-                    conversation_revision INTEGER NOT NULL DEFAULT 0,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-                )
-                """
-            )
-            connection.execute(
-                """
-                INSERT INTO notebooks_fk_repair
-                  (id, user_id, title, current_stage, progress_text,
-                   settings_text, conversation_revision, created_at, updated_at)
-                SELECT id, user_id, title, current_stage, progress_text,
-                       settings_text, COALESCE(conversation_revision, 0),
-                       created_at, updated_at
-                FROM notebooks
-                """
-            )
-            connection.execute("DROP TABLE notebooks")
-            connection.execute(
-                "ALTER TABLE notebooks_fk_repair RENAME TO notebooks"
-            )
-            connection.execute(
-                "CREATE INDEX idx_notebooks_user_updated "
-                "ON notebooks(user_id, updated_at)"
-            )
-            violations = connection.execute(
-                "PRAGMA foreign_key_check(notebooks)"
-            ).fetchall()
-            if violations:
-                raise RuntimeError(
-                    "Cannot repair the local notebooks foreign key because "
-                    "one or more notebooks have no matching user"
-                )
-            connection.commit()
-        except Exception:
-            connection.rollback()
-            raise
-        finally:
-            connection.execute("PRAGMA foreign_keys = ON")
+        """Repair notebooks created by the retired destructive user migration."""
+        repair_misbound_notebook_foreign_key(connection)
 
     @staticmethod
     def _migrate_legacy_workspace(connection: sqlite3.Connection) -> None:
@@ -3859,18 +3310,7 @@ class StudentStore:
 
     def _load_extracted_text(self, extracted_text_key: str | None) -> str:
         """Load extracted text bytes from object storage."""
-        if not extracted_text_key:
-            return ""
-        from backend.persistence.factory import get_file_storage
-
-        try:
-            data = get_file_storage().get_bytes(str(extracted_text_key))
-        except FileNotFoundError:
-            return ""
-        try:
-            return data.decode("utf-8")
-        except UnicodeDecodeError:
-            return data.decode("utf-8", errors="replace")
+        return self._bound_operations().sources.load_extracted_text(extracted_text_key)
 
     def add_source(
         self,
@@ -3893,65 +3333,20 @@ class StudentStore:
         whole write transaction. Source services must store extracted text
         first and pass its deterministic object key.
         """
-        if kind not in {"file", "image", "text", "url"}:
-            raise ValueError("Unsupported source type")
-        normalized_title = " ".join(title.strip().split())[:180]
-        if not normalized_title:
-            raise ValueError("Source title is required")
-        metadata_dict = dict(metadata or {})
-        object_key = metadata_dict.get("object_key") or None
-        storage_provider = str(metadata_dict.get("storage_provider") or "local")
-        if path:
-            if storage_provider in {"s3", "memory"} or object_key:
-                object_key = str(object_key or path)
-                path = None
-            else:
-                resolved_path = Path(path).resolve()
-                allowed_root = (settings.files_dir / "threads" / thread_id).resolve()
-                if allowed_root not in resolved_path.parents:
-                    raise ValueError("Unsafe source path")
-                # Local filesystem path kept in metadata for compatibility.
-                metadata_dict["local_path"] = str(resolved_path)
-                path = None
-        source_id = source_id or str(uuid.uuid4())
-        stored_text_key = str(extracted_text_key or "").strip() or None
-        now = utc_now()
-        with self._lock, self._connect() as connection:
-            owned = connection.execute(
-                "SELECT id FROM notebooks WHERE id=? AND user_id=?",
-                (thread_id, self.owner_id),
-            ).fetchone()
-            if not owned:
-                raise ValueError("Notebook not found")
-            connection.execute(
-                """
-                INSERT INTO sources
-                  (id, notebook_id, kind, title, content_type, byte_size,
-                   object_key, extracted_text_key, source_url, selected,
-                   metadata_text, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    source_id,
-                    thread_id,
-                    kind,
-                    normalized_title,
-                    mime or "application/octet-stream",
-                    max(0, int(size)),
-                    object_key,
-                    stored_text_key,
-                    source_url,
-                    int(selected),
-                    _dump(metadata_dict),
-                    now,
-                    now,
-                ),
-            )
-            connection.execute(
-                "UPDATE notebooks SET updated_at=? WHERE id=? AND user_id=?",
-                (now, thread_id, self.owner_id),
-            )
-        return source_id
+        return self._bound_operations().sources.add(
+            thread_id,
+            kind=kind,
+            title=title,
+            mime=mime,
+            path=path,
+            source_url=source_url,
+            extracted_text_key=extracted_text_key,
+            size=size,
+            selected=selected,
+            metadata=metadata,
+            source_id=source_id,
+            serialize=_dump,
+        )
 
     def list_sources(
         self,
@@ -3960,33 +3355,19 @@ class StudentStore:
         selected_only: bool = False,
     ) -> list[dict[str, Any]]:
         """List owned sources for a notebook."""
-        if not self.get_thread(thread_id):
-            return []
-        selected_clause = " AND selected=1" if selected_only else ""
-        with self._connect() as connection:
-            rows = connection.execute(
-                f"""
-                SELECT s.* FROM sources s
-                JOIN notebooks n ON n.id=s.notebook_id
-                WHERE s.notebook_id=? AND n.user_id=?{selected_clause}
-                ORDER BY s.created_at ASC, s.id ASC
-                """,
-                (thread_id, self.owner_id),
-            ).fetchall()
-        return [self._source_dict(row) for row in rows]
+        return self._bound_operations().sources.list(
+            thread_id,
+            selected_only=selected_only,
+            normalize=self._source_dict,
+        )
 
     def get_source(self, thread_id: str, source_id: str) -> dict[str, Any] | None:
         """Return one owned source or ``None``."""
-        with self._connect() as connection:
-            row = connection.execute(
-                """
-                SELECT s.* FROM sources s
-                JOIN notebooks n ON n.id=s.notebook_id
-                WHERE s.id=? AND s.notebook_id=? AND n.user_id=?
-                """,
-                (source_id, thread_id, self.owner_id),
-            ).fetchone()
-        return self._source_dict(row) if row else None
+        return self._bound_operations().sources.get(
+            thread_id,
+            source_id,
+            normalize=self._source_dict,
+        )
 
     def find_source_by_path(
         self,
@@ -3994,66 +3375,19 @@ class StudentStore:
         path: str,
     ) -> dict[str, Any] | None:
         """Find a source by object key or legacy local path."""
-        with self._connect() as connection:
-            row = connection.execute(
-                """
-                SELECT s.* FROM sources s
-                JOIN notebooks n ON n.id=s.notebook_id
-                WHERE s.notebook_id=? AND n.user_id=?
-                  AND (s.object_key=? OR s.metadata_text LIKE ?)
-                """,
-                (thread_id, self.owner_id, path, f'%{path}%'),
-            ).fetchone()
-        if not row:
-            return None
-        source = self._source_dict(row)
-        if source.get("path") == path or source.get("object_key") == path:
-            return source
-        # Fallback: check local_path in metadata.
-        if (source.get("metadata") or {}).get("local_path") == path:
-            return source
-        return None
+        return self._bound_operations().sources.find_by_path(
+            thread_id,
+            path,
+            normalize=self._source_dict,
+        )
 
     def _source_dict(self, row: Any) -> dict[str, Any]:
         """Normalize a sources row for callers (legacy keys preserved)."""
-        metadata = _load(row["metadata_text"], {})
-        if not isinstance(metadata, dict):
-            metadata = {}
-        legacy_extracted = str(metadata.pop("_legacy_extracted_text", "") or "")
-        object_key = row["object_key"]
-        local_path = metadata.get("local_path")
-        extracted = self._load_extracted_text(row["extracted_text_key"])
-        if not extracted:
-            extracted = legacy_extracted
-        path_value = object_key or local_path
-        if object_key and metadata.get("storage_provider") not in {"s3", "memory"}:
-            # Object key present implies object storage for readers.
-            if settings.file_storage_provider != "local":
-                metadata.setdefault(
-                    "storage_provider", settings.file_storage_provider
-                )
-                metadata.setdefault("object_key", object_key)
-        return {
-            "id": str(row["id"]),
-            "threadId": str(row["notebook_id"]),
-            "notebook_id": str(row["notebook_id"]),
-            "ownerId": self.owner_id,
-            "kind": row["kind"],
-            "title": row["title"],
-            "mime": row["content_type"] or "application/octet-stream",
-            "content_type": row["content_type"],
-            "path": path_value,
-            "object_key": object_key,
-            "extracted_text_key": row["extracted_text_key"],
-            "sourceUrl": row["source_url"],
-            "extractedText": extracted,
-            "size": int(row["byte_size"] or 0),
-            "byte_size": int(row["byte_size"] or 0),
-            "selected": bool(row["selected"]),
-            "metadata": metadata,
-            "createdAt": row["created_at"],
-            "updatedAt": row["updated_at"],
-        }
+        return self._bound_operations().sources.as_dict(
+            row,
+            deserialize=_load,
+            load_extracted=self._load_extracted_text,
+        )
 
     def set_source_selected(
         self,
@@ -4066,37 +3400,12 @@ class StudentStore:
         Locked course materials (Lecture Notes / Readings) stay selected and
         cannot be cleared through this API.
         """
-        from backend.source_library import is_locked_course_source
-
-        source = self.get_source(thread_id, source_id)
-        if not source:
-            raise ValueError("Source not found")
-        if is_locked_course_source(source):
-            if not selected:
-                raise ValueError(
-                    "Course materials stay selected and cannot be unselected."
-                )
-            if source.get("selected"):
-                return
-        with self._lock, self._connect() as connection:
-            changed = connection.execute(
-                """
-                UPDATE sources SET selected=?, updated_at=?
-                WHERE id=? AND notebook_id=? AND notebook_id IN (
-                  SELECT id FROM notebooks WHERE id=? AND user_id=?
-                )
-                """,
-                (
-                    int(selected),
-                    utc_now(),
-                    source_id,
-                    thread_id,
-                    thread_id,
-                    self.owner_id,
-                ),
-            ).rowcount
-        if not changed:
-            raise ValueError("Source not found")
+        self._bound_operations().sources.set_selected(
+            thread_id,
+            source_id,
+            selected,
+            source=self.get_source(thread_id, source_id),
+        )
 
     def set_all_sources_selected(self, thread_id: str, selected: bool) -> None:
         """Select or deselect personal sources in an owned notebook.
@@ -4104,63 +3413,20 @@ class StudentStore:
         Locked course materials are never cleared. When selecting all, any
         locked row that somehow became unselected is forced back on.
         """
-        from backend.source_library import is_locked_course_source
-
-        if not self.get_thread(thread_id):
-            raise ValueError("Notebook not found")
-        now = utc_now()
-        with self._lock, self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT id, selected, metadata_text FROM sources
-                WHERE notebook_id=?
-                """,
-                (thread_id,),
-            ).fetchall()
-            for row in rows:
-                metadata = _load(row["metadata_text"], {})
-                if not isinstance(metadata, dict):
-                    metadata = {}
-                locked = is_locked_course_source(
-                    {"metadata": metadata, "selected": bool(row["selected"])}
-                )
-                if locked:
-                    if not bool(row["selected"]):
-                        connection.execute(
-                            """
-                            UPDATE sources SET selected=1, updated_at=?
-                            WHERE id=? AND notebook_id=?
-                            """,
-                            (now, row["id"], thread_id),
-                        )
-                    continue
-                connection.execute(
-                    """
-                    UPDATE sources SET selected=?, updated_at=?
-                    WHERE id=? AND notebook_id=?
-                    """,
-                    (int(selected), now, row["id"], thread_id),
-                )
+        self._bound_operations().sources.set_all_selected(
+            thread_id,
+            selected,
+            deserialize=_load,
+        )
 
     def rename_source(self, thread_id: str, source_id: str, title: str) -> None:
         """Rename a personal notebook source. Locked course materials stay fixed."""
-        source = self.get_source(thread_id, source_id)
-        if not source:
-            raise ValueError("Source not found")
-        metadata = source.get("metadata") or {}
-        if metadata.get("locked_source"):
-            raise ValueError("Course materials cannot be renamed.")
-        normalized_title = " ".join(title.strip().split())[:180]
-        if not normalized_title:
-            raise ValueError("Source title is required")
-        with self._lock, self._connect() as connection:
-            connection.execute(
-                """
-                UPDATE sources SET title=?, updated_at=?
-                WHERE id=? AND notebook_id=?
-                """,
-                (normalized_title, utc_now(), source_id, thread_id),
-            )
+        self._bound_operations().sources.rename(
+            thread_id,
+            source_id,
+            title,
+            source=self.get_source(thread_id, source_id),
+        )
 
     def delete_source(
         self,
@@ -4177,24 +3443,14 @@ class StudentStore:
         authenticated-owner source object prefix. Never uses metadata-supplied
         keys for that cleanup. Repeated successful deletes are harmless.
         """
-        source = self.get_source(thread_id, source_id)
-        if source:
-            metadata = source.get("metadata") or {}
-            if metadata.get("locked_source") and not force:
-                raise ValueError("Course materials cannot be removed from the app.")
-            with self._lock, self._connect() as connection:
-                connection.execute(
-                    """
-                    DELETE FROM sources
-                    WHERE id=? AND notebook_id=?
-                      AND notebook_id IN (
-                        SELECT id FROM notebooks WHERE id=? AND user_id=?
-                      )
-                    """,
-                    (source_id, thread_id, thread_id, self.owner_id),
-                )
-            self._cleanup_source_local_file(source, thread_id=thread_id)
-        self._cleanup_source_object_prefix(thread_id, source_id)
+        self._bound_operations().sources.delete(
+            thread_id,
+            source_id,
+            force=force,
+            source=self.get_source(thread_id, source_id),
+            cleanup_local=self._cleanup_source_local_file,
+            cleanup_prefix=self._cleanup_source_object_prefix,
+        )
 
     def _cleanup_source_object_prefix(self, thread_id: str, source_id: str) -> None:
         """Delete object-storage keys under the authenticated owner's source prefix.
@@ -4203,16 +3459,7 @@ class StudentStore:
         ids — never from metadata ``object_key`` values — so retries cannot
         target another user's prefix.
         """
-        from backend.persistence.factory import get_file_storage
-        from backend.persistence.object_keys import source_prefix
-
-        get_file_storage().delete_prefix(
-            source_prefix(
-                user_id=self.owner_id,
-                notebook_id=thread_id,
-                source_id=source_id,
-            )
-        )
+        self._bound_operations().sources.cleanup_object_prefix(thread_id, source_id)
 
     def _cleanup_source_local_file(
         self,
@@ -4226,11 +3473,7 @@ class StudentStore:
         is known). Absent-row retries rely solely on object-prefix cleanup and
         do not guess unrelated local paths.
         """
-        metadata = source.get("metadata") or {}
-        local_path = metadata.get("local_path")
-        if not (local_path and metadata.get("managed_file")):
-            return
-        path = Path(str(local_path)).resolve()
-        allowed_root = (settings.files_dir / "threads" / thread_id).resolve()
-        if path.is_file() and allowed_root in path.parents:
-            path.unlink(missing_ok=True)
+        self._bound_operations().sources.cleanup_local_file(
+            source,
+            thread_id=thread_id,
+        )
