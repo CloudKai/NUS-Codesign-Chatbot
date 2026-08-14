@@ -20,6 +20,10 @@
         "idleRuntimeSessionTimeout": 900,
         "maxLifetime": 28800
       },
+      "envVars": [
+        { "name": "GUARDRAIL_ID", "value": "o8aipba8m129" },
+        { "name": "GUARDRAIL_VERSION", "value": "1" }
+      ],
       "connections": [
         {
           "id": "gateway-gateway-course-materials-4cymlvixrt",
@@ -30,11 +34,25 @@
               "awsIam": {}
             }
           }
+        },
+        {
+          "id": "chat-history",
+          "to": {
+            "type": "memory",
+            "arn": "arn:aws:bedrock-agentcore:us-west-2:355604674280:memory/NUSCodesignChatbot_StudentChatHistory-jtaN1sD4xC"
+          },
+          "access": "readwrite"
         }
       ]
     }
   ],
-  "memories": [],
+  "memories": [
+    {
+      "name": "StudentChatHistory",
+      "eventExpiryDuration": 180,
+      "strategies": []
+    }
+  ],
   "knowledgeBases": [],
   "credentials": [],
   "evaluators": [],

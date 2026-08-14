@@ -2,11 +2,14 @@ from typing import Any
 from collections import OrderedDict
 from strands import Agent
 import asyncio
+import os
 from strands.tools.executors import SequentialToolExecutor
 from strands.types.exceptions import EventLoopException
 from hooks.execution_limits import ExecutionLimitExceeded, ExecutionLimitsHook
 from strands.agent.conversation_manager.sliding_window_conversation_manager import SlidingWindowConversationManager
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
+from bedrock_agentcore.memory.integrations.strands.config import AgentCoreMemoryConfig
+from bedrock_agentcore.memory.integrations.strands.session_manager import AgentCoreMemorySessionManager
 from model.load import load_model
 from mcp_client.client import get_all_gateway_mcp_clients
 import phases
@@ -33,13 +36,14 @@ PHASE_TOOLS = {
 def _make_conversation_manager():
     return SlidingWindowConversationManager(**{"window_size":150}, per_turn=True)
 
-# One shared history + conversation manager + execution-limits hook per session_id (best-effort;
-# resets on cold start), reused across phase switches so the 75-iteration/1hr cap in
-# ExecutionLimitsHook stays session-wide instead of resetting every turn. A fresh specialist Agent
-# is built per invocation, bound to that same shared state, with the system prompt and tools for
-# whichever phase the caller requests. The cache is bounded to 128 sessions with LRU eviction
-# (least-recently-used is dropped and its history reset) so a single process serving many sessions
-# cannot leak history between them or grow without limit. For durable history, attach a session manager.
+# Conversation history now lives in AgentCore Memory (durable, keyed by actor_id + session_id --
+# see build_specialist_agent), not in this process, so it survives cold starts and works regardless
+# of which Runtime instance handles a given request. The conversation manager + execution-limits
+# hook stay in-process per session_id (best-effort; resets on cold start) since they govern a single
+# instance's live tool-loop rather than persisted state; reusing them across phase switches keeps the
+# 75-iteration/1hr cap in ExecutionLimitsHook session-wide instead of resetting every turn. The cache
+# is bounded to 128 sessions with LRU eviction so a single process serving many sessions cannot grow
+# without limit.
 def session_store_factory():
     cache = OrderedDict()
     def get_or_create_session_state(session_id):
@@ -49,7 +53,6 @@ def session_store_factory():
         if len(cache) >= 128:
             cache.popitem(last=False)
         cache[session_id] = {
-            "messages": [],
             "conversation_manager": _make_conversation_manager(),
             "hook": ExecutionLimitsHook(max_iterations=75, timeout_seconds=3600),
         }
@@ -58,13 +61,22 @@ def session_store_factory():
 get_or_create_session_state = session_store_factory()
 
 
-def build_specialist_agent(session_id: str, phase: str, topic: str | None) -> Agent:
+def build_specialist_agent(session_id: str, actor_id: str, phase: str, topic: str | None) -> Agent:
     state = get_or_create_session_state(session_id)
+    memory_config = AgentCoreMemoryConfig(
+        memory_id=os.environ["MEMORY_CHAT_HISTORY_ID"],
+        session_id=session_id,
+        actor_id=actor_id,
+    )
+    session_manager = AgentCoreMemorySessionManager(
+        memory_config,
+        region_name=os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION")),
+    )
     return Agent(
         model=load_model(),
         system_prompt=phases.build_system_prompt(phase, topic),
         tools=PHASE_TOOLS.get(phase, PHASE_TOOLS[phases.DEFAULT_PHASE]),
-        messages=state["messages"],
+        session_manager=session_manager,
         conversation_manager=state["conversation_manager"],
         tool_executor=SequentialToolExecutor(),
         callback_handler=None,
@@ -153,7 +165,11 @@ async def invoke(payload, context):
     prompt = _extract_prompt(payload)
     phase = payload.get("phase", phases.DEFAULT_PHASE)
     topic = payload.get("topic")
-    agent = build_specialist_agent(session_id, phase, topic)
+    # No inbound-identity plumbing (Cognito claims, etc.) reaches this entrypoint today -- the
+    # caller (post-Cognito-login frontend) must tell us who's asking. Falls back to session_id so
+    # test scripts without a student_id still get a working, if anonymous, memory scope.
+    actor_id = payload.get("student_id", session_id)
+    agent = build_specialist_agent(session_id, actor_id, phase, topic)
 
 
     timeout_seconds = 3600

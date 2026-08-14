@@ -14,12 +14,15 @@
 .NOTES
   Reuse the same -SessionId across calls to test that history carries across phase switches.
   SessionId must be at least 33 characters (AWS requirement) -- pad short ones with "a"s if needed.
+  -StudentId sets the AgentCore Memory actor_id (per-student history scope). Omit it and history
+  falls back to being scoped by -SessionId alone (anonymous/test use).
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Prompt,
     [Parameter(Mandatory = $true)][ValidateSet("qa", "coaching", "scoring")][string]$Phase,
     [string]$Topic,
     [string]$SessionId = ("test-session-" + [guid]::NewGuid().ToString("N")),
+    [string]$StudentId,
     [string]$AgentRuntimeArn = "arn:aws:bedrock-agentcore:us-west-2:355604674280:runtime/NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7",
     [string]$Region = "us-west-2",
     [string]$AwsCli = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
@@ -34,6 +37,7 @@ if ($SessionId.Length -lt 33) {
 
 $payloadObj = [ordered]@{ prompt = $Prompt; phase = $Phase }
 if ($Topic) { $payloadObj.topic = $Topic }
+if ($StudentId) { $payloadObj.student_id = $StudentId }
 
 $payloadFile = New-TemporaryFile
 $responseFile = New-TemporaryFile

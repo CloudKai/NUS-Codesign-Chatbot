@@ -9,6 +9,12 @@
             "roleArn": "arn:aws:iam::355604674280:role/AgentCore-NUSCodesignChat-ApplicationAgentChatbotHa-EVjV8lBDgqdP"
           }
         },
+        "memories": {
+          "StudentChatHistory": {
+            "memoryId": "NUSCodesignChatbot_StudentChatHistory-jtaN1sD4xC",
+            "memoryArn": "arn:aws:bedrock-agentcore:us-west-2:355604674280:memory/NUSCodesignChatbot_StudentChatHistory-jtaN1sD4xC"
+          }
+        },
         "harnesses": {
           "NUSCodesignChatbot": {
             "harnessId": "NUSCodesignChatbot_NUSCodesignChatbot-GE33tCQiBO",
@@ -21,7 +27,7 @@
           }
         },
         "stackName": "AgentCore-NUSCodesignChatbot-default",
-        "deployHash": "69921e22eec92724"
+        "deployHash": "06bbd42e804b1935"
       }
     }
   }

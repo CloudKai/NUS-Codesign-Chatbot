@@ -1,26 +1,56 @@
 """
 CDE2300 Socratic Design Thinking Coach -- Streamlit student UI.
 
-This is a thin client: all AI logic, prompts, and persistence live in the FastAPI
-backend (main.py). Run both:
+This is a thin client: all AI logic, prompts, and persistence live in the AgentCore Runtime
+(NUSCodesignChatbot/app/chatbot_harnessAgent). Chat history is durable server-side (AgentCore
+Memory, keyed by student_id + session_id) -- this app is just a window onto it.
 
-    uvicorn main:app --reload --port 8000
+Run:
     streamlit run streamlit_app.py
 
-The backend URL defaults to http://localhost:8000 and can be overridden with the
-BACKEND_URL environment variable or the "Advanced" panel in the sidebar.
+Uses whatever AWS credentials are already configured locally (same as the aws CLI). Override the
+target runtime with the AGENT_RUNTIME_ARN env var if needed.
 """
 
+import json
 import os
 import uuid
 
-import requests
+import boto3
 import streamlit as st
+from botocore.exceptions import BotoCoreError, ClientError
 
-from phases import PHASES
+AGENT_RUNTIME_ARN = os.environ.get(
+    "AGENT_RUNTIME_ARN",
+    "arn:aws:bedrock-agentcore:us-west-2:355604674280:runtime/NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7",
+)
+AWS_REGION = os.environ.get("AWS_REGION", "us-west-2")
+MEMORY_ID = os.environ.get("MEMORY_ID", "NUSCodesignChatbot_StudentChatHistory-jtaN1sD4xC")
 
-PHASE_ORDER = list(PHASES.keys())
-DEFAULT_BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
+PHASES_UI = {
+    "qa": {
+        "label": "Q&A",
+        "blurb": "Ask about course content, deadlines, rubrics -- answered from official CDE2300 course materials.",
+    },
+    "coaching": {
+        "label": "Coaching",
+        "blurb": "Socratic design-thinking coaching. The bot asks probing questions -- it won't give you the answer.",
+    },
+    "scoring": {
+        "label": "Scoring",
+        "blurb": "Get a Strengths / To Develop critique of your thinking so far in this conversation.",
+    },
+}
+PHASE_ORDER = ["qa", "coaching", "scoring"]
+
+COACHING_TOPICS_UI = {
+    "problem_identification": "Problem Identification",
+    "concept_generation": "Concept Generation",
+    "design_specification": "Design Specification",
+    "ethics_critical": "Ethics & Critical Thinking",
+    "reflection": "Reflection",
+}
+COACHING_TOPIC_ORDER = list(COACHING_TOPICS_UI.keys())
 
 st.set_page_config(
     page_title="Design Thinking Coach",
@@ -57,16 +87,25 @@ st.markdown(
 )
 
 
+@st.cache_resource
+def get_client():
+    return boto3.client("bedrock-agentcore", region_name=AWS_REGION)
+
+
+def new_session_id() -> str:
+    # AWS requires runtimeSessionId to be at least 33 characters.
+    return f"streamlit-{uuid.uuid4().hex}"
+
+
 # --- session state defaults ---
 def _init_state():
     defaults = {
         "student_id": "demo-student",
-        "project_id": "default",
-        "phase": PHASE_ORDER[0],
+        "session_id": new_session_id(),
+        "phase": "qa",
+        "topic": COACHING_TOPIC_ORDER[0],
         "messages": [],  # list of {role, content, critique}
         "hydrated_for": None,
-        "uploader_key": 0,
-        "backend_url": DEFAULT_BACKEND_URL,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -77,47 +116,71 @@ _init_state()
 
 
 def hydrate_history():
-    """Pull saved history for the current student/project from the backend."""
+    """Pull saved history for the current student/session from AgentCore Memory."""
     try:
-        resp = requests.get(
-            f"{st.session_state.backend_url}/state",
-            params={
-                "student_id": st.session_state.student_id,
-                "project_id": st.session_state.project_id,
-            },
-            timeout=15,
+        resp = get_client().list_events(
+            memoryId=MEMORY_ID,
+            actorId=st.session_state.student_id,
+            sessionId=st.session_state.session_id,
+            maxResults=100,
         )
-        resp.raise_for_status()
-        data = resp.json()
-    except requests.exceptions.RequestException:
+    except (ClientError, BotoCoreError):
         st.session_state.messages = []
-        return False
+        return
 
-    st.session_state.messages = [
-        {"role": turn["role"], "content": turn["content"], "critique": False}
-        for turn in data.get("history", [])
-    ]
-    if data.get("phase") in PHASES:
-        st.session_state.phase = data["phase"]
-    return True
+    turns = []
+    for event in reversed(resp.get("events", [])):  # API returns newest-first
+        for item in event.get("payload", []):
+            conversational = item.get("conversational")
+            if not conversational:
+                continue  # skip blob entries (session/agent-state bookkeeping, not chat turns)
+            role = conversational.get("role", "").lower()
+            text = conversational.get("content", {}).get("text")
+            if role in ("user", "assistant") and text:
+                turns.append({"role": role, "content": text, "critique": False})
+    st.session_state.messages = turns
+
+
+def stream_reply(prompt: str):
+    """Invoke the agent and yield reply text chunks as they arrive."""
+    payload = {"prompt": prompt, "phase": st.session_state.phase}
+    if st.session_state.phase == "coaching":
+        payload["topic"] = st.session_state.topic
+    if st.session_state.student_id:
+        payload["student_id"] = st.session_state.student_id
+
+    response = get_client().invoke_agent_runtime(
+        agentRuntimeArn=AGENT_RUNTIME_ARN,
+        payload=json.dumps(payload).encode("utf-8"),
+        runtimeSessionId=st.session_state.session_id,
+    )
+    for line in response["response"].iter_lines():
+        if not line:
+            continue
+        line = line.decode("utf-8") if isinstance(line, bytes) else line
+        if not line.startswith("data: "):
+            continue
+        event = json.loads(line[len("data: "):])
+        text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
+        if text:
+            yield text
 
 
 # --- sidebar ---
 with st.sidebar:
     st.markdown("## 🧭 Design Thinking Coach")
-    st.caption("CDE2300 Socratic AI assistant")
+    st.caption("CDE2300 Socratic AI assistant (AgentCore)")
 
     with st.expander("Session", expanded=True):
         student_id = st.text_input("Student ID", value=st.session_state.student_id)
-        project_id = st.text_input("Project ID", value=st.session_state.project_id)
-        if (student_id, project_id) != (st.session_state.student_id, st.session_state.project_id):
+        if student_id != st.session_state.student_id:
             st.session_state.student_id = student_id
-            st.session_state.project_id = project_id
             st.session_state.hydrated_for = None
             st.rerun()
+        st.caption(f"Session: `{st.session_state.session_id[:24]}...`")
 
-    st.markdown("### Design phase")
-    phase_labels = [PHASES[key]["label"] for key in PHASE_ORDER]
+    st.markdown("### Phase")
+    phase_labels = [PHASES_UI[key]["label"] for key in PHASE_ORDER]
     current_index = PHASE_ORDER.index(st.session_state.phase)
     chosen_label = st.radio(
         "Choose the phase you're working on",
@@ -127,15 +190,18 @@ with st.sidebar:
     )
     st.session_state.phase = PHASE_ORDER[phase_labels.index(chosen_label)]
 
-    progress = (PHASE_ORDER.index(st.session_state.phase) + 1) / len(PHASE_ORDER)
-    st.progress(progress, text=f"Phase {PHASE_ORDER.index(st.session_state.phase) + 1} of {len(PHASE_ORDER)}")
+    if st.session_state.phase == "coaching":
+        topic_labels = [COACHING_TOPICS_UI[key] for key in COACHING_TOPIC_ORDER]
+        topic_index = COACHING_TOPIC_ORDER.index(st.session_state.topic)
+        chosen_topic_label = st.selectbox("Coaching topic", options=topic_labels, index=topic_index)
+        st.session_state.topic = COACHING_TOPIC_ORDER[topic_labels.index(chosen_topic_label)]
 
     st.divider()
 
     col_new, col_save = st.columns(2)
     with col_new:
         if st.button("🔄 New session", use_container_width=True):
-            st.session_state.project_id = f"session-{uuid.uuid4().hex[:8]}"
+            st.session_state.session_id = new_session_id()
             st.session_state.messages = []
             st.session_state.hydrated_for = None
             st.rerun()
@@ -147,28 +213,26 @@ with st.sidebar:
         st.download_button(
             "💾 Save chat",
             data=transcript or "No messages yet.",
-            file_name=f"{st.session_state.student_id}_{st.session_state.project_id}.txt",
+            file_name=f"{st.session_state.student_id}_{st.session_state.session_id}.txt",
             mime="text/plain",
             use_container_width=True,
         )
 
-    with st.expander("Advanced"):
-        st.session_state.backend_url = st.text_input("Backend URL", value=st.session_state.backend_url)
 
-
-# --- hydrate history when student/project changes ---
-hydration_key = (st.session_state.student_id, st.session_state.project_id, st.session_state.backend_url)
+# --- hydrate history when student/session changes ---
+hydration_key = (st.session_state.student_id, st.session_state.session_id)
 if st.session_state.hydrated_for != hydration_key:
     hydrate_history()
     st.session_state.hydrated_for = hydration_key
 
 
 # --- main header ---
-phase = PHASES[st.session_state.phase]
-st.title(phase["label"])
-st.markdown(f'<div class="phase-desc">{phase["core_focus"]}</div>', unsafe_allow_html=True)
-with st.expander("What this phase is looking for"):
-    st.markdown(phase["rubric_criteria"])
+phase = PHASES_UI[st.session_state.phase]
+header = phase["label"]
+if st.session_state.phase == "coaching":
+    header += f" — {COACHING_TOPICS_UI[st.session_state.topic]}"
+st.title(header)
+st.markdown(f'<div class="phase-desc">{phase["blurb"]}</div>', unsafe_allow_html=True)
 
 st.divider()
 
@@ -184,51 +248,23 @@ for msg in st.session_state.messages:
         else:
             st.markdown(msg["content"])
 
-# --- image attachment ---
-uploaded_file = st.file_uploader(
-    "📎 Attach a sketch or photo (optional)",
-    type=["png", "jpg", "jpeg", "webp"],
-    key=f"uploader_{st.session_state.uploader_key}",
-)
-if uploaded_file is not None:
-    st.image(uploaded_file, width=160)
-
 prompt = st.chat_input("Type your response...")
 
 if prompt:
-    payload = {
-        "student_id": st.session_state.student_id,
-        "project_id": st.session_state.project_id,
-        "phase": st.session_state.phase,
-        "message": prompt,
-    }
-    if uploaded_file is not None:
-        import base64
-
-        payload["image_base64"] = base64.b64encode(uploaded_file.getvalue()).decode("utf-8")
-        payload["image_format"] = uploaded_file.type.split("/")[-1] or "png"
-
     st.session_state.messages.append({"role": "user", "content": prompt, "critique": False})
+    with st.chat_message("user", avatar="🧑‍🎓"):
+        st.markdown(prompt)
 
-    try:
-        with st.spinner("Thinking..."):
-            resp = requests.post(f"{st.session_state.backend_url}/chat", json=payload, timeout=60)
-            resp.raise_for_status()
-            data = resp.json()
-        st.session_state.messages.append(
-            {"role": "assistant", "content": data["reply"], "critique": data.get("critique_mode", False)}
-        )
-    except requests.exceptions.RequestException as exc:
-        st.session_state.messages.append(
-            {
-                "role": "assistant",
-                "content": (
-                    f"⚠️ Couldn't reach the assistant backend at `{st.session_state.backend_url}`. "
-                    f"Is it running? (`uvicorn main:app --reload --port 8000`)\n\nDetails: {exc}"
-                ),
-                "critique": False,
-            }
-        )
+    with st.chat_message("assistant", avatar="🧭"):
+        try:
+            reply = st.write_stream(stream_reply(prompt))
+        except (ClientError, BotoCoreError) as exc:
+            reply = (
+                f"⚠️ Couldn't reach the AgentCore runtime `{AGENT_RUNTIME_ARN}`. "
+                f"Check your AWS credentials and that the runtime is deployed.\n\nDetails: {exc}"
+            )
+            st.markdown(reply)
 
-    st.session_state.uploader_key += 1
-    st.rerun()
+    st.session_state.messages.append(
+        {"role": "assistant", "content": reply, "critique": st.session_state.phase == "scoring"}
+    )

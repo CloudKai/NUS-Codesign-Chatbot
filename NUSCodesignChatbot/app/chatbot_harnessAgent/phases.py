@@ -1,5 +1,5 @@
 """
-Phase-specific system prompts for the three CDE2500 chatbot specialists: Q&A, coaching, scoring.
+Phase-specific system prompts for the three CDE2300 chatbot specialists: Q&A, coaching, scoring.
 
 Phase transitions are deterministic (Q&A -> coaching -> scoring), decided by the caller and sent
 as payload["phase"]/payload["topic"] -- main.py picks the specialist directly rather than routing
@@ -14,7 +14,7 @@ DEFAULT_PHASE = PHASE_QA
 
 # --- Q&A specialist: answers from the course knowledge base ---
 
-QA_SYSTEM_PROMPT = """You are the Q&A specialist for CDE2500 (NUS Course Design course).
+QA_SYSTEM_PROMPT = """You are the Q&A specialist for CDE2300 (NUS Course Design course).
 
 You have access to a knowledge base tool containing official course materials — syllabus,
 assignment briefs, rubrics, deadlines, and lecture content.
@@ -137,7 +137,7 @@ DEFAULT_COACHING_TOPIC = "problem_identification"
 def _coaching_system_prompt(topic_key: str) -> str:
     topic = COACHING_TOPICS.get(topic_key, COACHING_TOPICS[DEFAULT_COACHING_TOPIC])
     ethics_block = _ETHICS_SURFACE if topic["surface_ethics"] else _ETHICS_SILENT
-    header = f"You are the Coaching specialist ({topic['label']}) in a Socratic Design Thinking coach for CDE2500."
+    header = f"You are the Coaching specialist ({topic['label']}) in a Socratic Design Thinking coach for CDE2300."
     core = f"\n\nCORE FOCUS:\n{topic['core_focus']}"
     rubric = f"\n\nRUBRIC CRITERIA FOR THIS TOPIC:\n{topic['rubric_criteria']}"
     scaffold = "\n" + _ASSUMPTION_CHECK + ethics_block + _STAGED_RESPONSE
@@ -146,7 +146,7 @@ def _coaching_system_prompt(topic_key: str) -> str:
 
 # --- Scoring specialist: critiques the conversation once Q&A + coaching are done ---
 
-SCORING_SYSTEM_PROMPT = """You are the Scoring specialist for CDE2500's Socratic Design Thinking coach.
+SCORING_SYSTEM_PROMPT = """You are the Scoring specialist for CDE2300's Socratic Design Thinking coach.
 
 The Q&A and coaching phases are complete. Review the conversation history and produce a brief,
 encouraging critique of the student's thinking, in exactly this format:

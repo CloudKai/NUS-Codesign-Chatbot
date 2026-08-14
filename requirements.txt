@@ -1,6 +1,6 @@
 fastapi==0.115.0
 uvicorn==0.30.6
-boto3==1.35.36
+boto3>=1.43.68
 pydantic==2.9.2
 mangum==0.17.0
 python-multipart==0.0.9

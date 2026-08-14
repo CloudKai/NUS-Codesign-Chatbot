@@ -13,7 +13,7 @@ materials.
 | Stack | FastAPI + raw `boto3` Bedrock `Converse`, Streamlit UI | Amazon Bedrock AgentCore (Strands agent), deployed via CDK |
 | Tools / RAG | None — framework text pasted directly into prompts | Real RAG via an AgentCore Gateway → Bedrock Knowledge Base |
 | Phases | 5 design-thinking stages (problem ID → concept gen → design spec → ethics → reflection), single agent | 3 specialist agents (Q&A, coaching, scoring), deterministic backend-driven routing |
-| Persistence | Local JSON file (`storage.py`) | AgentCore Runtime session history (in-process, per session, best-effort) |
+| Persistence | Local JSON file (`storage.py`) | AgentCore Memory — durable, per-student, survives cold starts/multi-instance |
 | Docs | [README_1.md](README_1.md) (deploy walkthrough), [FEATURES.md](FEATURES.md) | [NUSCodesignChatbot/AGENTS.md](NUSCodesignChatbot/AGENTS.md), architecture below |
 
 The root POC established the coaching prompt design — assumption-checking, staged Socratic
@@ -44,7 +44,7 @@ flowchart TB
         C -->|phase=qa| D["Q&A specialist Agent"]
         C -->|phase=coaching| E["Coaching specialist Agent"]
         C -->|phase=scoring| F["Scoring specialist Agent"]
-        G[("Shared per-session state:<br/>messages · conversation manager · ExecutionLimitsHook")]
+        G[("In-process per-session:<br/>conversation manager · ExecutionLimitsHook")]
         D -.-> G
         E -.-> G
         F -.-> G
@@ -53,6 +53,9 @@ flowchart TB
     D -->|MCP tool call| H["AgentCore Gateway<br/>gateway-course-materials-4cymlvixrt"]
     H --> I["Target: kb<br/>(bedrock-knowledge-bases connector)"]
     I --> J[("Bedrock Knowledge Base")]
+
+    D & E & F -->|"session_manager<br/>(actor_id=student_id, session_id)"| K[("AgentCore Memory<br/>StudentChatHistory")]
+    D & E & F -->|"every model call<br/>(load_model)"| L["Bedrock Guardrail<br/>NUSCodesignChatbotGuardrail"]
 ```
 
 ### Components
@@ -64,9 +67,8 @@ flowchart TB
   name as `{gateway}_{target}___{operation}` — with `kb-target`, the `AgenticRetrieveStream`
   tool came out to 69 characters against a 64-character limit, so the target was renamed to fit.
 - Target type: `bedrock-knowledge-bases` connector, exposing `Retrieve` and
-  `AgenticRetrieveStream` operations, backed by knowledge base `JUQNP8AZAZ`.
-- **Known issue:** querying it currently returns CDE2300 content, not CDE2500 — worth checking
-  the knowledge base's data source before this is used with CDE2500 students.
+  `AgenticRetrieveStream` operations, backed by knowledge base `JUQNP8AZAZ` containing CDE2300
+  course materials.
 
 **2. Runtime — `chatbot_harnessAgent`** (`app/chatbot_harnessAgent/`)
 - The actively-developed piece: a Strands agent exported via `agentcore export harness`,
@@ -85,14 +87,63 @@ flowchart TB
     so far.
 - Only the `qa` specialist is given the knowledge-base gateway tool; `coaching` and `scoring`
   reason over conversation history alone.
-- Session state (`messages` history, `SlidingWindowConversationManager`, `ExecutionLimitsHook`)
-  is cached per `session_id` (LRU, capped at 128 sessions, in-process — resets on cold start) and
-  **shared across phase switches**, so moving `qa` → `coaching` → `scoring` within one session
-  keeps full context under a single session-wide 75-iteration / 1-hour execution cap, rather than
-  resetting per phase.
+- The `SlidingWindowConversationManager` and `ExecutionLimitsHook` stay in-process, cached per
+  `session_id` (LRU, capped at 128 sessions — resets on cold start) and **shared across phase
+  switches**, so moving `qa` → `coaching` → `scoring` within one session keeps a single
+  session-wide 75-iteration / 1-hour execution cap rather than resetting per phase. These govern a
+  single instance's live tool-loop, not persisted state, so it's fine for them to be best-effort.
 - The generic `shell` / `file_operations` tools that AgentCore's export scaffold adds by default
   were deliberately removed — a student-facing course bot shouldn't have arbitrary shell/file
   access on the server.
+
+**2a. Memory — `StudentChatHistory`**
+- An AgentCore Memory resource (`agentcore.json` → `memories`), short-term only (no
+  `SEMANTIC`/`SUMMARIZATION`/`USER_PREFERENCE`/`EPISODIC` strategies configured yet), 180-day
+  event expiry.
+- Wired to the Runtime via an explicit `connections` entry (`id: "chat-history"`, `access:
+  "readwrite"`) rather than the in-project `memories` array alone — the CDK constructs don't yet
+  support auto-wiring a same-project memory by name (that's called out in their source as a
+  future, unshipped feature), so the connection points at the Memory's own ARN and injects a
+  `MEMORY_CHAT_HISTORY_ID` env var into the Runtime.
+- `main.py` uses `AgentCoreMemorySessionManager` (from the `bedrock_agentcore` SDK) as each
+  specialist Agent's `session_manager`, keyed by `actor_id` + `session_id`. This **replaces** the
+  in-process message list entirely — every new specialist Agent (every turn, every phase)
+  reconstructs history straight from Memory, so it survives cold starts and works correctly even
+  if the Runtime scales to multiple instances.
+- `actor_id` comes from `payload["student_id"]`, falling back to `session_id` if absent. **The
+  installed SDK does not surface Cognito claims or any caller identity to `main.py`** — there is
+  currently no way for the backend to know who's calling except what the payload says. The
+  frontend (post-Cognito-login) must set `student_id` explicitly on every invoke call; this is an
+  application-level convention, not something AWS enforces cryptographically. The real security
+  boundary today is "only the frontend's IAM role can call this API at all."
+
+**2b. Guardrail — `NUSCodesignChatbotGuardrail`**
+- A real Amazon Bedrock Guardrail (`guardrailId: o8aipba8m129`, version `1`), applied on every
+  model call via `model/load.py` — since all three specialists share `load_model()`, this covers
+  `qa`, `coaching`, and `scoring` uniformly, not just one phase.
+- **Not** the same thing as AgentCore's Cedar `PolicyEngine`/`Policy` resources — those only
+  attach to *Gateways* (`agentcore add policy-engine --attach-to-gateways`), so they can gate
+  MCP tool calls but can't filter general chat turns. A real Bedrock Guardrail is the correct
+  mechanism for conversation-wide content filtering, which is why this isn't declared in
+  `agentcore.json`'s `policyEngines` array at all — Guardrails aren't a first-class AgentCore-CDK
+  resource type in this project's schema.
+- Content filters: `SEXUAL`/`HATE` at `HIGH` strength, `VIOLENCE`/`INSULTS`/`MISCONDUCT` at
+  `MEDIUM` (deliberately not `HIGH` — the `ethics_critical` coaching topic legitimately discusses
+  harm, safety, and misconduct as course content, and `HIGH` risked false-positive blocking of
+  that discussion). Prompt-attack detection at `HIGH` (input only — `PROMPT_ATTACK` doesn't apply
+  to model output).
+- Sensitive-information filters: blocks SSNs, card numbers/CVVs, AWS credentials, bank accounts,
+  passports, and passwords outright; anonymizes (rather than blocks) email/phone/name/address/
+  username, since students may legitimately reference this kind of PII when discussing user
+  personas or research subjects.
+- IAM: the Runtime's execution role needed `bedrock:ApplyGuardrail` on the guardrail's ARN, which
+  has no equivalent field in `agentcore.json`'s `AgentEnvSpec` schema either. Granted via a
+  manual `aws iam put-role-policy` (policy name `ManualGuardrailAccess-NotCDKManaged`) — **this is
+  not tracked by CDK.** If the runtime is ever renamed (which destroys and recreates its
+  execution role per this project's invariants), this grant must be re-applied by hand.
+- Verified live: a prompt-injection attempt ("ignore all previous instructions...") and a
+  hate-speech prompt were both blocked with the configured `blockedInputMessaging`; a normal
+  course-content question still worked.
 
 **3. Harness — `NUSCodesignChatbot`** (`app/NUSCodesignChatbot/`)
 - A second resource declared in `agentcore.json` (`harnesses` array), deployed alongside the
@@ -101,10 +152,11 @@ flowchart TB
   the phase logic. Not the active bot.
 
 **4. A separate harness exists outside this repo**
-- AWS currently also has a harness named `chatbot_harness` (id suffix `M6wbSQc3V9`) with a real
-  CDE2500 system prompt and its own backing Runtime — **not represented anywhere in this repo's
-  `agentcore.json` or CDK**, meaning it was created directly (console or otherwise) and isn't
-  managed by `agentcore deploy` here.
+- AWS currently also has a harness named `chatbot_harness` (id suffix `M6wbSQc3V9`) with its own
+  system prompt (labeled **CDE2500** — worth checking whether that's a stale/wrong course number,
+  since the actual course is CDE2300) and its own backing Runtime — **not represented anywhere in
+  this repo's `agentcore.json` or CDK**, meaning it was created directly (console or otherwise)
+  and isn't managed by `agentcore deploy` here.
 - This is almost certainly the bot currently reachable by students. Until it's imported into this
   project (`agentcore import`) or intentionally retired in favor of the CDK-managed
   `chatbot_harnessAgent` Runtime above, there are two independently-evolving agents for the same
@@ -130,13 +182,14 @@ and `agentcore dev`'s local server enforces its own auth that raw HTTP requests 
 
 ```powershell
 cd NUSCodesignChatbot
-.\test_invoke.ps1 -Prompt "When is the final project due?" -Phase qa -SessionId "my-test-session"
-.\test_invoke.ps1 -Prompt "Everyone will love a mobile app" -Phase coaching -Topic concept_generation -SessionId "my-test-session"
-.\test_invoke.ps1 -Prompt "Score my thinking so far" -Phase scoring -SessionId "my-test-session"
+.\test_invoke.ps1 -Prompt "When is the final project due?" -Phase qa -StudentId "student-1" -SessionId "my-test-session"
+.\test_invoke.ps1 -Prompt "Everyone will love a mobile app" -Phase coaching -Topic concept_generation -StudentId "student-1" -SessionId "my-test-session"
+.\test_invoke.ps1 -Prompt "Score my thinking so far" -Phase scoring -StudentId "student-1" -SessionId "my-test-session"
 ```
 
 Reuse the same `-SessionId` across calls to verify history and the execution-limits cap carry
-over between phases; omit it for an isolated one-off test.
+over between phases; omit it for an isolated one-off test. `-StudentId` sets the Memory `actor_id`
+— omit it and history falls back to being scoped by `-SessionId` alone.
 
 ### Project structure & CLI reference
 
