@@ -201,6 +201,28 @@ access in the Bedrock console for that region, grant the runtime role
 model/profile ARN only, and do not create a Knowledge Base for coaching.
 See [Bedrock adapter](docs/providers/BEDROCK_ADAPTER.md).
 
+### Amazon Bedrock AgentCore (production generation path)
+
+FastAPI stays the student application. AgentCore Runtime is the live coaching
+brain once the harness returns `coach_turn` JSON. Direct Converse remains a
+fallback.
+
+```bash
+MODEL_PROVIDER=agentcore
+AWS_REGION=us-west-2
+AGENTCORE_RUNTIME_ARN=arn:aws:bedrock-agentcore:us-west-2:<account>:runtime/<id>
+AGENTCORE_QUALIFIER=DEFAULT
+AGENTCORE_TIMEOUT_SECONDS=110
+AGENTCORE_MAX_RETRIES=0
+MOCK_OPENAI=false
+```
+
+Do not merge the POC CDK app as a second student UI. Apply
+[scripts/agentcore/harness_patch/README.md](scripts/agentcore/harness_patch/README.md)
+to the existing runtime, then run
+[docs/providers/AGENTCORE_ADAPTER.md](docs/providers/AGENTCORE_ADAPTER.md)
+live smoke only with an explicit cost cap.
+
 ### Thinking Path Next confirmation
 
 Default: `AUTO_ADVANCE_STAGES=false`. After the coach recommends the next stage:

@@ -25,7 +25,7 @@ RetrievalResult.context → PromptContext.retrieved_course_context
     ↓
 PromptComposer (server-side, no Streamlit / OpenAI / Bedrock imports)
     ↓
-OpenAI, Bedrock, or deterministic mock
+OpenAI, Bedrock Converse, AgentCore Runtime, or deterministic mock
     ↓
 structured coaching response (recommendation only)
     ↓
@@ -53,7 +53,10 @@ changes.
 
 The retriever sees full extracted text locally, but the generation model sees
 only the selected excerpts. Citation previews are focused around the matching
-query evidence instead of the beginning of the document.
+query evidence instead of the beginning of the document. Production generation
+may use AgentCore Runtime (`MODEL_PROVIDER=agentcore`); the user payload is
+still this application's composed CDE2300 prompt. Do not copy the POC CDE2500
+Q&A specialist prompt. Coaching must not receive Knowledge Base tools.
 
 ## Prompt structure
 
@@ -90,7 +93,7 @@ RetrievalResult (stable source IDs/labels + chunks)
     ↓
 same PromptComposer + same educational workflow
     ↓
-configured generation provider (Bedrock later)
+configured generation provider (AgentCore Runtime, or Bedrock/OpenAI fallback)
 ```
 
 For the Bedrock phase, implement a new `ContextRetriever` adapter and inject it

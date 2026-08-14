@@ -37,9 +37,9 @@ PDFs are normal Git blobs, not LFS pointers.
 
 ## Production image exclusion
 
-`.dockerignore` excludes `lecture_notes/`. Production Compose keeps
-`COURSE_MATERIAL_SYNC_ENABLED=false` so runtime must not copy lecture PDFs into
-the student uploads bucket.
+`.dockerignore` excludes `lecture_notes/`. Production Compose enables
+`COURSE_MATERIAL_SYNC_ENABLED=true` against shared `course/` keys so runtime
+must not copy lecture PDFs into the student uploads `users/` prefix.
 
 ## Owner decision required
 

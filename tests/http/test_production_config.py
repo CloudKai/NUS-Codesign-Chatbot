@@ -34,6 +34,12 @@ def _apply_valid_production_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "bedrock_model_id", "")
     monkeypatch.setattr(settings, "bedrock_timeout_seconds", 110.0)
     monkeypatch.setattr(settings, "bedrock_max_retries", 0)
+    monkeypatch.setattr(settings, "agentcore_runtime_arn", "")
+    monkeypatch.setattr(settings, "agentcore_runtime_id", "")
+    monkeypatch.setattr(settings, "agentcore_timeout_seconds", 110.0)
+    monkeypatch.setattr(settings, "agentcore_max_retries", 0)
+    monkeypatch.setattr(settings, "course_materials_bucket", "")
+    monkeypatch.setattr(settings, "course_materials_prefix", "course/")
     monkeypatch.setattr(settings, "use_local_api", True)
     monkeypatch.setattr(settings, "enable_local_code_execution", False)
     monkeypatch.setattr(settings, "course_material_sync_enabled", False)
@@ -76,6 +82,60 @@ def test_valid_bedrock_production_configuration_passes_without_openai_key(monkey
     validate_production_configuration()
 
 
+def test_valid_agentcore_production_configuration_passes_without_openai_key(monkeypatch):
+    _apply_valid_production_baseline(monkeypatch)
+    monkeypatch.setattr(settings, "model_provider", "agentcore")
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    monkeypatch.setattr(
+        settings,
+        "agentcore_runtime_arn",
+        "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/test",
+    )
+    validate_production_configuration()
+
+
+def test_valid_production_configuration_allows_shared_course_sync(monkeypatch):
+    _apply_valid_production_baseline(monkeypatch)
+    monkeypatch.setattr(settings, "course_material_sync_enabled", True)
+    monkeypatch.setattr(settings, "course_materials_bucket", "course-content-test")
+    monkeypatch.setattr(settings, "course_materials_prefix", "course/")
+    validate_production_configuration()
+
+
+@pytest.mark.parametrize(
+    "field,value,match",
+    [
+        ("agentcore_runtime_arn", "", r"AGENTCORE_RUNTIME_ARN"),
+        ("agentcore_timeout_seconds", 0, r"AGENTCORE_TIMEOUT_SECONDS"),
+        ("agentcore_timeout_seconds", 121, r"AGENTCORE_TIMEOUT_SECONDS"),
+        ("agentcore_max_retries", 3, r"AGENTCORE_MAX_RETRIES"),
+    ],
+)
+def test_production_rejects_incomplete_agentcore_configuration(
+    monkeypatch, field: str, value: object, match: str
+):
+    _apply_valid_production_baseline(monkeypatch)
+    monkeypatch.setattr(settings, "model_provider", "agentcore")
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    monkeypatch.setattr(
+        settings,
+        "agentcore_runtime_arn",
+        "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/test",
+    )
+    monkeypatch.setattr(settings, field, value)
+    with pytest.raises(ValueError, match=match):
+        validate_production_configuration()
+
+
+def test_production_rejects_users_namespace_as_course_prefix(monkeypatch):
+    _apply_valid_production_baseline(monkeypatch)
+    monkeypatch.setattr(settings, "course_material_sync_enabled", True)
+    monkeypatch.setattr(settings, "course_materials_bucket", "course-content-test")
+    monkeypatch.setattr(settings, "course_materials_prefix", "users/")
+    with pytest.raises(ValueError, match="users/"):
+        validate_production_configuration()
+
+
 @pytest.mark.parametrize(
     "field,value,match",
     [
@@ -110,7 +170,7 @@ def test_production_rejects_incomplete_bedrock_configuration(
         ("openai_max_retries", 3, r"OPENAI_MAX_RETRIES"),
         ("use_local_api", False, r"USE_LOCAL_API"),
         ("enable_local_code_execution", True, r"ENABLE_LOCAL_CODE_EXECUTION"),
-        ("course_material_sync_enabled", True, r"COURSE_MATERIAL_SYNC_ENABLED"),
+        ("course_material_sync_enabled", True, r"COURSE_MATERIALS_BUCKET"),
         ("database_provider", "sqlite", r"sqlite"),
         ("file_storage_provider", "local", r"local"),
         ("dsql_user", "admin", r"admin"),

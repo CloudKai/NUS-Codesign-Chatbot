@@ -25,6 +25,8 @@ logic.
 | `init_db.py` | Explicit SQLite schema setup | Refuses existing DB unless `--force`; prefer `--database PATH` for new files |
 | `init_dsql.py` | Compatibility CLI for `scripts/dsql/cli.py` admin bootstrap | One DDL per transaction; async-job `CALL` on dedicated autocommit connection; initializes the five-phase workflow marker only with zero notebooks; keeps research DDL; never app startup; not `co_design_app`. CloudShell SSL/IPv4 checklist: [`docs/deploy/AWS_STATELESS_EC2.md`](../docs/deploy/AWS_STATELESS_EC2.md) (§ CloudShell / laptop init_dsql checklist) |
 | `smoke_dsql_idempotency.py` | Explicitly approved live DSQL runtime-role idempotency smoke | Requires `--confirm-live`, `DATABASE_PROVIDER=dsql`, `DSQL_USER=co_design_app`, and `--identifier cognito:<sub>`; mock provider only; no DDL/S3/Bedrock |
+| `agentcore_smoke.py` | Explicitly approved one-request AgentCore coaching smoke | Requires `--i-approve-live-agentcore`, positive `--cost-cap`, and `--max-requests 1`; no pytest path |
+| `sync_course_materials.py` | Upload `lectureNotes/` and `readings/` to shared `course/` S3 keys | Requires `--confirm`; never writes `users/`; never deletes course objects |
 | `preview_prompt.py` | Demo-only composed stage-prompt preview | No DB, student data, tokens, or provider calls |
 | `reset_learning_data.py` | Dry-run inventory and explicit five-phase learning-data reset | Apply requires an unchanged signed manifest and exact phrase; preserves accounts/auth; creates SQLite backup and file quarantine |
 

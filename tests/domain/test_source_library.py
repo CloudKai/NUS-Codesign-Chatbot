@@ -519,3 +519,66 @@ def test_mock_turn_persists_source_snapshot_without_forcing_citations(tmp_path, 
     assistant = store.get_messages(thread_id)[-1]
     assert assistant["metadata"]["source_ids"] == [source["id"]]
     assert assistant["metadata"]["source_refs"] == []
+
+
+def test_shared_course_sync_references_course_keys_not_user_copies(tmp_path, monkeypatch):
+    from backend.persistence.factory import reset_file_storage_cache
+    from backend.persistence.memory_files import MemoryFileStorage
+    from backend import source_library
+    from backend.settings import settings as app_settings
+
+    memory = MemoryFileStorage()
+    memory.put_bytes(
+        key="course/lectureNotes/week-01.txt",
+        data=b"Pedestrian crossing evidence from lecture one.",
+        content_type="text/plain",
+    )
+    memory.put_bytes(
+        key="course/readings/reading-01.txt",
+        data=b"Assigned reading about personas.",
+        content_type="text/plain",
+    )
+    monkeypatch.setattr(app_settings, "file_storage_provider", "memory")
+    monkeypatch.setattr(app_settings, "course_materials_prefix", "course/")
+    monkeypatch.setattr(app_settings, "course_materials_bucket", "course-test")
+    monkeypatch.setattr(app_settings, "course_material_sync_enabled", True)
+    monkeypatch.setattr(app_settings, "max_lecture_notes", 50)
+    monkeypatch.setattr(app_settings, "max_course_material_size_mb", 1)
+    reset_file_storage_cache()
+    monkeypatch.setattr(
+        "backend.persistence.factory.get_file_storage", lambda: memory
+    )
+    monkeypatch.setattr(
+        "backend.persistence.factory.get_course_file_storage", lambda: memory
+    )
+
+    store, thread_id, _files_dir = make_notebook(tmp_path, monkeypatch)
+    first = sync_lecture_notes_folder(store, thread_id)
+    sources = store.list_sources(thread_id)
+    groups = {item["metadata"]["course_material_group"] for item in sources}
+    keys = {item["metadata"]["object_key"] for item in sources}
+
+    assert first.added == 2
+    assert first.errors == ()
+    assert groups == {"Lecture Notes", "Readings"}
+    assert keys == {
+        "course/lectureNotes/week-01.txt",
+        "course/readings/reading-01.txt",
+    }
+    assert all(item["metadata"]["shared_course_object"] is True for item in sources)
+    assert all(item["metadata"]["origin"] == "lecture_notes_folder" for item in sources)
+    assert [key for key in memory._objects if "/raw/" in key] == []
+    derived = [key for key in memory._objects if key.startswith("users/") and "/derived/" in key]
+    assert len(derived) == 2
+    assert "Pedestrian crossing evidence" in sources[0]["extractedText"] or any(
+        "Pedestrian crossing evidence" in item["extractedText"] for item in sources
+    )
+    assert sync_lecture_notes_folder(store, thread_id).unchanged == 2
+
+    def boom() -> list:
+        raise RuntimeError("catalog down")
+
+    monkeypatch.setattr(source_library, "_iter_shared_course_items", boom)
+    failed = sync_lecture_notes_folder(store, thread_id)
+    assert failed.errors
+    assert len(store.list_sources(thread_id)) == 2

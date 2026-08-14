@@ -12,6 +12,7 @@ import re
 import socket
 import threading
 import uuid
+import zlib
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -24,6 +25,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from ..file_processing import (
     IMAGE_SUFFIXES,
     SUPPORTED_SUFFIXES,
+    extract_source_text_from_bytes,
     extract_text,
     save_uploads,
 )
@@ -44,6 +46,8 @@ MAX_WEB_BYTES = 5 * 1024 * 1024
 WEB_TIMEOUT_SECONDS = 10
 LECTURE_NOTES_README = "README.txt"
 COURSE_MATERIAL_GROUPS = ("Lecture Notes", "Readings")
+SHARED_COURSE_FOLDERS = ("lectureNotes", "readings")
+_SHARED_CATALOG_UNAVAILABLE = (("__course_catalog_unavailable__", 0, 0),)
 _COURSE_MATERIAL_SYNC_LOCK = threading.RLock()
 
 
@@ -63,8 +67,23 @@ class LectureNotesSyncResult:
     errors: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class SharedCourseItem:
+    """One shared course object referenced by locked notebook sources."""
+
+    object_key: str
+    relative_path: str
+    filename: str
+    size: int
+    signature: str
+    material_group: str
+    fingerprint_token: int
+
+
 def course_material_fingerprint() -> tuple[tuple[str, int, int], ...]:
     """Return the stable file signature used to coordinate background imports."""
+    if settings.uses_shared_course_materials:
+        return _shared_course_fingerprint()
     root = settings.lecture_notes_dir.resolve()
     root.mkdir(parents=True, exist_ok=True)
     fingerprint: list[tuple[str, int, int]] = []
@@ -216,6 +235,59 @@ def course_material_group(relative_path: str) -> str:
     if any("reading" in part for part in lowered_parts):
         return "Readings"
     return "Lecture Notes"
+
+
+def _iter_shared_course_items() -> list[SharedCourseItem]:
+    """List shared Lecture Notes and Readings objects for locked source sync.
+
+    Raises:
+        Exception: Listing failures propagate so callers can avoid treating an
+            outage as an empty catalog (which would delete locked sources).
+    """
+    from backend.persistence.factory import get_course_file_storage
+
+    prefix = settings.normalized_course_materials_prefix
+    storage = get_course_file_storage()
+    items: list[SharedCourseItem] = []
+    max_bytes = settings.max_course_material_size_mb * 1024 * 1024
+    for folder in SHARED_COURSE_FOLDERS:
+        for obj in storage.list_prefix(f"{prefix}{folder}/"):
+            if "/derived/" in obj.key or obj.key.endswith("/"):
+                continue
+            relative = obj.key[len(prefix) :] if obj.key.startswith(prefix) else obj.key
+            filename = Path(relative).name
+            if filename == LECTURE_NOTES_README or filename.startswith("."):
+                continue
+            if Path(filename).suffix.lower() not in SUPPORTED_SUFFIXES:
+                continue
+            if obj.size > max_bytes:
+                continue
+            signature = f"{obj.size}:{obj.etag or obj.size}"
+            items.append(
+                SharedCourseItem(
+                    object_key=obj.key,
+                    relative_path=relative,
+                    filename=filename,
+                    size=obj.size,
+                    signature=signature,
+                    material_group=course_material_group(relative),
+                    fingerprint_token=zlib.crc32(signature.encode("utf-8")) & 0x7FFFFFFF,
+                )
+            )
+            if len(items) >= settings.max_lecture_notes:
+                return items
+    return items
+
+
+def _shared_course_fingerprint() -> tuple[tuple[str, int, int], ...]:
+    """Return the shared-catalog fingerprint, or a sentinel when listing fails."""
+    try:
+        items = _iter_shared_course_items()
+    except Exception:
+        return _SHARED_CATALOG_UNAVAILABLE
+    return tuple(
+        (item.relative_path, item.size, item.fingerprint_token) for item in items
+    )
 
 
 def is_locked_course_source(source: dict[str, Any]) -> bool:
@@ -533,17 +605,131 @@ def sync_lecture_notes_folder(
         return _sync_lecture_notes_folder(store, thread_id)
 
 
+def _sync_shared_course_materials(
+    store: StudentStore,
+    thread_id: str,
+) -> LectureNotesSyncResult:
+    """Create locked sources that reference shared course object keys.
+
+    PDFs stay under the shared prefix. Only extracted text is written under
+    the notebook's ``users/.../derived/`` key. A catalog listing failure does
+    not delete existing locked sources.
+    """
+    from backend.persistence.factory import get_course_file_storage
+
+    try:
+        catalog = _iter_shared_course_items()
+    except Exception:
+        return LectureNotesSyncResult(errors=("course catalog is unavailable",))
+
+    managed_by_path: dict[str, list[dict[str, Any]]] = {}
+    for source in store.list_sources(thread_id):
+        metadata = source.get("metadata") or {}
+        relative_path = metadata.get("lecture_note_relative_path")
+        if metadata.get("origin") != "lecture_notes_folder" or not relative_path:
+            continue
+        managed_by_path.setdefault(str(relative_path), []).append(source)
+
+    added = updated = removed = unchanged = skipped = 0
+    errors: list[str] = []
+    existing: dict[str, dict[str, Any]] = {}
+    for relative_path, candidates in managed_by_path.items():
+        ordered = sorted(
+            candidates,
+            key=lambda source: (str(source.get("createdAt") or ""), source["id"]),
+        )
+        existing[relative_path] = ordered[0]
+        for duplicate in ordered[1:]:
+            store.delete_source(thread_id, duplicate["id"], force=True)
+            removed += 1
+
+    seen: set[str] = set()
+    storage = get_course_file_storage()
+    storage_provider = settings.file_storage_provider
+    for item in catalog:
+        seen.add(item.relative_path)
+        current = existing.get(item.relative_path)
+        current_metadata = (current or {}).get("metadata") or {}
+        if (
+            current_metadata.get("lecture_note_signature") == item.signature
+            and current_metadata.get("course_material_group") == item.material_group
+            and current_metadata.get("locked_source") is True
+            and current_metadata.get("shared_course_object") is True
+            and current_metadata.get("object_key") == item.object_key
+            and current.get("title") == item.filename
+        ):
+            unchanged += 1
+            continue
+        try:
+            payload = storage.get_bytes(item.object_key)
+            extracted = extract_source_text_from_bytes(item.filename, payload)[
+                :MAX_SOURCE_TEXT
+            ]
+            mime = mimetypes.guess_type(item.filename)[0] or "application/octet-stream"
+            kind = "image" if Path(item.filename).suffix.lower() in IMAGE_SUFFIXES else "file"
+            created_id = _add_source_with_extracted_text(
+                store,
+                thread_id,
+                kind=kind,
+                title=item.filename,
+                mime=mime,
+                path=item.object_key,
+                extracted_text=extracted,
+                size=item.size,
+                selected=True,
+                metadata={
+                    "origin": "lecture_notes_folder",
+                    "lecture_note_relative_path": item.relative_path,
+                    "lecture_note_signature": item.signature,
+                    "course_material_group": item.material_group,
+                    "locked_source": True,
+                    "managed_file": True,
+                    "supported": True,
+                    "storage_provider": storage_provider,
+                    "object_key": item.object_key,
+                    "shared_course_object": True,
+                },
+            )
+        except (OSError, ValueError) as exc:
+            errors.append(f"{item.relative_path}: {exc}")
+            continue
+        created = store.get_source(thread_id, created_id)
+        if not created:
+            errors.append(f"{item.relative_path}: source was not created")
+            continue
+        if current:
+            store.delete_source(thread_id, current["id"], force=True)
+            updated += 1
+        else:
+            added += 1
+
+    for relative_text, source in existing.items():
+        if relative_text not in seen:
+            store.delete_source(thread_id, source["id"], force=True)
+            removed += 1
+
+    return LectureNotesSyncResult(
+        added=added,
+        updated=updated,
+        removed=removed,
+        unchanged=unchanged,
+        skipped=skipped,
+        errors=tuple(errors),
+    )
+
+
 def _sync_lecture_notes_folder(
     store: StudentStore,
     thread_id: str,
 ) -> LectureNotesSyncResult:
     """Copy lecture-note files into one notebook and select them for grounding.
 
-    The shared folder is treated as read-only input. Files are validated through
-    the existing upload path, copied into notebook-owned storage, and keyed by a
-    relative path plus size/mtime signature. Deleted or replaced folder files
-    update only sources previously created by this synchronizer.
+    The shared folder is treated as read-only input. Local development copies
+    files into notebook-owned storage. Production S3 references shared
+    ``course/`` object keys and never writes PDFs under ``users/``.
     """
+    if settings.uses_shared_course_materials:
+        return _sync_shared_course_materials(store, thread_id)
     root = settings.lecture_notes_dir.resolve()
     root.mkdir(parents=True, exist_ok=True)
     managed_by_path: dict[str, list[dict[str, Any]]] = {}

@@ -46,7 +46,7 @@ Only read that for UI tasks that touch API migration or coaching flow.
 | `sources.py` | Compatibility alias for `panels/sources.py` (library, search/filter, add/viewer dialogs) |
 | `studio.py` | Compatibility alias for `panels/studio.py` (five-phase Journey/Review, pending transitions) |
 | `professor.py` | Lecturer Research/analytics workbench. Do not relocate. CSS lives in `assets/styles/70-professor.css`. |
-| `notebooks.py` | Folder-free notebook library and actions dialog |
+| `notebooks.py` | Folder-free notebook library and actions dialog (rename, transcript download, delete) |
 | `settings.py` | Preference persistence callbacks used by the profile popover |
 
 `ui.chat`, `ui.sources`, `ui.studio`, and `ui.runtime` replace themselves with

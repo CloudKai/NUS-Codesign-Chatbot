@@ -18,7 +18,7 @@ backend/
   api_client.py               typed client used by Streamlit
   application.py              coaching compatibility facade
   coaching/                   durable coach-turn execution
-  workspace_service.py        notebook/message/source/preference use cases
+  workspace_service.py        notebook/message/source/preference use cases; transcript export
   learning_service.py         transition confirmation and stage selection
   domain.py                   Pydantic API/workflow contracts
   student_journey.py          learning compatibility facade
@@ -36,6 +36,7 @@ backend/
   persistence/                DSQL, local-file, memory, and S3 adapters/ports
   providers.py                OpenAI adapter and provider selection
   bedrock_provider.py         Amazon Bedrock Converse coach adapter
+  agentcore_provider.py       Amazon Bedrock AgentCore Runtime coach adapter
   mock_provider.py            deterministic offline coach
   auth_*.py / cognito_*.py    Cognito/OIDC boundary and cookie behavior
 tests/                        domain/, persistence/, http/, ui/, scripts/ suites

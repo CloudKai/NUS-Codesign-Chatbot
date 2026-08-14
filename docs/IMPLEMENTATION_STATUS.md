@@ -1,6 +1,137 @@
 # Implementation status
 
-## Current phase — Amazon Bedrock coach adapter
+## Current phase — DSQL-only transcript + student download
+
+**Completed locally on 2026-08-15.** Aurora DSQL / SQLite `messages` remain the
+only durable chat transcript. AgentCore stays generation-only (stateless
+invokes). Students can download a `.txt` projection of persisted messages from
+Notebook Actions. POC JSON, DynamoDB, and AgentCore session memory are not
+used as chat history. A sixth Thinking Path stage is not added.
+
+### Behavior delivered
+
+1. Documented and tested that `AgentCoreCoachProvider` never reuses a notebook
+   id as `runtimeSessionId`, never sends AgentCore Memory/history fields, and
+   persists a valid turn only in `StudentStore` (no `poc_store.json`).
+2. `GET /api/v1/threads/{thread_id}/transcript.txt` returns an attachment
+   built from `get_messages` (Student/Coach labels, no assessment metadata).
+   Foreign notebooks stay 404.
+3. Notebook Actions offers **Download transcript** via the workspace facade /
+   typed API client. Streamlit does not read SQLite.
+4. Recorded deferred POC extras: deploy the existing harness `coach_turn`
+   overlay; optional later “Ask the course” Retrieve mode mapped onto locked
+   sources. Explicitly out of scope: scoring specialist replacement, critique
+   every Nth turn, `ethics_critical` as a sixth stage, CDK student UI merge.
+
+### Main files changed
+
+- Export: `backend/workspace_service.py`, `backend/http/app.py`,
+  `backend/api_client.py`, `ui/services/runtime.py`, `ui/notebooks.py`,
+  `ui/assets/styles/50-dialogs-notebooks.css`
+- Tests: `tests/domain/test_agentcore_provider.py`,
+  `tests/http/test_workspace_api.py`, `tests/http/test_multiuser_ownership.py`,
+  `tests/ui/test_streamlit_ui.py`, `tests/test_architecture_contracts.py`
+- Docs: `docs/DATABASE.md`, `docs/LOCAL_DEMO_IMPLEMENTATION.md`,
+  `docs/providers/AGENTCORE_ADAPTER.md`, `docs/deploy/AWS_STATELESS_EC2.md`,
+  nested `AGENTS.md`
+
+### Validation evidence
+
+- Targeted: `tests/domain/test_agentcore_provider.py`,
+  `tests/http/test_workspace_api.py`, `tests/http/test_multiuser_ownership.py`,
+  `tests/test_architecture_contracts.py`, `tests/ui/test_streamlit_ui.py`
+  passed.
+- Full deterministic suite: **535 passed, 0 failed**. Existing
+  Starlette/httpx deprecation warnings. No live AWS, Bedrock, AgentCore,
+  Cognito, DSQL, S3, or paid OpenAI call from pytest.
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
+  passed. `git diff --check` passed.
+
+### Compatibility, migration, and rollback
+
+- No database schema change. Transcript download is a read of existing
+  `messages`. Rollback is reverting this working tree.
+
+### Known risks and next exact action
+
+- Live AgentCore still streams prose until
+  `scripts/agentcore/harness_patch/README.md` is applied and `DEFAULT` is
+  READY on a new version.
+- Next: deploy that harness patch, then one approved
+  `scripts/agentcore_smoke.py --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`.
+  Do not add course Q&A or a scoring specialist until that cutover is done.
+  Never restore six stages.
+
+## Previous completed phase — AgentCore generation + shared course S3 keys
+
+**Completed locally on 2026-08-14.** FastAPI/Streamlit remain the student
+product. Production generation is `MODEL_PROVIDER=agentcore` (one
+`InvokeAgentRuntime` per turn). Locked Lecture Notes/Readings reference shared
+`course/` objects instead of copying PDFs into `users/`. Automated tests inject
+fake clients and never call AWS.
+
+### Behavior delivered
+
+1. `AgentCoreCoachProvider` sends `phase=coaching`, composed CDE2300 prompt,
+   and `output_contract=coach_turn`. `deep_analysis` maps to AgentCore topic
+   `ethics_critical` only. Invokes are stateless. Images fail closed rather
+   than being dropped. Errors are category-only.
+2. POC harness overlay in `scripts/agentcore/harness_patch/` so the live
+   coaching specialist returns `ProviderCoachOutput` JSON with zero KB tools.
+3. Shared course sync lists `course/lectureNotes/` and `course/readings/`,
+   creates locked DSQL source rows, and writes only extracted text under
+   `users/.../derived/`.
+4. Production config accepts OpenAI xor Bedrock xor AgentCore. Course sync is
+   allowed when `COURSE_MATERIALS_BUCKET` + `COURSE_MATERIALS_PREFIX=course/`
+   are set (not `users/`).
+5. Admin inventory (account `355604674280`, `us-west-2`): runtime
+   `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` DEFAULT READY v6;
+   gateway `gateway-course-materials-4cymlvixrt`; KB `JUQNP8AZAZ` data source
+   `cde2300-course-content-s3`; uploaded 7 lecture PDFs + 3 readings to
+   `course/lectureNotes/` and `course/readings/`; EC2 role
+   `CDE2300ChatbotEC2Role` inline policy `AgentCore-Course-Materials`
+   (invoke, Retrieve, course Get/List, no course delete).
+
+### Main files changed
+
+- New: `backend/agentcore_provider.py`, `tests/domain/test_agentcore_provider.py`,
+  `scripts/agentcore/harness_patch/`, `scripts/agentcore_smoke.py`,
+  `scripts/sync_course_materials.py`, `docs/providers/AGENTCORE_ADAPTER.md`
+- Wiring: `backend/providers.py`, `backend/settings.py`, `backend/http/app.py`,
+  `backend/sources/library.py`, `backend/persistence/*`
+- Config/docs: `.env.example`, `compose.prod.yaml`, `docs/deploy/AWS_STATELESS_EC2.md`,
+  `docs/PROMPT_ARCHITECTURE.md`
+
+### Validation evidence
+
+- Targeted: `tests/domain/test_agentcore_provider.py`,
+  `tests/domain/test_source_library.py`,
+  `tests/http/test_production_config.py`,
+  `tests/test_deployment_config.py` passed.
+- Full deterministic suite: **531 passed, 0 failed**. Existing
+  Starlette/httpx deprecation warnings. No live AWS, Bedrock, AgentCore,
+  Cognito, DSQL, S3, or paid OpenAI call from pytest.
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
+  passed. `git diff --check` passed.
+
+### Compatibility, migration, and rollback
+
+- No database schema change. Default local provider remains `mock`.
+- Host `.env` should set `MODEL_PROVIDER=agentcore`,
+  `AGENTCORE_RUNTIME_ARN=arn:aws:bedrock-agentcore:us-west-2:355604674280:runtime/NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`,
+  `COURSE_MATERIALS_BUCKET=cde2300-course-content-s3`.
+- Rollback: leave `.env` on `openai` or `bedrock` and set
+  `COURSE_MATERIAL_SYNC_ENABLED=false`.
+
+### Known risks and next exact action
+
+- Live runtime still streams prose until
+  `scripts/agentcore/harness_patch/README.md` is applied and `DEFAULT` is
+  READY on a new version.
+- Next: deploy that harness patch, then one approved
+  `scripts/agentcore_smoke.py --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`.
+
+## Previous completed phase — Amazon Bedrock coach adapter
 
 **Completed locally on 2026-08-14.** The coach provider contract now includes a
 Bedrock Converse adapter. Phase progression, citations, persistence, and

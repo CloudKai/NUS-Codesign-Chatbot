@@ -100,6 +100,21 @@ class Settings:
     bedrock_model_id: str = os.getenv("BEDROCK_MODEL_ID", "").strip()
     bedrock_timeout_seconds: float = float(os.getenv("BEDROCK_TIMEOUT_SECONDS", "110"))
     bedrock_max_retries: int = int(os.getenv("BEDROCK_MAX_RETRIES", "0"))
+    agentcore_runtime_arn: str = os.getenv("AGENTCORE_RUNTIME_ARN", "").strip()
+    agentcore_runtime_id: str = os.getenv("AGENTCORE_RUNTIME_ID", "").strip()
+    agentcore_qualifier: str = (
+        os.getenv("AGENTCORE_QUALIFIER", "DEFAULT").strip() or "DEFAULT"
+    )
+    agentcore_timeout_seconds: float = float(
+        os.getenv("AGENTCORE_TIMEOUT_SECONDS", "110")
+    )
+    agentcore_max_retries: int = int(os.getenv("AGENTCORE_MAX_RETRIES", "0"))
+    course_materials_bucket: str = field(
+        default_factory=lambda: os.getenv("COURSE_MATERIALS_BUCKET", "").strip()
+    )
+    course_materials_prefix: str = (
+        os.getenv("COURSE_MATERIALS_PREFIX", "course/").strip() or "course/"
+    )
     api_base_url: str = os.getenv("CO_DESIGN_API_URL", "http://127.0.0.1:8000")
     public_api_base_url: str = os.getenv(
         "CO_DESIGN_PUBLIC_API_URL",
@@ -131,8 +146,8 @@ class Settings:
         os.getenv("COGNITO_JWKS_CACHE_TTL_SECONDS", str(6 * 60 * 60))
     )
     # Local demo copies lecture PDFs into notebook storage. Production DSQL+S3
-    # must keep this false until the separate course-material/Bedrock owner
-    # lands — otherwise student-upload S3 would receive duplicate course PDFs.
+    # syncs locked Lecture Notes/Readings from shared ``course/`` keys without
+    # copying PDFs into ``users/``.
     course_material_sync_enabled: bool = _boolean(
         "COURSE_MATERIAL_SYNC_ENABLED", True
     )
@@ -196,6 +211,44 @@ class Settings:
         """Return True when uploads are stored on the local filesystem."""
         return self.file_storage_provider == "local"
 
+    @property
+    def normalized_course_materials_prefix(self) -> str:
+        """Return the shared course-object prefix with a trailing slash."""
+        cleaned = self.course_materials_prefix.strip().replace("\\", "/").strip("/")
+        return f"{cleaned}/" if cleaned else ""
+
+    @property
+    def resolved_course_materials_bucket(self) -> str:
+        """Return the course-materials bucket, falling back to student uploads."""
+        return self.course_materials_bucket.strip() or self.user_uploads_bucket.strip()
+
+    @property
+    def uses_shared_course_materials(self) -> bool:
+        """Return whether locked course sources should reference shared object keys.
+
+        Production S3 always uses the shared prefix. Memory-backed tests opt in
+        by setting ``COURSE_MATERIALS_BUCKET`` so ordinary memory upload tests
+        keep the local lecture-notes copy path.
+        """
+        if not self.normalized_course_materials_prefix:
+            return False
+        if self.file_storage_provider == "s3":
+            return True
+        return self.file_storage_provider == "memory" and bool(
+            self.course_materials_bucket.strip()
+        )
+
+    @property
+    def resolved_agentcore_runtime_arn(self) -> str:
+        """Return the AgentCore runtime ARN from ARN or id-shaped ARN values."""
+        arn = self.agentcore_runtime_arn.strip()
+        if arn:
+            return arn
+        runtime_id = self.agentcore_runtime_id.strip()
+        if runtime_id.startswith("arn:"):
+            return runtime_id
+        return ""
+
     def ensure_directories(self) -> None:
         """Create local data directories when the local providers are active.
 
@@ -258,6 +311,13 @@ def validate_production_configuration() -> None:
             raise ValueError("BEDROCK_TIMEOUT_SECONDS must be between 1 and 120")
         if not 0 <= settings.bedrock_max_retries <= 2:
             raise ValueError("BEDROCK_MAX_RETRIES must be between 0 and 2")
+    elif settings.model_provider == "agentcore":
+        if not settings.resolved_agentcore_runtime_arn:
+            raise ValueError("AGENTCORE_RUNTIME_ARN is not configured")
+        if not 1 <= settings.agentcore_timeout_seconds <= 120:
+            raise ValueError("AGENTCORE_TIMEOUT_SECONDS must be between 1 and 120")
+        if not 0 <= settings.agentcore_max_retries <= 2:
+            raise ValueError("AGENTCORE_MAX_RETRIES must be between 0 and 2")
     else:
         raise ValueError(
             f"Unsupported MODEL_PROVIDER for production: {settings.model_provider}"
@@ -268,7 +328,19 @@ def validate_production_configuration() -> None:
     if settings.enable_local_code_execution:
         raise ValueError("ENABLE_LOCAL_CODE_EXECUTION is not allowed in production")
     if settings.course_material_sync_enabled:
-        raise ValueError("COURSE_MATERIAL_SYNC_ENABLED is not allowed in production")
+        prefix = settings.normalized_course_materials_prefix
+        if settings.file_storage_provider != "s3":
+            raise ValueError(
+                "COURSE_MATERIAL_SYNC_ENABLED requires FILE_STORAGE_PROVIDER=s3"
+            )
+        if not prefix:
+            raise ValueError("COURSE_MATERIALS_PREFIX is not configured")
+        if prefix == "users/" or prefix.startswith("users/"):
+            raise ValueError(
+                "COURSE_MATERIALS_PREFIX must not use the users/ namespace"
+            )
+        if not settings.course_materials_bucket.strip():
+            raise ValueError("COURSE_MATERIALS_BUCKET is not configured")
 
     if settings.database_provider == "sqlite":
         raise ValueError("DATABASE_PROVIDER=sqlite is not allowed in production")

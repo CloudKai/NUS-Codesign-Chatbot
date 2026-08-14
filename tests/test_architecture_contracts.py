@@ -306,6 +306,11 @@ def test_complete_fastapi_route_inventory_is_stable(tmp_path: Path) -> None:
             ("GET", "/api/v1/threads/{thread_id}/messages", "list_messages"),
             ("POST", "/api/v1/threads/{thread_id}/messages", "create_message"),
             (
+                "GET",
+                "/api/v1/threads/{thread_id}/transcript.txt",
+                "download_transcript",
+            ),
+            (
                 "POST",
                 "/api/v1/threads/{thread_id}/messages/{message_id}/revise",
                 "revise_user_message",

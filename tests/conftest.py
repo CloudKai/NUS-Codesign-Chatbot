@@ -35,6 +35,9 @@ os.environ["APP_WORKSPACES_DIR"] = str(_BOOTSTRAP_ROOT / "workspaces")
 os.environ["LECTURE_NOTES_DIR"] = str(_BOOTSTRAP_ROOT / "lecture_notes")
 os.environ["DATABASE_PROVIDER"] = "sqlite"
 os.environ["FILE_STORAGE_PROVIDER"] = "local"
+os.environ.pop("DSQL_SSLROOTCERT", None)
+os.environ.pop("COURSE_MATERIALS_BUCKET", None)
+os.environ.pop("AGENTCORE_RUNTIME_ARN", None)
 
 
 def _clear_streamlit_runtime_caches() -> None:
@@ -78,6 +81,9 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("LECTURE_NOTES_DIR", str(lecture_notes_dir))
     monkeypatch.setenv("DATABASE_PROVIDER", "sqlite")
     monkeypatch.setenv("FILE_STORAGE_PROVIDER", "local")
+    monkeypatch.delenv("DSQL_SSLROOTCERT", raising=False)
+    monkeypatch.delenv("COURSE_MATERIALS_BUCKET", raising=False)
+    monkeypatch.delenv("AGENTCORE_RUNTIME_ARN", raising=False)
 
     from backend import settings as settings_module
     from backend.persistence.factory import reset_file_storage_cache
@@ -99,6 +105,10 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     )
     monkeypatch.setattr(settings_module.settings, "database_provider", "sqlite")
     monkeypatch.setattr(settings_module.settings, "file_storage_provider", "local")
+    monkeypatch.setattr(settings_module.settings, "course_materials_bucket", "")
+    monkeypatch.setattr(settings_module.settings, "agentcore_runtime_arn", "")
+    monkeypatch.setattr(settings_module.settings, "agentcore_runtime_id", "")
+    monkeypatch.setattr(settings_module.settings, "dsql_sslrootcert", "")
     monkeypatch.setattr(settings_module.settings, "openai_api_key", "")
     monkeypatch.setattr(settings_module.settings, "openai_timeout_seconds", 110.0)
     monkeypatch.setattr(settings_module.settings, "openai_max_retries", 0)

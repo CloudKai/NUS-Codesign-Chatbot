@@ -182,7 +182,7 @@ def notebooks_dialog() -> None:
                         "⋯",
                         type="tertiary",
                         key=f"notebook-actions-{thread['id']}",
-                        help="Rename or delete this notebook",
+                        help="Rename, download, or delete this notebook",
                     ):
                         request_notebook_actions(thread["id"])
                         rerun_app()
@@ -278,7 +278,7 @@ def _sync_notebook_library_scroll() -> None:
     on_dismiss=cancel_notebook_actions,
 )
 def notebook_actions_dialog() -> None:
-    """Rename only when Enter submits the form; delete with confirmation.
+    """Rename, download the persisted transcript, or delete with confirmation.
 
     Dismissing (X, click outside, or Esc) clears the pending action and reopens
     Your Notebooks on the next script run.
@@ -309,6 +309,24 @@ def notebook_actions_dialog() -> None:
             root_selector='[role="dialog"]:has(.st-key-notebook_actions_panel)',
             aria_label="Rename",
         )
+
+        with st.container(key="notebook_action_export"):
+            try:
+                transcript = store.download_transcript(str(thread_id))
+            except ValueError:
+                transcript = None
+            if transcript is not None:
+                st.download_button(
+                    "Download transcript",
+                    data=transcript.data,
+                    file_name=transcript.filename,
+                    mime="text/plain",
+                    key=f"download-transcript-{thread_id}",
+                    use_container_width=True,
+                    type="secondary",
+                    icon=":material/download:",
+                    help="Save this notebook's chat from persisted messages",
+                )
 
         with st.container(key="notebook_action_danger"):
             st.markdown("#### Delete notebook")

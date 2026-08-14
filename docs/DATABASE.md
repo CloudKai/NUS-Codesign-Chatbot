@@ -27,6 +27,21 @@ owns browser authentication. Pending/resolved transition records and durable
 coach-idempotency reservations use structured internal message rows that normal
 history/count queries filter out.
 
+## System of record
+
+SQLite locally and Aurora DSQL in production are the **only** durable chat
+transcript. Do not store student messages in:
+
+- AgentCore Runtime session memory (in-process LRU, lost on cold start)
+- AgentCore Memory strategies (semantic / summarization)
+- DynamoDB
+- a JSON file such as the POC ``poc_store.json``
+
+Each AgentCore invoke is stateless (a fresh ``runtimeSessionId`` that is never
+a notebook id). FastAPI persists the turn in ``messages`` after structured
+validation. Student ``transcript.txt`` download is a projection of
+``get_messages``, not a second store.
+
 ## Ownership and relationships
 
 Ownership is derived, not copied onto every child row:

@@ -51,10 +51,10 @@ def read_source_bytes(source: dict[str, Any]) -> bytes | None:
         )
     )
     if object_key:
-        from backend.persistence.factory import get_file_storage
+        from backend.persistence.factory import file_storage_for_key
 
         try:
-            return get_file_storage().get_bytes(str(object_key))
+            return file_storage_for_key(str(object_key)).get_bytes(str(object_key))
         except FileNotFoundError:
             return None
     path = safe_source_file_path(source)

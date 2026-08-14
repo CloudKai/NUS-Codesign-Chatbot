@@ -292,6 +292,37 @@ def test_s3_delete_prefix_raises_on_returned_object_errors():
     assert successful.delete_prefix("users/u/n/") == 2
 
 
+def test_s3_list_prefix_skips_directory_placeholders():
+    class _Paginator:
+        def paginate(self, **kwargs):
+            assert kwargs["Prefix"] == "course/"
+            yield {
+                "Contents": [
+                    {"Key": "course/", "Size": 0, "ETag": '"dir"'},
+                    {
+                        "Key": "course/lectureNotes/week-01.pdf",
+                        "Size": 12,
+                        "ETag": '"abc"',
+                    },
+                ]
+            }
+
+    class _Client:
+        def get_paginator(self, name: str):
+            assert name == "list_objects_v2"
+            return _Paginator()
+
+    storage = S3FileStorage(
+        bucket="course-test",
+        region="us-west-2",
+        client=_Client(),
+    )
+    listed = storage.list_prefix("course/")
+    assert [item.key for item in listed] == ["course/lectureNotes/week-01.pdf"]
+    assert listed[0].size == 12
+    assert listed[0].etag == "abc"
+
+
 def test_create_file_storage_provider_selection(tmp_path: Path, monkeypatch):
     reset_file_storage_cache()
     monkeypatch.setattr("backend.persistence.factory.settings.file_storage_provider", "local")

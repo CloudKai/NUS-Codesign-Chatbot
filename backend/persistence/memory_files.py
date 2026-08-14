@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .ports import StoredObject
+from .ports import ListedObject, StoredObject
 
 
 class MemoryFileStorage:
@@ -51,3 +51,12 @@ class MemoryFileStorage:
         for key in keys:
             del self._objects[key]
         return len(keys)
+
+    def list_prefix(self, prefix: str) -> list[ListedObject]:
+        """List in-memory objects whose keys start with *prefix*."""
+        listed: list[ListedObject] = []
+        for key, (data, _content_type) in sorted(self._objects.items()):
+            if not key.startswith(prefix) or key.endswith("/"):
+                continue
+            listed.append(ListedObject(key=key, size=len(data), etag=str(len(data))))
+        return listed

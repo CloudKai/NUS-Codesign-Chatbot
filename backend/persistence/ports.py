@@ -20,6 +20,15 @@ class StoredObject:
     size: int
 
 
+@dataclass(frozen=True)
+class ListedObject:
+    """Lightweight listing row for one object under a storage prefix."""
+
+    key: str
+    size: int
+    etag: str = ""
+
+
 class FileStorage(Protocol):
     """Byte-oriented object storage for user uploads and managed copies."""
 
@@ -50,3 +59,6 @@ class FileStorage(Protocol):
 
     def delete_prefix(self, prefix: str) -> int:
         """Delete every object whose key starts with *prefix*. Return count."""
+
+    def list_prefix(self, prefix: str) -> list[ListedObject]:
+        """List objects whose keys start with *prefix* (non-recursive extras allowed)."""

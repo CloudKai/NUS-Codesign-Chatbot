@@ -19,24 +19,29 @@ Students
        │     └── FastAPI :8000 (internal)
        │           ├── Cognito
        │           ├── Aurora DSQL (structured state, role co_design_app)
-       │           ├── S3 (user uploads)
-       │           └── OpenAI or Amazon Bedrock (configured coach provider)
+       │           ├── S3 (user uploads under users/; shared course/ keys)
+       │           └── AgentCore Runtime (production coach) or OpenAI / Bedrock Converse
        └── DuckDNS cron on the host (not in the app container)
 ```
 
 Persistent state lives in **Aurora DSQL** and **S3**. Replacing the app
 container must not destroy conversations, progress, or uploads.
-Bedrock and shared course-material retrieval are separate workstreams. Coach
-generation can use `MODEL_PROVIDER=bedrock` once the instance role has invoke
-permission on the chosen model; Knowledge Base retrieval is still not required
-to validate this production path.
+Production coaching uses `MODEL_PROVIDER=agentcore` against runtime
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` (qualifier `DEFAULT`).
+Invokes are stateless; Aurora DSQL `messages` is the only durable transcript.
+Do not treat AgentCore session memory, DynamoDB, or a JSON file as chat history.
+Direct Bedrock Converse remains a fallback. Course PDFs live in shared
+`course/lectureNotes/` and `course/readings/` on the course-content bucket;
+student uploads stay under `users/`. `COURSE_MATERIAL_SYNC_ENABLED=true`
+creates locked DSQL source rows that **reference** those shared keys and does
+not copy PDFs into the uploads prefix. Coaching does not call
+`RetrieveAndGenerate`. The AgentCore coaching specialist must keep zero KB
+tools so `[S#]` citations stay notebook-selected.
 
-During pre-Bedrock testing, student-upload RAG is still functional: extracted
+During pre-AgentCore testing, student-upload RAG is still functional: extracted
 text is read from the selected S3-backed sources, chunked and ranked in the app
 container for each turn, and passed to the provider through the same bounded
-prompt contract. `COURSE_MATERIAL_SYNC_ENABLED=false` prevents repository
-lecture files from being copied into the student uploads bucket; it does not
-disable retrieval over sources the student uploads or pastes into a notebook.
+prompt contract.
 
 ## Production data model
 
@@ -416,6 +421,11 @@ Required production `.env` keys (host-only):
 - `DSQL_ENDPOINT=<hostname>`
 - `DSQL_USER=co_design_app`
 - `USER_UPLOADS_BUCKET=<bucket>`
+- `COURSE_MATERIALS_BUCKET=cde2300-course-content-s3`
+- `COURSE_MATERIALS_PREFIX=course/`
+- `MODEL_PROVIDER=agentcore`
+- `AGENTCORE_RUNTIME_ARN=arn:aws:bedrock-agentcore:us-west-2:355604674280:runtime/NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`
+- `AGENTCORE_QUALIFIER=DEFAULT`
 - Cognito + public URL values already set in `compose.prod.yaml`
 
 `/api/v1/ready` checks non-secret Cognito configuration locally (it does not
@@ -451,9 +461,11 @@ AWS_REGION=us-west-2
 ```
 
 The application creates object prefixes automatically. Do not pre-create
-folders and do not copy local course materials into this student-uploads
-bucket. Once the role policy is attached, verify the readiness endpoint; then
-perform upload, preview, download, restart, and delete from the smoke sequence.
+folders and do not copy local course materials into the student-uploads
+`users/` prefix. Shared Lecture Notes and Readings live on
+`cde2300-course-content-s3` under `course/lectureNotes/` and
+`course/readings/`. Set `COURSE_MATERIALS_BUCKET` to that bucket. The EC2 role
+may `GetObject`/`ListBucket` on `course/*` and must not delete those objects.
 Replace both bucket placeholders in this EC2 role policy before attaching it:
 
 ```json
@@ -578,7 +590,13 @@ Grant least privilege for:
 - Aurora DSQL DbConnect for `co_design_app` (not admin)
 - S3 bucket list plus read/write/delete on the uploads bucket's
   `users/*` objects
+- `s3:ListBucket` + `s3:GetObject` on the course-content bucket's `course/*`
+  prefix only (no delete on `course/*`)
 - Optional CloudWatch logs
+- When `MODEL_PROVIDER=agentcore`: `bedrock-agentcore:InvokeAgentRuntime` on
+  runtime `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` (and its
+  `DEFAULT` endpoint); `bedrock:Retrieve` on Knowledge Base `JUQNP8AZAZ` for a
+  future selected-source Retrieve adapter only (not RetrieveAndGenerate)
 - When `MODEL_PROVIDER=bedrock`: `bedrock:InvokeModel` and
   `bedrock:InvokeModelWithResponseStream` on the exact model or
   inference-profile ARN only (no `bedrock:*` admin)

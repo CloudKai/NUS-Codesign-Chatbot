@@ -752,6 +752,23 @@ def test_notebook_history_confirmed_delete_removes_the_selected_notebook():
     assert not app.exception
 
 
+def test_notebook_actions_offers_transcript_download():
+    """Notebook Actions downloads the persisted chat, not a sidecar store."""
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    next(button for button in app.button if button.label == "Notebooks").click().run()
+    next(button for button in app.button if button.label == "New notebook").click().run()
+    thread_id = app.session_state["thread_id"]
+    app.session_state["pending_notebook_actions"] = thread_id
+    app.run()
+    download = next(
+        control
+        for control in app.download_button
+        if control.label == "Download transcript"
+    )
+    assert "persisted messages" in str(download.help)
+    assert not app.exception
+
+
 def test_legacy_chat_turn_does_not_move_the_learning_stage_without_confirmation():
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     next(button for button in app.button if button.label == "Notebooks").click().run()

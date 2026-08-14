@@ -24,7 +24,7 @@ FastAPI (`api.py` façade → `http/app.py`)
   -> one LangGraph workflow (workflow.py)
   -> domain contracts (`domain.py`, `student_journey.py` façade → `learning/`)
   -> repositories + SQLite (repositories.py, student_store.py, research/)
-  -> providers (providers.py, bedrock_provider.py, mock_provider.py)
+  -> providers (providers.py, bedrock_provider.py, agentcore_provider.py, mock_provider.py)
   -> sources/files (`source_library.py` façade → `sources/`, `file_processing.py`)
 ```
 
@@ -36,7 +36,7 @@ FastAPI (`api.py` façade → `http/app.py`)
 | `application.py` / `coaching/` | Compatibility import plus durable `CoachApplicationService` execution, including research-observation persist |
 | `api.py` / `http/app.py` | Compatibility import plus FastAPI app factory/composition, student and professor routes, and HTTP error mapping |
 | `api_client.py` | Typed client used by Streamlit when `USE_LOCAL_API=true` |
-| `workspace_service.py` | Notebook/history/source/preference CRUD application service |
+| `workspace_service.py` | Notebook/history/source/preference CRUD application service; student transcript export |
 | `workflow.py` | Single LangGraph coach workflow wrapper (not one agent per phase) |
 | `student_journey.py` / `learning/` | Compatibility imports plus the five research-aligned phases, journey normalization, review helpers, and questions |
 | `learning_service.py` | Confirmation-gated phase transitions and learning progression |
@@ -46,8 +46,9 @@ FastAPI (`api.py` façade → `http/app.py`)
 | `persistence/` | Storage ports + factories: SQLite/DSQL student stores, local/S3 file storage; `persistence/store/` holds schema, migrations, and extracted source operations |
 | `repositories.py` | Narrow repository adapters over `StudentStore` |
 | `chat_service.py` | Legacy/direct chat engine retained for compatibility tests; not the current Streamlit fallback |
-| `providers.py` | OpenAI, mock selection, and Bedrock factory wiring |
+| `providers.py` | OpenAI, mock selection, Bedrock and AgentCore factory wiring |
 | `bedrock_provider.py` | Amazon Bedrock Converse coach adapter (injected client; no AWS in tests) |
+| `agentcore_provider.py` | AgentCore Runtime coach adapter (injected client; no AWS in tests) |
 | `prompts/` | Framework-neutral five-phase prompt files, loader, and composer |
 | `mock_provider.py` | Deterministic provider for tests and offline demo |
 | `source_library.py` / `sources/` | Compatibility import plus ingestion, course sync, bounded context, and image/storage projection |
@@ -75,11 +76,15 @@ FastAPI (`api.py` façade → `http/app.py`)
 - **Structured provider failures** map to HTTP 503 at the API boundary.
 - **Mock-first testing**. Automated tests must not require paid APIs or internet.
 - **AWS production adapters are opt-in** via ``DATABASE_PROVIDER=dsql``,
-  ``FILE_STORAGE_PROVIDER=s3``, and ``MODEL_PROVIDER=bedrock``. Keep ports
+  ``FILE_STORAGE_PROVIDER=s3``, and ``MODEL_PROVIDER=agentcore`` (or
+  ``bedrock`` / ``openai``). Keep ports
   replaceable; never bake credentials into images; tests must use mocks/fakes
   only.
 - **Notebook isolation**. Retrieval and citations must stay scoped to the active
   notebook and selected sources.
+- **DSQL/SQLite is the transcript.** AgentCore Runtime is generation-only and
+  must not own chat history (no runtime LRU, AgentCore Memory, DynamoDB, or
+  JSON sidecar). Student transcript download is a projection of ``messages``.
 - **Professor/research stays one API.** Lecturer routes live in `http/app.py`
   with the student API. Do not split them into a second FastAPI app.
 

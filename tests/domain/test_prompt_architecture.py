@@ -230,12 +230,15 @@ def test_composer_module_has_no_provider_sdk_dependencies():
 def test_providers_do_not_embed_five_stage_educational_wording():
     source = (_REPO_ROOT / "backend" / "providers.py").read_text(encoding="utf-8")
     bedrock = (_REPO_ROOT / "backend" / "bedrock_provider.py").read_text(encoding="utf-8")
+    agentcore = (_REPO_ROOT / "backend" / "agentcore_provider.py").read_text(encoding="utf-8")
     for marker in _STAGE_MARKERS.values():
         assert marker not in source
         assert marker not in bedrock
+        assert marker not in agentcore
     assert "Stage-specific advance rule for Problem" not in source
     assert "compose_coach_prompt" in source
     assert "compose_coach_prompt" in bedrock
+    assert "compose_coach_prompt" in agentcore
 
 
 def _set_stage(store: StudentStore, thread_id: str, stage_id: str) -> None:

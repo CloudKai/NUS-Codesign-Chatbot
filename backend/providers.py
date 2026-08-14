@@ -4,7 +4,8 @@ Providers consume a server-composed prompt from ``backend.prompts`` and focus on
 invocation, structured output, model arguments, and error translation. They do
 not own five-stage educational wording. When ``CoachRequest.image_inputs`` is
 present, OpenAI receives multimodal ``input_image`` parts alongside the composed
-text prompt. Bedrock lives in ``backend.bedrock_provider`` and is selected here.
+text prompt. Bedrock lives in ``backend.bedrock_provider`` and AgentCore in
+``backend.agentcore_provider``; both are selected here.
 """
 
 from __future__ import annotations
@@ -135,5 +136,15 @@ def configured_coach_provider():
             region=settings.aws_region,
             timeout_seconds=settings.bedrock_timeout_seconds,
             max_retries=settings.bedrock_max_retries,
+        )
+    if settings.model_provider == "agentcore":
+        from backend.agentcore_provider import AgentCoreCoachProvider
+
+        return AgentCoreCoachProvider(
+            settings.resolved_agentcore_runtime_arn,
+            region=settings.aws_region,
+            qualifier=settings.agentcore_qualifier,
+            timeout_seconds=settings.agentcore_timeout_seconds,
+            max_retries=settings.agentcore_max_retries,
         )
     raise ProviderUnavailableError(f"Unsupported MODEL_PROVIDER: {settings.model_provider}")

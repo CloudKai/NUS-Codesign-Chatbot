@@ -165,12 +165,17 @@ OPENAI_API_KEY=
 OPENAI_CHAT_MODEL=gpt-5.6-luna
 ```
 
-Set `MODEL_PROVIDER=openai` or `MODEL_PROVIDER=bedrock` in a private `.env`
+Set `MODEL_PROVIDER=openai`, `MODEL_PROVIDER=bedrock`, or
+`MODEL_PROVIDER=agentcore` in a private `.env`
 when needed. Do not hard-code a model in the workflow. The mock provider must
 be deterministic and support all automated tests without network access.
-Bedrock uses the default AWS credential chain (SSO or the EC2 role) plus
-`BEDROCK_MODEL_ID`; never put access keys in `.env`. The Bedrock adapter is
-generation-only and must not call RetrieveAndGenerate.
+Bedrock and AgentCore use the default AWS credential chain (SSO or the EC2 role).
+Never put access keys in `.env`. The Bedrock adapter is
+generation-only and must not call RetrieveAndGenerate. AgentCore is the
+production generation path: FastAPI stays the application; the runtime is not
+the student UI. Invokes are stateless so DSQL/SQLite ``messages`` remain the
+only durable transcript. Do not port POC JSON, DynamoDB, or AgentCore session
+caches as chat history.
 
 Retrieval is notebook-isolated and source-first. The current local adapter
 creates sentence-aware overlapping chunks from extracted selected-source text

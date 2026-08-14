@@ -19,7 +19,7 @@ from .domain import (
     SourceSelectAllRequest,
     SourceUpdateRequest,
 )
-from .workspace_service import SourceContent
+from .workspace_service import SourceContent, TranscriptExport
 
 
 class _HttpSession(Protocol):
@@ -377,6 +377,24 @@ class LocalApiClient:
         )
         response.raise_for_status()
         return response.json()
+
+    def download_transcript(self, thread_id: str) -> TranscriptExport:
+        """Download the persisted notebook transcript as UTF-8 ``.txt``."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/threads/{thread_id}/transcript.txt",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        mime = response.headers.get("content-type", "text/plain; charset=utf-8")
+        filename = "transcript.txt"
+        disposition = response.headers.get("content-disposition") or ""
+        if "filename*=" in disposition:
+            filename = disposition.split("filename*=UTF-8''", 1)[-1].strip()
+        return TranscriptExport(
+            data=bytes(response.content),
+            filename=filename,
+            mime=mime,
+        )
 
     def add_message(self, thread_id: str, request: MessageCreateRequest) -> str:
         """Persist one message and return its id."""

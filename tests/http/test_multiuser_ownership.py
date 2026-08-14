@@ -164,6 +164,13 @@ def test_user_a_cannot_access_user_b_notebook_or_sources(tmp_path, monkeypatch):
         == 404
     )
     assert (
+        client.get(
+            f"/api/v1/threads/{notebook_b}/transcript.txt",
+            cookies=cookies_a,
+        ).status_code
+        == 404
+    )
+    assert (
         client.patch(
             f"/api/v1/threads/{notebook_b}/sources/{source_b}",
             json=SourceUpdateRequest(selected=False).model_dump(exclude_none=True),

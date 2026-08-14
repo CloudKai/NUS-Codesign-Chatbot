@@ -184,3 +184,58 @@ def test_workspace_service_redacts_paths(tmp_path):
     assert "path" not in public
     assert public["has_file"] is False
     assert public["title"] == "Paste"
+
+
+def test_workspace_api_transcript_download_uses_persisted_messages(tmp_path):
+    """Student transcript download is a projection of DSQL/SQLite messages."""
+    from backend.api_client import LocalApiClient
+    from backend.workspace_service import format_notebook_transcript, transcript_filename
+
+    store = StudentStore(tmp_path / "transcript.sqlite3")
+    thread_id = store.create_thread(
+        name="Studio research",
+        model_id="mock",
+        support_mode="critical-thinking",
+    )
+    store.add_message(thread_id, "user", "I compared privacy and fairness.")
+    store.add_message(
+        thread_id,
+        "assistant",
+        "What trade-off still needs evidence?",
+        metadata={"assessment": {"confidence": 0.9}},
+    )
+
+    expected = format_notebook_transcript(
+        title="Studio research",
+        messages=[
+            {"role": "user", "content": "I compared privacy and fairness."},
+            {
+                "role": "assistant",
+                "content": "What trade-off still needs evidence?",
+                "metadata": {"assessment": {"confidence": 0.9}},
+            },
+        ],
+    )
+    assert expected.startswith("Studio research\n")
+    assert "Student:\nI compared privacy and fairness." in expected
+    assert "Coach:\nWhat trade-off still needs evidence?" in expected
+    assert "confidence" not in expected
+    assert "0.9" not in expected
+
+    client = TestClient(create_app(store))
+    missing = client.get("/api/v1/threads/missing-notebook/transcript.txt")
+    assert missing.status_code == 404
+
+    response = client.get(f"/api/v1/threads/{thread_id}/transcript.txt")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert "attachment" in response.headers["content-disposition"]
+    assert transcript_filename("Studio research") in response.headers["content-disposition"]
+    assert response.content.decode("utf-8") == expected
+    assert not (tmp_path / "poc_store.json").exists()
+
+    exported = LocalApiClient("http://testserver", session=client).download_transcript(
+        thread_id
+    )
+    assert exported.filename == transcript_filename("Studio research")
+    assert exported.data.decode("utf-8") == expected

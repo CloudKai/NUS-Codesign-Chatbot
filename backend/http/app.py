@@ -691,7 +691,7 @@ def create_app(
                 ),
             ) from error
         provider = settings.model_provider
-        if provider not in {"mock", "openai", "bedrock"}:
+        if provider not in {"mock", "openai", "bedrock", "agentcore"}:
             raise HTTPException(
                 status_code=503, detail=f"Unsupported MODEL_PROVIDER: {provider}"
             )
@@ -702,6 +702,10 @@ def create_app(
         if provider == "bedrock" and not settings.bedrock_model_id:
             raise HTTPException(
                 status_code=503, detail="BEDROCK_MODEL_ID is not configured"
+            )
+        if provider == "agentcore" and not settings.resolved_agentcore_runtime_arn:
+            raise HTTPException(
+                status_code=503, detail="AGENTCORE_RUNTIME_ARN is not configured"
             )
         if production_mode:
             try:
@@ -825,6 +829,23 @@ def create_app(
             return owner.workspace.get_messages(thread_id)
         except ValueError as error:
             raise _value_error(error) from error
+
+    @app.get("/api/v1/threads/{thread_id}/transcript.txt")
+    def download_transcript(
+        thread_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> Response:
+        """Return a student-readable .txt projection of persisted messages."""
+        try:
+            transcript = owner.workspace.export_transcript(thread_id)
+        except ValueError as error:
+            raise _value_error(error) from error
+        disposition = "attachment; filename*=UTF-8''" + quote(transcript.filename)
+        return Response(
+            content=transcript.data,
+            media_type=transcript.mime,
+            headers={"Content-Disposition": disposition},
+        )
 
     @app.post("/api/v1/threads/{thread_id}/messages")
     def create_message(
