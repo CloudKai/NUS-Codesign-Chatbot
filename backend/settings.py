@@ -118,6 +118,7 @@ class Settings:
     guardrail_version: str = os.getenv("GUARDRAIL_VERSION", "").strip()
     knowledge_base_id: str = os.getenv("KNOWLEDGE_BASE_ID", "").strip()
     knowledge_base_region: str = os.getenv("KNOWLEDGE_BASE_REGION", "").strip()
+    knowledge_base_type: str = os.getenv("KNOWLEDGE_BASE_TYPE", "").strip()
     knowledge_base_strict_metadata_filter: bool = _boolean(
         "KNOWLEDGE_BASE_STRICT_METADATA_FILTER", False
     )
@@ -234,6 +235,21 @@ class Settings:
         if ``AUTO_ADVANCE_STAGES=true``.
         """
         return bool(self.auto_advance_stages) and not bool(self.student_stage_selection)
+
+    @property
+    def normalized_knowledge_base_type(self) -> str:
+        """Return ``vector`` or ``managed`` for the Retrieve search configuration.
+
+        Empty local/dev values default to classic vector Retrieve. Production
+        shared course sync must set ``KNOWLEDGE_BASE_TYPE`` explicitly because
+        a MANAGED Knowledge Base rejects ``vectorSearchConfiguration``.
+        """
+        raw = self.knowledge_base_type.strip().casefold()
+        if raw in {"", "vector"}:
+            return "vector"
+        if raw == "managed":
+            return "managed"
+        return raw
 
     @property
     def uses_local_database(self) -> bool:
@@ -394,6 +410,12 @@ def validate_production_configuration() -> None:
             raise ValueError("COURSE_MATERIALS_BUCKET is not configured")
         if not settings.knowledge_base_id.strip():
             raise ValueError("KNOWLEDGE_BASE_ID is not configured")
+        kb_type = settings.normalized_knowledge_base_type
+        if not settings.knowledge_base_type.strip() or kb_type not in {
+            "vector",
+            "managed",
+        }:
+            raise ValueError("KNOWLEDGE_BASE_TYPE must be VECTOR or MANAGED")
 
     if settings.database_provider == "sqlite":
         raise ValueError("DATABASE_PROVIDER=sqlite is not allowed in production")

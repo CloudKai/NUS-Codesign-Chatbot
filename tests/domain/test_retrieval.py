@@ -381,6 +381,7 @@ def test_virtual_course_without_kb_does_not_synthesize_placeholder_chunk():
     assert result.chunks == ()
     assert result.course_retrieval_status == "unavailable"
     assert COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT in result.context
+    assert result.failure_category == "config_missing"
     assert UNANALYZABLE_SOURCE_PLACEHOLDER not in result.context
     assert all(
         UNANALYZABLE_SOURCE_PLACEHOLDER not in chunk.text

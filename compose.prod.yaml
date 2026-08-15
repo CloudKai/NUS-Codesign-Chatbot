@@ -34,6 +34,9 @@ services:
       # Do not copy those PDFs into USER_UPLOADS_BUCKET/users/.
       COURSE_MATERIAL_SYNC_ENABLED: "true"
       COURSE_MATERIALS_PREFIX: "course/"
+      # Production Knowledge Base JUQNP8AZAZ is type MANAGED. Retrieve must
+      # use managedSearchConfiguration, not vectorSearchConfiguration.
+      KNOWLEDGE_BASE_TYPE: "MANAGED"
       MODEL_PROVIDER: "agentcore"
       MOCK_OPENAI: "false"
       AGENTCORE_MODEL_PROVIDER: "bedrock"

@@ -441,8 +441,10 @@ Required production `.env` keys (host-only):
 - `GUARDRAIL_ID=<configured guardrail>`
 - `GUARDRAIL_VERSION=<configured version>`
 - `KNOWLEDGE_BASE_ID=<configured KB id>` (required when shared course sync is on)
-- `KNOWLEDGE_BASE_REGION=us-west-2`
-- Cognito + public URL values already set in `compose.prod.yaml`
+- `KNOWLEDGE_BASE_TYPE=MANAGED` (Compose sets this; `JUQNP8AZAZ` is MANAGED)
+- `KNOWLEDGE_BASE_REGION=us-west-2` (optional; falls back to `AWS_REGION`)
+- `PUBLIC_ORIGIN=https://<cloudfront-domain>` (Compose interpolates browser URLs)
+- Cognito client values in `.streamlit/secrets.toml` (host-only)
 
 `/api/v1/ready` checks non-secret Cognito configuration locally (it does not
 perform OIDC discovery), queries all five required DSQL tables, and performs a
@@ -609,13 +611,74 @@ Grant least privilege for:
 - Optional CloudWatch logs
 - When `MODEL_PROVIDER=agentcore`: `bedrock-agentcore:InvokeAgentRuntime` on
   runtime `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` (and its
-  `DEFAULT` endpoint); `bedrock:Retrieve` on Knowledge Base `JUQNP8AZAZ` for the
-  selected-source Retrieve adapter only (not RetrieveAndGenerate)
+  `DEFAULT` endpoint)
+- Bedrock Knowledge Base **Retrieve only** (never `RetrieveAndGenerate`) as
+  documented below
 - When `MODEL_PROVIDER=bedrock`: `bedrock:InvokeModel` and
   `bedrock:InvokeModelWithResponseStream` on the exact model or
   inference-profile ARN only (no `bedrock:*` admin)
 
-Do **not** place long-lived AWS access keys in `.env`.
+Do **not** place long-lived AWS access keys in `.env`. Credentials must come
+from the EC2 instance profile.
+
+### Bedrock Knowledge Base Retrieve (required for shared course files)
+
+Official AWS Knowledge Base permissions document that calling `Retrieve`
+requires the IAM action `bedrock:Retrieve` on the knowledge-base resource
+ARN. This application does **not** call `RetrieveAndGenerate`, so do not
+grant that action to the EC2 role.
+
+Replace the account and Knowledge Base id before attaching. Current
+production Knowledge Base id is `JUQNP8AZAZ` in `us-west-2`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BedrockKnowledgeBaseRetrieve",
+      "Effect": "Allow",
+      "Action": "bedrock:Retrieve",
+      "Resource": "arn:aws:bedrock:us-west-2:355604674280:knowledge-base/JUQNP8AZAZ"
+    }
+  ]
+}
+```
+
+`bedrock:GetKnowledgeBase` is optional for this adapter (it never calls
+GetKnowledgeBase). The Knowledge Base **service role** that Bedrock uses to
+read S3 during ingestion is separate from the EC2 instance role; do not
+confuse the two.
+
+If production logs `course_retrieval_access_denied`, this statement is the
+first thing to attach and verify on the instance profile.
+
+### Knowledge Base Retrieve diagnostic
+
+Dry-run (no AWS):
+
+```sh
+PYTHONPATH=. python scripts/diagnostics/check_knowledge_base_retrieve.py --dry-run
+```
+
+One approved live Retrieve (from EC2, after `aws sts get-caller-identity`):
+
+```sh
+docker compose -f compose.prod.yaml exec app \
+  python scripts/diagnostics/check_knowledge_base_retrieve.py \
+  --i-approve-live-bedrock --max-requests 2 \
+  --query "week 1 introduction innovation"
+```
+
+`--max-requests 2` allows the production metadata-filter fallback. Default is
+1. The script never calls RetrieveAndGenerate.
+
+The Knowledge Base data source must index
+`s3://cde2300-course-content-s3/course/`, not
+`CDE2300_course_files_export/Course_materials/`. After changing the prefix,
+run a full ingestion sync. Exact catalog keys such as
+`course/lectureNotes/Week 1 Introduction to innovation v3.pdf` must appear in
+Retrieve locations.
 
 ## Manual AWS Console steps still required
 

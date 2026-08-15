@@ -148,6 +148,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         region=region,
         course_bucket=str(settings.course_materials_bucket or "").strip(),
         strict_metadata_filter=bool(settings.knowledge_base_strict_metadata_filter),
+        knowledge_base_type=str(settings.normalized_knowledge_base_type),
     )
     inner = retriever._runtime_client()
     if inner is None:
@@ -175,10 +176,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     first_filter = False
     if recorder.calls:
-        vector = recorder.calls[0].get("retrievalConfiguration", {}).get(
+        config = recorder.calls[0].get("retrievalConfiguration", {})
+        search = config.get("managedSearchConfiguration") or config.get(
             "vectorSearchConfiguration", {}
         )
-        first_filter = "filter" in vector
+        first_filter = isinstance(search, dict) and "filter" in search
     report = {
         **payload,
         "raw_retrieve_result_count": recorder.raw_counts[-1] if recorder.raw_counts else 0,

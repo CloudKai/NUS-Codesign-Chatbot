@@ -1,6 +1,82 @@
 # Implementation status
 
-## Current phase — Publish vendored AgentCore DEFAULT v14 and capped Sonnet smoke
+## Current phase — Production Knowledge Base Retrieve diagnosis and adapter fix
+
+**Completed locally on 2026-08-16.** Integrate-Bedrock HEAD
+`8b0d5f06e80f78efaf277dd8c3f8f7899fe0b4a2`. AgentCore / Sonnet / Q&A routing
+were not the failure. Shared course files still use Bedrock Knowledge Base
+**Retrieve only**. Exact S3 key validation is unchanged. No local fallback
+for production `course/` objects.
+
+### Root cause (proved)
+
+1. Knowledge Base `JUQNP8AZAZ` is type **MANAGED** and **ACTIVE**. The adapter
+   always sent `vectorSearchConfiguration`. Live Retrieve raised
+   `ValidationException` on both filtered and unfiltered calls, which the
+   previous broad `except Exception` logged only as
+   `course_retrieval_unavailable`.
+2. After switching to `managedSearchConfiguration`, unfiltered Retrieve
+   returned 8 hits whose locations are
+   `CDE2300_course_files_export/Course_materials/Week 1 Introduction to innovation v3.pdf`.
+   The catalog selects `course/lectureNotes/Week 1 Introduction to innovation v3.pdf`.
+   Exact-key validation correctly discarded every hit. Both objects exist in
+   S3 (same size). The data source prefix is wrong, not the PDF.
+
+### Behavior delivered
+
+1. Retrieve failures are classified (`access_denied`, `not_found`,
+   `validation_error`, `timeout`, `throttled`, `client_error`,
+   `config_missing`) without logging secrets.
+2. Metadata-filter `ValidationException` retries unfiltered Retrieve when
+   strict mode is off; exact-key validation still applies.
+3. Production Compose sets `KNOWLEDGE_BASE_TYPE=MANAGED` so Retrieve uses
+   `managedSearchConfiguration`.
+4. HTTPS S3 locations are parsed into bucket+key. Suffix matching is still
+   forbidden.
+5. Gated diagnostic
+   `scripts/diagnostics/check_knowledge_base_retrieve.py` prints secret-safe
+   JSON and refuses live AWS by default.
+
+### Main files changed
+
+- `backend/bedrock_retrieve.py`, `backend/retrieval.py`, `backend/settings.py`,
+  `compose.prod.yaml`, `.env.example`
+- `scripts/diagnostics/check_knowledge_base_retrieve.py`,
+  `scripts/diagnostics/test_course_retrieval.py`
+- Tests: `tests/domain/test_bedrock_retrieve.py`,
+  `tests/test_deployment_config.py`, `tests/http/test_production_config.py`,
+  `tests/scripts/test_agentcore_course_cli.py`
+- Docs: `docs/RAG_ARCHITECTURE.md`, `docs/deploy/AWS_STATELESS_EC2.md`
+
+### Validation evidence
+
+- `ruff check .`: **passed**.
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`,
+  `agentcore_runtime`: **passed**.
+- Full deterministic pytest: **768 passed** (`pytest -q`).
+- `docker compose config --quiet` and production Compose with
+  `PUBLIC_ORIGIN=https://example.invalid APP_IMAGE=co-design:test`: **passed**.
+- Live Retrieve (account root, `--i-approve-live-bedrock --max-requests 2`):
+  MANAGED search works; validated count 0 until the data source indexes
+  `course/`.
+
+### Compatibility, migration, and rollback
+
+- No schema change. Rollback is reverting this working tree.
+- Production must deploy this image **and** re-point/sync the Knowledge Base
+  data source to `s3://cde2300-course-content-s3/course/`.
+
+### Known risks and next exact action
+
+- Deploying the adapter without re-ingesting `course/` yields
+  `course_retrieval_empty` (raw hits, zero validated), not a grounded Week 1
+  citation.
+- Next: on EC2, pull this image, confirm container env includes
+  `KNOWLEDGE_BASE_TYPE=MANAGED`, run the gated diagnostic, then in the AWS
+  console set the KB data source prefix to `course/` and sync.
+
+## Previous phase — Publish vendored AgentCore DEFAULT v14 and capped Sonnet smoke
+
 
 **Completed on 2026-08-16.** Same runtime ARN
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.

@@ -75,7 +75,14 @@ shared `course/` sources cannot become fake local chunks. Live providers with
 a Knowledge Base id inject `BedrockKnowledgeBaseRetriever`.
 
 `BedrockKnowledgeBaseRetriever` calls **Retrieve only** (never
-RetrieveAndGenerate). When selected course sources have `course_material_id`
+RetrieveAndGenerate). Production Knowledge Base `JUQNP8AZAZ` is type
+**MANAGED**, so Retrieve uses `managedSearchConfiguration`. Classic VECTOR
+Knowledge Bases keep `vectorSearchConfiguration`. `compose.prod.yaml` sets
+`KNOWLEDGE_BASE_TYPE=MANAGED`. Sending `vectorSearchConfiguration` to a
+MANAGED Knowledge Base raises `ValidationException` and becomes
+`course_retrieval_unavailable`.
+
+When selected course sources have `course_material_id`
 values, Retrieve sends a metadata filter:
 
 ```text
@@ -97,11 +104,39 @@ in two folders cannot collide (`course/readings/archive/week1.pdf` →
 source metadata.
 
 If the live Knowledge Base does not yet contain that attribute, a filtered
-Retrieve can return no hits. The adapter then retries **without** the filter
-and still drops unselected or foreign S3 keys, unless
-`KNOWLEDGE_BASE_STRICT_METADATA_FILTER=true`. Post-retrieval object-key
-validation is always applied. Strict filter stays off until live KB metadata
-is verified.
+Retrieve can return no hits **or raise `ValidationException`**. The adapter
+then retries **without** the filter and still drops unselected or foreign S3
+keys, unless `KNOWLEDGE_BASE_STRICT_METADATA_FILTER=true`. Post-retrieval
+object-key validation is always applied. Strict filter stays off until live
+KB metadata is verified.
+
+Sidecar metadata files are optional until you turn strict mode on. For the
+S3 data source, Bedrock expects a sibling file named
+`<filename.ext>.metadata.json` in the same prefix, for example:
+
+```text
+s3://<COURSE_MATERIALS_BUCKET>/course/lectureNotes/Week 1 Introduction to innovation v3.pdf
+s3://<COURSE_MATERIALS_BUCKET>/course/lectureNotes/Week 1 Introduction to innovation v3.pdf.metadata.json
+```
+
+```json
+{
+  "metadataAttributes": {
+    "course_material_id": "lecture_week_1_introduction_to_innovation_v3"
+  }
+}
+```
+
+After uploading sidecars, sync the Knowledge Base data source. Do not enable
+strict metadata filtering until a live Retrieve with the filter returns
+validated hits. Exact S3 key matching is never relaxed to suffix matching.
+
+Live Knowledge Base `JUQNP8AZAZ` currently returns HTTPS S3 locations under
+`CDE2300_course_files_export/Course_materials/...`. The student catalog
+selects `course/lectureNotes/...` and `course/readings/...`. Those keys do
+not match. Re-point the data source at `s3://<COURSE_MATERIALS_BUCKET>/course/`
+and complete ingestion/sync. Do not map the export prefix onto catalog keys
+in application code.
 
 Until the Knowledge Base is re-ingested with `course_material_id` metadata,
 the compatibility fallback is the production path. After re-ingestion, the

@@ -10,9 +10,10 @@ fake client so automated runs never contact AWS.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import ParseResult, unquote, urlparse
 
 from .retrieval import (
     CompositeContextRetriever,
@@ -34,6 +35,84 @@ logger = logging.getLogger(__name__)
 _DEFAULT_RESULTS = 8
 _MAX_CONTEXT_CHARS = 16_000
 COURSE_MATERIAL_METADATA_KEY = "course_material_id"
+_S3_VIRTUAL_HOST = re.compile(
+    r"^(?P<bucket>.+)\.s3(?:[.-](?:dualstack\.)?(?:[a-z0-9-]+))?\.amazonaws\.com$",
+    re.IGNORECASE,
+)
+_S3_PATH_HOST = re.compile(
+    r"^s3(?:[.-](?:dualstack\.)?(?:[a-z0-9-]+))?\.amazonaws\.com$",
+    re.IGNORECASE,
+)
+
+_TIMEOUT_EXCEPTION_NAMES = frozenset(
+    {
+        "ConnectTimeoutError",
+        "ReadTimeoutError",
+        "EndpointConnectionError",
+        "ConnectionClosedError",
+        "ConnectTimeout",
+        "ReadTimeout",
+        "TimeoutError",
+    }
+)
+
+
+def classify_retrieve_failure(error: BaseException) -> str:
+    """Return a secret-safe category for one Knowledge Base Retrieve failure.
+
+    Args:
+        error: Exception raised by the SDK or ``client.retrieve``.
+
+    Returns:
+        One of ``access_denied``, ``not_found``, ``validation_error``,
+        ``throttled``, ``timeout``, or ``client_error``.
+    """
+    name = type(error).__name__
+    code = ""
+    response = getattr(error, "response", None)
+    if isinstance(response, Mapping):
+        payload = response.get("Error")
+        if isinstance(payload, Mapping):
+            code = str(payload.get("Code") or "").strip()
+    combined = f"{code} {name}".casefold()
+    if "accessdenied" in combined or "unauthorized" in combined:
+        return "access_denied"
+    if "resourcenotfound" in combined:
+        return "not_found"
+    if "validation" in combined:
+        return "validation_error"
+    if "throttl" in combined or "toomanyrequests" in combined:
+        return "throttled"
+    if name in _TIMEOUT_EXCEPTION_NAMES or "timeout" in combined:
+        return "timeout"
+    return "client_error"
+
+
+def sanitized_s3_uri(uri: str) -> str:
+    """Return ``s3://bucket/key`` without query strings or credentials.
+
+    Args:
+        uri: Retrieve location URI.
+
+    Returns:
+        Canonical bucket/key form, or an empty string when the URI is unusable.
+    """
+    bucket, key = _s3_uri_parts(uri)
+    if bucket and key:
+        return f"s3://{bucket}/{key}"
+    return canonical_object_key(uri)
+
+
+def sanitized_hit_s3_uri(item: Mapping[str, Any]) -> str:
+    """Return the secret-safe S3 URI for one Retrieve hit.
+
+    Args:
+        item: One ``retrievalResults`` element.
+
+    Returns:
+        Canonical ``s3://bucket/key`` or an empty string.
+    """
+    return sanitized_s3_uri(_location_uri(item))
 
 
 def _normalize_key(value: str) -> str:
@@ -50,21 +129,53 @@ def canonical_object_key(value: str) -> str:
     ``myweek1.pdf``.
     """
     cleaned = str(value or "").strip()
-    if cleaned.lower().startswith("s3://"):
+    lowered = cleaned.lower()
+    if lowered.startswith(("s3://", "http://", "https://")):
         _bucket, key = _s3_uri_parts(cleaned)
         return key
     return _normalize_key(cleaned)
 
 
+def _https_s3_parts(parsed: ParseResult) -> tuple[str, str]:
+    """Split a virtual-hosted or path-style HTTPS S3 URL into bucket and key.
+
+    Args:
+        parsed: ``urlparse`` result for an ``http(s)`` URI.
+
+    Returns:
+        ``(bucket, key)`` when the host is Amazon S3; otherwise empty strings.
+        Exact key matching still applies after this split.
+    """
+    host = (parsed.netloc or "").split("@")[-1].split(":")[0].strip().lower()
+    path_key = _normalize_key(unquote(parsed.path or ""))
+    if not host or not path_key:
+        return "", ""
+    virtual = _S3_VIRTUAL_HOST.match(host)
+    if virtual:
+        bucket = str(virtual.group("bucket") or "").strip()
+        if bucket and bucket != "s3":
+            return bucket, path_key
+    if _S3_PATH_HOST.match(host):
+        bucket, sep, remainder = path_key.partition("/")
+        if sep and bucket and remainder:
+            return bucket, remainder
+    return "", ""
+
+
 def _s3_uri_parts(uri: str) -> tuple[str, str]:
-    """Split ``s3://bucket/key`` into ``(bucket, key)``. Empty on failure."""
+    """Split ``s3://bucket/key`` or an HTTPS S3 URL into ``(bucket, key)``."""
     cleaned = str(uri or "").strip()
     if not cleaned:
         return "", ""
     parsed = urlparse(cleaned)
-    if parsed.scheme.lower() != "s3":
-        return "", _normalize_key(cleaned)
-    return str(parsed.netloc or "").strip(), _normalize_key(parsed.path)
+    scheme = parsed.scheme.lower()
+    if scheme == "s3":
+        return str(parsed.netloc or "").strip(), _normalize_key(
+            unquote(parsed.path or "")
+        )
+    if scheme in {"http", "https"}:
+        return _https_s3_parts(parsed)
+    return "", ""
 
 
 def _location_uri(item: Mapping[str, Any]) -> str:
@@ -77,6 +188,11 @@ def _location_uri(item: Mapping[str, Any]) -> str:
         uri = str(s3_location.get("uri") or "").strip()
         if uri:
             return uri
+    web_location = location.get("webLocation")
+    if isinstance(web_location, Mapping):
+        url = str(web_location.get("url") or "").strip()
+        if url:
+            return url
     return str(location.get("uri") or "").strip()
 
 
@@ -158,12 +274,20 @@ def _course_material_ids(sources: tuple[RetrievalSource, ...]) -> list[str]:
     return ordered
 
 
-def _vector_search_configuration(
+def _retrieval_results(response: Any) -> list[Any]:
+    """Return the Retrieve ``retrievalResults`` list, or an empty list."""
+    if not isinstance(response, Mapping):
+        return []
+    raw = response.get("retrievalResults")
+    return list(raw) if isinstance(raw, list) else []
+
+
+def _search_configuration(
     *,
     number_of_results: int,
     material_ids: list[str] | tuple[str, ...] = (),
 ) -> dict[str, Any]:
-    """Build Retrieve vectorSearchConfiguration, optionally metadata-filtered."""
+    """Build Retrieve search configuration, optionally metadata-filtered."""
     config: dict[str, Any] = {"numberOfResults": number_of_results}
     cleaned = [str(item).strip() for item in material_ids if str(item).strip()]
     if not cleaned:
@@ -192,19 +316,22 @@ class BedrockKnowledgeBaseRetriever:
         course_bucket: str = "",
         client: Any | None = None,
         strict_metadata_filter: bool | None = None,
+        knowledge_base_type: str | None = None,
     ) -> None:
         """Create the adapter with an injected or lazily constructed client.
 
         Args:
             knowledge_base_id: Bedrock Knowledge Base id (non-secret).
             region: AWS region for the data-plane client.
-            number_of_results: ``vectorSearchConfiguration.numberOfResults``.
+            number_of_results: Retrieve ``numberOfResults``.
             max_context_chars: Prompt budget after selected-source filtering.
             course_bucket: When set, Retrieve hits from other buckets are dropped.
             client: Optional injected ``bedrock-agent-runtime`` client for tests.
             strict_metadata_filter: When true, an empty filtered Retrieve is an
                 evidence gap (no unfiltered retry). Default follows settings and
                 remains false until live KB metadata is verified.
+            knowledge_base_type: ``vector`` or ``managed``. MANAGED Knowledge
+                Bases require ``managedSearchConfiguration``.
         """
         self._knowledge_base_id = str(knowledge_base_id or "").strip()
         self._region = str(region or "").strip() or "us-west-2"
@@ -212,6 +339,15 @@ class BedrockKnowledgeBaseRetriever:
         self._max_context_chars = max(1, int(max_context_chars))
         self._course_bucket = str(course_bucket or "").strip()
         self._client = client
+        if knowledge_base_type is None:
+            self._knowledge_base_type = str(
+                getattr(settings, "normalized_knowledge_base_type", "vector")
+            )
+        else:
+            cleaned = str(knowledge_base_type or "").strip().casefold()
+            self._knowledge_base_type = (
+                "managed" if cleaned == "managed" else "vector"
+            )
         if strict_metadata_filter is None:
             self._strict_metadata_filter = bool(
                 getattr(settings, "knowledge_base_strict_metadata_filter", False)
@@ -227,31 +363,109 @@ class BedrockKnowledgeBaseRetriever:
             import boto3
             from botocore.config import Config
         except ImportError:
-            logger.warning("Knowledge Base client libraries are unavailable")
+            logger.warning(
+                "course_retrieval_client_error exception=ImportError region=%s",
+                self._region,
+            )
             return None
         config = Config(
             retries={"max_attempts": 1, "mode": "standard"},
             read_timeout=30.0,
             connect_timeout=10.0,
         )
-        self._client = boto3.client(
-            "bedrock-agent-runtime",
-            region_name=self._region,
-            config=config,
-        )
+        try:
+            self._client = boto3.client(
+                "bedrock-agent-runtime",
+                region_name=self._region,
+                config=config,
+            )
+        except Exception as exc:
+            logger.warning(
+                "course_retrieval_%s exception=%s region=%s",
+                classify_retrieve_failure(exc),
+                type(exc).__name__,
+                self._region,
+            )
+            return None
         return self._client
+
+    def _retrieval_configuration(
+        self,
+        material_ids: list[str] | tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        """Return Retrieve configuration for VECTOR or MANAGED Knowledge Bases."""
+        search = _search_configuration(
+            number_of_results=self._number_of_results,
+            material_ids=material_ids,
+        )
+        if self._knowledge_base_type == "managed":
+            return {"managedSearchConfiguration": search}
+        return {"vectorSearchConfiguration": search}
+
+    def _call_retrieve(
+        self,
+        client: Any,
+        query_text: str,
+        material_ids: list[str] | tuple[str, ...] = (),
+    ) -> Any:
+        """Invoke Retrieve once. Never RetrieveAndGenerate.
+
+        Args:
+            client: Injected or constructed ``bedrock-agent-runtime`` client.
+            query_text: Expanded Retrieve query text (never logged).
+            material_ids: Optional ``course_material_id`` filter values.
+
+        Returns:
+            The raw ``client.retrieve`` response.
+        """
+        return client.retrieve(
+            knowledgeBaseId=self._knowledge_base_id,
+            retrievalQuery={"text": query_text},
+            retrievalConfiguration=self._retrieval_configuration(material_ids),
+        )
+
+    def _unavailable_result(
+        self, category: str, error: BaseException
+    ) -> RetrievalResult:
+        """Log a secret-safe failure category and return an evidence gap."""
+        logger.warning(
+            "course_retrieval_%s exception=%s region=%s",
+            category,
+            type(error).__name__,
+            self._region,
+        )
+        return RetrievalResult(
+            context="",
+            chunks=(),
+            course_retrieval_status="unavailable",
+            failure_category=category,
+        )
 
     def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
         """Return selected-source chunks from Knowledge Base Retrieve.
 
         Foreign S3 keys and non-course sources are dropped. AWS and SDK
         failures return an empty result so the composer can apply evidence-gap
-        rules instead of inventing sources.
+        rules instead of inventing sources. A metadata-filter
+        ``ValidationException`` retries unfiltered Retrieve when strict
+        metadata mode is off; exact-key validation still applies.
+
+        Args:
+            query: Selected-source retrieval query from FastAPI.
+
+        Returns:
+            Validated Knowledge Base chunks, or an empty evidence-gap result.
         """
         if not self._knowledge_base_id:
-            logger.info("course_retrieval_unavailable")
+            logger.warning(
+                "course_retrieval_config_missing kb_configured=0 region=%s",
+                self._region,
+            )
             return RetrievalResult(
-                context="", chunks=(), course_retrieval_status="unavailable"
+                context="",
+                chunks=(),
+                course_retrieval_status="unavailable",
+                failure_category="config_missing",
             )
         course_sources = tuple(
             source for source in query.sources if is_course_retrieval_source(source)
@@ -260,9 +474,11 @@ class BedrockKnowledgeBaseRetriever:
             return RetrievalResult(context="", chunks=())
         client = self._runtime_client()
         if client is None:
-            logger.info("course_retrieval_unavailable")
             return RetrievalResult(
-                context="", chunks=(), course_retrieval_status="unavailable"
+                context="",
+                chunks=(),
+                course_retrieval_status="unavailable",
+                failure_category="client_error",
             )
         original_query = " ".join(str(query.current_message or "").split()).strip()
         query_text = expand_session_query_text(query.current_message)
@@ -271,34 +487,44 @@ class BedrockKnowledgeBaseRetriever:
         material_ids = _course_material_ids(course_sources)
         used_filter = bool(material_ids)
         fallback = False
+        logger.info(
+            "course_retrieval_query kb_configured=1 region=%s "
+            "kb_type=%s selected_course_count=%s material_id_count=%s "
+            "strict_filter=%s session_expanded=%s",
+            self._region,
+            self._knowledge_base_type,
+            len(course_sources),
+            len(material_ids),
+            int(self._strict_metadata_filter),
+            int(query_text != original_query),
+        )
         try:
-            logger.info(
-                "course_retrieval_query selected_course_count=%s "
-                "material_id_count=%s strict_filter=%s session_expanded=%s",
-                len(course_sources),
-                len(material_ids),
-                int(self._strict_metadata_filter),
-                int(query_text != original_query),
-            )
-            response = client.retrieve(
-                knowledgeBaseId=self._knowledge_base_id,
-                retrievalQuery={"text": query_text},
-                retrievalConfiguration={
-                    "vectorSearchConfiguration": _vector_search_configuration(
-                        number_of_results=self._number_of_results,
-                        material_ids=material_ids,
+            response = self._call_retrieve(client, query_text, material_ids)
+        except Exception as exc:
+            category = classify_retrieve_failure(exc)
+            if self._can_retry_unfiltered(category, material_ids):
+                logger.warning(
+                    "course_retrieval_validation_error exception=%s region=%s "
+                    "retrying_unfiltered=1",
+                    type(exc).__name__,
+                    self._region,
+                )
+                fallback = True
+                used_filter = False
+                try:
+                    response = self._call_retrieve(client, query_text, ())
+                except Exception as retry_exc:
+                    return self._unavailable_result(
+                        classify_retrieve_failure(retry_exc), retry_exc
                     )
-                },
-            )
-            raw_hits = (
-                response.get("retrievalResults")
-                if isinstance(response, Mapping)
-                else None
-            )
+            else:
+                return self._unavailable_result(category, exc)
+        else:
+            raw_hits = _retrieval_results(response)
             if (
                 material_ids
                 and not self._strict_metadata_filter
-                and not (isinstance(raw_hits, list) and raw_hits)
+                and not raw_hits
             ):
                 logger.info(
                     "Knowledge Base metadata filter returned no hits; "
@@ -306,35 +532,23 @@ class BedrockKnowledgeBaseRetriever:
                 )
                 fallback = True
                 used_filter = False
-                response = client.retrieve(
-                    knowledgeBaseId=self._knowledge_base_id,
-                    retrievalQuery={"text": query_text},
-                    retrievalConfiguration={
-                        "vectorSearchConfiguration": _vector_search_configuration(
-                            number_of_results=self._number_of_results,
-                        )
-                    },
-                )
-            elif (
-                material_ids
-                and self._strict_metadata_filter
-                and not (isinstance(raw_hits, list) and raw_hits)
-            ):
+                try:
+                    response = self._call_retrieve(client, query_text, ())
+                except Exception as retry_exc:
+                    return self._unavailable_result(
+                        classify_retrieve_failure(retry_exc), retry_exc
+                    )
+            elif material_ids and self._strict_metadata_filter and not raw_hits:
                 logger.info(
                     "Knowledge Base metadata filter returned no hits; "
                     "strict filter treats this as an evidence gap"
                 )
-        except Exception:
-            logger.warning("course_retrieval_unavailable")
-            return RetrievalResult(
-                context="", chunks=(), course_retrieval_status="unavailable"
-            )
-        if not isinstance(response, Mapping):
-            return RetrievalResult(context="", chunks=())
-        raw_hits = response.get("retrievalResults")
-        if not isinstance(raw_hits, list):
+        raw_hits = _retrieval_results(response)
+        if not raw_hits:
             logger.info(
-                "course_retrieval_empty raw_hits=0 validated_count=0 fallback=%s",
+                "course_retrieval_empty raw_hits=0 validated_count=0 "
+                "filter=%s fallback=%s",
+                int(used_filter),
                 int(fallback),
             )
             return RetrievalResult(
@@ -393,8 +607,10 @@ class BedrockKnowledgeBaseRetriever:
         )
         if not formatted.chunks:
             logger.info(
-                "course_retrieval_empty raw_hits=%s validated_count=0 fallback=%s",
+                "course_retrieval_empty raw_hits=%s validated_count=0 "
+                "filter=%s fallback=%s",
                 len(raw_hits),
+                int(used_filter),
                 int(fallback),
             )
             return RetrievalResult(
@@ -402,10 +618,23 @@ class BedrockKnowledgeBaseRetriever:
                 chunks=(),
                 course_retrieval_status="empty",
             )
+        logger.info("course_retrieval_status=ok")
         return RetrievalResult(
             context=formatted.context,
             chunks=formatted.chunks,
             course_retrieval_status="ok",
+        )
+
+    def _can_retry_unfiltered(
+        self,
+        category: str,
+        material_ids: list[str] | tuple[str, ...],
+    ) -> bool:
+        """Return whether a failed filtered Retrieve may retry unfiltered."""
+        return (
+            category == "validation_error"
+            and bool(material_ids)
+            and not self._strict_metadata_filter
         )
 
 
@@ -443,6 +672,9 @@ def configured_context_retriever(
         region=region,
         course_bucket=str(settings.course_materials_bucket or "").strip(),
         client=client,
+        knowledge_base_type=str(
+            getattr(settings, "normalized_knowledge_base_type", "vector")
+        ),
     )
     return CompositeContextRetriever(
         knowledge_base=knowledge_base,
