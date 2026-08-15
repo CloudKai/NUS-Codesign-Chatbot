@@ -15,6 +15,11 @@ from backend.retrieval import (
     LocalChunkRetriever,
     RetrievalQuery,
     RetrievalSource,
+    UNANALYZABLE_SOURCE_PLACEHOLDER,
+    COURSE_RETRIEVAL_EMPTY_CONTEXT,
+    COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT,
+    course_material_id_from_object_key,
+    expand_session_query_text,
 )
 from backend.settings import settings
 
@@ -210,6 +215,7 @@ def test_retrieve_failures_return_empty_instead_of_inventing_sources():
     )
     assert result.chunks == ()
     assert result.context == ""
+    assert result.course_retrieval_status == "unavailable"
 
 
 def test_composite_keeps_student_uploads_on_local_retriever():
@@ -247,12 +253,15 @@ def test_composite_keeps_student_uploads_on_local_retriever():
     assert len(client.calls) == 1
 
 
-def test_configured_retriever_stays_local_in_mock_mode(monkeypatch: pytest.MonkeyPatch):
+def test_configured_retriever_is_composite_without_local_course_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+):
     monkeypatch.setattr(settings, "knowledge_base_id", "JUQNP8AZAZ")
     monkeypatch.setattr(settings, "model_provider", "mock")
     monkeypatch.setattr(settings, "mock_openai", True)
     retriever = configured_context_retriever()
-    assert isinstance(retriever, LocalChunkRetriever)
+    assert isinstance(retriever, CompositeContextRetriever)
+    assert retriever._knowledge_base is None
 
 
 def test_configured_retriever_uses_composite_when_live_provider(
@@ -442,4 +451,238 @@ def test_strict_metadata_filter_does_not_retry_unfiltered(monkeypatch: pytest.Mo
     assert len(client.calls) == 1
     assert result.chunks == ()
     assert result.context == ""
+    assert result.course_retrieval_status == "empty"
+
+
+_WEEK1_KEY = (
+    "course/lectureNotes/Week 1 Introduction to innovation v3.pdf"
+)
+_WEEK1_TITLE = "Week 1 Introduction to innovation v3.pdf"
+
+
+def _virtual_week1_source() -> RetrievalSource:
+    """Return the shared Week 1 catalog source with empty extracted text."""
+    return RetrievalSource(
+        source_id="virtual-week-1",
+        label="S1",
+        title=_WEEK1_TITLE,
+        text="",
+        group="lectureNotes",
+        object_key=_WEEK1_KEY,
+        course_material_id=course_material_id_from_object_key(_WEEK1_KEY),
+        virtual_course_source=True,
+        shared_course_object=True,
+    )
+
+
+def test_virtual_week1_kb_hit_reaches_context():
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                f"s3://cde2300-course-content-s3/{_WEEK1_KEY}",
+                "Week 1 introduces innovation as a process of identifying jobs to be done.",
+            )
+        ]
+    )
+    result = CompositeContextRetriever(
+        knowledge_base=BedrockKnowledgeBaseRetriever(
+            "JUQNP8AZAZ",
+            course_bucket="cde2300-course-content-s3",
+            client=client,
+        ),
+        local=LocalChunkRetriever(),
+    ).retrieve(
+        RetrievalQuery(
+            current_message="what are the week 1 contents talking about?",
+            current_stage="problem_identification",
+            sources=(_virtual_week1_source(),),
+        )
+    )
+    assert result.course_retrieval_status == "ok"
+    assert result.chunks
+    assert result.chunks[0].text.startswith("Week 1 introduces innovation")
+    assert result.chunks[0].retrieval_origin == "knowledge_base"
+    assert result.chunks[0].label == "S1"
+    assert UNANALYZABLE_SOURCE_PLACEHOLDER not in result.context
+    vector = client.calls[0]["retrievalConfiguration"]["vectorSearchConfiguration"]
+    assert vector["filter"] == {
+        "equals": {
+            "key": "course_material_id",
+            "value": "lecture_week_1_introduction_to_innovation_v3",
+        }
+    }
+    query_text = client.calls[0]["retrievalQuery"]["text"]
+    assert "week 1" in query_text.casefold()
+    assert "lecture 1" in query_text.casefold()
+
+
+def test_virtual_week1_without_kb_is_evidence_gap():
+    result = CompositeContextRetriever(
+        knowledge_base=None,
+        local=LocalChunkRetriever(),
+    ).retrieve(
+        RetrievalQuery(
+            current_message="what are the week 1 contents talking about?",
+            current_stage="problem_identification",
+            sources=(_virtual_week1_source(),),
+        )
+    )
+    assert result.chunks == ()
+    assert result.course_retrieval_status == "unavailable"
+    assert COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT in result.context
+    assert UNANALYZABLE_SOURCE_PLACEHOLDER not in result.context
+
+
+def test_virtual_week1_kb_zero_results_does_not_use_local_placeholder():
+    client = FakeRetrieveClient(results=[])
+    result = CompositeContextRetriever(
+        knowledge_base=BedrockKnowledgeBaseRetriever(
+            "JUQNP8AZAZ",
+            course_bucket="cde2300-course-content-s3",
+            client=client,
+        ),
+        local=LocalChunkRetriever(),
+    ).retrieve(
+        RetrievalQuery(
+            current_message="what are the week 1 contents talking about?",
+            current_stage="problem_identification",
+            sources=(_virtual_week1_source(),),
+        )
+    )
+    assert result.chunks == ()
+    assert result.course_retrieval_status == "empty"
+    assert COURSE_RETRIEVAL_EMPTY_CONTEXT in result.context
+    assert UNANALYZABLE_SOURCE_PLACEHOLDER not in result.context
+    assert len(client.calls) == 2
+
+
+def test_mixed_course_kb_and_student_local_chunks():
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                f"s3://cde2300-course-content-s3/{_WEEK1_KEY}",
+                "Week 1 course excerpt about innovation.",
+            )
+        ]
+    )
+    student = RetrievalSource(
+        source_id="upload-1",
+        label="S2",
+        title="My notes",
+        text="I observed older pedestrians waiting at the school gate.",
+        object_key="users/student/notebook/notes.txt",
+    )
+    result = CompositeContextRetriever(
+        knowledge_base=BedrockKnowledgeBaseRetriever(
+            "JUQNP8AZAZ",
+            course_bucket="cde2300-course-content-s3",
+            client=client,
+        ),
+        local=LocalChunkRetriever(chunk_chars=500, overlap_chars=80, max_chunks=3),
+    ).retrieve(
+        RetrievalQuery(
+            current_message="what are the week 1 contents talking about at the school gate?",
+            current_stage="problem_identification",
+            sources=(_virtual_week1_source(), student),
+        )
+    )
+    labels = {chunk.label for chunk in result.chunks}
+    origins = {chunk.retrieval_origin for chunk in result.chunks}
+    assert labels == {"S1", "S2"}
+    assert "knowledge_base" in origins
+    assert "extracted_text" in origins
+    assert "Week 1 course excerpt" in result.context
+    assert "school gate" in result.context
+    assert UNANALYZABLE_SOURCE_PLACEHOLDER not in result.context
+
+
+def test_lecture_query_targets_week_one_source():
+    expanded = expand_session_query_text("what are lecture 1 slides about?")
+    assert "week 1" in expanded
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                f"s3://cde2300-course-content-s3/{_WEEK1_KEY}",
+                "Lecture 1 / Week 1 slides introduce innovation.",
+            )
+        ]
+    )
+    result = BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="cde2300-course-content-s3",
+        client=client,
+    ).retrieve(
+        RetrievalQuery(
+            current_message="what are lecture 1 slides about?",
+            current_stage="problem_identification",
+            sources=(_virtual_week1_source(),),
+        )
+    )
+    assert "week 1" in client.calls[0]["retrievalQuery"]["text"].casefold()
+    assert result.chunks[0].title == _WEEK1_TITLE
+
+
+def test_glued_week_and_lecture_queries_expand():
+    assert "week 1" in expand_session_query_text("week1")
+    assert "lecture 1" in expand_session_query_text("week1")
+    assert "week 1" in expand_session_query_text("lecture01")
+    assert "lecture 1" in expand_session_query_text("lecture01")
+
+
+def test_week1_intro_pdf_rejects_similar_object_keys():
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                f"s3://cde2300-course-content-s3/{_WEEK1_KEY}",
+                "Canonical Week 1 excerpt.",
+            ),
+            _hit(
+                "s3://cde2300-course-content-s3/archive/Week 1 Introduction to innovation v3.pdf",
+                "Archive Week 1 must not match.",
+            ),
+            _hit(
+                "s3://cde2300-course-content-s3/myWeek 1 Introduction to innovation v3.pdf",
+                "Prefix Week 1 must not match.",
+            ),
+            _hit(
+                "s3://cde2300-course-content-s3/another-folder/Week 1 Introduction to innovation v3.pdf",
+                "Other folder Week 1 must not match.",
+            ),
+        ]
+    )
+    result = BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="cde2300-course-content-s3",
+        client=client,
+    ).retrieve(
+        RetrievalQuery(
+            current_message="what are the week 1 contents talking about?",
+            current_stage="problem_identification",
+            sources=(_virtual_week1_source(),),
+        )
+    )
+    assert [chunk.text for chunk in result.chunks] == ["Canonical Week 1 excerpt."]
+    assert "Archive Week 1" not in result.context
+    assert "Prefix Week 1" not in result.context
+    assert "Other folder" not in result.context
+
+
+def test_configured_retriever_empty_kb_id_stays_composite(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "knowledge_base_id", "")
+    monkeypatch.setattr(settings, "model_provider", "agentcore")
+    monkeypatch.setattr(settings, "mock_openai", False)
+    retriever = configured_context_retriever()
+    assert isinstance(retriever, CompositeContextRetriever)
+    assert retriever._knowledge_base is None
+    result = retriever.retrieve(
+        RetrievalQuery(
+            current_message="what are the week 1 contents talking about?",
+            current_stage="problem_identification",
+            sources=(_virtual_week1_source(),),
+        )
+    )
+    assert result.course_retrieval_status == "unavailable"
+    assert UNANALYZABLE_SOURCE_PLACEHOLDER not in result.context
 

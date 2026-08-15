@@ -11,11 +11,11 @@ Student → Streamlit → FastAPI
                          │
             Composite retrieval (course KB + student extract)
                          │
-            Application-composed coaching brief
+            Runtime rules + untrusted evidence (not a second curriculum)
                          │
-            AgentCore / Strands (no KB/S3 tools)
+            AgentCore / Strands specialists (no KB/S3 tools)
                          │
-            Validate coach_turn + citations
+            Validate structured output + citations
                          │
             Atomic DSQL persistence
 ```
@@ -28,8 +28,9 @@ Student → Streamlit → FastAPI
 - Student A cannot retrieve Student B's notebook, source, extracted text,
   image, conversation, or S3 object by forging a `source_id`, guessing an
   object key, or placing instructions in an uploaded document.
-- Client-supplied `history`, `retrieved_chunks`, `image_inputs`, and
-  `source_context` are rejected. The server loads those from the store.
+- Client-supplied `history`, `retrieved_chunks`, `image_inputs`,
+  `source_context`, and privileged `specialist` names are not authoritative.
+  The server loads store state and selects `qa` / `coaching` / `review`.
 
 ## Retrieval authorization
 
@@ -41,6 +42,10 @@ Student → Streamlit → FastAPI
   is not a match.
 - Student retrieval is local to extracted text of selected sources in the
   current notebook.
+- Virtual shared course sources have empty extracted text. They must not be
+  converted into searchable placeholder chunks. If Knowledge Base Retrieve is
+  unavailable or returns no validated excerpt, the coach receives an
+  application-owned evidence-gap note, not a claim that the PDF has no text.
 - The AgentCore coach has no Knowledge Base tool and no S3 tool. It cannot
   pass `user_id`, `notebook_id`, `bucket`, `object_key`, `knowledge_base_id`,
   or `source_id` as model-controlled retrieval parameters.
@@ -60,15 +65,24 @@ Student → Streamlit → FastAPI
 Retrieved course text, student uploads, websites, student messages, prior
 conversation turns, and derived conversation memory are untrusted evidence.
 The composer delimits them and exposes a dedicated untrusted product.
-Shared, stage, and runtime sections remain authoritative and are sent to
-AgentCore on a separate `trusted_instructions` channel. Authorization is
-structural, not instructional. Trusted prompt files must not include literal
+Shared, stage, and runtime pedagogy for AgentCore is loaded inside the
+runtime as system instruction. FastAPI runtime rules travel on
+`trusted_instructions`. Authorization is structural, not instructional. Trusted prompt files must not include literal
 jailbreak examples; those n-grams may appear only inside delimited retrieved
 or student content.
 
 Runtime guardrail intervention (`guardrail_intervened` or `action=BLOCKED`)
 fails closed as category `safety_blocked`. Refusal text, prompt text, and AWS
 trace bodies are never returned to the student UI or persisted.
+
+On the Sonnet `BedrockModel` path, `GUARDRAIL_ID` and `GUARDRAIL_VERSION` are
+required and `guardrail_latest_message=True` so input evaluation targets the
+latest untrusted user turn (current student/evidence), not the trusted
+specialist curriculum. Specialists use `tools=[]`, so the Strands tool-result
+guardrail wrapping bug does not apply. The optional Luna
+`OpenAIResponsesModel` path does not accept those constructor fields; it must
+call Bedrock `ApplyGuardrail` on untrusted input and on model output. Missing
+guardrail configuration fails production startup and the runtime loader.
 
 ## Conversation integrity
 

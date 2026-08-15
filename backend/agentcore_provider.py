@@ -1,25 +1,25 @@
-"""Amazon Bedrock AgentCore Runtime adapter for one structured coaching turn.
+"""Amazon Bedrock AgentCore Runtime adapter for one structured specialist turn.
 
-The adapter invokes ``InvokeAgentRuntime`` once per turn with this
-application's trusted instructions plus untrusted turn content, validates
-``ProviderCoachOutput``, and returns the provider-neutral result. It does not
-own phase progression, citations, persistence, retrieval, or IAM. Tests inject
-a fake client so automated runs never contact AWS.
+The adapter invokes ``InvokeAgentRuntime`` once per turn with application
+runtime rules plus untrusted turn content, validates structured output, and
+returns the provider-neutral result. It does not own phase progression,
+citations, persistence, retrieval, or IAM. Tests inject a fake client so
+automated runs never contact AWS.
 
-Production coaching uses the AgentCore ``coaching`` specialist with
-``output_contract=coach_turn``. Thinking Path stages stay in DSQL; only the
+Production uses one AgentCore runtime with three specialists: ``qa``,
+``coaching``, and ``review``. Thinking Path stages stay in DSQL; only the
 runtime *topic* key maps ``deep_analysis`` to the POC ``ethics_critical``
 label. Invokes are stateless (a fresh ``runtimeSessionId`` per turn) so the
 runtime LRU cache is not a second transcript. The token-aware planner sends
 the full active DSQL transcript when it fits, otherwise derived
-``conversation_memory`` plus a recent verbatim window. Trusted shared/stage/
-runtime instructions travel in ``trusted_instructions``; untrusted project,
-evidence, memory, and the current student contribution travel as the last user
-message. The untrusted brief omits duplicated ``<recent_messages>`` history.
-``student_id`` is the store owner identifier, never a notebook id. This
-adapter does not call RetrieveAndGenerate. Production DEFAULT is unchanged by
-the isolated Luna InvokeHarness evaluation path. Guardrail blocks are
-category-only failures and never persist refusal text.
+``conversation_memory`` plus a recent verbatim window. Canonical pedagogy
+lives in ``agentcore_runtime/prompts``. FastAPI sends runtime constraints in
+``trusted_instructions`` and ``runtime_context``. Untrusted project,
+evidence, memory, and the current student contribution travel as the last
+user message. ``student_id`` is the store owner identifier, never a notebook
+id. This adapter does not call RetrieveAndGenerate. Production DEFAULT is
+unchanged by the isolated Luna InvokeHarness evaluation path. Guardrail
+blocks are category-only failures and never persist refusal text.
 """
 
 from __future__ import annotations
@@ -40,24 +40,38 @@ from .context_planner import (
     memory_from_metadata,
 )
 from .domain import (
+    CitationReference,
     CoachImageInput,
     CoachRequest,
+    EducationalAssessment,
+    FacioneDimensionScores,
     ProviderAssessmentResult,
     ProviderCoachOutput,
+    StageDecision,
 )
 from .prompts import compose_coach_prompt
 from .providers import ProviderUnavailableError
 from .settings import settings
+from .specialists.routing import (
+    SPECIALIST_COACHING,
+    SPECIALIST_QA,
+    SPECIALIST_REVIEW,
+    select_specialist,
+)
 
 logger = logging.getLogger(__name__)
 
 _GENERIC_FAILURE = "AgentCore could not create a structured coaching turn"
 _TRUNCATED_FAILURE = "AgentCore truncated the coaching turn"
-_MALFORMED_FAILURE = "AgentCore returned a malformed coaching turn"
+_MALFORMED_FAILURE = "The coach reply could not be completed"
 _BLOCKED_FAILURE = "AgentCore blocked this turn"
 _IMAGE_FAILURE = "AgentCore does not support this image type"
-_PHASE = "coaching"
 _OUTPUT_CONTRACT = "coach_turn"
+_CONTRACT_BY_SPECIALIST = {
+    SPECIALIST_QA: "qa_turn",
+    SPECIALIST_COACHING: "coach_turn",
+    SPECIALIST_REVIEW: "review_turn",
+}
 _TRUSTED_INSTRUCTIONS_FIELD = "trusted_instructions"
 _BLOCKED_STOP_REASONS = frozenset({"guardrail_intervened", "content_filtered"})
 _DATA_URL = re.compile(r"^data:([^;,]+);base64,(.+)$", re.DOTALL | re.IGNORECASE)
@@ -162,6 +176,10 @@ def _translate_agentcore_error(error: BaseException) -> ProviderUnavailableError
         return ProviderUnavailableError(
             "AgentCore runtime is unavailable", category="unavailable"
         )
+    if isinstance(error, json.JSONDecodeError) or type(error).__name__ == "JSONDecodeError":
+        return ProviderUnavailableError(
+            _MALFORMED_FAILURE, category="structured_output_failure"
+        )
     return ProviderUnavailableError(_GENERIC_FAILURE, category="unavailable")
 
 
@@ -212,8 +230,10 @@ def _blocked_error() -> ProviderUnavailableError:
 
 
 def _malformed_error() -> ProviderUnavailableError:
-    """Return a category-only malformed-output failure."""
-    return ProviderUnavailableError(_MALFORMED_FAILURE, category="malformed")
+    """Return a category-only structured-output failure."""
+    return ProviderUnavailableError(
+        _MALFORMED_FAILURE, category="structured_output_failure"
+    )
 
 
 def _mapping_indicates_runtime_block(obj: Any, *, depth: int = 0) -> bool:
@@ -258,6 +278,30 @@ def _raise_if_runtime_blocked(events: list[Any]) -> None:
             raise _blocked_error()
 
 
+def _raise_if_harness_error_envelope(payload: Mapping[str, Any]) -> None:
+    """Map a harness category-only error envelope before coach_turn validation.
+
+    The production harness returns ``{"ok": false, "error": true, "category": ...}``
+    instead of raising JSONDecodeError on an empty ``str(AgentResult)``.
+    """
+    if payload.get("error") is not True and payload.get("ok") is not False:
+        return
+    if "response_text" in payload and "assessment" in payload:
+        return
+    category = str(payload.get("category") or "").strip()
+    if category == "safety_blocked":
+        raise _blocked_error()
+    if category == "timeout":
+        raise ProviderUnavailableError(_TRUNCATED_FAILURE, category="timeout")
+    if category == "throttled":
+        raise ProviderUnavailableError(
+            "AgentCore is temporarily throttled", category="throttled"
+        )
+    if category in {"structured_output_failure", "malformed"}:
+        raise _malformed_error()
+    raise ProviderUnavailableError(_GENERIC_FAILURE, category="unavailable")
+
+
 def _parse_json_object(value: Any) -> dict[str, Any]:
     """Parse a runtime payload into a JSON object without fence fallbacks."""
     if isinstance(value, dict):
@@ -297,6 +341,13 @@ def _unwrap_runtime_object(payload: dict[str, Any]) -> dict[str, Any]:
     return current
 
 
+def _final_coach_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Unwrap envelopes, then fail closed on a harness error object."""
+    unwrapped = _unwrap_runtime_object(payload)
+    _raise_if_harness_error_envelope(unwrapped)
+    return unwrapped
+
+
 def _text_from_stream_events(events: list[Any]) -> str:
     """Concatenate assistant text and tool-input deltas from runtime events.
 
@@ -317,7 +368,7 @@ def _text_from_stream_events(events: list[Any]) -> str:
             stop_reason = str(stop.get("stopReason") or "")
             if stop_reason == "max_tokens":
                 raise ProviderUnavailableError(
-                    _TRUNCATED_FAILURE, category="malformed"
+                    _TRUNCATED_FAILURE, category="structured_output_failure"
                 )
             if stop_reason == "timeout_exceeded":
                 raise ProviderUnavailableError(_TRUNCATED_FAILURE, category="timeout")
@@ -407,7 +458,7 @@ def _payload_from_runtime_response(response: Mapping[str, Any]) -> dict[str, Any
         _raise_if_runtime_blocked(mappings)
         assembled = _text_from_stream_events(mappings)
         if assembled:
-            return _unwrap_runtime_object(_parse_json_object(assembled))
+            return _final_coach_payload(_parse_json_object(assembled))
         if len(events) == 1 and isinstance(events[0], dict):
             parsed = events[0]
         else:
@@ -422,7 +473,7 @@ def _payload_from_runtime_response(response: Mapping[str, Any]) -> dict[str, Any
         _raise_if_runtime_blocked(parsed)
         assembled = _text_from_stream_events(parsed)
         if assembled:
-            return _unwrap_runtime_object(_parse_json_object(assembled))
+            return _final_coach_payload(_parse_json_object(assembled))
         raise _malformed_error()
     if not isinstance(parsed, dict):
         raise _malformed_error()
@@ -430,14 +481,193 @@ def _payload_from_runtime_response(response: Mapping[str, Any]) -> dict[str, Any
     if "event" in parsed or "contentBlockDelta" in parsed:
         assembled = _text_from_stream_events([parsed])
         if assembled:
-            return _unwrap_runtime_object(_parse_json_object(assembled))
-    return _unwrap_runtime_object(parsed)
+            return _final_coach_payload(_parse_json_object(assembled))
+    return _final_coach_payload(parsed)
+
+
+def _request_specialist(request: CoachRequest) -> str:
+    """Return the server-owned specialist for one request."""
+    return select_specialist(
+        request.student_message,
+        requested=request.specialist,
+    )
+
+
+def _runtime_context(request: CoachRequest) -> dict[str, Any]:
+    """Return application-owned runtime constraints for the AgentCore specialist."""
+    labels = sorted(
+        {
+            str(chunk.label).strip()
+            for chunk in request.retrieved_chunks
+            if str(chunk.label or "").strip()
+        }
+    )
+    specialist = _request_specialist(request)
+    return {
+        "current_stage": request.current_stage,
+        "agentcore_topic": agentcore_topic_for_stage(request.current_stage),
+        "response_detail": "quick" if request.response_detail == "short" else "strict",
+        "language": request.response_language,
+        "allowed_citations": labels,
+        "allow_model_knowledge": bool(request.allow_model_knowledge),
+        "conversation_revision": request.conversation_revision,
+        "specialist": specialist,
+    }
+
+
+def _citations_from_items(items: Any) -> list[CitationReference]:
+    """Map specialist citation objects onto application citation references."""
+    citations: list[CitationReference] = []
+    if not isinstance(items, list):
+        return citations
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+        label = str(item.get("label") or "").strip()
+        if not label:
+            continue
+        citations.append(
+            CitationReference(
+                source_id=str(item.get("source_id") or "").strip(),
+                label=label,
+                title=str(item.get("title") or "").strip(),
+                excerpt=str(item.get("excerpt") or "").strip(),
+            )
+        )
+    return citations
+
+
+def _stay_assessment(
+    request: CoachRequest,
+    *,
+    contribution_summary: str,
+    stage_assessment: str,
+    recommendation_rationale: str,
+    learning_summary: str,
+    citations: list[CitationReference] | None = None,
+    review_strengths: list[str] | None = None,
+    review_improvements: list[str] | None = None,
+    facione_scores: FacioneDimensionScores | None = None,
+) -> EducationalAssessment:
+    """Build a non-transitioning assessment for Q&A or Review specialists."""
+    summary = " ".join(str(contribution_summary or request.student_message).split())[:500]
+    return EducationalAssessment(
+        current_stage=request.current_stage,
+        contribution_summary=summary or "Student asked a course or review question.",
+        stage_assessment=stage_assessment,
+        critical_understanding_level="Not assessed",
+        confidence=0.5,
+        recommendation=StageDecision.STAY,
+        recommendation_rationale=recommendation_rationale,
+        guidance_questions=[],
+        learning_summary=learning_summary,
+        citations=citations or [],
+        facione_scores=facione_scores or FacioneDimensionScores(),
+        review_strengths=review_strengths or [],
+        review_improvements=review_improvements or [],
+    )
 
 
 def _validated_result(
     payload: dict[str, Any], request: CoachRequest
 ) -> ProviderAssessmentResult:
-    """Validate structured coaching output and force the persisted phase."""
+    """Validate structured specialist output and force the persisted phase.
+
+    Q&A and Review never persist a stage transition. Coaching remains the only
+    pedagogical readiness authority.
+    """
+    specialist = _request_specialist(request)
+    if specialist == SPECIALIST_QA:
+        if isinstance(payload.get("assessment"), Mapping):
+            try:
+                turn = ProviderCoachOutput.model_validate(payload)
+            except Exception as error:
+                raise _malformed_error() from error
+            assessment = turn.assessment.model_copy(
+                update={
+                    "current_stage": request.current_stage,
+                    "recommendation": StageDecision.STAY,
+                    "recommendation_rationale": (
+                        "Q&A specialist does not recommend Thinking Path changes."
+                    ),
+                }
+            )
+            return ProviderAssessmentResult(
+                response_text=turn.response_text,
+                assessment=assessment,
+                research_coding=None,
+            )
+        text = str(payload.get("response_text") or "").strip()
+        if not text:
+            raise _malformed_error()
+        return ProviderAssessmentResult(
+            response_text=text,
+            assessment=_stay_assessment(
+                request,
+                contribution_summary=request.student_message,
+                stage_assessment="Course-information question; Thinking Path stage unchanged.",
+                recommendation_rationale="Q&A specialist does not recommend Thinking Path changes.",
+                learning_summary="The student asked a course-information question.",
+                citations=_citations_from_items(payload.get("citations")),
+            ),
+            research_coding=None,
+        )
+    if specialist == SPECIALIST_REVIEW:
+        if isinstance(payload.get("assessment"), Mapping):
+            try:
+                turn = ProviderCoachOutput.model_validate(payload)
+            except Exception as error:
+                raise _malformed_error() from error
+            assessment = turn.assessment.model_copy(
+                update={
+                    "current_stage": request.current_stage,
+                    "recommendation": StageDecision.STAY,
+                    "recommendation_rationale": (
+                        "Formative Review does not recommend Thinking Path changes."
+                    ),
+                }
+            )
+            return ProviderAssessmentResult(
+                response_text=turn.response_text,
+                assessment=assessment,
+                research_coding=None,
+            )
+        text = str(payload.get("response_text") or "").strip()
+        synthesis = str(payload.get("synthesis") or "").strip()
+        if not text:
+            raise _malformed_error()
+        strengths = [
+            str(item).strip()
+            for item in (payload.get("strengths") or [])
+            if str(item).strip()
+        ]
+        improvements = [
+            str(item).strip()
+            for item in (payload.get("areas_to_develop") or [])
+            if str(item).strip()
+        ]
+        facione = None
+        profile = payload.get("facione_profile")
+        if isinstance(profile, Mapping):
+            try:
+                facione = FacioneDimensionScores.model_validate(profile)
+            except Exception:
+                facione = None
+        return ProviderAssessmentResult(
+            response_text=text,
+            assessment=_stay_assessment(
+                request,
+                contribution_summary=request.student_message,
+                stage_assessment=synthesis or "Formative review of progress so far.",
+                recommendation_rationale="Formative Review does not recommend Thinking Path changes.",
+                learning_summary=synthesis or "Formative review of the student's reasoning.",
+                citations=_citations_from_items(payload.get("citations")),
+                review_strengths=strengths[:4],
+                review_improvements=improvements[:4],
+                facione_scores=facione,
+            ),
+            research_coding=None,
+        )
     try:
         turn = ProviderCoachOutput.model_validate(payload)
     except Exception as error:
@@ -558,8 +788,9 @@ class AgentCoreCoachProvider:
         """Build the JSON payload for one coaching InvokeAgentRuntime call.
 
         Always sends Converse ``messages``: planner-selected DSQL history plus
-        the untrusted current-turn content. Trusted shared/stage/runtime
-        instructions travel in ``trusted_instructions``. The untrusted brief
+        the untrusted current-turn content. Canonical pedagogy lives in the
+        AgentCore runtime. This adapter sends application runtime rules in
+        ``trusted_instructions`` and ``runtime_context``. The untrusted brief
         omits duplicated ``<recent_messages>``. Derived memory appears only in
         ``<conversation_memory>`` when compression was required. A top-level
         ``prompt`` string is never used. Token budgeting still uses the full
@@ -603,11 +834,15 @@ class AgentCoreCoachProvider:
                 ),
             }
         )
+        specialist = _request_specialist(request)
         payload: dict[str, Any] = {
-            "phase": _PHASE,
+            "phase": specialist,
             "topic": agentcore_topic_for_stage(request.current_stage),
-            "output_contract": _OUTPUT_CONTRACT,
-            _TRUSTED_INSTRUCTIONS_FIELD: prepared.trusted_instructions,
+            "output_contract": _CONTRACT_BY_SPECIALIST.get(
+                specialist, _OUTPUT_CONTRACT
+            ),
+            "runtime_context": _runtime_context(request),
+            _TRUSTED_INSTRUCTIONS_FIELD: prepared.runtime_instructions,
             "messages": messages,
         }
         student_id = " ".join(str(request.student_id or "").split()).strip()

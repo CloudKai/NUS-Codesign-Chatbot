@@ -21,6 +21,10 @@ def _load(name: str, filename: str):
 _SMOKE = _load("co_design_agentcore_smoke", "agentcore_smoke.py")
 _SYNC = _load("co_design_sync_course_materials", "sync_course_materials.py")
 _EVAL = _load("co_design_evaluate_live_coach", "evals/evaluate_live_coach.py")
+_COURSE_RETRIEVE = _load(
+    "co_design_test_course_retrieval",
+    "diagnostics/test_course_retrieval.py",
+)
 
 
 def test_course_object_pairs_use_course_prefix_not_users(tmp_path: Path):
@@ -63,3 +67,29 @@ def test_live_luna_eval_refuses_without_approval():
     assert _EVAL.main([]) == 2
     capped = _EVAL.parse_args(["--i-approve-live-luna", "--max-calls", "151"])
     assert "150" in (_EVAL.refuse_reason(capped) or "")
+
+
+def test_course_retrieval_diagnostic_refuses_without_approval():
+    args = _COURSE_RETRIEVE.parse_args([])
+    assert (
+        _COURSE_RETRIEVE.refuse_reason(args)
+        == "live course retrieval requires --i-approve-live-bedrock"
+    )
+    assert _COURSE_RETRIEVE.main([]) == 2
+    approved = _COURSE_RETRIEVE.parse_args(
+        [
+            "--i-approve-live-bedrock",
+            "--query",
+            "what are the week 1 contents talking about?",
+            "--source",
+            "Week 1 Introduction to innovation v3.pdf",
+            "--dry-run",
+        ]
+    )
+    assert _COURSE_RETRIEVE.refuse_reason(approved) is None
+    assert (
+        _COURSE_RETRIEVE.resolve_course_object_key(
+            "Week 1 Introduction to innovation v3.pdf"
+        )
+        == "course/lectureNotes/Week 1 Introduction to innovation v3.pdf"
+    )

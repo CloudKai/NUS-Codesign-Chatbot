@@ -72,12 +72,12 @@ def student_coach_error_message(category: str = "", *, status: Any = None) -> st
             "This turn was blocked by a safety check. Rephrase your message "
             "and try again. Your notebook was not updated."
         )
+    if normalized in {"structured_output_failure", "malformed"}:
+        return "The coach couldn't complete that reply. Please try again."
     if normalized == "throttled" or status_code == 429:
         return "The coach is busy right now. Wait a moment and try again."
     if normalized == "timeout":
         return "The coach took too long to reply. Try again."
-    if normalized == "malformed":
-        return "The coach reply could not be used. Try sending your message again."
     return "Coaching is temporarily unavailable. Try again in a moment."
 
 
@@ -507,76 +507,74 @@ def handle_prompt(
             reasoning_effort=reasoning_effort,
             idempotency_key=idempotency_key,
         )
-        with st.chat_message("assistant", avatar=":material/auto_awesome:"):
-            thinking = st.status("Coach is thinking…", expanded=False)
-            try:
-                turn: CoachTurn | None = None
-                thinking_closed = False
+        thinking = st.status(
+            "Coach is thinking…",
+            expanded=False,
+            type="compact",
+        )
+        try:
+            turn: CoachTurn | None = None
+            thinking_closed = False
 
-                def _close_thinking(*, label: str, state: str) -> None:
-                    nonlocal thinking_closed
-                    if thinking_closed:
-                        return
-                    thinking.update(label=label, state=state)
-                    thinking_closed = True
+            def _close_thinking(*, label: str, state: str) -> None:
+                nonlocal thinking_closed
+                if thinking_closed:
+                    return
+                thinking.update(label=label, state=state)
+                thinking_closed = True
 
-                def token_stream():
-                    nonlocal turn
-                    for event in stream_coach_turn_events(request):
-                        kind = event.get("event")
-                        if kind in {"started", "status", "graph"}:
-                            # Keep the running status visible during provider wait.
-                            continue
-                        if kind == "token":
-                            _close_thinking(label="Coach reply ready", state="complete")
-                            yield str(event.get("text") or "")
-                        elif kind == "done":
-                            _close_thinking(label="Coach reply ready", state="complete")
-                            turn = CoachTurn.model_validate(event["turn"])
-                        elif kind == "error":
-                            _close_thinking(label="Coaching failed", state="error")
-                            raise CoachTurnStreamError(
-                                str(event.get("detail") or "Coaching failed"),
-                                status=event.get("status"),
-                                category=str(event.get("category") or ""),
-                            )
-                    _close_thinking(label="Coach reply ready", state="complete")
-
-                st.write_stream(token_stream())
-                remove_retry_key(
-                    st.session_state,
-                    thread_id=st.session_state.thread_id,
-                    stage=journey["current_stage"],
-                    prompt=prompt,
-                )
-                if turn and turn.pending_transition:
-                    st.caption(
-                        "The coach has recommended a next step in Thinking Path."
+            for event in stream_coach_turn_events(request):
+                kind = event.get("event")
+                if kind in {"started", "status", "graph"}:
+                    continue
+                if kind == "token":
+                    continue
+                elif kind == "done":
+                    turn = CoachTurn.model_validate(event["turn"])
+                elif kind == "error":
+                    _close_thinking(label="Coaching failed", state="error")
+                    raise CoachTurnStreamError(
+                        str(event.get("detail") or "Coaching failed"),
+                        status=event.get("status"),
+                        category=str(event.get("category") or ""),
                     )
-            except CoachTurnStreamError as error:
-                try:
-                    thinking.update(label="Coaching failed", state="error")
-                except Exception:
-                    pass
-                st.error(
-                    student_coach_error_message(error.category, status=error.status)
+            if turn is None or not str(turn.response_text or "").strip():
+                _close_thinking(label="Coaching failed", state="error")
+                raise CoachTurnStreamError(
+                    "The coach reply could not be completed",
+                    category="structured_output_failure",
                 )
-                st.caption(
-                    "Reload the notebook before resubmitting; the completed turn "
-                    "may already be present if the connection ended late."
-                )
-                return
+            _close_thinking(label="Coach reply ready", state="complete")
+            remove_retry_key(
+                st.session_state,
+                thread_id=st.session_state.thread_id,
+                stage=journey["current_stage"],
+                prompt=prompt,
+            )
+        except CoachTurnStreamError as error:
+            try:
+                thinking.update(label="Coaching failed", state="error")
             except Exception:
-                try:
-                    thinking.update(label="Coaching failed", state="error")
-                except Exception:
-                    pass
-                st.error(student_coach_error_message("unavailable"))
-                st.caption(
-                    "Reload the notebook before resubmitting; the completed turn "
-                    "may already be present if the connection ended late."
-                )
-                return
+                pass
+            st.error(
+                student_coach_error_message(error.category, status=error.status)
+            )
+            st.caption(
+                "Reload the notebook before resubmitting; the completed turn "
+                "may already be present if the connection ended late."
+            )
+            return
+        except Exception:
+            try:
+                thinking.update(label="Coaching failed", state="error")
+            except Exception:
+                pass
+            st.error(student_coach_error_message("unavailable"))
+            st.caption(
+                "Reload the notebook before resubmitting; the completed turn "
+                "may already be present if the connection ended late."
+            )
+            return
     updated_thread = store.get_thread(st.session_state.thread_id) or {}
     updated_metadata = updated_thread.get("metadata") or {}
     updated_journey = normalize_journey(updated_metadata.get("learning_journey"))
@@ -672,7 +670,11 @@ def _submit_pending_edit(
         "idempotency_key": idempotency_key,
     }
     st.session_state.pending_edit = pending
-    thinking = st.status("Coach is thinking…", expanded=False)
+    thinking = st.status(
+        "Coach is thinking…",
+        expanded=False,
+        type="compact",
+    )
     try:
         store.revise_message(
             thread_id,
@@ -745,6 +747,10 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
     chat_log = st.container(key="chat_log")
     with chat_log:
         for message in messages:
+            if message.get("role") == "assistant" and not str(
+                message.get("content") or ""
+            ).strip():
+                continue
             render_message(message)
 
     if st.session_state.get("edit_confirm_message_id"):
@@ -760,7 +766,7 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
             submit_mode="stop",
             height="content",
         )
-        sync_composer_layout()
+        sync_composer_layout(max_file_size_mb=settings.max_file_size_mb)
     prompt, uploads = normalize_composer_value(composer_value)
     if prompt:
         handle_prompt(

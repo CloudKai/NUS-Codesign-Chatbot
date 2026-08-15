@@ -24,6 +24,7 @@ from backend.models import DEFAULT_CHAT_MODEL_ID, get_model, validate_reasoning
 from backend.prompts.composer import COACH_PROMPT_VERSION
 from backend.research.models import ResearchEvidenceSpan, ResearchObservationCreate
 from backend.repositories import NotebookRepository
+from backend.specialists.routing import select_specialist
 from backend.retrieval import (
     ContextRetriever,
     LocalChunkRetriever,
@@ -31,6 +32,7 @@ from backend.retrieval import (
     bounded_retrieval_result,
     focused_excerpt,
     retrieval_sources_from_notebook,
+    with_course_evidence_gap,
 )
 from backend.source_library import (
     get_visible_source,
@@ -695,7 +697,14 @@ class CoachApplicationService:
                 )
         # Rebuild context solely from the validated chunks. Do not trust an
         # adapter-provided opaque context string, even from future Bedrock code.
+        # Re-attach the application-owned course evidence-gap note when the
+        # composite reported missing Knowledge Base excerpts.
+        course_status = str(retrieval_result.course_retrieval_status or "ok")
         retrieval_result = bounded_retrieval_result(retrieval_result.chunks)
+        if course_status in {"unavailable", "empty"}:
+            retrieval_result = with_course_evidence_gap(
+                retrieval_result, status=course_status
+            )
         for chunk in retrieval_result.chunks:
             excerpt = focused_excerpt(
                 chunk.text,
@@ -754,6 +763,7 @@ class CoachApplicationService:
                 "conversation_revision": conversation_revision,
                 "student_id": str(getattr(self._store, "identifier", "") or "").strip()
                 or None,
+                "specialist": select_specialist(request.student_message, requested=None),
             }
         )
 

@@ -109,6 +109,13 @@ class Settings:
         os.getenv("AGENTCORE_TIMEOUT_SECONDS", "110")
     )
     agentcore_max_retries: int = int(os.getenv("AGENTCORE_MAX_RETRIES", "0"))
+    # Runtime process env (also required on the published AgentCore runtime).
+    # Empty in local mock/dev; production AgentCore fail-closes when unset.
+    agentcore_model_provider: str = os.getenv("AGENTCORE_MODEL_PROVIDER", "").strip().lower()
+    agentcore_model_id: str = os.getenv("AGENTCORE_MODEL_ID", "").strip()
+    agentcore_model_region: str = os.getenv("AGENTCORE_MODEL_REGION", "").strip()
+    guardrail_id: str = os.getenv("GUARDRAIL_ID", "").strip()
+    guardrail_version: str = os.getenv("GUARDRAIL_VERSION", "").strip()
     knowledge_base_id: str = os.getenv("KNOWLEDGE_BASE_ID", "").strip()
     knowledge_base_region: str = os.getenv("KNOWLEDGE_BASE_REGION", "").strip()
     knowledge_base_strict_metadata_filter: bool = _boolean(
@@ -345,6 +352,23 @@ def validate_production_configuration() -> None:
             raise ValueError("AGENTCORE_TIMEOUT_SECONDS must be between 1 and 120")
         if not 0 <= settings.agentcore_max_retries <= 2:
             raise ValueError("AGENTCORE_MAX_RETRIES must be between 0 and 2")
+        provider = (settings.agentcore_model_provider or "").strip().lower()
+        if provider not in {"bedrock", "bedrock_mantle_responses"}:
+            raise ValueError("AGENTCORE_MODEL_PROVIDER is not configured")
+        if not settings.agentcore_model_id.strip():
+            raise ValueError("AGENTCORE_MODEL_ID is not configured")
+        if not settings.agentcore_model_region.strip():
+            raise ValueError("AGENTCORE_MODEL_REGION is not configured")
+        if not settings.guardrail_id.strip() or not settings.guardrail_version.strip():
+            raise ValueError("GUARDRAIL_ID and GUARDRAIL_VERSION are required")
+        if provider == "bedrock" and settings.agentcore_model_id.lower().startswith(
+            "openai."
+        ):
+            raise ValueError("Luna cannot use BedrockModel")
+        if provider == "bedrock_mantle_responses" and not (
+            settings.agentcore_model_id.lower().startswith("openai.")
+        ):
+            raise ValueError("Mantle Responses requires an openai.* model id")
     else:
         raise ValueError(
             f"Unsupported MODEL_PROVIDER for production: {settings.model_provider}"
@@ -368,6 +392,8 @@ def validate_production_configuration() -> None:
             )
         if not settings.course_materials_bucket.strip():
             raise ValueError("COURSE_MATERIALS_BUCKET is not configured")
+        if not settings.knowledge_base_id.strip():
+            raise ValueError("KNOWLEDGE_BASE_ID is not configured")
 
     if settings.database_provider == "sqlite":
         raise ValueError("DATABASE_PROVIDER=sqlite is not allowed in production")

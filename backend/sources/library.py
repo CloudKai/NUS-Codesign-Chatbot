@@ -25,7 +25,6 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from ..file_processing import (
     IMAGE_SUFFIXES,
     SUPPORTED_SUFFIXES,
-    extract_source_text_from_bytes,
     extract_text,
     save_uploads,
 )

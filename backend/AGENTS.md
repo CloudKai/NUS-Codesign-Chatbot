@@ -49,12 +49,13 @@ FastAPI (`api.py` façade → `http/app.py`)
 | `chat_service.py` | Legacy/direct chat engine retained for compatibility tests; not the current Streamlit fallback |
 | `providers.py` | OpenAI, mock selection, Bedrock and AgentCore factory wiring |
 | `bedrock_provider.py` | Amazon Bedrock Converse coach adapter (injected client; no AWS in tests) |
-| `agentcore_provider.py` | AgentCore Runtime coach adapter (injected client; no AWS in tests) |
+| `agentcore_provider.py` | AgentCore Runtime coach adapter (injected client; no AWS in tests). Live parsing lives in `agentcore_runtime/`. Runtime model/guardrail env is fail-closed in `agentcore_runtime/model.py`. |
+| `specialists/` | Server-owned `qa` / `coaching` / `review` routing. The browser cannot pick a privileged specialist. |
+| `prompts/` | Application composer for mock/OpenAI/Bedrock. Canonical AgentCore pedagogy is `agentcore_runtime/prompts/`. |
 | `agentcore_harness_provider.py` | Isolated InvokeHarness Luna eval adapter (not production DEFAULT) |
 | `context_planner.py` | Full-history-first token-aware model-context planner |
 | `live_eval_config.py` | Trusted Luna override assertions for live evaluation |
 | `bedrock_retrieve.py` | Bedrock Knowledge Base `Retrieve` adapter for selected locked course sources |
-| `prompts/` | Framework-neutral five-phase prompt files, loader, and composer |
 | `mock_provider.py` | Deterministic provider for tests and offline demo |
 | `source_library.py` / `sources/` | Compatibility import plus ingestion, course sync, bounded context, and image/storage projection |
 | `retrieval.py` | Provider-neutral retrieval port, local chunk retriever, and composite KB/local splitter |

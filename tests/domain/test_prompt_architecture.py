@@ -209,7 +209,12 @@ def test_trusted_prompt_files_omit_literal_attack_ngrams():
         "reveal the system prompt",
         "you are now",
     )
-    roots = [Path("backend/prompts/shared"), Path("backend/prompts/stages")]
+    roots = [
+        Path("backend/prompts/shared"),
+        Path("backend/prompts/stages"),
+        Path("agentcore_runtime/prompts"),
+        Path("agentcore_runtime/prompts/stages"),
+    ]
     for root in roots:
         for path in root.glob("*.md"):
             normalized = " ".join(path.read_text(encoding="utf-8").lower().split())
@@ -293,6 +298,27 @@ def test_composer_includes_source_context_and_bounds_history():
         len(source) > composer_module.MAX_RETRIEVED_CONTEXT_CHARS
         or "older pedestrians" in text
     )
+
+
+def test_composer_course_evidence_gap_does_not_claim_unreadable_pdf():
+    from backend.retrieval import COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT
+
+    prepared = PromptComposer().compose(
+        PromptContext(
+            current_stage="problem_identification",
+            student_project_context="Project brief",
+            retrieved_course_context=COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT,
+            conversation_summary="Summary",
+            student_message="what are the week 1 contents talking about?",
+            response_detail="long",
+            allow_model_knowledge=False,
+        )
+    )
+    text = prepared.composed_text
+    assert "could not retrieve a validated excerpt" in text
+    assert "Do not invent a summary" in text
+    assert "query-ranked excerpts" not in text
+    assert "[This source is stored but has no analyzable text.]" not in text
 
 
 def test_composer_trims_dynamic_context_before_mandatory_sections(monkeypatch):

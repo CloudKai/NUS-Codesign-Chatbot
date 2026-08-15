@@ -35,6 +35,12 @@ def test_student_coach_error_copy_is_category_safe():
     assert "notebook was not updated" in blocked.lower()
     assert "start.sh" not in blocked
     assert "provider" not in blocked.lower()
+    malformed = student_coach_error_message("structured_output_failure")
+    assert "couldn't complete" in malformed.lower()
+    assert "json" not in malformed.lower()
+    assert "502" not in malformed
+    assert "agentresult" not in malformed.lower()
+    assert student_coach_error_message("malformed") == malformed
     unavailable = student_coach_error_message("unavailable")
     assert "temporarily unavailable" in unavailable.lower()
     assert "start.sh" not in unavailable
@@ -82,6 +88,20 @@ def test_chat_composer_attachment_error_is_recoverable(monkeypatch):
     ]
 
 
+def test_empty_assistant_rows_are_not_rendered():
+    """Failed or skeleton assistant rows with no text stay off the chat log."""
+    from backend.student_store import StudentStore
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    assert not app.exception
+    starting = len(app.chat_message)
+    store = StudentStore()
+    store.add_message(app.session_state["thread_id"], "assistant", "")
+    app.run()
+    assert not app.exception
+    assert len(app.chat_message) == starting
+
+
 def test_streamlit_notebook_workspace_smoke():
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     assert not app.exception
@@ -94,6 +114,12 @@ def test_streamlit_notebook_workspace_smoke():
     assert composer.proto.accept_file
     assert not composer.proto.accept_audio
     assert composer.proto.max_upload_size_mb == settings.max_file_size_mb
+    composer_layout = Path("ui/layout/composer_layout.py").read_text(encoding="utf-8")
+    assert "Max {size_mb} MB per file" in composer_layout
+    assert "cd-attach-tooltip" in composer_layout
+    sources_py = _implementation_source(sources_module)
+    assert "data-tooltip=" in sources_py
+    assert "Max {settings.max_file_size_mb} MB per file" in sources_py
 
     assert any(
         (button.key or "").startswith("profile-language-") for button in app.button
@@ -120,6 +146,7 @@ def test_streamlit_notebook_workspace_smoke():
     assert {tab.label for tab in app.tabs} >= {"Journey", "Review"}
 
     assert '<span class="pane-title">Sources</span>' in rendered
+    assert f"Max {settings.max_file_size_mb} MB per file" in rendered
     assert "Welcome to your critical-thinking coach" in rendered
     assert "What design challenge or problem are you working on today?" in rendered
     notebook_title = next(
@@ -250,6 +277,9 @@ def test_streamlit_notebook_workspace_smoke():
     assert "grid-template-columns:minmax(0,1fr) auto" in rendered
     assert "stChatInputTextArea" in rendered
     assert "arrow_upward" in rendered
+    assert "stChatInputStopButton" in rendered
+    assert "textarea:disabled" in rendered
+    assert 'type="compact"' in _implementation_source(chat_module)
     assert "cd-composer-card" in Path("ui/layout/composer_layout.py").read_text(encoding="utf-8")
     assert (
         '[data-testid="stHeaderActionElements"] {\n'
@@ -296,9 +326,13 @@ def test_streamlit_notebook_workspace_smoke():
     button_labels = {button.label for button in app.button}
     assert "Notebooks" in button_labels
     assert len(app.file_uploader) >= 1
-    assert any(
-        (uploader.label or "") == "Add" for uploader in app.file_uploader
+    add_uploader = next(
+        uploader
+        for uploader in app.file_uploader
+        if (uploader.label or "") == "Add"
     )
+    assert add_uploader.help == f"Max {settings.max_file_size_mb} MB per file"
+    assert add_uploader.proto.max_upload_size_mb == settings.max_file_size_mb
 
     assert any(input_widget.label == "Display name" for input_widget in app.text_input)
     assert any(control.label == "Appearance" for control in app.segmented_control)
@@ -550,8 +584,6 @@ def test_language_theme_and_journey_has_no_manual_progression_control():
     assert app.session_state["response_detail"] == "long"
     assert app.session_state["learning_journey"]["response_detail"] == "long"
     assert app.session_state["setting_coaching_style"] == "Strict"
-    from backend.student_store import StudentStore
-
     created = StudentStore().get_thread(app.session_state["thread_id"])
     assert created is not None
     assert created["metadata"]["response_detail"] == "long"
@@ -724,6 +756,10 @@ def test_rename_and_icon_controls_expose_accessible_instructions():
     assert '_ENTER_HINT = "Press Enter to apply"' in rename_source
     assert '"help": _ENTER_HINT' not in rename_source
     assert 'help="Source actions"' in sources
+    assert "data-tooltip=" in sources
+    assert "Max {settings.max_file_size_mb} MB per file" in sources
+    assert ".cd-sources-add-face::after" in css
+    assert 'content:attr(data-tooltip)' in css
     assert "with st.popover(initial)" in profile
     assert 'help="Settings"' not in profile
     assert 'help="Collapse Thinking Path"' in workspace

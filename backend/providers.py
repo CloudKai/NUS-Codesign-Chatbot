@@ -30,8 +30,9 @@ class ProviderUnavailableError(RuntimeError):
     """Raised when a configured local or hosted model provider cannot be used.
 
     ``category`` is a stable, student-safe label such as ``safety_blocked``,
-    ``malformed``, ``throttled``, ``timeout``, ``access_denied``, or
-    ``unavailable``. It must never contain prompts, AWS bodies, or student text.
+    ``structured_output_failure``, ``malformed``, ``throttled``, ``timeout``,
+    ``access_denied``, or ``unavailable``. It must never contain prompts, AWS
+    bodies, or student text.
     """
 
     def __init__(self, message: str, *, category: str = "unavailable") -> None:
@@ -58,8 +59,8 @@ def provider_error_category(error: BaseException) -> str:
     text = str(error).casefold()
     if "blocked this turn" in text:
         return "safety_blocked"
-    if "malformed" in text:
-        return "malformed"
+    if "could not be completed" in text or "malformed" in text:
+        return "structured_output_failure" if "could not be completed" in text else "malformed"
     if "throttl" in text:
         return "throttled"
     if "timed out" in text or "timeout" in text:
@@ -71,8 +72,9 @@ def provider_error_category(error: BaseException) -> str:
 
 def provider_unavailable_outcome(error: BaseException) -> str:
     """Return the operational-metric outcome for one provider failure."""
-    if provider_error_category(error) == "safety_blocked":
-        return "safety_blocked"
+    category = provider_error_category(error)
+    if category in {"safety_blocked", "structured_output_failure"}:
+        return category
     return "provider_unavailable"
 
 

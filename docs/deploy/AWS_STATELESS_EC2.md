@@ -29,16 +29,23 @@ container must not destroy conversations, progress, or uploads.
 Production coaching uses `MODEL_PROVIDER=agentcore` against runtime
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` (qualifier `DEFAULT`).
 Invokes are stateless; Aurora DSQL `messages` is the only durable transcript.
-Do not treat AgentCore session memory, DynamoDB, or a JSON file as chat history.
+The published runtime source of truth is `agentcore_runtime/` in this
+repository (Q&A, Coaching, and Formative Review specialists). Do not treat
+AgentCore session memory, DynamoDB, or a JSON file as chat history.
 Direct Bedrock Converse remains a fallback. Course PDFs live in shared
 `course/lectureNotes/` and `course/readings/` on the course-content bucket;
 student uploads stay under `users/`. `COURSE_MATERIAL_SYNC_ENABLED=true`
-creates locked DSQL source rows that **reference** those shared keys and does
-not copy PDFs into the uploads prefix. Coaching does not call
+exposes those shared objects as virtual catalog sources in the UI and does
+not copy PDFs into the uploads prefix or duplicate them into notebook DSQL
+source rows. Coaching does not call
 `RetrieveAndGenerate`. The AgentCore coaching specialist must keep zero KB
-tools so `[S#]` citations stay notebook-selected. When `KNOWLEDGE_BASE_ID` is
-set, locked Lecture Notes/Readings use Bedrock `Retrieve` mapped onto those
-same `[S#]` labels; student uploads stay on local chunks.
+tools so `[S#]` citations stay notebook-selected. Shared course files are
+virtual catalog sources in the UI; they are not copied into each notebook and
+do not rely on local `extractedText`. Production with shared course sync
+**requires** `KNOWLEDGE_BASE_ID` so official materials retrieve through
+Bedrock `Retrieve` mapped onto those `[S#]` labels. Student uploads stay on
+local chunks. An empty Knowledge Base id must not silently rank placeholder
+text as course evidence.
 
 During pre-AgentCore testing, student-upload RAG is still functional: extracted
 text is read from the selected S3-backed sources, chunked and ranked in the app
@@ -428,7 +435,13 @@ Required production `.env` keys (host-only):
 - `MODEL_PROVIDER=agentcore`
 - `AGENTCORE_RUNTIME_ARN=arn:aws:bedrock-agentcore:us-west-2:355604674280:runtime/NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`
 - `AGENTCORE_QUALIFIER=DEFAULT`
-- `KNOWLEDGE_BASE_ID=JUQNP8AZAZ` (optional; selected-source Retrieve)
+- `AGENTCORE_MODEL_PROVIDER=bedrock`
+- `AGENTCORE_MODEL_ID=global.anthropic.claude-sonnet-4-6`
+- `AGENTCORE_MODEL_REGION=us-west-2`
+- `GUARDRAIL_ID=<configured guardrail>`
+- `GUARDRAIL_VERSION=<configured version>`
+- `KNOWLEDGE_BASE_ID=<configured KB id>` (required when shared course sync is on)
+- `KNOWLEDGE_BASE_REGION=us-west-2`
 - Cognito + public URL values already set in `compose.prod.yaml`
 
 `/api/v1/ready` checks non-secret Cognito configuration locally (it does not

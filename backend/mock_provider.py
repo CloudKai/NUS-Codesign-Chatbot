@@ -18,6 +18,11 @@ from .domain import (
     StageDecision,
 )
 from .prompts import PreparedCoachPrompt, compose_coach_prompt
+from .specialists.routing import (
+    SPECIALIST_QA,
+    SPECIALIST_REVIEW,
+    select_specialist,
+)
 from .student_journey import (
     STAGE_BY_ID,
     THINKING_STAGES,
@@ -234,6 +239,13 @@ class DeterministicCoachProvider:
         prepared = compose_coach_prompt(request)
         self.last_prepared_prompt = prepared
         self.last_stage_id = request.current_stage
+        specialist = select_specialist(
+            request.student_message, requested=request.specialist
+        )
+        if specialist == SPECIALIST_QA:
+            return self._qa_result(request)
+        if specialist == SPECIALIST_REVIEW:
+            return self._review_result(request)
         stage = STAGE_BY_ID[request.current_stage]
         prior_stage_contributions = _prior_assessed_turns(request)
         advance_after = 2 if request.response_detail == "long" else 1
@@ -321,4 +333,63 @@ class DeterministicCoachProvider:
             response_text=response,
             assessment=assessment,
             research_coding=_mock_research_coding(request),
+        )
+
+    def _qa_result(self, request: CoachRequest) -> ProviderAssessmentResult:
+        """Return a grounded course answer that does not coach or advance."""
+        evidence = _mock_grounded_evidence(request)
+        if evidence:
+            excerpt, label = evidence
+            response = (
+                f"Week 1 introduces the course framing using the selected materials. "
+                f"One retrieved excerpt is: “{excerpt}” [{label}]."
+            )
+        else:
+            response = (
+                "I couldn't find a validated excerpt from the selected course "
+                "material for that question."
+            )
+        summary = " ".join(request.student_message.split())[:500]
+        assessment = EducationalAssessment(
+            current_stage=request.current_stage,
+            contribution_summary=summary or "Student asked a course question.",
+            stage_assessment="Course-information question; Thinking Path stage unchanged.",
+            critical_understanding_level="Not assessed",
+            confidence=0.5,
+            recommendation=StageDecision.STAY,
+            recommendation_rationale="Q&A specialist does not recommend Thinking Path changes.",
+            guidance_questions=[],
+            learning_summary="The student asked a course-information question.",
+        )
+        return ProviderAssessmentResult(
+            response_text=response,
+            assessment=assessment,
+            research_coding=None,
+        )
+
+    def _review_result(self, request: CoachRequest) -> ProviderAssessmentResult:
+        """Return formative synthesis that is not a grade and does not advance."""
+        summary = " ".join(request.student_message.split())[:500]
+        response = (
+            "You have started to locate the problem in a real context. "
+            "Next, make the affected people and intended outcome more specific. "
+            "This is formative feedback, not a grade."
+        )
+        assessment = EducationalAssessment(
+            current_stage=request.current_stage,
+            contribution_summary=summary or "Student asked for a formative review.",
+            stage_assessment="Formative review of progress so far.",
+            critical_understanding_level="Not assessed",
+            confidence=0.5,
+            recommendation=StageDecision.STAY,
+            recommendation_rationale="Formative Review does not recommend Thinking Path changes.",
+            guidance_questions=[],
+            learning_summary="Formative review of the student's reasoning.",
+            review_strengths=["You located the work in a concrete setting."],
+            review_improvements=["Name who is affected and what success would look like."],
+        )
+        return ProviderAssessmentResult(
+            response_text=response,
+            assessment=assessment,
+            research_coding=None,
         )

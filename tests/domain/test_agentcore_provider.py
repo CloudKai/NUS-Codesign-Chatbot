@@ -80,18 +80,31 @@ class FakeAgentCoreRuntime:
         *,
         payload: dict[str, Any] | None = None,
         raw: bytes | None = None,
+        payloads: list[Any] | None = None,
         content_type: str = "application/json",
         error: BaseException | None = None,
     ) -> None:
         self.calls: list[dict[str, Any]] = []
         self._payload = payload
         self._raw = raw
+        self._queue = list(payloads) if payloads is not None else None
         self._content_type = content_type
         self._error = error
 
     def invoke_agent_runtime(self, **kwargs: Any) -> dict[str, Any]:
         """Record one runtime invocation and return a fake structured response."""
         self.calls.append(kwargs)
+        if self._queue is not None:
+            if not self._queue:
+                raise AssertionError("FakeAgentCoreRuntime has no queued responses left")
+            item = self._queue.pop(0)
+            if isinstance(item, BaseException):
+                raise item
+            if isinstance(item, bytes):
+                body = item
+            else:
+                body = json.dumps(item).encode("utf-8")
+            return {"contentType": self._content_type, "response": FakeBody(body)}
         if self._error is not None:
             raise self._error
         if self._raw is not None:
@@ -105,6 +118,7 @@ def _assessment(
     *,
     stage: str = "problem_identification",
     citations: list[CitationReference] | None = None,
+    recommendation: StageDecision = StageDecision.STAY,
 ) -> EducationalAssessment:
     """Return a valid coaching assessment for adapter tests."""
     return EducationalAssessment(
@@ -113,7 +127,7 @@ def _assessment(
         stage_assessment="The contribution is usable but can be developed further.",
         critical_understanding_level="Developing",
         confidence=0.7,
-        recommendation=StageDecision.STAY,
+        recommendation=recommendation,
         recommendation_rationale="One important element remains to be examined.",
         guidance_questions=["What should you examine next?"],
         learning_summary="The student is developing the design reasoning.",
@@ -144,11 +158,14 @@ def _output(
     research: ProvisionalResearchCoding | None | dict[str, Any] = _coding(),
     citations: list[CitationReference] | None = None,
     response_text: str = "What trade-off still needs evidence [S1]?",
+    recommendation: StageDecision = StageDecision.STAY,
 ) -> dict[str, Any]:
     """Return a JSON-ready provider envelope, including optional research."""
     envelope = ProviderCoachOutput(
         response_text=response_text,
-        assessment=_assessment(stage=stage, citations=citations),
+        assessment=_assessment(
+            stage=stage, citations=citations, recommendation=recommendation
+        ),
         research_coding=research if not isinstance(research, dict) else None,
     )
     dumped = envelope.model_dump(mode="json")
@@ -181,7 +198,12 @@ def _request(**overrides: Any) -> CoachRequest:
     return CoachRequest(**payload)
 
 
-def _service(store: StudentStore, provider: AgentCoreCoachProvider) -> CoachApplicationService:
+def _service(
+    store: StudentStore,
+    provider: AgentCoreCoachProvider,
+    *,
+    auto_advance_stages: bool = False,
+) -> CoachApplicationService:
     """Build the normal application path with the AgentCore adapter injected."""
     notebooks = SQLiteNotebookRepository(store)
     transitions = SQLitePhaseTransitionRepository(store)
@@ -190,6 +212,7 @@ def _service(store: StudentStore, provider: AgentCoreCoachProvider) -> CoachAppl
         notebooks,
         CoachWorkflow(provider, transitions),
         LearningProgressService(store, notebooks, transitions),
+        auto_advance_stages=auto_advance_stages,
     )
 
 
@@ -237,10 +260,12 @@ def test_valid_structured_coaching_and_research_coding():
     assert payload["output_contract"] == "coach_turn"
     assert "prompt" not in payload
     prepared = compose_coach_prompt(_request(), include_recent_messages=False)
-    assert payload["trusted_instructions"] == prepared.trusted_instructions
+    assert payload["trusted_instructions"] == prepared.runtime_instructions
     assert _current_turn_text(payload) == prepared.untrusted_turn_text
-    assert _STAGE_MARKERS["problem_identification"] in payload["trusted_instructions"]
+    assert _STAGE_MARKERS["problem_identification"] not in payload["trusted_instructions"]
     assert _STAGE_MARKERS["problem_identification"] not in _current_turn_text(payload)
+    assert payload["runtime_context"]["current_stage"] == "problem_identification"
+    assert payload["runtime_context"]["specialist"] == "coaching"
     assert _STUDENT_MESSAGE in _current_turn_text(payload)
     assert _STUDENT_MESSAGE not in payload["trusted_instructions"]
     assert "RetrieveAndGenerate" not in json.dumps(payload)
@@ -265,8 +290,10 @@ def test_deep_analysis_maps_only_to_agentcore_ethics_critical_topic():
     assert result.assessment.current_stage == "deep_analysis"
     payload = _decoded_payload(client.calls[0])
     assert payload["topic"] == "ethics_critical"
-    assert _STAGE_MARKERS["deep_analysis"] in payload["trusted_instructions"]
+    assert _STAGE_MARKERS["deep_analysis"] not in payload["trusted_instructions"]
     assert _STAGE_MARKERS["deep_analysis"] not in _current_turn_text(payload)
+    assert payload["runtime_context"]["current_stage"] == "deep_analysis"
+    assert payload["runtime_context"]["agentcore_topic"] == "ethics_critical"
 
 
 def test_stateless_session_ids_are_unique_per_invoke():
@@ -325,7 +352,7 @@ def test_agentcore_payload_sends_full_history_and_owner_student_id():
     messages = payload["messages"]
     assert all(item["role"] in {"user", "assistant"} for item in messages)
     assert messages[-1]["role"] == "user"
-    assert _STAGE_MARKERS["problem_identification"] in payload["trusted_instructions"]
+    assert _STAGE_MARKERS["problem_identification"] not in payload["trusted_instructions"]
     assert _STAGE_MARKERS["problem_identification"] not in messages[-1]["content"][0]["text"]
     prior = messages[:-1]
     assert len(prior) == 9
@@ -440,10 +467,11 @@ def test_invalid_coaching_is_rejected_without_persistence(tmp_path):
     store = StudentStore(tmp_path / "agentcore-invalid.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     client = FakeAgentCoreRuntime(payload={"response_text": ""})
-    with pytest.raises(ProviderUnavailableError, match="malformed"):
+    with pytest.raises(ProviderUnavailableError, match="could not be completed") as raised:
         _service(store, _provider(client)).submit(
             _request(thread_id=thread_id)
         )
+    assert raised.value.category == "structured_output_failure"
     assert all(item["role"] != "assistant" for item in store.get_messages(thread_id))
     assert store.list_research_observations(notebook_id=thread_id) == []
 
@@ -535,16 +563,18 @@ def test_agentcore_error_translation_hides_aws_and_student_content(
 def test_markdown_fences_are_not_parsed_as_structured_output():
     fenced = "```json\n" + json.dumps(_output()) + "\n```"
     client = FakeAgentCoreRuntime(raw=fenced.encode("utf-8"))
-    with pytest.raises(ProviderUnavailableError, match="malformed"):
+    with pytest.raises(ProviderUnavailableError, match="could not be completed") as raised:
         _provider(client).assess(_request())
+    assert raised.value.category == "structured_output_failure"
 
 
 def test_plain_prose_agentcore_output_is_rejected_without_persistence(tmp_path):
     store = StudentStore(tmp_path / "agentcore-prose.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     client = FakeAgentCoreRuntime(raw=b"Here is coaching without a JSON object.")
-    with pytest.raises(ProviderUnavailableError, match="malformed"):
+    with pytest.raises(ProviderUnavailableError, match="could not be completed") as raised:
         _service(store, _provider(client)).submit(_request(thread_id=thread_id))
+    assert raised.value.category == "structured_output_failure"
     assert all(item["role"] != "assistant" for item in store.get_messages(thread_id))
     assert store.list_research_observations(notebook_id=thread_id) == []
 
@@ -680,7 +710,7 @@ def test_content_filtered_stop_reason_is_safety_blocked():
     assert "filtered" not in str(raised.value)
 
 
-def test_malformed_sse_prose_is_rejected_as_malformed():
+def test_malformed_sse_prose_is_rejected_as_structured_output_failure():
     client = FakeAgentCoreRuntime(
         raw=_sse_bytes(
             {
@@ -694,9 +724,9 @@ def test_malformed_sse_prose_is_rejected_as_malformed():
         ),
         content_type="text/event-stream",
     )
-    with pytest.raises(ProviderUnavailableError, match="malformed") as raised:
+    with pytest.raises(ProviderUnavailableError, match="could not be completed") as raised:
         _provider(client).assess(_request())
-    assert raised.value.category == "malformed"
+    assert raised.value.category == "structured_output_failure"
 
 
 def test_blocked_turn_is_rejected_without_persistence(tmp_path):
@@ -715,14 +745,8 @@ def test_blocked_turn_is_rejected_without_persistence(tmp_path):
 
 
 def test_harness_patch_appends_trusted_instructions_and_uses_untrusted_user():
-    import importlib.util
-    from pathlib import Path
+    from agentcore_runtime.structured_coach import coaching_invoke_prompts
 
-    path = Path("scripts/agentcore/harness_patch/structured_coach.py")
-    spec = importlib.util.spec_from_file_location("harness_structured_coach", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
     prepared = compose_coach_prompt(_request(), include_recent_messages=False)
     payload = {
         "output_contract": "coach_turn",
@@ -731,14 +755,174 @@ def test_harness_patch_appends_trusted_instructions_and_uses_untrusted_user():
             {"role": "user", "content": [{"text": prepared.untrusted_turn_text}]}
         ],
     }
-    system_prompt, user_prompt = module.coaching_invoke_prompts(payload)
+    system_prompt, user_prompt = coaching_invoke_prompts(payload)
     assert prepared.trusted_instructions in system_prompt
     assert user_prompt == prepared.untrusted_turn_text
     assert _STAGE_MARKERS["problem_identification"] in system_prompt
     assert _STUDENT_MESSAGE in user_prompt
     assert _STUDENT_MESSAGE not in system_prompt
-    legacy_system, legacy_user = module.coaching_invoke_prompts(
+    legacy_system, legacy_user = coaching_invoke_prompts(
         {"messages": [{"role": "user", "content": [{"text": prepared.composed_text}]}]}
     )
     assert prepared.trusted_instructions not in legacy_system
     assert legacy_user == prepared.composed_text
+
+
+_STREET = "A quiet residential street"
+
+
+def _thread_stage(store: StudentStore, thread_id: str) -> str:
+    """Return the persisted Thinking Path stage for one notebook."""
+    thread = store.get_thread(thread_id) or {}
+    metadata = thread.get("metadata") or {}
+    journey = metadata.get("learning_journey") or {}
+    return str(
+        journey.get("current_stage")
+        or metadata.get("thinking_stage")
+        or ""
+    )
+
+
+def test_empty_runtime_body_is_structured_output_failure():
+    client = FakeAgentCoreRuntime(raw=b"")
+    with pytest.raises(ProviderUnavailableError, match="could not be completed") as raised:
+        _provider(client).assess(_request())
+    assert raised.value.category == "structured_output_failure"
+    assert "JSONDecodeError" not in str(raised.value)
+
+
+def test_harness_error_envelope_maps_to_structured_output_failure():
+    client = FakeAgentCoreRuntime(
+        payload={"ok": False, "error": True, "category": "structured_output_failure"}
+    )
+    with pytest.raises(ProviderUnavailableError, match="could not be completed") as raised:
+        _provider(client).assess(_request())
+    assert raised.value.category == "structured_output_failure"
+
+
+def test_harness_safety_envelope_stays_safety_blocked():
+    client = FakeAgentCoreRuntime(
+        payload={"ok": False, "error": True, "category": "safety_blocked"}
+    )
+    with pytest.raises(ProviderUnavailableError, match="blocked this turn") as raised:
+        _provider(client).assess(_request())
+    assert raised.value.category == "safety_blocked"
+
+
+def test_short_street_contribution_is_invoked_and_not_treated_as_empty():
+    client = FakeAgentCoreRuntime(payload=_output(research=None))
+    result = _provider(client).assess(_request(student_message=_STREET))
+    assert result.response_text
+    assert result.assessment.recommendation is StageDecision.STAY
+    payload = _decoded_payload(client.calls[0])
+    current = _current_turn_text(payload)
+    assert current.count(_STREET) == 1
+    assert json.dumps(payload).count(_STREET) == 1
+    assert _STREET in current
+    assert payload["messages"][-1]["content"][0]["text"].strip()
+
+
+def test_large_history_and_evidence_keep_current_street_contribution_once():
+    history = []
+    for index in range(24):
+        role = "user" if index % 2 == 0 else "assistant"
+        history.append(
+            {
+                "role": role,
+                "content": f"history-turn-{index} " + ("design-context " * 80),
+            }
+        )
+    evidence = "retrieved-excerpt " * 1200
+    request = _request(
+        student_message=_STREET,
+        history=history,
+        source_context=evidence,
+        student_project_context="project-context " * 400,
+    )
+    client = FakeAgentCoreRuntime(payload=_output(research=None))
+    result = _provider(client).assess(request)
+    assert result.response_text
+    encoded = client.calls[0]["payload"]
+    size = len(encoded if isinstance(encoded, (bytes, bytearray)) else str(encoded))
+    assert 30_000 <= size <= 150_000
+    payload = _decoded_payload(client.calls[0])
+    current = _current_turn_text(payload)
+    assert current.count(_STREET) == 1
+    assert json.dumps(payload).count(_STREET) == 1
+    assert _STREET not in payload["trusted_instructions"]
+    assert payload["messages"][-1]["role"] == "user"
+
+
+def test_structured_output_failure_retry_persists_exactly_one_turn(tmp_path):
+    store = StudentStore(tmp_path / "agentcore-street-retry.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = FakeAgentCoreRuntime(payloads=[b"", _output(research=None)])
+    service = _service(store, _provider(client))
+    request = _request(
+        thread_id=thread_id,
+        student_message=_STREET,
+        idempotency_key="street-structured-retry",
+    )
+    with pytest.raises(ProviderUnavailableError, match="could not be completed") as raised:
+        service.submit(request)
+    assert raised.value.category == "structured_output_failure"
+    first_messages = store.get_messages(thread_id)
+    assert all(item["role"] != "assistant" for item in first_messages)
+    assert all(str(item.get("content") or "").strip() for item in first_messages)
+    assert store.get_pending_phase_transition(thread_id) is None
+    completed = service.submit(request)
+    assert completed.response_text
+    messages = store.get_messages(thread_id)
+    roles = [item["role"] for item in messages]
+    assert roles.count("user") == 1
+    assert roles.count("assistant") == 1
+    user = next(item for item in messages if item["role"] == "user")
+    assistant = next(item for item in messages if item["role"] == "assistant")
+    assert user["content"] == _STREET
+    assert assistant["content"].strip()
+    assert store.get_pending_phase_transition(thread_id) is None
+    assert _thread_stage(store, thread_id) == "problem_identification"
+
+
+def test_street_stay_does_not_advance_stage(tmp_path):
+    store = StudentStore(tmp_path / "agentcore-street-stay.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = FakeAgentCoreRuntime(payload=_output(research=None))
+    turn = _service(store, _provider(client)).submit(
+        _request(thread_id=thread_id, student_message=_STREET)
+    )
+    assert turn.assessment.recommendation is StageDecision.STAY
+    assert turn.pending_transition is None
+    assert _thread_stage(store, thread_id) == "problem_identification"
+
+
+def test_street_advance_follows_validated_recommendation_not_the_sentence(tmp_path):
+    store = StudentStore(tmp_path / "agentcore-street-advance.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = FakeAgentCoreRuntime(
+        payload=_output(research=None, recommendation=StageDecision.ADVANCE)
+    )
+    turn = _service(store, _provider(client)).submit(
+        _request(thread_id=thread_id, student_message=_STREET)
+    )
+    assert turn.assessment.recommendation is StageDecision.ADVANCE
+    assert turn.pending_transition is not None
+    assert _thread_stage(store, thread_id) == "problem_identification"
+
+
+def test_street_advance_auto_applies_when_configured(tmp_path):
+    store = StudentStore(tmp_path / "agentcore-street-auto.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = FakeAgentCoreRuntime(
+        payload=_output(research=None, recommendation=StageDecision.ADVANCE)
+    )
+    turn = _service(
+        store, _provider(client), auto_advance_stages=True
+    ).submit(_request(thread_id=thread_id, student_message=_STREET))
+    assert turn.assessment.recommendation is StageDecision.ADVANCE
+    assert turn.pending_transition is None
+    assert turn.auto_advanced_to == "concept_generation"
+    assert _thread_stage(store, thread_id) == "concept_generation"
+    messages = store.get_messages(thread_id)
+    assert [item["role"] for item in messages].count("assistant") == 1
+    assert all(str(item.get("content") or "").strip() for item in messages)

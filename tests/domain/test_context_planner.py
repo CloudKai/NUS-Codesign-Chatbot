@@ -8,7 +8,6 @@ from backend.context_planner import (
     ContextBudget,
     ContextBudgetError,
     ConversationMemory,
-    ExtractiveHistoryCompressor,
     HistoryContextPlanner,
     estimate_tokens,
     memory_from_metadata,
@@ -64,9 +63,9 @@ def _overflow_prompt() -> str:
     return "history-padding " * 20
 
 
-def test_ten_and_fifty_message_notebooks_send_full_history_when_within_budget():
+def test_ten_fifty_and_hundred_message_notebooks_send_full_history_when_within_budget():
     planner = HistoryContextPlanner()
-    for count in (10, 50):
+    for count in (10, 50, 100):
         request = _request(history=_history(count))
         plan = planner.plan(request, prompt_text="brief")
         assert plan.full_history_used is True
@@ -76,7 +75,7 @@ def test_ten_and_fifty_message_notebooks_send_full_history_when_within_budget():
         assert len(plan.messages) == count
         assert plan.estimated_input_tokens <= plan.max_input_tokens
         texts = [item["content"][0]["text"] for item in plan.messages]
-        assert f"turn-0" in texts
+        assert "turn-0" in texts
         assert f"turn-{count - 1}" in texts
         assert "CURRENT_STUDENT_TURN unique" not in texts
 

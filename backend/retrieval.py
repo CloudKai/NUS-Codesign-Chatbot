@@ -13,9 +13,30 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
+import logging
 import math
 import re
 from typing import Any, Iterable, Protocol, Sequence
+
+logger = logging.getLogger(__name__)
+
+UNANALYZABLE_SOURCE_PLACEHOLDER = (
+    "[This source is stored but has no analyzable text.]"
+)
+IMAGE_SOURCE_PLACEHOLDER = (
+    "[Image source. Inspect the accompanying image input.]"
+)
+COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT = (
+    "No validated excerpt was retrieved for the selected course source. "
+    "Course material retrieval is unavailable for this turn. "
+    "Do not claim the document has no readable text. Do not invent a "
+    "summary of the file."
+)
+COURSE_RETRIEVAL_EMPTY_CONTEXT = (
+    "No validated excerpt was retrieved for the selected course source. "
+    "Do not claim the document itself has no readable text. Do not invent "
+    "a summary."
+)
 
 
 _TOKEN = re.compile(r"[^\W_]+(?:['’-][^\W_]+)?|\d+(?:\.\d+)?", re.UNICODE)
@@ -96,6 +117,8 @@ class RetrievalSource:
     group: str | None = None
     object_key: str | None = None
     course_material_id: str | None = None
+    virtual_course_source: bool = False
+    shared_course_object: bool = False
 
 
 @dataclass(frozen=True)
@@ -133,6 +156,7 @@ class RetrievalResult:
 
     context: str
     chunks: tuple[RetrievedChunk, ...]
+    course_retrieval_status: str = "ok"
 
 
 class ContextRetriever(Protocol):
@@ -225,12 +249,100 @@ def is_course_retrieval_source(source: RetrievalSource) -> bool:
     return key.startswith("course/")
 
 
-class CompositeContextRetriever:
-    """Split course sources onto a Knowledge Base retriever and the rest locally.
+def is_virtual_shared_course_record(
+    source: dict[str, Any] | RetrievalSource,
+) -> bool:
+    """Return whether a notebook/catalog source is a shared virtual course object.
 
-    When the knowledge-base adapter is absent, every selected source uses the
-    local retriever. Knowledge Base misses stay empty for course sources
-    (evidence-gap composer rules) instead of dumping whole PDFs locally.
+    Virtual catalog rows have empty extracted text on purpose. Their evidence
+    must come from Knowledge Base Retrieve, never from a synthesized
+    placeholder chunk.
+    """
+    if isinstance(source, RetrievalSource):
+        if source.virtual_course_source or source.shared_course_object:
+            return True
+        key = str(source.object_key or "").strip().lstrip("/").replace("\\", "/")
+        return key.startswith("course/")
+    metadata = source.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    if metadata.get("virtual_course_source") or metadata.get("shared_course_object"):
+        return True
+    key = str(
+        source.get("object_key")
+        or metadata.get("object_key")
+        or source.get("path")
+        or ""
+    ).strip().lstrip("/").replace("\\", "/")
+    return key.startswith("course/")
+
+
+def requires_knowledge_base_retrieval(source: RetrievalSource) -> bool:
+    """Return whether official course evidence must come from Knowledge Base.
+
+    Shared ``course/`` objects and virtual catalog rows never use local
+    extracted-text retrieval. Notebook-copied lecture files and student
+    uploads stay on :class:`LocalChunkRetriever`.
+    """
+    return is_virtual_shared_course_record(source)
+
+
+def is_placeholder_retrieval_text(text: str) -> bool:
+    """Return whether *text* is a synthesized empty-source placeholder."""
+    cleaned = str(text or "").strip()
+    return cleaned in {
+        UNANALYZABLE_SOURCE_PLACEHOLDER,
+        IMAGE_SOURCE_PLACEHOLDER,
+    }
+
+
+def with_course_evidence_gap(
+    result: RetrievalResult,
+    *,
+    status: str,
+) -> RetrievalResult:
+    """Attach a provider-safe course evidence-gap note without fake chunks.
+
+    Args:
+        result: Already-scoped retrieval result, typically after
+            :func:`bounded_retrieval_result`.
+        status: ``unavailable`` when Knowledge Base retrieval cannot run,
+            ``empty`` when Retrieve returned no validated excerpt.
+
+    Returns:
+        The same chunks with a gap note in ``context`` when course evidence
+        is missing. Validated Knowledge Base hits are left unchanged.
+    """
+    cleaned = str(status or "").strip().casefold()
+    if cleaned not in {"unavailable", "empty"}:
+        return result
+    if any(chunk.retrieval_origin == "knowledge_base" for chunk in result.chunks):
+        return RetrievalResult(
+            context=result.context,
+            chunks=result.chunks,
+            course_retrieval_status=cleaned,
+        )
+    note = (
+        COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT
+        if cleaned == "unavailable"
+        else COURSE_RETRIEVAL_EMPTY_CONTEXT
+    )
+    context = str(result.context or "").strip()
+    if note not in context:
+        context = f"{context}\n\n{note}".strip() if context else note
+    return RetrievalResult(
+        context=context,
+        chunks=result.chunks,
+        course_retrieval_status=cleaned,
+    )
+
+
+class CompositeContextRetriever:
+    """Split shared course sources onto Knowledge Base Retrieve and the rest locally.
+
+    Virtual/shared ``course/`` objects never fall back to
+    :class:`LocalChunkRetriever`. A missing Knowledge Base adapter is an
+    evidence gap, not fake placeholder text. Student uploads and notebook-copied
+    lecture files with extracted text stay local.
     """
 
     def __init__(
@@ -243,8 +355,8 @@ class CompositeContextRetriever:
         """Compose two retrievers behind one selected-source port.
 
         Args:
-            knowledge_base: Optional Bedrock ``Retrieve`` adapter for course
-                Lecture Notes/Readings.
+            knowledge_base: Optional Bedrock ``Retrieve`` adapter for shared
+                Lecture Notes/Readings. ``None`` yields a course evidence gap.
             local: Retriever for student uploads (defaults to
                 :class:`LocalChunkRetriever`).
             max_context_chars: Combined prompt budget after both adapters run.
@@ -255,25 +367,56 @@ class CompositeContextRetriever:
 
     def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
         """Retrieve course hits from the KB adapter and uploads from local."""
-        if self._knowledge_base is None:
-            return self._local.retrieve(query)
-        course = tuple(
-            source for source in query.sources if is_course_retrieval_source(source)
-        )
-        uploads = tuple(
+        kb_sources = tuple(
             source
             for source in query.sources
-            if not is_course_retrieval_source(source)
+            if requires_knowledge_base_retrieval(source)
+        )
+        local_sources = tuple(
+            source
+            for source in query.sources
+            if not requires_knowledge_base_retrieval(source)
         )
         chunks: list[RetrievedChunk] = []
-        if course:
-            kb_result = self._knowledge_base.retrieve(replace(query, sources=course))
-            chunks.extend(kb_result.chunks)
-        if uploads:
-            local_result = self._local.retrieve(replace(query, sources=uploads))
+        course_status = "ok"
+        if kb_sources:
+            if self._knowledge_base is None:
+                course_status = "unavailable"
+                logger.info("course_retrieval_unavailable")
+            else:
+                kb_result = self._knowledge_base.retrieve(
+                    replace(query, sources=kb_sources)
+                )
+                chunks.extend(kb_result.chunks)
+                kb_status = str(kb_result.course_retrieval_status or "ok")
+                if kb_status == "unavailable":
+                    course_status = "unavailable"
+                    logger.info("course_retrieval_unavailable")
+                elif not kb_result.chunks:
+                    course_status = "empty"
+                    logger.info(
+                        "course_retrieval_empty validated_count=0 "
+                        "selected_course_count=%s",
+                        len(kb_sources),
+                    )
+        if local_sources:
+            local_result = self._local.retrieve(
+                replace(query, sources=local_sources)
+            )
             chunks.extend(local_result.chunks)
-        return bounded_retrieval_result(
+        formatted = bounded_retrieval_result(
             chunks, max_context_chars=self._max_context_chars
+        )
+        if kb_sources and not any(
+            chunk.retrieval_origin == "knowledge_base" for chunk in formatted.chunks
+        ):
+            if course_status not in {"unavailable", "empty"}:
+                course_status = "empty"
+            return with_course_evidence_gap(formatted, status=course_status)
+        return RetrievalResult(
+            context=formatted.context,
+            chunks=formatted.chunks,
+            course_retrieval_status="ok" if not kb_sources else course_status,
         )
 
 
@@ -299,13 +442,13 @@ def retrieval_sources_from_notebook(
     normalized: list[RetrievalSource] = []
     for index, source in enumerate(sources, start=1):
         kind = str(source.get("kind") or "file").strip().lower()
-        text = str(source.get("extractedText") or "").strip()
-        if not text and kind == "image":
-            text = "[Image source. Inspect the accompanying image input.]"
-        elif not text:
-            text = "[This source is stored but has no analyzable text.]"
         metadata = source.get("metadata")
         metadata = metadata if isinstance(metadata, dict) else {}
+        virtual_course = bool(
+            metadata.get("virtual_course_source")
+            or metadata.get("shared_course_object")
+        )
+        shared_course = bool(metadata.get("shared_course_object"))
         group = " ".join(
             str(metadata.get("course_material_group") or "").split()
         ).strip()
@@ -324,6 +467,15 @@ def retrieval_sources_from_notebook(
             derived = course_material_id_from_object_key(object_key)
             if object_key.replace("\\", "/").lstrip("/").startswith("course/"):
                 material_id = derived
+        if object_key.replace("\\", "/").lstrip("/").startswith("course/"):
+            virtual_course = True
+            shared_course = True
+        text = str(source.get("extractedText") or "").strip()
+        if not text and not virtual_course:
+            if kind == "image":
+                text = IMAGE_SOURCE_PLACEHOLDER
+            else:
+                text = UNANALYZABLE_SOURCE_PLACEHOLDER
         normalized.append(
             RetrievalSource(
                 source_id=str(source.get("id") or "").strip(),
@@ -342,6 +494,8 @@ def retrieval_sources_from_notebook(
                 group=group or None,
                 object_key=object_key or None,
                 course_material_id=material_id or None,
+                virtual_course_source=virtual_course,
+                shared_course_object=shared_course,
             )
         )
     return tuple(source for source in normalized if source.source_id)
@@ -593,6 +747,8 @@ def bounded_retrieval_result(
     seen_excerpts: dict[str, set[str]] = {}
     used = 0
     for chunk in chunks:
+        if is_placeholder_retrieval_text(chunk.text):
+            continue
         fingerprint = _normalized_excerpt(chunk.text)
         source_seen = seen_excerpts.setdefault(str(chunk.source_id), set())
         if fingerprint and fingerprint in source_seen:
@@ -679,6 +835,10 @@ class LocalChunkRetriever:
         """Create deterministic overlapping candidates from all selected sources."""
         candidates: list[_Candidate] = []
         for source_index, source in enumerate(sources, start=1):
+            if is_placeholder_retrieval_text(source.text) or not str(
+                source.text or ""
+            ).strip():
+                continue
             chunks = _chunk_text(
                 source.text,
                 chunk_chars=self.chunk_chars,

@@ -363,3 +363,40 @@ def test_api_client_surfaces_safety_blocked_category(tmp_path, monkeypatch):
         )
     finally:
         client.close()
+
+
+def test_api_client_surfaces_structured_output_failure_category(tmp_path, monkeypatch):
+    """Stream error events expose structured_output_failure to the UI client."""
+    from backend.providers import ProviderUnavailableError
+    from backend.workflow import CoachWorkflow
+
+    store = StudentStore(tmp_path / "client-structured.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _set_first_phase(store, thread_id)
+
+    def fail_run(self, request):
+        raise ProviderUnavailableError(
+            "The coach reply could not be completed",
+            category="structured_output_failure",
+        )
+
+    monkeypatch.setattr(CoachWorkflow, "run", fail_run)
+    client = _client_for_store(store, auto_advance=False)
+    try:
+        events = list(
+            client.stream_coach_turn(
+                CoachRequest(
+                    thread_id=thread_id,
+                    student_message="A quiet residential street",
+                    current_stage="problem_identification",
+                    response_detail="short",
+                )
+            )
+        )
+        error = next(event for event in events if event.get("event") == "error")
+        assert error["status"] == 503
+        assert error["category"] == "structured_output_failure"
+        assert "JSONDecodeError" not in str(error)
+        assert LocalApiClient.coaching_error_category(error) == "structured_output_failure"
+    finally:
+        client.close()

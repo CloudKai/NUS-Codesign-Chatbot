@@ -65,9 +65,9 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert 'APP_ENV: "production"' in app
     assert 'AUTO_ADVANCE_STAGES: "true"' in app
     assert 'STUDENT_STAGE_SELECTION: "false"' in app
+    assert "Month-2+" in compose
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
     assert "STUDENT_STAGE_SELECTION=false" in env_example
-    assert "Month-2+" in env_example
     assert 'DATABASE_PROVIDER: "dsql"' in app
     assert 'FILE_STORAGE_PROVIDER: "s3"' in app
     assert 'DSQL_USER: "co_design_app"' in app
@@ -89,6 +89,9 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     )
     assert 'CO_DESIGN_PUBLIC_API_URL: "https://d1sxfuoybzedj5.cloudfront.net"' in app
     assert 'CO_DESIGN_UI_URL: "https://d1sxfuoybzedj5.cloudfront.net"' in app
+    assert 'MODEL_PROVIDER: "agentcore"' in app
+    assert 'MOCK_OPENAI: "false"' in app
+    assert 'AGENTCORE_MODEL_ID: "global.anthropic.claude-sonnet-4-6"' in app
     assert "source: ./.streamlit/secrets.toml" in app
     for block in (app, caddy):
         assert "no-new-privileges:true" in block

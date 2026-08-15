@@ -20,7 +20,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from backend.live_eval_config import (
+from backend.live_eval_config import (  # noqa: E402 - path insert above
     LIVE_EVAL_API_FORMAT,
     LIVE_EVAL_MODEL_ID,
     LiveEvalConfigurationError,

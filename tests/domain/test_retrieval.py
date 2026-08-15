@@ -17,11 +17,14 @@ from backend.learning_service import LearningProgressService
 from backend.mock_provider import DeterministicCoachProvider
 from backend.repositories import SQLiteNotebookRepository, SQLitePhaseTransitionRepository
 from backend.retrieval import (
+    CompositeContextRetriever,
+    COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT,
     LocalChunkRetriever,
     RetrievalQuery,
     RetrievalResult,
     RetrievalSource,
     RetrievedChunk,
+    UNANALYZABLE_SOURCE_PLACEHOLDER,
     bounded_retrieval_result,
     course_material_id_collisions,
     course_material_id_from_object_key,
@@ -194,6 +197,16 @@ def test_expand_session_query_text_aliases_lecture_and_week():
     )
     assert expand_session_query_text("summarise Week 1") == "summarise Week 1 lecture 1"
     assert expand_session_query_text("what is innovation?") == "what is innovation?"
+    assert expand_session_query_text(
+        "what are the week 1 contents talking about?"
+    ) == "what are the week 1 contents talking about? lecture 1"
+    assert expand_session_query_text("what are lecture 1 slides about?") == (
+        "what are lecture 1 slides about? week 1"
+    )
+    assert "week 1" in expand_session_query_text("week1")
+    assert "lecture 1" in expand_session_query_text("week1")
+    assert "week 1" in expand_session_query_text("lecture01")
+    assert "lecture 1" in expand_session_query_text("lecture01")
 
 
 def test_local_retriever_lecture_one_prefers_week_one_title():
@@ -313,6 +326,136 @@ def test_retrieval_source_normalization_keeps_course_group_and_image_label():
     assert sources[0].object_key == "course/lectureNotes/week2.pdf"
     assert sources[1].label == "S2"
     assert "Image source" in sources[1].text
+
+
+_WEEK1_KEY = (
+    "course/lectureNotes/Week 1 Introduction to innovation v3.pdf"
+)
+_WEEK1_TITLE = "Week 1 Introduction to innovation v3.pdf"
+
+
+def _virtual_week1_record() -> dict[str, object]:
+    """Return a shared catalog Week 1 source with empty extracted text."""
+    return {
+        "id": "virtual-week-1",
+        "title": _WEEK1_TITLE,
+        "kind": "file",
+        "extractedText": "",
+        "object_key": _WEEK1_KEY,
+        "path": _WEEK1_KEY,
+        "metadata": {
+            "virtual_course_source": True,
+            "shared_course_object": True,
+            "course_material_group": "Lecture Notes",
+            "object_key": _WEEK1_KEY,
+            "course_material_id": course_material_id_from_object_key(_WEEK1_KEY),
+        },
+    }
+
+
+def test_virtual_course_source_keeps_empty_retrieval_text():
+    sources = retrieval_sources_from_notebook([_virtual_week1_record()])
+    assert len(sources) == 1
+    assert sources[0].text == ""
+    assert sources[0].virtual_course_source is True
+    assert sources[0].shared_course_object is True
+    assert sources[0].label == "S1"
+    assert sources[0].course_material_id == (
+        "lecture_week_1_introduction_to_innovation_v3"
+    )
+    assert UNANALYZABLE_SOURCE_PLACEHOLDER not in sources[0].text
+
+
+def test_virtual_course_without_kb_does_not_synthesize_placeholder_chunk():
+    sources = retrieval_sources_from_notebook([_virtual_week1_record()])
+    result = CompositeContextRetriever(
+        knowledge_base=None,
+        local=LocalChunkRetriever(),
+    ).retrieve(
+        RetrievalQuery(
+            current_message="what are the week 1 contents talking about?",
+            current_stage="problem_identification",
+            sources=sources,
+        )
+    )
+    assert result.chunks == ()
+    assert result.course_retrieval_status == "unavailable"
+    assert COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT in result.context
+    assert UNANALYZABLE_SOURCE_PLACEHOLDER not in result.context
+    assert all(
+        UNANALYZABLE_SOURCE_PLACEHOLDER not in chunk.text
+        for chunk in result.chunks
+    )
+
+
+def test_local_retriever_skips_empty_virtual_course_text():
+    source = retrieval_sources_from_notebook([_virtual_week1_record()])[0]
+    result = LocalChunkRetriever().retrieve(
+        RetrievalQuery(
+            current_message="what are the week 1 contents talking about?",
+            current_stage="problem_identification",
+            sources=(source,),
+        )
+    )
+    assert result.chunks == ()
+    assert UNANALYZABLE_SOURCE_PLACEHOLDER not in result.context
+
+
+def test_week_one_query_expansion_keeps_session_eligible():
+    expanded = expand_session_query_text(
+        "what are the week 1 contents talking about?"
+    )
+    assert "lecture 1" in expanded
+    week1 = retrieval_sources_from_notebook([_virtual_week1_record()])[0]
+    assert "week 1" in week1.title.casefold()
+
+
+def test_application_virtual_course_gap_is_not_placeholder_evidence(tmp_path):
+    store = StudentStore(tmp_path / "virtual-course-gap.sqlite3")
+    notebook = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    store.add_source(
+        notebook,
+        kind="file",
+        title=_WEEK1_TITLE,
+        mime="application/pdf",
+        metadata={
+            "virtual_course_source": True,
+            "shared_course_object": True,
+            "locked_source": True,
+            "origin": "lecture_notes_folder",
+            "course_material_group": "Lecture Notes",
+            "object_key": _WEEK1_KEY,
+            "course_material_id": course_material_id_from_object_key(_WEEK1_KEY),
+            "storage_provider": "s3",
+        },
+    )
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    provider = DeterministicCoachProvider(StageDecision.STAY)
+    service = CoachApplicationService(
+        store,
+        notebooks,
+        CoachWorkflow(provider, transitions),
+        LearningProgressService(store, notebooks, transitions),
+        retriever=CompositeContextRetriever(
+            knowledge_base=None,
+            local=LocalChunkRetriever(),
+        ),
+    )
+    service.submit(
+        CoachRequest(
+            thread_id=notebook,
+            student_message="what are the week 1 contents talking about?",
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    )
+    assert provider.last_prepared_prompt is not None
+    prompt = provider.last_prepared_prompt.composed_text
+    assert UNANALYZABLE_SOURCE_PLACEHOLDER not in prompt
+    assert "could not retrieve a validated excerpt" in prompt
+    assert "no readable text" in prompt
+    assert "Do not invent a summary" in prompt
 
 
 def test_application_retrieval_is_selected_notebook_scoped_and_audited(tmp_path):

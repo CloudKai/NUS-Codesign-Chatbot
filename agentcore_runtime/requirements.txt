@@ -1,0 +1,12 @@
+# AgentCore DEFAULT coaching runtime.
+# Exact pins were pip-installed and API-checked in a clean CPython 3.12.10
+# venv on 2026-08-16 against the public PyPI index. Companion pytest does
+# not install this stack; GitHub job agentcore-runtime-compatibility does.
+#
+# bedrock-agentcore 1.21.0 requires pydantic<2.41.3,>=2.0.0.
+# pydantic==2.13.4 is the compatible exact pin used by this runtime.
+strands-agents==1.52.0
+bedrock-agentcore==1.21.0
+pydantic==2.13.4
+# Optional Luna / Mantle Responses extra (not required for Sonnet 4.6):
+#   strands-agents[openai]==1.52.0

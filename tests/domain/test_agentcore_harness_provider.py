@@ -164,7 +164,7 @@ def test_harness_system_prompt_stays_thin_and_matches_runtime_patch_intent():
     assert "Do not call tools" in HARNESS_STRUCTURED_COACH_PROMPT
     assert "STAGE: PROBLEM IDENTIFICATION" not in HARNESS_STRUCTURED_COACH_PROMPT
     assert "Interpret" in HARNESS_STRUCTURED_COACH_PROMPT
-    patch = Path("scripts/agentcore/harness_patch/structured_coach.py").read_text(
+    patch = Path("agentcore_runtime/structured_coach.py").read_text(
         encoding="utf-8"
     )
     assert "Do not call tools" in patch
@@ -192,5 +192,5 @@ def test_harness_malformed_output_fails_closed():
         "arn:aws:bedrock-agentcore:us-west-2:123:harness/NUSCodesignEvalLuna",
         client=client,
     )
-    with pytest.raises(ProviderUnavailableError, match="malformed"):
+    with pytest.raises(ProviderUnavailableError, match="could not be completed"):
         provider.assess(_request())

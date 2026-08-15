@@ -472,8 +472,10 @@ def _render_sources_panel_body() -> None:
                 unsafe_allow_html=True,
             )
             with st.container(key="add-sources"):
+                size_hint = f"Max {settings.max_file_size_mb} MB per file"
                 st.markdown(
-                    '<div class="cd-sources-add-face" aria-hidden="true">+ Add</div>',
+                    f'<div class="cd-sources-add-face" data-tooltip="{escape(size_hint)}" '
+                    'aria-hidden="true">+ Add</div>',
                     unsafe_allow_html=True,
                 )
                 upload_nonce = int(st.session_state.get("source_upload_nonce") or 0)
@@ -485,10 +487,8 @@ def _render_sources_panel_body() -> None:
                         f"source-upload-{st.session_state.thread_id}-"
                         f"{upload_nonce}"
                     ),
-                    help=(
-                        f"Choose files to add · up to {settings.max_files} files · "
-                        f"{settings.max_file_size_mb} MB each"
-                    ),
+                    help=size_hint,
+                    max_upload_size=settings.max_file_size_mb,
                 )
                 if uploads:
                     _import_uploaded_sources(list(uploads))

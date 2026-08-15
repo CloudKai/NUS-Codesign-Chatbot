@@ -248,6 +248,18 @@
             padding:.5rem .7rem .4rem !important;
         }
 
+        .st-key-chat_composer [data-testid="stChatInput"]:has(textarea:disabled),
+        .st-key-chat_composer [data-testid="stChatInput"]:has([data-testid="stChatInputStopButton"]) {
+            min-height:3.05rem !important;
+            max-height:3.4rem !important;
+        }
+
+        .st-key-chat_composer [data-testid="stChatInput"]:has(textarea:disabled) > div,
+        .st-key-chat_composer [data-testid="stChatInput"]:has([data-testid="stChatInputStopButton"]) > div {
+            min-height:0 !important;
+            padding:.35rem .7rem !important;
+        }
+
         .st-key-chat_composer [data-testid="stChatInput"] textarea,
         .st-key-chat_composer [data-testid="stChatInputTextArea"] {
             width:100% !important;
