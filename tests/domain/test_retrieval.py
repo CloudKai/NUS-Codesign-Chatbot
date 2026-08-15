@@ -25,6 +25,7 @@ from backend.retrieval import (
     bounded_retrieval_result,
     course_material_id_collisions,
     course_material_id_from_object_key,
+    expand_session_query_text,
     focused_excerpt,
     retrieval_sources_from_notebook,
 )
@@ -185,6 +186,76 @@ def test_local_retriever_preserves_stable_labels_and_source_diversity():
     assert {chunk.label for chunk in result.chunks} == {"S1", "S2"}
     assert "[S1] Survey" in result.context
     assert "[S2] Street audit" in result.context
+
+
+def test_expand_session_query_text_aliases_lecture_and_week():
+    assert expand_session_query_text("what is lecture 1 about") == (
+        "what is lecture 1 about week 1"
+    )
+    assert expand_session_query_text("summarise Week 1") == "summarise Week 1 lecture 1"
+    assert expand_session_query_text("what is innovation?") == "what is innovation?"
+
+
+def test_local_retriever_lecture_one_prefers_week_one_title():
+    """Students say 'lecture 1'; course files are titled Week 1."""
+    sources = (
+        _source(
+            "week-1",
+            "S1",
+            "Week 1 Introduction to innovation v3.pdf",
+            "Introduction to innovation, design thinking, and the course rhythm. " * 20,
+        ),
+        _source(
+            "week-2",
+            "S2",
+            "Week 2 JTBD Framework Term 1 2026.pdf",
+            "Jobs to Be Done, personas, and problem framing for later weeks. " * 20,
+        ),
+        _source(
+            "week-4",
+            "S3",
+            "Week 4 Affinity Clusters Product Values and Features Oxymoron.pdf",
+            "Affinity clusters, product values, and feature oxymorons. " * 20,
+        ),
+    )
+    result = LocalChunkRetriever(max_chunks=3).retrieve(
+        RetrievalQuery(
+            current_message="what is lecture 1 about",
+            current_stage="problem_identification",
+            sources=sources,
+        )
+    )
+
+    assert result.chunks
+    assert result.chunks[0].source_id == "week-1"
+    assert "Week 1 Introduction to innovation" in result.context
+    assert result.chunks[0].source_id != "week-2"
+
+
+def test_local_retriever_week_one_still_finds_week_one_title():
+    sources = (
+        _source(
+            "week-1",
+            "S1",
+            "Week 1 Introduction to innovation v3.pdf",
+            "Introduction to innovation and the CDE2300 studio. " * 12,
+        ),
+        _source(
+            "week-2",
+            "S2",
+            "Week 2 JTBD Framework Term 1 2026.pdf",
+            "Jobs to Be Done interviews and persona sketches. " * 12,
+        ),
+    )
+    result = LocalChunkRetriever(max_chunks=2).retrieve(
+        RetrievalQuery(
+            current_message="what is week 1 about",
+            current_stage="problem_identification",
+            sources=sources,
+        )
+    )
+
+    assert result.chunks[0].source_id == "week-1"
 
 
 def test_local_retriever_generic_query_uses_bounded_representative_fallback():

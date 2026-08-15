@@ -266,6 +266,32 @@ def render_theme_css() -> None:
                 color:inherit !important;
                 -webkit-text-fill-color:currentColor !important;
             }}
+            .st-key-profile_coaching_style [role="radiogroup"]
+            > [role="radio"][aria-checked="true"],
+            .st-key-profile_coaching_style [role="radiogroup"]
+            > [role="radio"][aria-pressed="true"],
+            .st-key-profile_coaching_style [data-testid="stButtonGroup"]
+            button[aria-checked="true"],
+            .st-key-profile_coaching_style [data-testid="stButtonGroup"]
+            button[aria-pressed="true"],
+            .st-key-profile_coaching_style [data-testid="stButtonGroup"]
+            button[kind="primary"] {{
+                color:#fff !important;
+                background:var(--cd-accent) !important;
+                border-color:var(--cd-accent) !important;
+                font-weight:700 !important;
+            }}
+            .st-key-profile_coaching_style [role="radiogroup"]
+            > [role="radio"][aria-checked="true"] p,
+            .st-key-profile_coaching_style [role="radiogroup"]
+            > [role="radio"][aria-pressed="true"] p,
+            .st-key-profile_coaching_style [data-testid="stButtonGroup"]
+            button[aria-checked="true"] p,
+            .st-key-profile_coaching_style [data-testid="stButtonGroup"]
+            button[kind="primary"] p {{
+                color:#fff !important;
+                -webkit-text-fill-color:#fff !important;
+            }}
             [data-baseweb="select"] *,
             [data-baseweb="input"] input,
             [data-baseweb="textarea"] textarea,

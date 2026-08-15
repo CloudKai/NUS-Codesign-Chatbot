@@ -25,6 +25,7 @@ from .settings import settings
 from .source_library import (
     add_file_sources,
     backfill_legacy_sources,
+    list_visible_sources,
     source_image_input,
 )
 from .student_journey import (
@@ -202,7 +203,9 @@ class StudentChatEngine:
                     extracted_text=str(source.get("extractedText") or ""),
                 )
             )
-        available_sources = self.store.list_sources(thread_id, selected_only=True)
+        available_sources = list_visible_sources(
+            self.store, thread_id, selected_only=True
+        )
         if options.source_ids:
             requested = set(options.source_ids)
             available_sources = [

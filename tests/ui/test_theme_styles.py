@@ -40,13 +40,19 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
         "40-sources.css": ".st-key-sources_panel",
         "50-dialogs-notebooks.css": ".st-key-notebook_library_scroll",
         "55-auth.css": ".cd-auth-redirecting",
-        "60-profile-topbar.css": ".st-key-profile_menu_root",
+        "60-profile-topbar.css": ".st-key-profile_coaching_style",
         "70-professor.css": ".st-key-research_workspace",
         "90-responsive.css": "@media (max-width:1050px)",
     }
     for name, marker in markers.items():
         assert marker in Path(_STYLES_DIR / name).read_text(encoding="utf-8")
         assert marker in css
+
+    profile_css = Path(_STYLES_DIR / "60-profile-topbar.css").read_text(encoding="utf-8")
+    assert ".st-key-profile_menu_root" in profile_css
+    assert ".st-key-profile_coaching_style" in profile_css
+    assert "button[aria-checked=\"true\"]" in profile_css
+    assert "background:var(--cd-accent)" in profile_css
 
     auth_css = Path(_STYLES_DIR / "55-auth.css").read_text(encoding="utf-8")
     assert ".st-key-auth_login_card" in auth_css

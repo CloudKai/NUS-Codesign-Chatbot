@@ -81,6 +81,7 @@ def test_topbar_guidance_and_profile_use_correct_rerun_scope() -> None:
         "def _render_language_dropdown", 1
     )[0]
     assert "on_change=persist_appearance" in profile_render_block
+    assert 'key="profile_coaching_style"' in profile
     language_block = profile.split("def _render_language_dropdown", 1)[1]
     assert "persist_response_language()" in language_block
     assert "rerun_fragment()" in language_block

@@ -75,6 +75,19 @@ def test_chat_history_and_notebook_state(tmp_path):
     assert not hasattr(store, "record_turn")
 
 
+def test_new_notebook_defaults_to_strict_coaching(tmp_path):
+    store = StudentStore(tmp_path / "strict-default.sqlite3")
+    thread_id = store.create_thread(
+        name="Untitled notebook",
+        model_id="mock",
+        support_mode="critical-thinking",
+    )
+    thread = store.get_thread(thread_id)
+    assert thread is not None
+    assert thread["metadata"]["response_detail"] == "long"
+    assert thread["metadata"]["learning_journey"]["response_detail"] == "long"
+
+
 def test_notebook_update_reads_and_writes_on_one_connection(tmp_path, monkeypatch):
     """The merge must be one OCC-visible unit for Aurora DSQL."""
     store = StudentStore(tmp_path / "atomic-update.sqlite3")

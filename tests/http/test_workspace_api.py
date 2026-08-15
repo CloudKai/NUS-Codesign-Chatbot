@@ -26,6 +26,18 @@ def test_workspace_api_notebook_and_preference_crud(tmp_path):
     assert created.status_code == 200
     thread_id = created.json()["id"]
     assert created.json()["name"] == "Research notebook"
+    assert created.json()["metadata"]["response_detail"] == "short"
+
+    defaulted = client.post(
+        "/api/v1/threads",
+        json={
+            "name": "Untitled notebook",
+            "model_id": "mock",
+            "support_mode": "critical-thinking",
+        },
+    )
+    assert defaulted.status_code == 200
+    assert defaulted.json()["metadata"]["response_detail"] == "long"
 
     listed = client.get("/api/v1/threads")
     assert listed.status_code == 200

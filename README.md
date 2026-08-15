@@ -287,8 +287,9 @@ Put instructor PDFs and related files under:
 - `lecture_notes/lectureNotes/`
 - `lecture_notes/readings/`
 
-They sync into each notebook as locked **Lecture Notes** / **Readings** groups.
-`lecture_notes/README.txt` is instructional only and is not imported. Course
+They are listed as locked **Lecture Notes** / **Readings** from the shared
+catalog. Production does not insert those files as per-notebook ``sources``
+rows. `lecture_notes/README.txt` is instructional only and is not imported. Course
 materials in this folder are shared in the repo; originals are never moved.
 Prefer compressed PDFs. Future large PDFs under `lecture_notes/` are marked for
 Git LFS in `.gitattributes` (existing blobs are unchanged until an explicit

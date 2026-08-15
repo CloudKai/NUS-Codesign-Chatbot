@@ -19,6 +19,11 @@ from typing import Any, Iterable, Protocol, Sequence
 
 
 _TOKEN = re.compile(r"[^\W_]+(?:['’-][^\W_]+)?|\d+(?:\.\d+)?", re.UNICODE)
+_GLUED_SESSION = re.compile(
+    r"^(lecture|lectures|lec|week|weeks)(\d+)$",
+    re.IGNORECASE,
+)
+_SESSION_HEADS = frozenset({"lecture", "lectures", "lec", "week", "weeks"})
 _WHITESPACE = re.compile(r"[ \t\f\v]+")
 _BLANK_LINES = re.compile(r"\n\s*\n+")
 
@@ -345,6 +350,8 @@ def retrieval_sources_from_notebook(
 def _stem(token: str) -> str:
     """Apply conservative English suffix normalization for lexical matching."""
     value = token.casefold().replace("’", "'").strip("'")
+    if value.isdigit():
+        return value.lstrip("0") or "0"
     if len(value) > 5 and value.endswith("ies"):
         return value[:-3] + "y"
     if len(value) > 6 and value.endswith("ing"):
@@ -358,12 +365,81 @@ def _stem(token: str) -> str:
     return value
 
 
+def _split_glued_session(token: str) -> list[str]:
+    """Split ``week1`` / ``lecture01`` into a session label and week number."""
+    match = _GLUED_SESSION.fullmatch(token)
+    if not match:
+        return [token]
+    number = match.group(2).lstrip("0") or "0"
+    return [match.group(1).casefold(), number]
+
+
+def _keep_term(term: str, *, remove_stop_words: bool) -> bool:
+    """Keep digits and content words; drop short stopwords from queries."""
+    if not term:
+        return False
+    if term.isdigit():
+        return True
+    if not remove_stop_words:
+        return True
+    return len(term) > 1 and term not in _STOP_WORDS
+
+
 def _terms(text: str, *, remove_stop_words: bool = False) -> list[str]:
     """Tokenize text into case-folded, lightly normalized search terms."""
-    terms = [_stem(match.group(0)) for match in _TOKEN.finditer(str(text or ""))]
-    if remove_stop_words:
-        return [term for term in terms if len(term) > 1 and term not in _STOP_WORDS]
-    return [term for term in terms if term]
+    terms: list[str] = []
+    for match in _TOKEN.finditer(str(text or "")):
+        for piece in _split_glued_session(_stem(match.group(0))):
+            if _keep_term(piece, remove_stop_words=remove_stop_words):
+                terms.append(piece)
+    return terms
+
+
+def _session_number_pairs(text: str) -> tuple[tuple[str, str], ...]:
+    """Return ``(lecture|week, N)`` pairs from student or filename phrasing."""
+    tokens = _terms(text)
+    pairs: list[tuple[str, str]] = []
+    for index, token in enumerate(tokens[:-1]):
+        if token not in _SESSION_HEADS:
+            continue
+        number = tokens[index + 1]
+        if not number.isdigit():
+            continue
+        pairs.append((token, number))
+    return tuple(pairs)
+
+
+def _session_alias_bigrams(text: str) -> set[tuple[str, str]]:
+    """Treat ``lecture 1`` and ``Week 1`` as the same session phrase."""
+    aliases: set[tuple[str, str]] = set()
+    for _head, number in _session_number_pairs(text):
+        aliases.add(("lecture", number))
+        aliases.add(("week", number))
+    return aliases
+
+
+def expand_session_query_text(message: str) -> str:
+    """Append Week/Lecture aliases so students can ask either way.
+
+    Course files are titled ``Week 1 …``. Students often ask about
+    ``lecture 1``. Retrieval and Knowledge Base queries get the missing
+    phrasing without changing authorization or selected-source scope.
+    """
+    cleaned = " ".join(str(message or "").split()).strip()
+    if not cleaned:
+        return ""
+    lowered = cleaned.casefold()
+    extras: list[str] = []
+    seen: set[str] = set()
+    for _head, number in _session_number_pairs(cleaned):
+        for phrase in (f"week {number}", f"lecture {number}"):
+            if phrase in lowered or phrase in seen:
+                continue
+            extras.append(phrase)
+            seen.add(phrase)
+    if not extras:
+        return cleaned
+    return f"{cleaned} {' '.join(extras)}"
 
 
 def _normalized_text(text: str) -> str:
@@ -415,6 +491,10 @@ def _query_weights(query: RetrievalQuery) -> Counter[str]:
             for term in _terms(query.current_message, remove_stop_words=True)
         }
     )
+    for _head, number in _session_number_pairs(query.current_message):
+        weights["week"] += 2.0
+        weights["lecture"] += 2.0
+        weights[number] += 1.5
     recent_user = [
         str(message.get("content") or "")
         for message in query.recent_messages
@@ -630,7 +710,9 @@ class LocalChunkRetriever:
             document_frequency[term] = sum(
                 1 for candidate in candidates if term in candidate.terms
             )
-        query_bigrams = _bigrams(query.current_message)
+        query_bigrams = _bigrams(query.current_message) | _session_alias_bigrams(
+            query.current_message
+        )
         total = len(candidates)
         scored: list[_Candidate] = []
         for candidate in candidates:
@@ -650,7 +732,11 @@ class LocalChunkRetriever:
             )
             ordered_terms = _terms(candidate.text)
             candidate_bigrams = set(zip(ordered_terms, ordered_terms[1:]))
+            title_bigrams = _bigrams(candidate.source.title) | _session_alias_bigrams(
+                candidate.source.title
+            )
             score += 1.25 * len(query_bigrams & candidate_bigrams)
+            score += 2.0 * len(query_bigrams & title_bigrams)
             scored.append(
                 _Candidate(
                     source=candidate.source,

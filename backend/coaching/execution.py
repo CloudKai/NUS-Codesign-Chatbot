@@ -32,7 +32,12 @@ from backend.retrieval import (
     focused_excerpt,
     retrieval_sources_from_notebook,
 )
-from backend.source_library import image_inputs_for_source_ids, selected_source_context
+from backend.source_library import (
+    get_visible_source,
+    image_inputs_for_source_ids,
+    list_visible_sources,
+    selected_source_context,
+)
 from backend.student_journey import (
     DEFAULT_RESPONSE_DETAIL,
     advanced_stage_response,
@@ -598,8 +603,8 @@ class CoachApplicationService:
         ):
             raise ValueError("history does not match the notebook conversation")
 
-        selected_sources = self._store.list_sources(
-            request.thread_id, selected_only=True
+        selected_sources = list_visible_sources(
+            self._store, request.thread_id, selected_only=True
         )
         authoritative_ids = [str(source["id"]) for source in selected_sources]
         authoritative_id_set = set(authoritative_ids)
@@ -607,7 +612,7 @@ class CoachApplicationService:
             unknown = [
                 source_id
                 for source_id in request.source_ids
-                if not self._store.get_source(request.thread_id, source_id)
+                if not get_visible_source(self._store, request.thread_id, source_id)
             ]
             if unknown:
                 raise ValueError("One or more source_ids are unknown for this notebook")
@@ -846,7 +851,7 @@ class CoachApplicationService:
             # for the student-visible citation preview.
             retrieved_by_source.setdefault(chunk.source_id, chunk)
         for index, source_id in enumerate(request.source_ids, start=1):
-            source = self._store.get_source(request.thread_id, source_id)
+            source = get_visible_source(self._store, request.thread_id, source_id)
             if not source:
                 continue
             retrieved = retrieved_by_source.get(source_id)

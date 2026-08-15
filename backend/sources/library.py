@@ -50,6 +50,7 @@ COURSE_MATERIAL_GROUPS = ("Lecture Notes", "Readings")
 SHARED_COURSE_FOLDERS = ("lectureNotes", "readings")
 _SHARED_CATALOG_UNAVAILABLE = (("__course_catalog_unavailable__", 0, 0),)
 _COURSE_MATERIAL_SYNC_LOCK = threading.RLock()
+_VIRTUAL_COURSE_NAMESPACE = uuid.UUID("6b1c9e20-4d8a-5f31-8c47-2e9a0b7d15c3")
 
 
 class SourceImportError(ValueError):
@@ -152,6 +153,9 @@ class CourseMaterialSyncCoordinator:
         thread_id: str,
         fingerprint: tuple[tuple[str, int, int], ...],
     ) -> bool:
+        # Shared S3 catalogs are listed into the UI, not copied into ``sources``.
+        if settings.uses_shared_course_materials:
+            return fingerprint != _SHARED_CATALOG_UNAVAILABLE
         expected_paths = {item[0] for item in fingerprint}
         actual_paths = [
             str((source.get("metadata") or {}).get("lecture_note_relative_path"))
@@ -297,6 +301,109 @@ def is_locked_course_source(source: dict[str, Any]) -> bool:
     return bool(metadata.get("locked_source")) and (
         metadata.get("origin") == "lecture_notes_folder"
     )
+
+
+def virtual_course_source_id(object_key: str) -> str:
+    """Return a stable source id for a shared course object that is not in DSQL."""
+    return str(uuid.uuid5(_VIRTUAL_COURSE_NAMESPACE, object_key))
+
+
+def project_shared_course_item(item: SharedCourseItem) -> dict[str, Any]:
+    """Project one shared catalog object into a locked source dict.
+
+    The dict is UI/retrieval shaped. It is not a ``sources`` row.
+    """
+    mime = mimetypes.guess_type(item.filename)[0] or "application/octet-stream"
+    kind = (
+        "image"
+        if Path(item.filename).suffix.lower() in IMAGE_SUFFIXES
+        else "file"
+    )
+    return {
+        "id": virtual_course_source_id(item.object_key),
+        "kind": kind,
+        "title": item.filename,
+        "mime": mime,
+        "size": item.size,
+        "selected": True,
+        "path": item.object_key,
+        "object_key": item.object_key,
+        "extractedText": "",
+        "metadata": {
+            "origin": "lecture_notes_folder",
+            "lecture_note_relative_path": item.relative_path,
+            "lecture_note_signature": item.signature,
+            "course_material_group": item.material_group,
+            "locked_source": True,
+            "managed_file": True,
+            "supported": True,
+            "storage_provider": settings.file_storage_provider,
+            "object_key": item.object_key,
+            "shared_course_object": True,
+            "virtual_course_source": True,
+            "course_material_id": course_material_id_from_object_key(item.object_key),
+        },
+    }
+
+
+def _shared_catalog_source_dicts() -> list[dict[str, Any]]:
+    """List locked course sources from the shared catalog, or empty on outage."""
+    if not settings.course_material_sync_enabled:
+        return []
+    if not settings.uses_shared_course_materials:
+        return []
+    try:
+        items = _iter_shared_course_items()
+    except Exception:
+        return []
+    return [project_shared_course_item(item) for item in items]
+
+
+def list_visible_sources(
+    store: StudentStore,
+    thread_id: str,
+    *,
+    selected_only: bool = False,
+) -> list[dict[str, Any]]:
+    """List personal notebook sources plus the shared Lecture Notes catalog.
+
+    Shared ``course/`` objects are not inserted per notebook. Notebooks that
+    already persisted locked course rows keep those rows and skip duplicates.
+    """
+    persisted = store.list_sources(thread_id, selected_only=False)
+    persisted_course_paths = {
+        str((source.get("metadata") or {}).get("lecture_note_relative_path") or "")
+        for source in persisted
+        if is_locked_course_source(source)
+    }
+    catalog = [
+        source
+        for source in _shared_catalog_source_dicts()
+        if str((source.get("metadata") or {}).get("lecture_note_relative_path") or "")
+        not in persisted_course_paths
+    ]
+    merged = persisted + catalog
+    if selected_only:
+        return [source for source in merged if source.get("selected")]
+    return merged
+
+
+def get_visible_source(
+    store: StudentStore,
+    thread_id: str,
+    source_id: str,
+) -> dict[str, Any] | None:
+    """Return a persisted source or a shared-catalog course source."""
+    found = store.get_source(thread_id, source_id)
+    if found:
+        return found
+    wanted = str(source_id or "").strip()
+    if not wanted:
+        return None
+    for source in _shared_catalog_source_dicts():
+        if str(source.get("id") or "") == wanted:
+            return source
+    return None
 
 
 class _ReadableHTML(HTMLParser):
@@ -610,129 +717,33 @@ def _sync_shared_course_materials(
     store: StudentStore,
     thread_id: str,
 ) -> LectureNotesSyncResult:
-    """Create locked sources that reference shared course object keys.
+    """Confirm the shared course catalog without writing notebook ``sources``.
 
-    PDFs stay under the shared prefix. Only extracted text is written under
-    the notebook's ``users/.../derived/`` key. A catalog listing failure does
-    not delete existing locked sources.
+    PDFs stay under the shared prefix. New notebooks must not receive one
+    ``sources`` row per Week/Reading file. A catalog listing failure is
+    reported so the UI can keep any older persisted locked rows.
+
+    Args:
+        store: Unused; kept so the coordinator signature stays notebook-scoped.
+        thread_id: Unused; catalog listing is shared across notebooks.
     """
-    from backend.persistence.factory import get_course_file_storage
-
+    del store, thread_id
     try:
         catalog = _iter_shared_course_items()
     except Exception:
         return LectureNotesSyncResult(errors=("course catalog is unavailable",))
-
-    managed_by_path: dict[str, list[dict[str, Any]]] = {}
-    for source in store.list_sources(thread_id):
-        metadata = source.get("metadata") or {}
-        relative_path = metadata.get("lecture_note_relative_path")
-        if metadata.get("origin") != "lecture_notes_folder" or not relative_path:
-            continue
-        managed_by_path.setdefault(str(relative_path), []).append(source)
-
-    added = updated = removed = unchanged = skipped = 0
-    errors: list[str] = []
-    existing: dict[str, dict[str, Any]] = {}
-    for relative_path, candidates in managed_by_path.items():
-        ordered = sorted(
-            candidates,
-            key=lambda source: (str(source.get("createdAt") or ""), source["id"]),
-        )
-        existing[relative_path] = ordered[0]
-        for duplicate in ordered[1:]:
-            store.delete_source(thread_id, duplicate["id"], force=True)
-            removed += 1
-
-    seen: set[str] = set()
-    storage = get_course_file_storage()
-    storage_provider = settings.file_storage_provider
-    for item in catalog:
-        seen.add(item.relative_path)
-        current = existing.get(item.relative_path)
-        current_metadata = (current or {}).get("metadata") or {}
-        if (
-            current_metadata.get("lecture_note_signature") == item.signature
-            and current_metadata.get("course_material_group") == item.material_group
-            and current_metadata.get("locked_source") is True
-            and current_metadata.get("shared_course_object") is True
-            and current_metadata.get("object_key") == item.object_key
-            and current_metadata.get("course_material_id")
-            == course_material_id_from_object_key(item.object_key)
-            and current.get("title") == item.filename
-        ):
-            unchanged += 1
-            continue
-        try:
-            payload = storage.get_bytes(item.object_key)
-            extracted = extract_source_text_from_bytes(item.filename, payload)[
-                :MAX_SOURCE_TEXT
-            ]
-            mime = mimetypes.guess_type(item.filename)[0] or "application/octet-stream"
-            kind = "image" if Path(item.filename).suffix.lower() in IMAGE_SUFFIXES else "file"
-            created_id = _add_source_with_extracted_text(
-                store,
-                thread_id,
-                kind=kind,
-                title=item.filename,
-                mime=mime,
-                path=item.object_key,
-                extracted_text=extracted,
-                size=item.size,
-                selected=True,
-                metadata={
-                    "origin": "lecture_notes_folder",
-                    "lecture_note_relative_path": item.relative_path,
-                    "lecture_note_signature": item.signature,
-                    "course_material_group": item.material_group,
-                    "locked_source": True,
-                    "managed_file": True,
-                    "supported": True,
-                    "storage_provider": storage_provider,
-                    "object_key": item.object_key,
-                    "shared_course_object": True,
-                    "course_material_id": course_material_id_from_object_key(
-                        item.object_key
-                    ),
-                },
-            )
-        except (OSError, ValueError) as exc:
-            errors.append(f"{item.relative_path}: {exc}")
-            continue
-        created = store.get_source(thread_id, created_id)
-        if not created:
-            errors.append(f"{item.relative_path}: source was not created")
-            continue
-        if current:
-            store.delete_source(thread_id, current["id"], force=True)
-            updated += 1
-        else:
-            added += 1
-
-    for relative_text, source in existing.items():
-        if relative_text not in seen:
-            store.delete_source(thread_id, source["id"], force=True)
-            removed += 1
-
-    return LectureNotesSyncResult(
-        added=added,
-        updated=updated,
-        removed=removed,
-        unchanged=unchanged,
-        skipped=skipped,
-        errors=tuple(errors),
-    )
+    return LectureNotesSyncResult(unchanged=len(catalog))
 
 
 def _sync_lecture_notes_folder(
     store: StudentStore,
     thread_id: str,
 ) -> LectureNotesSyncResult:
-    """Copy lecture-note files into one notebook and select them for grounding.
+    """Copy local lecture-note files into one notebook, or list the shared catalog.
 
     The shared folder is treated as read-only input. Local development copies
-    files into notebook-owned storage. Production S3 references shared
-    ``course/`` object keys and never writes PDFs under ``users/``.
+    files into notebook-owned storage. Production S3 lists shared ``course/``
+    object keys into the UI and never writes those files into ``sources``.
     """
     if settings.uses_shared_course_materials:
         return _sync_shared_course_materials(store, thread_id)

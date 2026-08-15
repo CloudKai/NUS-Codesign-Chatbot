@@ -420,6 +420,42 @@
         font-size:.72rem !important;
     }
 
+    /* Coaching style: selected Strict (or Quick) is the filled accent chip. */
+    .st-key-profile_coaching_style [data-testid="stButtonGroup"] button,
+    .st-key-profile_coaching_style [role="radiogroup"] > [role="radio"] {
+        font-weight:600 !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stButtonGroup"]
+    button[aria-checked="true"],
+    .st-key-profile_coaching_style [data-testid="stButtonGroup"]
+    button[aria-pressed="true"],
+    .st-key-profile_coaching_style [data-testid="stButtonGroup"]
+    button[kind="primary"],
+    .st-key-profile_coaching_style [role="radiogroup"]
+    > [role="radio"][aria-checked="true"],
+    .st-key-profile_coaching_style [role="radiogroup"]
+    > [role="radio"][aria-pressed="true"] {
+        background:var(--cd-accent) !important;
+        border-color:var(--cd-accent) !important;
+        color:#fff !important;
+        -webkit-text-fill-color:#fff !important;
+        font-weight:700 !important;
+        box-shadow:0 0 0 1px var(--cd-accent) !important;
+    }
+
+    .st-key-profile_coaching_style [role="radiogroup"]
+    > [role="radio"][aria-checked="true"] p,
+    .st-key-profile_coaching_style [role="radiogroup"]
+    > [role="radio"][aria-pressed="true"] p,
+    .st-key-profile_coaching_style [data-testid="stButtonGroup"]
+    button[aria-checked="true"] p,
+    .st-key-profile_coaching_style [data-testid="stButtonGroup"]
+    button[kind="primary"] p {
+        color:#fff !important;
+        -webkit-text-fill-color:#fff !important;
+    }
+
     [data-testid="stPopoverBody"][aria-label="Setting"] {
         width:min(21rem,calc(100vw - 1.5rem));
         max-width:min(21rem,calc(100vw - 1.5rem));

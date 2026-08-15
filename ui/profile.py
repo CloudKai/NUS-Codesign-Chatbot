@@ -113,14 +113,14 @@ def _render_coaching_style_fragment() -> None:
     journey = normalize_journey(st.session_state.learning_journey)
     current_detail = journey["response_detail"]
     labels = [COACHING_STYLE_LABELS[detail] for detail in RESPONSE_DETAILS]
-    if st.session_state.get("setting_coaching_style") not in labels:
-        st.session_state.setting_coaching_style = COACHING_STYLE_LABELS[current_detail]
-    st.segmented_control(
-        "Coaching style",
-        labels,
-        key="setting_coaching_style",
-        on_change=_persist_coaching_style,
-    )
+    st.session_state.setting_coaching_style = COACHING_STYLE_LABELS[current_detail]
+    with st.container(key="profile_coaching_style"):
+        st.segmented_control(
+            "Coaching style",
+            labels,
+            key="setting_coaching_style",
+            on_change=_persist_coaching_style,
+        )
 
 
 def render_profile_menu() -> None:

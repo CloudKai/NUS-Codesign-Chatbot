@@ -538,6 +538,24 @@ def test_language_theme_and_journey_has_no_manual_progression_control():
     assert app.session_state["response_detail"] == "long"
     assert app.session_state["learning_journey"]["response_detail"] == "long"
 
+    # A later notebook must start Strict even if this session had Quick selected.
+    next(button for button in app.button if button.label == "Notebooks").click().run()
+    next(button for button in app.button if button.label == "New notebook").click().run()
+    coaching_style = next(
+        control
+        for control in app.segmented_control
+        if control.label == "Coaching style"
+    )
+    assert coaching_style.value == "Strict"
+    assert app.session_state["response_detail"] == "long"
+    assert app.session_state["learning_journey"]["response_detail"] == "long"
+    assert app.session_state["setting_coaching_style"] == "Strict"
+    from backend.student_store import StudentStore
+
+    created = StudentStore().get_thread(app.session_state["thread_id"])
+    assert created is not None
+    assert created["metadata"]["response_detail"] == "long"
+
     # Popover content remains available for further preference changes.
     appearance = next(
         control

@@ -109,6 +109,10 @@ def image_inputs_for_source_ids(
     for source_id in source_ids:
         source = store.get_source(thread_id, str(source_id))
         if not source:
+            from backend.sources.library import get_visible_source
+
+            source = get_visible_source(store, thread_id, str(source_id))
+        if not source:
             continue
         image_part = source_image_input(source)
         if not image_part:
