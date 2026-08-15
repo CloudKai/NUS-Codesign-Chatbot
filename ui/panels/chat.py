@@ -766,7 +766,7 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
             submit_mode="stop",
             height="content",
         )
-        sync_composer_layout()
+        sync_composer_layout(max_file_size_mb=settings.max_file_size_mb)
     prompt, uploads = normalize_composer_value(composer_value)
     if prompt:
         handle_prompt(

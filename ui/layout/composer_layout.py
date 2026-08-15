@@ -7,17 +7,29 @@ Call once after rendering the composer widgets. Prefer ``ui.layout.composer_layo
 
 from __future__ import annotations
 
+import json
+
 import streamlit.components.v1 as components
 
+from backend.settings import settings
 
-def sync_composer_layout() -> None:
-    """Pin the model dropdown beside the attach control on the composer footer."""
-    components.html(
-        """
+
+def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
+    """Pin the model dropdown beside the attach control on the composer footer.
+
+    Also labels the attach control with the student upload size limit because
+    Streamlit's chat-input tooltip does not accept custom copy.
+    """
+    size_mb = int(max_file_size_mb or settings.max_file_size_mb)
+    size_hint = f"Max {size_mb} MB per file"
+    attach_label = f"Upload or drag and drop files · {size_hint}"
+    script = """
 <script>
 (() => {
   const doc = window.parent.document;
   const win = window.parent;
+  const SIZE_HINT = __CD_SIZE_HINT__;
+  const ATTACH_LABEL = __CD_ATTACH_LABEL__;
 
   function root() {
     return doc.querySelector(".st-key-chat_composer");
@@ -163,6 +175,140 @@ def sync_composer_layout() -> None:
       : null;
   }
 
+  function annotateAttach(input) {
+    const attach = fileUpload(input);
+    if (attach) attach.setAttribute("data-tooltip", ATTACH_LABEL);
+    const btn = attach ? attach.querySelector("button") : null;
+    if (btn) {
+      btn.setAttribute("aria-label", ATTACH_LABEL);
+    }
+  }
+
+  function attachTooltipEl() {
+    let tip = doc.getElementById("cd-attach-tooltip");
+    if (!tip) {
+      tip = doc.createElement("div");
+      tip.id = "cd-attach-tooltip";
+      tip.className = "cd-attach-tooltip";
+      tip.setAttribute("role", "tooltip");
+      doc.body.appendChild(tip);
+    }
+    const tokenSource = root() || doc.body;
+    const tokens = win.getComputedStyle(tokenSource);
+    const bg = tokens.getPropertyValue("--cd-surface").trim() || "#171C22";
+    const fg = tokens.getPropertyValue("--cd-text").trim() || "#F2F5F7";
+    const border = tokens.getPropertyValue("--cd-border").trim() || "#2A343E";
+    tip.textContent = ATTACH_LABEL;
+    tip.style.setProperty("position", "fixed", "important");
+    tip.style.setProperty("z-index", "10000", "important");
+    tip.style.setProperty("padding", ".32rem .55rem", "important");
+    tip.style.setProperty("border", "1px solid " + border, "important");
+    tip.style.setProperty("border-radius", ".4rem", "important");
+    tip.style.setProperty("background", bg, "important");
+    tip.style.setProperty("color", fg, "important");
+    tip.style.setProperty("-webkit-text-fill-color", fg, "important");
+    tip.style.setProperty("font-size", ".75rem", "important");
+    tip.style.setProperty("font-weight", "600", "important");
+    tip.style.setProperty("line-height", "1.25", "important");
+    tip.style.setProperty("white-space", "nowrap", "important");
+    tip.style.setProperty("pointer-events", "none", "important");
+    tip.style.setProperty("box-shadow", "0 4px 14px rgba(21,32,43,.16)", "important");
+    if (!tip.style.left) {
+      tip.style.setProperty("left", "-9999px", "important");
+      tip.style.setProperty("top", "-9999px", "important");
+    }
+    if (!tip.classList.contains("cd-attach-tooltip-visible")) {
+      tip.style.setProperty("opacity", "0", "important");
+      tip.style.setProperty("visibility", "hidden", "important");
+    }
+    return tip;
+  }
+
+  function placeAttachTooltip() {
+    const tip = attachTooltipEl();
+    const composer = root();
+    const attach = fileUpload(chatInput(composer));
+    const btn = attach ? attach.querySelector("button") || attach : null;
+    if (!btn || doc.body.getAttribute("data-cd-attach-hover") !== "1") {
+      tip.classList.remove("cd-attach-tooltip-visible");
+      tip.style.setProperty("opacity", "0", "important");
+      tip.style.setProperty("visibility", "hidden", "important");
+      return;
+    }
+    const rect = btn.getBoundingClientRect();
+    const tipWidth = Math.max(tip.offsetWidth, 1);
+    const tipHeight = Math.max(tip.offsetHeight, 1);
+    const left = Math.max(
+      8,
+      Math.min(
+        rect.left + rect.width / 2 - tipWidth / 2,
+        win.innerWidth - tipWidth - 8
+      )
+    );
+    const top = Math.max(8, rect.top - tipHeight - 8);
+    tip.style.setProperty("left", left + "px", "important");
+    tip.style.setProperty("top", top + "px", "important");
+    tip.classList.add("cd-attach-tooltip-visible");
+    tip.style.setProperty("opacity", "1", "important");
+    tip.style.setProperty("visibility", "visible", "important");
+  }
+
+  let attachTipTimer = 0;
+  function showAttachTooltip() {
+    doc.body.setAttribute("data-cd-attach-hover", "1");
+    win.clearTimeout(attachTipTimer);
+    attachTipTimer = win.setTimeout(placeAttachTooltip, 450);
+  }
+
+  function hideAttachTooltip() {
+    win.clearTimeout(attachTipTimer);
+    doc.body.removeAttribute("data-cd-attach-hover");
+    placeAttachTooltip();
+  }
+
+  function bindAttachTooltip(input) {
+    const attach = fileUpload(input);
+    if (!attach) return;
+    attachTooltipEl();
+    if (attach.dataset.cdAttachTipBound === "1") return;
+    attach.dataset.cdAttachTipBound = "1";
+    attach.addEventListener("pointerenter", showAttachTooltip);
+    attach.addEventListener("pointerleave", hideAttachTooltip);
+    attach.addEventListener("focusin", showAttachTooltip);
+    attach.addEventListener("focusout", hideAttachTooltip);
+  }
+
+  function hideNativeUploadTooltips() {
+    const nodes = doc.querySelectorAll('[data-testid="stTooltipContent"]');
+    for (const node of nodes) {
+      const text = (node.textContent || "").trim();
+      if (!text.startsWith("Upload or drag and drop files")) continue;
+      const layer =
+        node.closest('[data-baseweb="tooltip"]') ||
+        node.closest('[role="tooltip"]') ||
+        node.parentElement ||
+        node;
+      layer.style.setProperty("display", "none", "important");
+      layer.style.setProperty("visibility", "hidden", "important");
+      layer.style.setProperty("opacity", "0", "important");
+    }
+  }
+
+  function rewriteDropOverlay() {
+    const nodes = doc.querySelectorAll(
+      '.st-key-chat_composer [data-testid="stChatInput"] *'
+    );
+    for (const node of nodes) {
+      if (node.childElementCount > 0) continue;
+      const text = (node.textContent || "").trim();
+      if (text === "Drag and drop files here") {
+        node.textContent = ["Drag and drop files here", SIZE_HINT].join("\\n");
+        node.style.setProperty("white-space", "pre-line", "important");
+        node.style.setProperty("text-align", "center", "important");
+      }
+    }
+  }
+
   function placeModel(composer, input) {
     const popover = modelPopover(composer);
     const attach = fileUpload(input);
@@ -214,11 +360,71 @@ def sync_composer_layout() -> None:
         node === textarea.parentElement ||
         (!!node.querySelector &&
           !!node.querySelector('[data-testid="stChatInputTextArea"], textarea') &&
-          !node.querySelector('[data-testid="stChatInputSubmitButton"]'));
+          !node.querySelector(
+            '[data-testid="stChatInputSubmitButton"], [data-testid="stChatInputStopButton"]'
+          ));
       if (isTextShell) shells.push(node);
       node = node.parentElement;
     }
     return shells;
+  }
+
+  function isComposerBusy(input, textarea) {
+    return !!(
+      input.querySelector('[data-testid="stChatInputStopButton"]') ||
+      (textarea && textarea.disabled)
+    );
+  }
+
+  function setBusyComposer(input, textarea, busy) {
+    const inner = input.querySelector(":scope > div");
+    const hideNodes = [];
+    if (textarea) {
+      hideNodes.push(textarea);
+      let node = textarea.parentElement;
+      for (let depth = 0; depth < 5 && node && node !== input; depth += 1) {
+        if (
+          node.querySelector(
+            '[data-testid="stChatInputStopButton"], [data-testid="stChatInputSubmitButton"]'
+          )
+        ) {
+          break;
+        }
+        hideNodes.push(node);
+        node = node.parentElement;
+      }
+    }
+    const attach = fileUpload(input);
+    if (busy) {
+      input.dataset.cdComposerBusy = "1";
+      input.style.setProperty("min-height", "3.05rem", "important");
+      input.style.setProperty("height", "auto", "important");
+      if (inner) {
+        inner.style.setProperty("min-height", "0", "important");
+        inner.style.setProperty("height", "auto", "important");
+      }
+      for (const node of hideNodes) {
+        node.style.setProperty("display", "none", "important");
+        node.style.setProperty("height", "0", "important");
+        node.style.setProperty("min-height", "0", "important");
+      }
+      if (attach) attach.style.setProperty("display", "none", "important");
+      return;
+    }
+    if (input.dataset.cdComposerBusy !== "1") return;
+    delete input.dataset.cdComposerBusy;
+    input.style.removeProperty("min-height");
+    input.style.removeProperty("height");
+    if (inner) {
+      inner.style.removeProperty("min-height");
+      inner.style.removeProperty("height");
+    }
+    for (const node of hideNodes) {
+      node.style.removeProperty("display");
+      node.style.removeProperty("height");
+      node.style.removeProperty("min-height");
+    }
+    if (attach) attach.style.removeProperty("display");
   }
 
   function capTextarea(textarea) {
@@ -266,13 +472,32 @@ def sync_composer_layout() -> None:
     composer.classList.add("cd-composer-card");
     input.classList.add("cd-composer-card");
     const textarea = input.querySelector('[data-testid="stChatInputTextArea"], textarea');
-    if (textarea) capTextarea(textarea);
+    const busy = isComposerBusy(input, textarea);
+    setBusyComposer(input, textarea, busy);
+    if (textarea && !busy) capTextarea(textarea);
+    annotateAttach(input);
+    bindAttachTooltip(input);
+    rewriteDropOverlay();
+    hideNativeUploadTooltips();
+    if (doc.body.getAttribute("data-cd-attach-hover") === "1") {
+      placeAttachTooltip();
+    }
     win.requestAnimationFrame(() => {
+      const nextBusy = isComposerBusy(input, textarea);
+      setBusyComposer(input, textarea, nextBusy);
       placeModel(composer, input);
-      if (textarea) capTextarea(textarea);
+      annotateAttach(input);
+      bindAttachTooltip(input);
+      rewriteDropOverlay();
+      if (textarea && !nextBusy) capTextarea(textarea);
       win.requestAnimationFrame(() => {
+        const laterBusy = isComposerBusy(input, textarea);
+        setBusyComposer(input, textarea, laterBusy);
         placeModel(composer, input);
-        if (textarea) capTextarea(textarea);
+        annotateAttach(input);
+        bindAttachTooltip(input);
+        rewriteDropOverlay();
+        if (textarea && !laterBusy) capTextarea(textarea);
       });
     });
     return true;
@@ -299,9 +524,20 @@ def sync_composer_layout() -> None:
       win.setTimeout(schedule, 0);
       win.setTimeout(schedule, 50);
     });
-    win.addEventListener("resize", schedule);
+    win.addEventListener("resize", () => {
+      schedule();
+      placeAttachTooltip();
+    });
     const observer = new win.MutationObserver(schedule);
     observer.observe(input, { childList: true, subtree: true, characterData: true });
+    let overlayFrame = 0;
+    const overlayObserver = new win.MutationObserver(() => {
+      win.cancelAnimationFrame(overlayFrame);
+      overlayFrame = win.requestAnimationFrame(rewriteDropOverlay);
+    });
+    overlayObserver.observe(input, { childList: true, subtree: true });
+    const nativeTipObserver = new win.MutationObserver(hideNativeUploadTooltips);
+    nativeTipObserver.observe(doc.body, { childList: true, subtree: true });
     const slot = modelSlot(composer);
     if (slot) observer.observe(slot, { childList: true, subtree: true });
     if (typeof win.ResizeObserver === "function") {
@@ -329,6 +565,10 @@ def sync_composer_layout() -> None:
   boot();
 })();
 </script>
-        """,
+        """
+    components.html(
+        script.replace("__CD_SIZE_HINT__", json.dumps(size_hint)).replace(
+            "__CD_ATTACH_LABEL__", json.dumps(attach_label)
+        ),
         height=0,
     )

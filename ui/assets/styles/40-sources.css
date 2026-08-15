@@ -167,10 +167,37 @@
         box-sizing:border-box !important;
         opacity:1 !important;
         visibility:visible !important;
+        overflow:visible !important;
     }
 
     .st-key-sources_panel [class*="st-key-add-sources"]:hover .cd-sources-add-face {
         background:var(--cd-surface-muted) !important;
+    }
+
+    .st-key-sources_panel [class*="st-key-add-sources"] .cd-sources-add-face::after {
+        content:attr(data-tooltip);
+        position:absolute !important;
+        right:0 !important;
+        top:calc(100% + .35rem) !important;
+        z-index:40 !important;
+        padding:.28rem .45rem !important;
+        border:1px solid var(--cd-border) !important;
+        border-radius:.35rem !important;
+        background:var(--cd-surface) !important;
+        color:var(--cd-text) !important;
+        -webkit-text-fill-color:var(--cd-text) !important;
+        font-size:.68rem !important;
+        font-weight:600 !important;
+        line-height:1.2 !important;
+        white-space:nowrap !important;
+        opacity:0 !important;
+        pointer-events:none !important;
+        box-shadow:0 4px 14px rgba(21,32,43,.16) !important;
+    }
+
+    .st-key-sources_panel [class*="st-key-add-sources"]:hover .cd-sources-add-face::after,
+    .st-key-sources_panel [class*="st-key-add-sources"]:focus-within .cd-sources-add-face::after {
+        opacity:1 !important;
     }
 
     .st-key-sources_panel [class*="st-key-add-sources"]

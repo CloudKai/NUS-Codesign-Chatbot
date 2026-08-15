@@ -831,7 +831,7 @@
 
     /* Expanded Streamlit footer already holds attach + actions. */
     .st-key-chat_composer [data-testid="stChatInput"]
-    div:has([data-testid="stChatInputFileUploadButton"]):has([data-testid="stChatInputSubmitButton"]):not(:has([data-testid="stChatInputTextArea"])) {
+    div:has([data-testid="stChatInputFileUploadButton"]):has([data-testid="stChatInputSubmitButton"], [data-testid="stChatInputStopButton"]):not(:has([data-testid="stChatInputTextArea"])) {
         grid-column:1 / -1 !important;
         grid-row:2 !important;
         display:flex !important;
@@ -843,7 +843,7 @@
 
     /* Compact mode: attach group left, action group right on footer row. */
     .st-key-chat_composer [data-testid="stChatInput"]
-    div:has([data-testid="stChatInputFileUploadButton"]):not(:has([data-testid="stChatInputSubmitButton"])):not(:has([data-testid="stChatInputTextArea"])) {
+    div:has([data-testid="stChatInputFileUploadButton"]):not(:has([data-testid="stChatInputSubmitButton"], [data-testid="stChatInputStopButton"])):not(:has([data-testid="stChatInputTextArea"])) {
         grid-column:1 !important;
         grid-row:2 !important;
         display:flex !important;
@@ -857,7 +857,7 @@
     }
 
     .st-key-chat_composer [data-testid="stChatInput"]
-    div:has([data-testid="stChatInputSubmitButton"]):not(:has([data-testid="stChatInputFileUploadButton"])):not(:has([data-testid="stChatInputTextArea"])) {
+    div:has([data-testid="stChatInputSubmitButton"], [data-testid="stChatInputStopButton"]):not(:has([data-testid="stChatInputFileUploadButton"])):not(:has([data-testid="stChatInputTextArea"])) {
         grid-column:2 !important;
         grid-row:2 !important;
         display:flex !important;
@@ -950,6 +950,7 @@
     .st-key-chat_composer [data-testid="stChatInputFileUploadButton"],
     .st-key-chat_composer [data-testid="stChatInputFileUploadButton"] button,
     .st-key-chat_composer [data-testid="stChatInputSubmitButton"],
+    .st-key-chat_composer [data-testid="stChatInputStopButton"],
     .st-key-chat_composer [data-testid="stChatInputCancelButton"],
     .st-key-chat_composer [data-testid="stChatInputApproveButton"] {
         position:relative !important;
@@ -1017,6 +1018,130 @@
         -webkit-text-fill-color:var(--cd-muted) !important;
     }
 
+    .st-key-chat_composer [data-testid="stChatInputStopButton"] {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        width:2.1rem !important;
+        height:2.1rem !important;
+        min-width:2.1rem !important;
+        min-height:2.1rem !important;
+        padding:0 !important;
+        margin:0 !important;
+        border-radius:999px !important;
+        color:#fff !important;
+        background:var(--cd-accent) !important;
+        border:0 !important;
+        line-height:0 !important;
+    }
+
+    .st-key-chat_composer [data-testid="stChatInputStopButton"] svg,
+    .st-key-chat_composer [data-testid="stChatInputStopButton"] [data-testid="stIconMaterial"] {
+        display:none !important;
+    }
+
+    .st-key-chat_composer [data-testid="stChatInputStopButton"]::before {
+        content:"stop";
+        display:flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        width:1.15rem !important;
+        height:1.15rem !important;
+        margin:0 !important;
+        font-family:"Material Symbols Rounded" !important;
+        font-size:1.15rem !important;
+        font-variation-settings:"FILL" 1,"wght" 500,"GRAD" 0,"opsz" 20;
+        line-height:1 !important;
+        text-align:center !important;
+        color:#fff !important;
+        -webkit-text-fill-color:#fff !important;
+    }
+
+    /*
+     * While the coach is generating, Streamlit keeps the chat input mounted
+     * (disabled textarea + stop). Collapse it to a single stop row.
+     */
+    .st-key-chat_composer [data-testid="stChatInput"]:has(textarea:disabled),
+    .st-key-chat_composer [data-testid="stChatInput"]:has([data-testid="stChatInputStopButton"]) {
+        min-height:3.05rem !important;
+        height:auto !important;
+        max-height:3.4rem !important;
+    }
+
+    .st-key-chat_composer [data-testid="stChatInput"]:has(textarea:disabled) > div,
+    .st-key-chat_composer [data-testid="stChatInput"]:has([data-testid="stChatInputStopButton"]) > div {
+        min-height:0 !important;
+        height:auto !important;
+        max-height:none !important;
+        padding:.35rem .7rem !important;
+        display:flex !important;
+        align-items:center !important;
+        justify-content:flex-end !important;
+    }
+
+    .st-key-chat_composer [data-testid="stChatInput"]:has(textarea:disabled) textarea,
+    .st-key-chat_composer [data-testid="stChatInput"]:has(textarea:disabled) [data-testid="stChatInputTextArea"],
+    .st-key-chat_composer [data-testid="stChatInput"]:has(textarea:disabled) [data-baseweb="textarea"],
+    .st-key-chat_composer [data-testid="stChatInput"]:has([data-testid="stChatInputStopButton"]) textarea,
+    .st-key-chat_composer [data-testid="stChatInput"]:has([data-testid="stChatInputStopButton"]) [data-testid="stChatInputTextArea"],
+    .st-key-chat_composer [data-testid="stChatInput"]:has([data-testid="stChatInputStopButton"]) [data-baseweb="textarea"] {
+        display:none !important;
+        height:0 !important;
+        min-height:0 !important;
+        max-height:0 !important;
+        padding:0 !important;
+        margin:0 !important;
+        overflow:hidden !important;
+    }
+
+    .st-key-chat_composer [data-testid="stChatInput"]:has(textarea:disabled)
+    [data-testid="stChatInputFileUploadButton"],
+    .st-key-chat_composer [data-testid="stChatInput"]:has([data-testid="stChatInputStopButton"])
+    [data-testid="stChatInputFileUploadButton"] {
+        display:none !important;
+    }
+
+    .st-key-chat_composer:has(textarea:disabled) .st-key-composer_model_slot,
+    .st-key-chat_composer:has([data-testid="stChatInputStopButton"]) .st-key-composer_model_slot,
+    .st-key-chat_composer:has(textarea:disabled)
+    > [data-testid="stLayoutWrapper"]:has(.st-key-composer_model_slot),
+    .st-key-chat_composer:has([data-testid="stChatInputStopButton"])
+    > [data-testid="stLayoutWrapper"]:has(.st-key-composer_model_slot) {
+        display:none !important;
+    }
+
+    /* Thinking status is an expander; hide the compact chevron so it is not a second box. */
+    .st-key-chat_log [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"]) {
+        border:0 !important;
+        background:transparent !important;
+        box-shadow:none !important;
+        margin:0 !important;
+    }
+
+    .st-key-chat_log [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"]) details,
+    .st-key-chat_log [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"]) summary {
+        border:0 !important;
+        background:transparent !important;
+        box-shadow:none !important;
+        padding-left:0 !important;
+        padding-right:0 !important;
+        list-style:none !important;
+        cursor:default !important;
+    }
+
+    .st-key-chat_log [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"])
+    summary::-webkit-details-marker,
+    .st-key-chat_log [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"])
+    summary::marker {
+        display:none !important;
+        content:none !important;
+    }
+
+    .st-key-chat_log [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"])
+    summary [data-testid="stIconMaterial"] {
+        display:none !important;
+    }
+
     /* Keep the zero-height composer layout bridge iframe out of layout. */
     .st-key-chat_composer
     [data-testid="stElementContainer"]:has(iframe[height="0"]),
@@ -1029,6 +1154,44 @@
         margin:0 !important;
         padding:0 !important;
         overflow:hidden !important;
+        opacity:0 !important;
+        pointer-events:none !important;
+    }
+
+    /*
+     * Attach size-limit tooltip lives on document.body. Streamlit's native
+     * tooltip is a portal we cannot restyle, so hide it while ours is armed.
+     */
+    .cd-attach-tooltip {
+        position:fixed !important;
+        z-index:10000 !important;
+        max-width:min(22rem, calc(100vw - 1rem)) !important;
+        padding:.32rem .55rem !important;
+        border:1px solid var(--cd-border) !important;
+        border-radius:.4rem !important;
+        background:var(--cd-surface) !important;
+        color:var(--cd-text) !important;
+        -webkit-text-fill-color:var(--cd-text) !important;
+        font-size:.75rem !important;
+        font-weight:600 !important;
+        line-height:1.25 !important;
+        white-space:nowrap !important;
+        pointer-events:none !important;
+        opacity:0 !important;
+        visibility:hidden !important;
+        box-shadow:0 4px 14px rgba(21,32,43,.16) !important;
+    }
+
+    .cd-attach-tooltip.cd-attach-tooltip-visible {
+        opacity:1 !important;
+        visibility:visible !important;
+    }
+
+    body[data-cd-attach-hover="1"] [data-testid="stTooltipContent"],
+    body[data-cd-attach-hover="1"] [data-testid="stTooltipErrorContent"],
+    body[data-cd-attach-hover="1"] [data-baseweb="tooltip"] {
+        display:none !important;
+        visibility:hidden !important;
         opacity:0 !important;
         pointer-events:none !important;
     }

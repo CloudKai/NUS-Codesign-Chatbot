@@ -912,7 +912,7 @@
     }
 
     [data-testid="stFileUploaderDropzone"]::after {
-        content:"Drop files here or browse";
+        content:"Drop files here or browse · max 10 MB per file";
         order:2;
         color:var(--cd-text);
         font-size:.96rem;

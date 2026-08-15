@@ -37,7 +37,7 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
         "10-workspace.css": ".st-key-notebook_topbar",
         "20-studio.css": ".st-key-journey_track",
         "30-chat.css": ".chat-context-line",
-        "40-sources.css": ".st-key-sources_panel",
+        "40-sources.css": ".cd-sources-add-face::after",
         "50-dialogs-notebooks.css": ".st-key-notebook_library_scroll",
         "55-auth.css": ".cd-auth-redirecting",
         "60-profile-topbar.css": ".st-key-profile_coaching_style",
@@ -53,6 +53,21 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     assert ".st-key-profile_coaching_style" in profile_css
     assert "button[aria-checked=\"true\"]" in profile_css
     assert "background:var(--cd-accent)" in profile_css
+
+    sources_css = Path(_STYLES_DIR / "40-sources.css").read_text(encoding="utf-8")
+    assert "content:attr(data-tooltip)" in sources_css
+
+    chat_css = Path(_STYLES_DIR / "30-chat.css").read_text(encoding="utf-8")
+    assert ".cd-attach-tooltip" in chat_css
+    assert "body[data-cd-attach-hover=\"1\"]" in chat_css
+    assert "stChatInputStopButton" in chat_css
+    assert "stExpanderIconSpinner" in chat_css
+    assert "textarea:disabled" in chat_css
+
+    dialogs_css = Path(_STYLES_DIR / "50-dialogs-notebooks.css").read_text(
+        encoding="utf-8"
+    )
+    assert "max 10 MB per file" in dialogs_css
 
     auth_css = Path(_STYLES_DIR / "55-auth.css").read_text(encoding="utf-8")
     assert ".st-key-auth_login_card" in auth_css
