@@ -201,7 +201,9 @@ def _runtime_instructions(context: PromptContext) -> str:
         "for all six dimensions using 0=not started, 1=Weak, 2=Unacceptable, "
         "3=Acceptable, 4=Strong. Keep learning_summary synthesized—never paste "
         "prompts. Review strengths and improvements must be specific to this "
-        "stage and must not copy the student's wording."
+        "stage and must not copy the student's wording. "
+        "assessment.stage_assessment must be a string, not an object. "
+        "assessment.recommendation must be exactly lowercase stay or advance."
     )
     return _clip("\n".join(parts), MAX_RUNTIME_CHARS)
 

@@ -28,7 +28,9 @@ companion application. Required top-level keys:
 - response_text (string): student-facing Socratic coaching
 - assessment (object): current_stage, contribution_summary, stage_assessment,
   critical_understanding_level, confidence, recommendation, recommendation_rationale,
-  guidance_questions, learning_summary, citations, facione_scores
+  guidance_questions, learning_summary, citations, facione_scores.
+  stage_assessment must be a string, not an object.
+  recommendation must be exactly lowercase stay or advance.
 - research_coding (object or null)
 
 Rules:

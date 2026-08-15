@@ -246,6 +246,18 @@ def test_valid_structured_coaching_and_research_coding():
     assert "RetrieveAndGenerate" not in json.dumps(payload)
 
 
+def test_live_uppercase_recommendation_and_object_stage_assessment_are_accepted():
+    payload = _output()
+    payload["assessment"]["recommendation"] = "STAY"
+    payload["assessment"]["stage_assessment"] = {
+        "strengths": [],
+        "improvements": ["Trade-offs can be identified."],
+    }
+    result = _provider(FakeAgentCoreRuntime(payload=payload)).assess(_request())
+    assert result.assessment.recommendation is StageDecision.STAY
+    assert "Trade-offs can be identified." in result.assessment.stage_assessment
+
+
 def test_deep_analysis_maps_only_to_agentcore_ethics_critical_topic():
     assert agentcore_topic_for_stage("deep_analysis") == "ethics_critical"
     client = FakeAgentCoreRuntime(payload=_output(stage="deep_analysis"))

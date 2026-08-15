@@ -8,8 +8,10 @@ from backend.models import (
 )
 from backend.domain import (
     CoachRequest,
+    EducationalAssessment,
     FacioneDimensionScores,
     ProviderCoachOutput,
+    StageDecision,
     openai_strict_schema,
 )
 from backend.mock_provider import DeterministicCoachProvider
@@ -57,6 +59,29 @@ def test_openai_strict_schema_marks_objects_closed():
         "self_regulation",
     ):
         assert key in facione["required"]
+
+
+def test_educational_assessment_coerces_live_agentcore_shapes():
+    assessment = EducationalAssessment.model_validate(
+        {
+            "current_stage": "problem_identification",
+            "contribution_summary": "The student named one remaining trade-off.",
+            "stage_assessment": {
+                "strengths": ["Named a concrete trade-off."],
+                "improvements": ["Trade-offs can be identified."],
+            },
+            "critical_understanding_level": "Developing",
+            "confidence": 0.6,
+            "recommendation": "STAY",
+            "recommendation_rationale": "The trade-off still needs evidence.",
+            "guidance_questions": ["What evidence would decide the trade-off?"],
+            "learning_summary": "The student is locating a decision point.",
+        }
+    )
+    assert assessment.recommendation is StageDecision.STAY
+    assert "Trade-offs can be identified." in assessment.stage_assessment
+    assert assessment.review_strengths == ["Named a concrete trade-off."]
+    assert assessment.review_improvements == ["Trade-offs can be identified."]
 
 
 def test_facione_dimension_scores_default_to_not_started():

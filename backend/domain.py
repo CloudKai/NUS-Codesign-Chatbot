@@ -7,6 +7,7 @@ application services, and infrastructure adapters.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -170,6 +171,44 @@ class FacioneDimensionScores(BaseModel):
     self_regulation: int = Field(ge=0, le=4, default=0)
 
 
+def _stage_assessment_as_text(value: Any) -> Any:
+    """Flatten live-model stage_assessment objects or lists into one string."""
+    if isinstance(value, str) or value is None:
+        return value
+    if isinstance(value, list):
+        return " ".join(str(item).strip() for item in value if str(item).strip())
+    if not isinstance(value, Mapping):
+        return value
+    for key in ("text", "summary", "assessment", "stage_assessment"):
+        item = value.get(key)
+        if isinstance(item, str) and item.strip():
+            return item.strip()
+    parts: list[str] = []
+    for key in ("strengths", "improvements", "gaps", "notes"):
+        item = value.get(key)
+        if isinstance(item, list):
+            joined = "; ".join(str(entry).strip() for entry in item if str(entry).strip())
+            if joined:
+                parts.append(f"{key}: {joined}")
+        elif isinstance(item, str) and item.strip():
+            parts.append(item.strip())
+    for key, item in value.items():
+        if key in {
+            "strengths",
+            "improvements",
+            "gaps",
+            "notes",
+            "text",
+            "summary",
+            "assessment",
+            "stage_assessment",
+        }:
+            continue
+        if isinstance(item, str) and item.strip():
+            parts.append(item.strip())
+    return " ".join(parts).strip()
+
+
 class EducationalAssessment(BaseModel):
     """Validated coaching assessment produced for one student contribution."""
 
@@ -193,6 +232,33 @@ class EducationalAssessment(BaseModel):
     )
     review_strengths: list[str] = Field(default_factory=list, max_length=4)
     review_improvements: list[str] = Field(default_factory=list, max_length=4)
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_live_provider_shapes(cls, value: Any) -> Any:
+        """Accept common live-model variants without changing the stored contract.
+
+        AgentCore JSON sometimes emits ``recommendation`` as ``STAY``/``ADVANCE``
+        and ``stage_assessment`` as an object with strengths/improvements.
+        """
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        stage = data.get("stage_assessment")
+        if isinstance(stage, Mapping):
+            if not data.get("review_strengths") and isinstance(stage.get("strengths"), list):
+                data["review_strengths"] = stage.get("strengths")
+            if not data.get("review_improvements") and isinstance(
+                stage.get("improvements"), list
+            ):
+                data["review_improvements"] = stage.get("improvements")
+            data["stage_assessment"] = _stage_assessment_as_text(stage)
+        elif isinstance(stage, list):
+            data["stage_assessment"] = _stage_assessment_as_text(stage)
+        recommendation = data.get("recommendation")
+        if isinstance(recommendation, str):
+            data["recommendation"] = recommendation.strip().lower()
+        return data
 
     @field_validator("guidance_questions")
     @classmethod

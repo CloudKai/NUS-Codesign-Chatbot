@@ -1,6 +1,90 @@
 # Implementation status
 
-## Current phase — AgentCore coaching availability, guardrail handling, trust split
+## Current phase — Live AgentCore DEFAULT coaching (harness patch + smoke)
+
+**Completed on 2026-08-15.** Integrate-Bedrock remains the product.
+Production still uses `MODEL_PROVIDER=agentcore` against existing runtime
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. Qualifier remains
+`DEFAULT`. No experimental student runtime.
+
+The companion trust split was already in this repo; live DEFAULT still ran
+pre-patch harness code until republished. First republish (version 8) 502'd
+because `invoke` mixed `return json.loads(...)` with SSE `yield` (`SyntaxError:
+'return' with value in async generator`). Version 9 splits JSON return and SSE
+streaming into separate functions. Live JSON then failed validation on
+`recommendation: "STAY"` and object-shaped `stage_assessment`; the domain
+contract now coerces those live-model variants.
+
+### Behavior delivered
+
+1. Existing DEFAULT runtime updated in place to **version 9**, READY.
+2. `coach_turn` invokes return unfenced JSON (no tools, no AgentCore Memory as
+   transcript). Q&A SSE path is unchanged.
+3. `EducationalAssessment` accepts uppercase `stay`/`advance` and flattens
+   object `stage_assessment` (lifting strengths/improvements into review
+   fields when present).
+4. Runtime instructions tell the model `stage_assessment` is a string and
+   `recommendation` is lowercase `stay` or `advance`.
+
+### Main files changed
+
+- Live harness (POC worktree, not this git tree): `chatbot_harnessAgent/main.py`
+  split `_coach_turn_invoke` / `_stream_specialist_invoke`
+- Companion: `backend/domain.py`, `backend/prompts/composer.py`,
+  `backend/agentcore_harness_provider.py`,
+  `scripts/agentcore/harness_patch/structured_coach.py`,
+  `scripts/agentcore/harness_patch/README.md`, this status file
+- Tests: `tests/domain/test_models_and_support.py`,
+  `tests/domain/test_agentcore_provider.py`
+
+### Validation evidence
+
+- Focused deterministic tests for the coercion and AgentCore/prompt/harness
+  contracts: **passed** (Starlette/httpx deprecation warnings only).
+- Live capped smoke:
+  `scripts/agentcore_smoke.py --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`
+  returned `{"ok": true, "stage": "problem_identification", "recommendation": "stay"}`.
+  Not a guardrail block. Not a 502.
+- Local `/api/v1/ready` was `provider: agentcore` before restart; stack restarted
+  after the domain coercion so UI turns use the same parser.
+
+### Compatibility, migration, and rollback
+
+- No database migration. Runtime ARN and `AGENTCORE_QUALIFIER=DEFAULT` unchanged.
+- Rollback of the live runtime is pointing DEFAULT at version 7 (pre-patch) or
+  8 (broken import). Version 9 is the working structured-coach code.
+- Companion rollback is reverting this working tree; uppercase `STAY` would
+  again fail closed as malformed.
+
+### Localhost UI follow-up (2026-08-15)
+
+Profile settings on http://127.0.0.1:8501/ : display name Kai Ming, appearance
+System, language English, coaching style **Strict** (`response_detail=long`).
+The first UI turns failed closed as generic “temporarily unavailable” because
+`focused_excerpt` could return 601–602 characters (ellipsis around a 600-char
+window) and `RetrievalChunkReference.excerpt` rejects that. Course retrieval
+for this notebook returns mid-chunk matches, so the turn never reached
+AgentCore. Excerpts are now clipped to the field limit, including ellipses.
+
+A live Strict turn then succeeded on DEFAULT version 9: notebook title
+**Elderly Road Safety**, stage stayed `problem_identification`, recommendation
+`stay`, eight retrieval refs with excerpts ≤ 600 characters, Socratic reply
+persisted. No mock fallback. No Claude.
+
+Additional files: `backend/retrieval.py`, `tests/domain/test_retrieval.py`.
+Focused retrieval tests: **17 passed**.
+
+### Known risks and next exact action
+
+- Empty assistant rows from earlier failed streams remain in this notebook;
+  they are not used as transcript history for the successful turn.
+- Live `review_strengths` can still be an empty list, so Journey may show
+  “No feedback yet” even after a persisted assessment.
+- Next: optional cleanup of empty failed-stream assistant rows, or prompt the
+  structured coach to fill `review_strengths` / `review_improvements`. No mock
+  fallback and no Claude calls.
+
+## Previous completed phase — AgentCore coaching availability, guardrail handling, trust split
 
 **Completed locally on 2026-08-15.** Integrate-Bedrock remains the product.
 Production `MODEL_PROVIDER=agentcore` still uses `InvokeAgentRuntime` and does
@@ -48,7 +132,7 @@ instructions from untrusted turn content.
 - Full deterministic suite: **591 passed, 0 failed** (Starlette/httpx
   deprecation warnings only; classified as harmless test-client debt).
   `compileall` passed. `git diff --check` passed. No live AWS or paid OpenAI
-  call from pytest. Live wrapped-payload smoke is **not** claimed complete.
+  call from pytest.
 
 ### Compatibility, migration, and rollback
 
@@ -56,18 +140,7 @@ instructions from untrusted turn content.
   are unchanged. No experimental student runtime.
 - JSON 503 `detail` for provider failures is now `{message, category}` instead
   of a bare string. Stream error events add `category`.
-- Live DEFAULT still needs the updated harness patch republished before the
-  trusted/untrusted split takes effect in production. Until that deploy, the
-  adapter sends untrusted-only user content plus `trusted_instructions`.
 - Rollback is reverting this working tree.
-
-### Known risks and next exact action
-
-- Live smoke against wrapped AgentCore payloads was not run (paid-call policy).
-- Next: after explicit approval and a request/token or cost cap, republish the
-  harness patch to existing DEFAULT, then run one real wrapped-payload smoke
-  test and repeat the student UI quality assessment. No mock fallback and no
-  Claude calls.
 
 ## Previous completed phase — Full-history-first planner, exact RAG keys, isolated Luna eval path
 

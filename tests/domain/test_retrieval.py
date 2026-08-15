@@ -10,6 +10,7 @@ from backend.domain import (
     CitationReference,
     CoachRequest,
     ProviderAssessmentResult,
+    RetrievalChunkReference,
     StageDecision,
 )
 from backend.learning_service import LearningProgressService
@@ -24,11 +25,86 @@ from backend.retrieval import (
     bounded_retrieval_result,
     course_material_id_collisions,
     course_material_id_from_object_key,
+    focused_excerpt,
     retrieval_sources_from_notebook,
 )
 from backend.source_library import add_file_sources, add_text_source, image_inputs_for_source_ids
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
+
+
+def test_focused_excerpt_never_exceeds_limit_with_ellipsis_window():
+    padding = "Background crossing design notes without the target claim. " * 40
+    target = "Safer pedestrian crossings for older adults near schools need evidence."
+    excerpt = focused_excerpt(
+        padding + target + padding,
+        "older adults pedestrian crossings evidence",
+        limit=600,
+    )
+
+    assert 0 < len(excerpt) <= 600
+    assert excerpt.startswith("…")
+    assert excerpt.endswith("…")
+    assert "older adults" in excerpt.casefold()
+    RetrievalChunkReference(
+        source_id="src",
+        label="S1",
+        title="Crossing note",
+        chunk_id="S1-C0",
+        excerpt=excerpt,
+    )
+
+
+def test_application_persists_mid_chunk_excerpt_within_domain_limit(tmp_path):
+    class _MidChunkRetriever:
+        def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
+            source = query.sources[0]
+            padding = "Background crossing design notes without the target claim. " * 40
+            target = (
+                "Safer pedestrian crossings for older adults near schools need evidence."
+            )
+            return bounded_retrieval_result(
+                [
+                    RetrievedChunk(
+                        source_id=source.source_id,
+                        label=source.label,
+                        title=source.title,
+                        chunk_id=f"{source.label}-C0",
+                        text=padding + target + padding,
+                        score=1.0,
+                        source_index=1,
+                        chunk_index=0,
+                    )
+                ]
+            )
+
+    store = StudentStore(tmp_path / "mid-chunk-excerpt.sqlite3")
+    notebook = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    add_text_source(store, notebook, "Crossing note", "Selected crossing source")
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    service = CoachApplicationService(
+        store,
+        notebooks,
+        CoachWorkflow(DeterministicCoachProvider(), transitions),
+        LearningProgressService(store, notebooks, transitions),
+        retriever=_MidChunkRetriever(),
+    )
+
+    turn = service.submit(
+        CoachRequest(
+            thread_id=notebook,
+            student_message="Which older-adult crossing trade-off still needs evidence?",
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    )
+
+    refs = store.get_messages(notebook)[-1]["metadata"]["retrieval_refs"]
+    assert refs
+    assert len(refs[0]["excerpt"]) <= 600
+    assert "older adults" in refs[0]["excerpt"].casefold()
+    assert turn.response_text
 
 
 def _source(

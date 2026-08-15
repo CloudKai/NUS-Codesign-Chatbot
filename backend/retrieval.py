@@ -436,8 +436,29 @@ def _bigrams(text: str) -> set[tuple[str, str]]:
     return set(zip(values, values[1:]))
 
 
+def _clip_excerpt(cleaned: str, *, start: int, limit: int) -> str:
+    """Return one excerpt window that never exceeds ``limit`` characters.
+
+    Leading and trailing ellipses are included in the limit so the result can
+    be stored on ``RetrievalChunkReference.excerpt``.
+    """
+    prefix = "…" if start else ""
+    body = cleaned[start:]
+    if len(prefix) + len(body) <= limit:
+        return f"{prefix}{body}"
+    suffix = "…"
+    budget = limit - len(prefix) - len(suffix)
+    if budget <= 0:
+        return ("…" * limit)[:limit]
+    return f"{prefix}{body[:budget].rstrip()}{suffix}"
+
+
 def focused_excerpt(text: str, query: str, *, limit: int = 600) -> str:
-    """Return a bounded excerpt centered near the strongest query-term window."""
+    """Return a bounded excerpt centered near the strongest query-term window.
+
+    The returned string is always at most ``limit`` characters, including any
+    leading or trailing ellipses.
+    """
     cleaned = " ".join(str(text or "").split()).strip()
     if limit <= 0 or not cleaned:
         return ""
@@ -451,7 +472,7 @@ def focused_excerpt(text: str, query: str, *, limit: int = 600) -> str:
         if len(term) >= 3 and lowered.find(term) >= 0
     ]
     if not positions:
-        return cleaned[: max(1, limit - 1)].rstrip() + "…"
+        return _clip_excerpt(cleaned, start=0, limit=limit)
     best_start = 0
     best_score = -1
     for position in positions:
@@ -466,10 +487,7 @@ def focused_excerpt(text: str, query: str, *, limit: int = 600) -> str:
         boundary = cleaned.find(" ", best_start)
         if 0 <= boundary < best_start + 40:
             best_start = boundary + 1
-    excerpt = cleaned[best_start : best_start + limit].rstrip()
-    prefix = "…" if best_start else ""
-    suffix = "…" if best_start + limit < len(cleaned) else ""
-    return f"{prefix}{excerpt}{suffix}"
+    return _clip_excerpt(cleaned, start=best_start, limit=limit)
 
 
 def _normalized_excerpt(text: str, *, limit: int = 400) -> str:

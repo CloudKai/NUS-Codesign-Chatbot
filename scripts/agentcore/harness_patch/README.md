@@ -73,28 +73,35 @@ import json
 
 3. When `payload.get("output_contract") == "coach_turn"`, append trusted
    instructions to the JSON system prompt and invoke **only** the untrusted
-   user content (not the SSE event stream):
+   user content (not the SSE event stream). Keep JSON return and SSE `yield`
+   in **separate** functions. `invoke` itself must not `yield`, or Python
+   treats it as an async generator and `return json.loads(...)` is a
+   `SyntaxError` at import (runtime HTTP 502).
 
 ```python
-@app.entrypoint
-async def invoke(payload, context):
-    phase = payload.get("phase", phases.DEFAULT_PHASE)
-    topic = payload.get("topic")
-    if payload.get("output_contract") == "coach_turn":
-        system_prompt, prompt = coaching_invoke_prompts(payload)
-        agent = Agent(
-            model=load_model(),
-            system_prompt=system_prompt,
-            tools=[],
-            callback_handler=None,
-        )
-        result = await agent.invoke_async(prompt)
-        text = str(result).strip()
-        if text.startswith("```"):
-            raise ValueError("structured coaching output must be unfenced JSON")
-        return json.loads(text)
+async def _coach_turn_invoke(payload: dict) -> dict:
+    system_prompt, prompt = coaching_invoke_prompts(payload)
+    agent = Agent(
+        model=load_model(),
+        system_prompt=system_prompt,
+        tools=[],
+        callback_handler=None,
+    )
+    result = await agent.invoke_async(prompt)
+    text = str(result).strip()
+    if text.startswith("```"):
+        raise ValueError("structured coaching output must be unfenced JSON")
+    return json.loads(text)
+
+async def _stream_specialist_invoke(payload, context):
     # existing streaming Q&A / scoring path unchanged
     ...
+
+@app.entrypoint
+async def invoke(payload, context):
+    if isinstance(payload, dict) and payload.get("output_contract") == "coach_turn":
+        return await _coach_turn_invoke(payload)
+    return _stream_specialist_invoke(payload, context)
 ```
 
 4. Do not enable shell or file tools from any AgentCore export.
