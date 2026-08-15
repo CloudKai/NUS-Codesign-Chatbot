@@ -17,5 +17,6 @@ This is the terminal phase. Always return STAY; do not recommend advancing
 beyond Reflection.
 
 The optional holistic Facione candidate is permitted only here. It must be a
-provisional conversation-based research candidate, never a grade, and must cite
-student evidence from the conversation.
+provisional conversation-based research candidate, never a grade, never a
+psychometric assessment, and never equivalent to applying HCTSR to a completed
+project artifact. It must cite student evidence from the conversation.

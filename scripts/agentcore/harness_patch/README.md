@@ -22,13 +22,20 @@ The FastAPI app sends:
   "phase": "coaching",
   "topic": "problem_identification",
   "output_contract": "coach_turn",
-  "prompt": "<compose_coach_prompt text>"
+  "student_id": "cognito:<sub>",
+  "messages": [
+    {"role": "user", "content": [{"text": "<prior DSQL turn>"}]},
+    {"role": "assistant", "content": [{"text": "<prior coach reply>"}]},
+    {"role": "user", "content": [{"text": "<current-turn coaching brief>"}]}
+  ]
 }
 ```
 
-`deep_analysis` is sent as topic `ethics_critical` only. Thinking Path rows in
-DSQL stay `deep_analysis`. Invokes are **stateless** (fresh `runtimeSessionId`
-per turn). Do not attach notebook history to AgentCore session memory.
+The current-turn brief is `compose_coach_prompt(..., include_recent_messages=False)`.
+Prior DSQL turns live only in `messages`. `deep_analysis` is sent as topic
+`ethics_critical` only. Thinking Path rows in DSQL stay `deep_analysis`.
+Invokes are **stateless** (fresh `runtimeSessionId` per turn). Do not attach
+notebook history to AgentCore session memory.
 
 Coaching must keep **zero** Knowledge Base / MCP tools. Q&A may keep KB tools;
 do not give them to the coaching specialist.

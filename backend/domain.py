@@ -151,6 +151,7 @@ class RetrievalChunkReference(BaseModel):
     chunk_id: str
     excerpt: str = Field(default="", max_length=600)
     score: float = 0.0
+    retrieval_origin: str = ""
 
 
 class FacioneDimensionScores(BaseModel):

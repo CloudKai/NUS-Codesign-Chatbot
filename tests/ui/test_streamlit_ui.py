@@ -106,12 +106,12 @@ def test_streamlit_notebook_workspace_smoke():
     assert 'class="journey-short-label">Problem identification</span>' in rendered
     assert 'class="journey-short-label">Concept generation</span>' in rendered
     assert 'class="journey-short-label">Design specification</span>' in rendered
-    assert 'class="journey-short-label">Deep analysis</span>' in rendered
+    assert 'class="journey-short-label">Ethics &amp; Critical Thinking</span>' in rendered
     assert 'class="journey-short-label">Reflection</span>' in rendered
     assert 'class="journey-short-label">Problem</span>' not in rendered
     assert 'class="journey-short-label">Concepts</span>' not in rendered
     assert 'class="journey-short-label">Specification</span>' not in rendered
-    assert 'class="journey-short-label">Analysis</span>' not in rendered
+    assert 'class="journey-short-label">Ethics & CT</span>' not in rendered
     assert "Summary" in rendered
     assert "Critical thinking (Facione)" in rendered
     assert "Discussion summary" in rendered

@@ -25,9 +25,10 @@ Both paths support Thinking Path progression, structured assessments, Review
 personalization, and selected image grounding.
 
 The current research workflow uses five phases: **Problem identification**,
-**Concept generation**, **Design specification**, **Deep analysis**, and
-**Reflection**. Automated research coding is provisional and evidence-linked;
-it never grades the student or changes a phase by itself.
+**Concept generation**, **Design specification**, **Ethics & Critical Thinking**,
+and **Reflection**. The internal persisted id for Ethics & Critical Thinking
+remains `deep_analysis`. Automated research coding is provisional and
+evidence-linked; it never grades the student or changes a phase by itself.
 
 ---
 

@@ -11,9 +11,10 @@ Production coaching uses the AgentCore ``coaching`` specialist with
 runtime *topic* key maps ``deep_analysis`` to the POC ``ethics_critical``
 label. Invokes are stateless (a fresh ``runtimeSessionId`` per turn) so the
 runtime LRU cache is not a second transcript. Bounded DSQL history is sent as
-Converse ``messages`` (POC Memory equivalent) plus the composed current turn.
-``student_id`` is the store owner identifier, never a notebook id. This adapter
-does not call RetrieveAndGenerate.
+Converse ``messages`` (POC Memory equivalent). The composed current turn omits
+``<recent_messages>`` so those turns are not duplicated. ``student_id`` is the
+store owner identifier, never a notebook id. This adapter does not call
+RetrieveAndGenerate.
 """
 
 from __future__ import annotations
@@ -488,11 +489,14 @@ class AgentCoreCoachProvider:
         """Build the JSON payload for one coaching InvokeAgentRuntime call.
 
         Always sends Converse ``messages``: bounded DSQL history plus the
-        composed current turn. A top-level ``prompt`` string is never used, so
-        the live harness ``_extract_prompt`` takes the caller-supplied history
-        instead of AgentCore Memory.
+        composed current-turn brief. The brief omits ``<recent_messages>`` so
+        prior turns are not supplied twice. A top-level ``prompt`` string is
+        never used, so the live harness ``_extract_prompt`` takes the
+        caller-supplied history instead of AgentCore Memory.
         """
-        prompt = compose_coach_prompt(request).composed_text
+        prompt = compose_coach_prompt(
+            request, include_recent_messages=False
+        ).composed_text
         messages = _history_converse_messages(list(request.history))
         messages.append(
             {

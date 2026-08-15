@@ -701,6 +701,7 @@ class CoachApplicationService:
                     chunk_id=chunk.chunk_id,
                     excerpt=excerpt,
                     score=chunk.score,
+                    retrieval_origin=str(chunk.retrieval_origin or ""),
                 )
             )
         response_language = " ".join(

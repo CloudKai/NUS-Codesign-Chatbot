@@ -37,7 +37,7 @@ from .loader import load_shared_prompt, load_stage_prompt
 EMPTY_RETRIEVED_COURSE_CONTEXT = (
     "No retrieved source context was provided for this turn."
 )
-COACH_PROMPT_VERSION = "five-phase-research-v1"
+COACH_PROMPT_VERSION = "five-phase-research-v2"
 
 # Bound dynamic sections so composition never injects whole PDFs or unbounded history.
 # Retrieved context is capped economically for the temporary pre-Bedrock OpenAI
@@ -54,6 +54,11 @@ MAX_COMPOSED_PROMPT_CHARS = 200_000
 _EMPTY_PROJECT = "No student project context was provided for this turn."
 _EMPTY_SUMMARY = "No conversation summary was provided for this turn."
 _EMPTY_RECENT = "No recent messages were provided for this turn."
+_EMPTY_RECENT_SUPPLIED_AS_HISTORY = (
+    "Prior conversation turns were supplied separately as message history. "
+    "Use that history for continuity. This block is empty to avoid duplicating "
+    "the same turns."
+)
 _EMPTY_STUDENT = "(empty student message)"
 
 
@@ -72,6 +77,7 @@ class PromptContext(BaseModel):
     allow_model_knowledge: bool = False
     response_language: str = "English"
     image_note: str = ""
+    include_recent_messages: bool = True
 
 
 class PreparedCoachPrompt(BaseModel):
@@ -259,10 +265,14 @@ class PromptComposer:
             else EMPTY_RETRIEVED_COURSE_CONTEXT
         )
         summary = _clip(context.conversation_summary, MAX_CONVERSATION_SUMMARY_CHARS)
-        recent_limit = MAX_RECENT_MESSAGES
-        recent = _format_recent_messages(
-            list(context.recent_messages),
-            max_messages=recent_limit,
+        recent_limit = MAX_RECENT_MESSAGES if context.include_recent_messages else 0
+        recent = (
+            _format_recent_messages(
+                list(context.recent_messages),
+                max_messages=recent_limit,
+            )
+            if context.include_recent_messages
+            else _EMPTY_RECENT_SUPPLIED_AS_HISTORY
         )
 
         def build() -> str:
@@ -345,12 +355,19 @@ class PromptComposer:
         )
 
 
-def prompt_context_from_request(request: CoachRequest) -> PromptContext:
-    """Build ``PromptContext`` from a server-authoritative ``CoachRequest``.
+def prompt_context_from_request(
+    request: CoachRequest,
+    *,
+    include_recent_messages: bool = True,
+) -> PromptContext:
+    """Map one coach request onto composer inputs.
 
-    ``request.source_context`` maps to ``retrieved_course_context`` (current
-    query-ranked local retriever). Future KB retrieval replaces only how that
-    string and its audit references are produced before this helper runs.
+    ``request.source_context`` maps to ``retrieved_course_context`` (query-ranked
+    excerpts from the selected-source retriever). Knowledge Base Retrieve
+    replaces only how that string and its audit references are produced.
+
+    Set ``include_recent_messages=False`` when the provider already sends the
+    same bounded DSQL turns as conversation messages (AgentCore).
     """
     image_note = ""
     if request.image_inputs:
@@ -377,9 +394,19 @@ def prompt_context_from_request(request: CoachRequest) -> PromptContext:
         allow_model_knowledge=request.allow_model_knowledge,
         response_language=request.response_language,
         image_note=image_note,
+        include_recent_messages=include_recent_messages,
     )
 
 
-def compose_coach_prompt(request: CoachRequest) -> PreparedCoachPrompt:
+def compose_coach_prompt(
+    request: CoachRequest,
+    *,
+    include_recent_messages: bool = True,
+) -> PreparedCoachPrompt:
     """Compose the coaching prompt for one authoritative coach request."""
-    return PromptComposer().compose(prompt_context_from_request(request))
+    return PromptComposer().compose(
+        prompt_context_from_request(
+            request,
+            include_recent_messages=include_recent_messages,
+        )
+    )

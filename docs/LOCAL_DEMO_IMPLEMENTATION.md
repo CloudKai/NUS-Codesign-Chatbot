@@ -28,7 +28,9 @@ capabilities:
 - source-grounded conversation, stable citations, streaming, model selection,
   short/long response modes, and local persistence;
 - the five research-aligned phases: Problem identification, Concept generation,
-  Design specification, Deep analysis, and Reflection;
+  Design specification, Ethics & Critical Thinking, and Reflection
+  (internal persisted id for Ethics & Critical Thinking remains
+  `deep_analysis`);
 - prompt summaries, learning summaries, working conclusions, changes in
   understanding, and critical-understanding assessment.
 

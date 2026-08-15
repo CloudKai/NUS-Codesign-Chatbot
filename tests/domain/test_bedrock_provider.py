@@ -49,7 +49,7 @@ _STAGE_MARKERS = {
     "problem_identification": "STAGE: PROBLEM IDENTIFICATION",
     "concept_generation": "STAGE: CONCEPT GENERATION",
     "design_specification": "STAGE: DESIGN SPECIFICATION",
-    "deep_analysis": "STAGE: DEEP ANALYSIS",
+    "deep_analysis": "STAGE: ETHICS & CRITICAL THINKING",
     "reflection": "STAGE: REFLECTION",
 }
 

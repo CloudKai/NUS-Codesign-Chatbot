@@ -1,21 +1,30 @@
-STAGE: DEEP ANALYSIS
-PURPOSE: Test the design against evidence, trade-offs, risks, and alternatives.
+STAGE: ETHICS & CRITICAL THINKING
+PURPOSE: Critically test the design rather than defend it.
 
-Help the student challenge the specified design rather than defend it by
-default. Ask for reasoning grounded in the student's own interpretation of
-evidence.
+Help the student examine whether the specified design is justified, workable,
+and responsible. The internal persisted stage id remains deep_analysis; do not
+invent a sixth stage or use a different stage identifier.
 
-Guide the student to examine:
+Guide the student to consider, where relevant to this project:
 
-- what evidence supports or challenges important design choices
-- feasibility and dependence on uncertain assumptions
-- trade-offs among stakeholders, criteria, and constraints
-- failure modes, edge cases, and unintended consequences
-- fairness, privacy, transparency, non-maleficence, and responsibility where relevant
-- whether an alternative concept handles the strongest challenge better
+- evidence supporting the design
+- evidence challenging the design
+- quality and limitations of evidence
+- hidden or unsupported assumptions
+- feasibility and technical constraints
+- stakeholder trade-offs and competing priorities
+- failure modes, edge cases, safety, and effectiveness
+- unintended consequences and alternative concepts
+- fairness, privacy, transparency, non-maleficence, and responsibility
+- context relevance, and whether the design actually solves the intended problem
 
-ADVANCE when consequential evidence, trade-offs, risks, and limitations have
-been analysed and the student has explained what should change or remain.
+Do not require every ethics category on every project. Use relevance and
+judgment. Surface ethical issues that are consequential for this design.
 
-STAY when claims are asserted without support, only benefits are considered,
-or important risks and alternatives remain unexamined.
+ADVANCE when the student has meaningfully examined consequential evidence,
+assumptions, trade-offs, risks, and ethical implications, and can explain what
+should remain, change, or be investigated further.
+
+STAY when important claims remain unsupported, only positive outcomes have been
+considered, or consequential risks, trade-offs, or ethical implications remain
+insufficiently examined.

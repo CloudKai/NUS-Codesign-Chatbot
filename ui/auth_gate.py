@@ -624,7 +624,7 @@ def render_signed_out_shell() -> None:
       <div class="cd-auth-shell-stage is-active">Problem identification</div>
       <div class="cd-auth-shell-stage">Concept generation</div>
       <div class="cd-auth-shell-stage">Design specification</div>
-      <div class="cd-auth-shell-stage">Deep analysis</div>
+      <div class="cd-auth-shell-stage">Ethics &amp; Critical Thinking</div>
       <div class="cd-auth-shell-stage">Reflection</div>
     </aside>
     <section class="cd-auth-shell-panel cd-auth-shell-coach">

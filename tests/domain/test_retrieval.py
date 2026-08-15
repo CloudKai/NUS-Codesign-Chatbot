@@ -6,7 +6,12 @@ import pytest
 
 from backend.application import CoachApplicationService
 from backend.chat_service import ChatOptions, StudentChatEngine
-from backend.domain import CoachRequest, StageDecision
+from backend.domain import (
+    CitationReference,
+    CoachRequest,
+    ProviderAssessmentResult,
+    StageDecision,
+)
 from backend.learning_service import LearningProgressService
 from backend.mock_provider import DeterministicCoachProvider
 from backend.repositories import SQLiteNotebookRepository, SQLitePhaseTransitionRepository
@@ -16,9 +21,10 @@ from backend.retrieval import (
     RetrievalResult,
     RetrievalSource,
     RetrievedChunk,
+    course_material_id_from_object_key,
     retrieval_sources_from_notebook,
 )
-from backend.source_library import add_text_source
+from backend.source_library import add_file_sources, add_text_source, image_inputs_for_source_ids
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
 
@@ -389,3 +395,182 @@ def test_legacy_development_fallback_uses_same_local_retriever(tmp_path):
     assert "Unrelated crossing note" not in stream.retrieval_context
     user = store.get_messages(notebook)[-1]
     assert user["metadata"]["retrieval_refs"][0]["label"] == "S1"
+
+
+def test_course_material_id_is_stable_from_object_key():
+    assert (
+        course_material_id_from_object_key("course/lectureNotes/week_02_jtbd.pdf")
+        == "lecture_week_02_jtbd"
+    )
+    assert (
+        course_material_id_from_object_key("course/readings/pixar.pdf")
+        == "reading_pixar"
+    )
+
+
+def test_forged_citation_is_not_persisted(tmp_path):
+    store = StudentStore(tmp_path / "forged-citation.sqlite3")
+    notebook = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    selected = add_text_source(
+        store,
+        notebook,
+        "Selected battery study",
+        "Thermal battery evidence reports 18 percent capacity loss.",
+    )
+
+    class ForgedCitationProvider:
+        provider_id = "mock"
+
+        def model_id_for(self, request: CoachRequest) -> str:
+            del request
+            return "deterministic-v1"
+
+        def assess(self, request: CoachRequest) -> ProviderAssessmentResult:
+            inner = DeterministicCoachProvider(StageDecision.STAY)
+            result = inner.assess(request)
+            forged = CitationReference(
+                source_id="forged-source",
+                label="S99",
+                title="Invented source",
+                excerpt="This citation was not retrieved.",
+            )
+            assessment = result.assessment.model_copy(
+                update={"citations": [*result.assessment.citations, forged]}
+            )
+            return ProviderAssessmentResult(
+                response_text=f"{result.response_text} See [S99].",
+                assessment=assessment,
+                research_coding=result.research_coding,
+            )
+
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    service = CoachApplicationService(
+        store,
+        notebooks,
+        CoachWorkflow(ForgedCitationProvider(), transitions),
+        LearningProgressService(store, notebooks, transitions),
+    )
+    turn = service.submit(
+        CoachRequest(
+            thread_id=notebook,
+            student_message="What thermal battery evidence is available?",
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    )
+    assistant = store.get_messages(notebook)[-1]
+    source_ids = {item["id"] for item in assistant["metadata"]["source_refs"]}
+    labels = {item["label"] for item in assistant["metadata"]["source_refs"]}
+    assert selected["id"] in source_ids or "[S1]" in turn.response_text
+    assert "S99" not in labels
+    assert "forged-source" not in source_ids
+    assert all(citation.label != "S99" for citation in turn.assessment.citations)
+
+
+def test_cross_user_source_id_is_rejected_before_retrieval(tmp_path):
+    owner = StudentStore(tmp_path / "owner.sqlite3", identifier="student-a")
+    owner_notebook = owner.create_thread(
+        model_id="mock", support_mode="critical-thinking"
+    )
+    owner_source = add_text_source(
+        owner, owner_notebook, "Owner notes", "Owner-only crossing evidence."
+    )
+    stranger = StudentStore(tmp_path / "stranger.sqlite3", identifier="student-b")
+    stranger_notebook = stranger.create_thread(
+        model_id="mock", support_mode="critical-thinking"
+    )
+    add_text_source(
+        stranger, stranger_notebook, "Stranger notes", "SECRET_STRANGER_SOURCE"
+    )
+    assert stranger.get_source(owner_notebook, owner_source["id"]) is None
+    notebooks = SQLiteNotebookRepository(stranger)
+    transitions = SQLitePhaseTransitionRepository(stranger)
+    service = CoachApplicationService(
+        stranger,
+        notebooks,
+        CoachWorkflow(DeterministicCoachProvider(StageDecision.STAY), transitions),
+        LearningProgressService(stranger, notebooks, transitions),
+    )
+    with pytest.raises(ValueError, match="unknown"):
+        service.submit(
+            CoachRequest(
+                thread_id=stranger_notebook,
+                student_message="Use the other student's source.",
+                current_stage="problem_identification",
+                response_detail="short",
+                source_ids=[owner_source["id"]],
+            )
+        )
+    with pytest.raises(ValueError, match="Notebook not found"):
+        service.submit(
+            CoachRequest(
+                thread_id=owner_notebook,
+                student_message="Open someone else's notebook.",
+                current_stage="problem_identification",
+                response_detail="short",
+            )
+        )
+
+
+def test_foreign_image_is_not_supplied_as_coach_input(tmp_path, monkeypatch):
+    from backend import source_library
+
+    monkeypatch.setattr(source_library.settings, "files_dir", tmp_path / "files")
+    png = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f"
+        b"\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    owner = StudentStore(tmp_path / "img-owner.sqlite3", identifier="student-a")
+    owner_notebook = owner.create_thread(
+        model_id="mock", support_mode="critical-thinking"
+    )
+    created = add_file_sources(
+        owner,
+        owner_notebook,
+        [("diagram.png", png, "image/png")],
+    )
+    stranger = StudentStore(tmp_path / "img-stranger.sqlite3", identifier="student-b")
+    stranger_notebook = stranger.create_thread(
+        model_id="mock", support_mode="critical-thinking"
+    )
+    images = image_inputs_for_source_ids(
+        stranger,
+        stranger_notebook,
+        [created[0]["id"]],
+    )
+    assert images == []
+    owned = image_inputs_for_source_ids(
+        owner,
+        owner_notebook,
+        [created[0]["id"]],
+    )
+    assert len(owned) == 1
+    assert owned[0]["source_id"] == created[0]["id"]
+
+
+def test_research_coding_does_not_advance_stage(tmp_path):
+    store = StudentStore(tmp_path / "research-independence.sqlite3")
+    notebook = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    service = CoachApplicationService(
+        store,
+        notebooks,
+        CoachWorkflow(DeterministicCoachProvider(StageDecision.STAY), transitions),
+        LearningProgressService(store, notebooks, transitions),
+        auto_advance_stages=True,
+    )
+    turn = service.submit(
+        CoachRequest(
+            thread_id=notebook,
+            student_message="I compared privacy and fairness before choosing the design.",
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    )
+    assert turn.pending_transition is None
+    progress = store.get_thread(notebook)["metadata"]["learning_journey"]
+    assert progress["current_stage"] == "problem_identification"
+    assert turn.assessment.recommendation is StageDecision.STAY

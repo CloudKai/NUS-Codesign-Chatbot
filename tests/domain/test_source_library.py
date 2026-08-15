@@ -566,6 +566,10 @@ def test_shared_course_sync_references_course_keys_not_user_copies(tmp_path, mon
         "course/readings/reading-01.txt",
     }
     assert all(item["metadata"]["shared_course_object"] is True for item in sources)
+    assert {item["metadata"]["course_material_id"] for item in sources} == {
+        "lecture_week_01",
+        "reading_reading_01",
+    }
     assert all(item["metadata"]["origin"] == "lecture_notes_folder" for item in sources)
     assert [key for key in memory._objects if "/raw/" in key] == []
     derived = [key for key in memory._objects if key.startswith("users/") and "/derived/" in key]

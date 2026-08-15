@@ -1,6 +1,66 @@
 # Implementation status
 
-## Current phase — POC-style DSQL history messages + selected-source KB Retrieve
+## Current phase — Ethics & CT integration, KB metadata filter, history de-dup
+
+**Completed locally on 2026-08-15.** Integrate-Bedrock remains the product.
+AgentCore is still a stateless reasoning adapter. Course Retrieve can send a
+`course_material_id` metadata filter and still post-validates object keys.
+AgentCore no longer duplicates DSQL history inside `<recent_messages>`. The
+student-facing fourth stage is **Ethics & Critical Thinking** (persisted id
+`deep_analysis`). Shared prompts now include the silent Socratic scaffold,
+Assumption Check, and V&V lens. Co-occurrence is professor-only post-hoc
+analytics.
+
+### Behavior delivered
+
+1. `compose_coach_prompt(..., include_recent_messages=False)` for AgentCore.
+   Bounded DSQL turns travel as Converse `messages` only.
+2. `BedrockKnowledgeBaseRetriever` filters by `course_material_id` when ids
+   exist, retries without the filter if empty, then drops unselected keys.
+3. Student-facing label for `deep_analysis` is Ethics & Critical Thinking /
+   Ethics & CT. No sixth `ethics_critical` application stage.
+4. Shared coaching prompt: Interpret → Assumption/V&V check → one probe →
+   reflection trigger; untrusted-evidence rules strengthened.
+5. Professor research summary includes read-only co-occurrence / co-absence.
+   Research codes still do not advance stages or drive coaching.
+
+### Main files changed
+
+- Prompts/journey: `backend/prompts/shared/coaching.md`,
+  `backend/prompts/stages/deep_analysis.md`, `backend/learning/stages.py`,
+  `backend/prompts/composer.py`, `backend/agentcore_provider.py`
+- Retrieval: `backend/retrieval.py`, `backend/bedrock_retrieve.py`,
+  `backend/sources/library.py`, `backend/coaching/execution.py`
+- Research/UI: `backend/professor_analytics/research.py`, `ui/professor.py`,
+  `ui/auth_gate.py`
+- Docs: `docs/RAG_ARCHITECTURE.md`, `docs/SECURITY_BOUNDARIES.md`,
+  `docs/PROMPT_ARCHITECTURE.md`, `docs/providers/AGENTCORE_ADAPTER.md`,
+  `docs/research/METHODOLOGY.md`
+
+### Validation evidence
+
+- Full deterministic suite: **558 passed, 0 failed**. Existing Starlette/httpx
+  deprecation warnings. No live AWS or paid OpenAI call from pytest.
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
+  passed.
+
+### Compatibility, migration, and rollback
+
+- No database migration. Internal stage id remains `deep_analysis`.
+- Knowledge Base metadata `course_material_id` is recommended; without it the
+  adapter falls back to unfiltered Retrieve plus object-key validation.
+- Harness patch system prompt changed; redeploy DEFAULT if that overlay is
+  used. Rollback is reverting this working tree.
+
+### Known risks and next exact action
+
+- Live AgentCore still streams prose until the harness patch is on DEFAULT
+  READY. KB metadata filter is ineffective until course objects are
+  re-ingested with `course_material_id`.
+- Next: optional approved live smoke after harness JSON cutover. Do not
+  commit/push/deploy from this phase unless asked.
+
+## Previous completed phase — POC-style DSQL history messages + selected-source KB Retrieve
 
 **Completed locally on 2026-08-15.** AgentCore invokes send bounded DSQL
 history as Converse `messages` (POC Memory equivalent) while remaining

@@ -770,6 +770,23 @@ def _render_research(client: Any) -> None:
             "Mean evidence confidence",
             "Not available" if confidence is None else f"{float(confidence):.2f}",
         )
+    st.caption(str(summary.get("co_occurrence_note") or ""))
+    with st.expander("Post-hoc co-occurrence (not a grade)", expanded=False):
+        pairs = summary.get("co_occurrence") or []
+        if not pairs:
+            st.caption("No co-occurrence counts are available yet.")
+        else:
+            st.dataframe(
+                [
+                    {
+                        "Pair": f"{item.get('left')} × {item.get('right')}",
+                        "Count": item.get("count", 0),
+                    }
+                    for item in pairs[:12]
+                ],
+                hide_index=True,
+                use_container_width=True,
+            )
 
     filters = st.columns([1.4, 1, 1, 0.8], gap="small")
     with filters[0]:

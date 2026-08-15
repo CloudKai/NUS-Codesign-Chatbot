@@ -26,10 +26,12 @@ class FakeRetrieveClient:
         self,
         *,
         results: list[dict[str, Any]] | None = None,
+        results_sequence: list[list[dict[str, Any]]] | None = None,
         error: BaseException | None = None,
     ) -> None:
         self.calls: list[dict[str, Any]] = []
         self._results = results or []
+        self._results_sequence = results_sequence
         self._error = error
 
     def retrieve(self, **kwargs: Any) -> dict[str, Any]:
@@ -37,6 +39,9 @@ class FakeRetrieveClient:
         self.calls.append(kwargs)
         if self._error is not None:
             raise self._error
+        if self._results_sequence is not None:
+            index = min(len(self.calls) - 1, len(self._results_sequence) - 1)
+            return {"retrievalResults": list(self._results_sequence[index])}
         return {"retrievalResults": list(self._results)}
 
 
@@ -228,3 +233,124 @@ def test_configured_retriever_uses_composite_when_live_provider(
     monkeypatch.setattr(settings, "course_materials_bucket", "cde2300-course-content-s3")
     retriever = configured_context_retriever(client=FakeRetrieveClient(results=[]))
     assert isinstance(retriever, CompositeContextRetriever)
+
+
+def test_retrieve_sends_course_material_id_metadata_filter():
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                "s3://cde2300-course-content-s3/course/lectureNotes/crossing.pdf",
+                "Selected lecture excerpt.",
+            )
+        ]
+    )
+    result = BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="cde2300-course-content-s3",
+        client=client,
+    ).retrieve(
+        _query(
+            _course_source(
+                "src-lecture",
+                "S1",
+                object_key="course/lectureNotes/crossing.pdf",
+            )
+        )
+    )
+    assert len(client.calls) == 1
+    vector = client.calls[0]["retrievalConfiguration"]["vectorSearchConfiguration"]
+    assert vector["filter"] == {
+        "equals": {"key": "course_material_id", "value": "lecture_crossing"}
+    }
+    assert result.chunks[0].retrieval_origin == "knowledge_base"
+
+
+def test_retrieve_falls_back_without_filter_then_post_validates():
+    client = FakeRetrieveClient(
+        results_sequence=[
+            [],
+            [
+                _hit(
+                    "s3://cde2300-course-content-s3/course/readings/unselected.pdf",
+                    "Unselected reading excerpt.",
+                ),
+                _hit(
+                    "s3://cde2300-course-content-s3/course/lectureNotes/crossing.pdf",
+                    "Selected lecture excerpt after fallback.",
+                ),
+            ],
+        ]
+    )
+    result = BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="cde2300-course-content-s3",
+        client=client,
+    ).retrieve(
+        _query(
+            _course_source(
+                "src-lecture",
+                "S1",
+                object_key="course/lectureNotes/crossing.pdf",
+            )
+        )
+    )
+    assert len(client.calls) == 2
+    first_filter = client.calls[0]["retrievalConfiguration"]["vectorSearchConfiguration"]
+    second_filter = client.calls[1]["retrievalConfiguration"]["vectorSearchConfiguration"]
+    assert "filter" in first_filter
+    assert "filter" not in second_filter
+    assert [chunk.text for chunk in result.chunks] == [
+        "Selected lecture excerpt after fallback."
+    ]
+    assert "Unselected reading" not in result.context
+
+
+def test_composite_course_only_does_not_require_student_retriever():
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                "s3://cde2300-course-content-s3/course/lectureNotes/crossing.pdf",
+                "KB lecture excerpt about signal timing.",
+            )
+        ]
+    )
+    retriever = CompositeContextRetriever(
+        knowledge_base=BedrockKnowledgeBaseRetriever(
+            "JUQNP8AZAZ",
+            course_bucket="cde2300-course-content-s3",
+            client=client,
+        ),
+        local=LocalChunkRetriever(chunk_chars=500, overlap_chars=80, max_chunks=3),
+    )
+    result = retriever.retrieve(
+        _query(
+            _course_source(
+                "src-lecture",
+                "S1",
+                object_key="course/lectureNotes/crossing.pdf",
+            )
+        )
+    )
+    assert len(client.calls) == 1
+    assert [chunk.label for chunk in result.chunks] == ["S1"]
+    assert "school gate" not in result.context
+    assert result.chunks[0].retrieval_origin == "knowledge_base"
+
+
+def test_composite_student_only_does_not_call_knowledge_base():
+    client = FakeRetrieveClient(results=[_hit("s3://unused/course/x.pdf", "secret")])
+    retriever = CompositeContextRetriever(
+        knowledge_base=BedrockKnowledgeBaseRetriever(
+            "JUQNP8AZAZ",
+            course_bucket="cde2300-course-content-s3",
+            client=client,
+        ),
+        local=LocalChunkRetriever(chunk_chars=500, overlap_chars=80, max_chunks=3),
+    )
+    result = retriever.retrieve(_query(_upload_source()))
+    assert client.calls == []
+    assert [chunk.label for chunk in result.chunks] == ["S2"]
+    assert all(chunk.retrieval_origin == "extracted_text" for chunk in result.chunks)
+    assert "school gate" in result.context
+    assert "secret" not in result.context
+

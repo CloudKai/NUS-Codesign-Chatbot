@@ -151,7 +151,7 @@ def test_professor_students_renders_missing_score_and_filters(monkeypatch):
         "Problem Identification",
         "Concept Generation",
         "Design Specification",
-        "Deep Analysis",
+        "Ethics & Critical Thinking",
         "Reflection",
     )
     assert "/ 6" not in Path("ui/professor.py").read_text(encoding="utf-8")

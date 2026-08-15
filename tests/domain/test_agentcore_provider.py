@@ -48,7 +48,7 @@ _STAGE_MARKERS = {
     "problem_identification": "STAGE: PROBLEM IDENTIFICATION",
     "concept_generation": "STAGE: CONCEPT GENERATION",
     "design_specification": "STAGE: DESIGN SPECIFICATION",
-    "deep_analysis": "STAGE: DEEP ANALYSIS",
+    "deep_analysis": "STAGE: ETHICS & CRITICAL THINKING",
     "reflection": "STAGE: REFLECTION",
 }
 
@@ -231,7 +231,9 @@ def test_valid_structured_coaching_and_research_coding():
     assert payload["topic"] == "problem_identification"
     assert payload["output_contract"] == "coach_turn"
     assert "prompt" not in payload
-    assert _current_turn_text(payload) == compose_coach_prompt(_request()).composed_text
+    assert _current_turn_text(payload) == compose_coach_prompt(
+        _request(), include_recent_messages=False
+    ).composed_text
     assert _STAGE_MARKERS["problem_identification"] in _current_turn_text(payload)
     assert "RetrieveAndGenerate" not in json.dumps(payload)
 
@@ -307,6 +309,11 @@ def test_agentcore_payload_sends_bounded_history_and_owner_student_id():
     assert len(prior) == 6
     assert prior[0]["content"][0]["text"] == "Earlier student turn 3."
     assert prior[-1]["role"] == "assistant"
+    current_text = messages[-1]["content"][0]["text"]
+    assert "Earlier student turn 3." not in current_text
+    assert "Earlier coach reply." not in current_text
+    assert "<recent_messages>" in current_text
+    assert "supplied separately as message history" in current_text
 
 
 def test_application_path_stamps_store_identifier_as_student_id(tmp_path):
@@ -324,6 +331,9 @@ def test_application_path_stamps_store_identifier_as_student_id(tmp_path):
     prior = payload["messages"][:-1]
     assert prior[0]["content"][0]["text"] == "I framed the crossing problem."
     assert prior[1]["content"][0]["text"] == "Who is affected at night?"
+    current_text = payload["messages"][-1]["content"][0]["text"]
+    assert "I framed the crossing problem." not in current_text
+    assert "Who is affected at night?" not in current_text
 
 
 def test_valid_agentcore_turn_persists_only_in_student_store(tmp_path):
@@ -404,7 +414,8 @@ def test_images_are_mapped_into_runtime_messages():
     assert "prompt" not in payload
     content = payload["messages"][-1]["content"]
     assert content[0]["text"] == compose_coach_prompt(
-        _request(image_inputs=[image])
+        _request(image_inputs=[image]),
+        include_recent_messages=False,
     ).composed_text
     assert content[1]["image"]["format"] == "png"
     assert content[1]["image"]["source"]["bytes"] == _TINY_PNG
@@ -451,6 +462,16 @@ def test_markdown_fences_are_not_parsed_as_structured_output():
     client = FakeAgentCoreRuntime(raw=fenced.encode("utf-8"))
     with pytest.raises(ProviderUnavailableError, match="malformed"):
         _provider(client).assess(_request())
+
+
+def test_plain_prose_agentcore_output_is_rejected_without_persistence(tmp_path):
+    store = StudentStore(tmp_path / "agentcore-prose.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = FakeAgentCoreRuntime(raw=b"Here is coaching without a JSON object.")
+    with pytest.raises(ProviderUnavailableError, match="malformed"):
+        _service(store, _provider(client)).submit(_request(thread_id=thread_id))
+    assert all(item["role"] != "assistant" for item in store.get_messages(thread_id))
+    assert store.list_research_observations(notebook_id=thread_id) == []
 
 
 def test_configured_coach_provider_selects_agentcore(monkeypatch: pytest.MonkeyPatch):

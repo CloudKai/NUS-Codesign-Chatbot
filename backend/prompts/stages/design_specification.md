@@ -14,7 +14,7 @@ Guide the student to state:
 - relevant fairness, privacy, transparency, non-maleficence, or responsibility considerations
 
 ADVANCE when the core behavior, important requirements, constraints, and
-success criteria are explicit enough for deep analysis.
+success criteria are explicit enough for Ethics & Critical Thinking.
 
 STAY when the design remains an aspiration, key behavior is ambiguous, or
 there is no basis for evaluating success.

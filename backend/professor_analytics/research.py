@@ -69,6 +69,23 @@ class ResearchRepository(Protocol):
         """Persist an attributable access audit or raise."""
 
 
+class CoOccurrencePair(BaseModel):
+    """One post-hoc count of two research codes appearing on the same utterance."""
+
+    left: str
+    right: str
+    count: int
+
+
+class CoAbsenceItem(BaseModel):
+    """How often an expected code family was not observed on coded utterances."""
+
+    code: str
+    family: str
+    observations_without: int
+    active_coded: int
+
+
 class ResearchSummaryResponse(BaseModel):
     """Aggregate-only research coding summary."""
 
@@ -77,6 +94,13 @@ class ResearchSummaryResponse(BaseModel):
     coding_status: dict[str, int] = Field(default_factory=dict)
     phases: dict[str, int] = Field(default_factory=dict)
     mean_confidence: float | None = None
+    co_occurrence: list[CoOccurrencePair] = Field(default_factory=list)
+    co_absence: list[CoAbsenceItem] = Field(default_factory=list)
+    co_occurrence_note: str = (
+        "Co-occurrence and co-absence are post-hoc counts of provisional "
+        "research codes. They are not grades, ability measures, coaching "
+        "rules, or evidence that a student lacks a skill."
+    )
 
 
 class ResearchQueueItem(BaseModel):
@@ -175,6 +199,105 @@ def _codes(data: dict[str, Any], *names: str) -> list[Any]:
     return list(value) if isinstance(value, (list, tuple)) else []
 
 
+_HIGHLIGHT_PAIRS = (
+    ("logical", "evaluation"),
+    ("reflective", "self_regulation"),
+    ("explicit", "analysis"),
+    ("ethics", "evaluation"),
+)
+
+
+def _observation_code_set(row: dict[str, Any]) -> set[str]:
+    """Return the observational codes present on one research record."""
+    codes: set[str] = set()
+    clear = _field(row, "dominant_clear", "clear_strategy")
+    if clear:
+        codes.add(str(clear).strip().lower())
+    for item in _codes(row, "facione_behaviors", "facione_codes"):
+        codes.add(str(item).strip().lower())
+    ethics = _codes(row, "ethics_concepts", "ethics_codes")
+    for item in ethics:
+        codes.add(str(item).strip().lower())
+    if ethics:
+        codes.add("ethics")
+    return {item for item in codes if item}
+
+
+def _posthoc_code_patterns(
+    rows: list[dict[str, Any]],
+) -> tuple[list[CoOccurrencePair], list[CoAbsenceItem]]:
+    """Count co-occurrence and co-absence from persisted observations only.
+
+    This function is read-only analytics. It must never be used to change
+    coaching, stage progression, or student grades.
+    """
+    pair_counts: Counter[tuple[str, str]] = Counter()
+    for row in rows:
+        present = sorted(_observation_code_set(row))
+        for index, left in enumerate(present):
+            for right in present[index + 1 :]:
+                pair_counts[(left, right)] += 1
+    highlighted: list[CoOccurrencePair] = []
+    seen: set[tuple[str, str]] = set()
+    for left, right in _HIGHLIGHT_PAIRS:
+        key = tuple(sorted((left, right)))
+        seen.add(key)
+        highlighted.append(
+            CoOccurrencePair(
+                left=key[0],
+                right=key[1],
+                count=int(pair_counts.get(key, 0)),
+            )
+        )
+    extras = [
+        CoOccurrencePair(left=left, right=right, count=count)
+        for (left, right), count in pair_counts.most_common()
+        if (left, right) not in seen and count > 0
+    ]
+    co_occurrence = highlighted + extras[:8]
+    coded = [
+        row
+        for row in rows
+        if str(_field(row, "coding_status", "status", default="uncoded")) == "coded"
+    ]
+    coded_count = len(coded)
+    absences: list[CoAbsenceItem] = []
+    for family, members in (
+        (
+            "facione",
+            (
+                "analysis",
+                "interpretation",
+                "inference",
+                "evaluation",
+                "explanation",
+                "self_regulation",
+            ),
+        ),
+        (
+            "ethics",
+            (
+                "fairness",
+                "privacy",
+                "transparency",
+                "non_maleficence",
+                "responsibility",
+            ),
+        ),
+    ):
+        for code in members:
+            without = sum(1 for row in coded if code not in _observation_code_set(row))
+            absences.append(
+                CoAbsenceItem(
+                    code=code,
+                    family=family,
+                    observations_without=without,
+                    active_coded=coded_count,
+                )
+            )
+    return co_occurrence, absences
+
+
 def _safe_csv_cell(value: Any) -> str:
     """Prevent spreadsheet formula execution while preserving exported text."""
     text = "" if value is None else str(value)
@@ -210,6 +333,7 @@ class ProfessorResearchService:
             for row in active
             if (value := self._observation_confidence(row)) is not None
         ]
+        co_occurrence, co_absence = _posthoc_code_patterns(active)
         return ResearchSummaryResponse(
             total_observations=len(rows),
             active_observations=len(active),
@@ -218,6 +342,8 @@ class ProfessorResearchService:
             mean_confidence=(
                 round(sum(confidence) / len(confidence), 3) if confidence else None
             ),
+            co_occurrence=co_occurrence,
+            co_absence=co_absence,
         )
 
     def queue(

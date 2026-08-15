@@ -270,9 +270,16 @@ def test_research_api_requires_persisted_staff_role_and_sanitizes_audit_failure(
         cookies={cookie: oidc.token("learner")},
     ).status_code == 403
     staff_cookie = {cookie: oidc.token("staff")}
-    assert client.get(
+    summary = client.get(
         "/api/v1/professor/research/summary", cookies=staff_cookie
-    ).status_code == 200
+    )
+    assert summary.status_code == 200
+    summary_body = summary.json()
+    assert "not grades" in summary_body["co_occurrence_note"]
+    assert any(
+        item["left"] == "analysis" and item["right"] == "explicit"
+        for item in summary_body["co_occurrence"]
+    )
     queue = client.get(
         "/api/v1/professor/research/queue?limit=1", cookies=staff_cookie
     )

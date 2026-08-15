@@ -29,6 +29,7 @@ from ..file_processing import (
     extract_text,
     save_uploads,
 )
+from ..retrieval import course_material_id_from_object_key
 from ..settings import settings
 from ..student_store import StudentStore
 from .context import selected_source_context as _selected_source_context
@@ -656,6 +657,8 @@ def _sync_shared_course_materials(
             and current_metadata.get("locked_source") is True
             and current_metadata.get("shared_course_object") is True
             and current_metadata.get("object_key") == item.object_key
+            and current_metadata.get("course_material_id")
+            == course_material_id_from_object_key(item.object_key)
             and current.get("title") == item.filename
         ):
             unchanged += 1
@@ -688,6 +691,9 @@ def _sync_shared_course_materials(
                     "storage_provider": storage_provider,
                     "object_key": item.object_key,
                     "shared_course_object": True,
+                    "course_material_id": course_material_id_from_object_key(
+                        item.object_key
+                    ),
                 },
             )
         except (OSError, ValueError) as exc:
@@ -786,6 +792,8 @@ def _sync_lecture_notes_folder(
             current_metadata.get("lecture_note_signature") == signature
             and current_metadata.get("course_material_group") == material_group
             and current_metadata.get("locked_source") is True
+            and current_metadata.get("course_material_id")
+            == course_material_id_from_object_key(f"course/{relative_text}")
             and current.get("title") == path.name
         ):
             unchanged += 1
@@ -802,6 +810,9 @@ def _sync_lecture_notes_folder(
                     "lecture_note_signature": signature,
                     "course_material_group": material_group,
                     "locked_source": True,
+                    "course_material_id": course_material_id_from_object_key(
+                        f"course/{relative_text}"
+                    ),
                 },
                 max_file_size_mb=settings.max_course_material_size_mb,
                 preserve_display_names=True,

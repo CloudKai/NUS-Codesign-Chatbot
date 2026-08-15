@@ -100,8 +100,8 @@ _STAGE_GUIDANCE: dict[str, tuple[str, str, str]] = {
     ),
     "deep_analysis": (
         "What evidence most strongly supports or challenges the design?",
-        "Which trade-off, risk, or unintended consequence matters most?",
-        "How would the design perform under a difficult but plausible scenario?",
+        "Which assumption, trade-off, risk, or ethical implication matters most?",
+        "What should remain, change, or be investigated further, and why?",
     ),
     "reflection": (
         "How has your design reasoning changed through this process?",
@@ -233,7 +233,7 @@ def personalized_stage_questions(
     if stage_id == "deep_analysis":
         subject = "older adults, caregivers, and road users" if older_adult_topic else "the affected groups"
         return (
-            f"Which trade-off or risk could affect {subject} most?",
+            f"Which trade-off, risk, or ethical implication could affect {subject} most?",
             f"What does {evidence_reference} support, and what important limitation remains?",
         )
     if stage_id == "reflection":

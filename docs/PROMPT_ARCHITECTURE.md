@@ -69,15 +69,23 @@ The composer orders and delimits these sections:
 2. the one authoritative Thinking Path stage prompt;
 3. student project context;
 4. retrieved source excerpts;
-5. bounded learning summary and recent conversation;
+5. bounded learning summary and, unless the provider already sends DSQL
+   history as conversation messages, recent conversation;
 6. the current student message;
 7. runtime rules for language, detail, grounding, citations, and structured
    assessment.
 
 Retrieved content is explicitly untrusted evidence. It cannot override shared,
-stage, or runtime instructions. The grounding rules require claim-level `[S#]`
-citations, prohibit invented sources/quotes, and tell the coach to identify an
-evidence gap when the retrieved excerpts do not answer the question.
+stage, authorization, workflow, or runtime instructions. The shared prompt
+includes an internal Interpret → Assumption/V&V check → one Socratic probe →
+reflection trigger. Those headings are not student-facing. Grounding rules
+require claim-level `[S#]` citations, prohibit invented sources/quotes, and
+tell the coach to identify an evidence gap when the retrieved excerpts do not
+answer the question.
+
+AgentCore omits `<recent_messages>` from the composed brief because the same
+bounded turns are already Converse `messages`. Mock, OpenAI, and Bedrock
+Converse keep the inline recent-history block.
 
 ## Production Knowledge Base path
 
@@ -104,9 +112,12 @@ configured generation provider (AgentCore Runtime, or Bedrock/OpenAI fallback)
 `CoachApplicationService` when `KNOWLEDGE_BASE_ID` is set and the provider is
 not mock. It:
 
-- filters retrieval by the selected source IDs already loaded for the notebook;
+- filters retrieval by selected source IDs already loaded for the notebook;
+- sends a `course_material_id` Knowledge Base metadata filter when ids exist,
+  then retries without the filter if that returns no hits (compatibility until
+  the KB is re-ingested with metadata);
 - maps S3 locations onto locked course `object_key` values and `[S#]` labels;
-- returns bounded `RetrievedChunk` values;
+- returns bounded `RetrievedChunk` values with `retrieval_origin`;
 - uses Knowledge Base `Retrieve`, then feeds the existing composer/workflow, so
   stage decisions and persistence do not move into `RetrieveAndGenerate`;
 - drops results whose S3 keys are outside the selected notebook sources.
@@ -118,8 +129,8 @@ cannot introduce another notebook's chunk.
 
 | Path | Role |
 |---|---|
-| `backend/prompts/shared/coaching.md` | Shared Socratic coach behaviour |
-| `backend/prompts/stages/{focus,evidence,assumptions,perspectives,synthesis,conclusion}.md` | Stage purpose, coaching strategy, advance/stay criteria |
+| `backend/prompts/shared/coaching.md` | Shared Socratic coach behaviour, Assumption Check, V&V |
+| `backend/prompts/stages/{problem_identification,concept_generation,design_specification,deep_analysis,reflection}.md` | Stage purpose, coaching strategy, advance/stay criteria. `deep_analysis.md` is student-facing Ethics & Critical Thinking |
 | `backend/prompts/loader.py` | UTF-8 load + in-process cache; stage IDs from `STAGE_BY_ID` |
 | `backend/prompts/composer.py` | Ordered composition with explicit delimiters |
 | `backend/retrieval.py` | Retrieval port, local chunker/ranker, composite splitter |

@@ -95,11 +95,22 @@ transcript or source content.
 
 ## How coding may affect coaching
 
-Research codes do not award Facione points, complete a phase, or force a stage
-transition. The coach can use an evidence gap as one input when choosing its
-next Socratic question, but the current phase outcome remains authoritative.
-Quick and Strict keep their existing progression semantics and separate
-cumulative Facione profiles.
+Research codes do not award Facione points, complete a phase, force a stage
+transition, grade the student, or mandate a coaching move that manufactures
+the behaviour being measured. The coach may adapt from the current stage, the
+student's reasoning, evidence gaps, assumptions, V&V concerns, project
+context, and relevant ethical issues. Provisional CLEAR / Facione / ethics
+labels themselves are observational only.
+
+## Co-occurrence and co-absence
+
+CLEAR × Facione (and ethics) co-occurrence, and co-absence of codes, are
+computed only as read-only professor/research summary analytics from persisted
+observations. They are not used in the live coaching loop, are not grades, and
+must not be read as proof that a student lacks a skill.
+
+Absence of Inference, Explanation, or an ethics concept on coded utterances is
+an aggregate pattern, not an ability diagnosis.
 
 ## Sources and adaptations
 

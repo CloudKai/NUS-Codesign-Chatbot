@@ -67,9 +67,14 @@ def _parse_time(value: Any) -> datetime | None:
 
 
 def _label(stage: str | None) -> str | None:
-    """Render an authoritative stage id as a calm human label."""
+    """Render an authoritative stage id as the student-facing label."""
     if not stage:
         return None
+    from backend.learning.stages import STAGE_BY_ID
+
+    spec = STAGE_BY_ID.get(str(stage))
+    if spec is not None:
+        return spec.label
     return str(stage).replace("_", " ").title()
 
 

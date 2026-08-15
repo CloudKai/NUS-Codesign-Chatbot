@@ -40,10 +40,10 @@ THINKING_STAGES: tuple[ThinkingStage, ...] = (
     ),
     ThinkingStage(
         "deep_analysis",
-        "Deep analysis",
-        "Analysis",
-        "Test the specified design against evidence, trade-offs, risks, and alternatives.",
-        "What evidence, trade-off, or risk most challenges the current design?",
+        "Ethics & Critical Thinking",
+        "Ethics & CT",
+        "Critically test the design against evidence, assumptions, trade-offs, risks, and ethical implications.",
+        "What evidence, assumption, trade-off, or ethical implication most challenges the current design?",
     ),
     ThinkingStage(
         "reflection",

@@ -24,6 +24,20 @@ def test_default_journey_uses_strict_coaching_style():
     assert normalize_journey({"response_detail": "unknown"})["response_detail"] == "long"
 
 
+def test_thinking_path_keeps_five_stages_and_ethics_critical_thinking_label():
+    assert [stage.id for stage in THINKING_STAGES] == [
+        "problem_identification",
+        "concept_generation",
+        "design_specification",
+        "deep_analysis",
+        "reflection",
+    ]
+    assert "ethics_critical" not in {stage.id for stage in THINKING_STAGES}
+    ethics = next(stage for stage in THINKING_STAGES if stage.id == "deep_analysis")
+    assert ethics.label == "Ethics & Critical Thinking"
+    assert ethics.short_label == "Ethics & CT"
+
+
 def test_journey_advances_through_all_critical_thinking_stages():
     journey = default_journey()
     assert current_stage(journey).id == "problem_identification"
@@ -81,7 +95,7 @@ def test_journey_normalization_and_short_long_learning_reviews():
         "self_regulation": 0,
     }
     assert long_review["stage_notes"] == [
-        {"stage": "Deep analysis", "note": "The sample is small."}
+        {"stage": "Ethics & Critical Thinking", "note": "The sample is small."}
     ]
     assert "plausible" in long_review["conclusion"]
     assert "correlation" in long_review["critical_reflection"]

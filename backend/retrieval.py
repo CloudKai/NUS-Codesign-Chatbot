@@ -90,6 +90,7 @@ class RetrievalSource:
     url: str | None = None
     group: str | None = None
     object_key: str | None = None
+    course_material_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,7 @@ class RetrievedChunk:
     chunk_index: int
     url: str | None = None
     group: str | None = None
+    retrieval_origin: str = "extracted_text"
 
 
 @dataclass(frozen=True)
@@ -136,6 +138,38 @@ class ContextRetriever(Protocol):
 
 
 _COURSE_MATERIAL_GROUPS = frozenset({"lecturenotes", "readings"})
+_COURSE_MATERIAL_ID_SAFE = re.compile(r"[^a-z0-9]+")
+
+
+def course_material_id_from_object_key(object_key: str) -> str:
+    """Return a stable application-owned course-material id from an object key.
+
+    Examples::
+
+        course/lectureNotes/week_02_jtbd.pdf -> lecture_week_02_jtbd
+        course/readings/pixar.pdf -> reading_pixar
+
+    The identifier is used as Bedrock Knowledge Base metadata
+    ``course_material_id`` when present. Post-retrieval source/object
+    validation remains mandatory.
+    """
+    key = str(object_key or "").strip().lstrip("/")
+    if not key:
+        return ""
+    parts = [part for part in key.replace("\\", "/").split("/") if part]
+    filename = parts[-1]
+    stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+    slug = _COURSE_MATERIAL_ID_SAFE.sub("_", stem.casefold()).strip("_")
+    folder = ""
+    if len(parts) >= 2:
+        folder = parts[1].replace(" ", "").replace("_", "").casefold()
+    if folder == "lecturenotes":
+        prefix = "lecture"
+    elif folder == "readings":
+        prefix = "reading"
+    else:
+        prefix = "course"
+    return f"{prefix}_{slug}" if slug else prefix
 
 
 def is_course_retrieval_source(source: RetrievalSource) -> bool:
@@ -243,6 +277,13 @@ def retrieval_sources_from_notebook(
                 or ""
             ).split()
         ).strip()
+        material_id = " ".join(
+            str(metadata.get("course_material_id") or "").split()
+        ).strip()
+        if not material_id and object_key:
+            derived = course_material_id_from_object_key(object_key)
+            if object_key.replace("\\", "/").lstrip("/").startswith("course/"):
+                material_id = derived
         normalized.append(
             RetrievalSource(
                 source_id=str(source.get("id") or "").strip(),
@@ -260,6 +301,7 @@ def retrieval_sources_from_notebook(
                 url=str(source.get("sourceUrl") or "").strip() or None,
                 group=group or None,
                 object_key=object_key or None,
+                course_material_id=material_id or None,
             )
         )
     return tuple(source for source in normalized if source.source_id)
@@ -439,6 +481,7 @@ def bounded_retrieval_result(
                 chunk_index=chunk.chunk_index,
                 url=chunk.url,
                 group=chunk.group,
+                retrieval_origin=chunk.retrieval_origin,
             )
         )
         if used >= max_context_chars:
@@ -646,6 +689,7 @@ class LocalChunkRetriever:
                     chunk_index=candidate.chunk_index,
                     url=source.url,
                     group=source.group,
+                    retrieval_origin="extracted_text",
                 )
             )
         return bounded_retrieval_result(

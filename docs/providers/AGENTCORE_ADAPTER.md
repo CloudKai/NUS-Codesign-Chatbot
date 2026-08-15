@@ -28,15 +28,16 @@ Each coach turn makes **one** `InvokeAgentRuntime` call with:
 ```
 
 `student_id` is the store owner identifier, never a notebook id. Bounded DSQL
-history (same cap as the composer) is sent as Converse `messages` so the
-harness can use caller-supplied history instead of AgentCore Memory. A fresh
-`runtimeSessionId` (`stateless-…`) is still used per invoke.
+history (same cap as the composer) is sent as Converse `messages`. The composed
+current-turn brief omits `<recent_messages>` so those turns are not duplicated
+inside the prompt. A fresh `runtimeSessionId` (`stateless-…`) is still used per
+invoke.
 
 Invariants:
 
 - the request's persisted phase overrides a model-supplied phase;
 - `deep_analysis` maps to AgentCore topic `ethics_critical` only; UI/DSQL stay
-  `deep_analysis`;
+  `deep_analysis` with the student-facing label **Ethics & Critical Thinking**;
 - structured `ProviderCoachOutput` / `coach_turn` JSON is mandatory (no markdown
   fence fallback);
 - citations stay `[S#]` over selected notebook sources — no

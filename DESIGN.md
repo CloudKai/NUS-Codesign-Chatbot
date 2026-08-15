@@ -245,7 +245,7 @@ The journey contains five ordered phases:
 1. Problem identification
 2. Concept generation
 3. Design specification
-4. Deep analysis
+4. Ethics & Critical Thinking
 5. Reflection
 
 Rules:

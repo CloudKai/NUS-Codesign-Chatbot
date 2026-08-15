@@ -23,6 +23,7 @@ from .retrieval import (
     RetrievalSource,
     RetrievedChunk,
     bounded_retrieval_result,
+    course_material_id_from_object_key,
     is_course_retrieval_source,
 )
 from .settings import settings
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_RESULTS = 8
 _MAX_CONTEXT_CHARS = 16_000
+COURSE_MATERIAL_METADATA_KEY = "course_material_id"
 
 
 def _normalize_key(value: str) -> str:
@@ -130,6 +132,41 @@ def _result_score(item: Mapping[str, Any]) -> float:
         return 0.0
 
 
+def _course_material_ids(sources: tuple[RetrievalSource, ...]) -> list[str]:
+    """Return unique selected course_material_id values for a KB metadata filter."""
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for source in sources:
+        value = str(source.course_material_id or "").strip()
+        if not value:
+            value = course_material_id_from_object_key(str(source.object_key or ""))
+        if value and value not in seen:
+            seen.add(value)
+            ordered.append(value)
+    return ordered
+
+
+def _vector_search_configuration(
+    *,
+    number_of_results: int,
+    material_ids: list[str] | tuple[str, ...] = (),
+) -> dict[str, Any]:
+    """Build Retrieve vectorSearchConfiguration, optionally metadata-filtered."""
+    config: dict[str, Any] = {"numberOfResults": number_of_results}
+    cleaned = [str(item).strip() for item in material_ids if str(item).strip()]
+    if not cleaned:
+        return config
+    if len(cleaned) == 1:
+        config["filter"] = {
+            "equals": {"key": COURSE_MATERIAL_METADATA_KEY, "value": cleaned[0]}
+        }
+    else:
+        config["filter"] = {
+            "in": {"key": COURSE_MATERIAL_METADATA_KEY, "value": cleaned}
+        }
+    return config
+
+
 class BedrockKnowledgeBaseRetriever:
     """Call Bedrock Agent Runtime ``Retrieve`` for selected course sources."""
 
@@ -202,16 +239,37 @@ class BedrockKnowledgeBaseRetriever:
         query_text = " ".join(str(query.current_message or "").split()).strip()
         if not query_text:
             return RetrievalResult(context="", chunks=())
+        material_ids = _course_material_ids(course_sources)
         try:
             response = client.retrieve(
                 knowledgeBaseId=self._knowledge_base_id,
                 retrievalQuery={"text": query_text},
                 retrievalConfiguration={
-                    "vectorSearchConfiguration": {
-                        "numberOfResults": self._number_of_results,
-                    }
+                    "vectorSearchConfiguration": _vector_search_configuration(
+                        number_of_results=self._number_of_results,
+                        material_ids=material_ids,
+                    )
                 },
             )
+            raw_hits = (
+                response.get("retrievalResults")
+                if isinstance(response, Mapping)
+                else None
+            )
+            if material_ids and not (isinstance(raw_hits, list) and raw_hits):
+                logger.info(
+                    "Knowledge Base metadata filter returned no hits; "
+                    "retrying without filter"
+                )
+                response = client.retrieve(
+                    knowledgeBaseId=self._knowledge_base_id,
+                    retrievalQuery={"text": query_text},
+                    retrievalConfiguration={
+                        "vectorSearchConfiguration": _vector_search_configuration(
+                            number_of_results=self._number_of_results,
+                        )
+                    },
+                )
         except Exception:
             logger.warning("Knowledge Base Retrieve failed", exc_info=False)
             return RetrievalResult(context="", chunks=())
@@ -257,6 +315,7 @@ class BedrockKnowledgeBaseRetriever:
                     chunk_index=count,
                     url=source.url,
                     group=source.group,
+                    retrieval_origin="knowledge_base",
                 )
             )
         return bounded_retrieval_result(
