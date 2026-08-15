@@ -39,6 +39,7 @@ jobs:
           # CI has no private .env; compose files require env_file: .env.
           # Use the committed example only for config validation—never commit secrets.
           cp .env.example .env
+          PUBLIC_ORIGIN=https://d1sxfuoybzedj5.cloudfront.net \
           docker compose config --quiet
           APP_IMAGE=co-design:test docker compose -f compose.prod.yaml config --quiet
 
