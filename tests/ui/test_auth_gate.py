@@ -160,6 +160,7 @@ def test_sign_in_button_cooldown_reenable_helpers(monkeypatch):
     """The cooldown should disable immediately and clear after the window."""
     monkeypatch.setattr(auth_gate.time, "time", lambda: 1_000.0)
     st.session_state.clear()
+    st.session_state["_auth_refresh_attempted"] = True
     monkeypatch.setattr(
         auth_gate,
         "auth_login_url",
@@ -167,6 +168,7 @@ def test_sign_in_button_cooldown_reenable_helpers(monkeypatch):
     )
     auth_gate.start_login()
     assert st.session_state.get("_auth_launch_cognito") is True
+    assert st.session_state.get("_auth_refresh_attempted") is True
     assert auth_gate._signin_cooldown_active() is True
     monkeypatch.setattr(auth_gate.time, "time", lambda: 1_000.0 + 5.01)
     assert auth_gate._signin_cooldown_active() is False
@@ -366,13 +368,38 @@ def test_env_example_documents_cognito_cookies_and_fastapi_callback():
     assert "authoritative" in example.lower() or "app-client" in example.lower()
 
 
-def test_should_attempt_session_refresh_runs_once_when_signed_out(monkeypatch):
-    """Expired ID cookies still reach the refresh bridge via one browser hop."""
+def test_should_attempt_session_refresh_requires_existing_session_hint(monkeypatch):
+    """Cold visitors skip refresh; expired established sessions bridge once."""
     st.session_state.clear()
     monkeypatch.setattr(auth_gate.st, "query_params", {})
+    monkeypatch.setattr(auth_gate, "_cookie_value", lambda _name: None)
+    assert auth_gate.should_attempt_session_refresh() is False
+
+    monkeypatch.setattr(
+        auth_gate,
+        "_cookie_value",
+        lambda name: "1"
+        if name == settings.cognito_session_hint_cookie_name
+        else None,
+    )
     assert auth_gate.should_attempt_session_refresh() is True
 
     st.session_state["_auth_refresh_attempted"] = True
+    assert auth_gate.should_attempt_session_refresh() is False
+
+
+@pytest.mark.parametrize(
+    "pending_key", ["_auth_launch_cognito", "_auth_signin_redirecting"]
+)
+def test_should_attempt_session_refresh_never_intercepts_login_redirect(
+    monkeypatch, pending_key
+):
+    """A Sign in click must reach Cognito instead of re-entering refresh."""
+    st.session_state.clear()
+    st.session_state[pending_key] = True
+    monkeypatch.setattr(auth_gate.st, "query_params", {})
+    monkeypatch.setattr(auth_gate, "_cookie_value", lambda _name: "1")
+
     assert auth_gate.should_attempt_session_refresh() is False
 
 
@@ -384,6 +411,40 @@ def test_should_attempt_session_refresh_skips_auth_required_marker(monkeypatch):
         {"auth_required": "1"},
     )
     assert auth_gate.should_attempt_session_refresh() is False
+
+
+def test_session_refresh_renders_spinner_over_shell_without_visible_fallback(
+    monkeypatch,
+):
+    """Refresh UI is a centered loader, not the former bare text/link page."""
+    rendered: list[str] = []
+    scripts: list[str] = []
+    monkeypatch.setattr(
+        auth_gate,
+        "auth_refresh_url",
+        lambda: "https://app.example/api/v1/auth/refresh",
+    )
+    monkeypatch.setattr(
+        auth_gate.st,
+        "markdown",
+        lambda body, **_kwargs: rendered.append(str(body)),
+    )
+    monkeypatch.setattr(
+        auth_gate.st,
+        "html",
+        lambda body, **_kwargs: scripts.append(str(body)),
+    )
+    st.session_state.clear()
+
+    assert auth_gate.redirect_to_session_refresh() is True
+
+    markup = "\n".join(rendered)
+    script = "\n".join(scripts)
+    assert "cd-auth-session-spinner" in markup
+    assert "If nothing happens" not in markup
+    assert ">Continue</a>" in markup
+    assert 'aria-hidden="true"' in markup
+    assert "window.location.replace(url)" in script
 
 
 def test_should_attempt_session_refresh_skips_auth_refreshed_marker(monkeypatch):

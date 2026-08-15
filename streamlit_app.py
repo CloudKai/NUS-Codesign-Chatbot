@@ -53,10 +53,16 @@ if not user:
     # Overwrite leftovers from a prior logged-in session in this browser tab.
     st.session_state.appearance = DEFAULT_APPEARANCE
     render_theme_css()
+    signed_out_shell_rendered = False
     if should_attempt_session_refresh():
+        # Keep the static app skeleton visible while the browser checks an
+        # existing Cognito refresh session. No protected data is loaded here.
+        render_signed_out_shell()
+        signed_out_shell_rendered = True
         if redirect_to_session_refresh():
             st.stop()
-    render_signed_out_shell()
+    if not signed_out_shell_rendered:
+        render_signed_out_shell()
     render_login_gate()
     st.stop()
 

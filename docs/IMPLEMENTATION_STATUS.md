@@ -417,7 +417,7 @@ scope, DSQL transcript, AgentCore reasoning only.
 
 ## Previous completed phase — Live AgentCore DEFAULT coaching (harness patch + smoke)
 
-**Completed on 2026-08-15.** Integrate-Bedrock remains the product.
+**Completed on 2026-08-15.** `Integrate-Bedrock` is merged into `main`.
 Production still uses `MODEL_PROVIDER=agentcore` against existing runtime
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. Qualifier remains
 `DEFAULT`. No experimental student runtime.
@@ -497,7 +497,9 @@ Focused retrieval tests: **17 passed**.
   “No feedback yet” even after a persisted assessment.
 - Next: optional cleanup of empty failed-stream assistant rows, or prompt the
   structured coach to fill `review_strengths` / `review_improvements`. No mock
-  fallback and no Claude calls.
+  fallback and no Claude calls. Production deploy of this merge keeps
+  CloudFront as the only public hostname and Caddy `:80` with `/api/v1/auth/me`
+  on the auth allow-list.
 
 ## Previous completed phase — AgentCore coaching availability, guardrail handling, trust split
 
@@ -1294,13 +1296,46 @@ deployed lecturer account. Do not open class traffic before those checks pass.
 
 ### Prior auth phase (still true)
 
-**Auth: restore Cognito refresh after 1-hour ID cookie expiry.** Streamlit
-could not see the path-scoped refresh cookie, and `should_attempt_session_refresh`
-skipped the browser bridge whenever `co_design_id` was missing — so a normal
-page load after ~1h forced re-login even though the 30-day refresh token was
-still valid. Fix: always attempt `/api/v1/auth/refresh` once when signed out
-(loop-guarded by query markers), and set a non-sensitive Path=/ 
-`co_design_session` hint alongside auth cookies.
+**Production edge: CloudFront viewer TLS → Caddy HTTP origin.** CloudFront at
+``d1sxfuoybzedj5.cloudfront.net`` is now the sole production hostname. Caddy
+listens on EC2 port 80 as the route-security boundary; host port 443 and the
+retired dynamic-DNS updater are removed. Both Compose contracts, CI deployment
+tests, Cognito callback examples, operational docs, and manual QA now use the
+CloudFront topology.
+
+### CloudFront/Caddy edge alignment (completed)
+
+1. CloudFront owns viewer HTTPS; Caddy accepts origin HTTP on ``:80`` and keeps
+   the auth/health allow-list plus the catch-all ``/api/*`` 404 boundary.
+2. ``compose.yaml`` and ``compose.prod.yaml`` use the CloudFront UI/API origin
+   and Cognito callback. Neither publishes host port 443.
+3. The obsolete host address-updater scripts and their secret-ignore rules were
+   removed. A deterministic deployment test rejects their return in runtime,
+   workflow, or documentation files.
+4. CI's production configuration gate is explicitly named for the
+   CloudFront/Caddy contract.
+5. No database, DSQL, S3, Cognito resource, or student-data migration is
+   required. Rollback is a code/config revert, but must not restore a second
+   public hostname after Cognito and CloudFront cutover.
+
+Validation: deployment/config/auth tests **50 passed**; full mock suite
+**401 passed**; compileall, shell syntax, both Compose config validations, and
+``git diff --check`` passed. No live AWS, DSQL, S3, Cognito, or paid-provider
+call was made.
+
+Next exact action: deploy the immutable image, restrict EC2 TCP 80 ingress to
+the AWS-managed CloudFront origin-facing prefix list, verify the distribution
+uses caching disabled plus full cookie/query/WebSocket forwarding, then run
+``docs/security/CADDY_PUBLIC_BOUNDARY.md`` and the authenticated production
+smoke. Do not open host TCP 443.
+
+### Prior auth phase (still true)
+
+**Auth: restore Cognito refresh after 1-hour ID cookie expiry.** The
+non-sensitive Path=/ ``co_design_session`` hint now limits refresh attempts to
+browsers with an established session. Cold visitors go directly to Sign in;
+expired sessions see the app skeleton and centered loader while the refresh
+bridge runs once; a Sign in launch cannot be intercepted by that bridge.
 
 ### Prior UI phase (still true)
 
@@ -1995,12 +2030,12 @@ Student detail, Critical Thinking, and Engagement were exercised at 1440 px;
 Overview was also checked at 390 px. Final browser logs contained no errors.
 Review images are under the current Codex visualizations artifact directory;
 no real student records or authenticated AWS session were used.
-- A later full-suite rerun reached **404 passed, 2 failed**. Both failures are
-outside professor analytics and reflect concurrent deployment configuration
-drift: `tests/test_deployment_config.py` still expects the DuckDNS/443
-Caddy shape while the working tree currently contains a CloudFront/port-80
-configuration. Those user-owned deployment edits were not reverted or
-folded into this feature.
+-   A later full-suite rerun reached **404 passed, 2 failed**. Both failures are
+  outside professor analytics and reflect concurrent deployment configuration
+  drift: `tests/test_deployment_config.py` still expected the retired
+  dynamic-DNS hostname and host port 443 Caddy shape while the working tree
+  currently contains a CloudFront/port-80 configuration. Those user-owned
+  deployment edits were not reverted or folded into this feature.
 - New coverage asserts 401 anonymous, 403 student, 200 lecturer; persisted
 role rather than client claims; active-branch Facione/session correctness;
 missing dimensions; constant-count repository access rather than N+1; normal

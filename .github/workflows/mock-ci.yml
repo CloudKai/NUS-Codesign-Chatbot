@@ -34,7 +34,7 @@ jobs:
           sh -n scripts/deploy_ecr.sh
           sh -n scripts/browser_e2e_smoke.sh
 
-      - name: Compose config
+      - name: Compose and Caddy config
         run: |
           # CI has no private .env; compose files require env_file: .env.
           # Use the committed example only for config validation—never commit secrets.
@@ -42,13 +42,16 @@ jobs:
           PUBLIC_ORIGIN=https://d1sxfuoybzedj5.cloudfront.net \
           docker compose config --quiet
           APP_IMAGE=co-design:test docker compose -f compose.prod.yaml config --quiet
+          docker run --rm --entrypoint caddy \
+            -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2-alpine validate --config /etc/caddy/Caddyfile
 
       - name: Compile sources
         env:
           PYTHONPYCACHEPREFIX: /tmp/co-design-pycache
         run: python -m compileall -q backend ui streamlit_app.py tests scripts agentcore_runtime
 
-      - name: Production configuration rejection tests
+      - name: Production configuration and CloudFront-Caddy edge contract
         env:
           MOCK_OPENAI: "true"
           MODEL_PROVIDER: mock

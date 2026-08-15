@@ -858,7 +858,7 @@ def test_cookie_settings_local_insecure(monkeypatch):
 def test_cognito_redirect_uri_precedence(monkeypatch, tmp_path):
     monkeypatch.delenv("COGNITO_REDIRECT_URI", raising=False)
     monkeypatch.setattr(
-        settings, "public_api_base_url", "https://cde2300chatbot.duckdns.org"
+        settings, "public_api_base_url", "https://d1sxfuoybzedj5.cloudfront.net"
     )
     monkeypatch.setattr(
         "backend.cognito_config._secrets_auth_table",
@@ -871,11 +871,11 @@ def test_cognito_redirect_uri_precedence(monkeypatch, tmp_path):
 
     monkeypatch.setenv(
         "COGNITO_REDIRECT_URI",
-        "https://cde2300chatbot.duckdns.org/api/v1/auth/callback",
+        "https://d1sxfuoybzedj5.cloudfront.net/api/v1/auth/callback",
     )
     assert (
         load_cognito_auth_config().redirect_uri
-        == "https://cde2300chatbot.duckdns.org/api/v1/auth/callback"
+        == "https://d1sxfuoybzedj5.cloudfront.net/api/v1/auth/callback"
     )
 
     monkeypatch.delenv("COGNITO_REDIRECT_URI", raising=False)
@@ -885,7 +885,7 @@ def test_cognito_redirect_uri_precedence(monkeypatch, tmp_path):
     )
     assert (
         load_cognito_auth_config().redirect_uri
-        == "https://cde2300chatbot.duckdns.org/api/v1/auth/callback"
+        == "https://d1sxfuoybzedj5.cloudfront.net/api/v1/auth/callback"
     )
 
 

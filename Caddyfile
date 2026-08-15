@@ -1,4 +1,6 @@
-d1sxfuoybzedj5.cloudfront.net {
+:80 {
+	# CloudFront terminates viewer TLS. Caddy is the HTTP origin policy boundary
+	# and is reachable only from CloudFront through the EC2 security group.
 	encode zstd gzip
 
 	header {
@@ -8,13 +10,16 @@ d1sxfuoybzedj5.cloudfront.net {
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 	}
 
-	# Browser-only Cognito routes. Session probe (/api/v1/auth/me) and every
-	# coaching/CRUD path stay on the app-container loopback.
+	# FastAPI-owned Cognito login, session probe, and logout.
 	handle /api/v1/auth/login {
 		reverse_proxy app:8000
 	}
 
 	handle /api/v1/auth/callback {
+		reverse_proxy app:8000
+	}
+
+	handle /api/v1/auth/me {
 		reverse_proxy app:8000
 	}
 
@@ -36,7 +41,7 @@ d1sxfuoybzedj5.cloudfront.net {
 		reverse_proxy app:8000
 	}
 
-	# Block every other /api/* path at the edge so unauthenticated FastAPI
+	# Block every other path at the edge so unauthenticated FastAPI
 	# coaching/CRUD routes never receive public traffic. The refresh cookie is
 	# Path=/api/v1/auth and is handled only by the public auth routes above.
 	# Caddy selects the most specific handle matcher first, so the routes

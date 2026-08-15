@@ -19,7 +19,7 @@ measured against the live EC2 stack with the real provider configuration.
 | Signal | Why |
 |---|---|
 | CPU / RAM (`htop`, CloudWatch) | Coach turns and PDF extract are CPU/RAM heavy |
-| Disk free on `/` and Docker volumes | Caddy certs + container logs; no student data mount |
+| Disk free on `/` and Docker volumes | Caddy state + container logs; no student data mount |
 | `docker compose ps` / restart count | Unexpected restarts under load |
 | App container logs | Provider/rate-limit failures (must stay privacy-safe) |
 | Aurora DSQL errors | OCC conflicts, permission denials, connectivity |

@@ -12,7 +12,7 @@
 |---|---|
 | Branch | `Production-RemoveData` |
 | Commit SHA (local tip when tested) | `aa8e934` (*Escape LIKE percent literals for DSQL/psycopg*) |
-| Production URL | https://cde2300chatbot.duckdns.org |
+| Production URL (current) | https://d1sxfuoybzedj5.cloudfront.net |
 | Browser | Cursor IDE browser (Chromium automation) |
 | Viewport(s) | Desktop default; mobile `390×844` via CDP Emulation (layout smoke only) |
 | Model/provider observed | GPT-5.6 Luna · Low (live OpenAI path) |
@@ -22,6 +22,10 @@
 Parent orchestrator for this pass: Cursor Grok 4.5 High. Pedagogy/security explore subagents: GPT-5.6 Sol High + Grok 4.5 High (no Fast models).
 
 Dedicated QA notebook title used: `QA-TEST-PROD-MANUAL` (later XSS retitle). Account used for live auth: the credentials supplied in the QA request (single user). **QA_USER_A / QA_USER_B were not provided** — cross-user IDOR on live is **NOT VERIFIED**.
+
+The recorded live run predates the current CloudFront edge cutover. Repeat the
+edge, authentication, and session checks against the current URL before using
+those historical observations as release evidence.
 
 ---
 
@@ -35,7 +39,7 @@ Not **READY FOR PRODUCTION**: live host currently auto-advances stages (skips co
 
 ## Executive summary
 
-Live Cognito login, HTTPS, Caddy public API boundary, session refresh, logout, and coach Focus→Evidence coaching behaviour were exercised on the production URL. Coach pedagogy for weak Focus scaffolding, injection resistance, and off-topic refusal looked aligned with `backend/prompts/*`.
+Live Cognito login, HTTPS, the public API boundary, session refresh, logout, and coach Focus→Evidence coaching behaviour were exercised on the production URL. Coach pedagogy for weak Focus scaffolding, injection resistance, and off-topic refusal looked aligned with `backend/prompts/*`.
 
 **Product progression policy (owner decision, 2026-08-10):**
 - **Month 1 (current pilot):** `AUTO_ADVANCE_STAGES=true` — coach ADVANCE auto-applies; no Next confirmation. Live already behaved this way; repo now matches via `compose.prod.yaml`.
@@ -74,8 +78,8 @@ Confirmation mode (`AUTO_ADVANCE_STAGES=false`): ADVANCE → pending transition 
 
 | Scenario | Expected | Observed | Result | Latency (manual) | Evidence | Related | Fix |
 |---|---|---|---|---|---|---|---|
-| HTTPS root | 200 app | 200 Streamlit | **PASS** LIVE | ~1.0s TTFB-ish | curl | Caddy | — |
-| HTTP→HTTPS | redirect | 308 → https | **PASS** LIVE | — | curl | Caddy | — |
+| HTTPS root | 200 app | 200 Streamlit | **PASS** LIVE | ~1.0s TTFB-ish | curl | CloudFront → Caddy | — |
+| HTTP→HTTPS | redirect | redirect → https | **PASS** LIVE | — | curl | CloudFront | — |
 | Security headers | HSTS/nosniff/Referrer/Permissions | Present | **PASS** LIVE | — | curl -I | `Caddyfile` | — |
 | `/api/v1/health` | 200 JSON | 200 `{"status":"ok","mode":"local"}` | **FAIL** LIVE (label) | ~0.65s | curl | `backend/api.py` | Fixed locally: mode from `APP_ENV` |
 | `/api/v1/ready` public | blocked | 404 `Not Found` | **PASS** LIVE | — | curl | `Caddyfile` | — |
@@ -222,7 +226,7 @@ Bottleneck: **model latency**, not page chrome.
 ### F1 — Production health `mode` mislabeled
 
 - **Severity:** P2  
-- **Reproduction:** `GET https://cde2300chatbot.duckdns.org/api/v1/health` → `"mode":"local"`.  
+- **Reproduction:** `GET https://d1sxfuoybzedj5.cloudfront.net/api/v1/health` → `"mode":"local"`.
 - **Root cause:** Hardcoded return in `backend/api.py`.  
 - **Files:** `backend/api.py`  
 - **Fix:** Derive `mode` from `APP_ENV`.  
