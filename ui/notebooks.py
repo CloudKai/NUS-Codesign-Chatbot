@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from html import escape
 from typing import Any
 
@@ -9,6 +10,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from backend.student_journey import (
+    DEFAULT_RESPONSE_DETAIL,
+    DEFAULT_STAGE,
     THINKING_STAGES,
     current_stage,
     journey_progress,
@@ -37,8 +40,10 @@ def thread_overview(thread: dict[str, Any]) -> dict[str, Any]:
         metadata.get("learning_journey")
         if isinstance(metadata.get("learning_journey"), dict)
         else {
-            "current_stage": metadata.get("thinking_stage", "focus"),
-            "response_detail": metadata.get("response_detail", "short"),
+            "current_stage": metadata.get("thinking_stage", DEFAULT_STAGE),
+            "response_detail": metadata.get(
+                "response_detail", DEFAULT_RESPONSE_DETAIL
+            ),
         }
     )
     stage = current_stage(journey)
@@ -62,9 +67,40 @@ def thread_overview(thread: dict[str, Any]) -> dict[str, Any]:
         "progress": journey_progress(journey),
         "summary": " ".join(summary.split())[:160] or "No learning summary yet.",
         "turns": int(thread.get("studentTurnCount") or 0),
+        "messages": int(thread.get("messageCount") or 0),
+        "last_active": _relative_activity(
+            thread.get("lastActivity")
+            or thread.get("updatedAt")
+            or thread.get("createdAt")
+        ),
         "helpful": 0,
         "review": 0,
     }
+
+
+def _relative_activity(value: Any, *, now: datetime | None = None) -> str:
+    """Format a persisted activity timestamp as concise notebook metadata."""
+    raw = str(value or "").strip()
+    if not raw:
+        return "Unknown"
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return "Unknown"
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    activity_date = parsed.astimezone(current.tzinfo).date()
+    elapsed_days = max(0, (current.date() - activity_date).days)
+    if elapsed_days == 0:
+        return "today"
+    if elapsed_days == 1:
+        return "yesterday"
+    if elapsed_days < 7:
+        return f"{elapsed_days} days ago"
+    return parsed.astimezone(current.tzinfo).strftime("%d %b %Y")
 
 
 @st.dialog("Your Notebooks", width="large")
@@ -114,14 +150,21 @@ def notebooks_dialog() -> None:
                         if is_active
                         else ""
                     )
+                    notebook_title = escape(
+                        thread.get("name") or "Untitled notebook"
+                    )
                     title_column.markdown(
                         '<div class="notebook-card-copy">'
                         '<div class="notebook-card-title">'
-                        f"{escape(thread.get('name') or 'Untitled notebook')}"
+                        f'<span class="notebook-card-title-text" title="{notebook_title}">'
+                        f"{notebook_title}"
+                        "</span>"
                         f"{current_badge}</div>"
                         f'<div class="notebook-card-meta">'
-                        f"{escape(overview['stage'].short_label)} · "
-                        f"{overview['stage_index']} of 6</div>"
+                        f"{escape(overview['stage'].label)} · "
+                        f"{overview['stage_index']} of {len(THINKING_STAGES)} stages</div>"
+                        f'<div class="notebook-card-activity">'
+                        f"Last active {escape(overview['last_active'])}</div>"
                         "</div>",
                         unsafe_allow_html=True,
                     )
@@ -136,7 +179,7 @@ def notebooks_dialog() -> None:
                         "⋯",
                         type="tertiary",
                         key=f"notebook-actions-{thread['id']}",
-                        help="Rename or delete this notebook",
+                        help="Rename, download, or delete this notebook",
                     ):
                         request_notebook_actions(thread["id"])
                         rerun_app()
@@ -232,7 +275,7 @@ def _sync_notebook_library_scroll() -> None:
     on_dismiss=cancel_notebook_actions,
 )
 def notebook_actions_dialog() -> None:
-    """Rename only when Enter submits the form; delete with confirmation.
+    """Rename, download the persisted transcript, or delete with confirmation.
 
     Dismissing (X, click outside, or Esc) clears the pending action and reopens
     Your Notebooks on the next script run.
@@ -253,7 +296,8 @@ def notebook_actions_dialog() -> None:
             current_value=current_title,
         )
         st.caption(
-            f"{overview['stage'].short_label} · phase {overview['stage_index']} of 6"
+            f"{overview['stage'].label} · phase {overview['stage_index']} "
+            f"of {len(THINKING_STAGES)}"
         )
         if applied and cleaned and cleaned != current_title:
             store.update_thread(thread_id, name=cleaned)
@@ -262,6 +306,24 @@ def notebook_actions_dialog() -> None:
             root_selector='[role="dialog"]:has(.st-key-notebook_actions_panel)',
             aria_label="Rename",
         )
+
+        with st.container(key="notebook_action_export"):
+            try:
+                transcript = store.download_transcript(str(thread_id))
+            except ValueError:
+                transcript = None
+            if transcript is not None:
+                st.download_button(
+                    "Download transcript",
+                    data=transcript.data,
+                    file_name=transcript.filename,
+                    mime="text/plain",
+                    key=f"download-transcript-{thread_id}",
+                    use_container_width=True,
+                    type="secondary",
+                    icon=":material/download:",
+                    help="Save this notebook's chat from persisted messages",
+                )
 
         with st.container(key="notebook_action_danger"):
             st.markdown("#### Delete notebook")

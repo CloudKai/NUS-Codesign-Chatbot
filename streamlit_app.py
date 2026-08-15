@@ -1,8 +1,9 @@
 """Streamlit entrypoint for the Co-design learning notebook.
 
-Startup order matters: inject static CSS, gate on the FastAPI application
-session (``/api/v1/auth/me``), then initialize session (including appearance
-from the store), sync appearance, apply theme tokens, and render the top bar
+Startup order matters: inject static CSS, drop the one-shot
+``auth_refreshed`` query marker, gate on the FastAPI application session
+(``/api/v1/auth/me``), then initialize session (including appearance from
+the store), sync appearance, apply theme tokens, and render the top bar
 and three-column workspace. Unauthenticated visitors see only a static shell
 plus the login dialog. Prefer ``sh scripts/start.sh`` so the local API is
 running.
@@ -14,6 +15,7 @@ import streamlit as st
 
 from ui.auth_gate import (
     authenticated_user,
+    consume_auth_refresh_marker,
     current_user_claims,
     display_name_from_claims,
     logout_user,
@@ -30,6 +32,7 @@ from ui.session import initialize_session
 from ui.settings import sync_appearance_from_widget
 from ui.theme import inject_template_css, render_theme_css
 from ui.topbar import render_topbar
+from ui.professor import render_professor_dashboard
 from ui.workspace import render_workspace
 
 from backend.auth_profiles import store_identifier_for_sub
@@ -42,6 +45,7 @@ st.set_page_config(
 )
 
 inject_template_css()
+consume_auth_refresh_marker()
 
 user = authenticated_user()
 if not user:
@@ -92,6 +96,16 @@ else:
 
 if "display_name" not in st.session_state:
     st.session_state.display_name = display_name
+
+# Professor navigation is only a convenience; the FastAPI professor routes
+# independently verify Cognito and the persisted lecturer/admin role.  Branch
+# before student notebook/session initialisation so staff never create or alter
+# a student workspace while reviewing analytics.
+if str(user.get("role") or "").strip().lower() in {"lecturer", "admin"}:
+    st.session_state["appearance"] = st.session_state.get("appearance", DEFAULT_APPEARANCE)
+    render_theme_css()
+    render_professor_dashboard()
+    st.stop()
 
 # Debug counter for full-script runs (fragment-only interactions skip this path).
 st.session_state["_app_runs"] = int(st.session_state.get("_app_runs") or 0) + 1

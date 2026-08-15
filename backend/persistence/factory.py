@@ -54,6 +54,37 @@ def get_file_storage() -> FileStorage:
 def reset_file_storage_cache() -> None:
     """Clear the FileStorage singleton (used by tests)."""
     get_file_storage.cache_clear()
+    get_course_file_storage.cache_clear()
+
+
+@lru_cache(maxsize=1)
+def get_course_file_storage() -> FileStorage:
+    """Return storage for shared course objects (may reuse the uploads adapter).
+
+    When ``COURSE_MATERIALS_BUCKET`` matches ``USER_UPLOADS_BUCKET`` (or is
+    empty), this is the same singleton as ``get_file_storage``. A different
+    bucket gets its own S3 adapter. Tests inject memory storage by
+    monkeypatching this function together with ``get_file_storage``.
+    """
+    if settings.file_storage_provider != "s3":
+        return get_file_storage()
+    course_bucket = settings.resolved_course_materials_bucket
+    uploads_bucket = settings.user_uploads_bucket.strip()
+    if not course_bucket or course_bucket == uploads_bucket:
+        return get_file_storage()
+    return S3FileStorage(bucket=course_bucket, region=settings.aws_region)
+
+
+def file_storage_for_key(key: str) -> FileStorage:
+    """Return the adapter that owns *key* (course bucket vs student uploads)."""
+    from backend.persistence.object_keys import is_course_object_key, is_user_object_key
+
+    candidate = str(key or "")
+    if is_course_object_key(candidate, settings.course_materials_prefix) and not is_user_object_key(
+        candidate
+    ):
+        return get_course_file_storage()
+    return get_file_storage()
 
 
 def create_student_store(

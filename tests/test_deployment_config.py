@@ -1,5 +1,7 @@
 """Static safety checks for local and production Docker deployment files."""
 
+from __future__ import annotations
+
 from pathlib import Path
 
 
@@ -70,7 +72,8 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert 'FILE_STORAGE_PROVIDER: "s3"' in app
     assert 'DSQL_USER: "co_design_app"' in app
     assert 'AWS_REGION: "us-west-2"' in app
-    assert 'COURSE_MATERIAL_SYNC_ENABLED: "false"' in app
+    assert 'COURSE_MATERIAL_SYNC_ENABLED: "true"' in app
+    assert 'COURSE_MATERIALS_PREFIX: "course/"' in app
     assert "LECTURE_NOTES_DIR" not in app
     assert "DSQL_USER: \"admin\"" not in app
     assert "ports:" not in app

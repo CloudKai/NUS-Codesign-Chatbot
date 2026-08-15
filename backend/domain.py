@@ -7,10 +7,21 @@ application services, and infrastructure adapters.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
+
+
+RESEARCH_CODING_VERSION = "clear-facione-ethics-v1"
 
 
 class StageDecision(StrEnum):
@@ -18,6 +29,97 @@ class StageDecision(StrEnum):
 
     STAY = "stay"
     ADVANCE = "advance"
+
+
+class ResearchCodingStatus(StrEnum):
+    """Soft-validation status for provisional research coding."""
+
+    CODED = "coded"
+    PARTIAL = "partial"
+    UNCODED = "uncoded"
+
+
+class ClearCode(StrEnum):
+    """Dominant CLEAR behavior demonstrated in one student contribution."""
+
+    CONCISE = "concise"
+    LOGICAL = "logical"
+    EXPLICIT = "explicit"
+    ADAPTIVE = "adaptive"
+    REFLECTIVE = "reflective"
+
+
+class FacioneBehavior(StrEnum):
+    """Observable Facione behavior tag; this is not a holistic score."""
+
+    ANALYSIS = "analysis"
+    INTERPRETATION = "interpretation"
+    INFERENCE = "inference"
+    EVALUATION = "evaluation"
+    EXPLANATION = "explanation"
+    SELF_REGULATION = "self_regulation"
+
+
+class EthicsConcept(StrEnum):
+    """Ethics concepts that may be explicitly evidenced in a contribution."""
+
+    FAIRNESS = "fairness"
+    PRIVACY = "privacy"
+    TRANSPARENCY = "transparency"
+    NON_MALEFICENCE = "non_maleficence"
+    RESPONSIBILITY = "responsibility"
+
+
+class ResearchEvidence(BaseModel):
+    """Quoted evidence and provisional rationale for one research code."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    quote: str = Field(min_length=1, max_length=2_000)
+    rationale: str = Field(min_length=1, max_length=1_000)
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class HolisticCandidate(BaseModel):
+    """Conversation-based provisional Facione candidate, never a grade."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    score: int = Field(ge=1, le=4)
+    rationale: str = Field(min_length=1, max_length=1_000)
+    evidence_quotes: list[str] = Field(default_factory=list, max_length=3)
+
+    @field_validator("evidence_quotes")
+    @classmethod
+    def normalize_evidence_quotes(cls, values: list[str]) -> list[str]:
+        """Keep at most three non-empty, bounded evidence quotations."""
+        return [" ".join(str(value).split())[:2_000] for value in values if str(value).strip()][:3]
+
+
+class ProvisionalResearchCoding(BaseModel):
+    """Optional research coding produced alongside, but isolated from, coaching."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    coding_status: ResearchCodingStatus
+    dominant_clear: ClearCode | None = None
+    facione_behaviors: list[FacioneBehavior] = Field(default_factory=list, max_length=2)
+    ethics_concepts: list[EthicsConcept] = Field(default_factory=list, max_length=5)
+    evidence: list[ResearchEvidence] = Field(default_factory=list, max_length=8)
+    holistic_candidate: HolisticCandidate | None = None
+
+    @model_validator(mode="after")
+    def dominant_clear_matches_status(self) -> "ProvisionalResearchCoding":
+        """Require one CLEAR code only when the result is fully coded."""
+        if self.coding_status is ResearchCodingStatus.CODED and self.dominant_clear is None:
+            raise ValueError("coded research output requires one dominant CLEAR code")
+        if self.coding_status is not ResearchCodingStatus.CODED and self.dominant_clear is not None:
+            raise ValueError("partial or uncoded research output cannot assign CLEAR")
+        if len(set(self.facione_behaviors)) != len(self.facione_behaviors):
+            raise ValueError("Facione behavior codes must be unique")
+        if len(set(self.ethics_concepts)) != len(self.ethics_concepts):
+            raise ValueError("Ethics concept codes must be unique")
+        return self
 
 
 class TransitionStatus(StrEnum):
@@ -50,6 +152,7 @@ class RetrievalChunkReference(BaseModel):
     chunk_id: str
     excerpt: str = Field(default="", max_length=600)
     score: float = 0.0
+    retrieval_origin: str = ""
 
 
 class FacioneDimensionScores(BaseModel):
@@ -66,6 +169,44 @@ class FacioneDimensionScores(BaseModel):
     evaluation: int = Field(ge=0, le=4, default=0)
     explanation: int = Field(ge=0, le=4, default=0)
     self_regulation: int = Field(ge=0, le=4, default=0)
+
+
+def _stage_assessment_as_text(value: Any) -> Any:
+    """Flatten live-model stage_assessment objects or lists into one string."""
+    if isinstance(value, str) or value is None:
+        return value
+    if isinstance(value, list):
+        return " ".join(str(item).strip() for item in value if str(item).strip())
+    if not isinstance(value, Mapping):
+        return value
+    for key in ("text", "summary", "assessment", "stage_assessment"):
+        item = value.get(key)
+        if isinstance(item, str) and item.strip():
+            return item.strip()
+    parts: list[str] = []
+    for key in ("strengths", "improvements", "gaps", "notes"):
+        item = value.get(key)
+        if isinstance(item, list):
+            joined = "; ".join(str(entry).strip() for entry in item if str(entry).strip())
+            if joined:
+                parts.append(f"{key}: {joined}")
+        elif isinstance(item, str) and item.strip():
+            parts.append(item.strip())
+    for key, item in value.items():
+        if key in {
+            "strengths",
+            "improvements",
+            "gaps",
+            "notes",
+            "text",
+            "summary",
+            "assessment",
+            "stage_assessment",
+        }:
+            continue
+        if isinstance(item, str) and item.strip():
+            parts.append(item.strip())
+    return " ".join(parts).strip()
 
 
 class EducationalAssessment(BaseModel):
@@ -91,6 +232,33 @@ class EducationalAssessment(BaseModel):
     )
     review_strengths: list[str] = Field(default_factory=list, max_length=4)
     review_improvements: list[str] = Field(default_factory=list, max_length=4)
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_live_provider_shapes(cls, value: Any) -> Any:
+        """Accept common live-model variants without changing the stored contract.
+
+        AgentCore JSON sometimes emits ``recommendation`` as ``STAY``/``ADVANCE``
+        and ``stage_assessment`` as an object with strengths/improvements.
+        """
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        stage = data.get("stage_assessment")
+        if isinstance(stage, Mapping):
+            if not data.get("review_strengths") and isinstance(stage.get("strengths"), list):
+                data["review_strengths"] = stage.get("strengths")
+            if not data.get("review_improvements") and isinstance(
+                stage.get("improvements"), list
+            ):
+                data["review_improvements"] = stage.get("improvements")
+            data["stage_assessment"] = _stage_assessment_as_text(stage)
+        elif isinstance(stage, list):
+            data["stage_assessment"] = _stage_assessment_as_text(stage)
+        recommendation = data.get("recommendation")
+        if isinstance(recommendation, str):
+            data["recommendation"] = recommendation.strip().lower()
+        return data
 
     @field_validator("guidance_questions")
     @classmethod
@@ -147,12 +315,11 @@ class CoachImageInput(BaseModel):
 
 VALID_STAGE_IDS = frozenset(
     {
-        "focus",
-        "evidence",
-        "assumptions",
-        "perspectives",
-        "synthesis",
-        "conclusion",
+        "problem_identification",
+        "concept_generation",
+        "design_specification",
+        "deep_analysis",
+        "reflection",
     }
 )
 
@@ -171,10 +338,14 @@ class CoachRequest(BaseModel):
     student_message: str = Field(min_length=1, max_length=12_000)
     current_stage: str
     response_detail: str = Field(pattern="^(short|long)$")
+    # Server-filled owner identifier for AgentCore harness compatibility.
+    # Never a notebook id; clients cannot make this authoritative.
+    student_id: str | None = Field(default=None, max_length=128)
     source_ids: list[str] = Field(default_factory=list)
     source_context: str = ""
     student_project_context: str = ""
     conversation_summary: str = ""
+    conversation_memory: dict[str, Any] | None = None
     retrieved_chunks: list[RetrievalChunkReference] = Field(default_factory=list)
     image_inputs: list[CoachImageInput] = Field(default_factory=list, max_length=5)
     allow_model_knowledge: bool = False
@@ -226,10 +397,70 @@ class CoachTurn(BaseModel):
 
 
 class ProviderCoachOutput(BaseModel):
-    """Structured provider payload before workflow-side transition handling."""
+    """One-call provider envelope with soft provisional research validation."""
 
     response_text: str = Field(min_length=1)
     assessment: EducationalAssessment
+    research_coding: ProvisionalResearchCoding | None = None
+
+    @field_validator("research_coding", mode="before")
+    @classmethod
+    def invalid_research_coding_becomes_absent(cls, value: Any) -> Any:
+        """Drop invalid optional research data without losing valid coaching."""
+        if value is None or isinstance(value, ProvisionalResearchCoding):
+            return value
+        try:
+            return ProvisionalResearchCoding.model_validate(value)
+        except (ValidationError, TypeError, ValueError):
+            return None
+
+    @model_validator(mode="after")
+    def holistic_candidate_is_reflection_only(self) -> "ProviderCoachOutput":
+        """Force non-Reflection holistic candidates to absent."""
+        coding = self.research_coding
+        if (
+            coding is not None
+            and coding.holistic_candidate is not None
+            and self.assessment.current_stage != "reflection"
+        ):
+            object.__setattr__(
+                self,
+                "research_coding",
+                coding.model_copy(update={"holistic_candidate": None}),
+            )
+        return self
+
+
+class ProviderAssessmentResult(BaseModel):
+    """Internal provider result; iteration preserves the legacy two-item seam."""
+
+    model_config = ConfigDict(frozen=True)
+
+    response_text: str = Field(min_length=1)
+    assessment: EducationalAssessment
+    research_coding: ProvisionalResearchCoding | None = None
+    conversation_memory: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def holistic_candidate_is_reflection_only(self) -> "ProviderAssessmentResult":
+        """Apply the authoritative assessment stage to the holistic candidate."""
+        coding = self.research_coding
+        if (
+            coding is not None
+            and coding.holistic_candidate is not None
+            and self.assessment.current_stage != "reflection"
+        ):
+            object.__setattr__(
+                self,
+                "research_coding",
+                coding.model_copy(update={"holistic_candidate": None}),
+            )
+        return self
+
+    def __iter__(self):
+        """Yield coaching text and assessment for existing provider consumers."""
+        yield self.response_text
+        yield self.assessment
 
 
 def openai_strict_schema(model: type[BaseModel]) -> dict[str, Any]:

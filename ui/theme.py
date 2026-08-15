@@ -23,6 +23,7 @@ _STYLE_PARTIALS: tuple[str, ...] = (
     "50-dialogs-notebooks.css",
     "55-auth.css",
     "60-profile-topbar.css",
+    "70-professor.css",
     "90-responsive.css",
 )
 _template_css_cache: tuple[tuple[tuple[str, int, int], ...], str] | None = None

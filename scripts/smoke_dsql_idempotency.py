@@ -27,6 +27,7 @@ from backend.persistence.factory import create_student_store
 from backend.persistence.dsql_student_store import DsqlStudentStore
 from backend.repositories import SQLiteNotebookRepository, SQLitePhaseTransitionRepository
 from backend.settings import settings
+from backend.student_journey import DEFAULT_STAGE
 from backend.student_store import CoachIdempotencyConflictError
 from backend.workflow import CoachWorkflow
 
@@ -134,7 +135,7 @@ def run(identifier: str) -> None:
         request = CoachRequest(
             thread_id=thread_id,
             student_message="Check this disposable DSQL idempotency claim.",
-            current_stage="focus",
+            current_stage=DEFAULT_STAGE,
             response_detail="short",
             idempotency_key=f"live-dsql-{uuid4()}",
         )

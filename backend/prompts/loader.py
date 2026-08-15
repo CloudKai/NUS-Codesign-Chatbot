@@ -1,7 +1,7 @@
 """UTF-8 prompt-file loader with an in-process immutable cache.
 
 Stage IDs come from ``backend.student_journey.STAGE_BY_ID`` so the prompt
-package cannot drift from the six Thinking Path stages. Unknown stages raise;
+package cannot drift from the five Thinking Path stages. Unknown stages raise;
 there is no silent fallback to another stage file.
 """
 

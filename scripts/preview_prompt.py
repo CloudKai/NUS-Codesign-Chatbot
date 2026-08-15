@@ -3,7 +3,7 @@
 
 Usage::
 
-    python scripts/preview_prompt.py --stage evidence
+    python scripts/preview_prompt.py --stage deep_analysis
 
 Uses fake/demo context only. Does not load student data, tokens, API keys, or
 call a model provider.
@@ -19,8 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend.prompts import PromptComposer, PromptContext, load_stage_prompt
-from backend.student_journey import STAGE_BY_ID
+from backend.prompts import PromptComposer, PromptContext, load_stage_prompt  # noqa: E402
+from backend.student_journey import DEFAULT_STAGE, STAGE_BY_ID  # noqa: E402
 
 
 def _demo_context(stage_id: str) -> PromptContext:
@@ -65,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--stage",
-        default="focus",
+        default=DEFAULT_STAGE,
         choices=sorted(STAGE_BY_ID),
         help="Authoritative Thinking Path stage ID",
     )

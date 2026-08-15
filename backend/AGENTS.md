@@ -18,13 +18,15 @@ This package does **not** own Streamlit UI code. Presentation lives in
 ## Layer map
 
 ```text
-FastAPI (api.py)
-  -> application services (application.py, learning_service.py, chat_service.py)
+FastAPI (`api.py` façade → `http/app.py`)
+  -> application services (`application.py` façade → `coaching/execution.py`,
+     `learning_service.py`, `chat_service.py`, `professor_analytics/`)
   -> one LangGraph workflow (workflow.py)
-  -> domain contracts (domain.py, student_journey.py)
-  -> repositories + SQLite (repositories.py, student_store.py)
-  -> providers (providers.py, mock_provider.py)
-  -> sources/files (source_library.py, file_processing.py)
+  -> domain contracts (`domain.py`, `student_journey.py` façade → `learning/`)
+  -> repositories + SQLite (repositories.py, student_store.py, research/)
+  -> providers (providers.py, bedrock_provider.py, agentcore_provider.py, mock_provider.py)
+  -> retrieval (retrieval.py, bedrock_retrieve.py)
+  -> sources/files (`source_library.py` façade → `sources/`, `file_processing.py`)
 ```
 
 ## Module responsibilities
@@ -32,22 +34,30 @@ FastAPI (api.py)
 | Module | Responsibility |
 |---|---|
 | `domain.py` | Pydantic contracts: `CoachRequest`, `CoachTurn`, `EducationalAssessment`, `PendingPhaseTransition`, citations |
-| `application.py` | `CoachApplicationService` — coordinates workflow, persistence, optional auto-advance |
-| `api.py` | FastAPI `/api/v1` routes (coach + workspace CRUD), app factory, structured errors |
+| `application.py` / `coaching/` | Compatibility import plus durable `CoachApplicationService` execution, including research-observation persist |
+| `api.py` / `http/app.py` | Compatibility import plus FastAPI app factory/composition, student and professor routes, and HTTP error mapping |
 | `api_client.py` | Typed client used by Streamlit when `USE_LOCAL_API=true` |
-| `workspace_service.py` | Notebook/history/source/preference CRUD application service |
-| `workflow.py` | Single LangGraph coach workflow wrapper (not six agents) |
-| `student_journey.py` | Six thinking stages, journey normalization, review helpers, stage questions |
+| `workspace_service.py` | Notebook/history/source/preference CRUD application service; student transcript export |
+| `workflow.py` | Single LangGraph coach workflow wrapper (not one agent per phase) |
+| `student_journey.py` / `learning/` | Compatibility imports plus the five research-aligned phases, journey normalization, review helpers, and questions. New journeys default to Strict (`response_detail=long`). |
 | `learning_service.py` | Confirmation-gated phase transitions and learning progression |
-| `student_store.py` | Five-table SQLite/DSQL-compatible store for users, OAuth state, notebooks, messages, sources |
-| `persistence/` | Storage ports + factories: SQLite/DSQL student stores, local/S3 file storage |
+| `student_store.py` | SQLite/DSQL-compatible student, conversation, source, research, review, and audit persistence |
+| `research/` | Provider-neutral research observations, human review/adjudication models, and repository adapter |
+| `professor_analytics/` | Lecturer overview and Research application services |
+| `persistence/` | Storage ports + factories: SQLite/DSQL student stores, local/S3 file storage; `persistence/store/` holds schema, migrations, and extracted source operations |
 | `repositories.py` | Narrow repository adapters over `StudentStore` |
-| `chat_service.py` | Legacy/direct chat engine (`StudentChatEngine`); OpenAI continuation state is not persisted |
-| `providers.py` | Ollama and OpenAI coach provider adapters (consume composed prompts) |
-| `prompts/` | Framework-neutral stage prompt files, loader, and composer |
+| `chat_service.py` | Legacy/direct chat engine retained for compatibility tests; not the current Streamlit fallback |
+| `providers.py` | OpenAI, mock selection, Bedrock and AgentCore factory wiring |
+| `bedrock_provider.py` | Amazon Bedrock Converse coach adapter (injected client; no AWS in tests) |
+| `agentcore_provider.py` | AgentCore Runtime coach adapter (injected client; no AWS in tests) |
+| `agentcore_harness_provider.py` | Isolated InvokeHarness Luna eval adapter (not production DEFAULT) |
+| `context_planner.py` | Full-history-first token-aware model-context planner |
+| `live_eval_config.py` | Trusted Luna override assertions for live evaluation |
+| `bedrock_retrieve.py` | Bedrock Knowledge Base `Retrieve` adapter for selected locked course sources |
+| `prompts/` | Framework-neutral five-phase prompt files, loader, and composer |
 | `mock_provider.py` | Deterministic provider for tests and offline demo |
-| `source_library.py` | Source CRUD helpers, lecture-notes sync, URL import, citation context |
-| `retrieval.py` | Provider-neutral retrieval port + deterministic local selected-source chunk retriever |
+| `source_library.py` / `sources/` | Compatibility import plus ingestion, course sync, bounded context, and image/storage projection |
+| `retrieval.py` | Provider-neutral retrieval port, local chunk retriever, and composite KB/local splitter |
 | `file_processing.py` | Upload storage, text extraction, safe paths |
 | `settings.py` | Environment-driven configuration (`Settings`) |
 | `models.py` | Model registry and allowed model IDs |
@@ -58,7 +68,7 @@ FastAPI (api.py)
 ## Hard constraints
 
 - **No Streamlit imports** in any `backend/` module.
-- **One workflow** for all six stages. Do not create six autonomous agents.
+- **One workflow** for all five phases. Do not create autonomous agents per phase.
 - **Structured assessments** at provider boundaries. Validate before persisting.
 - **Confirmation-gated advancement** when not in automatic-resolve mode. Persist
   recommendations and student decisions; never use hidden HTML markers or keyword
@@ -70,11 +80,18 @@ FastAPI (api.py)
   status in one SQLite transaction).
 - **Structured provider failures** map to HTTP 503 at the API boundary.
 - **Mock-first testing**. Automated tests must not require paid APIs or internet.
-- **AWS production adapters are opt-in** via ``DATABASE_PROVIDER=dsql`` and
-  ``FILE_STORAGE_PROVIDER=s3``. Keep ports replaceable; never bake credentials
-  into images; tests must use mocks/fakes only.
+- **AWS production adapters are opt-in** via ``DATABASE_PROVIDER=dsql``,
+  ``FILE_STORAGE_PROVIDER=s3``, and ``MODEL_PROVIDER=agentcore`` (or
+  ``bedrock`` / ``openai``). Keep ports
+  replaceable; never bake credentials into images; tests must use mocks/fakes
+  only.
 - **Notebook isolation**. Retrieval and citations must stay scoped to the active
   notebook and selected sources.
+- **DSQL/SQLite is the transcript.** AgentCore Runtime is generation-only and
+  must not own chat history (no runtime LRU, AgentCore Memory, DynamoDB, or
+  JSON sidecar). Student transcript download is a projection of ``messages``.
+- **Professor/research stays one API.** Lecturer routes live in `http/app.py`
+  with the student API. Do not split them into a second FastAPI app.
 
 ## Current migration state
 
@@ -84,37 +101,43 @@ sources, preferences, source content) run through the FastAPI path when
 `ui.runtime.store` (a `WorkspaceFacade`) so they do not open SQLite or source
 paths directly.
 
-A second stack remains for compatibility:
+A compatibility implementation remains, but it is not a second student UI
+stack:
 
 | Path | Entry | Use |
 |---|---|---|
 | Preferred | `application.py` → `workflow.py` → providers → API | Stage progression, assessments, selected-image inputs |
-| Legacy | `chat_service.StudentChatEngine` | Streamlit-only / `USE_LOCAL_API=false` fallback; does not mutate learning stages |
+| In-process fallback | `application.py` → `workflow.py` → providers | Same typed coach path when `USE_LOCAL_API=false` |
+| Legacy test seam | `chat_service.StudentChatEngine` | Compatibility/unit tests only; does not mutate learning stages |
 
-Do not add new coaching behaviour only to the legacy engine. The next
-architecture step (including AWS cutover) is to collapse onto the API/workflow
-path and retire `StudentChatEngine` for student turns.
+Do not add new coaching behaviour to the legacy engine. Student turns already
+use the API/workflow application path or its in-process equivalent;
+`StudentChatEngine` can be retired only after its remaining compatibility tests
+and non-student utilities are accounted for.
 
-`StudentStore` still concentrates notebooks, messages, sources, and preferences
-in one SQLite module. Repository adapters in `repositories.py` already narrow
-some access; when CRUD moves fully behind API routes (local or AWS), split
-persistence along those boundaries without changing the Streamlit contracts.
+`StudentStore` still concentrates notebooks, messages, sources, preferences,
+and research SQL in one module. Source operations are extracted to
+`persistence/store/operations/sources.py`; research observation/review/audit
+SQL stays on the store so coach-turn persist remains atomic.
 
-Source, notebook, and folder CRUD may still be called directly from the
-Streamlit UI via `StudentStore`. When migrating CRUD behind API routes,
-preserve the verified UI behavior and existing SQLite data.
+Streamlit panels call `ui.runtime.WorkspaceFacade`, which selects typed FastAPI
+CRUD in API mode or `WorkspaceService` in process. Panels must not call
+`StudentStore` directly.
 
 ## Common edit paths
 
 **Add or change an API route**
 
-`domain.py` (request/response models) → `application.py` or service →
-`api.py` → `api_client.py` → targeted tests in `tests/test_api.py`.
+`domain.py` (request/response models) → `coaching/` or service →
+`http/app.py` → `api_client.py` → targeted route/client tests. Keep owner
+resolution injected from `create_app`; moving a route must not weaken
+`Depends(current_owner)` or alter its OpenAPI contract. Professor Research
+routes stay in the same composition root.
 
 **Change stage behavior or coaching output**
 
-`student_journey.py` / provider prompts in `providers.py` → `workflow.py` →
-`application.py` → UI compatibility adapters in `ui/chat.py` if display-only.
+`learning/` / provider prompts in `providers.py` → `workflow.py` →
+`coaching/execution.py` → UI compatibility adapters in `ui/chat.py` if display-only.
 
 **Change persistence or schema**
 
@@ -123,15 +146,16 @@ and rollback path. Update `docs/IMPLEMENTATION_STATUS.md`.
 
 **Change source handling**
 
-`source_library.py`, `file_processing.py`, and tests in
-`tests/test_source_library.py`.
+`sources/`, `file_processing.py`, and tests in
+`tests/domain/test_source_library.py`.
 
 ## Validation
 
 ```sh
-.venv/bin/python -m pytest -q tests/test_api.py tests/test_workflow.py \
-  tests/test_learning_service.py tests/test_student_store.py \
-  tests/test_source_library.py tests/test_student_journey.py
+.venv/bin/python -m pytest -q tests/http/test_api.py \
+  tests/domain/test_workflow.py tests/domain/test_learning_service.py \
+  tests/persistence/test_student_store.py \
+  tests/domain/test_source_library.py tests/domain/test_student_journey.py
 PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \
   .venv/bin/python -m compileall -q backend
 ```

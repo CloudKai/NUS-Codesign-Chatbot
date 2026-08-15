@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .ports import StoredObject
+from .ports import ListedObject, StoredObject
 
 
 class LocalFileStorage:
@@ -90,3 +90,23 @@ class LocalFileStorage:
                 path.unlink(missing_ok=True)
                 removed += 1
         return removed
+
+    def list_prefix(self, prefix: str) -> list[ListedObject]:
+        """List local files whose object keys start with *prefix*."""
+        normalized = str(prefix).replace("\\", "/").lstrip("/")
+        listed: list[ListedObject] = []
+        for path in sorted(self.root.rglob("*")):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(self.root).as_posix()
+            if not rel.startswith(normalized):
+                continue
+            stat = path.stat()
+            listed.append(
+                ListedObject(
+                    key=rel,
+                    size=stat.st_size,
+                    etag=str(stat.st_mtime_ns),
+                )
+            )
+        return listed

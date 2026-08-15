@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .ports import StoredObject
+from .ports import ListedObject, StoredObject
 
 logger = logging.getLogger(__name__)
 
@@ -201,3 +201,23 @@ class S3FileStorage:
                 raise S3DeleteObjectsError(prefix, list(errors))
             removed += len(objects)
         return removed
+
+    def list_prefix(self, prefix: str) -> list[ListedObject]:
+        """List S3 objects under *prefix* without mutating the bucket."""
+        client = self._s3()
+        paginator = client.get_paginator("list_objects_v2")
+        listed: list[ListedObject] = []
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            for item in page.get("Contents") or []:
+                key = str(item.get("Key") or "")
+                if not key or key.endswith("/"):
+                    continue
+                etag = str(item.get("ETag") or "").strip().strip('"')
+                listed.append(
+                    ListedObject(
+                        key=key,
+                        size=int(item.get("Size") or 0),
+                        etag=etag,
+                    )
+                )
+        return listed

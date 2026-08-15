@@ -2,56 +2,22 @@
 
 from __future__ import annotations
 
+from html import escape
+
 import streamlit as st
 
 from backend.title_service import NotebookTitleService
-from backend.student_journey import RESPONSE_DETAILS, normalize_journey
 
+from ui.constants import PRODUCT_SUBTITLE, PRODUCT_TITLE
 from ui.notebooks import notebooks_dialog
-from ui.menu_popovers import close_menu_popover, menu_popover_widget_key
 from ui.profile import inject_profile_leave_helper, render_profile_menu
 from ui.rename import bump_rename_epoch, render_enter_to_apply_rename
-from ui.runtime import rerun_app, rerun_fragment, store
-from ui.session import save_journey
+from ui.runtime import rerun_app, store
 from ui.settings import apply_selected_model
 
 
-GUIDANCE_LABELS = {
-    "short": "Quick",
-    "long": "Complex",
-}
-
-
-@st.fragment
-def _render_guidance_fragment() -> None:
-    """Guidance Level control; fragment-scoped so Chat/Journey do not redraw."""
-    st.session_state["_topbar_guidance_fragment_runs"] = (
-        int(st.session_state.get("_topbar_guidance_fragment_runs") or 0) + 1
-    )
-    journey = normalize_journey(st.session_state.learning_journey)
-    current_detail = journey["response_detail"]
-    with st.container(key="topbar_mode"):
-        with st.popover(
-            GUIDANCE_LABELS[current_detail],
-            key=menu_popover_widget_key("topbar-guidance"),
-        ):
-            for detail in RESPONSE_DETAILS:
-                label = GUIDANCE_LABELS[detail]
-                if st.button(
-                    label,
-                    key=f"topbar-guidance-{detail}",
-                    use_container_width=True,
-                    type="tertiary",
-                ):
-                    if detail != current_detail:
-                        journey["response_detail"] = detail
-                        save_journey(journey)
-                    close_menu_popover("topbar-guidance")
-                    rerun_fragment()
-
-
 def render_topbar() -> tuple[str, str | None]:
-    """Render brand, notebook title, chats library, guidance, and profile."""
+    """Render course identity, notebook title, notebook library, and profile."""
     thread = store.get_thread(st.session_state.thread_id) or {}
     legacy_title_replacement = NotebookTitleService.replacement_for_legacy_title(
         str(thread.get("name") or ""),
@@ -74,10 +40,13 @@ def render_topbar() -> tuple[str, str | None]:
             gap="small",
         )
         brand_column.markdown(
-            """
+            f"""
             <div class="brand-lockup">
               <div class="brand-mark">C</div>
-              <div class="brand-caption">Critical Thinking Companion</div>
+              <div class="brand-copy">
+                <div class="brand-title">{escape(PRODUCT_TITLE)}</div>
+                <div class="brand-subtitle">{escape(PRODUCT_SUBTITLE)}</div>
+              </div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -98,11 +67,7 @@ def render_topbar() -> tuple[str, str | None]:
                     bump_rename_epoch("topbar", thread_id)
                     rerun_app()
         with controls_column.container(key="topbar_actions"):
-            chats_column, guidance_label_column, guidance_menu_column = st.columns(
-                [0.28, 0.40, 0.32],
-                gap="small",
-            )
-            with chats_column.container(key="topbar_navigation"):
+            with st.container(key="topbar_navigation"):
                 if st.button(
                     "Notebooks",
                     icon=":material/library_books:",
@@ -110,15 +75,9 @@ def render_topbar() -> tuple[str, str | None]:
                     key="open-notebooks",
                 ):
                     notebooks_dialog()
-            guidance_label_column.markdown(
-                '<p class="topbar-guidance-label">Guidance Level:</p>',
-                unsafe_allow_html=True,
-            )
-            with guidance_menu_column:
-                _render_guidance_fragment()
         with profile_column.container(key="topbar_profile_slot"):
-            # Appearance owns an app-scoped widget rerun; display name and
-            # language remain nested fragments inside the profile menu.
+            # Appearance owns an app-scoped widget rerun; display name,
+            # language, and coaching style remain nested fragments in the menu.
             render_profile_menu()
         inject_profile_leave_helper()
         chosen_model = st.session_state.selected_model

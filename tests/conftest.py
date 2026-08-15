@@ -19,6 +19,8 @@ os.environ["APP_ENV"] = "development"
 os.environ["MOCK_OPENAI"] = "true"
 os.environ["MODEL_PROVIDER"] = "mock"
 os.environ["OPENAI_API_KEY"] = ""
+os.environ["OPENAI_TIMEOUT_SECONDS"] = "110"
+os.environ["OPENAI_MAX_RETRIES"] = "0"
 # Default AppTest path uses in-process coaching; API-mode UI tests opt in.
 os.environ["USE_LOCAL_API"] = "false"
 os.environ["AUTO_ADVANCE_STAGES"] = "false"
@@ -33,6 +35,10 @@ os.environ["APP_WORKSPACES_DIR"] = str(_BOOTSTRAP_ROOT / "workspaces")
 os.environ["LECTURE_NOTES_DIR"] = str(_BOOTSTRAP_ROOT / "lecture_notes")
 os.environ["DATABASE_PROVIDER"] = "sqlite"
 os.environ["FILE_STORAGE_PROVIDER"] = "local"
+os.environ.pop("DSQL_SSLROOTCERT", None)
+os.environ.pop("COURSE_MATERIALS_BUCKET", None)
+os.environ.pop("AGENTCORE_RUNTIME_ARN", None)
+os.environ.pop("KNOWLEDGE_BASE_ID", None)
 
 
 def _clear_streamlit_runtime_caches() -> None:
@@ -64,6 +70,8 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("MOCK_OPENAI", "true")
     monkeypatch.setenv("MODEL_PROVIDER", "mock")
     monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.setenv("OPENAI_TIMEOUT_SECONDS", "110")
+    monkeypatch.setenv("OPENAI_MAX_RETRIES", "0")
     monkeypatch.setenv("USE_LOCAL_API", "false")
     monkeypatch.setenv("AUTO_ADVANCE_STAGES", "false")
     monkeypatch.setenv("STUDENT_STAGE_SELECTION", "false")
@@ -74,6 +82,10 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("LECTURE_NOTES_DIR", str(lecture_notes_dir))
     monkeypatch.setenv("DATABASE_PROVIDER", "sqlite")
     monkeypatch.setenv("FILE_STORAGE_PROVIDER", "local")
+    monkeypatch.delenv("DSQL_SSLROOTCERT", raising=False)
+    monkeypatch.delenv("COURSE_MATERIALS_BUCKET", raising=False)
+    monkeypatch.delenv("AGENTCORE_RUNTIME_ARN", raising=False)
+    monkeypatch.delenv("KNOWLEDGE_BASE_ID", raising=False)
 
     from backend import settings as settings_module
     from backend.persistence.factory import reset_file_storage_cache
@@ -95,7 +107,15 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     )
     monkeypatch.setattr(settings_module.settings, "database_provider", "sqlite")
     monkeypatch.setattr(settings_module.settings, "file_storage_provider", "local")
+    monkeypatch.setattr(settings_module.settings, "course_materials_bucket", "")
+    monkeypatch.setattr(settings_module.settings, "agentcore_runtime_arn", "")
+    monkeypatch.setattr(settings_module.settings, "agentcore_runtime_id", "")
+    monkeypatch.setattr(settings_module.settings, "knowledge_base_id", "")
+    monkeypatch.setattr(settings_module.settings, "knowledge_base_region", "")
+    monkeypatch.setattr(settings_module.settings, "dsql_sslrootcert", "")
     monkeypatch.setattr(settings_module.settings, "openai_api_key", "")
+    monkeypatch.setattr(settings_module.settings, "openai_timeout_seconds", 110.0)
+    monkeypatch.setattr(settings_module.settings, "openai_max_retries", 0)
     monkeypatch.setattr(settings_module.settings, "mock_openai", True)
     monkeypatch.setattr(settings_module.settings, "model_provider", "mock")
     monkeypatch.setattr(settings_module.settings, "use_local_api", False)
@@ -119,8 +139,6 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     # Default UI tests run as an authenticated Cognito student so existing
     # AppTest suites keep exercising the full application. Auth-gate tests
     # override ``is_logged_in`` / ``authenticated_user`` explicitly.
-    import streamlit as st
-
     from ui import auth_gate as auth_gate_module
 
     _default_user = {

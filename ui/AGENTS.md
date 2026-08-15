@@ -29,23 +29,29 @@ Only read that for UI tasks that touch API migration or coaching flow.
 | Module | Responsibility |
 |---|---|
 | `auth_gate.py` | Signed-out shell, Cognito login dialog, logout helpers |
+| `auth/cookies.py` | Cookie helpers extracted from the login gate; `_cookie_value` remains a patch seam on `auth_gate` |
 | `constants.py` | Response languages and appearance modes |
 | `components.py` | Shared HTML helpers for progress, empty states, review cards |
 | `toasts.py` | Corner toast helper (timed slide-in; falls back to `st.toast`) |
 | `assets/styles/` | Ordered static CSS partials (edit the matching component file) |
 | `theme.py` | Loads `assets/styles/` in fixed order, `inject_template_css()`, dynamic `render_theme_css()` |
 | `layout/` | Browser-side layout helpers (column resize, sources scroll, composer) |
-| `runtime.py` | Cached store/workspace/coach + `WorkspaceFacade`, `local_api_client()`, coach helpers, `rerun_app()` / `rerun_fragment()` |
-| `session.py` | Session defaults, notebook create/select/delete, `save_journey()` |
+| `runtime.py` | Compatibility alias for `services/runtime.py` (cached store/workspace/coach, `WorkspaceFacade`, coach helpers, rerun) |
+| `session.py` | Session defaults (Strict coaching / `response_detail=long`), notebook create/select/delete, `save_journey()` |
 | `rename.py` | Shared Enter-only rename forms, draft discard, select-all helper |
 | `topbar.py` | Brand, title, section switcher, Guidance, profile entry |
-| `profile.py` | Compact settings popover (display name, appearance, language, help) |
+| `profile.py` | Compact settings popover (display name, Coaching style Quick/Strict, appearance, language, help) |
 | `workspace.py` | Mobile panel radio and three-column studio/chat/sources layout |
-| `chat.py` | Message rendering, citations, composer, `handle_prompt()`, `render_chat_panel()` |
-| `sources.py` | Source library with search/filter, add/viewer dialogs |
-| `studio.py` | Thinking Path journey roadmap, review cards, pending transition UI |
-| `notebooks.py` | Folder-free notebook library and actions dialog |
+| `chat.py` | Compatibility alias for `panels/chat.py` (messages, citations, composer, `handle_prompt()`) |
+| `sources.py` | Compatibility alias for `panels/sources.py` (library, search/filter, add/viewer dialogs) |
+| `studio.py` | Compatibility alias for `panels/studio.py` (five-phase Journey/Review, pending transitions) |
+| `professor.py` | Lecturer Research/analytics workbench. Do not relocate. CSS lives in `assets/styles/70-professor.css`. |
+| `notebooks.py` | Folder-free notebook library and actions dialog (rename, transcript download, delete) |
 | `settings.py` | Preference persistence callbacks used by the profile popover |
+
+`ui.chat`, `ui.sources`, `ui.studio`, and `ui.runtime` replace themselves with
+the owning implementation module so historical imports and monkeypatch targets
+keep the same function objects.
 
 Compatibility shims at `ui/column_resize.py`, `ui/sources_scroll.py`, and
 `ui/composer_layout.py` re-export `ui.layout.*`. Prefer importing from
@@ -67,7 +73,7 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
 ## Hard constraints
 
 - **Presentation only.** Do not import SQLite drivers, LangChain, LangGraph,
-  OpenAI/Ollama SDKs, or read/write the filesystem directly except through
+  OpenAI SDKs, or read/write the filesystem directly except through
   backend helpers already used in this package.
 - **Import shared runtime from `ui.runtime` only.** Use `store` (workspace
   facade), `local_api_client()`, coach helpers, `rerun_app()`, and
@@ -139,8 +145,9 @@ streamlit_app.py
 
 **Panel layout or copy**
 
-Edit the owning module (`chat.py`, `sources.py`, `studio.py`, etc.). Check
-`DESIGN.md` for density and clutter rules.
+Edit the owning module (`ui/panels/chat.py`, `ui/panels/sources.py`,
+`ui/panels/studio.py`, or `ui/professor.py`). Check `DESIGN.md` for density
+and clutter rules.
 
 **Theme or responsive CSS**
 
@@ -149,8 +156,9 @@ Edit the matching partial under `ui/assets/styles/` for static styles
 `50-dialogs-notebooks`, `60-profile-topbar`, `90-responsive`). Keep the
 manifest order in `ui/theme.py`. Edit `theme.py` only for Light/Dark/System
 token overrides in `render_theme_css()`. AppTest in
-`tests/test_streamlit_ui.py` and `tests/test_theme_styles.py` assert assembled
-CSS contracts — run UI tests after visual changes.
+`tests/ui/test_streamlit_ui.py` and `tests/ui/test_theme_styles.py` assert assembled
+CSS contracts — run UI tests after visual changes. Source-file assertions must
+use `inspect.getfile` so they follow the panel aliases.
 
 **Layout / scroll / composer DOM helpers**
 
@@ -171,7 +179,7 @@ entrypoint or a parent panel if it must open on load.
 ## Validation
 
 ```sh
-.venv/bin/python -m pytest -q tests/test_streamlit_ui.py
+.venv/bin/python -m pytest -q tests/ui/test_streamlit_ui.py
 PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \
   .venv/bin/python -m compileall -q ui streamlit_app.py
 ```
@@ -185,7 +193,7 @@ sh scripts/start.sh
 
 If a test asserts text from a source file (not rendered output), update the
 path when moving strings — e.g. `"Loading course materials…"` lives in
-`sources.py`.
+`ui/panels/sources.py`.
 
 ## Handoff
 

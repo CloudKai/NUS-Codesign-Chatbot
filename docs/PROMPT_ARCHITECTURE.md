@@ -19,13 +19,14 @@ shared prompt + stage file  (backend/prompts/)
     ↓
 selected notebook sources (DSQL/SQLite metadata + S3/local extracted text)
     ↓
-LocalChunkRetriever (query-time chunks + deterministic lexical ranking)
+LocalChunkRetriever, or CompositeContextRetriever (Bedrock Retrieve for
+locked course sources + local chunks for student uploads)
     ↓
 RetrievalResult.context → PromptContext.retrieved_course_context
     ↓
 PromptComposer (server-side, no Streamlit / OpenAI / Bedrock imports)
     ↓
-OpenAI (or Ollama / deterministic mock)
+OpenAI, Bedrock Converse, AgentCore Runtime, or deterministic mock
     ↓
 structured coaching response (recommendation only)
     ↓
@@ -53,7 +54,12 @@ changes.
 
 The retriever sees full extracted text locally, but the generation model sees
 only the selected excerpts. Citation previews are focused around the matching
-query evidence instead of the beginning of the document.
+query evidence instead of the beginning of the document. Production generation
+may use AgentCore Runtime (`MODEL_PROVIDER=agentcore`); the user payload is
+this application's composed CDE2300 prompt plus bounded DSQL history as
+Converse `messages`. Do not copy the POC CDE2500 Q&A specialist prompt.
+Coaching must not receive Knowledge Base tools. Course grounding uses
+server-side `Retrieve` when `KNOWLEDGE_BASE_ID` is set.
 
 ## Prompt structure
 
@@ -63,17 +69,43 @@ The composer orders and delimits these sections:
 2. the one authoritative Thinking Path stage prompt;
 3. student project context;
 4. retrieved source excerpts;
-5. bounded learning summary and recent conversation;
+5. bounded learning summary and, unless the provider already sends DSQL
+   history as conversation messages, recent conversation;
 6. the current student message;
 7. runtime rules for language, detail, grounding, citations, and structured
    assessment.
 
 Retrieved content is explicitly untrusted evidence. It cannot override shared,
-stage, or runtime instructions. The grounding rules require claim-level `[S#]`
-citations, prohibit invented sources/quotes, and tell the coach to identify an
-evidence gap when the retrieved excerpts do not answer the question.
+stage, authorization, workflow, or runtime instructions. The shared prompt
+includes an internal Interpret → Assumption/V&V check → one Socratic probe →
+reflection trigger. Those headings are not student-facing. Grounding rules
+require claim-level `[S#]` citations, prohibit invented sources/quotes, and
+tell the coach to identify an evidence gap when the retrieved excerpts do not
+answer the question. Trusted prompt files must not contain literal
+prompt-attack examples; quoted override attempts remain evidence only when they
+genuinely appear in retrieved or student content.
 
-## Future architecture
+The composer exposes two bounded products in addition to `composed_text`:
+
+- `trusted_instructions`: shared coaching, the authoritative stage file, and
+  runtime/output rules;
+- `untrusted_turn_text`: project context, retrieved evidence, summary/memory,
+  and the current student contribution.
+
+Mock, OpenAI, and Bedrock Converse still send the ordered `composed_text`.
+AgentCore sends trusted instructions in a dedicated `trusted_instructions`
+harness field and keeps DSQL history plus the untrusted current turn in
+`messages`. Token budgeting still counts the full `composed_text` so the split
+cannot overflow the window.
+
+AgentCore omits duplicated `<recent_messages>` from the untrusted turn because
+the same turns are already Converse `messages`. When history no longer fits,
+derived `<conversation_memory>` is inserted once between summary and
+recent_messages. That block is untrusted student/project content, not
+instructions. Mock, OpenAI, and Bedrock Converse keep the inline recent-history
+block unless a provider opts into the same planner.
+
+## Production Knowledge Base path
 
 ```text
 Streamlit
@@ -85,38 +117,45 @@ DSQL current_stage
 selected source IDs + notebook/user filter
     ↓
 Bedrock Knowledge Base `Retrieve` adapter implementing ContextRetriever
+(locked Lecture Notes/Readings only; student uploads stay local)
     ↓
 RetrievalResult (stable source IDs/labels + chunks)
     ↓
 same PromptComposer + same educational workflow
     ↓
-configured generation provider (Bedrock later)
+configured generation provider (AgentCore Runtime, or Bedrock/OpenAI fallback)
 ```
 
-For the Bedrock phase, implement a new `ContextRetriever` adapter and inject it
-into `CoachApplicationService`. The adapter must:
+`backend/bedrock_retrieve.py` implements this adapter and is injected into
+`CoachApplicationService` when `KNOWLEDGE_BASE_ID` is set and the provider is
+not mock. It:
 
-- filter retrieval by authenticated user/notebook and the selected source IDs;
-- store the durable application `source_id` in Knowledge Base metadata;
-- map results back to the existing selected-source `[S#]` order;
-- return bounded `RetrievedChunk` values with location metadata where
-  available;
-- use Knowledge Base `Retrieve`, then feed the existing composer/workflow, so
+- filters retrieval by selected source IDs already loaded for the notebook;
+- sends a `course_material_id` Knowledge Base metadata filter when ids exist,
+  then retries without the filter if that returns no hits (compatibility until
+  the KB is re-ingested with metadata);
+- maps S3 locations onto locked course `object_key` values and `[S#]` labels
+  using exact canonical key equality (URL-decoded, slash-normalized, S3 URI
+  extracted). Suffix matching is not used, so `week1.pdf` cannot match
+  `archive/week1.pdf` or `myweek1.pdf`;
+- returns bounded `RetrievedChunk` values with `retrieval_origin`;
+- uses Knowledge Base `Retrieve`, then feeds the existing composer/workflow, so
   stage decisions and persistence do not move into `RetrieveAndGenerate`;
-- reject results whose source IDs or labels are outside the selected notebook.
+- drops results whose S3 keys are outside the selected notebook sources.
 
-The application already enforces the final scope check, so a faulty future
-adapter cannot introduce another notebook's chunk.
+The application already enforces the final scope check, so a faulty adapter
+cannot introduce another notebook's chunk.
 
 ## Package layout
 
 | Path | Role |
 |---|---|
-| `backend/prompts/shared/coaching.md` | Shared Socratic coach behaviour |
-| `backend/prompts/stages/{focus,evidence,assumptions,perspectives,synthesis,conclusion}.md` | Stage purpose, coaching strategy, advance/stay criteria |
+| `backend/prompts/shared/coaching.md` | Shared Socratic coach behaviour, Assumption Check, V&V |
+| `backend/prompts/stages/{problem_identification,concept_generation,design_specification,deep_analysis,reflection}.md` | Stage purpose, coaching strategy, advance/stay criteria. `deep_analysis.md` is student-facing Ethics & Critical Thinking |
 | `backend/prompts/loader.py` | UTF-8 load + in-process cache; stage IDs from `STAGE_BY_ID` |
-| `backend/prompts/composer.py` | Ordered composition with explicit delimiters |
-| `backend/retrieval.py` | Retrieval port, local chunker/ranker, stable chunk metadata |
+| `backend/prompts/composer.py` | Ordered composition with explicit delimiters and a trusted/untrusted channel split |
+| `backend/retrieval.py` | Retrieval port, local chunker/ranker, composite splitter |
+| `backend/bedrock_retrieve.py` | Bedrock Knowledge Base `Retrieve` adapter (injected client in tests) |
 | `backend/application.py` | Authoritative source selection, retrieval injection, citation filtering, audit persistence |
 
 ## Local preview (no network)

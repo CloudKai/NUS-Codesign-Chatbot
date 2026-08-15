@@ -156,6 +156,24 @@ def extract_text(path: Path) -> str:
     return ""
 
 
+def extract_source_text_from_bytes(name: str, content: bytes) -> str:
+    """Extract readable text from in-memory source bytes.
+
+    Unlike ``_extract_text_from_bytes``, extraction failures propagate so course
+    sync can record the per-file error instead of silently storing empty text.
+    """
+    suffix = Path(name).suffix.lower() or ".bin"
+    if suffix in TEXT_SUFFIXES:
+        return content.decode("utf-8", errors="replace")
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
+        handle.write(content)
+        temp_path = Path(handle.name)
+    try:
+        return extract_text(temp_path)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
 def _extract_text_from_bytes(name: str, content: bytes) -> str:
     """Extract readable text from in-memory upload bytes for compression checks."""
     suffix = Path(name).suffix.lower() or ".bin"

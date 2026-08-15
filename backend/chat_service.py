@@ -28,6 +28,7 @@ from .source_library import (
     source_image_input,
 )
 from .student_journey import (
+    DEFAULT_RESPONSE_DETAIL,
     complete_and_advance,
     current_stage,
     default_journey,
@@ -46,8 +47,8 @@ class ChatOptions:
     image_generation: bool = False
     local_analysis: bool = False
     assignment: dict[str, str] = field(default_factory=dict)
-    thinking_stage: str = "focus"
-    response_detail: str = "short"
+    thinking_stage: str = "problem_identification"
+    response_detail: str = DEFAULT_RESPONSE_DETAIL
     response_language: str = "English"
     source_ids: list[str] = field(default_factory=list)
     allow_model_knowledge: bool = False
@@ -538,7 +539,11 @@ class StudentChatEngine:
     def _openai_stream(self, stream: ChatStream, model: ModelDefinition) -> Iterator[str]:
         if not settings.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is not configured. Use MOCK_OPENAI=true to preview.")
-        client = OpenAI(api_key=settings.openai_api_key)
+        client = OpenAI(
+            api_key=settings.openai_api_key,
+            timeout=settings.openai_timeout_seconds,
+            max_retries=settings.openai_max_retries,
+        )
         history = [
             {"role": message["role"], "content": message["content"]}
             for message in self.store.get_messages(stream.thread_id)

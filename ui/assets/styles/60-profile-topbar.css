@@ -1,8 +1,8 @@
     [data-testid="stPopoverBody"][aria-label="Settings"],
     [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root) {
-        width:min(16.5rem,calc(100vw - 1.5rem)) !important;
-        max-width:min(16.5rem,calc(100vw - 1.5rem)) !important;
-        padding:.32rem .7rem .7rem !important;
+        width:min(19.5rem,calc(100vw - 1.5rem)) !important;
+        max-width:min(19.5rem,calc(100vw - 1.5rem)) !important;
+        padding:.5rem 1rem .85rem !important;
         border:1px solid var(--cd-border) !important;
         border-radius:.72rem !important;
         background:var(--cd-surface) !important;
@@ -748,16 +748,6 @@
         border:0;
     }
 
-    .topbar-guidance-label {
-        margin:0 !important;
-        padding:0 !important;
-        color:var(--cd-text);
-        font-size:.95rem;
-        font-weight:700;
-        line-height:1 !important;
-        white-space:nowrap;
-    }
-
     .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
     > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2)
     [data-testid="stMarkdownContainer"],
@@ -785,57 +775,6 @@
         width:auto !important;
         flex:0 0 auto !important;
         min-width:0 !important;
-    }
-
-    /* Guidance menu: no heavy outline, soft hover only. */
-    [data-testid="stPopoverBody"]:has([class*="st-key-topbar-guidance-"]) {
-        border:0 !important;
-        outline:none !important;
-        box-shadow:var(--cd-shadow) !important;
-        background:var(--cd-surface) !important;
-        border-radius:.72rem !important;
-        padding:.2rem !important;
-        min-width:6.5rem !important;
-    }
-
-    [data-testid="stPopoverBody"]:has([class*="st-key-topbar-guidance-"])
-    > div,
-    [data-testid="stPopoverBody"]:has([class*="st-key-topbar-guidance-"])
-    [data-testid="stVerticalBlock"],
-    [data-testid="stPopoverBody"]:has([class*="st-key-topbar-guidance-"])
-    [data-testid="stLayoutWrapper"] {
-        gap:0 !important;
-        row-gap:0 !important;
-    }
-
-    [data-testid="stPopoverBody"] [class*="st-key-topbar-guidance-"] {
-        margin:0 !important;
-        padding:0 !important;
-    }
-
-    [data-testid="stPopoverBody"] [class*="st-key-topbar-guidance-"]
-    div[data-testid="stButton"] {
-        margin:0 !important;
-        padding:0 !important;
-    }
-
-    [data-testid="stPopoverBody"] [class*="st-key-topbar-guidance-"]
-    div[data-testid="stButton"] button {
-        min-height:1.85rem !important;
-        height:1.85rem !important;
-        margin:0 !important;
-        padding:0 .55rem !important;
-        border:0 !important;
-        border-radius:.45rem !important;
-        color:var(--cd-text) !important;
-        background:transparent !important;
-        box-shadow:none !important;
-        justify-content:flex-start !important;
-    }
-
-    [data-testid="stPopoverBody"] [class*="st-key-topbar-guidance-"]
-    div[data-testid="stButton"] button:hover {
-        background:var(--cd-subtle) !important;
     }
 
     /* Neutral listbox options for any remaining selects. */
@@ -878,7 +817,7 @@
         column-gap:0 !important;
     }
 
-    /* Notebooks / Guidance cluster — asymmetric gaps (not uniform). */
+    /* Notebooks cluster stays compact on the right. */
     .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
     > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
         flex:0 0 auto !important;
@@ -891,26 +830,6 @@
         transform:none !important;
         padding:0 !important;
         margin:0 !important;
-    }
-
-    /* Larger gap: Notebooks → Guidance Level */
-    .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
-    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(1) {
-        margin-right:1.25rem !important;
-    }
-
-    /* Tight gap: Guidance Level → Quick dropdown */
-    .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
-    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) {
-        margin-right:.25rem !important;
-        padding-right:0 !important;
-    }
-
-    .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
-    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(3) {
-        min-width:6.75rem !important;
-        width:max-content !important;
-        margin-left:0 !important;
     }
 
     .st-key-topbar_navigation,
@@ -1053,6 +972,7 @@
     }
 
     .st-key-topbar_actions,
+    .st-key-topbar_actions > [data-testid="stVerticalBlock"],
     .st-key-topbar_actions > [data-testid="stLayoutWrapper"],
     .st-key-topbar_actions > [data-testid="stLayoutWrapper"]
     > [data-testid="stHorizontalBlock"],

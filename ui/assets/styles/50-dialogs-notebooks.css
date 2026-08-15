@@ -192,7 +192,7 @@
         text-align:left !important;
     }
 
-    /* Tighten Rename → phase caption → delete spacing. */
+    /* Tighten Rename → phase caption → transcript download → delete spacing. */
     [role="dialog"]:has(.st-key-notebook_actions_panel)
     [data-testid="stElementContainer"]:has([data-testid="stTextInput"]),
     [role="dialog"]:has(.st-key-notebook_actions_panel)
@@ -217,6 +217,31 @@
         margin:0 !important;
         padding:0 !important;
         min-height:0 !important;
+    }
+
+    .st-key-notebook_action_export {
+        margin:.2rem 0 .15rem;
+    }
+
+    [data-testid="stElementContainer"]:has(> .st-key-notebook_action_export),
+    [data-testid="stLayoutWrapper"]:has(.st-key-notebook_action_export) {
+        margin:.15rem 0 .1rem !important;
+        padding:0 !important;
+    }
+
+    .st-key-notebook_action_export [data-testid="stVerticalBlock"] {
+        gap:.15rem !important;
+        row-gap:.15rem !important;
+    }
+
+    .st-key-notebook_action_export [data-testid="stDownloadButton"],
+    .st-key-notebook_action_export div[data-testid="stDownloadButton"] {
+        width:100% !important;
+        margin:0 !important;
+    }
+
+    .st-key-notebook_action_export [data-testid="stDownloadButton"] button {
+        width:100% !important;
     }
 
     [role="dialog"]:has(.st-key-notebook_actions_panel)
@@ -789,7 +814,7 @@
     .notebook-card-title {
         display:flex;
         align-items:center;
-        flex-wrap:wrap;
+        flex-wrap:nowrap;
         gap:.35rem;
         min-width:0;
         overflow:visible;
@@ -797,6 +822,13 @@
         font-size:.8rem;
         font-weight:650;
         line-height:1.2;
+    }
+
+    .notebook-card-title-text {
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
     }
 
     .notebook-current-badge {
@@ -814,11 +846,19 @@
     }
 
     .notebook-card-meta {
-        margin:0;
+        margin:.16rem 0 0;
         color:var(--cd-muted);
         font-size:.68rem;
         font-weight:520;
         line-height:1.15;
+    }
+
+    .notebook-card-activity {
+        margin:.12rem 0 0;
+        color:var(--cd-muted);
+        font-size:.67rem;
+        font-weight:450;
+        line-height:1.2;
     }
 
     .notebook-folder-active {

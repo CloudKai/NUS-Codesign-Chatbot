@@ -12,7 +12,7 @@ The target architecture is:
 ```text
 Streamlit UI -> typed FastAPI client -> FastAPI /api/v1 -> application services
     -> one LangGraph coach workflow -> model/retrieval/storage ports
-    -> Ollama or mock model, SQLite, local files, and local vector search
+    -> mock or optional OpenAI model, SQLite, local files, and local vector search
 ```
 
 OpenAI remains an optional provider. Future AWS adapters may provide Bedrock,
@@ -27,14 +27,39 @@ capabilities:
 - notebooks, folders, history, source upload/selection/preview/download/removal;
 - source-grounded conversation, stable citations, streaming, model selection,
   short/long response modes, and local persistence;
-- the six thinking stages: Focus, Evidence, Assumptions, Perspectives,
-  Synthesis, and Conclusion;
+- the five research-aligned phases: Problem identification, Concept generation,
+  Design specification, Ethics & Critical Thinking, and Reflection
+  (internal persisted id for Ethics & Critical Thinking remains
+  `deep_analysis`);
 - prompt summaries, learning summaries, working conclusions, changes in
   understanding, and critical-understanding assessment.
 
-Existing SQLite data, local source files, thread identities, and user-visible
-entrypoints must remain usable. Schema changes require explicit migrations,
-safe defaults, backup instructions, and a tested rollback path.
+Existing local source files, account identities, and user-visible entrypoints
+must remain safe. The old six-stage and new five-phase learning contracts are
+not silently mapped. Non-empty databases without the exact workflow marker
+fail readiness until an explicit, inventoried reset/bootstrap is approved.
+SQLite reset creates a recoverable backup and file quarantine and preserves
+users/auth records; DSQL reset is admin-only and explicit. Schema changes
+require safe initialization, backup instructions, and tested rollback paths.
+
+## Implemented package ownership
+
+The layers above are the behavior contract. Current code ownership:
+
+| Concern | Implementation | Compatibility import |
+|---|---|---|
+| FastAPI composition, student and professor routes | `backend/http/app.py` | `backend/api.py` |
+| Five-phase journey, review, Facione projection | `backend/learning/` | `backend/student_journey.py` |
+| Coach-turn execution, research-observation persist | `backend/coaching/execution.py` | `backend/application.py` |
+| Source ingestion, course sync, context, image projection | `backend/sources/` | `backend/source_library.py` |
+| Chat, sources, Journey/Review, runtime facade | `ui/panels/`, `ui/services/runtime.py` | `ui/chat.py`, `ui/sources.py`, `ui/studio.py`, `ui/runtime.py` |
+| DSQL admin bootstrap (five-phase marker + research DDL) | `scripts/dsql/cli.py` | `scripts/init_dsql.py` |
+
+Leave `ui/professor.py`, professor CSS, `backend/professor_analytics/`, and
+`backend/research/` in place. Keep research SQL on `StudentStore`. Do not
+restore six coaching stages or drop professor/research routes.
+
+See [`CODEBASE_STRUCTURE.md`](CODEBASE_STRUCTURE.md) for the placement map.
 
 ## Target layers and interfaces
 
@@ -66,16 +91,18 @@ Use narrow dependency-injected ports, including:
 - `ChatModelProvider` and `EmbeddingProvider`;
 - `KnowledgeRepository`, `ConversationRepository`, `NotebookRepository`,
   `LearningStateRepository`, and `PhaseTransitionRepository`;
-- `FileStorage`, `CoachWorkflow`, and `ModelRouter`.
+- `FileStorage`, `CoachWorkflow`, and `ModelRouter`;
+- `ResearchRepository` for immutable automated observations, append-only human
+  reviews/adjudications, and attributable access audit.
 
-Local SQLite, local filesystem, local vector search, Ollama, OpenAI, and mock
+Local SQLite, local filesystem, local vector search, OpenAI, and mock
 implementations live in infrastructure. Do not leak their response schemas
 into domain or application code.
 
 ## Educational workflow
 
-Build one LangGraph workflow, not six agents. Give it explicit typed state and
-durable per-thread checkpoints.
+Build one LangGraph workflow, not one agent per phase. Give it explicit typed
+state and durable per-thread checkpoints.
 
 Its steps are:
 
@@ -93,13 +120,29 @@ Its steps are:
 9. Update summaries, conclusion, understanding change, and learning state.
 10. Persist conversation, source snapshot, usage, and graph state.
 
-Each assessment includes: current stage, contribution summary, stage-specific
+Each assessment includes: current phase, contribution summary, phase-specific
 assessment, evidence, assumptions, missing reasoning elements,
 critical-understanding level, confidence, stay/advance recommendation,
 rationale, guidance questions, updated learning summary, working conclusion,
 understanding change, citations, Facione dimension scores (0–4 Holistic rubric
 plus not-started), supportive review strengths and improvements for the current
-stage (may be empty), and user-facing response.
+phase (may be empty), and user-facing response.
+
+The same single provider result may also include optional provisional research
+coding. It is soft-validated independently from coaching: one dominant CLEAR
+strategy, no more than two Facione behaviour occurrences, design-ethics
+concepts, and evidence quotes that the application resolves to offsets in the
+current student utterance. Invalid research coding never discards a valid
+coach turn. Research codes do not award Review points, complete a phase, or
+force progression. Only Reflection may yield a provisional holistic candidate.
+
+Lecturer/admin access is attributable. Protected professor routes expose an
+aggregate summary, paginated observation queue, notebook detail/transcript,
+append-only review/adjudication, and formula-safe CSV. Every identifiable read
+or export writes an access audit first and fails closed when auditing fails.
+Students receive the established Review projection plus Facione behaviour
+occurrences and the provisional Reflection candidate; CLEAR and ethics labels
+remain research-review data.
 
 Only the student's explicit confirmation may apply an advancement in the safe
 default mode (`AUTO_ADVANCE_STAGES=false`). The system must persist the
@@ -120,17 +163,21 @@ MODEL_PROVIDER=mock
 MOCK_OPENAI=true
 AUTO_ADVANCE_STAGES=false
 USE_LOCAL_API=true
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_CHAT_MODEL=gpt-oss:20b
-OLLAMA_EMBEDDING_MODEL=<local-embedding-model>
 OPENAI_API_KEY=
 OPENAI_CHAT_MODEL=gpt-5.6-luna
 ```
 
-Set `MODEL_PROVIDER=ollama` or `openai` in a private `.env` when needed. Do not
-hard-code a model in the workflow. Give a helpful, actionable error if Ollama is
-unavailable. The mock provider must be deterministic and support all automated
-tests without network access.
+Set `MODEL_PROVIDER=openai`, `MODEL_PROVIDER=bedrock`, or
+`MODEL_PROVIDER=agentcore` in a private `.env`
+when needed. Do not hard-code a model in the workflow. The mock provider must
+be deterministic and support all automated tests without network access.
+Bedrock and AgentCore use the default AWS credential chain (SSO or the EC2 role).
+Never put access keys in `.env`. The Bedrock adapter is
+generation-only and must not call RetrieveAndGenerate. AgentCore is the
+production generation path: FastAPI stays the application; the runtime is not
+the student UI. Invokes are stateless so DSQL/SQLite ``messages`` remain the
+only durable transcript. Do not port POC JSON, DynamoDB, or AgentCore session
+caches as chat history.
 
 Retrieval is notebook-isolated and source-first. The current local adapter
 creates sentence-aware overlapping chunks from extracted selected-source text
@@ -139,9 +186,12 @@ and records stable source/chunk audit mappings on the assistant message. It
 retrieves only selected sources from the active notebook and returns citations
 that open the correct source. Student uploads remain private. Enforce existing
 file-count and size limits, prevent path traversal, validate content types
-where practical, and preserve legacy source attachments. Future Bedrock
-Knowledge Base retrieval replaces only the retrieval adapter and must retain
-the same notebook/source filter, chunk-result contract, and citation mapping.
+where practical, and preserve legacy source attachments. When
+``KNOWLEDGE_BASE_ID`` is set outside mock mode, locked Lecture Notes/Readings
+use Bedrock Knowledge Base ``Retrieve`` (never ``RetrieveAndGenerate``) mapped
+onto selected ``[S#]`` labels; student uploads stay on the local chunk
+retriever. The composer, citations, and coaching specialist tools do not
+change.
 
 ## Development sequence
 
@@ -153,10 +203,10 @@ Work in these verified phases:
    migration is complete.
 4. Structured educational assessment and one LangGraph workflow.
 5. Confirmation-based phase transitions and durable checkpoint state.
-6. Ollama, OpenAI, and deterministic mock provider adapters; local retrieval.
+6. OpenAI and deterministic mock provider adapters; local retrieval.
 7. Streamlit migration, source/citation integration, graph inspection, and
    visual QA.
-8. Full regression, migration, restart, local-Ollama, and optional approved
+8. Full regression, migration, restart, and optional approved
    OpenAI smoke testing.
 
 At every phase, update `IMPLEMENTATION_STATUS.md` with evidence before moving
@@ -166,15 +216,15 @@ targeted tests.
 ## Required verification
 
 Automated tests must require no paid API or internet connection. Cover domain
-validation, repository contracts, migration, graph routing, all six stages,
+validation, repository contracts, migration, graph routing, all five phases,
 stay/advance recommendations, confirmation/rejection, restart resumption,
 source selection, citations, notebook isolation, provider errors, streaming
 failures, upload safety, API contracts, and Streamlit client behavior.
 
-Separately gate local Ollama and OpenAI smoke tests. UI changes require browser
+Separately gate OpenAI smoke tests. UI changes require browser
 checks on desktop and 390 px mobile with a clean console.
 
 Final acceptance requires successful Streamlit and FastAPI startup, mock mode,
-Ollama operation when installed, preserved user data, streaming, grounded
+preserved user data, streaming, grounded
 citations, inspectable graph state, confirmed progress transitions, recovery
 after restart, responsive UI, passing tests, and accurate setup documentation.

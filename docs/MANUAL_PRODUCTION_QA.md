@@ -1,5 +1,11 @@
 # Production Manual QA
 
+> Historical evidence captured at the commit and date below. It is not the
+> current implementation-status source of truth. Later changes—including
+> student stage selection, idempotency hardening, and professor analytics—are
+> tracked in [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md). Live items
+> in this report remain unverified until the production smoke is repeated.
+
 ## Environment tested
 
 | Field | Value |
@@ -239,7 +245,7 @@ Bottleneck: **model latency**, not page chrome.
 ### F3 — Public login-start write amplification
 
 - **Severity:** P1 (code review; not load-tested live)  
-- **Reproduction:** Unauthenticated `GET /api/v1/auth/login` always persisted OAuth state (DSQL) with no throttle ([Sol security review](d9fce27a-9b27-4132-8003-b1688094656e)).  
+- **Reproduction:** Unauthenticated `GET /api/v1/auth/login` always persisted OAuth state (DSQL) with no throttle (see the hardening history in [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md)).
 - **Root cause:** Public Caddy-exposed login start had no per-IP/global limiter.  
 - **Files:** `backend/rate_limit.py`, `backend/auth_routes.py`, `backend/settings.py`, `.env.example`, `tests/test_rate_limit.py`  
 - **Fix:** In-process `LoginStartLimiter` (default 10/min/IP, 60/min global); on limit redirect `/?auth_error=1` with `Retry-After` before `begin_login`.  
@@ -270,10 +276,10 @@ None observed that expose other students’ data or bypass auth on the public ed
 ### P2
 
 1. Health `mode` still wrong on live until redeploy.  
-2. Incomplete live coverage: uploads/RAG, multi-user IDOR (must use container-local API per [Auth ownership map](e6b197fd-0d32-47aa-9818-4b6c2b4c8640)), full stage ladder, idempotency double-click, rate-limit UX.  
-3. Auto-advance + concurrent idempotency waiter race ([Sol](d9fce27a-9b27-4132-8003-b1688094656e)) — relevant while month-1 auto-advance is on.  
+2. Incomplete live coverage: uploads/RAG, multi-user IDOR (must use the container-local API described in [`deploy/AWS_STATELESS_EC2.md`](deploy/AWS_STATELESS_EC2.md)), full stage ladder, idempotency double-click, rate-limit UX.
+3. Auto-advance + concurrent idempotency waiter race (historical review; see current regression evidence in [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md)) — relevant while month-1 auto-advance is on.
 4. Logout is GET and can be forced via top-level cross-site navigation (`SameSite=Lax`) — needs POST+CSRF design; **not changed** this pass.  
-5. Unsupported upload extensions are stored with `supported=False` rather than hard-rejected ([RAG map](a211ff22-ff19-4648-9e97-53938f872876)) — policy check.
+5. Unsupported upload extensions are stored with `supported=False` rather than hard-rejected (see [`PROMPT_ARCHITECTURE.md`](PROMPT_ARCHITECTURE.md)) — policy check.
 
 ### P3
 

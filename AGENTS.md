@@ -64,8 +64,7 @@ relevant module only. For backend or migration work, read
   explicit, tested migrations with a backup and rollback path.
 - Paid OpenAI calls are prohibited unless the user explicitly approves a live
   smoke test and specifies a request/token or cost cap.
-- Automated tests must use deterministic mock providers. Local Ollama smoke
-  tests are optional and separately labelled.
+- Automated tests must use deterministic mock providers.
 
 ## Architecture constraints
 
@@ -73,11 +72,11 @@ relevant module only. For backend or migration work, read
   separate. Streamlit must not directly access SQLite, the filesystem, model
   SDKs, LangChain, or LangGraph.
 - Keep core educational logic independent of Streamlit, LangChain, LangGraph,
-  OpenAI, Ollama, SQLite, and future AWS services.
+  OpenAI, SQLite, and future AWS services.
 - Use dependency injection and narrow interfaces for repositories, file
   storage, retrieval, model providers, and the coach workflow.
-- Use one LangGraph workflow for the six critical-thinking stages. Do not
-  create six autonomous agents.
+- Use one LangGraph workflow for the five research-aligned design-thinking
+  phases. Do not create autonomous agents per phase.
 - Model-generated stage recommendations must be structured, validated,
   persisted, shown to the student, and explicitly confirmed before a stage
   changes. Never use hidden HTML comments, keyword heuristics, or unrestricted
@@ -109,7 +108,7 @@ Use the project virtual environment when present:
 ```sh
 .venv/bin/python -m pytest -q
 PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \\
-  .venv/bin/python -m compileall -q backend ui streamlit_app.py
+  .venv/bin/python -m compileall -q backend ui streamlit_app.py tests scripts
 ```
 
 `scripts/build.sh` is validation-only (`compileall` + mock `pytest`) and does

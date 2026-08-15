@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+from .persistence.object_keys import sanitize_filename
 from .source_library import (
     CourseMaterialSyncCoordinator,
     LectureNotesSyncResult,
@@ -21,6 +22,8 @@ from .source_library import (
 )
 from .student_store import StudentStore
 
+_TRANSCRIPT_ROLES = {"user": "Student", "assistant": "Coach"}
+
 
 @dataclass(frozen=True)
 class SourceContent:
@@ -29,6 +32,60 @@ class SourceContent:
     data: bytes
     mime: str
     filename: str
+
+
+@dataclass(frozen=True)
+class TranscriptExport:
+    """UTF-8 chat transcript projected from persisted notebook messages."""
+
+    data: bytes
+    filename: str
+    mime: str = "text/plain; charset=utf-8"
+
+
+def format_notebook_transcript(
+    *,
+    title: str,
+    messages: Iterable[dict[str, Any]],
+) -> str:
+    """Render visible chat turns as a student-readable ``.txt`` transcript.
+
+    The text is a projection of ``get_messages`` only. It omits assessments,
+    research coding, and other metadata so the download is not a second
+    message store.
+
+    Args:
+        title: Notebook title shown at the top of the file.
+        messages: Active-branch message dicts from the student store.
+
+    Returns:
+        UTF-8 transcript text ending in a newline.
+    """
+    heading = str(title or "").strip() or "Untitled notebook"
+    lines = [heading, ""]
+    for message in messages:
+        role = str(message.get("role") or "").strip().lower()
+        content = str(message.get("content") or "").strip()
+        label = _TRANSCRIPT_ROLES.get(role)
+        if label is None or not content:
+            continue
+        lines.append(f"{label}:")
+        lines.append(content)
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def transcript_filename(title: str) -> str:
+    """Return a path-safe ``.txt`` basename derived from the notebook title.
+
+    Args:
+        title: Notebook title, which may contain spaces or unsafe characters.
+
+    Returns:
+        A sanitized filename ending in ``-transcript.txt``.
+    """
+    stem = str(title or "").strip() or "Untitled notebook"
+    return sanitize_filename(f"{stem}-transcript.txt")
 
 
 def public_source(source: dict[str, Any]) -> dict[str, Any]:
@@ -146,6 +203,31 @@ class WorkspaceService:
         if not self._store.get_thread(thread_id):
             raise ValueError("Notebook not found")
         return self._store.get_messages(thread_id)
+
+    def export_transcript(self, thread_id: str) -> TranscriptExport:
+        """Return a ``.txt`` transcript projected from persisted messages.
+
+        Args:
+            thread_id: Owned notebook id.
+
+        Returns:
+            Filename and UTF-8 bytes built from the active ``messages`` rows.
+
+        Raises:
+            ValueError: When the notebook is missing or not owned.
+        """
+        thread = self._store.get_thread(thread_id)
+        if not thread:
+            raise ValueError("Notebook not found")
+        title = str(thread.get("name") or "").strip() or "Untitled notebook"
+        text = format_notebook_transcript(
+            title=title,
+            messages=self._store.get_messages(thread_id),
+        )
+        return TranscriptExport(
+            data=text.encode("utf-8"),
+            filename=transcript_filename(title),
+        )
 
     def get_messages_at_revision(
         self, thread_id: str, revision: int

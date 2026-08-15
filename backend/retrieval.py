@@ -1,10 +1,9 @@
 """Provider-neutral retrieval contracts and local selected-source retrieval.
 
-The current development adapter chunks the text already stored for selected
-notebook sources and ranks those chunks deterministically. A future Bedrock
-Knowledge Base adapter implements :class:`ContextRetriever` and returns the
-same :class:`RetrievalResult`; prompt composition, coaching, and citations do
-not need to change.
+The local adapter chunks the text already stored for selected notebook sources
+and ranks those chunks deterministically. Production can inject a Bedrock
+Knowledge Base ``Retrieve`` adapter behind the same :class:`ContextRetriever`
+port. Prompt composition, coaching, and citations do not need to change.
 
 Retrieval is deliberately read-only. Callers must pass only sources already
 authorized and selected for the active notebook.
@@ -13,7 +12,7 @@ authorized and selected for the active notebook.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 import re
 from typing import Any, Iterable, Protocol, Sequence
@@ -90,6 +89,8 @@ class RetrievalSource:
     mime: str = "application/octet-stream"
     url: str | None = None
     group: str | None = None
+    object_key: str | None = None
+    course_material_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,7 @@ class RetrievedChunk:
     chunk_index: int
     url: str | None = None
     group: str | None = None
+    retrieval_origin: str = "extracted_text"
 
 
 @dataclass(frozen=True)
@@ -133,6 +135,141 @@ class ContextRetriever(Protocol):
 
     def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
         """Return bounded chunks drawn only from ``query.sources``."""
+
+
+_COURSE_MATERIAL_GROUPS = frozenset({"lecturenotes", "readings"})
+_COURSE_MATERIAL_ID_SAFE = re.compile(r"[^a-z0-9]+")
+
+
+def course_material_id_from_object_key(object_key: str) -> str:
+    """Return a stable unique application-owned course-material id.
+
+    Direct files keep the historical prefix+stem form::
+
+        course/lectureNotes/week_02_jtbd.pdf -> lecture_week_02_jtbd
+        course/readings/pixar.pdf -> reading_pixar
+
+    Nested directories are included so the same filename in two folders cannot
+    collide::
+
+        course/readings/week1.pdf -> reading_week1
+        course/readings/archive/week1.pdf -> reading_archive_week1
+    """
+    key = str(object_key or "").strip().lstrip("/")
+    if not key:
+        return ""
+    parts = [part for part in key.replace("\\", "/").split("/") if part]
+    filename = parts[-1]
+    stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+    slug = _COURSE_MATERIAL_ID_SAFE.sub("_", stem.casefold()).strip("_")
+    folder = ""
+    if len(parts) >= 2:
+        folder = parts[1].replace(" ", "").replace("_", "").casefold()
+    if folder == "lecturenotes":
+        prefix = "lecture"
+        nested = parts[2:-1]
+    elif folder == "readings":
+        prefix = "reading"
+        nested = parts[2:-1]
+    else:
+        prefix = "course"
+        nested = parts[1:-1] if len(parts) > 1 else []
+    nested_slug = "_".join(
+        _COURSE_MATERIAL_ID_SAFE.sub("_", part.casefold()).strip("_")
+        for part in nested
+        if _COURSE_MATERIAL_ID_SAFE.sub("_", part.casefold()).strip("_")
+    )
+    body = "_".join(item for item in (nested_slug, slug) if item)
+    return f"{prefix}_{body}" if body else prefix
+
+
+def course_material_id_collisions(
+    object_keys: Iterable[str],
+) -> dict[str, tuple[str, ...]]:
+    """Return derived ids that map to more than one distinct object key.
+
+    Used to detect filename-normalization collisions (case, punctuation, or
+    directory differences that still slug to the same identifier).
+    """
+    grouped: dict[str, list[str]] = {}
+    for raw in object_keys:
+        key = str(raw or "").strip()
+        material_id = course_material_id_from_object_key(key)
+        if not material_id:
+            continue
+        grouped.setdefault(material_id, [])
+        if key not in grouped[material_id]:
+            grouped[material_id].append(key)
+    return {
+        material_id: tuple(keys)
+        for material_id, keys in grouped.items()
+        if len(keys) > 1
+    }
+
+
+def is_course_retrieval_source(source: RetrievalSource) -> bool:
+    """Return whether *source* is a locked Lecture Notes or Readings object.
+
+    Student uploads stay on the local retriever. Course objects are identified
+    by ``course_material_group`` or a ``course/`` object key.
+    """
+    group = str(source.group or "").replace(" ", "").replace("_", "").casefold()
+    if group in _COURSE_MATERIAL_GROUPS:
+        return True
+    key = str(source.object_key or "").strip().lstrip("/")
+    return key.startswith("course/")
+
+
+class CompositeContextRetriever:
+    """Split course sources onto a Knowledge Base retriever and the rest locally.
+
+    When the knowledge-base adapter is absent, every selected source uses the
+    local retriever. Knowledge Base misses stay empty for course sources
+    (evidence-gap composer rules) instead of dumping whole PDFs locally.
+    """
+
+    def __init__(
+        self,
+        *,
+        knowledge_base: ContextRetriever | None,
+        local: ContextRetriever | None = None,
+        max_context_chars: int = 16_000,
+    ) -> None:
+        """Compose two retrievers behind one selected-source port.
+
+        Args:
+            knowledge_base: Optional Bedrock ``Retrieve`` adapter for course
+                Lecture Notes/Readings.
+            local: Retriever for student uploads (defaults to
+                :class:`LocalChunkRetriever`).
+            max_context_chars: Combined prompt budget after both adapters run.
+        """
+        self._knowledge_base = knowledge_base
+        self._local = local or LocalChunkRetriever()
+        self._max_context_chars = max_context_chars
+
+    def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
+        """Retrieve course hits from the KB adapter and uploads from local."""
+        if self._knowledge_base is None:
+            return self._local.retrieve(query)
+        course = tuple(
+            source for source in query.sources if is_course_retrieval_source(source)
+        )
+        uploads = tuple(
+            source
+            for source in query.sources
+            if not is_course_retrieval_source(source)
+        )
+        chunks: list[RetrievedChunk] = []
+        if course:
+            kb_result = self._knowledge_base.retrieve(replace(query, sources=course))
+            chunks.extend(kb_result.chunks)
+        if uploads:
+            local_result = self._local.retrieve(replace(query, sources=uploads))
+            chunks.extend(local_result.chunks)
+        return bounded_retrieval_result(
+            chunks, max_context_chars=self._max_context_chars
+        )
 
 
 @dataclass(frozen=True)
@@ -167,6 +304,21 @@ def retrieval_sources_from_notebook(
         group = " ".join(
             str(metadata.get("course_material_group") or "").split()
         ).strip()
+        object_key = " ".join(
+            str(
+                source.get("object_key")
+                or metadata.get("object_key")
+                or source.get("path")
+                or ""
+            ).split()
+        ).strip()
+        material_id = " ".join(
+            str(metadata.get("course_material_id") or "").split()
+        ).strip()
+        if not material_id and object_key:
+            derived = course_material_id_from_object_key(object_key)
+            if object_key.replace("\\", "/").lstrip("/").startswith("course/"):
+                material_id = derived
         normalized.append(
             RetrievalSource(
                 source_id=str(source.get("id") or "").strip(),
@@ -183,6 +335,8 @@ def retrieval_sources_from_notebook(
                 ),
                 url=str(source.get("sourceUrl") or "").strip() or None,
                 group=group or None,
+                object_key=object_key or None,
+                course_material_id=material_id or None,
             )
         )
     return tuple(source for source in normalized if source.source_id)
@@ -282,8 +436,29 @@ def _bigrams(text: str) -> set[tuple[str, str]]:
     return set(zip(values, values[1:]))
 
 
+def _clip_excerpt(cleaned: str, *, start: int, limit: int) -> str:
+    """Return one excerpt window that never exceeds ``limit`` characters.
+
+    Leading and trailing ellipses are included in the limit so the result can
+    be stored on ``RetrievalChunkReference.excerpt``.
+    """
+    prefix = "…" if start else ""
+    body = cleaned[start:]
+    if len(prefix) + len(body) <= limit:
+        return f"{prefix}{body}"
+    suffix = "…"
+    budget = limit - len(prefix) - len(suffix)
+    if budget <= 0:
+        return ("…" * limit)[:limit]
+    return f"{prefix}{body[:budget].rstrip()}{suffix}"
+
+
 def focused_excerpt(text: str, query: str, *, limit: int = 600) -> str:
-    """Return a bounded excerpt centered near the strongest query-term window."""
+    """Return a bounded excerpt centered near the strongest query-term window.
+
+    The returned string is always at most ``limit`` characters, including any
+    leading or trailing ellipses.
+    """
     cleaned = " ".join(str(text or "").split()).strip()
     if limit <= 0 or not cleaned:
         return ""
@@ -297,7 +472,7 @@ def focused_excerpt(text: str, query: str, *, limit: int = 600) -> str:
         if len(term) >= 3 and lowered.find(term) >= 0
     ]
     if not positions:
-        return cleaned[: max(1, limit - 1)].rstrip() + "…"
+        return _clip_excerpt(cleaned, start=0, limit=limit)
     best_start = 0
     best_score = -1
     for position in positions:
@@ -312,10 +487,12 @@ def focused_excerpt(text: str, query: str, *, limit: int = 600) -> str:
         boundary = cleaned.find(" ", best_start)
         if 0 <= boundary < best_start + 40:
             best_start = boundary + 1
-    excerpt = cleaned[best_start : best_start + limit].rstrip()
-    prefix = "…" if best_start else ""
-    suffix = "…" if best_start + limit < len(cleaned) else ""
-    return f"{prefix}{excerpt}{suffix}"
+    return _clip_excerpt(cleaned, start=best_start, limit=limit)
+
+
+def _normalized_excerpt(text: str, *, limit: int = 400) -> str:
+    """Return a comparable excerpt prefix used for near-duplicate suppression."""
+    return " ".join(str(text or "").split()).casefold()[:limit]
 
 
 def bounded_retrieval_result(
@@ -328,11 +505,20 @@ def bounded_retrieval_result(
     The application re-runs this formatter for every adapter result. Therefore
     provider context can contain only the validated chunk text, never extra
     opaque text returned alongside a future infrastructure adapter result.
+    Near-duplicate excerpts from the same source are skipped so repeated KB
+    chunks do not waste the prompt budget.
     """
     sections: list[str] = []
     included: list[RetrievedChunk] = []
+    seen_excerpts: dict[str, set[str]] = {}
     used = 0
     for chunk in chunks:
+        fingerprint = _normalized_excerpt(chunk.text)
+        source_seen = seen_excerpts.setdefault(str(chunk.source_id), set())
+        if fingerprint and fingerprint in source_seen:
+            continue
+        if fingerprint:
+            source_seen.add(fingerprint)
         header = f"--- [{chunk.label}] {chunk.title} · excerpt {chunk.chunk_id} ---"
         metadata_lines: list[str] = []
         if chunk.group:
@@ -362,6 +548,7 @@ def bounded_retrieval_result(
                 chunk_index=chunk.chunk_index,
                 url=chunk.url,
                 group=chunk.group,
+                retrieval_origin=chunk.retrieval_origin,
             )
         )
         if used >= max_context_chars:
@@ -569,6 +756,7 @@ class LocalChunkRetriever:
                     chunk_index=candidate.chunk_index,
                     url=source.url,
                     group=source.group,
+                    retrieval_origin="extracted_text",
                 )
             )
         return bounded_retrieval_result(

@@ -19,7 +19,12 @@ from backend.models import (
     get_model,
     validate_reasoning,
 )
-from backend.student_journey import default_journey, normalize_journey
+from backend.student_journey import (
+    DEFAULT_RESPONSE_DETAIL,
+    DEFAULT_STAGE,
+    default_journey,
+    normalize_journey,
+)
 from backend.student_support import DEFAULT_SUPPORT_MODE
 
 from ui.coach_welcome import seed_coach_welcome
@@ -51,7 +56,7 @@ def initialize_session() -> None:
         "web_search": False,
         "image_generation": False,
         "allow_model_knowledge": False,
-        "response_detail": "short",
+        "response_detail": DEFAULT_RESPONSE_DETAIL,
         "response_language": "English",
         "appearance": DEFAULT_APPEARANCE,
         "learning_journey": default_journey(),
@@ -208,8 +213,10 @@ def select_thread(thread_id: str, should_rerun: bool = True) -> None:
     raw_journey = metadata.get("learning_journey")
     if not isinstance(raw_journey, dict):
         raw_journey = {
-            "current_stage": metadata.get("thinking_stage", "focus"),
-            "response_detail": metadata.get("response_detail", "short"),
+            "current_stage": metadata.get("thinking_stage", DEFAULT_STAGE),
+            "response_detail": metadata.get(
+                "response_detail", DEFAULT_RESPONSE_DETAIL
+            ),
         }
     journey = normalize_journey(raw_journey)
     st.session_state.learning_journey = journey

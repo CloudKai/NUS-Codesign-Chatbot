@@ -16,6 +16,7 @@ from ui.layout.column_resize import (
     sync_workspace_column_resize,
 )
 from ui.layout.sources_scroll import sync_sources_scroll
+from ui.layout.studio_scroll import sync_studio_scroll
 from ui.runtime import rerun_app
 from ui.sources import render_sources_panel
 from ui.studio import render_studio_panel
@@ -99,6 +100,7 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                     ):
                         set_side_panel_collapsed("studio", True)
                         rerun_app()
+                    sync_studio_scroll()
         with chat_column:
             with st.container(key="chat_panel"):
                 render_chat_panel(model_id, reasoning_effort)

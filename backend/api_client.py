@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Callable, Iterator, Mapping, Protocol
+from urllib.parse import quote
 
 import httpx
 
@@ -18,7 +19,7 @@ from .domain import (
     SourceSelectAllRequest,
     SourceUpdateRequest,
 )
-from .workspace_service import SourceContent
+from .workspace_service import SourceContent, TranscriptExport
 
 
 class _HttpSession(Protocol):
@@ -163,6 +164,141 @@ class LocalApiClient:
         response.raise_for_status()
         return response.json()
 
+    def professor_overview(self) -> dict[str, Any]:
+        """Return professor-authorised class overview analytics."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/overview", **self._request_kwargs()
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_students(self, **filters: Any) -> dict[str, Any]:
+        """Return professor-authorised roster data with server-side filters."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students",
+            params={key: value for key, value in filters.items() if value not in (None, "")},
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_student_detail(self, student_id: str) -> dict[str, Any]:
+        """Return one professor-authorised student's learning journey."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students/{student_id}",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_conversation_transcript(
+        self, student_id: str, notebook_id: str
+    ) -> dict[str, Any]:
+        """Return one selected active-branch transcript for teaching review."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students/{student_id}/conversations/{notebook_id}",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_critical_thinking(self) -> dict[str, Any]:
+        """Return professor-authorised Facione analytics."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/critical-thinking", **self._request_kwargs()
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_engagement(self) -> dict[str, Any]:
+        """Return professor-authorised engagement analytics."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/engagement", **self._request_kwargs()
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_research_summary(self) -> dict[str, Any]:
+        """Return aggregate automated research-coding status."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/research/summary",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_research_queue(self, **filters: Any) -> dict[str, Any]:
+        """Return an audited page of identifiable research observations."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/research/queue",
+            params={
+                key: value
+                for key, value in filters.items()
+                if value not in (None, "")
+            },
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_research_notebook(
+        self,
+        notebook_id: str,
+        *,
+        observation_limit: int = 100,
+        observation_offset: int = 0,
+    ) -> dict[str, Any]:
+        """Return one audited research notebook detail."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/research/notebooks/"
+            f"{quote(notebook_id, safe='')}",
+            params={
+                "observation_limit": observation_limit,
+                "observation_offset": observation_offset,
+            },
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_submit_research_review(
+        self, payload: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Append one human validation; reviewer identity stays server-side."""
+        response = self._http.post(
+            f"{self._base_url}/api/v1/professor/research/reviews",
+            json=dict(payload),
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_submit_research_adjudication(
+        self, payload: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Append one adjudication; actor identity stays server-side."""
+        response = self._http.post(
+            f"{self._base_url}/api/v1/professor/research/adjudications",
+            json=dict(payload),
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_research_export(self, **filters: Any) -> bytes:
+        """Return an audited formula-safe research CSV export."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/research/export.csv",
+            params={
+                key: value
+                for key, value in filters.items()
+                if value not in (None, "")
+            },
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return bytes(response.content)
+
     def get_preferences(self) -> dict[str, Any]:
         """Return local user preferences."""
         response = self._http.get(
@@ -241,6 +377,24 @@ class LocalApiClient:
         )
         response.raise_for_status()
         return response.json()
+
+    def download_transcript(self, thread_id: str) -> TranscriptExport:
+        """Download the persisted notebook transcript as UTF-8 ``.txt``."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/threads/{thread_id}/transcript.txt",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        mime = response.headers.get("content-type", "text/plain; charset=utf-8")
+        filename = "transcript.txt"
+        disposition = response.headers.get("content-disposition") or ""
+        if "filename*=" in disposition:
+            filename = disposition.split("filename*=UTF-8''", 1)[-1].strip()
+        return TranscriptExport(
+            data=bytes(response.content),
+            filename=filename,
+            mime=mime,
+        )
 
     def add_message(self, thread_id: str, request: MessageCreateRequest) -> str:
         """Persist one message and return its id."""
@@ -470,6 +624,30 @@ class LocalApiClient:
         )
         response.raise_for_status()
         return CoachTurn.model_validate(response.json())
+
+    @staticmethod
+    def coaching_error_category(payload: Mapping[str, Any] | None) -> str:
+        """Return the structured coaching error category from an API payload.
+
+        Stream error events carry ``category`` at the top level. JSON 503
+        bodies nest it under ``detail``. Missing or malformed payloads return
+        an empty string rather than guessing from message text.
+
+        Args:
+            payload: A stream event dict or a decoded HTTP JSON body.
+
+        Returns:
+            The category token, or ``""`` when none is present.
+        """
+        if not isinstance(payload, Mapping):
+            return ""
+        category = str(payload.get("category") or "").strip()
+        if category:
+            return category
+        detail = payload.get("detail")
+        if isinstance(detail, Mapping):
+            return str(detail.get("category") or "").strip()
+        return ""
 
     def stream_coach_turn(self, request: CoachRequest) -> Iterator[dict[str, Any]]:
         """Yield NDJSON events from the streaming coaching endpoint."""

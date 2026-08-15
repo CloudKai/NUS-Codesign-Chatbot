@@ -5,9 +5,14 @@ Logical production schema (Cognito owns the browser session; no app_sessions):
     users
      └── notebooks
           ├── messages
-          └── sources → S3 object keys
+          ├── sources → S3 object keys
+          └── research_observations
+               ├── research_reviews
+               └── research_adjudications
 
     oauth_login_states  (pre-auth, transient)
+    research_access_events  (append-only attributable audit)
+    system_metadata  (workflow-contract readiness)
 
 Public method names such as ``create_thread`` / ``thread_id`` remain as
 compatibility wrappers over ``notebooks`` so API and UI churn stays limited.
@@ -15,209 +20,66 @@ compatibility wrappers over ``notebooks`` so API and UI churn stays limited.
 
 from __future__ import annotations
 
-import json
 import shutil
 import sqlite3
 import threading
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from .persistence.store.contracts import (
+    AtomicAutoAdvance,
+    COACH_IDEMPOTENCY_MARKER as _COACH_IDEMPOTENCY_MARKER,
+    CoachIdempotencyConflictError,
+    CoachingStyleConflictError,
+    CoachRequestInProgressError,
+    CoachRequestLeaseLostError,
+    CoachRequestReservation,
+    ConversationRevisionConflictError,
+    ConversationRevisionResult,
+    PROGRESS_KEYS as _PROGRESS_KEYS,
+    SETTINGS_KEYS as _SETTINGS_KEYS,
+    dump_json as _dump,
+    load_json as _load,
+    utc_now,
+)
+from .persistence.store.sqlite_schema import (
+    NOTEBOOK_CHILD_DELETE_PLAN,
+    NOTEBOOK_CHILD_TABLES,
+    SQLITE_SCHEMA as SCHEMA,
+)
+from .persistence.store.operations import StoreOperations, bind_store_operations
+from .persistence.store.migrations import (
+    migrate_message_revisions,
+    migrate_notebook_revision,
+    migrate_oauth_login_states,
+    migrate_users_table,
+    repair_misbound_notebook_foreign_key,
+)
 from .settings import settings
+from .student_journey import DEFAULT_RESPONSE_DETAIL, DEFAULT_STAGE
+from . import workflow_contract as _workflow_contract
+from .workflow_contract import workflow_contract_is_ready, workflow_contract_payload
+
+if TYPE_CHECKING:
+    from .research.models import ResearchObservationCreate
 
 
-_COACH_IDEMPOTENCY_MARKER = "coach_idempotency"
-
-
-class CoachIdempotencyConflictError(ValueError):
-    """Raised when one idempotency key is reused for a different coach request."""
-
-
-class CoachRequestLeaseLostError(RuntimeError):
-    """Raised when an expired reservation was claimed by another worker."""
-
-
-class CoachRequestInProgressError(RuntimeError):
-    """Raised when another worker still owns an active coach request lease."""
-
-
-class ConversationRevisionConflictError(ValueError):
-    """Raised when a coach result targets a stale conversation_revision."""
-
-
-@dataclass(frozen=True)
-class ConversationRevisionResult:
-    """Authoritative notebook state after an append-only conversation revision.
-
-    ``edited_message_id`` is the new replacement user-message id (not the
-    superseded original). ``surviving_history`` is the active branch at the
-    new notebook revision.
-    """
-
-    thread_id: str
-    edited_message_id: str
-    conversation_revision: int
-    current_stage: str
-    surviving_history: list[dict[str, Any]]
-
-
-@dataclass(frozen=True)
-class CoachRequestReservation:
-    """Durable state returned while reserving one coach request key."""
-
-    state: str
-    marker_id: str
-    lease_token: str | None = None
-    turn_payload: dict[str, Any] | None = None
-
-
-def utc_now() -> str:
-    """Return an ISO-8601 UTC timestamp string."""
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _dump(value: Any) -> str:
-    """Serialize *value* as JSON text for TEXT columns."""
-    return json.dumps(value, ensure_ascii=False)
-
-
-def _load(value: str | None, default: Any) -> Any:
-    """Deserialize a JSON TEXT column, returning *default* on empty/invalid."""
-    if not value:
-        return default
-    try:
-        return json.loads(value)
-    except (TypeError, json.JSONDecodeError):
-        return default
-
-
-# Progress blob keys (never include current_stage — that is notebooks.current_stage).
-_PROGRESS_KEYS = frozenset(
-    {
-        "completed_stages",
-        "stage_notes",
-        "working_conclusion",
-        "critical_reflection",
-        "response_detail",
-        "learning_summary",
-        "understanding_change",
-        "critical_understanding",
-    }
-)
-
-# Notebook settings blob keys.
-_SETTINGS_KEYS = frozenset(
-    {
-        "selected_model",
-        "reasoning_effort",
-        "support_mode",
-        "assignment",
-        "response_language",
-        "allow_model_knowledge",
-        "display_name",
-        "last_workflow_user_message_id",
-        "tags",
-        "revoked_coach_idempotency_keys",
-    }
-)
-
-
-SCHEMA = """
-PRAGMA foreign_keys = ON;
-
-CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    identifier TEXT NOT NULL UNIQUE,
-    cognito_sub TEXT,
-    email TEXT,
-    display_name TEXT,
-    role TEXT NOT NULL DEFAULT 'student',
-    preferences_text TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    updated_at TEXT,
-    last_login_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS oauth_login_states (
-    state TEXT PRIMARY KEY,
-    code_verifier TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS notebooks (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    title TEXT,
-    current_stage TEXT NOT NULL DEFAULT 'focus',
-    progress_text TEXT NOT NULL DEFAULT '{}',
-    settings_text TEXT NOT NULL DEFAULT '{}',
-    conversation_revision INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_notebooks_user_updated
-ON notebooks(user_id, updated_at);
-
-CREATE TABLE IF NOT EXISTS messages (
-    id TEXT PRIMARY KEY,
-    notebook_id TEXT NOT NULL,
-    role TEXT NOT NULL,
-    content TEXT NOT NULL,
-    is_error INTEGER NOT NULL DEFAULT 0,
-    assessment_text TEXT,
-    cited_source_ids_text TEXT,
-    proposed_stage TEXT,
-    decision_status TEXT,
-    decision_at TEXT,
-    metadata_text TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    conversation_revision INTEGER NOT NULL DEFAULT 0,
-    previous_message_id TEXT,
-    superseded_at_revision INTEGER,
-    FOREIGN KEY (notebook_id) REFERENCES notebooks(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_messages_notebook_created
-ON messages(notebook_id, created_at, id);
-
-CREATE INDEX IF NOT EXISTS idx_messages_notebook_decision
-ON messages(notebook_id, decision_status, created_at);
-
-CREATE TABLE IF NOT EXISTS sources (
-    id TEXT PRIMARY KEY,
-    notebook_id TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    title TEXT NOT NULL,
-    content_type TEXT,
-    byte_size INTEGER NOT NULL DEFAULT 0,
-    object_key TEXT,
-    extracted_text_key TEXT,
-    source_url TEXT,
-    selected INTEGER NOT NULL DEFAULT 1,
-    metadata_text TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    FOREIGN KEY (notebook_id) REFERENCES notebooks(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_sources_notebook_created
-ON sources(notebook_id, created_at, id);
-"""
-
-
-# Child tables deleted explicitly when a notebook is removed (DSQL has no FK cascade).
-NOTEBOOK_CHILD_TABLES = ("messages", "sources")
+RESEARCH_WORKFLOW_CONTRACT_KEY = _workflow_contract.WORKFLOW_CONTRACT_KEY
+RESEARCH_WORKFLOW_CONTRACT_VERSION = _workflow_contract.WORKFLOW_CONTRACT_VERSION
 
 
 class StudentStore:
     """Framework-neutral store for notebooks, messages, sources, and auth users."""
 
-    def __init__(self, path: Path | None = None, identifier: str = "local-student", *, ensure_owner: bool = True):
+    def __init__(
+        self,
+        path: Path | None = None,
+        identifier: str = "local-student",
+        *,
+        ensure_owner: bool = True,
+    ):
         """Open (or create) the local SQLite database for *identifier*.
 
         When ``ensure_owner`` is False the store can run auth/OAuth helpers
@@ -227,6 +89,7 @@ class StudentStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.identifier = identifier
         self._lock = threading.RLock()
+        self._operations: StoreOperations = bind_store_operations(self)
         with self._connect() as connection:
             connection.executescript(SCHEMA)
             self._migrate_oauth_login_states(connection)
@@ -240,200 +103,71 @@ class StudentStore:
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_cognito_sub "
                 "ON users(cognito_sub)"
             )
+            notebook_count = int(
+                connection.execute("SELECT COUNT(*) AS total FROM notebooks").fetchone()[
+                    "total"
+                ]
+            )
+            if notebook_count == 0:
+                connection.execute(
+                    """
+                    INSERT INTO system_metadata (key, value_text, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT (key) DO NOTHING
+                    """,
+                    (
+                        RESEARCH_WORKFLOW_CONTRACT_KEY,
+                        _dump(workflow_contract_payload()),
+                        utc_now(),
+                    ),
+                )
         self.owner_id = self._ensure_user() if ensure_owner else ""
 
     def ping(self) -> None:
-        """Verify the database connection without creating or reading a user row."""
+        """Verify connectivity and the required research workflow contract."""
         with self._connect() as connection:
             connection.execute("SELECT 1").fetchone()
+            row = connection.execute(
+                "SELECT value_text FROM system_metadata WHERE key=?",
+                (RESEARCH_WORKFLOW_CONTRACT_KEY,),
+            ).fetchone()
+        marker = _load(row["value_text"] if row else None, {})
+        if not workflow_contract_is_ready(marker):
+            raise RuntimeError(
+                "Research workflow contract is not ready; use explicit reset/bootstrap"
+            )
+
+    def _bound_operations(self) -> StoreOperations:
+        """Return operation groups, binding lazily for legacy test constructors."""
+        operations = getattr(self, "_operations", None)
+        if operations is None:
+            operations = bind_store_operations(self)
+            self._operations = operations
+        return operations
 
     @staticmethod
     def _migrate_oauth_login_states(connection: sqlite3.Connection) -> None:
-        """Rebuild legacy camelCase ``oauth_login_states`` to snake_case columns.
-
-        Older local DBs still have Streamlit-era ``codeVerifier`` / ``expiresAt``
-        columns. ``CREATE TABLE IF NOT EXISTS`` does not rename them, so login
-        then fails with ``no such column: expires_at`` and the browser sees a
-        blank/white page. Rows are one-time PKCE state and safe to remap or drop.
-        """
-        rows = connection.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-            ("oauth_login_states",),
-        ).fetchall()
-        if not rows:
-            return
-        columns = {
-            str(row[1])
-            for row in connection.execute("PRAGMA table_info(oauth_login_states)")
-        }
-        if {"state", "code_verifier", "created_at", "expires_at"}.issubset(columns):
-            return
-        connection.execute(
-            "ALTER TABLE oauth_login_states RENAME TO oauth_login_states_legacy"
-        )
-        connection.execute(
-            """
-            CREATE TABLE oauth_login_states (
-                state TEXT PRIMARY KEY,
-                code_verifier TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                expires_at TEXT NOT NULL
-            )
-            """
-        )
-        legacy = {
-            str(row[1])
-            for row in connection.execute(
-                "PRAGMA table_info(oauth_login_states_legacy)"
-            )
-        }
-        if {
-            "state",
-            "codeVerifier",
-            "createdAt",
-            "expiresAt",
-        }.issubset(legacy):
-            connection.execute(
-                """
-                INSERT INTO oauth_login_states
-                  (state, code_verifier, created_at, expires_at)
-                SELECT state, codeVerifier, createdAt, expiresAt
-                FROM oauth_login_states_legacy
-                """
-            )
-        connection.execute("DROP TABLE oauth_login_states_legacy")
+        """Rebuild legacy camelCase ``oauth_login_states`` to snake_case columns."""
+        migrate_oauth_login_states(connection)
 
     @staticmethod
     def _migrate_users_table(connection: sqlite3.Connection) -> None:
-        """Extend legacy camelCase ``users`` rows for the five-table schema.
-
-        Local demo DBs often still have ``displayName`` / ``cognitoSub`` /
-        ``createdAt`` / ``metadata`` from the pre-Cognito store. Cognito
-        callback upserts require snake_case columns; without this migration
-        sign-in completes at Cognito then fails with ``auth_error=1``.
-
-        This migration is deliberately additive. Renaming and dropping the old
-        ``users`` table makes SQLite rewrite legacy foreign keys to
-        ``users_legacy`` and then cascade-delete old threads, sources, and
-        messages. Keeping the original table identity preserves those rows
-        while the compatibility migration copies them into the five-table
-        layout.
-        """
-        rows = connection.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-            ("users",),
-        ).fetchall()
-        if not rows:
-            return
-        columns = {
-            str(row[1]) for row in connection.execute("PRAGMA table_info(users)")
-        }
-        expected = {
-            "id",
-            "identifier",
-            "cognito_sub",
-            "email",
-            "display_name",
-            "role",
-            "preferences_text",
-            "created_at",
-            "updated_at",
-            "last_login_at",
-        }
-        if expected.issubset(columns):
-            return
-
-        additions = {
-            "cognito_sub": "TEXT",
-            "email": "TEXT",
-            "display_name": "TEXT",
-            "role": "TEXT NOT NULL DEFAULT 'student'",
-            "preferences_text": "TEXT NOT NULL DEFAULT '{}'",
-            "created_at": "TEXT NOT NULL DEFAULT ''",
-            "updated_at": "TEXT",
-            "last_login_at": "TEXT",
-        }
-        for name, declaration in additions.items():
-            if name not in columns:
-                connection.execute(
-                    f"ALTER TABLE users ADD COLUMN {name} {declaration}"
-                )
-
-        # Copy old values only when their camelCase source columns exist.
-        copies = {
-            "cognito_sub": "cognitoSub",
-            "display_name": "displayName",
-            "preferences_text": "metadata",
-            "created_at": "createdAt",
-            "updated_at": "updatedAt",
-            "last_login_at": "lastLoginAt",
-        }
-        for target, source in copies.items():
-            if source not in columns:
-                continue
-            connection.execute(
-                f"UPDATE users SET {target}={source} "
-                f"WHERE {source} IS NOT NULL AND TRIM(CAST({source} AS TEXT)) != ''"
-            )
-        connection.execute(
-            "UPDATE users SET display_name='Student' "
-            "WHERE display_name IS NULL OR TRIM(display_name)=''"
-        )
-        connection.execute(
-            "UPDATE users SET role='student' WHERE role IS NULL OR TRIM(role)=''"
-        )
-        connection.execute(
-            "UPDATE users SET preferences_text='{}' "
-            "WHERE preferences_text IS NULL OR TRIM(preferences_text)=''"
-        )
+        """Extend legacy camelCase ``users`` rows for the five-table schema."""
+        migrate_users_table(connection)
 
     @staticmethod
     def _migrate_notebooks_conversation_revision(
         connection: sqlite3.Connection,
     ) -> None:
         """Add/repair ``conversation_revision`` for edit/revise CAS on existing DBs."""
-        columns = {
-            str(row["name"])
-            for row in connection.execute("PRAGMA table_info(notebooks)")
-        }
-        if "conversation_revision" not in columns:
-            connection.execute(
-                "ALTER TABLE notebooks ADD COLUMN conversation_revision "
-                "INTEGER NOT NULL DEFAULT 0"
-            )
-            return
-        connection.execute(
-            "UPDATE notebooks SET conversation_revision = 0 "
-            "WHERE conversation_revision IS NULL"
-        )
+        migrate_notebook_revision(connection)
 
     @staticmethod
     def _migrate_messages_revision_columns(
         connection: sqlite3.Connection,
     ) -> None:
         """Add/repair append-only message revision columns on existing local DBs."""
-        columns = {
-            str(row["name"])
-            for row in connection.execute("PRAGMA table_info(messages)")
-        }
-        if "conversation_revision" not in columns:
-            connection.execute(
-                "ALTER TABLE messages ADD COLUMN conversation_revision "
-                "INTEGER NOT NULL DEFAULT 0"
-            )
-        else:
-            connection.execute(
-                "UPDATE messages SET conversation_revision = 0 "
-                "WHERE conversation_revision IS NULL"
-            )
-        if "previous_message_id" not in columns:
-            connection.execute(
-                "ALTER TABLE messages ADD COLUMN previous_message_id TEXT"
-            )
-        if "superseded_at_revision" not in columns:
-            connection.execute(
-                "ALTER TABLE messages ADD COLUMN superseded_at_revision INTEGER"
-            )
+        migrate_message_revisions(connection)
 
     @staticmethod
     def _notebook_revision_value(row: Any) -> int:
@@ -554,105 +288,8 @@ class StudentStore:
     def _repair_misbound_local_foreign_keys(
         connection: sqlite3.Connection,
     ) -> None:
-        """Repair notebooks created by the retired destructive user migration.
-
-        A previous local compatibility migration renamed ``users`` to
-        ``users_legacy`` before rebuilding it. SQLite consequently rewrote the
-        existing ``notebooks.user_id`` foreign key to reference that temporary
-        name. Dropping the temporary table left Cognito-authenticated notebook
-        creation failing with ``no such table: main.users_legacy``.
-
-        Rebuilding ``notebooks`` is SQLite-only, transactional, and preserves
-        its primary keys, so existing ``messages`` and ``sources`` continue to
-        reference the same notebooks. Production DSQL never invokes this
-        initializer and its schema is intentionally unchanged.
-        """
-        foreign_keys = connection.execute(
-            "PRAGMA foreign_key_list(notebooks)"
-        ).fetchall()
-        user_key = next(
-            (row for row in foreign_keys if str(row["from"]) == "user_id"),
-            None,
-        )
-        if user_key is None or str(user_key["table"]) == "users":
-            return
-
-        expected_columns = (
-            "id",
-            "user_id",
-            "title",
-            "current_stage",
-            "progress_text",
-            "settings_text",
-            "conversation_revision",
-            "created_at",
-            "updated_at",
-        )
-        actual_columns = tuple(
-            str(row["name"])
-            for row in connection.execute("PRAGMA table_info(notebooks)")
-        )
-        if actual_columns != expected_columns:
-            raise RuntimeError(
-                "Cannot safely repair the local notebooks foreign key because "
-                f"its columns differ from the expected schema: {actual_columns!r}"
-            )
-
-        # PRAGMA foreign_keys is ignored inside an active transaction. Commit
-        # preceding additive migrations before entering this isolated rebuild.
-        connection.commit()
-        connection.execute("PRAGMA foreign_keys = OFF")
-        try:
-            connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
-                """
-                CREATE TABLE notebooks_fk_repair (
-                    id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    title TEXT,
-                    current_stage TEXT NOT NULL DEFAULT 'focus',
-                    progress_text TEXT NOT NULL DEFAULT '{}',
-                    settings_text TEXT NOT NULL DEFAULT '{}',
-                    conversation_revision INTEGER NOT NULL DEFAULT 0,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-                )
-                """
-            )
-            connection.execute(
-                """
-                INSERT INTO notebooks_fk_repair
-                  (id, user_id, title, current_stage, progress_text,
-                   settings_text, conversation_revision, created_at, updated_at)
-                SELECT id, user_id, title, current_stage, progress_text,
-                       settings_text, COALESCE(conversation_revision, 0),
-                       created_at, updated_at
-                FROM notebooks
-                """
-            )
-            connection.execute("DROP TABLE notebooks")
-            connection.execute(
-                "ALTER TABLE notebooks_fk_repair RENAME TO notebooks"
-            )
-            connection.execute(
-                "CREATE INDEX idx_notebooks_user_updated "
-                "ON notebooks(user_id, updated_at)"
-            )
-            violations = connection.execute(
-                "PRAGMA foreign_key_check(notebooks)"
-            ).fetchall()
-            if violations:
-                raise RuntimeError(
-                    "Cannot repair the local notebooks foreign key because "
-                    "one or more notebooks have no matching user"
-                )
-            connection.commit()
-        except Exception:
-            connection.rollback()
-            raise
-        finally:
-            connection.execute("PRAGMA foreign_keys = ON")
+        """Repair notebooks created by the retired destructive user migration."""
+        repair_misbound_notebook_foreign_key(connection)
 
     @staticmethod
     def _migrate_legacy_workspace(connection: sqlite3.Connection) -> None:
@@ -1309,7 +946,7 @@ class StudentStore:
         settings_blob = _load(row["settings_text"], {})
         if not isinstance(settings_blob, dict):
             settings_blob = {}
-        current_stage = str(row["current_stage"] or "focus")
+        current_stage = str(row["current_stage"] or DEFAULT_STAGE)
         try:
             conversation_revision = int(row["conversation_revision"] or 0)
         except (KeyError, TypeError, ValueError):
@@ -1321,7 +958,7 @@ class StudentStore:
             "stage_notes": progress.get("stage_notes") or {},
             "working_conclusion": progress.get("working_conclusion") or "",
             "critical_reflection": progress.get("critical_reflection") or "",
-            "response_detail": progress.get("response_detail") or "short",
+            "response_detail": progress.get("response_detail") or DEFAULT_RESPONSE_DETAIL,
         }
         metadata: dict[str, Any] = {
             **settings_blob,
@@ -1510,7 +1147,7 @@ class StudentStore:
             progress["response_detail"] = (
                 journey.get("response_detail")
                 or metadata.get("response_detail")
-                or "short"
+                or DEFAULT_RESPONSE_DETAIL
             )
         if "completed_stages" not in progress:
             progress["completed_stages"] = journey.get("completed_stages") or []
@@ -1538,9 +1175,9 @@ class StudentStore:
         """
         if self.get_thread(thread_id):
             with self._lock, self._connect() as connection:
-                for table in NOTEBOOK_CHILD_TABLES:
+                for table, predicate in NOTEBOOK_CHILD_DELETE_PLAN:
                     connection.execute(
-                        f"DELETE FROM {table} WHERE notebook_id = ?",
+                        f"DELETE FROM {table} WHERE {predicate}",
                         (thread_id,),
                     )
                 connection.execute(
@@ -2136,6 +1773,7 @@ class StudentStore:
         *,
         expected_stage: str,
         expected_conversation_revision: int,
+        expected_response_detail: str | None = None,
         user_content: str,
         user_metadata: dict[str, Any],
         assistant_content: str,
@@ -2148,12 +1786,17 @@ class StudentStore:
         idempotency_key: str | None = None,
         idempotency_lease_token: str | None = None,
         idempotency_fingerprint: str | None = None,
+        research_observation: ResearchObservationCreate | None = None,
+        auto_advance: AtomicAutoAdvance | None = None,
     ) -> tuple[str, str]:
         """Persist one completed coaching turn in a single DB transaction.
 
         Provider, retrieval, and object-storage work must finish before this
         method is called. The user row, assistant assessment/citations/pending
-        decision, and notebook summary either commit together or roll back.
+        decision, optional auto-advance, optional research observation, and
+        notebook summary either commit together or roll back. Research evidence
+        stores offsets into the referenced student message rather than a
+        transcript copy.
 
         When ``existing_user_message_id`` is set (edit/revise path), the user
         message is already durable from the revision transaction. Content is not
@@ -2168,15 +1811,49 @@ class StudentStore:
         user_id = str(existing_user_message_id or uuid.uuid4())
         assistant_id = assistant_message_id or str(uuid.uuid4())
         assistant_meta = dict(assistant_metadata)
+        research_payload: dict[str, Any] | None = None
+        if research_observation is not None:
+            from .research.models import ResearchObservationCreate
+
+            normalized_research = ResearchObservationCreate.model_validate(
+                research_observation
+            )
+            for evidence in normalized_research.evidence:
+                if evidence.end_offset > len(cleaned_user):
+                    raise ValueError("Research evidence offsets exceed the student message")
+            holistic = normalized_research.holistic_candidate
+            if holistic is not None and any(
+                span.end_offset > len(cleaned_user)
+                for span in holistic.evidence_spans
+            ):
+                raise ValueError("Research evidence offsets exceed the student message")
+            research_payload = normalized_research.model_dump(mode="json")
+            assistant_meta["research_coding"] = normalized_research.message_metadata()
         assessment = assistant_meta.pop("assessment", None)
         cited = assistant_meta.pop("source_refs", None)
         proposed_stage = assistant_meta.pop("proposed_stage", None)
         decision_status = assistant_meta.pop("decision_status", None)
         assistant_meta.pop("pending_transition_id", None)
-        if decision_status and decision_status != "pending":
+        if auto_advance is None and decision_status and decision_status != "pending":
             raise ValueError("New coach transition status must be pending")
+        if auto_advance is not None:
+            if assistant_id != auto_advance.transition_id:
+                raise ValueError("Auto-advance transition id must match the assistant")
+            if auto_advance.from_stage != expected_stage:
+                raise ValueError("Auto-advance source stage does not match the coach turn")
+            if proposed_stage != auto_advance.to_stage:
+                raise ValueError("Auto-advance destination does not match the recommendation")
+            if decision_status != "confirmed":
+                raise ValueError("Auto-advance transition must be confirmed")
         if bool(proposed_stage) != bool(decision_status):
             raise ValueError("Pending coach transitions require a proposed stage")
+        expected_detail = (
+            str(expected_response_detail or "").strip().lower()
+            if expected_response_detail is not None
+            else None
+        )
+        if expected_detail is not None and expected_detail not in {"short", "long"}:
+            raise ValueError("Invalid expected response detail")
 
         with self._lock, self._connect() as connection:
             notebook = connection.execute(
@@ -2185,10 +1862,20 @@ class StudentStore:
             ).fetchone()
             if not notebook:
                 raise ValueError("Chat not found")
-            active_stage = str(notebook["current_stage"] or "focus")
+            active_stage = str(notebook["current_stage"] or DEFAULT_STAGE)
             if active_stage != expected_stage:
                 raise ValueError(
                     "The notebook stage changed before the coaching turn was saved"
+                )
+            thread = self._thread_dict(notebook)
+            current_meta = dict(thread.get("metadata") or {})
+            current_journey = dict(current_meta.get("learning_journey") or {})
+            active_detail = str(
+                current_journey.get("response_detail") or DEFAULT_RESPONSE_DETAIL
+            ).lower()
+            if expected_detail is not None and active_detail != expected_detail:
+                raise CoachingStyleConflictError(
+                    "The coaching style changed before the turn was saved"
                 )
             active_revision = self._notebook_revision_value(notebook)
             if active_revision != int(expected_conversation_revision):
@@ -2268,7 +1955,7 @@ class StudentStore:
                         active_revision,
                     ),
                 )
-            if decision_status == "pending":
+            if decision_status in {"pending", "confirmed"}:
                 connection.execute(
                     f"""
                     UPDATE messages
@@ -2291,7 +1978,7 @@ class StudentStore:
                    decision_at, metadata_text, created_at,
                    conversation_revision, previous_message_id,
                    superseded_at_revision)
-                VALUES (?, ?, 'assistant', ?, 0, ?, ?, ?, ?, NULL, ?, ?,
+                VALUES (?, ?, 'assistant', ?, 0, ?, ?, ?, ?, ?, ?, ?,
                         ?, NULL, NULL)
                 """,
                 (
@@ -2302,20 +1989,73 @@ class StudentStore:
                     _dump(cited) if cited is not None else None,
                     proposed_stage,
                     decision_status,
+                    assistant_created_at if decision_status == "confirmed" else None,
                     _dump(assistant_meta),
                     assistant_created_at,
                     active_revision,
                 ),
             )
+            if research_payload is not None:
+                connection.execute(
+                    """
+                    INSERT INTO research_observations
+                      (id, notebook_id, user_message_id, assistant_message_id,
+                       conversation_revision, coding_status, coding_version,
+                       prompt_version, provider, model_id, coaching_profile,
+                       phase_id, dominant_clear, facione_behaviors_text,
+                       ethics_concepts_text, evidence_text,
+                       holistic_candidate_text, metadata_text, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (assistant_message_id) DO NOTHING
+                    """,
+                    (
+                        str(uuid.uuid4()),
+                        thread_id,
+                        user_id,
+                        assistant_id,
+                        active_revision,
+                        research_payload["coding_status"],
+                        research_payload["coding_version"],
+                        research_payload["prompt_version"],
+                        research_payload["provider"],
+                        research_payload["model_id"],
+                        research_payload["coaching_profile"],
+                        research_payload["phase_id"],
+                        research_payload.get("dominant_clear"),
+                        _dump(research_payload.get("facione_behaviors") or []),
+                        _dump(research_payload.get("ethics_concepts") or []),
+                        _dump(research_payload.get("evidence") or []),
+                        (
+                            _dump(research_payload["holistic_candidate"])
+                            if research_payload.get("holistic_candidate") is not None
+                            else None
+                        ),
+                        _dump(research_payload.get("metadata") or {}),
+                        assistant_created_at,
+                    ),
+                )
 
-            thread = self._thread_dict(notebook)
             current_meta = {
-                **dict(thread.get("metadata") or {}),
+                **current_meta,
                 **summary_metadata,
                 "last_workflow_user_message_id": user_id,
                 "conversation_revision": active_revision,
             }
-            journey_meta = dict(current_meta.get("learning_journey") or {})
+            if auto_advance is not None:
+                from .student_journey import complete_and_advance, current_stage
+
+                next_journey = complete_and_advance(
+                    current_journey,
+                    note=auto_advance.contribution_summary,
+                )
+                if current_stage(next_journey).id != auto_advance.to_stage:
+                    raise ValueError(
+                        "Auto-advance destination does not match the learning journey"
+                    )
+                journey_meta = next_journey
+                current_meta["thinking_stage"] = auto_advance.to_stage
+            else:
+                journey_meta = current_journey
             for key in _PROGRESS_KEYS:
                 if key in summary_metadata:
                     journey_meta[key] = summary_metadata[key]
@@ -2323,7 +2063,10 @@ class StudentStore:
             stage, progress_text, settings_text = self._split_notebook_metadata(
                 current_meta
             )
-            if stage != expected_stage:
+            expected_saved_stage = (
+                auto_advance.to_stage if auto_advance is not None else expected_stage
+            )
+            if stage != expected_saved_stage:
                 raise ValueError("Coach summary cannot change the notebook stage")
             title = generated_title or notebook["title"]
             updated = connection.execute(
@@ -2349,6 +2092,401 @@ class StudentStore:
                     "The conversation was revised before the coaching turn was saved"
                 )
         return user_id, assistant_id
+
+    @staticmethod
+    def _research_observation_dict(row: Any) -> dict[str, Any]:
+        """Map one joined research observation without returning transcript text."""
+        return {
+            "id": str(row["id"]),
+            "notebook_id": str(row["notebook_id"]),
+            "student_user_id": str(row["student_user_id"]),
+            "student_display_name": row["student_display_name"],
+            "student_email": row["student_email"],
+            "user_message_id": str(row["user_message_id"]),
+            "assistant_message_id": str(row["assistant_message_id"]),
+            "conversation_revision": int(row["conversation_revision"] or 0),
+            "coding_status": str(row["coding_status"]),
+            "coding_version": str(row["coding_version"]),
+            "prompt_version": str(row["prompt_version"]),
+            "provider": str(row["provider"]),
+            "model_id": str(row["model_id"]),
+            "coaching_profile": str(row["coaching_profile"]),
+            "phase_id": str(row["phase_id"]),
+            "dominant_clear": row["dominant_clear"],
+            "facione_behaviors": _load(row["facione_behaviors_text"], []),
+            "ethics_concepts": _load(row["ethics_concepts_text"], []),
+            "evidence": _load(row["evidence_text"], []),
+            "holistic_candidate": _load(row["holistic_candidate_text"], None),
+            "metadata": _load(row["metadata_text"], {}),
+            "created_at": str(row["created_at"]),
+        }
+
+    def list_research_observations(
+        self,
+        *,
+        notebook_id: str | None = None,
+        active_only: bool = True,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """List owner-attributed observations, optionally active-branch only."""
+        bounded_limit = max(1, min(500, int(limit)))
+        bounded_offset = max(0, int(offset))
+        clauses = ["1=1"]
+        params: list[Any] = []
+        if notebook_id:
+            clauses.append("o.notebook_id=?")
+            params.append(notebook_id)
+        if active_only:
+            clauses.extend(
+                (
+                    "COALESCE(am.conversation_revision, 0) "
+                    "<= COALESCE(n.conversation_revision, 0)",
+                    "(am.superseded_at_revision IS NULL OR "
+                    "am.superseded_at_revision > COALESCE(n.conversation_revision, 0))",
+                    "COALESCE(um.conversation_revision, 0) "
+                    "<= COALESCE(n.conversation_revision, 0)",
+                    "(um.superseded_at_revision IS NULL OR "
+                    "um.superseded_at_revision > COALESCE(n.conversation_revision, 0))",
+                )
+            )
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT o.*, n.user_id AS student_user_id,
+                       u.display_name AS student_display_name,
+                       u.email AS student_email
+                FROM research_observations o
+                JOIN notebooks n ON n.id=o.notebook_id
+                JOIN users u ON u.id=n.user_id
+                JOIN messages um ON um.id=o.user_message_id
+                JOIN messages am ON am.id=o.assistant_message_id
+                WHERE {' AND '.join(clauses)}
+                ORDER BY o.created_at DESC, o.id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (*params, bounded_limit, bounded_offset),
+            ).fetchall()
+        return [self._research_observation_dict(row) for row in rows]
+
+    def get_research_observation(
+        self, observation_id: str, *, active_only: bool = True
+    ) -> dict[str, Any] | None:
+        """Return one observation by id from the research dataset."""
+        clauses = ["o.id=?"]
+        params: list[Any] = [observation_id]
+        if active_only:
+            clauses.extend(
+                (
+                    "COALESCE(am.conversation_revision, 0) "
+                    "<= COALESCE(n.conversation_revision, 0)",
+                    "(am.superseded_at_revision IS NULL OR "
+                    "am.superseded_at_revision > COALESCE(n.conversation_revision, 0))",
+                    "COALESCE(um.conversation_revision, 0) "
+                    "<= COALESCE(n.conversation_revision, 0)",
+                    "(um.superseded_at_revision IS NULL OR "
+                    "um.superseded_at_revision > COALESCE(n.conversation_revision, 0))",
+                )
+            )
+        with self._connect() as connection:
+            row = connection.execute(
+                f"""
+                SELECT o.*, n.user_id AS student_user_id,
+                       u.display_name AS student_display_name,
+                       u.email AS student_email
+                FROM research_observations o
+                JOIN notebooks n ON n.id=o.notebook_id
+                JOIN users u ON u.id=n.user_id
+                JOIN messages um ON um.id=o.user_message_id
+                JOIN messages am ON am.id=o.assistant_message_id
+                WHERE {' AND '.join(clauses)}
+                """,
+                tuple(params),
+            ).fetchone()
+        return self._research_observation_dict(row) if row else None
+
+    @staticmethod
+    def _research_review_dict(row: Any) -> dict[str, Any]:
+        """Map one append-only human review row."""
+        return {
+            "id": str(row["id"]),
+            "observation_id": str(row["observation_id"]),
+            "reviewer_user_id": str(row["reviewer_user_id"]),
+            "status": str(row["status"]),
+            "coding_status": row["coding_status"],
+            "dominant_clear": row["dominant_clear"],
+            "facione_behaviors": _load(row["facione_behaviors_text"], None),
+            "ethics_concepts": _load(row["ethics_concepts_text"], None),
+            "evidence": _load(row["evidence_text"], None),
+            "holistic_candidate": _load(row["holistic_candidate_text"], None),
+            "notes": row["notes"],
+            "supersedes_review_id": row["supersedes_review_id"],
+            "metadata": _load(row["metadata_text"], {}),
+            "created_at": str(row["created_at"]),
+        }
+
+    def append_research_review(self, value: dict[str, Any]) -> dict[str, Any]:
+        """Append one review after validating observation, reviewer, and supersession."""
+        from .research.models import ResearchReviewCreate
+
+        item = ResearchReviewCreate.model_validate(value)
+        review_id, created_at = str(uuid.uuid4()), utc_now()
+        with self._lock, self._connect() as connection:
+            observation = connection.execute(
+                "SELECT id FROM research_observations WHERE id=?",
+                (item.observation_id,),
+            ).fetchone()
+            reviewer = connection.execute(
+                "SELECT id FROM users WHERE id=?", (item.reviewer_user_id,)
+            ).fetchone()
+            if not observation:
+                raise ValueError("Research observation not found")
+            if not reviewer:
+                raise ValueError("Research reviewer not found")
+            if item.supersedes_review_id:
+                prior = connection.execute(
+                    "SELECT id FROM research_reviews WHERE id=? AND observation_id=?",
+                    (item.supersedes_review_id, item.observation_id),
+                ).fetchone()
+                if not prior:
+                    raise ValueError("Superseded research review not found")
+            connection.execute(
+                """
+                INSERT INTO research_reviews
+                  (id, observation_id, reviewer_user_id, status, coding_status,
+                   dominant_clear, facione_behaviors_text, ethics_concepts_text,
+                   evidence_text, holistic_candidate_text, notes,
+                   supersedes_review_id, metadata_text, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    review_id,
+                    item.observation_id,
+                    item.reviewer_user_id,
+                    item.status,
+                    item.coding_status,
+                    item.dominant_clear,
+                    (
+                        _dump(item.facione_behaviors)
+                        if item.facione_behaviors is not None
+                        else None
+                    ),
+                    (
+                        _dump(item.ethics_concepts)
+                        if item.ethics_concepts is not None
+                        else None
+                    ),
+                    (
+                        _dump(
+                            [
+                                entry.model_dump(mode="json")
+                                for entry in item.evidence
+                            ]
+                        )
+                        if item.evidence is not None
+                        else None
+                    ),
+                    (
+                        _dump(item.holistic_candidate.model_dump(mode="json"))
+                        if item.holistic_candidate is not None
+                        else None
+                    ),
+                    item.notes,
+                    item.supersedes_review_id,
+                    _dump(item.metadata),
+                    created_at,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM research_reviews WHERE id=?", (review_id,)
+            ).fetchone()
+        return self._research_review_dict(row)
+
+    def list_research_reviews(self, observation_id: str) -> list[dict[str, Any]]:
+        """Return append-only reviews in creation order."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM research_reviews WHERE observation_id=? "
+                "ORDER BY created_at, id",
+                (observation_id,),
+            ).fetchall()
+        return [self._research_review_dict(row) for row in rows]
+
+    @staticmethod
+    def _research_adjudication_dict(row: Any) -> dict[str, Any]:
+        """Map one append-only adjudication row."""
+        return {
+            "id": str(row["id"]),
+            "observation_id": str(row["observation_id"]),
+            "adjudicator_user_id": str(row["adjudicator_user_id"]),
+            "decision": str(row["decision"]),
+            "coding_status": row["coding_status"],
+            "dominant_clear": row["dominant_clear"],
+            "facione_behaviors": _load(row["facione_behaviors_text"], None),
+            "ethics_concepts": _load(row["ethics_concepts_text"], None),
+            "evidence": _load(row["evidence_text"], None),
+            "holistic_candidate": _load(row["holistic_candidate_text"], None),
+            "notes": row["notes"],
+            "supersedes_adjudication_id": row["supersedes_adjudication_id"],
+            "referenced_review_ids": _load(row["referenced_review_ids_text"], []),
+            "metadata": _load(row["metadata_text"], {}),
+            "created_at": str(row["created_at"]),
+        }
+
+    def append_research_adjudication(self, value: dict[str, Any]) -> dict[str, Any]:
+        """Append one adjudication without mutating prior review decisions."""
+        from .research.models import ResearchAdjudicationCreate
+
+        item = ResearchAdjudicationCreate.model_validate(value)
+        adjudication_id, created_at = str(uuid.uuid4()), utc_now()
+        with self._lock, self._connect() as connection:
+            if not connection.execute(
+                "SELECT id FROM research_observations WHERE id=?",
+                (item.observation_id,),
+            ).fetchone():
+                raise ValueError("Research observation not found")
+            if not connection.execute(
+                "SELECT id FROM users WHERE id=?",
+                (item.adjudicator_user_id,),
+            ).fetchone():
+                raise ValueError("Research adjudicator not found")
+            if item.supersedes_adjudication_id and not connection.execute(
+                "SELECT id FROM research_adjudications WHERE id=? AND observation_id=?",
+                (item.supersedes_adjudication_id, item.observation_id),
+            ).fetchone():
+                raise ValueError("Superseded research adjudication not found")
+            if item.referenced_review_ids:
+                placeholders = ",".join("?" for _ in item.referenced_review_ids)
+                rows = connection.execute(
+                    "SELECT id FROM research_reviews WHERE observation_id=? "
+                    f"AND id IN ({placeholders})",
+                    (item.observation_id, *item.referenced_review_ids),
+                ).fetchall()
+                if {str(row["id"]) for row in rows} != set(item.referenced_review_ids):
+                    raise ValueError("Referenced research review not found")
+            connection.execute(
+                """INSERT INTO research_adjudications
+                (id, observation_id, adjudicator_user_id, decision, coding_status,
+                 dominant_clear, facione_behaviors_text, ethics_concepts_text,
+                 evidence_text, holistic_candidate_text, notes,
+                 supersedes_adjudication_id, referenced_review_ids_text,
+                 metadata_text, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    adjudication_id,
+                    item.observation_id,
+                    item.adjudicator_user_id,
+                    item.decision,
+                    item.coding_status,
+                    item.dominant_clear,
+                    (
+                        _dump(item.facione_behaviors)
+                        if item.facione_behaviors is not None
+                        else None
+                    ),
+                    (
+                        _dump(item.ethics_concepts)
+                        if item.ethics_concepts is not None
+                        else None
+                    ),
+                    (
+                        _dump(
+                            [
+                                entry.model_dump(mode="json")
+                                for entry in item.evidence
+                            ]
+                        )
+                        if item.evidence is not None
+                        else None
+                    ),
+                    (
+                        _dump(item.holistic_candidate.model_dump(mode="json"))
+                        if item.holistic_candidate is not None
+                        else None
+                    ),
+                    item.notes,
+                    item.supersedes_adjudication_id,
+                    _dump(item.referenced_review_ids),
+                    _dump(item.metadata),
+                    created_at,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM research_adjudications WHERE id=?",
+                (adjudication_id,),
+            ).fetchone()
+        return self._research_adjudication_dict(row)
+
+    def list_research_adjudications(self, observation_id: str) -> list[dict[str, Any]]:
+        """Return append-only adjudications in creation order."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM research_adjudications WHERE observation_id=? "
+                "ORDER BY created_at, id",
+                (observation_id,),
+            ).fetchall()
+        return [self._research_adjudication_dict(row) for row in rows]
+
+    def record_research_access_event(self, value: dict[str, Any]) -> dict[str, Any]:
+        """Persist one audit event; callers intentionally fail closed on errors."""
+        from .research.models import ResearchAccessEventCreate
+
+        item = ResearchAccessEventCreate.model_validate(value)
+        event_id, created_at = str(uuid.uuid4()), utc_now()
+        with self._lock, self._connect() as connection:
+            if not connection.execute(
+                "SELECT id FROM users WHERE id=?", (item.actor_user_id,)
+            ).fetchone():
+                raise ValueError("Research access actor not found")
+            connection.execute(
+                """INSERT INTO research_access_events
+                (id, actor_user_id, action, scope, request_id, target_user_id,
+                 target_count, notebook_id, observation_id, filters_text,
+                 metadata_text, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    event_id,
+                    item.actor_user_id,
+                    item.action,
+                    item.scope,
+                    item.request_id,
+                    item.target_user_id,
+                    item.target_count,
+                    item.notebook_id,
+                    item.observation_id,
+                    _dump(item.filters),
+                    _dump(item.metadata),
+                    created_at,
+                ),
+            )
+        return {"id": event_id, **item.model_dump(mode="json"), "created_at": created_at}
+
+    def get_system_metadata(self, key: str) -> dict[str, Any] | None:
+        """Return one internal system metadata value."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT value_text FROM system_metadata WHERE key=?", (key,)
+            ).fetchone()
+        value = _load(row["value_text"] if row else None, None)
+        return value if isinstance(value, dict) else None
+
+    def set_system_metadata(self, key: str, value: dict[str, Any]) -> None:
+        """Set one internal metadata marker through an explicit write boundary."""
+        cleaned_key = str(key).strip()
+        if not cleaned_key or len(cleaned_key) > 160:
+            raise ValueError("Invalid system metadata key")
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """INSERT INTO system_metadata (key, value_text, updated_at)
+                VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE
+                SET value_text=excluded.value_text, updated_at=excluded.updated_at""",
+                (cleaned_key, _dump(value), utc_now()),
+            )
+
+    def research_workflow_contract_ready(self) -> bool:
+        """Return whether persisted research data uses the required phase contract."""
+        marker = self.get_system_metadata(RESEARCH_WORKFLOW_CONTRACT_KEY) or {}
+        return workflow_contract_is_ready(marker)
 
     def update_message(self, message_id: str, content: str) -> None:
         """Refuse destructive in-place content replacement for chat messages.
@@ -2489,9 +2627,9 @@ class StudentStore:
                 return None
             from backend.student_journey import STAGE_BY_ID
 
-            restored_stage = str(notebook["current_stage"] or "focus")
+            restored_stage = str(notebook["current_stage"] or DEFAULT_STAGE)
             if restored_stage not in STAGE_BY_ID:
-                restored_stage = "focus"
+                restored_stage = DEFAULT_STAGE
             return ConversationRevisionResult(
                 thread_id=thread_id,
                 edited_message_id=str(replacement["id"]),
@@ -2554,10 +2692,10 @@ class StudentStore:
             restored_stage = str(
                 target_meta.get("thinking_stage")
                 or notebook["current_stage"]
-                or "focus"
+                or DEFAULT_STAGE
             ).strip()
             if restored_stage not in STAGE_BY_ID:
-                restored_stage = "focus"
+                restored_stage = DEFAULT_STAGE
 
             # Latest active surviving assistant assessment before the target.
             prior_assistants = connection.execute(
@@ -3095,7 +3233,7 @@ class StudentStore:
             if not row:
                 raise ValueError("Pending transition not found")
             if accepted and expected_from_stage is not None:
-                active_stage = str(notebook["current_stage"] or "focus")
+                active_stage = str(notebook["current_stage"] or DEFAULT_STAGE)
                 if active_stage != expected_from_stage:
                     raise ValueError(
                         "The notebook stage changed; request a new recommendation"
@@ -3172,18 +3310,7 @@ class StudentStore:
 
     def _load_extracted_text(self, extracted_text_key: str | None) -> str:
         """Load extracted text bytes from object storage."""
-        if not extracted_text_key:
-            return ""
-        from backend.persistence.factory import get_file_storage
-
-        try:
-            data = get_file_storage().get_bytes(str(extracted_text_key))
-        except FileNotFoundError:
-            return ""
-        try:
-            return data.decode("utf-8")
-        except UnicodeDecodeError:
-            return data.decode("utf-8", errors="replace")
+        return self._bound_operations().sources.load_extracted_text(extracted_text_key)
 
     def add_source(
         self,
@@ -3206,65 +3333,20 @@ class StudentStore:
         whole write transaction. Source services must store extracted text
         first and pass its deterministic object key.
         """
-        if kind not in {"file", "image", "text", "url"}:
-            raise ValueError("Unsupported source type")
-        normalized_title = " ".join(title.strip().split())[:180]
-        if not normalized_title:
-            raise ValueError("Source title is required")
-        metadata_dict = dict(metadata or {})
-        object_key = metadata_dict.get("object_key") or None
-        storage_provider = str(metadata_dict.get("storage_provider") or "local")
-        if path:
-            if storage_provider in {"s3", "memory"} or object_key:
-                object_key = str(object_key or path)
-                path = None
-            else:
-                resolved_path = Path(path).resolve()
-                allowed_root = (settings.files_dir / "threads" / thread_id).resolve()
-                if allowed_root not in resolved_path.parents:
-                    raise ValueError("Unsafe source path")
-                # Local filesystem path kept in metadata for compatibility.
-                metadata_dict["local_path"] = str(resolved_path)
-                path = None
-        source_id = source_id or str(uuid.uuid4())
-        stored_text_key = str(extracted_text_key or "").strip() or None
-        now = utc_now()
-        with self._lock, self._connect() as connection:
-            owned = connection.execute(
-                "SELECT id FROM notebooks WHERE id=? AND user_id=?",
-                (thread_id, self.owner_id),
-            ).fetchone()
-            if not owned:
-                raise ValueError("Notebook not found")
-            connection.execute(
-                """
-                INSERT INTO sources
-                  (id, notebook_id, kind, title, content_type, byte_size,
-                   object_key, extracted_text_key, source_url, selected,
-                   metadata_text, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    source_id,
-                    thread_id,
-                    kind,
-                    normalized_title,
-                    mime or "application/octet-stream",
-                    max(0, int(size)),
-                    object_key,
-                    stored_text_key,
-                    source_url,
-                    int(selected),
-                    _dump(metadata_dict),
-                    now,
-                    now,
-                ),
-            )
-            connection.execute(
-                "UPDATE notebooks SET updated_at=? WHERE id=? AND user_id=?",
-                (now, thread_id, self.owner_id),
-            )
-        return source_id
+        return self._bound_operations().sources.add(
+            thread_id,
+            kind=kind,
+            title=title,
+            mime=mime,
+            path=path,
+            source_url=source_url,
+            extracted_text_key=extracted_text_key,
+            size=size,
+            selected=selected,
+            metadata=metadata,
+            source_id=source_id,
+            serialize=_dump,
+        )
 
     def list_sources(
         self,
@@ -3273,33 +3355,19 @@ class StudentStore:
         selected_only: bool = False,
     ) -> list[dict[str, Any]]:
         """List owned sources for a notebook."""
-        if not self.get_thread(thread_id):
-            return []
-        selected_clause = " AND selected=1" if selected_only else ""
-        with self._connect() as connection:
-            rows = connection.execute(
-                f"""
-                SELECT s.* FROM sources s
-                JOIN notebooks n ON n.id=s.notebook_id
-                WHERE s.notebook_id=? AND n.user_id=?{selected_clause}
-                ORDER BY s.created_at ASC, s.id ASC
-                """,
-                (thread_id, self.owner_id),
-            ).fetchall()
-        return [self._source_dict(row) for row in rows]
+        return self._bound_operations().sources.list(
+            thread_id,
+            selected_only=selected_only,
+            normalize=self._source_dict,
+        )
 
     def get_source(self, thread_id: str, source_id: str) -> dict[str, Any] | None:
         """Return one owned source or ``None``."""
-        with self._connect() as connection:
-            row = connection.execute(
-                """
-                SELECT s.* FROM sources s
-                JOIN notebooks n ON n.id=s.notebook_id
-                WHERE s.id=? AND s.notebook_id=? AND n.user_id=?
-                """,
-                (source_id, thread_id, self.owner_id),
-            ).fetchone()
-        return self._source_dict(row) if row else None
+        return self._bound_operations().sources.get(
+            thread_id,
+            source_id,
+            normalize=self._source_dict,
+        )
 
     def find_source_by_path(
         self,
@@ -3307,66 +3375,19 @@ class StudentStore:
         path: str,
     ) -> dict[str, Any] | None:
         """Find a source by object key or legacy local path."""
-        with self._connect() as connection:
-            row = connection.execute(
-                """
-                SELECT s.* FROM sources s
-                JOIN notebooks n ON n.id=s.notebook_id
-                WHERE s.notebook_id=? AND n.user_id=?
-                  AND (s.object_key=? OR s.metadata_text LIKE ?)
-                """,
-                (thread_id, self.owner_id, path, f'%{path}%'),
-            ).fetchone()
-        if not row:
-            return None
-        source = self._source_dict(row)
-        if source.get("path") == path or source.get("object_key") == path:
-            return source
-        # Fallback: check local_path in metadata.
-        if (source.get("metadata") or {}).get("local_path") == path:
-            return source
-        return None
+        return self._bound_operations().sources.find_by_path(
+            thread_id,
+            path,
+            normalize=self._source_dict,
+        )
 
     def _source_dict(self, row: Any) -> dict[str, Any]:
         """Normalize a sources row for callers (legacy keys preserved)."""
-        metadata = _load(row["metadata_text"], {})
-        if not isinstance(metadata, dict):
-            metadata = {}
-        legacy_extracted = str(metadata.pop("_legacy_extracted_text", "") or "")
-        object_key = row["object_key"]
-        local_path = metadata.get("local_path")
-        extracted = self._load_extracted_text(row["extracted_text_key"])
-        if not extracted:
-            extracted = legacy_extracted
-        path_value = object_key or local_path
-        if object_key and metadata.get("storage_provider") not in {"s3", "memory"}:
-            # Object key present implies object storage for readers.
-            if settings.file_storage_provider != "local":
-                metadata.setdefault(
-                    "storage_provider", settings.file_storage_provider
-                )
-                metadata.setdefault("object_key", object_key)
-        return {
-            "id": str(row["id"]),
-            "threadId": str(row["notebook_id"]),
-            "notebook_id": str(row["notebook_id"]),
-            "ownerId": self.owner_id,
-            "kind": row["kind"],
-            "title": row["title"],
-            "mime": row["content_type"] or "application/octet-stream",
-            "content_type": row["content_type"],
-            "path": path_value,
-            "object_key": object_key,
-            "extracted_text_key": row["extracted_text_key"],
-            "sourceUrl": row["source_url"],
-            "extractedText": extracted,
-            "size": int(row["byte_size"] or 0),
-            "byte_size": int(row["byte_size"] or 0),
-            "selected": bool(row["selected"]),
-            "metadata": metadata,
-            "createdAt": row["created_at"],
-            "updatedAt": row["updated_at"],
-        }
+        return self._bound_operations().sources.as_dict(
+            row,
+            deserialize=_load,
+            load_extracted=self._load_extracted_text,
+        )
 
     def set_source_selected(
         self,
@@ -3379,37 +3400,12 @@ class StudentStore:
         Locked course materials (Lecture Notes / Readings) stay selected and
         cannot be cleared through this API.
         """
-        from backend.source_library import is_locked_course_source
-
-        source = self.get_source(thread_id, source_id)
-        if not source:
-            raise ValueError("Source not found")
-        if is_locked_course_source(source):
-            if not selected:
-                raise ValueError(
-                    "Course materials stay selected and cannot be unselected."
-                )
-            if source.get("selected"):
-                return
-        with self._lock, self._connect() as connection:
-            changed = connection.execute(
-                """
-                UPDATE sources SET selected=?, updated_at=?
-                WHERE id=? AND notebook_id=? AND notebook_id IN (
-                  SELECT id FROM notebooks WHERE id=? AND user_id=?
-                )
-                """,
-                (
-                    int(selected),
-                    utc_now(),
-                    source_id,
-                    thread_id,
-                    thread_id,
-                    self.owner_id,
-                ),
-            ).rowcount
-        if not changed:
-            raise ValueError("Source not found")
+        self._bound_operations().sources.set_selected(
+            thread_id,
+            source_id,
+            selected,
+            source=self.get_source(thread_id, source_id),
+        )
 
     def set_all_sources_selected(self, thread_id: str, selected: bool) -> None:
         """Select or deselect personal sources in an owned notebook.
@@ -3417,63 +3413,20 @@ class StudentStore:
         Locked course materials are never cleared. When selecting all, any
         locked row that somehow became unselected is forced back on.
         """
-        from backend.source_library import is_locked_course_source
-
-        if not self.get_thread(thread_id):
-            raise ValueError("Notebook not found")
-        now = utc_now()
-        with self._lock, self._connect() as connection:
-            rows = connection.execute(
-                """
-                SELECT id, selected, metadata_text FROM sources
-                WHERE notebook_id=?
-                """,
-                (thread_id,),
-            ).fetchall()
-            for row in rows:
-                metadata = _load(row["metadata_text"], {})
-                if not isinstance(metadata, dict):
-                    metadata = {}
-                locked = is_locked_course_source(
-                    {"metadata": metadata, "selected": bool(row["selected"])}
-                )
-                if locked:
-                    if not bool(row["selected"]):
-                        connection.execute(
-                            """
-                            UPDATE sources SET selected=1, updated_at=?
-                            WHERE id=? AND notebook_id=?
-                            """,
-                            (now, row["id"], thread_id),
-                        )
-                    continue
-                connection.execute(
-                    """
-                    UPDATE sources SET selected=?, updated_at=?
-                    WHERE id=? AND notebook_id=?
-                    """,
-                    (int(selected), now, row["id"], thread_id),
-                )
+        self._bound_operations().sources.set_all_selected(
+            thread_id,
+            selected,
+            deserialize=_load,
+        )
 
     def rename_source(self, thread_id: str, source_id: str, title: str) -> None:
         """Rename a personal notebook source. Locked course materials stay fixed."""
-        source = self.get_source(thread_id, source_id)
-        if not source:
-            raise ValueError("Source not found")
-        metadata = source.get("metadata") or {}
-        if metadata.get("locked_source"):
-            raise ValueError("Course materials cannot be renamed.")
-        normalized_title = " ".join(title.strip().split())[:180]
-        if not normalized_title:
-            raise ValueError("Source title is required")
-        with self._lock, self._connect() as connection:
-            connection.execute(
-                """
-                UPDATE sources SET title=?, updated_at=?
-                WHERE id=? AND notebook_id=?
-                """,
-                (normalized_title, utc_now(), source_id, thread_id),
-            )
+        self._bound_operations().sources.rename(
+            thread_id,
+            source_id,
+            title,
+            source=self.get_source(thread_id, source_id),
+        )
 
     def delete_source(
         self,
@@ -3490,24 +3443,14 @@ class StudentStore:
         authenticated-owner source object prefix. Never uses metadata-supplied
         keys for that cleanup. Repeated successful deletes are harmless.
         """
-        source = self.get_source(thread_id, source_id)
-        if source:
-            metadata = source.get("metadata") or {}
-            if metadata.get("locked_source") and not force:
-                raise ValueError("Course materials cannot be removed from the app.")
-            with self._lock, self._connect() as connection:
-                connection.execute(
-                    """
-                    DELETE FROM sources
-                    WHERE id=? AND notebook_id=?
-                      AND notebook_id IN (
-                        SELECT id FROM notebooks WHERE id=? AND user_id=?
-                      )
-                    """,
-                    (source_id, thread_id, thread_id, self.owner_id),
-                )
-            self._cleanup_source_local_file(source, thread_id=thread_id)
-        self._cleanup_source_object_prefix(thread_id, source_id)
+        self._bound_operations().sources.delete(
+            thread_id,
+            source_id,
+            force=force,
+            source=self.get_source(thread_id, source_id),
+            cleanup_local=self._cleanup_source_local_file,
+            cleanup_prefix=self._cleanup_source_object_prefix,
+        )
 
     def _cleanup_source_object_prefix(self, thread_id: str, source_id: str) -> None:
         """Delete object-storage keys under the authenticated owner's source prefix.
@@ -3516,16 +3459,7 @@ class StudentStore:
         ids — never from metadata ``object_key`` values — so retries cannot
         target another user's prefix.
         """
-        from backend.persistence.factory import get_file_storage
-        from backend.persistence.object_keys import source_prefix
-
-        get_file_storage().delete_prefix(
-            source_prefix(
-                user_id=self.owner_id,
-                notebook_id=thread_id,
-                source_id=source_id,
-            )
-        )
+        self._bound_operations().sources.cleanup_object_prefix(thread_id, source_id)
 
     def _cleanup_source_local_file(
         self,
@@ -3539,11 +3473,7 @@ class StudentStore:
         is known). Absent-row retries rely solely on object-prefix cleanup and
         do not guess unrelated local paths.
         """
-        metadata = source.get("metadata") or {}
-        local_path = metadata.get("local_path")
-        if not (local_path and metadata.get("managed_file")):
-            return
-        path = Path(str(local_path)).resolve()
-        allowed_root = (settings.files_dir / "threads" / thread_id).resolve()
-        if path.is_file() and allowed_root in path.parents:
-            path.unlink(missing_ok=True)
+        self._bound_operations().sources.cleanup_local_file(
+            source,
+            thread_id=thread_id,
+        )

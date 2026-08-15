@@ -24,13 +24,19 @@ and scopes every notebook/source/message operation to that owner. The shared
 Both paths support Thinking Path progression, structured assessments, Review
 personalization, and selected image grounding.
 
+The current research workflow uses five phases: **Problem identification**,
+**Concept generation**, **Design specification**, **Ethics & Critical Thinking**,
+and **Reflection**. The internal persisted id for Ethics & Critical Thinking
+remains `deep_analysis`. Automated research coding is provisional and
+evidence-linked; it never grades the student or changes a phase by itself.
+
 ---
 
 ## Prerequisites
 
 - **Python 3.12+** (3.12 recommended)
 - macOS or Linux shell (`zsh` / `bash`)
-- Optional later: [Ollama](https://ollama.com/) or an OpenAI API key
+- Optional later: an OpenAI API key (paid; mock mode is the default)
 
 ---
 
@@ -161,26 +167,6 @@ No OpenAI key is required.
 
 ## Optional: live providers
 
-### Ollama (local model)
-
-```bash
-ollama pull gpt-oss:20b
-```
-
-In `.env`:
-
-```bash
-MODEL_PROVIDER=ollama
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-OLLAMA_CHAT_MODEL=gpt-oss:20b
-```
-
-Then:
-
-```bash
-sh scripts/start.sh
-```
-
 ### OpenAI (paid — only with explicit approval / budget)
 
 In `.env`:
@@ -193,8 +179,55 @@ DEFAULT_REASONING_EFFORT=low
 MOCK_OPENAI=false
 ```
 
-Paid calls are **not** part of the default local workflow. Keep mock or Ollama
+Paid calls are **not** part of the default local workflow. Keep `MODEL_PROVIDER=mock`
 for routine development.
+
+### Amazon Bedrock (AWS inference — only with explicit approval / budget)
+
+In `.env` (no access keys):
+
+```bash
+MODEL_PROVIDER=bedrock
+AWS_REGION=us-west-2
+BEDROCK_MODEL_ID=<inference-profile-or-model-id>
+BEDROCK_TIMEOUT_SECONDS=110
+BEDROCK_MAX_RETRIES=0
+MOCK_OPENAI=false
+```
+
+Leave `OPENAI_API_KEY` empty if you are not using OpenAI. Credentials come from
+`aws sso login` locally or the EC2 instance role in production. Enable model
+access in the Bedrock console for that region, grant the runtime role
+`bedrock:InvokeModel` (and `InvokeModelWithResponseStream` if streaming) on that
+model/profile ARN only, and do not create a Knowledge Base for coaching.
+See [Bedrock adapter](docs/providers/BEDROCK_ADAPTER.md).
+
+### Amazon Bedrock AgentCore (production generation path)
+
+FastAPI stays the student application. AgentCore Runtime is the live coaching
+brain once the harness returns `coach_turn` JSON. Direct Converse remains a
+fallback.
+
+```bash
+MODEL_PROVIDER=agentcore
+AWS_REGION=us-west-2
+AGENTCORE_RUNTIME_ARN=arn:aws:bedrock-agentcore:us-west-2:<account>:runtime/<id>
+AGENTCORE_QUALIFIER=DEFAULT
+AGENTCORE_TIMEOUT_SECONDS=110
+AGENTCORE_MAX_RETRIES=0
+KNOWLEDGE_BASE_ID=JUQNP8AZAZ
+MOCK_OPENAI=false
+```
+
+Optional `KNOWLEDGE_BASE_ID` runs Bedrock `Retrieve` for selected Lecture
+Notes/Readings and maps hits onto `[S#]`. Student uploads stay local. The
+coaching specialist still has zero Knowledge Base tools.
+
+Do not merge the POC CDK app as a second student UI. Apply
+[scripts/agentcore/harness_patch/README.md](scripts/agentcore/harness_patch/README.md)
+to the existing runtime, then run
+[docs/providers/AGENTCORE_ADAPTER.md](docs/providers/AGENTCORE_ADAPTER.md)
+live smoke only with an explicit cost cap.
 
 ### Thinking Path Next confirmation
 
@@ -204,12 +237,46 @@ Default: `AUTO_ADVANCE_STAGES=false`. After the coach recommends the next stage:
 2. Read the warning that confirming early can make the process less critical.
 3. Press **Next** again in the dialog to confirm (or Cancel).
 
-Quick guidance is a lighter advance bar; Complex is stricter. To restore silent
-auto-advance:
+New notebooks default to Strict coaching. Quick uses the practical evidence
+threshold; Strict requires clearer, more consistently demonstrated reasoning
+before recommending advancement. The profiles retain separate cumulative Review
+evidence. To restore silent auto-advance:
 
 ```bash
 AUTO_ADVANCE_STAGES=true
 ```
+
+## Research review and lecturer visibility
+
+Each coach turn may include a separately validated, provisional observation of
+the current student utterance: one dominant CLEAR strategy, up to two Facione
+behaviours, optional design-ethics concepts, and evidence offsets. Raw quote
+copies are not stored in the research record. These codes do not award Facione
+points, complete a phase, or determine a grade.
+
+Authenticated users with persisted `lecturer` or `admin` roles can use the
+professor **Research** view to see attributable student/notebook context,
+inspect the active transcript, submit append-only reviews or adjudications, and
+export filtered CSV. Identifiable reads and exports are themselves audited and
+fail closed if the audit write fails. Students see their existing Review plus
+Facione behaviour occurrences and a clearly provisional Reflection candidate;
+CLEAR and ethics research labels remain staff-facing.
+
+See [Research coding methodology](docs/research/METHODOLOGY.md) for operational
+definitions, limitations, and cited sources. A future Bedrock adapter must
+preserve the same provider-neutral one-call contract described in the
+[Bedrock adapter handoff](docs/providers/BEDROCK_ADAPTER.md). The Converse
+adapter in `backend/bedrock_provider.py` is that generation path; it does not
+replace selected-source retrieval.
+
+### Existing data and the five-phase contract
+
+The six-stage and five-phase workflows are not silently mapped because their
+educational meanings differ. A non-empty database without the exact workflow
+marker fails readiness. Use the supported `scripts/start.sh` path and follow
+[Research data reset](docs/operations/RESEARCH_DATA_RESET.md) to inventory and
+back up learning data before any explicit reset. The reset is never automatic;
+accounts and authentication identities are preserved.
 
 ---
 
@@ -259,9 +326,10 @@ backend/ → domain, workflow, providers, SQLite, sources
 
 Prefer the API coaching path for all new behaviour. The legacy
 `StudentChatEngine` path exists only as a fallback when `USE_LOCAL_API` is off;
-do not add new behavior there. Cognito sessions use the same typed application
-services in process until FastAPI has its own verified authenticated-owner
-boundary.
+do not add new behavior there. Production requires `USE_LOCAL_API=true`:
+Streamlit calls FastAPI, which verifies the Cognito session and applies the
+authenticated-owner boundary before accessing student data. The in-process
+fallback is limited to local development and deterministic tests.
 
 ---
 
@@ -373,17 +441,21 @@ docker compose up -d --build
 > auth browser routes (`/login`, `/callback`, `/me`, `/refresh`, `/logout` and
 > the migration logout callback) plus `/api/v1/health` to FastAPI. Other
 > `/api/*` paths return 404 at Caddy and never reach FastAPI through the public
-> distribution.
+> distribution. FastAPI does not publish `/docs`, `/redoc`, or `/openapi.json`.
 
 ---
 
 ## Tests
 
+Install the pinned development tools with `python -m pip install -r requirements-dev.txt`,
+then run:
+
 ```bash
 source .venv/bin/activate
 python -m pytest -q
+ruff check .
 PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \
-  python -m compileall -q backend ui streamlit_app.py
+  python -m compileall -q backend ui scripts streamlit_app.py tests
 ```
 
 ### Headed Cognito browser smoke
@@ -411,8 +483,9 @@ commit those artifacts.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Progress bar never leaves Focus | UI started without API | Use `sh scripts/start.sh` only |
+| Thinking Path never leaves Problem identification | UI started without API | Use `sh scripts/start.sh` only |
 | Coach error about local API | API not up / wrong URL | Check `:8000/api/v1/health`; keep `CO_DESIGN_API_URL=http://127.0.0.1:8000` |
 | Provider / OpenAI errors on first run | `.env` set to `openai` without a key | Set `MODEL_PROVIDER=mock` |
+| Bedrock access denied / model unavailable | Model access, IAM, or `BEDROCK_MODEL_ID` | Enable the model in Bedrock, grant invoke on that ID, match `AWS_REGION` |
 | Port already in use | Another process on 8000 or 8501 | Stop the other process, then restart `start.sh` |
 | Imports missing | Wrong Python / no venv packages | `source .venv/bin/activate` then `python -m pip install -r requirements.txt` |

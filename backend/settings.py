@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Application settings loaded from the project ``.env`` file.
 
 Fallback defaults match ``.env.example``: mock provider, confirmation-mode
@@ -8,6 +6,8 @@ so a missing ``.env`` stays cost-safe. Production selects Aurora DSQL and S3
 via ``DATABASE_PROVIDER`` / ``FILE_STORAGE_PROVIDER`` and must set
 ``APP_ENV=production`` so ``validate_production_configuration`` fail-closes.
 """
+
+from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
@@ -94,10 +94,54 @@ class Settings:
     # precedence over auto_advance_stages (selection wins if both are true).
     student_stage_selection: bool = _boolean("STUDENT_STAGE_SELECTION", False)
     model_provider: str = os.getenv("MODEL_PROVIDER", "mock").strip().lower()
-    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-    ollama_chat_model: str = os.getenv("OLLAMA_CHAT_MODEL", "gpt-oss:20b")
-    ollama_embedding_model: str = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
     openai_chat_model: str = os.getenv("OPENAI_CHAT_MODEL", "gpt-5.6-luna")
+    openai_timeout_seconds: float = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "110"))
+    openai_max_retries: int = int(os.getenv("OPENAI_MAX_RETRIES", "0"))
+    bedrock_model_id: str = os.getenv("BEDROCK_MODEL_ID", "").strip()
+    bedrock_timeout_seconds: float = float(os.getenv("BEDROCK_TIMEOUT_SECONDS", "110"))
+    bedrock_max_retries: int = int(os.getenv("BEDROCK_MAX_RETRIES", "0"))
+    agentcore_runtime_arn: str = os.getenv("AGENTCORE_RUNTIME_ARN", "").strip()
+    agentcore_runtime_id: str = os.getenv("AGENTCORE_RUNTIME_ID", "").strip()
+    agentcore_qualifier: str = (
+        os.getenv("AGENTCORE_QUALIFIER", "DEFAULT").strip() or "DEFAULT"
+    )
+    agentcore_timeout_seconds: float = float(
+        os.getenv("AGENTCORE_TIMEOUT_SECONDS", "110")
+    )
+    agentcore_max_retries: int = int(os.getenv("AGENTCORE_MAX_RETRIES", "0"))
+    knowledge_base_id: str = os.getenv("KNOWLEDGE_BASE_ID", "").strip()
+    knowledge_base_region: str = os.getenv("KNOWLEDGE_BASE_REGION", "").strip()
+    knowledge_base_strict_metadata_filter: bool = _boolean(
+        "KNOWLEDGE_BASE_STRICT_METADATA_FILTER", False
+    )
+    model_context_limit_tokens: int = int(
+        os.getenv("MODEL_CONTEXT_LIMIT_TOKENS", "272000")
+    )
+    model_max_input_tokens: int = int(os.getenv("MODEL_MAX_INPUT_TOKENS", "210000"))
+    model_output_reserve_tokens: int = int(
+        os.getenv("MODEL_OUTPUT_RESERVE_TOKENS", "32000")
+    )
+    model_context_safety_margin_tokens: int = int(
+        os.getenv("MODEL_CONTEXT_SAFETY_MARGIN_TOKENS", "30000")
+    )
+    history_recent_verbatim_messages: int = int(
+        os.getenv("HISTORY_RECENT_VERBATIM_MESSAGES", "12")
+    )
+    agentcore_eval_harness_arn: str = os.getenv(
+        "AGENTCORE_EVAL_HARNESS_ARN", ""
+    ).strip()
+    live_eval_model_id: str = os.getenv(
+        "LIVE_EVAL_MODEL_ID", "openai.gpt-5.6-luna"
+    ).strip() or "openai.gpt-5.6-luna"
+    live_eval_api_format: str = os.getenv(
+        "LIVE_EVAL_API_FORMAT", "responses"
+    ).strip() or "responses"
+    course_materials_bucket: str = field(
+        default_factory=lambda: os.getenv("COURSE_MATERIALS_BUCKET", "").strip()
+    )
+    course_materials_prefix: str = (
+        os.getenv("COURSE_MATERIALS_PREFIX", "course/").strip() or "course/"
+    )
     api_base_url: str = os.getenv("CO_DESIGN_API_URL", "http://127.0.0.1:8000")
     public_api_base_url: str = os.getenv(
         "CO_DESIGN_PUBLIC_API_URL",
@@ -129,8 +173,8 @@ class Settings:
         os.getenv("COGNITO_JWKS_CACHE_TTL_SECONDS", str(6 * 60 * 60))
     )
     # Local demo copies lecture PDFs into notebook storage. Production DSQL+S3
-    # must keep this false until the separate course-material/Bedrock owner
-    # lands — otherwise student-upload S3 would receive duplicate course PDFs.
+    # syncs locked Lecture Notes/Readings from shared ``course/`` keys without
+    # copying PDFs into ``users/``.
     course_material_sync_enabled: bool = _boolean(
         "COURSE_MATERIAL_SYNC_ENABLED", True
     )
@@ -194,6 +238,44 @@ class Settings:
         """Return True when uploads are stored on the local filesystem."""
         return self.file_storage_provider == "local"
 
+    @property
+    def normalized_course_materials_prefix(self) -> str:
+        """Return the shared course-object prefix with a trailing slash."""
+        cleaned = self.course_materials_prefix.strip().replace("\\", "/").strip("/")
+        return f"{cleaned}/" if cleaned else ""
+
+    @property
+    def resolved_course_materials_bucket(self) -> str:
+        """Return the course-materials bucket, falling back to student uploads."""
+        return self.course_materials_bucket.strip() or self.user_uploads_bucket.strip()
+
+    @property
+    def uses_shared_course_materials(self) -> bool:
+        """Return whether locked course sources should reference shared object keys.
+
+        Production S3 always uses the shared prefix. Memory-backed tests opt in
+        by setting ``COURSE_MATERIALS_BUCKET`` so ordinary memory upload tests
+        keep the local lecture-notes copy path.
+        """
+        if not self.normalized_course_materials_prefix:
+            return False
+        if self.file_storage_provider == "s3":
+            return True
+        return self.file_storage_provider == "memory" and bool(
+            self.course_materials_bucket.strip()
+        )
+
+    @property
+    def resolved_agentcore_runtime_arn(self) -> str:
+        """Return the AgentCore runtime ARN from ARN or id-shaped ARN values."""
+        arn = self.agentcore_runtime_arn.strip()
+        if arn:
+            return arn
+        runtime_id = self.agentcore_runtime_id.strip()
+        if runtime_id.startswith("arn:"):
+            return runtime_id
+        return ""
+
     def ensure_directories(self) -> None:
         """Create local data directories when the local providers are active.
 
@@ -242,14 +324,50 @@ def validate_production_configuration() -> None:
         raise ValueError("MODEL_PROVIDER=mock is not allowed in production")
     if settings.mock_openai:
         raise ValueError("MOCK_OPENAI masking is not allowed in production")
-    if settings.model_provider == "ollama":
-        raise ValueError("MODEL_PROVIDER=ollama is not allowed in production")
-    if settings.model_provider != "openai":
+    if settings.model_provider == "openai":
+        if not settings.openai_api_key.strip():
+            raise ValueError("OPENAI_API_KEY is not configured")
+        if not 1 <= settings.openai_timeout_seconds <= 120:
+            raise ValueError("OPENAI_TIMEOUT_SECONDS must be between 1 and 120")
+        if not 0 <= settings.openai_max_retries <= 2:
+            raise ValueError("OPENAI_MAX_RETRIES must be between 0 and 2")
+    elif settings.model_provider == "bedrock":
+        if not settings.bedrock_model_id.strip():
+            raise ValueError("BEDROCK_MODEL_ID is not configured")
+        if not 1 <= settings.bedrock_timeout_seconds <= 120:
+            raise ValueError("BEDROCK_TIMEOUT_SECONDS must be between 1 and 120")
+        if not 0 <= settings.bedrock_max_retries <= 2:
+            raise ValueError("BEDROCK_MAX_RETRIES must be between 0 and 2")
+    elif settings.model_provider == "agentcore":
+        if not settings.resolved_agentcore_runtime_arn:
+            raise ValueError("AGENTCORE_RUNTIME_ARN is not configured")
+        if not 1 <= settings.agentcore_timeout_seconds <= 120:
+            raise ValueError("AGENTCORE_TIMEOUT_SECONDS must be between 1 and 120")
+        if not 0 <= settings.agentcore_max_retries <= 2:
+            raise ValueError("AGENTCORE_MAX_RETRIES must be between 0 and 2")
+    else:
         raise ValueError(
             f"Unsupported MODEL_PROVIDER for production: {settings.model_provider}"
         )
-    if not settings.openai_api_key.strip():
-        raise ValueError("OPENAI_API_KEY is not configured")
+
+    if not settings.use_local_api:
+        raise ValueError("USE_LOCAL_API must be enabled in production")
+    if settings.enable_local_code_execution:
+        raise ValueError("ENABLE_LOCAL_CODE_EXECUTION is not allowed in production")
+    if settings.course_material_sync_enabled:
+        prefix = settings.normalized_course_materials_prefix
+        if settings.file_storage_provider != "s3":
+            raise ValueError(
+                "COURSE_MATERIAL_SYNC_ENABLED requires FILE_STORAGE_PROVIDER=s3"
+            )
+        if not prefix:
+            raise ValueError("COURSE_MATERIALS_PREFIX is not configured")
+        if prefix == "users/" or prefix.startswith("users/"):
+            raise ValueError(
+                "COURSE_MATERIALS_PREFIX must not use the users/ namespace"
+            )
+        if not settings.course_materials_bucket.strip():
+            raise ValueError("COURSE_MATERIALS_BUCKET is not configured")
 
     if settings.database_provider == "sqlite":
         raise ValueError("DATABASE_PROVIDER=sqlite is not allowed in production")

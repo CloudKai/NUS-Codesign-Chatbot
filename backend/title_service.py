@@ -10,8 +10,8 @@ class NotebookTitleService:
 
     The coaching provider already produces the structured contribution summary,
     so title generation reuses that model output instead of creating a second
-    paid request. A deterministic fallback keeps local mock and Ollama demos
-    equally usable.
+    paid request. A deterministic fallback keeps local mock demos equally
+    usable.
     """
 
     _STOP_WORDS = {

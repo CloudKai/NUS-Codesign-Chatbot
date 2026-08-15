@@ -44,6 +44,24 @@ def notebook_prefix(*, user_id: str, notebook_id: str) -> str:
     return f"users/{safe_user}/notebooks/{safe_notebook}/"
 
 
+def normalize_course_prefix(prefix: str) -> str:
+    """Return a shared course prefix with a trailing slash, or empty."""
+    cleaned = str(prefix or "").strip().replace("\\", "/").strip("/")
+    return f"{cleaned}/" if cleaned else ""
+
+
+def is_user_object_key(key: str) -> bool:
+    """Return whether *key* is in the student-upload namespace."""
+    return str(key or "").startswith("users/")
+
+
+def is_course_object_key(key: str, prefix: str) -> bool:
+    """Return whether *key* is under the shared course prefix and not ``users/``."""
+    normalized = normalize_course_prefix(prefix)
+    candidate = str(key or "")
+    return bool(normalized) and candidate.startswith(normalized) and not is_user_object_key(candidate)
+
+
 def source_prefix(*, user_id: str, notebook_id: str, source_id: str) -> str:
     """Return the key prefix for every object belonging to one source.
 

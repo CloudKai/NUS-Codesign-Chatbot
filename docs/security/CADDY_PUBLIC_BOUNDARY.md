@@ -3,7 +3,8 @@
 CloudFront terminates viewer HTTPS and forwards uncached traffic to Caddy on
 the EC2 HTTP origin. Caddy exposes only Streamlit plus a short allow-list of
 auth/health FastAPI routes. Private application APIs must return `404` from
-Caddy through CloudFront.
+Caddy through CloudFront. FastAPI does not publish `/docs`, `/redoc`, or
+`/openapi.json`.
 
 ## Public routes (expect proxied responses)
 

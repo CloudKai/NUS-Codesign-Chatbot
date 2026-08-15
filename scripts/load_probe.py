@@ -28,6 +28,7 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from backend.api import create_app
+from backend.student_journey import DEFAULT_STAGE
 from backend.student_store import StudentStore
 
 
@@ -86,7 +87,7 @@ def main() -> None:
                     json={
                         "thread_id": thread_id,
                         "student_message": f"Load probe claim {index}",
-                        "current_stage": "focus",
+                        "current_stage": DEFAULT_STAGE,
                         "response_detail": "short",
                         "idempotency_key": f"load-{user_index}-{index}-{uuid4()}",
                     },
