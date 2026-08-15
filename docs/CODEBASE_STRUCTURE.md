@@ -46,7 +46,7 @@ tests/                        domain/, persistence/, http/, ui/, scripts/ suites
 scripts/                      startup, validation and operator entrypoints
   dsql/                       DSQL catalog, migration and execution implementation
   agentcore/harness_patch/    compatibility re-export; not the live harness
-agentcore_runtime/            canonical AgentCore specialists, prompts, contracts
+agentcore_runtime/            canonical AgentCore specialists, prompts, contracts, model factory
 docs/                         architecture, status, QA, deployment, and security guides
 ```
 

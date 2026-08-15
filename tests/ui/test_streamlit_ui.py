@@ -584,8 +584,6 @@ def test_language_theme_and_journey_has_no_manual_progression_control():
     assert app.session_state["response_detail"] == "long"
     assert app.session_state["learning_journey"]["response_detail"] == "long"
     assert app.session_state["setting_coaching_style"] == "Strict"
-    from backend.student_store import StudentStore
-
     created = StudentStore().get_thread(app.session_state["thread_id"])
     assert created is not None
     assert created["metadata"]["response_detail"] == "long"

@@ -41,6 +41,11 @@ services:
       # USER_UPLOADS_BUCKET: set in host .env
       # COURSE_MATERIALS_BUCKET: set in host .env (cde2300-course-content-s3)
       # AGENTCORE_RUNTIME_ARN: set in host .env
+      # AGENTCORE_MODEL_PROVIDER=bedrock
+      # AGENTCORE_MODEL_ID=global.anthropic.claude-sonnet-4-6
+      # AGENTCORE_MODEL_REGION=us-west-2
+      # GUARDRAIL_ID / GUARDRAIL_VERSION: required for student-facing AgentCore
+      # Those same keys must be injected on the published AgentCore runtime.
       # KNOWLEDGE_BASE_ID: required in host .env when COURSE_MATERIAL_SYNC_ENABLED=true
       # MODEL_PROVIDER=agentcore once the harness emits coach_turn JSON
       # APP_IMAGE: set on the host to the ECR image URI + immutable tag

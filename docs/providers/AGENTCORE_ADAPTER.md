@@ -86,9 +86,33 @@ AGENTCORE_RUNTIME_ARN=arn:aws:bedrock-agentcore:us-west-2:<account>:runtime/<id>
 AGENTCORE_QUALIFIER=DEFAULT
 AGENTCORE_TIMEOUT_SECONDS=110
 AGENTCORE_MAX_RETRIES=0
-KNOWLEDGE_BASE_ID=JUQNP8AZAZ
+AGENTCORE_MODEL_PROVIDER=bedrock
+AGENTCORE_MODEL_ID=global.anthropic.claude-sonnet-4-6
+AGENTCORE_MODEL_REGION=us-west-2
+GUARDRAIL_ID=<configured guardrail>
+GUARDRAIL_VERSION=<configured version>
+KNOWLEDGE_BASE_ID=<configured KB>
 MOCK_OPENAI=false
 ```
+
+The published AgentCore runtime reads `AGENTCORE_MODEL_*` and `GUARDRAIL_*`
+from **its own** process environment. FastAPI production validation requires
+the same keys so the host `.env` cannot look ready while the runtime would
+still construct a bare `BedrockModel()`. Missing model or guardrail config
+fails closed. There is no Claude↔Luna fallback.
+
+First paid specialist evaluation uses Sonnet 4.6 (`BedrockModel` with
+`guardrail_latest_message=True`). Optional Luna uses
+`AGENTCORE_MODEL_PROVIDER=bedrock_mantle_responses` and
+`OpenAIResponsesModel(stateful=False, bedrock_mantle_config={"region": ...})`
+plus Bedrock `ApplyGuardrail` on untrusted input and model output. Do not
+pass `openai.gpt-5.6-luna` into `BedrockModel`.
+
+Pinned runtime packages (document, then confirm on the published runtime):
+
+- `strands-agents==1.52.0`
+- `bedrock-agentcore==1.21.0`
+- `pydantic==2.13.4`
 
 Production accepts OpenAI **xor** Bedrock **xor** AgentCore (not mock). Direct
 `BedrockCoachProvider` Converse remains a fallback/test path.

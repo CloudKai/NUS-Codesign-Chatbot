@@ -1,6 +1,15 @@
-# AgentCore DEFAULT coaching runtime. Pin to the Strands release used by the
-# published runtime; structured_output_model lives on Agent.invoke_async.
-# Tests in this companion repo do not install or import this file.
-strands-agents>=1.4.0,<2
-pydantic>=2.0,<3
-bedrock-agentcore>=0.1.0
+# AgentCore DEFAULT coaching runtime.
+# Pins are the current PyPI versions that document BedrockModel(model_id,
+# region_name, guardrail_*, guardrail_latest_message) and
+# OpenAIResponsesModel(stateful=False, bedrock_mantle_config={"region": ...}).
+# Companion pytest does not install these packages. Confirm the same versions
+# on the published runtime before promoting DEFAULT.
+#
+# pydantic==2.13.4 is the version installed in this companion venv.
+# bedrock-agentcore 1.21.0 requires pydantic<2.41.3,>=2.0.0.
+strands-agents==1.52.0
+bedrock-agentcore==1.21.0
+pydantic==2.13.4
+# Optional Luna / Mantle Responses path (do not install for the Sonnet-first
+# publish unless AGENTCORE_MODEL_PROVIDER=bedrock_mantle_responses):
+#   strands-agents[openai]==1.52.0

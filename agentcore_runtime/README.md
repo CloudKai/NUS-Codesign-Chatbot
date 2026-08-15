@@ -18,6 +18,14 @@ One runtime hosts Q&A, Coaching, and Formative Review. Do not treat
    `result.structured_output`. Text-block JSON is a fallback.
 6. Never `json.loads(str(result))`.
 7. Failures return `{ok: false, error: true, category: ...}`.
+8. Explicit `load_runtime_model()`: `AGENTCORE_MODEL_PROVIDER`,
+   `AGENTCORE_MODEL_ID`, `AGENTCORE_MODEL_REGION`, `GUARDRAIL_ID`,
+   `GUARDRAIL_VERSION`. No bare `BedrockModel()`. No Claude↔Luna fallback.
+
+First paid evaluation: `bedrock` + `global.anthropic.claude-sonnet-4-6` +
+`guardrail_latest_message=True`. Optional Luna:
+`bedrock_mantle_responses` + `openai.gpt-5.6-luna` + `stateful=False` +
+ApplyGuardrail. Pin versions in `requirements.txt`.
 
 ## Layout
 

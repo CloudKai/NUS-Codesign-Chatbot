@@ -193,6 +193,46 @@ def test_k_guardrail_intervened_is_safety_blocked() -> None:
     assert raised.value.category == "safety_blocked"
 
 
+def test_timeout_stop_reason_is_timeout() -> None:
+    with pytest.raises(CoachTurnExtractionError) as raised:
+        coach_turn_from_agent_result(
+            _result(
+                stop_reason="timeout",
+                structured_output=CoachTurnOutput.model_validate(_coach_turn()),
+            )
+        )
+    assert raised.value.category == "timeout"
+
+
+def test_object_stage_assessment_is_coerced_to_text() -> None:
+    payload = _coach_turn(
+        assessment=_assessment(
+            stage_assessment={"text": "The street is named but users are not."}
+        )
+    )
+    parsed = coach_turn_from_agent_result(_result(structured_output=payload))
+    assert "users are not" in parsed.assessment.stage_assessment
+
+
+def test_thirty_kb_history_stays_in_prior_messages() -> None:
+    from agentcore_runtime.structured_coach import conversation_for_invoke
+
+    blob = "decision-raised-crossing " * 1400
+    assert 30_000 <= len(blob) <= 40_000
+    prior, current = conversation_for_invoke(
+        {
+            "messages": [
+                {"role": "user", "content": [{"text": blob}]},
+                {"role": "assistant", "content": [{"text": "Who is affected?"}]},
+                {"role": "user", "content": [{"text": _STREET}]},
+            ]
+        }
+    )
+    assert current == _STREET
+    assert blob in prior[0]["content"][0]["text"]
+    assert _STREET not in prior[0]["content"][0]["text"]
+
+
 def test_l_uppercase_stay_is_coerced() -> None:
     payload = _coach_turn(assessment=_assessment(recommendation="STAY"))
     parsed = coach_turn_from_agent_result(_result(structured_output=payload))

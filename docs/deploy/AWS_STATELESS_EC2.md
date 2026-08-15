@@ -435,6 +435,11 @@ Required production `.env` keys (host-only):
 - `MODEL_PROVIDER=agentcore`
 - `AGENTCORE_RUNTIME_ARN=arn:aws:bedrock-agentcore:us-west-2:355604674280:runtime/NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`
 - `AGENTCORE_QUALIFIER=DEFAULT`
+- `AGENTCORE_MODEL_PROVIDER=bedrock`
+- `AGENTCORE_MODEL_ID=global.anthropic.claude-sonnet-4-6`
+- `AGENTCORE_MODEL_REGION=us-west-2`
+- `GUARDRAIL_ID=<configured guardrail>`
+- `GUARDRAIL_VERSION=<configured version>`
 - `KNOWLEDGE_BASE_ID=<configured KB id>` (required when shared course sync is on)
 - `KNOWLEDGE_BASE_REGION=us-west-2`
 - Cognito + public URL values already set in `compose.prod.yaml`

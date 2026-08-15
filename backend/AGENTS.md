@@ -49,7 +49,7 @@ FastAPI (`api.py` façade → `http/app.py`)
 | `chat_service.py` | Legacy/direct chat engine retained for compatibility tests; not the current Streamlit fallback |
 | `providers.py` | OpenAI, mock selection, Bedrock and AgentCore factory wiring |
 | `bedrock_provider.py` | Amazon Bedrock Converse coach adapter (injected client; no AWS in tests) |
-| `agentcore_provider.py` | AgentCore Runtime coach adapter (injected client; no AWS in tests). Live parsing lives in `agentcore_runtime/`. |
+| `agentcore_provider.py` | AgentCore Runtime coach adapter (injected client; no AWS in tests). Live parsing lives in `agentcore_runtime/`. Runtime model/guardrail env is fail-closed in `agentcore_runtime/model.py`. |
 | `specialists/` | Server-owned `qa` / `coaching` / `review` routing. The browser cannot pick a privileged specialist. |
 | `prompts/` | Application composer for mock/OpenAI/Bedrock. Canonical AgentCore pedagogy is `agentcore_runtime/prompts/`. |
 | `agentcore_harness_provider.py` | Isolated InvokeHarness Luna eval adapter (not production DEFAULT) |

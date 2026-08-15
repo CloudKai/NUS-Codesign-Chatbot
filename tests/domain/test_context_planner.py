@@ -8,7 +8,6 @@ from backend.context_planner import (
     ContextBudget,
     ContextBudgetError,
     ConversationMemory,
-    ExtractiveHistoryCompressor,
     HistoryContextPlanner,
     estimate_tokens,
     memory_from_metadata,
@@ -76,7 +75,7 @@ def test_ten_fifty_and_hundred_message_notebooks_send_full_history_when_within_b
         assert len(plan.messages) == count
         assert plan.estimated_input_tokens <= plan.max_input_tokens
         texts = [item["content"][0]["text"] for item in plan.messages]
-        assert f"turn-0" in texts
+        assert "turn-0" in texts
         assert f"turn-{count - 1}" in texts
         assert "CURRENT_STUDENT_TURN unique" not in texts
 

@@ -19,6 +19,7 @@ ALLOWED_SPECIALISTS = frozenset(
 
 _QA_PATTERNS = (
     re.compile(r"\bwhat is week\s*\d+\b", re.IGNORECASE),
+    re.compile(r"\bwhat (is|are) (the )?week\s*\d+\b", re.IGNORECASE),
     re.compile(r"\bwhat (is|are) week\s*\d+\s+about\b", re.IGNORECASE),
     re.compile(
         r"\bwhat does (the )?(week|reading|lecture|assignment|brief|syllabus|jtbd)\b",

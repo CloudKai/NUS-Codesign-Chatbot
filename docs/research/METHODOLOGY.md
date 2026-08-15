@@ -144,3 +144,24 @@ The original Replit implementation, the supplied system-architecture deck, and
 the supplied NUS V&V slides informed phase wording, Socratic scaffolding, and
 verification/validation questions. They are design artifacts, not evidence
 that the resulting automated measures are valid.
+
+## Model freeze before data collection
+
+Engineering and pilot testing may compare models. The main student study
+should use **one fixed** foundation model unless model type is an explicit
+factor in the design.
+
+Before research data collection begins, freeze and record:
+
+- model provider (`bedrock` or `bedrock_mantle_responses`)
+- exact model ID
+- AgentCore runtime version / qualifier
+- Strands version
+- prompt / stage-prompt version
+- guardrail ID and version
+- retrieval settings (KB id, metadata filter)
+
+Recommended sequence: establish a Sonnet 4.6 quality baseline, then run the
+same cases on Luna (`openai.gpt-5.6-luna`, `stateful=False`) on an isolated
+qualifier. Choose Luna only if pedagogical quality is close enough, and freeze
+**before** the cohort starts. Do not mix models inside one participant cohort.

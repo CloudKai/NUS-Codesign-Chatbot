@@ -12,6 +12,11 @@ from backend.specialists.routing import (
 
 def test_week_one_course_question_routes_to_qa() -> None:
     assert select_specialist("What is Week 1 about?") == SPECIALIST_QA
+    assert select_specialist("What are the Week 1 contents talking about?") == SPECIALIST_QA
+
+
+def test_jtbd_lecture_routes_to_qa() -> None:
+    assert select_specialist("What does the JTBD lecture say?") == SPECIALIST_QA
 
 
 def test_reading_and_deadline_questions_route_to_qa() -> None:

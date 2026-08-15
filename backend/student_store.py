@@ -33,7 +33,7 @@ from .persistence.store.contracts import (
     COACH_IDEMPOTENCY_MARKER as _COACH_IDEMPOTENCY_MARKER,
     CoachIdempotencyConflictError,
     CoachingStyleConflictError,
-    CoachRequestInProgressError,
+    CoachRequestInProgressError,  # noqa: F401 - re-exported by HTTP and coaching
     CoachRequestLeaseLostError,
     CoachRequestReservation,
     ConversationRevisionConflictError,
@@ -46,7 +46,6 @@ from .persistence.store.contracts import (
 )
 from .persistence.store.sqlite_schema import (
     NOTEBOOK_CHILD_DELETE_PLAN,
-    NOTEBOOK_CHILD_TABLES,
     SQLITE_SCHEMA as SCHEMA,
 )
 from .persistence.store.operations import StoreOperations, bind_store_operations

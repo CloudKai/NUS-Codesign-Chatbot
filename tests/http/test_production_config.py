@@ -38,6 +38,11 @@ def _apply_valid_production_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "agentcore_runtime_id", "")
     monkeypatch.setattr(settings, "agentcore_timeout_seconds", 110.0)
     monkeypatch.setattr(settings, "agentcore_max_retries", 0)
+    monkeypatch.setattr(settings, "agentcore_model_provider", "")
+    monkeypatch.setattr(settings, "agentcore_model_id", "")
+    monkeypatch.setattr(settings, "agentcore_model_region", "")
+    monkeypatch.setattr(settings, "guardrail_id", "")
+    monkeypatch.setattr(settings, "guardrail_version", "")
     monkeypatch.setattr(settings, "course_materials_bucket", "")
     monkeypatch.setattr(settings, "course_materials_prefix", "course/")
     monkeypatch.setattr(settings, "use_local_api", True)
@@ -91,7 +96,51 @@ def test_valid_agentcore_production_configuration_passes_without_openai_key(monk
         "agentcore_runtime_arn",
         "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/test",
     )
+    monkeypatch.setattr(settings, "agentcore_model_provider", "bedrock")
+    monkeypatch.setattr(
+        settings, "agentcore_model_id", "global.anthropic.claude-sonnet-4-6"
+    )
+    monkeypatch.setattr(settings, "agentcore_model_region", "us-west-2")
+    monkeypatch.setattr(settings, "guardrail_id", "test-guardrail")
+    monkeypatch.setattr(settings, "guardrail_version", "1")
     validate_production_configuration()
+
+
+def test_valid_agentcore_mantle_luna_configuration_passes(monkeypatch):
+    _apply_valid_production_baseline(monkeypatch)
+    monkeypatch.setattr(settings, "model_provider", "agentcore")
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    monkeypatch.setattr(
+        settings,
+        "agentcore_runtime_arn",
+        "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/test",
+    )
+    monkeypatch.setattr(settings, "agentcore_model_provider", "bedrock_mantle_responses")
+    monkeypatch.setattr(settings, "agentcore_model_id", "openai.gpt-5.6-luna")
+    monkeypatch.setattr(settings, "agentcore_model_region", "us-west-2")
+    monkeypatch.setattr(settings, "guardrail_id", "test-guardrail")
+    monkeypatch.setattr(settings, "guardrail_version", "1")
+    validate_production_configuration()
+
+
+def test_production_rejects_mantle_with_claude_model_id(monkeypatch):
+    _apply_valid_production_baseline(monkeypatch)
+    monkeypatch.setattr(settings, "model_provider", "agentcore")
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    monkeypatch.setattr(
+        settings,
+        "agentcore_runtime_arn",
+        "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/test",
+    )
+    monkeypatch.setattr(settings, "agentcore_model_provider", "bedrock_mantle_responses")
+    monkeypatch.setattr(
+        settings, "agentcore_model_id", "global.anthropic.claude-sonnet-4-6"
+    )
+    monkeypatch.setattr(settings, "agentcore_model_region", "us-west-2")
+    monkeypatch.setattr(settings, "guardrail_id", "test-guardrail")
+    monkeypatch.setattr(settings, "guardrail_version", "1")
+    with pytest.raises(ValueError, match="openai"):
+        validate_production_configuration()
 
 
 def test_valid_production_configuration_allows_shared_course_sync(monkeypatch):
@@ -120,6 +169,13 @@ def test_production_shared_course_sync_requires_knowledge_base_id(monkeypatch):
         ("agentcore_timeout_seconds", 0, r"AGENTCORE_TIMEOUT_SECONDS"),
         ("agentcore_timeout_seconds", 121, r"AGENTCORE_TIMEOUT_SECONDS"),
         ("agentcore_max_retries", 3, r"AGENTCORE_MAX_RETRIES"),
+        ("agentcore_model_provider", "", r"AGENTCORE_MODEL_PROVIDER"),
+        ("agentcore_model_provider", "claude", r"AGENTCORE_MODEL_PROVIDER"),
+        ("agentcore_model_id", "", r"AGENTCORE_MODEL_ID"),
+        ("agentcore_model_region", "", r"AGENTCORE_MODEL_REGION"),
+        ("guardrail_id", "", r"GUARDRAIL_ID"),
+        ("guardrail_version", "", r"GUARDRAIL_ID and GUARDRAIL_VERSION"),
+        ("agentcore_model_id", "openai.gpt-5.6-luna", r"Luna cannot use BedrockModel"),
     ],
 )
 def test_production_rejects_incomplete_agentcore_configuration(
@@ -133,6 +189,13 @@ def test_production_rejects_incomplete_agentcore_configuration(
         "agentcore_runtime_arn",
         "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/test",
     )
+    monkeypatch.setattr(settings, "agentcore_model_provider", "bedrock")
+    monkeypatch.setattr(
+        settings, "agentcore_model_id", "global.anthropic.claude-sonnet-4-6"
+    )
+    monkeypatch.setattr(settings, "agentcore_model_region", "us-west-2")
+    monkeypatch.setattr(settings, "guardrail_id", "test-guardrail")
+    monkeypatch.setattr(settings, "guardrail_version", "1")
     monkeypatch.setattr(settings, field, value)
     with pytest.raises(ValueError, match=match):
         validate_production_configuration()

@@ -1,6 +1,65 @@
 # Implementation status
 
-## Current phase — AgentCore specialist brain (POC pedagogy, production shell)
+## Current phase — Explicit Sonnet 4.6 runtime model and guardrail fail-closed
+
+**Completed locally on 2026-08-16.** Integrate-Bedrock HEAD at start of this
+pass: `af79a693347a33ebbd9c92c5a33c297df70ce05b`. The runtime no longer
+constructs a bare `BedrockModel()`. Production AgentCore requires explicit
+`AGENTCORE_MODEL_PROVIDER` / `AGENTCORE_MODEL_ID` / `AGENTCORE_MODEL_REGION`
+plus `GUARDRAIL_ID` / `GUARDRAIL_VERSION`. First paid evaluation remains
+Sonnet 4.6. Luna is optional, stateless, and uses ApplyGuardrail. No live
+AWS generation or runtime publish in this pass.
+
+### Behavior delivered
+
+1. `agentcore_runtime/model.py` fail-closed loader. Bedrock path uses
+   `guardrail_latest_message=True`. Luna cannot be passed to `BedrockModel`.
+2. Mantle/Luna path: `OpenAIResponsesModel(stateful=False,
+   bedrock_mantle_config={"region": ...})` plus ApplyGuardrail on input and
+   output. Missing `strands-agents[openai]` does not fall back to Claude.
+3. FastAPI production validation requires the same model and guardrail keys
+   when `MODEL_PROVIDER=agentcore`.
+4. Runtime pins: `strands-agents==1.52.0`, `bedrock-agentcore==1.21.0`,
+   `pydantic==2.13.4` (companion-tested Pydantic; Strands/AgentCore pins are
+   current documented PyPI versions, not yet installed in the companion venv).
+
+### Main files changed
+
+- `agentcore_runtime/model.py`, `guardrails.py`, `main.py`, `requirements.txt`
+- `backend/settings.py`, `backend/specialists/routing.py`
+- Tests: `tests/domain/test_runtime_model.py` and production-config updates
+- Docs: AgentCore adapter, security boundaries, methodology, implementation status
+
+### Validation evidence
+
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`,
+  and `agentcore_runtime`: **passed**.
+- Full deterministic suite: **735 passed, 0 failed, 0 skipped** in 32.10s.
+  66 Starlette/httpx deprecation warnings.
+- `ruff check .`: **passed** after removing unused imports (including
+  pre-existing F401/F541/F811/E402 that would have failed CI).
+- `git diff --check`: **passed**.
+- `docker compose config --quiet`: **passed**.
+- `APP_IMAGE=co-design:test docker compose -f compose.prod.yaml config --quiet`:
+  **passed**.
+- Live KB diagnostic: refused without `--i-approve-live-bedrock` (no Retrieve).
+- No live AgentCore, Bedrock generation, or OpenAI calls. Runtime not
+  republished. `AGENTCORE_RUNTIME_ARN` unchanged.
+
+### Compatibility, migration, and rollback
+
+- No schema change. Five persisted stages unchanged.
+- Live DEFAULT still needs this package published onto
+  `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` with runtime env
+  injected. Do not promote DEFAULT until READY and a capped Sonnet smoke.
+
+### Known risks and next exact action
+
+- Confirm pins on the published runtime. Run the opt-in KB diagnostic, then a
+  new READY qualifier, then a capped Sonnet 4.6 specialist test.
+- Do not commit, push, or deploy from this phase unless asked.
+
+## Previous phase — AgentCore specialist brain (POC pedagogy, production shell)
 
 **Completed locally on 2026-08-16.** Integrate-Bedrock remains the production
 application shell. Canonical Q&A, Coaching, and Formative Review pedagogy now

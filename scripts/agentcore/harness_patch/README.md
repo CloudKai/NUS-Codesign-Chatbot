@@ -24,8 +24,13 @@ message can still be present in the invoke payload.
 
 Copy the entire `agentcore_runtime/` package:
 
-- `main.py`, `models.py`, `structured_coach.py`
+- `main.py`, `models.py`, `model.py`, `guardrails.py`, `structured_coach.py`
 - `specialists/`, `prompts/`, `contracts/`
+- `requirements.txt`
+
+Inject runtime env: `AGENTCORE_MODEL_PROVIDER`, `AGENTCORE_MODEL_ID`,
+`AGENTCORE_MODEL_REGION`, `GUARDRAIL_ID`, `GUARDRAIL_VERSION`. Do not
+construct a bare `BedrockModel()`.
 
 Keep `tools=[]` on every specialist. Pass the matching
 `structured_output_model` into `invoke_async`. Keep JSON return and SSE

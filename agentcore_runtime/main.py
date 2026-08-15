@@ -8,7 +8,8 @@ student-facing runtime.
 One runtime hosts Q&A, Coaching, and Formative Review. The caller sends
 ``phase``. Specialists use ``tools=[]`` plus Strands ``structured_output_model``.
 The harness never parses ``str(AgentResult)`` as JSON. DSQL history is passed
-as Strands ``messages``; AgentCore Memory is not the transcript.
+as Strands ``messages``; AgentCore Memory is not the transcript. The model is
+loaded by ``load_runtime_model()`` from explicit environment configuration.
 """
 
 from __future__ import annotations
@@ -19,6 +20,12 @@ from collections.abc import Mapping
 from typing import Any
 
 try:
+    from guardrails import enforce_mantle_guardrail
+    from model import (
+        RuntimeModelError,
+        load_runtime_model,
+        runtime_model_config_from_environ,
+    )
     from models import CoachTurnOutput, QATurnOutput, ReviewTurnOutput
     from specialists.routing import PHASE_QA, PHASE_REVIEW, payload_phase
     from structured_coach import (
@@ -35,6 +42,12 @@ try:
         structured_wire_payload,
     )
 except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
+    from agentcore_runtime.guardrails import enforce_mantle_guardrail
+    from agentcore_runtime.model import (
+        RuntimeModelError,
+        load_runtime_model,
+        runtime_model_config_from_environ,
+    )
     from agentcore_runtime.models import CoachTurnOutput, QATurnOutput, ReviewTurnOutput
     from agentcore_runtime.specialists.routing import (
         PHASE_QA,
@@ -65,13 +78,6 @@ except ImportError:  # pragma: no cover - companion tests never import this modu
 app = BedrockAgentCoreApp() if BedrockAgentCoreApp is not None else None
 
 _STRUCTURED_CONTRACTS = frozenset({"coach_turn", "qa_turn", "review_turn"})
-
-
-def _load_model() -> Any:
-    """Return the runtime model configured for this AgentCore environment."""
-    from strands.models import BedrockModel
-
-    return BedrockModel()
 
 
 def _output_model_for(phase: str, output_contract: str) -> type[Any]:
@@ -128,8 +134,38 @@ async def specialist_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]
             elapsed_ms=elapsed_ms_since(started),
         )
         return harness_error_payload("structured_output_failure")
+    try:
+        model_config = runtime_model_config_from_environ()
+        enforce_mantle_guardrail(str(prompt), config=model_config, source="INPUT")
+        model = load_runtime_model(model_config)
+    except CoachTurnExtractionError as error:
+        log_coach_turn_outcome(
+            ok=False,
+            category=error.category,
+            stage=stage,
+            elapsed_ms=elapsed_ms_since(started),
+        )
+        return harness_error_payload(error.category)
+    except RuntimeModelError:
+        log_coach_turn_outcome(
+            ok=False,
+            category="unavailable",
+            stage=stage,
+            elapsed_ms=elapsed_ms_since(started),
+        )
+        logger.exception("runtime_model_config_invalid")
+        return harness_error_payload("unavailable")
+    except Exception:
+        log_coach_turn_outcome(
+            ok=False,
+            category="unavailable",
+            stage=stage,
+            elapsed_ms=elapsed_ms_since(started),
+        )
+        logger.exception("runtime_model_load_failed")
+        return harness_error_payload("unavailable")
     agent_kwargs: dict[str, Any] = {
-        "model": _load_model(),
+        "model": model,
         "system_prompt": system_prompt,
         "tools": [],
         "callback_handler": None,
@@ -144,6 +180,8 @@ async def specialist_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]
             structured_output_model=_output_model_for(phase, contract),
         )
         output = _parse_result(phase, contract, result)
+        output_text = str(getattr(output, "response_text", "") or "")
+        enforce_mantle_guardrail(output_text, config=model_config, source="OUTPUT")
         log_coach_turn_outcome(
             ok=True,
             stage=stage,

@@ -71,6 +71,7 @@ modules.
 | `domain/test_pedagogical_stage_fixtures.py` | Per-stage mock pedagogical fixtures |
 | `domain/test_thinking_path_journey.py` | Complete five-stage mock journey |
 | `domain/test_security_invariants.py` | Memory-not-transcript, no tools, adapter cannot persist stage |
+| `domain/test_runtime_model.py` | Explicit Sonnet/Luna factory, no BedrockModel(), ApplyGuardrail for Mantle |
 | `domain/test_agentcore_harness_provider.py` | Isolated Luna InvokeHarness eval adapter; trusted override; no AWS |
 | `domain/test_context_planner.py` | Full-history-first planner, compression, revision invalidation |
 | `domain/test_bedrock_retrieve.py` | Bedrock Knowledge Base Retrieve adapter: selected `[S#]` mapping, foreign-key drop, composite factory without local course fallback |

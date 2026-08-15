@@ -94,6 +94,7 @@ def test_g_runtime_specialists_have_no_tools() -> None:
     main = Path("agentcore_runtime/main.py").read_text(encoding="utf-8")
     assert "tools=[]" in main
     assert "RetrieveAndGenerate" not in main
+    assert "BedrockModel()" not in main
     coaching = Path("agentcore_runtime/specialists/coaching.py").read_text(encoding="utf-8")
     assert "mcp" not in coaching.lower()
 
