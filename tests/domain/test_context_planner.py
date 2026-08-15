@@ -64,9 +64,9 @@ def _overflow_prompt() -> str:
     return "history-padding " * 20
 
 
-def test_ten_and_fifty_message_notebooks_send_full_history_when_within_budget():
+def test_ten_fifty_and_hundred_message_notebooks_send_full_history_when_within_budget():
     planner = HistoryContextPlanner()
-    for count in (10, 50):
+    for count in (10, 50, 100):
         request = _request(history=_history(count))
         plan = planner.plan(request, prompt_text="brief")
         assert plan.full_history_used is True

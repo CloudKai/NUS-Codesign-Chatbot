@@ -1,6 +1,220 @@
 # Implementation status
 
-## Current phase — Live AgentCore DEFAULT coaching (harness patch + smoke)
+## Current phase — AgentCore specialist brain (POC pedagogy, production shell)
+
+**Completed locally on 2026-08-16.** Integrate-Bedrock remains the production
+application shell. Canonical Q&A, Coaching, and Formative Review pedagogy now
+lives in `agentcore_runtime/`. FastAPI authorizes sources, retrieves evidence,
+sends runtime rules, validates structured output, and persists DSQL state.
+AgentCore Memory is not the transcript. Live AWS invokes were not made.
+
+### Behavior delivered
+
+1. One AgentCore runtime, three specialists, deterministic `phase` selection.
+   Unknown phases fall closed to coaching. Scoring was renamed Review and is
+   not a grade. Ambiguous chat defaults to coaching.
+2. Canonical prompts in `agentcore_runtime/prompts/` merge POC Socratic /
+   Assumption Check / AT-EAI stage focus with Integrate-Bedrock V&V, CLEAR,
+   Facione, HCTSR-aligned Reflection, and research independence.
+3. FastAPI AgentCore payload sends `runtime_context` plus runtime instructions
+   only. Stage curriculum is no longer duplicated on the trusted channel.
+4. Strands structured output for `coach_turn`, `qa_turn`, and `review_turn`.
+   DSQL history is passed as Strands `messages`. `tools=[]`.
+5. Q&A uses pre-retrieved `[S#]` evidence. No KB/S3 tools. Review is on-demand
+   from explicit student intent, not every turn.
+
+### Main files changed
+
+- `agentcore_runtime/` specialists, prompts, contracts, `main.py`
+- `backend/specialists/routing.py`, `backend/agentcore_provider.py`,
+  `backend/coaching/execution.py`, `backend/mock_provider.py`,
+  `backend/domain.py`
+- Tests listed in `tests/AGENTS.md`
+- Docs: prompt, RAG, security, AgentCore adapter, implementation status
+
+### Validation evidence
+
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`,
+  and `agentcore_runtime`: **passed**.
+- Full deterministic suite: **710 passed, 0 failed, 0 skipped** in ~30s.
+  Existing Starlette/httpx deprecation warnings only.
+- Ruff on files from this phase: **passed**.
+- `git diff --check`: **passed**.
+- `docker compose config --quiet`: **passed**.
+- No live AgentCore, Bedrock generation, or OpenAI calls. Runtime not
+  republished. `AGENTCORE_RUNTIME_ARN` unchanged.
+
+### Compatibility, migration, and rollback
+
+- No schema change. Five persisted stages unchanged. `ethics_critical` remains
+  an AgentCore topic key only.
+- Live DEFAULT still needs this package published onto
+  `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. Copy the whole
+  `agentcore_runtime/` tree. Rollback is the previous READY qualifier.
+- `backend/prompts/` remains for mock/OpenAI/Bedrock Converse.
+
+### Known risks and next exact action
+
+- Publish the runtime after approval, then one paid smoke. Do not run live
+  specialist evaluation until that publish.
+- Do not commit, push, or deploy from this phase unless asked.
+
+## Previous phase — AgentCore structured coach_turn output (no str(AgentResult))
+
+**Completed locally on 2026-08-16.** Live coaching could fail after
+`await agent.invoke_async(prompt)` because the deployed harness did
+`json.loads(str(result))`. `str(AgentResult)` is empty when
+`structured_output` is absent and the final message has no text blocks, which
+raises `JSONDecodeError` at char 0. The student contribution was not empty.
+This is independent of the earlier `guardrail_intervened` / `PROMPT_ATTACK`
+path; those trusted/untrusted and `safety_blocked` fixes stay.
+
+Architecture is unchanged: DSQL transcript, full-history planner, RAG
+authorization, AgentCore reasoning-only (`tools=[]`), five Thinking Path
+stages, research independence, and atomic persist.
+
+### Behavior delivered
+
+1. Canonical production harness lives in `agentcore_runtime/` (`models.py`,
+   `structured_coach.py`, `main.py`). `scripts/agentcore/harness_patch/` is a
+   re-export plus deploy notes.
+2. Native Strands path: `invoke_async(..., structured_output_model=CoachTurnOutput)`
+   then `result.structured_output`. Text-block JSON is a compatibility fallback.
+   `str(result)` is never parsed.
+3. Failures return `{ok: false, error: true, category: ...}`. The companion
+   adapter maps that to `structured_output_failure` or `safety_blocked`.
+   HTTP stays 503 with a category; students never see JSONDecodeError.
+4. Idempotency still releases the lease on provider failure. Empty assistant
+   bubbles are not opened until a validated reply exists; empty stored
+   assistant rows are not rendered.
+5. Stage advancement still requires a validated assessment. Short student
+   text such as "A quiet residential street" is not treated as empty and is
+   not hardcoded to ADVANCE.
+
+### Main files changed
+
+- `agentcore_runtime/` (new canonical harness)
+- `backend/agentcore_provider.py`, `backend/providers.py`
+- `ui/panels/chat.py`
+- `scripts/agentcore/harness_patch/`, `scripts/build.sh`
+- Tests: `tests/domain/test_agentcore_runtime.py`,
+  `tests/domain/test_agentcore_provider.py`,
+  `tests/domain/test_agentcore_harness_provider.py`,
+  `tests/http/test_api.py`, `tests/http/test_api_client.py`,
+  `tests/ui/test_streamlit_ui.py`
+- Docs: `docs/providers/AGENTCORE_ADAPTER.md`, `docs/CODEBASE_STRUCTURE.md`,
+  `tests/AGENTS.md`, `scripts/AGENTS.md`, `backend/AGENTS.md`
+
+### Validation evidence
+
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`,
+  and `agentcore_runtime`: **passed**.
+- Full deterministic suite: **648 passed, 0 failed, 0 skipped** in ~27s.
+  Existing Starlette/httpx deprecation warnings only (66).
+- Ruff on files from this fix: **passed** except one pre-existing F811 in
+  `tests/ui/test_streamlit_ui.py` (duplicate `StudentStore` import in an
+  unrelated test).
+- `git diff --check`: **passed**.
+- No live AgentCore invoke. Runtime not republished. `AGENTCORE_RUNTIME_ARN`
+  unchanged.
+
+### Compatibility, migration, and rollback
+
+- No schema change. Companion still accepts a raw coach_turn JSON body.
+- Live DEFAULT still runs the old `str(result)` harness until operators copy
+  `agentcore_runtime/` onto
+  `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` and publish a READY
+  version. Do not point DEFAULT at an untested version.
+- Rollback is reverting this working tree; live runtime rollback is the
+  previous READY qualifier.
+
+### Known risks and next exact action
+
+- Production blocker: publish the new harness version, then one approved
+  smoke: `scripts/agentcore_smoke.py --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`,
+  then the "A quiet residential street" regression.
+- Do not change `AGENTCORE_RUNTIME_ARN`. Do not create another student runtime.
+- Do not commit, push, or deploy from this phase unless asked.
+
+## Previous phase — Virtual course sources must not become fake local evidence
+
+**Completed locally on 2026-08-16.** Shared Week 1 catalog rows have empty
+`extractedText` on purpose. When `KNOWLEDGE_BASE_ID` was missing, mock, or
+`MOCK_OPENAI=true`, `configured_context_retriever()` returned
+`LocalChunkRetriever`, which ranked the synthesized placeholder
+`[This source is stored but has no analyzable text.]` because the Week 1
+title matched the student question. That fake chunk reached AgentCore.
+
+Architecture is unchanged: one shared S3 `course/` copy, virtual catalog
+sources, Bedrock KB Retrieve only, student uploads local, FastAPI source
+scope, DSQL transcript, AgentCore reasoning only.
+
+### Behavior delivered
+
+1. Virtual/shared `course/` sources keep `text=""` for retrieval. The
+   unanalyzable placeholder is display-only for real empty student files.
+2. `configured_context_retriever()` always returns
+   `CompositeContextRetriever`. Missing KB / mock / `MOCK_OPENAI` injects
+   `knowledge_base=None` instead of dumping course sources onto local chunks.
+3. Missing or empty KB results become an application-owned evidence-gap note.
+   Execution preserves that note after rebuilding context from validated
+   chunks. The composer tells the model not to claim the PDF has no readable
+   text and not to invent a summary.
+4. Production with `COURSE_MATERIAL_SYNC_ENABLED=true` requires
+   `KNOWLEDGE_BASE_ID`.
+5. Opt-in `scripts/diagnostics/test_course_retrieval.py` can call live
+   Retrieve only with `--i-approve-live-bedrock`. Pytest never runs it.
+   No generation call.
+
+### Main files changed
+
+- `backend/retrieval.py`, `backend/bedrock_retrieve.py`,
+  `backend/coaching/execution.py`, `backend/sources/context.py`,
+  `backend/prompts/composer.py`, `backend/settings.py`
+- Tests: `tests/domain/test_retrieval.py`,
+  `tests/domain/test_bedrock_retrieve.py`,
+  `tests/domain/test_source_library.py`,
+  `tests/domain/test_prompt_architecture.py`,
+  `tests/http/test_production_config.py`,
+  `tests/scripts/test_agentcore_course_cli.py`
+- Script: `scripts/diagnostics/test_course_retrieval.py`, `scripts/AGENTS.md`
+- Docs: `docs/RAG_ARCHITECTURE.md`, `docs/SECURITY_BOUNDARIES.md`,
+  `docs/deploy/AWS_STATELESS_EC2.md`, `docs/PROMPT_ARCHITECTURE.md`,
+  `docs/LOCAL_DEMO_IMPLEMENTATION.md`, `.env.example`, `README.md`,
+  `compose.prod.yaml`, `tests/AGENTS.md`
+
+### Validation evidence
+
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`:
+  **passed**.
+- Full deterministic suite: **618 passed, 0 failed, 0 skipped** in 27.86s.
+  Existing Starlette/httpx deprecation warnings only (66).
+- Ruff on files from this fix: **passed**. Repository-wide ruff still reports
+  8 pre-existing unused-import issues outside this change.
+- `git diff --check`: **passed**.
+- `docker compose config --quiet`: **passed**.
+- `docker compose -f compose.prod.yaml config --quiet`: **passed** with
+  `APP_IMAGE` set (blank `APP_IMAGE` is invalid by design).
+- No live Bedrock Retrieve call. No paid AgentCore/OpenAI generation call.
+
+### Compatibility, migration, and rollback
+
+- No schema change. Shared course files stay virtual; student uploads stay
+  notebook-scoped. Rollback is reverting this working tree.
+- Strict `course_material_id` metadata filter remains off until the live KB
+  is re-ingested with that attribute. Unfiltered retry plus exact-key
+  post-validation stays.
+
+### Known risks and next exact action
+
+- Live Knowledge Base Retrieve is not yet proven from this tree. Do not mark
+  strict metadata mode as working until re-ingestion is verified.
+- Next, only if explicitly approved:
+  `.venv/bin/python scripts/diagnostics/test_course_retrieval.py --query "what are the week 1 contents talking about?" --source "Week 1 Introduction to innovation v3.pdf" --i-approve-live-bedrock`
+- Do not run a paid AgentCore generation turn until Retrieve returns actual
+  Week 1 text. Do not commit, push, or deploy from this phase unless asked.
+
+## Previous completed phase — Live AgentCore DEFAULT coaching (harness patch + smoke)
 
 **Completed on 2026-08-15.** Integrate-Bedrock remains the product.
 Production still uses `MODEL_PROVIDER=agentcore` against existing runtime

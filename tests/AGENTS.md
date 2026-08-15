@@ -65,9 +65,15 @@ modules.
 | `http/test_runtime_auth.py` | Cognito owner isolation vs single-owner local API |
 | `http/test_workspace_api.py` | Notebook/source/preference CRUD API, path redaction, student transcript download |
 | `domain/test_agentcore_provider.py` | AgentCore Runtime adapter contract with an injected fake client; stateless session plus DSQL history as Converse messages |
+| `domain/test_agentcore_runtime.py` | Production harness `AgentResult` → structured output (no Strands/AWS) |
+| `domain/test_specialist_routing.py` | Deterministic qa / coaching / review routing |
+| `domain/test_agentcore_specialists.py` | Runtime prompt ownership and specialist contracts |
+| `domain/test_pedagogical_stage_fixtures.py` | Per-stage mock pedagogical fixtures |
+| `domain/test_thinking_path_journey.py` | Complete five-stage mock journey |
+| `domain/test_security_invariants.py` | Memory-not-transcript, no tools, adapter cannot persist stage |
 | `domain/test_agentcore_harness_provider.py` | Isolated Luna InvokeHarness eval adapter; trusted override; no AWS |
 | `domain/test_context_planner.py` | Full-history-first planner, compression, revision invalidation |
-| `domain/test_bedrock_retrieve.py` | Bedrock Knowledge Base Retrieve adapter: selected `[S#]` mapping, foreign-key drop, mock-local factory |
+| `domain/test_bedrock_retrieve.py` | Bedrock Knowledge Base Retrieve adapter: selected `[S#]` mapping, foreign-key drop, composite factory without local course fallback |
 | `domain/test_primary_path.py` | All five phases, stale/reject, restart, notebook isolation, schema |
 | `domain/test_research_coding_domain.py` | Structured provisional CLEAR/Facione/ethics coding |
 | `persistence/test_research_persistence.py` | Offset-only observations, revisions, human decisions, audit, workflow marker |
@@ -140,7 +146,7 @@ With compile check:
 
 ```sh
 PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \
-  .venv/bin/python -m compileall -q backend ui streamlit_app.py tests scripts
+  .venv/bin/python -m compileall -q backend ui streamlit_app.py tests scripts agentcore_runtime
 ```
 
 CI: [`.github/workflows/mock-ci.yml`](../.github/workflows/mock-ci.yml) runs

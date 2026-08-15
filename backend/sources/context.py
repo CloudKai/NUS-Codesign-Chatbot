@@ -5,6 +5,12 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+from backend.retrieval import (
+    UNANALYZABLE_SOURCE_PLACEHOLDER,
+    IMAGE_SOURCE_PLACEHOLDER,
+    is_virtual_shared_course_record,
+)
+
 
 def selected_source_context(
     sources: Iterable[dict[str, Any]],
@@ -27,10 +33,12 @@ def selected_source_context(
         label = f"S{index}"
         title = str(source.get("title") or "Untitled source")
         text = str(source.get("extractedText") or "").strip()
-        if not text and source.get("kind") == "image":
-            text = "[Image source. Inspect the accompanying image input.]"
-        elif not text:
-            text = "[This source is stored but has no analyzable text.]"
+        virtual_course = is_virtual_shared_course_record(source)
+        if not text and not virtual_course:
+            if source.get("kind") == "image":
+                text = IMAGE_SOURCE_PLACEHOLDER
+            else:
+                text = UNANALYZABLE_SOURCE_PLACEHOLDER
         header = f"--- [{label}] {title} ---"
         if source.get("sourceUrl"):
             header += f"\nURL: {source['sourceUrl']}"

@@ -45,7 +45,7 @@ jobs:
       - name: Compile sources
         env:
           PYTHONPYCACHEPREFIX: /tmp/co-design-pycache
-        run: python -m compileall -q backend ui streamlit_app.py tests scripts
+        run: python -m compileall -q backend ui streamlit_app.py tests scripts agentcore_runtime
 
       - name: Production configuration rejection tests
         env:

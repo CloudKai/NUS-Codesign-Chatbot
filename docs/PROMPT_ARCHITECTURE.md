@@ -1,10 +1,60 @@
 # Prompt architecture
 
-Framework-neutral retrieval and stage prompts for OpenAI/local testing of the
-educational workflow. Prompt markdown files are the development/application
-equivalent of future Bedrock Prompt Management. They contain **BEHAVIOUR**
-only. Course PDFs are never prompt files; query-ranked chunks supply
-**KNOWLEDGE** through `retrieved_course_context`.
+Canonical **pedagogy** for production AgentCore lives in
+`agentcore_runtime/prompts/`. FastAPI sends **application runtime rules**
+(stage id, Quick/Strict, language, allowed `[S#]`, source-grounding,
+research-coding contract). `backend/prompts/` remains the composer used by
+mock, OpenAI, and Bedrock Converse, and is the token-budget stand-in for
+AgentCore planning. Do not treat those two packages as competing curricula
+on the live AgentCore path.
+
+## Ownership
+
+```text
+Streamlit
+    ↓
+FastAPI (Cognito, notebook ownership, selected sources, RAG)
+    ↓
+DSQL / SQLite  (authoritative transcript + persisted stage)
+    ↓
+HistoryContextPlanner  (full DSQL history, or memory + recent)
+    ↓
+runtime_context + runtime_instructions   ← application rules
+untrusted turn (project, evidence, student text)
+    ↓
+ONE AgentCore Runtime
+    ├── Q&A specialist
+    ├── Coaching specialist + stage prompts
+    └── Formative Review specialist
+    ↓
+structured output  (coach_turn | qa_turn | review_turn)
+    ↓
+FastAPI validates → workflow → atomic DSQL persist
+```
+
+Integrate-Bedrock is the production shell. AgentCore is the pedagogical
+brain. DSQL is transcript/state authority. AgentCore Memory is not used.
+
+## Framework preservation matrix
+
+| Feature | POC | Current app | Target AgentCore | Status |
+|---|---|---|---|---|
+| Socratic coaching | harness `phases.py` | `backend/prompts/shared/coaching.md` | `agentcore_runtime/prompts/shared_coaching.md` | MERGE |
+| Stage purpose / readiness | POC `COACHING_TOPICS` | `backend/prompts/stages/*.md` | `agentcore_runtime/prompts/stages/` (`ethics_critical.md` for `deep_analysis`) | MERGE |
+| Assumption Check | POC silent block | shared coaching | runtime shared coaching | PRESERVE |
+| V&V | absent in POC | shared coaching | runtime shared coaching | IMPROVE |
+| Silent vs surface ethics / AT-EAI | POC ethics blocks | shared + `deep_analysis.md` | runtime shared + `ethics_critical.md` | MERGE |
+| CLEAR / Facione / HCTSR research | not in POC runtime | shared coaching + research models | runtime shared + same structured fields | PRESERVE |
+| Source grounding / citations | POC Q&A tools | composer + RAG | untrusted evidence `[S#]`; no KB tools | KEEP APPLICATION-SIDE |
+| Quick/Strict | n/a | composer runtime instructions | `runtime_context.response_detail` | KEEP APPLICATION-SIDE |
+| Research independence | n/a | shared coaching | runtime shared coaching | PRESERVE |
+| Q&A specialist | POC + unrestricted KB tools | none | runtime `prompts/qa.md`, pre-retrieved evidence | IMPROVE |
+| Scoring specialist | markdown critique | application Review tab | Formative Review specialist, not a grade | MERGE / RENAME |
+| Duplicate full curriculum on AgentCore trusted channel | n/a | previously sent `backend/prompts` as trusted | removed from AgentCore payload | REMOVE DUPLICATE |
+
+`backend/prompts/` is **KEEP APPLICATION-SIDE** for mock/OpenAI/Bedrock until
+those providers are retired. Semantic equivalence is covered by prompt-content
+tests; live AgentCore evaluation is not this pass.
 
 ## Current test architecture
 
@@ -126,9 +176,11 @@ same PromptComposer + same educational workflow
 configured generation provider (AgentCore Runtime, or Bedrock/OpenAI fallback)
 ```
 
-`backend/bedrock_retrieve.py` implements this adapter and is injected into
-`CoachApplicationService` when `KNOWLEDGE_BASE_ID` is set and the provider is
-not mock. It:
+`backend/bedrock_retrieve.py` implements this adapter. `configured_context_retriever()`
+always returns `CompositeContextRetriever`. A live Knowledge Base id is injected
+only when the provider is not mock and `MOCK_OPENAI` is false. Empty
+`KNOWLEDGE_BASE_ID` keeps `knowledge_base=None` so virtual course sources
+become an evidence gap instead of local placeholder chunks. It:
 
 - filters retrieval by selected source IDs already loaded for the notebook;
 - sends a `course_material_id` Knowledge Base metadata filter when ids exist,

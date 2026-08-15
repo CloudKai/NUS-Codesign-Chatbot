@@ -61,6 +61,11 @@ restore six coaching stages or drop professor/research routes.
 
 See [`CODEBASE_STRUCTURE.md`](CODEBASE_STRUCTURE.md) for the placement map.
 
+Production AgentCore pedagogy is not this local mock path. Canonical
+specialist and stage prompts live in `agentcore_runtime/`. FastAPI still
+owns identity, RAG authorization, transcript persistence, and stage
+transitions.
+
 ## Target layers and interfaces
 
 ### Presentation
@@ -190,8 +195,10 @@ where practical, and preserve legacy source attachments. When
 ``KNOWLEDGE_BASE_ID`` is set outside mock mode, locked Lecture Notes/Readings
 use Bedrock Knowledge Base ``Retrieve`` (never ``RetrieveAndGenerate``) mapped
 onto selected ``[S#]`` labels; student uploads stay on the local chunk
-retriever. The composer, citations, and coaching specialist tools do not
-change.
+retriever. Virtual shared course sources do not store extracted text and must
+not fall back to a synthesized placeholder chunk. Empty ``KNOWLEDGE_BASE_ID``
+is an evidence gap for those sources. The composer, citations, and coaching
+specialist tools do not change.
 
 ## Development sequence
 

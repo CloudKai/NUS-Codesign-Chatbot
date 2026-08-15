@@ -22,5 +22,5 @@ fi
 echo "Using Python: $PYTHON"
 export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-/private/tmp/co-design-pycache}"
 
-"$PYTHON" -m compileall -q backend ui streamlit_app.py tests scripts
+"$PYTHON" -m compileall -q backend ui streamlit_app.py tests scripts agentcore_runtime
 "$PYTHON" -m pytest -q

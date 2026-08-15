@@ -782,6 +782,69 @@ def test_local_api_maps_safety_blocked_to_structured_503(tmp_path, monkeypatch, 
     assert thread_id not in json.dumps(coach)
 
 
+def test_local_api_maps_structured_output_failure_to_structured_503(
+    tmp_path, monkeypatch, caplog
+):
+    """Malformed AgentResult stays 503 with a category, never JSONDecodeError."""
+    from backend.providers import ProviderUnavailableError
+    from backend.workflow import CoachWorkflow
+
+    store = StudentStore(tmp_path / "provider-structured.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+
+    def fail_run(self, request):
+        raise ProviderUnavailableError(
+            "The coach reply could not be completed",
+            category="structured_output_failure",
+        )
+
+    monkeypatch.setattr(CoachWorkflow, "run", fail_run)
+    client = TestClient(create_app(store))
+    with caplog.at_level("INFO", logger="co_design.operational"):
+        response = client.post(
+            "/api/v1/coach/turn",
+            json={
+                "thread_id": thread_id,
+                "student_message": "A quiet residential street",
+                "current_stage": "problem_identification",
+                "response_detail": "short",
+            },
+        )
+        stream = client.post(
+            "/api/v1/coach/turn/stream",
+            json={
+                "thread_id": thread_id,
+                "student_message": "A quiet residential street",
+                "current_stage": "problem_identification",
+                "response_detail": "short",
+            },
+        )
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert detail["category"] == "structured_output_failure"
+    assert "JSONDecodeError" not in response.text
+    assert "AgentResult" not in response.text
+    events = [
+        json.loads(line)
+        for line in stream.text.splitlines()
+        if line.strip()
+    ]
+    error = next(event for event in events if event.get("event") == "error")
+    assert error["status"] == 503
+    assert error["category"] == "structured_output_failure"
+    coach = next(
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.name == "co_design.operational"
+        and '"event":"coach_turn"' in record.getMessage()
+        and '"outcome":"structured_output_failure"' in record.getMessage()
+    )
+    assert coach["outcome"] == "structured_output_failure"
+    assert thread_id not in json.dumps(coach)
+    assert store.get_messages(thread_id) == []
+
+
 def test_operational_metrics_do_not_log_unmatched_url_values(tmp_path, caplog):
     """Unknown paths use one bounded label instead of logging attacker input."""
     client = TestClient(create_app(StudentStore(tmp_path / "route-metric.sqlite3")))

@@ -38,11 +38,15 @@ backend/
   providers.py                OpenAI adapter and provider selection
   bedrock_provider.py         Amazon Bedrock Converse coach adapter
   agentcore_provider.py       Amazon Bedrock AgentCore Runtime coach adapter
+  specialists/                server-owned qa / coaching / review routing
   mock_provider.py            deterministic offline coach
+  agentcore_harness_provider.py isolated Luna InvokeHarness eval adapter
   auth_*.py / cognito_*.py    Cognito/OIDC boundary and cookie behavior
 tests/                        domain/, persistence/, http/, ui/, scripts/ suites
 scripts/                      startup, validation and operator entrypoints
   dsql/                       DSQL catalog, migration and execution implementation
+  agentcore/harness_patch/    compatibility re-export; not the live harness
+agentcore_runtime/            canonical AgentCore specialists, prompts, contracts
 docs/                         architecture, status, QA, deployment, and security guides
 ```
 

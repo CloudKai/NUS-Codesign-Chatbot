@@ -368,6 +368,8 @@ def validate_production_configuration() -> None:
             )
         if not settings.course_materials_bucket.strip():
             raise ValueError("COURSE_MATERIALS_BUCKET is not configured")
+        if not settings.knowledge_base_id.strip():
+            raise ValueError("KNOWLEDGE_BASE_ID is not configured")
 
     if settings.database_provider == "sqlite":
         raise ValueError("DATABASE_PROVIDER=sqlite is not allowed in production")

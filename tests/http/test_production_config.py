@@ -99,7 +99,18 @@ def test_valid_production_configuration_allows_shared_course_sync(monkeypatch):
     monkeypatch.setattr(settings, "course_material_sync_enabled", True)
     monkeypatch.setattr(settings, "course_materials_bucket", "course-content-test")
     monkeypatch.setattr(settings, "course_materials_prefix", "course/")
+    monkeypatch.setattr(settings, "knowledge_base_id", "JUQNP8AZAZ")
     validate_production_configuration()
+
+
+def test_production_shared_course_sync_requires_knowledge_base_id(monkeypatch):
+    _apply_valid_production_baseline(monkeypatch)
+    monkeypatch.setattr(settings, "course_material_sync_enabled", True)
+    monkeypatch.setattr(settings, "course_materials_bucket", "course-content-test")
+    monkeypatch.setattr(settings, "course_materials_prefix", "course/")
+    monkeypatch.setattr(settings, "knowledge_base_id", "")
+    with pytest.raises(ValueError, match="KNOWLEDGE_BASE_ID"):
+        validate_production_configuration()
 
 
 @pytest.mark.parametrize(

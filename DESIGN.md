@@ -11,8 +11,10 @@ The interface should help students answer three questions at any point:
 2. What should I think about next?
 3. Which evidence is shaping the discussion?
 
-The product supports student reasoning rather than replacing it. Guidance should be concise,
-actionable, transparent, and connected to the student’s own discussion and selected sources.
+The product supports student reasoning rather than replacing it. Production
+coaching pedagogy lives in the AgentCore runtime; the Streamlit app remains
+the student shell. Guidance should be concise, actionable, transparent, and
+connected to the student’s own discussion and selected sources.
 
 ## 2. Design principles
 

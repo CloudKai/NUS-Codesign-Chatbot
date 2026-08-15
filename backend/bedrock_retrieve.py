@@ -249,7 +249,10 @@ class BedrockKnowledgeBaseRetriever:
         rules instead of inventing sources.
         """
         if not self._knowledge_base_id:
-            return RetrievalResult(context="", chunks=())
+            logger.info("course_retrieval_unavailable")
+            return RetrievalResult(
+                context="", chunks=(), course_retrieval_status="unavailable"
+            )
         course_sources = tuple(
             source for source in query.sources if is_course_retrieval_source(source)
         )
@@ -257,12 +260,26 @@ class BedrockKnowledgeBaseRetriever:
             return RetrievalResult(context="", chunks=())
         client = self._runtime_client()
         if client is None:
-            return RetrievalResult(context="", chunks=())
+            logger.info("course_retrieval_unavailable")
+            return RetrievalResult(
+                context="", chunks=(), course_retrieval_status="unavailable"
+            )
+        original_query = " ".join(str(query.current_message or "").split()).strip()
         query_text = expand_session_query_text(query.current_message)
         if not query_text:
             return RetrievalResult(context="", chunks=())
         material_ids = _course_material_ids(course_sources)
+        used_filter = bool(material_ids)
+        fallback = False
         try:
+            logger.info(
+                "course_retrieval_query selected_course_count=%s "
+                "material_id_count=%s strict_filter=%s session_expanded=%s",
+                len(course_sources),
+                len(material_ids),
+                int(self._strict_metadata_filter),
+                int(query_text != original_query),
+            )
             response = client.retrieve(
                 knowledgeBaseId=self._knowledge_base_id,
                 retrievalQuery={"text": query_text},
@@ -287,6 +304,8 @@ class BedrockKnowledgeBaseRetriever:
                     "Knowledge Base metadata filter returned no hits; "
                     "retrying without filter"
                 )
+                fallback = True
+                used_filter = False
                 response = client.retrieve(
                     knowledgeBaseId=self._knowledge_base_id,
                     retrievalQuery={"text": query_text},
@@ -306,13 +325,21 @@ class BedrockKnowledgeBaseRetriever:
                     "strict filter treats this as an evidence gap"
                 )
         except Exception:
-            logger.warning("Knowledge Base Retrieve failed", exc_info=False)
-            return RetrievalResult(context="", chunks=())
+            logger.warning("course_retrieval_unavailable")
+            return RetrievalResult(
+                context="", chunks=(), course_retrieval_status="unavailable"
+            )
         if not isinstance(response, Mapping):
             return RetrievalResult(context="", chunks=())
         raw_hits = response.get("retrievalResults")
         if not isinstance(raw_hits, list):
-            return RetrievalResult(context="", chunks=())
+            logger.info(
+                "course_retrieval_empty raw_hits=0 validated_count=0 fallback=%s",
+                int(fallback),
+            )
+            return RetrievalResult(
+                context="", chunks=(), course_retrieval_status="empty"
+            )
         chunks: list[RetrievedChunk] = []
         per_source: dict[str, int] = {}
         for item in raw_hits:
@@ -353,8 +380,32 @@ class BedrockKnowledgeBaseRetriever:
                     retrieval_origin="knowledge_base",
                 )
             )
-        return bounded_retrieval_result(
+        logger.info(
+            "course_retrieval_hit_count raw_hits=%s validated_count=%s "
+            "filter=%s fallback=%s",
+            len(raw_hits),
+            len(chunks),
+            int(used_filter),
+            int(fallback),
+        )
+        formatted = bounded_retrieval_result(
             chunks, max_context_chars=self._max_context_chars
+        )
+        if not formatted.chunks:
+            logger.info(
+                "course_retrieval_empty raw_hits=%s validated_count=0 fallback=%s",
+                len(raw_hits),
+                int(fallback),
+            )
+            return RetrievalResult(
+                context="",
+                chunks=(),
+                course_retrieval_status="empty",
+            )
+        return RetrievalResult(
+            context=formatted.context,
+            chunks=formatted.chunks,
+            course_retrieval_status="ok",
         )
 
 
@@ -362,20 +413,26 @@ def configured_context_retriever(
     *,
     client: Any | None = None,
 ) -> ContextRetriever:
-    """Return local retrieval, or a KB+local composite when configured.
+    """Return a composite retriever that never dumps virtual course sources locally.
 
-    Mock-mode and an empty ``KNOWLEDGE_BASE_ID`` keep
-    :class:`LocalChunkRetriever` so pytest never calls AWS. Production sets
-    the Knowledge Base id and injects this composite into
-    :class:`CoachApplicationService`.
+    Mock-mode and an empty ``KNOWLEDGE_BASE_ID`` still return
+    :class:`CompositeContextRetriever` with ``knowledge_base=None`` so pytest
+    never calls AWS and shared course sources become an evidence gap instead
+    of placeholder chunks. Live providers with a Knowledge Base id inject
+    :class:`BedrockKnowledgeBaseRetriever`.
     """
+    local = LocalChunkRetriever()
     knowledge_base_id = str(getattr(settings, "knowledge_base_id", "") or "").strip()
     if (
         not knowledge_base_id
         or settings.model_provider == "mock"
         or settings.mock_openai
     ):
-        return LocalChunkRetriever()
+        return CompositeContextRetriever(
+            knowledge_base=None,
+            local=local,
+            max_context_chars=_MAX_CONTEXT_CHARS,
+        )
     region = (
         str(getattr(settings, "knowledge_base_region", "") or "").strip()
         or str(settings.aws_region or "").strip()
@@ -389,6 +446,6 @@ def configured_context_retriever(
     )
     return CompositeContextRetriever(
         knowledge_base=knowledge_base,
-        local=LocalChunkRetriever(),
+        local=local,
         max_context_chars=_MAX_CONTEXT_CHARS,
     )

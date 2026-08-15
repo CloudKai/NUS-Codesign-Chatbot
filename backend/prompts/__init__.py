@@ -1,8 +1,8 @@
-"""Framework-neutral local stage-prompt package for coaching turns.
+"""Application composer for mock/OpenAI/Bedrock Converse.
 
-Prompt markdown files define educational BEHAVIOUR. Selected-source context
-(and later Knowledge Base chunks) supply KNOWLEDGE via the composer. Providers
-invoke models; they do not own stage educational wording.
+Canonical AgentCore specialist and stage pedagogy lives in
+``agentcore_runtime/prompts/``. This package still composes the ordered brief
+used by non-AgentCore providers and for AgentCore token budgeting.
 """
 
 from __future__ import annotations

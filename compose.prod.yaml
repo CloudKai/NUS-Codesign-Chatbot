@@ -41,7 +41,7 @@ services:
       # USER_UPLOADS_BUCKET: set in host .env
       # COURSE_MATERIALS_BUCKET: set in host .env (cde2300-course-content-s3)
       # AGENTCORE_RUNTIME_ARN: set in host .env
-      # KNOWLEDGE_BASE_ID: set in host .env (JUQNP8AZAZ) for selected-source Retrieve
+      # KNOWLEDGE_BASE_ID: required in host .env when COURSE_MATERIAL_SYNC_ENABLED=true
       # MODEL_PROVIDER=agentcore once the harness emits coach_turn JSON
       # APP_IMAGE: set on the host to the ECR image URI + immutable tag
       # Lecture notes are not bundled into the production image.

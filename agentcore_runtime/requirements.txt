@@ -1,0 +1,6 @@
+# AgentCore DEFAULT coaching runtime. Pin to the Strands release used by the
+# published runtime; structured_output_model lives on Agent.invoke_async.
+# Tests in this companion repo do not install or import this file.
+strands-agents>=1.4.0,<2
+pydantic>=2.0,<3
+bedrock-agentcore>=0.1.0

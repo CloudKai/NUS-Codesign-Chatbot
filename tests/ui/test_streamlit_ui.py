@@ -35,6 +35,12 @@ def test_student_coach_error_copy_is_category_safe():
     assert "notebook was not updated" in blocked.lower()
     assert "start.sh" not in blocked
     assert "provider" not in blocked.lower()
+    malformed = student_coach_error_message("structured_output_failure")
+    assert "couldn't complete" in malformed.lower()
+    assert "json" not in malformed.lower()
+    assert "502" not in malformed
+    assert "agentresult" not in malformed.lower()
+    assert student_coach_error_message("malformed") == malformed
     unavailable = student_coach_error_message("unavailable")
     assert "temporarily unavailable" in unavailable.lower()
     assert "start.sh" not in unavailable
@@ -80,6 +86,20 @@ def test_chat_composer_attachment_error_is_recoverable(monkeypatch):
     assert [message["role"] for message in StudentStore().get_messages(thread_id)] == [
         "assistant"
     ]
+
+
+def test_empty_assistant_rows_are_not_rendered():
+    """Failed or skeleton assistant rows with no text stay off the chat log."""
+    from backend.student_store import StudentStore
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    assert not app.exception
+    starting = len(app.chat_message)
+    store = StudentStore()
+    store.add_message(app.session_state["thread_id"], "assistant", "")
+    app.run()
+    assert not app.exception
+    assert len(app.chat_message) == starting
 
 
 def test_streamlit_notebook_workspace_smoke():

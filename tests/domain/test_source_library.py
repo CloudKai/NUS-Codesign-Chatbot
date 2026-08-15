@@ -88,6 +88,26 @@ def test_pasted_source_context_has_stable_labels_and_limit(tmp_path, monkeypatch
     assert len(context) <= 145
 
 
+def test_virtual_course_source_context_does_not_synthesize_placeholder():
+    source = {
+        "id": "virtual-week-1",
+        "title": "Week 1 Introduction to innovation v3.pdf",
+        "kind": "file",
+        "extractedText": "",
+        "object_key": (
+            "course/lectureNotes/Week 1 Introduction to innovation v3.pdf"
+        ),
+        "metadata": {
+            "virtual_course_source": True,
+            "shared_course_object": True,
+        },
+    }
+    context, references = selected_source_context([source], limit=400)
+    assert references[0]["label"] == "S1"
+    assert "Week 1 Introduction to innovation v3.pdf" in context
+    assert "[This source is stored but has no analyzable text.]" not in context
+
+
 def test_image_inputs_for_source_ids_resolves_selected_png(tmp_path, monkeypatch):
     store, thread_id, _ = make_notebook(tmp_path, monkeypatch)
     png = (

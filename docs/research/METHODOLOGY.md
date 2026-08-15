@@ -9,8 +9,10 @@ they are not grades, diagnoses, validated psychometric measurements, or claims
 about a student's underlying ability.
 
 The coding unit is one student utterance. Only reasoning explicitly present in
-that utterance may be coded. The coach reply, stage completion, response
-length, writing polish, and presumed student ability are not evidence.
+that utterance may be coded. Research coding is observational: it must never
+control coaching questions, stage recommendation, or a grade. The coach reply,
+stage completion, response length, writing polish, and presumed student ability
+are not evidence.
 
 ## Automated observation
 

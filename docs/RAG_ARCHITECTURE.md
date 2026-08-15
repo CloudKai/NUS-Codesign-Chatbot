@@ -36,13 +36,10 @@ the Knowledge Base or student S3.
                   Unified [S#] evidence
                             │
                             ▼
-                 Application prompt layer
-                            │
-             Socratic + Assumption Check
-                + V&V + stage guidance
+              FastAPI runtime rules + untrusted evidence
                             │
                             ▼
-                 AgentCore / Strands Coach
+         AgentCore Q&A / Coaching / Review specialists
 ```
 
 ## Authority
@@ -54,7 +51,7 @@ the Knowledge Base or student S3.
 | S3 | File bytes (canonical course objects and owner-scoped student objects) |
 | Bedrock Knowledge Base | Semantic retrieve over official course material only |
 | Local student retriever | Notebook-scoped chunks of extracted student text |
-| AgentCore / Strands | Pedagogical reasoning over the composed brief |
+| AgentCore / Strands | Pedagogical reasoning over authorized `[S#]` evidence. No KB or S3 tools. |
 
 The coach cannot choose sources. Prompt instructions are not authorization.
 
@@ -63,6 +60,19 @@ The coach cannot choose sources. Prompt instructions are not authorization.
 Official course PDFs have one canonical production copy under shared S3 keys
 such as `course/lectureNotes/` and `course/readings/`. Bedrock Knowledge Base
 indexes that copy. The application does not paste entire PDFs into prompts.
+
+Shared course files appear in the student UI as **virtual catalog sources**.
+They are not duplicated into each notebook's DSQL `sources` rows. Virtual
+rows have empty `extractedText` on purpose. Course evidence must come from
+Bedrock Knowledge Base `Retrieve`. A missing or empty `KNOWLEDGE_BASE_ID` is
+an evidence gap, not a fallback onto `LocalChunkRetriever`. The local
+retriever never ranks the display placeholder
+`[This source is stored but has no analyzable text.]` as retrieved evidence.
+
+`configured_context_retriever()` always returns `CompositeContextRetriever`.
+Mock mode and an empty Knowledge Base id inject `knowledge_base=None` so
+shared `course/` sources cannot become fake local chunks. Live providers with
+a Knowledge Base id inject `BedrockKnowledgeBaseRetriever`.
 
 `BedrockKnowledgeBaseRetriever` calls **Retrieve only** (never
 RetrieveAndGenerate). When selected course sources have `course_material_id`
@@ -95,7 +105,13 @@ is verified.
 
 Until the Knowledge Base is re-ingested with `course_material_id` metadata,
 the compatibility fallback is the production path. After re-ingestion, the
-filter constrains semantic search; validation remains defense in depth.
+filter constrains semantic search; validation remains defense in depth. Do
+not treat an unfiltered retry as proof that strict metadata mode is live.
+
+Production with `COURSE_MATERIAL_SYNC_ENABLED=true` requires
+`KNOWLEDGE_BASE_ID`, `KNOWLEDGE_BASE_REGION` (or `AWS_REGION`), and
+`COURSE_MATERIALS_BUCKET`. Empty Knowledge Base id is valid only for mock
+tests and local folder copies that still have extracted text.
 
 ## Student-upload RAG
 
@@ -109,7 +125,8 @@ users/<user-id>/notebooks/<notebook-id>/sources/<source-id>/raw|derived
 `LocalChunkRetriever` searches only authenticated user + current notebook +
 currently selected source IDs. There is no global student vector namespace.
 Chunking is deterministic (~1,800 characters, overlap, per-source diversity,
-bounded context).
+bounded context). Student uploads keep extracted text; they do not use the
+shared course Knowledge Base.
 
 ## Unified evidence
 

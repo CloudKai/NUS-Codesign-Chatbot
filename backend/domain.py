@@ -330,8 +330,8 @@ class CoachRequest(BaseModel):
     Clients may hint stage, history, and sources, but the application service
     reloads those values from the notebook store and rejects mismatches.
     ``student_project_context`` and ``conversation_summary`` are also filled
-    server-side for prompt composition; clients cannot inject prompt files or
-    stage instructions through this contract.
+    server-side for prompt composition; clients cannot inject prompt files,
+    stage instructions, or a privileged specialist through this contract.
     """
 
     thread_id: str
@@ -365,6 +365,8 @@ class CoachRequest(BaseModel):
         max_length=128,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
     )
+    # Server-filled specialist. Clients cannot make this authoritative.
+    specialist: str | None = Field(default=None, max_length=32)
 
     @field_validator("current_stage")
     @classmethod
@@ -385,6 +387,15 @@ class CoachRequest(BaseModel):
         if len(cleaned) != len(set(cleaned)):
             raise ValueError("source_ids must be unique")
         return cleaned
+
+    @field_validator("specialist")
+    @classmethod
+    def specialist_must_be_known_or_empty(cls, value: str | None) -> str | None:
+        """Drop unknown specialist names. The application service overwrites this."""
+        cleaned = str(value or "").strip().lower()
+        if cleaned in {"qa", "coaching", "review"}:
+            return cleaned
+        return None
 
 
 class CoachTurn(BaseModel):

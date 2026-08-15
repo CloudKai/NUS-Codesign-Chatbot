@@ -1,0 +1,45 @@
+"""Deterministic specialist routing tests. There is no LLM router."""
+
+from __future__ import annotations
+
+from backend.specialists.routing import (
+    SPECIALIST_COACHING,
+    SPECIALIST_QA,
+    SPECIALIST_REVIEW,
+    select_specialist,
+)
+
+
+def test_week_one_course_question_routes_to_qa() -> None:
+    assert select_specialist("What is Week 1 about?") == SPECIALIST_QA
+
+
+def test_reading_and_deadline_questions_route_to_qa() -> None:
+    assert select_specialist("What does Reading 2 discuss?") == SPECIALIST_QA
+    assert select_specialist("When is the assignment due?") == SPECIALIST_QA
+
+
+def test_project_reasoning_routes_to_coaching() -> None:
+    message = "Our elderly users may become stranded halfway across the road"
+    assert select_specialist(message) == SPECIALIST_COACHING
+
+
+def test_ambiguous_message_defaults_to_coaching() -> None:
+    assert select_specialist("I don't understand this.") == SPECIALIST_COACHING
+    assert select_specialist("hello") == SPECIALIST_COACHING
+
+
+def test_explicit_progress_review_routes_to_review() -> None:
+    assert select_specialist("Review my progress so far.") == SPECIALIST_REVIEW
+
+
+def test_client_cannot_force_qa_on_project_reasoning() -> None:
+    """HTTP handlers pass requested=None; unknown names are ignored."""
+    message = "Our elderly users may become stranded halfway across the road"
+    assert select_specialist(message, requested=None) == SPECIALIST_COACHING
+    assert select_specialist(message, requested="admin") == SPECIALIST_COACHING
+    assert select_specialist(message, requested="qa") == SPECIALIST_QA
+
+
+def test_server_surface_review_is_honored() -> None:
+    assert select_specialist("Keep going.", surface="review") == SPECIALIST_REVIEW

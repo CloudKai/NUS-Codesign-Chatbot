@@ -219,9 +219,10 @@ KNOWLEDGE_BASE_ID=JUQNP8AZAZ
 MOCK_OPENAI=false
 ```
 
-Optional `KNOWLEDGE_BASE_ID` runs Bedrock `Retrieve` for selected Lecture
-Notes/Readings and maps hits onto `[S#]`. Student uploads stay local. The
-coaching specialist still has zero Knowledge Base tools.
+Production with shared course sync requires `KNOWLEDGE_BASE_ID` so Bedrock
+`Retrieve` supplies official Lecture Notes/Readings onto `[S#]`. Student
+uploads stay local. The coaching specialist still has zero Knowledge Base
+tools. Empty Knowledge Base id is not a silent local-course fallback.
 
 Do not merge the POC CDK app as a second student UI. Apply
 [scripts/agentcore/harness_patch/README.md](scripts/agentcore/harness_patch/README.md)
