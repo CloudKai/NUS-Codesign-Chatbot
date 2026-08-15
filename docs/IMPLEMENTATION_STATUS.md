@@ -1,6 +1,75 @@
 # Implementation status
 
-## Current phase — Full-history-first planner, exact RAG keys, isolated Luna eval path
+## Current phase — AgentCore coaching availability, guardrail handling, trust split
+
+**Completed locally on 2026-08-15.** Integrate-Bedrock remains the product.
+Production `MODEL_PROVIDER=agentcore` still uses `InvokeAgentRuntime` and does
+**not** change DEFAULT. Live AgentCore coaching was failing closed as a
+malformed turn because runtime guardrail `PROMPT_ATTACK` blocked the composed
+user payload, including a literal attack example in shared instructions. This
+phase unblocks that path without disabling safety controls, then splits trusted
+instructions from untrusted turn content.
+
+### Behavior delivered
+
+1. Shared coaching no longer contains a literal prompt-attack example.
+   Quoted/retrieved override attempts remain untrusted evidence.
+2. `AgentCoreCoachProvider` detects `guardrail_intervened` and guardrail
+   `action=BLOCKED` before parsing model text. The failure is category-only
+   (`safety_blocked`); refusal text, prompts, and AWS traces are not exposed
+   or persisted.
+3. FastAPI carries `{message, category}` on JSON 503 and `category` on stream
+   error events. Streamlit shows student-safe copy that does not blame
+   `scripts/start.sh` or claim the provider is down.
+4. Composer exposes `trusted_instructions` and `untrusted_turn_text` while
+   preserving ordered `composed_text` and the same length budget. AgentCore
+   sends trusted instructions on a dedicated harness field and keeps DSQL
+   history plus untrusted content in `messages`.
+5. Harness patch appends `trusted_instructions` to the system prompt and
+   invokes only untrusted user content. Older payloads that omit the field
+   remain compatible. Isolated Luna eval uses the same split.
+6. `requirements.txt` pins `boto3==1.43.35` and `botocore[crt]==1.43.35` so
+   clean installs include AgentCore and `aws login` CRT credentials.
+
+### Main files changed
+
+- Prompts/adapters: `backend/prompts/shared/coaching.md`,
+  `backend/prompts/composer.py`, `backend/providers.py`,
+  `backend/agentcore_provider.py`, `backend/agentcore_harness_provider.py`,
+  `backend/http/app.py`, `backend/api_client.py`, `ui/panels/chat.py`
+- Harness: `scripts/agentcore/harness_patch/structured_coach.py`,
+  `scripts/agentcore/harness_patch/README.md`
+- Tests/docs: AgentCore, prompt, API, API-client, Streamlit tests; prompt,
+  security, AgentCore, and this status file
+- Dependencies: `requirements.txt`
+
+### Validation evidence
+
+- Full deterministic suite: **591 passed, 0 failed** (Starlette/httpx
+  deprecation warnings only; classified as harmless test-client debt).
+  `compileall` passed. `git diff --check` passed. No live AWS or paid OpenAI
+  call from pytest. Live wrapped-payload smoke is **not** claimed complete.
+
+### Compatibility, migration, and rollback
+
+- No database migration. Production runtime ARN and `AGENTCORE_QUALIFIER=DEFAULT`
+  are unchanged. No experimental student runtime.
+- JSON 503 `detail` for provider failures is now `{message, category}` instead
+  of a bare string. Stream error events add `category`.
+- Live DEFAULT still needs the updated harness patch republished before the
+  trusted/untrusted split takes effect in production. Until that deploy, the
+  adapter sends untrusted-only user content plus `trusted_instructions`.
+- Rollback is reverting this working tree.
+
+### Known risks and next exact action
+
+- Live smoke against wrapped AgentCore payloads was not run (paid-call policy).
+- Next: after explicit approval and a request/token or cost cap, republish the
+  harness patch to existing DEFAULT, then run one real wrapped-payload smoke
+  test and repeat the student UI quality assessment. No mock fallback and no
+  Claude calls.
+
+## Previous completed phase — Full-history-first planner, exact RAG keys, isolated Luna eval path
 
 **Completed locally on 2026-08-15.** Integrate-Bedrock remains the product.
 Production `MODEL_PROVIDER=agentcore` still uses `InvokeAgentRuntime` and

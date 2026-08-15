@@ -27,7 +27,53 @@ from .settings import settings
 
 
 class ProviderUnavailableError(RuntimeError):
-    """Raised when a configured local or hosted model provider cannot be used."""
+    """Raised when a configured local or hosted model provider cannot be used.
+
+    ``category`` is a stable, student-safe label such as ``safety_blocked``,
+    ``malformed``, ``throttled``, ``timeout``, ``access_denied``, or
+    ``unavailable``. It must never contain prompts, AWS bodies, or student text.
+    """
+
+    def __init__(self, message: str, *, category: str = "unavailable") -> None:
+        super().__init__(message)
+        cleaned = str(category or "unavailable").strip() or "unavailable"
+        self.category = cleaned
+
+
+def provider_error_category(error: BaseException) -> str:
+    """Return a stable provider-error category without AWS or prompt text.
+
+    Explicit ``ProviderUnavailableError.category`` wins. Message matching is a
+    compatibility fallback for raises that still omit the category.
+
+    Args:
+        error: The provider or HTTP-mapped exception.
+
+    Returns:
+        A short category token suitable for API payloads and student copy.
+    """
+    explicit = str(getattr(error, "category", "") or "").strip()
+    if explicit and explicit != "unavailable":
+        return explicit
+    text = str(error).casefold()
+    if "blocked this turn" in text:
+        return "safety_blocked"
+    if "malformed" in text:
+        return "malformed"
+    if "throttl" in text:
+        return "throttled"
+    if "timed out" in text or "timeout" in text:
+        return "timeout"
+    if "denied" in text:
+        return "access_denied"
+    return explicit or "unavailable"
+
+
+def provider_unavailable_outcome(error: BaseException) -> str:
+    """Return the operational-metric outcome for one provider failure."""
+    if provider_error_category(error) == "safety_blocked":
+        return "safety_blocked"
+    return "provider_unavailable"
 
 
 class OpenAICoachProvider:

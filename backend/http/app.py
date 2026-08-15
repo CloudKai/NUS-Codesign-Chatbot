@@ -39,7 +39,11 @@ from backend.operational_metrics import (
     record_stage_transition,
     started_at,
 )
-from backend.providers import ProviderUnavailableError
+from backend.providers import (
+    ProviderUnavailableError,
+    provider_error_category,
+    provider_unavailable_outcome,
+)
 from backend.rate_limit import RateLimitExceeded
 from backend.settings import settings, validate_production_configuration
 from backend.source_library import CourseMaterialSyncCoordinator
@@ -75,6 +79,15 @@ from backend.professor_analytics.research import (
 from backend.research.models import ResearchAdjudication, ResearchReview
 
 logger = logging.getLogger("backend.api")
+
+
+def _provider_unavailable_detail(error: ProviderUnavailableError) -> dict[str, str]:
+    """Return a structured 503 body with a category-only message."""
+    return {
+        "message": str(error),
+        "category": provider_error_category(error),
+    }
+
 
 # Streamlit OIDC cookie names (and numeric chunks) cleared by the logout callback.
 # Profile Logout / ui.auth_gate.app_logout_url() navigates here; not Cognito /logout.
@@ -1108,10 +1121,12 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(error)) from error
         except ProviderUnavailableError as error:
             _emit_coach_metric(
-                outcome="provider_unavailable",
+                outcome=provider_unavailable_outcome(error),
                 selected_source_count=selected_source_count,
             )
-            raise HTTPException(status_code=503, detail=str(error)) from error
+            raise HTTPException(
+                status_code=503, detail=_provider_unavailable_detail(error)
+            ) from error
         except ValueError as error:
             message = str(error)
             status = 404 if "not found" in message.lower() else 400
@@ -1181,13 +1196,15 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(error)) from error
         except ProviderUnavailableError as error:
             _emit_coach_metric(
-                outcome="provider_unavailable",
+                outcome=provider_unavailable_outcome(error),
                 selected_source_count=selected_source_count,
             )
             logger.warning(
                 "coach_turn provider unavailable request_id=%s", request_id
             )
-            raise HTTPException(status_code=503, detail=str(error)) from error
+            raise HTTPException(
+                status_code=503, detail=_provider_unavailable_detail(error)
+            ) from error
         except ValueError as error:
             _emit_coach_metric(
                 outcome="rejected",
@@ -1282,11 +1299,16 @@ def create_app(
                 return
             except ProviderUnavailableError as error:
                 _emit_coach_metric(
-                    outcome="provider_unavailable",
+                    outcome=provider_unavailable_outcome(error),
                     selected_source_count=selected_source_count,
                 )
                 yield json.dumps(
-                    {"event": "error", "detail": str(error), "status": 503}
+                    {
+                        "event": "error",
+                        "detail": str(error),
+                        "status": 503,
+                        "category": provider_error_category(error),
+                    }
                 ) + "\n"
                 return
             except ValueError as error:

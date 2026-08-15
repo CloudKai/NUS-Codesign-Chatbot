@@ -59,8 +59,16 @@ Student → Streamlit → FastAPI
 
 Retrieved course text, student uploads, websites, student messages, prior
 conversation turns, and derived conversation memory are untrusted evidence.
-The composer delimits them. Shared, stage, and runtime sections remain
-authoritative. Authorization is structural, not instructional.
+The composer delimits them and exposes a dedicated untrusted product.
+Shared, stage, and runtime sections remain authoritative and are sent to
+AgentCore on a separate `trusted_instructions` channel. Authorization is
+structural, not instructional. Trusted prompt files must not include literal
+jailbreak examples; those n-grams may appear only inside delimited retrieved
+or student content.
+
+Runtime guardrail intervention (`guardrail_intervened` or `action=BLOCKED`)
+fails closed as category `safety_blocked`. Refusal text, prompt text, and AWS
+trace bodies are never returned to the student UI or persisted.
 
 ## Conversation integrity
 

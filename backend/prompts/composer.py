@@ -84,12 +84,20 @@ class PromptContext(BaseModel):
 
 
 class PreparedCoachPrompt(BaseModel):
-    """Shared, stage, and fully composed text for one provider invocation."""
+    """Shared, stage, trusted, untrusted, and fully composed text for one turn.
+
+    ``composed_text`` keeps the historical ordered brief for mock, OpenAI, and
+    Bedrock Converse. AgentCore sends ``trusted_instructions`` on a dedicated
+    harness field and ``untrusted_turn_text`` as the current user message.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     shared_instructions: str
     stage_instructions: str
+    runtime_instructions: str = ""
+    trusted_instructions: str = ""
+    untrusted_turn_text: str = ""
     composed_text: str
 
 
@@ -205,6 +213,49 @@ def _section(tag: str, body: str, *, attrs: str = "") -> str:
     return f"{open_tag}\n{body.strip()}\n{close_tag}"
 
 
+def _join_trusted(
+    *,
+    shared: str,
+    stage: str,
+    stage_id: str,
+    runtime: str,
+) -> str:
+    """Assemble application-owned instructions for a dedicated trust channel."""
+    return "\n\n".join(
+        [
+            _section("shared_coaching", shared),
+            _section(
+                "stage_instructions",
+                stage,
+                attrs=f' stage="{stage_id}"',
+            ),
+            _section("runtime_instructions", runtime),
+        ]
+    )
+
+
+def _join_untrusted(
+    *,
+    project: str,
+    retrieved: str,
+    summary: str,
+    memory: str,
+    recent: str,
+    student: str,
+) -> str:
+    """Assemble student, evidence, and memory content for the untrusted channel."""
+    return "\n\n".join(
+        [
+            _section("student_project_context", project or _EMPTY_PROJECT),
+            _section("retrieved_course_context", retrieved),
+            _section("conversation_summary", summary or _EMPTY_SUMMARY),
+            _section("conversation_memory", memory or _EMPTY_MEMORY),
+            _section("recent_messages", recent or _EMPTY_RECENT),
+            _section("student_message", student or _EMPTY_STUDENT),
+        ]
+    )
+
+
 def _join_sections(
     *,
     shared: str,
@@ -238,6 +289,53 @@ def _join_sections(
     )
 
 
+def _prepared_prompt(
+    *,
+    shared: str,
+    stage: str,
+    stage_id: str,
+    project: str,
+    retrieved: str,
+    summary: str,
+    memory: str,
+    recent: str,
+    student: str,
+    runtime: str,
+) -> PreparedCoachPrompt:
+    """Build trusted, untrusted, and ordered composed products from one trim."""
+    return PreparedCoachPrompt(
+        shared_instructions=shared,
+        stage_instructions=stage,
+        runtime_instructions=runtime,
+        trusted_instructions=_join_trusted(
+            shared=shared,
+            stage=stage,
+            stage_id=stage_id,
+            runtime=runtime,
+        ),
+        untrusted_turn_text=_join_untrusted(
+            project=project,
+            retrieved=retrieved,
+            summary=summary,
+            memory=memory,
+            recent=recent,
+            student=student,
+        ),
+        composed_text=_join_sections(
+            shared=shared,
+            stage=stage,
+            stage_id=stage_id,
+            project=project,
+            retrieved=retrieved,
+            summary=summary,
+            memory=memory,
+            recent=recent,
+            student=student,
+            runtime=runtime,
+        ),
+    )
+
+
 class PromptComposer:
     """Assemble shared + stage + turn context without calling a model provider."""
 
@@ -256,7 +354,8 @@ class PromptComposer:
                 may replace only that producer.
 
         Returns:
-            Prepared shared/stage fragments plus the ordered composed text.
+            Prepared shared/stage/runtime fragments, the trusted/untrusted
+            channel split, and the ordered composed text.
 
         Raises:
             PromptLoadError: Propagated when stage or shared files are invalid.
@@ -287,8 +386,8 @@ class PromptComposer:
             else _EMPTY_RECENT_SUPPLIED_AS_HISTORY
         )
 
-        def build() -> str:
-            return _join_sections(
+        def build() -> PreparedCoachPrompt:
+            return _prepared_prompt(
                 shared=shared,
                 stage=stage,
                 stage_id=context.current_stage,
@@ -301,13 +400,10 @@ class PromptComposer:
                 runtime=runtime,
             )
 
-        composed = build()
+        prepared = build()
+        composed = prepared.composed_text
         if len(composed) <= MAX_COMPOSED_PROMPT_CHARS:
-            return PreparedCoachPrompt(
-                shared_instructions=shared,
-                stage_instructions=stage,
-                composed_text=composed,
-            )
+            return prepared
 
         # 1) Shrink retrieved source text first (never inject whole PDFs).
         retrieved_budget = len(retrieved) if has_retrieved else 0
@@ -326,7 +422,8 @@ class PromptComposer:
             else:
                 retrieved = EMPTY_RETRIEVED_COURSE_CONTEXT
                 has_retrieved = False
-            composed = build()
+            prepared = build()
+            composed = prepared.composed_text
 
         # 2) Drop older recent messages next.
         while len(composed) > MAX_COMPOSED_PROMPT_CHARS and recent_limit > 0:
@@ -335,7 +432,8 @@ class PromptComposer:
                 list(context.recent_messages),
                 max_messages=recent_limit,
             )
-            composed = build()
+            prepared = build()
+            composed = prepared.composed_text
 
         # 3) Trim derived memory, conversation summary, then project context.
         for label in ("memory", "summary", "project"):
@@ -358,7 +456,8 @@ class PromptComposer:
                     summary = trimmed
                 else:
                     project = trimmed
-                composed = build()
+                prepared = build()
+                composed = prepared.composed_text
                 if trimmed == current:
                     break
 
@@ -369,11 +468,7 @@ class PromptComposer:
                 "sections alone are too large."
             )
 
-        return PreparedCoachPrompt(
-            shared_instructions=shared,
-            stage_instructions=stage,
-            composed_text=composed,
-        )
+        return prepared
 
 
 def _conversation_memory_text(value: dict[str, Any] | None) -> str:

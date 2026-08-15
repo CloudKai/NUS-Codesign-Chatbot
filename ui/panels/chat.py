@@ -35,6 +35,52 @@ from ui.retry_keys import get_retry_key, remove_retry_key
 from ui.sources import source_viewer_dialog
 
 
+class CoachTurnStreamError(RuntimeError):
+    """Raised when a streamed coaching turn ends with a structured error event."""
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        status: Any = None,
+        category: str = "",
+    ) -> None:
+        super().__init__(detail)
+        self.detail = str(detail)
+        self.status = status
+        self.category = str(category or "").strip()
+
+
+def student_coach_error_message(category: str = "", *, status: Any = None) -> str:
+    """Return student-safe coaching-failure copy for one error category.
+
+    Args:
+        category: Stable API category such as ``safety_blocked``.
+        status: Optional HTTP status from the stream error event.
+
+    Returns:
+        Copy that does not blame the launcher, name the provider, or expose
+        AWS or prompt internals.
+    """
+    normalized = str(category or "").strip().lower()
+    try:
+        status_code = int(status) if status is not None else None
+    except (TypeError, ValueError):
+        status_code = None
+    if normalized == "safety_blocked":
+        return (
+            "This turn was blocked by a safety check. Rephrase your message "
+            "and try again. Your notebook was not updated."
+        )
+    if normalized == "throttled" or status_code == 429:
+        return "The coach is busy right now. Wait a moment and try again."
+    if normalized == "timeout":
+        return "The coach took too long to reply. Try again."
+    if normalized == "malformed":
+        return "The coach reply could not be used. Try sending your message again."
+    return "Coaching is temporarily unavailable. Try again in a moment."
+
+
 def render_media(raw_paths: list[str]) -> None:
     for raw_path in raw_paths:
         path = Path(raw_path).resolve()
@@ -489,9 +535,11 @@ def handle_prompt(
                             turn = CoachTurn.model_validate(event["turn"])
                         elif kind == "error":
                             _close_thinking(label="Coaching failed", state="error")
-                            status = event.get("status")
-                            detail = event.get("detail") or "Coaching failed"
-                            raise RuntimeError(f"{detail} (status={status})")
+                            raise CoachTurnStreamError(
+                                str(event.get("detail") or "Coaching failed"),
+                                status=event.get("status"),
+                                category=str(event.get("category") or ""),
+                            )
                     _close_thinking(label="Coach reply ready", state="complete")
 
                 st.write_stream(token_stream())
@@ -505,15 +553,25 @@ def handle_prompt(
                     st.caption(
                         "The coach has recommended a next step in Thinking Path."
                     )
-            except Exception:
+            except CoachTurnStreamError as error:
                 try:
                     thinking.update(label="Coaching failed", state="error")
                 except Exception:
                     pass
                 st.error(
-                    "Coaching is unavailable. Prefer `sh scripts/start.sh` for "
-                    "API mode, or check the local provider."
+                    student_coach_error_message(error.category, status=error.status)
                 )
+                st.caption(
+                    "Reload the notebook before resubmitting; the completed turn "
+                    "may already be present if the connection ended late."
+                )
+                return
+            except Exception:
+                try:
+                    thinking.update(label="Coaching failed", state="error")
+                except Exception:
+                    pass
+                st.error(student_coach_error_message("unavailable"))
                 st.caption(
                     "Reload the notebook before resubmitting; the completed turn "
                     "may already be present if the connection ended late."

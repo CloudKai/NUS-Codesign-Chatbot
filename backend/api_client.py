@@ -625,6 +625,30 @@ class LocalApiClient:
         response.raise_for_status()
         return CoachTurn.model_validate(response.json())
 
+    @staticmethod
+    def coaching_error_category(payload: Mapping[str, Any] | None) -> str:
+        """Return the structured coaching error category from an API payload.
+
+        Stream error events carry ``category`` at the top level. JSON 503
+        bodies nest it under ``detail``. Missing or malformed payloads return
+        an empty string rather than guessing from message text.
+
+        Args:
+            payload: A stream event dict or a decoded HTTP JSON body.
+
+        Returns:
+            The category token, or ``""`` when none is present.
+        """
+        if not isinstance(payload, Mapping):
+            return ""
+        category = str(payload.get("category") or "").strip()
+        if category:
+            return category
+        detail = payload.get("detail")
+        if isinstance(detail, Mapping):
+            return str(detail.get("category") or "").strip()
+        return ""
+
     def stream_coach_turn(self, request: CoachRequest) -> Iterator[dict[str, Any]]:
         """Yield NDJSON events from the streaming coaching endpoint."""
         with self._http.stream(

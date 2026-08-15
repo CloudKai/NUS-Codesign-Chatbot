@@ -208,6 +208,11 @@ def _current_turn_text(payload: dict[str, Any]) -> str:
     return str(messages[-1]["content"][0]["text"])
 
 
+def _sse_bytes(*events: dict[str, Any]) -> bytes:
+    """Encode runtime events as an SSE body for adapter tests."""
+    return "".join(f"data: {json.dumps(event)}\n\n" for event in events).encode("utf-8")
+
+
 def test_agentcore_provider_rejects_missing_runtime_arn():
     with pytest.raises(ProviderUnavailableError, match="AGENTCORE_RUNTIME_ARN"):
         AgentCoreCoachProvider("  ", client=FakeAgentCoreRuntime(payload=_output()))
@@ -231,10 +236,13 @@ def test_valid_structured_coaching_and_research_coding():
     assert payload["topic"] == "problem_identification"
     assert payload["output_contract"] == "coach_turn"
     assert "prompt" not in payload
-    assert _current_turn_text(payload) == compose_coach_prompt(
-        _request(), include_recent_messages=False
-    ).composed_text
-    assert _STAGE_MARKERS["problem_identification"] in _current_turn_text(payload)
+    prepared = compose_coach_prompt(_request(), include_recent_messages=False)
+    assert payload["trusted_instructions"] == prepared.trusted_instructions
+    assert _current_turn_text(payload) == prepared.untrusted_turn_text
+    assert _STAGE_MARKERS["problem_identification"] in payload["trusted_instructions"]
+    assert _STAGE_MARKERS["problem_identification"] not in _current_turn_text(payload)
+    assert _STUDENT_MESSAGE in _current_turn_text(payload)
+    assert _STUDENT_MESSAGE not in payload["trusted_instructions"]
     assert "RetrieveAndGenerate" not in json.dumps(payload)
 
 
@@ -245,7 +253,8 @@ def test_deep_analysis_maps_only_to_agentcore_ethics_critical_topic():
     assert result.assessment.current_stage == "deep_analysis"
     payload = _decoded_payload(client.calls[0])
     assert payload["topic"] == "ethics_critical"
-    assert _STAGE_MARKERS["deep_analysis"] in _current_turn_text(payload)
+    assert _STAGE_MARKERS["deep_analysis"] in payload["trusted_instructions"]
+    assert _STAGE_MARKERS["deep_analysis"] not in _current_turn_text(payload)
 
 
 def test_stateless_session_ids_are_unique_per_invoke():
@@ -304,7 +313,8 @@ def test_agentcore_payload_sends_full_history_and_owner_student_id():
     messages = payload["messages"]
     assert all(item["role"] in {"user", "assistant"} for item in messages)
     assert messages[-1]["role"] == "user"
-    assert _STAGE_MARKERS["problem_identification"] in messages[-1]["content"][0]["text"]
+    assert _STAGE_MARKERS["problem_identification"] in payload["trusted_instructions"]
+    assert _STAGE_MARKERS["problem_identification"] not in messages[-1]["content"][0]["text"]
     prior = messages[:-1]
     assert len(prior) == 9
     assert prior[0]["content"][0]["text"] == "Earlier student turn 0."
@@ -461,7 +471,7 @@ def test_images_are_mapped_into_runtime_messages():
     assert content[0]["text"] == compose_coach_prompt(
         _request(image_inputs=[image]),
         include_recent_messages=False,
-    ).composed_text
+    ).untrusted_turn_text
     assert content[1]["image"]["format"] == "png"
     assert content[1]["image"]["source"]["bytes"] == _TINY_PNG
 
@@ -500,6 +510,14 @@ def test_agentcore_error_translation_hides_aws_and_student_content(
     assert _STUDENT_MESSAGE not in message
     assert "aws-error" not in message
     assert "AccessDeniedException" not in message
+    if "throttl" in match:
+        assert raised.value.category == "throttled"
+    elif "timed out" in match:
+        assert raised.value.category == "timeout"
+    elif "denied" in match:
+        assert raised.value.category == "access_denied"
+    else:
+        assert raised.value.category == "unavailable"
 
 
 def test_markdown_fences_are_not_parsed_as_structured_output():
@@ -539,3 +557,176 @@ def test_readiness_requires_agentcore_runtime_arn(
     response = client.get("/api/v1/ready")
     assert response.status_code == 503
     assert "AGENTCORE_RUNTIME_ARN" in response.json()["detail"]
+
+
+def test_successful_sse_structured_output_is_parsed():
+    client = FakeAgentCoreRuntime(
+        raw=_sse_bytes(
+            {"event": {"messageStart": {"role": "assistant"}}},
+            {
+                "event": {
+                    "contentBlockDelta": {"delta": {"text": json.dumps(_output())}}
+                }
+            },
+            {"event": {"messageStop": {"stopReason": "end_turn"}}},
+        ),
+        content_type="text/event-stream",
+    )
+    result = _provider(client).assess(_request())
+    assert result.response_text.startswith("What trade-off")
+
+
+def test_guardrail_intervened_is_blocked_without_parsing_refusal(caplog):
+    refusal = "I can't respond to that request."
+    client = FakeAgentCoreRuntime(
+        raw=_sse_bytes(
+            {"event": {"messageStart": {"role": "assistant"}}},
+            {"event": {"contentBlockDelta": {"delta": {"text": refusal}}}},
+            {"event": {"messageStop": {"stopReason": "guardrail_intervened"}}},
+            {
+                "event": {
+                    "metadata": {
+                        "trace": {
+                            "guardrail": {
+                                "inputAssessment": {
+                                    "o8aipba8m129": {
+                                        "contentPolicy": {
+                                            "filters": [
+                                                {
+                                                    "type": "PROMPT_ATTACK",
+                                                    "action": "BLOCKED",
+                                                    "confidence": "HIGH",
+                                                }
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        ),
+        content_type="text/event-stream",
+    )
+    with pytest.raises(ProviderUnavailableError, match="blocked this turn") as raised:
+        _provider(client).assess(_request())
+    assert raised.value.category == "safety_blocked"
+    assert refusal not in str(raised.value)
+    assert "PROMPT_ATTACK" not in str(raised.value)
+    assert _STUDENT_MESSAGE not in str(raised.value)
+    joined = "\n".join(record.getMessage() for record in caplog.records)
+    assert "PROMPT_ATTACK" not in joined
+    assert refusal not in joined
+
+
+def test_trace_only_blocked_assessment_is_safety_blocked():
+    client = FakeAgentCoreRuntime(
+        raw=_sse_bytes(
+            {
+                "event": {
+                    "metadata": {
+                        "trace": {
+                            "guardrail": {
+                                "inputAssessment": {
+                                    "gid": {
+                                        "contentPolicy": {
+                                            "filters": [
+                                                {
+                                                    "type": "PROMPT_ATTACK",
+                                                    "action": "BLOCKED",
+                                                }
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        ),
+        content_type="text/event-stream",
+    )
+    with pytest.raises(ProviderUnavailableError, match="blocked this turn") as raised:
+        _provider(client).assess(_request())
+    assert raised.value.category == "safety_blocked"
+    assert "PROMPT_ATTACK" not in str(raised.value)
+
+
+def test_content_filtered_stop_reason_is_safety_blocked():
+    client = FakeAgentCoreRuntime(
+        raw=_sse_bytes(
+            {"event": {"contentBlockDelta": {"delta": {"text": "filtered"}}}},
+            {"event": {"messageStop": {"stopReason": "content_filtered"}}},
+        ),
+        content_type="text/event-stream",
+    )
+    with pytest.raises(ProviderUnavailableError, match="blocked this turn") as raised:
+        _provider(client).assess(_request())
+    assert raised.value.category == "safety_blocked"
+    assert "filtered" not in str(raised.value)
+
+
+def test_malformed_sse_prose_is_rejected_as_malformed():
+    client = FakeAgentCoreRuntime(
+        raw=_sse_bytes(
+            {
+                "event": {
+                    "contentBlockDelta": {
+                        "delta": {"text": "Here is coaching without a JSON object."}
+                    }
+                }
+            },
+            {"event": {"messageStop": {"stopReason": "end_turn"}}},
+        ),
+        content_type="text/event-stream",
+    )
+    with pytest.raises(ProviderUnavailableError, match="malformed") as raised:
+        _provider(client).assess(_request())
+    assert raised.value.category == "malformed"
+
+
+def test_blocked_turn_is_rejected_without_persistence(tmp_path):
+    store = StudentStore(tmp_path / "agentcore-blocked.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = FakeAgentCoreRuntime(
+        raw=_sse_bytes(
+            {"event": {"messageStop": {"stopReason": "guardrail_intervened"}}}
+        ),
+        content_type="text/event-stream",
+    )
+    with pytest.raises(ProviderUnavailableError, match="blocked this turn"):
+        _service(store, _provider(client)).submit(_request(thread_id=thread_id))
+    assert all(item["role"] != "assistant" for item in store.get_messages(thread_id))
+    assert store.list_research_observations(notebook_id=thread_id) == []
+
+
+def test_harness_patch_appends_trusted_instructions_and_uses_untrusted_user():
+    import importlib.util
+    from pathlib import Path
+
+    path = Path("scripts/agentcore/harness_patch/structured_coach.py")
+    spec = importlib.util.spec_from_file_location("harness_structured_coach", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    prepared = compose_coach_prompt(_request(), include_recent_messages=False)
+    payload = {
+        "output_contract": "coach_turn",
+        "trusted_instructions": prepared.trusted_instructions,
+        "messages": [
+            {"role": "user", "content": [{"text": prepared.untrusted_turn_text}]}
+        ],
+    }
+    system_prompt, user_prompt = module.coaching_invoke_prompts(payload)
+    assert prepared.trusted_instructions in system_prompt
+    assert user_prompt == prepared.untrusted_turn_text
+    assert _STAGE_MARKERS["problem_identification"] in system_prompt
+    assert _STUDENT_MESSAGE in user_prompt
+    assert _STUDENT_MESSAGE not in system_prompt
+    legacy_system, legacy_user = module.coaching_invoke_prompts(
+        {"messages": [{"role": "user", "content": [{"text": prepared.composed_text}]}]}
+    )
+    assert prepared.trusted_instructions not in legacy_system
+    assert legacy_user == prepared.composed_text

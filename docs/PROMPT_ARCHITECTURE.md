@@ -81,14 +81,29 @@ includes an internal Interpret → Assumption/V&V check → one Socratic probe �
 reflection trigger. Those headings are not student-facing. Grounding rules
 require claim-level `[S#]` citations, prohibit invented sources/quotes, and
 tell the coach to identify an evidence gap when the retrieved excerpts do not
-answer the question.
+answer the question. Trusted prompt files must not contain literal
+prompt-attack examples; quoted override attempts remain evidence only when they
+genuinely appear in retrieved or student content.
 
-AgentCore omits `<recent_messages>` from the composed brief because the same
-turns are already Converse `messages`. When history no longer fits, derived
-`<conversation_memory>` is inserted once between summary and recent_messages.
-That block is untrusted student/project content, not instructions. Mock,
-OpenAI, and Bedrock Converse keep the inline recent-history block unless a
-provider opts into the same planner.
+The composer exposes two bounded products in addition to `composed_text`:
+
+- `trusted_instructions`: shared coaching, the authoritative stage file, and
+  runtime/output rules;
+- `untrusted_turn_text`: project context, retrieved evidence, summary/memory,
+  and the current student contribution.
+
+Mock, OpenAI, and Bedrock Converse still send the ordered `composed_text`.
+AgentCore sends trusted instructions in a dedicated `trusted_instructions`
+harness field and keeps DSQL history plus the untrusted current turn in
+`messages`. Token budgeting still counts the full `composed_text` so the split
+cannot overflow the window.
+
+AgentCore omits duplicated `<recent_messages>` from the untrusted turn because
+the same turns are already Converse `messages`. When history no longer fits,
+derived `<conversation_memory>` is inserted once between summary and
+recent_messages. That block is untrusted student/project content, not
+instructions. Mock, OpenAI, and Bedrock Converse keep the inline recent-history
+block unless a provider opts into the same planner.
 
 ## Production Knowledge Base path
 
@@ -138,7 +153,7 @@ cannot introduce another notebook's chunk.
 | `backend/prompts/shared/coaching.md` | Shared Socratic coach behaviour, Assumption Check, V&V |
 | `backend/prompts/stages/{problem_identification,concept_generation,design_specification,deep_analysis,reflection}.md` | Stage purpose, coaching strategy, advance/stay criteria. `deep_analysis.md` is student-facing Ethics & Critical Thinking |
 | `backend/prompts/loader.py` | UTF-8 load + in-process cache; stage IDs from `STAGE_BY_ID` |
-| `backend/prompts/composer.py` | Ordered composition with explicit delimiters |
+| `backend/prompts/composer.py` | Ordered composition with explicit delimiters and a trusted/untrusted channel split |
 | `backend/retrieval.py` | Retrieval port, local chunker/ranker, composite splitter |
 | `backend/bedrock_retrieve.py` | Bedrock Knowledge Base `Retrieve` adapter (injected client in tests) |
 | `backend/application.py` | Authoritative source selection, retrieval injection, citation filtering, audit persistence |

@@ -150,10 +150,13 @@ def test_harness_provider_sends_luna_override_and_ignores_request_model_id():
     assert kwargs["maxIterations"] == 1
     assert "claude" not in json.dumps(kwargs).casefold()
     current = kwargs["messages"][-1]["content"][0]["text"]
-    assert current == compose_coach_prompt(
-        _request(), include_recent_messages=False
-    ).composed_text
+    prepared = compose_coach_prompt(_request(), include_recent_messages=False)
+    assert current == prepared.untrusted_turn_text
     assert "supplied separately as message history" in current
+    system = kwargs["systemPrompt"][0]["text"]
+    assert prepared.trusted_instructions in system
+    assert "STAGE: PROBLEM IDENTIFICATION" in system
+    assert "STAGE: PROBLEM IDENTIFICATION" not in current
 
 
 def test_harness_system_prompt_stays_thin_and_matches_runtime_patch_intent():
@@ -166,6 +169,7 @@ def test_harness_system_prompt_stays_thin_and_matches_runtime_patch_intent():
     )
     assert "Do not call tools" in patch
     assert "output_contract=coach_turn" in patch or "coach_turn" in patch
+    assert "trusted_instructions" in patch
 
 
 def test_configured_production_provider_is_not_the_eval_harness(

@@ -16,6 +16,23 @@ def _implementation_source(module: object) -> str:
     return Path(inspect.getfile(module)).read_text(encoding="utf-8")
 
 
+def test_student_coach_error_copy_is_category_safe():
+    """Safety-blocked turns must not blame start.sh or claim the provider is down."""
+    from ui.panels.chat import student_coach_error_message
+
+    blocked = student_coach_error_message("safety_blocked")
+    assert "safety check" in blocked.lower()
+    assert "notebook was not updated" in blocked.lower()
+    assert "start.sh" not in blocked
+    assert "provider" not in blocked.lower()
+    unavailable = student_coach_error_message("unavailable")
+    assert "temporarily unavailable" in unavailable.lower()
+    assert "start.sh" not in unavailable
+    chat_py = _implementation_source(chat_module)
+    assert "Prefer `sh scripts/start.sh`" not in chat_py
+    assert "check the local provider" not in chat_py
+
+
 def test_chat_composer_attachment_error_is_recoverable(monkeypatch):
     """Rejecting a chat attachment leaves the notebook usable and unsent."""
     from ui import chat

@@ -152,7 +152,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(live_eval_banner())
     print()
 
-    from backend.agentcore_harness_provider import AgentCoreHarnessCoachProvider
+    from backend.agentcore_harness_provider import (
+        AgentCoreHarnessCoachProvider,
+        _system_prompt_with_trusted,
+    )
     from backend.domain import CoachRequest
     from backend.settings import settings
 
@@ -180,7 +183,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         current_stage="problem_identification",
         response_detail="long",
     )
-    kwargs = provider.build_invoke_kwargs(messages=provider._planned_messages(probe))
+    messages, trusted = provider._planned_turn(probe)
+    kwargs = provider.build_invoke_kwargs(
+        messages=messages,
+        system_prompt=_system_prompt_with_trusted(trusted),
+    )
     model = kwargs["model"]["bedrockModelConfig"]
     if model["modelId"] != LIVE_EVAL_MODEL_ID or model["apiFormat"] != LIVE_EVAL_API_FORMAT:
         print("ABORT: Luna override could not be proven.", file=sys.stderr)

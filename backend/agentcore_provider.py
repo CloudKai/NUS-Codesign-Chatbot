@@ -1,10 +1,10 @@
 """Amazon Bedrock AgentCore Runtime adapter for one structured coaching turn.
 
 The adapter invokes ``InvokeAgentRuntime`` once per turn with this
-application's composed prompt, validates ``ProviderCoachOutput``, and returns
-the provider-neutral result. It does not own phase progression, citations,
-persistence, retrieval, or IAM. Tests inject a fake client so automated runs
-never contact AWS.
+application's trusted instructions plus untrusted turn content, validates
+``ProviderCoachOutput``, and returns the provider-neutral result. It does not
+own phase progression, citations, persistence, retrieval, or IAM. Tests inject
+a fake client so automated runs never contact AWS.
 
 Production coaching uses the AgentCore ``coaching`` specialist with
 ``output_contract=coach_turn``. Thinking Path stages stay in DSQL; only the
@@ -12,11 +12,14 @@ runtime *topic* key maps ``deep_analysis`` to the POC ``ethics_critical``
 label. Invokes are stateless (a fresh ``runtimeSessionId`` per turn) so the
 runtime LRU cache is not a second transcript. The token-aware planner sends
 the full active DSQL transcript when it fits, otherwise derived
-``conversation_memory`` plus a recent verbatim window. The composed current
-turn omits ``<recent_messages>`` so those turns are not duplicated.
+``conversation_memory`` plus a recent verbatim window. Trusted shared/stage/
+runtime instructions travel in ``trusted_instructions``; untrusted project,
+evidence, memory, and the current student contribution travel as the last user
+message. The untrusted brief omits duplicated ``<recent_messages>`` history.
 ``student_id`` is the store owner identifier, never a notebook id. This
 adapter does not call RetrieveAndGenerate. Production DEFAULT is unchanged by
-the isolated Luna InvokeHarness evaluation path.
+the isolated Luna InvokeHarness evaluation path. Guardrail blocks are
+category-only failures and never persist refusal text.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import logging
 import re
 import uuid
 from collections.abc import Mapping
@@ -45,12 +49,17 @@ from .prompts import compose_coach_prompt
 from .providers import ProviderUnavailableError
 from .settings import settings
 
+logger = logging.getLogger(__name__)
+
 _GENERIC_FAILURE = "AgentCore could not create a structured coaching turn"
 _TRUNCATED_FAILURE = "AgentCore truncated the coaching turn"
 _MALFORMED_FAILURE = "AgentCore returned a malformed coaching turn"
+_BLOCKED_FAILURE = "AgentCore blocked this turn"
 _IMAGE_FAILURE = "AgentCore does not support this image type"
 _PHASE = "coaching"
 _OUTPUT_CONTRACT = "coach_turn"
+_TRUSTED_INSTRUCTIONS_FIELD = "trusted_instructions"
+_BLOCKED_STOP_REASONS = frozenset({"guardrail_intervened", "content_filtered"})
 _DATA_URL = re.compile(r"^data:([^;,]+);base64,(.+)$", re.DOTALL | re.IGNORECASE)
 _IMAGE_FORMATS = {
     "image/png": "png",
@@ -140,14 +149,20 @@ def _translate_agentcore_error(error: BaseException) -> ProviderUnavailableError
         return error
     code = _error_code(error)
     if code in _THROTTLED_CODES:
-        return ProviderUnavailableError("AgentCore is temporarily throttled")
+        return ProviderUnavailableError(
+            "AgentCore is temporarily throttled", category="throttled"
+        )
     if code in _TIMEOUT_CODES or isinstance(error, TimeoutError):
-        return ProviderUnavailableError("AgentCore timed out")
+        return ProviderUnavailableError("AgentCore timed out", category="timeout")
     if code in _ACCESS_DENIED_CODES:
-        return ProviderUnavailableError("AgentCore access was denied")
+        return ProviderUnavailableError(
+            "AgentCore access was denied", category="access_denied"
+        )
     if code in _RUNTIME_UNAVAILABLE_CODES:
-        return ProviderUnavailableError("AgentCore runtime is unavailable")
-    return ProviderUnavailableError(_GENERIC_FAILURE)
+        return ProviderUnavailableError(
+            "AgentCore runtime is unavailable", category="unavailable"
+        )
+    return ProviderUnavailableError(_GENERIC_FAILURE, category="unavailable")
 
 
 def _bytes_from_data_url(data_url: str) -> bytes:
@@ -191,21 +206,73 @@ def _payload_image_block(image: CoachImageInput) -> dict[str, Any]:
     }
 
 
+def _blocked_error() -> ProviderUnavailableError:
+    """Return a category-only guardrail-block failure with no refusal text."""
+    return ProviderUnavailableError(_BLOCKED_FAILURE, category="safety_blocked")
+
+
+def _malformed_error() -> ProviderUnavailableError:
+    """Return a category-only malformed-output failure."""
+    return ProviderUnavailableError(_MALFORMED_FAILURE, category="malformed")
+
+
+def _mapping_indicates_runtime_block(obj: Any, *, depth: int = 0) -> bool:
+    """Return True when a runtime event reports a blocked guardrail assessment."""
+    if depth > 10 or not isinstance(obj, Mapping):
+        return False
+    stop = obj.get("messageStop")
+    if isinstance(stop, Mapping):
+        if str(stop.get("stopReason") or "") in _BLOCKED_STOP_REASONS:
+            return True
+    if str(obj.get("stopReason") or "") in _BLOCKED_STOP_REASONS:
+        return True
+    if str(obj.get("action") or "").upper() == "BLOCKED":
+        return True
+    for value in obj.values():
+        if isinstance(value, Mapping) and _mapping_indicates_runtime_block(
+            value, depth=depth + 1
+        ):
+            return True
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, Mapping) and _mapping_indicates_runtime_block(
+                    item, depth=depth + 1
+                ):
+                    return True
+    return False
+
+
+def _raise_if_runtime_blocked(events: list[Any]) -> None:
+    """Fail closed on guardrail intervention before parsing model text.
+
+    Args:
+        events: Parsed SSE or Converse-style runtime events.
+
+    Raises:
+        ProviderUnavailableError: When the runtime blocked the turn. The error
+            never includes refusal text, prompt text, or AWS trace bodies.
+    """
+    for event in events:
+        if isinstance(event, Mapping) and _mapping_indicates_runtime_block(event):
+            logger.warning("agentcore_turn_blocked")
+            raise _blocked_error()
+
+
 def _parse_json_object(value: Any) -> dict[str, Any]:
     """Parse a runtime payload into a JSON object without fence fallbacks."""
     if isinstance(value, dict):
         return value
     raw = str(value or "").strip()
     if not raw:
-        raise ProviderUnavailableError(_MALFORMED_FAILURE)
+        raise _malformed_error()
     if raw.startswith("```"):
-        raise ProviderUnavailableError(_MALFORMED_FAILURE)
+        raise _malformed_error()
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError as error:
-        raise ProviderUnavailableError(_MALFORMED_FAILURE) from error
+        raise _malformed_error() from error
     if not isinstance(parsed, dict):
-        raise ProviderUnavailableError(_MALFORMED_FAILURE)
+        raise _malformed_error()
     return parsed
 
 
@@ -231,7 +298,12 @@ def _unwrap_runtime_object(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _text_from_stream_events(events: list[Any]) -> str:
-    """Concatenate assistant text and tool-input deltas from runtime events."""
+    """Concatenate assistant text and tool-input deltas from runtime events.
+
+    Guardrail intervention is detected across the whole event list before any
+    refusal text is assembled or parsed as ``coach_turn`` JSON.
+    """
+    _raise_if_runtime_blocked(events)
     text_parts: list[str] = []
     tool_parts: list[str] = []
     for event in events:
@@ -241,12 +313,14 @@ def _text_from_stream_events(events: list[Any]) -> str:
         if not isinstance(inner, Mapping):
             continue
         stop = inner.get("messageStop")
-        if isinstance(stop, Mapping) and str(stop.get("stopReason") or "") in {
-            "max_tokens",
-            "content_filtered",
-            "timeout_exceeded",
-        }:
-            raise ProviderUnavailableError(_TRUNCATED_FAILURE)
+        if isinstance(stop, Mapping):
+            stop_reason = str(stop.get("stopReason") or "")
+            if stop_reason == "max_tokens":
+                raise ProviderUnavailableError(
+                    _TRUNCATED_FAILURE, category="malformed"
+                )
+            if stop_reason == "timeout_exceeded":
+                raise ProviderUnavailableError(_TRUNCATED_FAILURE, category="timeout")
         delta = inner.get("contentBlockDelta")
         if isinstance(delta, Mapping):
             payload = delta.get("delta") if isinstance(delta.get("delta"), Mapping) else delta
@@ -297,7 +371,7 @@ def _read_response_bytes(response: Mapping[str, Any]) -> bytes:
             elif isinstance(line, str):
                 lines.append(line.encode("utf-8"))
         return b"\n".join(lines)
-    raise ProviderUnavailableError(_MALFORMED_FAILURE)
+    raise _malformed_error()
 
 
 def _events_from_sse(raw: str) -> list[Any]:
@@ -322,35 +396,37 @@ def _payload_from_runtime_response(response: Mapping[str, Any]) -> dict[str, Any
     raw_bytes = _read_response_bytes(response)
     raw = raw_bytes.decode("utf-8", errors="replace").strip()
     if not raw:
-        raise ProviderUnavailableError(_MALFORMED_FAILURE)
+        raise _malformed_error()
     if raw.startswith("```"):
-        raise ProviderUnavailableError(_MALFORMED_FAILURE)
+        raise _malformed_error()
 
     parsed: Any
     if "text/event-stream" in content_type or raw.startswith("data:"):
         events = _events_from_sse(raw)
-        assembled = _text_from_stream_events(
-            [item for item in events if isinstance(item, Mapping)]
-        )
+        mappings = [item for item in events if isinstance(item, Mapping)]
+        _raise_if_runtime_blocked(mappings)
+        assembled = _text_from_stream_events(mappings)
         if assembled:
             return _unwrap_runtime_object(_parse_json_object(assembled))
         if len(events) == 1 and isinstance(events[0], dict):
             parsed = events[0]
         else:
-            raise ProviderUnavailableError(_MALFORMED_FAILURE)
+            raise _malformed_error()
     else:
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError as error:
-            raise ProviderUnavailableError(_MALFORMED_FAILURE) from error
+            raise _malformed_error() from error
 
     if isinstance(parsed, list):
+        _raise_if_runtime_blocked(parsed)
         assembled = _text_from_stream_events(parsed)
         if assembled:
             return _unwrap_runtime_object(_parse_json_object(assembled))
-        raise ProviderUnavailableError(_MALFORMED_FAILURE)
+        raise _malformed_error()
     if not isinstance(parsed, dict):
-        raise ProviderUnavailableError(_MALFORMED_FAILURE)
+        raise _malformed_error()
+    _raise_if_runtime_blocked([parsed])
     if "event" in parsed or "contentBlockDelta" in parsed:
         assembled = _text_from_stream_events([parsed])
         if assembled:
@@ -365,7 +441,7 @@ def _validated_result(
     try:
         turn = ProviderCoachOutput.model_validate(payload)
     except Exception as error:
-        raise ProviderUnavailableError(_MALFORMED_FAILURE) from error
+        raise _malformed_error() from error
     assessment = turn.assessment.model_copy(
         update={"current_stage": request.current_stage}
     )
@@ -482,10 +558,12 @@ class AgentCoreCoachProvider:
         """Build the JSON payload for one coaching InvokeAgentRuntime call.
 
         Always sends Converse ``messages``: planner-selected DSQL history plus
-        the composed current-turn brief. The brief omits ``<recent_messages>``
-        so prior turns are not supplied twice. Derived memory appears only in
+        the untrusted current-turn content. Trusted shared/stage/runtime
+        instructions travel in ``trusted_instructions``. The untrusted brief
+        omits duplicated ``<recent_messages>``. Derived memory appears only in
         ``<conversation_memory>`` when compression was required. A top-level
-        ``prompt`` string is never used.
+        ``prompt`` string is never used. Token budgeting still uses the full
+        ordered ``composed_text`` so the split cannot overflow the window.
         """
         existing = memory_from_metadata(
             {"conversation_memory": request.conversation_memory},
@@ -513,20 +591,23 @@ class AgentCoreCoachProvider:
                     "conversation_memory": plan.compressed_memory.model_dump(mode="json")
                 }
             )
-        prompt = compose_coach_prompt(
+        prepared = compose_coach_prompt(
             planned_request, include_recent_messages=False
-        ).composed_text
+        )
         messages = list(plan.messages)
         messages.append(
             {
                 "role": "user",
-                "content": _current_turn_content(prompt, list(request.image_inputs)),
+                "content": _current_turn_content(
+                    prepared.untrusted_turn_text, list(request.image_inputs)
+                ),
             }
         )
         payload: dict[str, Any] = {
             "phase": _PHASE,
             "topic": agentcore_topic_for_stage(request.current_stage),
             "output_contract": _OUTPUT_CONTRACT,
+            _TRUSTED_INSTRUCTIONS_FIELD: prepared.trusted_instructions,
             "messages": messages,
         }
         student_id = " ".join(str(request.student_id or "").split()).strip()
@@ -558,7 +639,7 @@ class AgentCoreCoachProvider:
                 accept="application/json",
             )
             if not isinstance(response, Mapping):
-                raise ProviderUnavailableError(_MALFORMED_FAILURE)
+                raise _malformed_error()
             parsed = _payload_from_runtime_response(response)
             result = _validated_result(parsed, request)
             plan = self._last_plan

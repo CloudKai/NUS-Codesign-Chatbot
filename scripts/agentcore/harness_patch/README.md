@@ -23,19 +23,28 @@ The FastAPI app sends:
   "topic": "problem_identification",
   "output_contract": "coach_turn",
   "student_id": "cognito:<sub>",
+  "trusted_instructions": "<shared + stage + runtime>",
   "messages": [
     {"role": "user", "content": [{"text": "<prior DSQL turn>"}]},
     {"role": "assistant", "content": [{"text": "<prior coach reply>"}]},
-    {"role": "user", "content": [{"text": "<current-turn coaching brief>"}]}
+    {"role": "user", "content": [{"text": "<untrusted current-turn content>"}]}
   ]
 }
 ```
 
-The current-turn brief is `compose_coach_prompt(..., include_recent_messages=False)`.
-Prior DSQL turns live only in `messages`. `deep_analysis` is sent as topic
-`ethics_critical` only. Thinking Path rows in DSQL stay `deep_analysis`.
-Invokes are **stateless** (fresh `runtimeSessionId` per turn). Do not attach
-notebook history to AgentCore session memory.
+`trusted_instructions` is application-owned shared coaching, the authoritative
+stage file, and runtime/output rules. The last user message is untrusted
+project context, retrieved evidence, summary/memory, and the current student
+contribution (`compose_coach_prompt(..., include_recent_messages=False)`
+untrusted product). Prior DSQL turns live only in `messages`.
+`deep_analysis` is sent as topic `ethics_critical` only. Thinking Path rows in
+DSQL stay `deep_analysis`. Invokes are **stateless** (fresh `runtimeSessionId`
+per turn). Do not attach notebook history to AgentCore session memory.
+
+Older companions that omit `trusted_instructions` still send the complete
+composed brief as the last user message. This patch remains compatible: when
+the field is absent, the thin JSON system prompt is used and the last user
+message is invoked unchanged.
 
 Coaching must keep **zero** Knowledge Base / MCP tools. Q&A may keep KB tools;
 do not give them to the coaching specialist.
@@ -56,26 +65,26 @@ selects the system prompt in `main.py` for `output_contract=coach_turn`, so
 1. Import the helper:
 
 ```python
-from structured_coach import structured_coaching_system_prompt
+from structured_coach import coaching_invoke_prompts
 import json
 ```
 
 2. Keep `PHASE_TOOLS[phases.PHASE_COACHING] = []`.
 
-3. When `payload.get("output_contract") == "coach_turn"`, build the specialist
-   with the JSON system prompt and **no tools**, invoke once (not the SSE
-   event stream), and return the parsed object:
+3. When `payload.get("output_contract") == "coach_turn"`, append trusted
+   instructions to the JSON system prompt and invoke **only** the untrusted
+   user content (not the SSE event stream):
 
 ```python
 @app.entrypoint
 async def invoke(payload, context):
-    prompt = _extract_prompt(payload)
     phase = payload.get("phase", phases.DEFAULT_PHASE)
     topic = payload.get("topic")
     if payload.get("output_contract") == "coach_turn":
+        system_prompt, prompt = coaching_invoke_prompts(payload)
         agent = Agent(
             model=load_model(),
-            system_prompt=structured_coaching_system_prompt(),
+            system_prompt=system_prompt,
             tools=[],
             callback_handler=None,
         )
@@ -94,8 +103,10 @@ async def invoke(payload, context):
 
 ## Deploy
 
-Republish the existing runtime only. Confirm the `DEFAULT` endpoint stays
-READY. Then run the companion smoke script with an explicit cost cap:
+Republish this patch to the existing DEFAULT runtime **before** relying on the
+companion adapter's trusted/untrusted split in live traffic. Confirm the
+`DEFAULT` endpoint stays READY. Then run the companion smoke script with an
+explicit cost cap:
 
 ```sh
 .venv/bin/python scripts/agentcore_smoke.py \

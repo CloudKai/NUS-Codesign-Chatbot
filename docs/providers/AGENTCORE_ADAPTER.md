@@ -19,10 +19,11 @@ Each coach turn makes **one** `InvokeAgentRuntime` call with:
   "topic": "problem_identification",
   "output_contract": "coach_turn",
   "student_id": "cognito:<sub>",
+  "trusted_instructions": "<shared + stage + runtime>",
   "messages": [
     {"role": "user", "content": [{"text": "<prior DSQL turn>"}]},
     {"role": "assistant", "content": [{"text": "<prior coach reply>"}]},
-    {"role": "user", "content": [{"text": "<compose_coach_prompt text>"}]}
+    {"role": "user", "content": [{"text": "<untrusted current-turn content>"}]}
   ]
 }
 ```
@@ -31,10 +32,12 @@ Each coach turn makes **one** `InvokeAgentRuntime` call with:
 token-aware planner sends the **full active DSQL transcript** when it fits
 the conservative Luna-safe input budget. Only when that would overflow does
 the planner compress older turns into derived `conversation_memory` and keep
-a recent verbatim window (default 12). The composed current-turn brief omits
-`<recent_messages>` so those turns are not duplicated inside the prompt.
-Derived memory is model input only; DSQL remains the complete transcript.
-A fresh `runtimeSessionId` (`stateless-…`) is still used per invoke.
+a recent verbatim window (default 12). Trusted shared/stage/runtime
+instructions travel in `trusted_instructions`. The last user message is the
+untrusted product from `compose_coach_prompt(..., include_recent_messages=False)`
+(project context, retrieved evidence, summary/memory, current student
+contribution). Derived memory is model input only; DSQL remains the complete
+transcript. A fresh `runtimeSessionId` (`stateless-…`) is still used per invoke.
 
 Invariants:
 
@@ -49,11 +52,16 @@ Invariants:
   never a notebook id) so DSQL remains the only durable transcript;
 - the coaching specialist must have **zero** Knowledge Base / MCP tools;
 - images map to Converse-style JSON blocks or the adapter fails closed;
-- provider exceptions map to category-only `ProviderUnavailableError`.
+- provider exceptions map to category-only `ProviderUnavailableError`;
+- `messageStop.stopReason=guardrail_intervened` or guardrail `action=BLOCKED`
+  maps to `safety_blocked` before any refusal text is parsed.
 
 The live harness must apply
 [`scripts/agentcore/harness_patch/README.md`](../../scripts/agentcore/harness_patch/README.md)
-so coaching returns JSON instead of prose.
+so coaching returns JSON instead of prose **and** appends `trusted_instructions`
+to the system prompt. Republish that patch to existing DEFAULT before relying
+on the split in live traffic. Older payloads that omit the field still treat
+the last user message as the complete brief.
 
 ## Configuration
 

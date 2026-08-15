@@ -586,7 +586,9 @@ def test_local_api_maps_provider_failures_to_503(tmp_path, monkeypatch):
     )
 
     assert response.status_code == 503
-    assert "mock provider offline" in response.json()["detail"]
+    detail = response.json()["detail"]
+    assert detail["message"] == "mock provider offline"
+    assert detail["category"] == "unavailable"
 
 
 def test_operational_metrics_are_aggregate_and_do_not_log_student_content(
@@ -716,6 +718,67 @@ def test_operational_metrics_record_provider_failure_without_thread_identifier(
     )
     assert coach["outcome"] == "provider_unavailable"
     assert coach["retrieval_outcome"] == "not_requested"
+    assert thread_id not in json.dumps(coach)
+
+
+def test_local_api_maps_safety_blocked_to_structured_503(tmp_path, monkeypatch, caplog):
+    """Guardrail blocks stay 503 with a category, never prompt or AWS bodies."""
+    from backend.providers import ProviderUnavailableError
+    from backend.workflow import CoachWorkflow
+
+    store = StudentStore(tmp_path / "provider-blocked.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+
+    def fail_run(self, request):
+        raise ProviderUnavailableError(
+            "AgentCore blocked this turn", category="safety_blocked"
+        )
+
+    monkeypatch.setattr(CoachWorkflow, "run", fail_run)
+    client = TestClient(create_app(store))
+    with caplog.at_level("INFO", logger="co_design.operational"):
+        response = client.post(
+            "/api/v1/coach/turn",
+            json={
+                "thread_id": thread_id,
+                "student_message": "PRIVATE_STUDENT_PROMPT_DO_NOT_LOG",
+                "current_stage": "problem_identification",
+                "response_detail": "short",
+            },
+        )
+        stream = client.post(
+            "/api/v1/coach/turn/stream",
+            json={
+                "thread_id": thread_id,
+                "student_message": "PRIVATE_STUDENT_PROMPT_DO_NOT_LOG",
+                "current_stage": "problem_identification",
+                "response_detail": "short",
+            },
+        )
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert detail["category"] == "safety_blocked"
+    assert detail["message"] == "AgentCore blocked this turn"
+    assert "PROMPT_ATTACK" not in response.text
+    assert "PRIVATE_STUDENT_PROMPT_DO_NOT_LOG" not in response.text
+    events = [
+        json.loads(line)
+        for line in stream.text.splitlines()
+        if line.strip()
+    ]
+    error = next(event for event in events if event.get("event") == "error")
+    assert error["status"] == 503
+    assert error["category"] == "safety_blocked"
+    assert error["detail"] == "AgentCore blocked this turn"
+    coach = next(
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.name == "co_design.operational"
+        and '"event":"coach_turn"' in record.getMessage()
+        and '"outcome":"safety_blocked"' in record.getMessage()
+    )
+    assert coach["outcome"] == "safety_blocked"
     assert thread_id not in json.dumps(coach)
 
 

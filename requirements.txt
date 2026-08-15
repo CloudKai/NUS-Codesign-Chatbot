@@ -17,7 +17,9 @@ openpyxl==3.1.5
 matplotlib==3.11.1
 
 # Production AWS adapters (lazy-imported; not required for local mock tests)
-boto3==1.35.99
+# 1.43+ is required for bedrock-agentcore, InvokeHarness, and aws login CRT creds.
+boto3==1.43.35
+botocore[crt]==1.43.35
 psycopg[binary]==3.2.9
 
 # Tests

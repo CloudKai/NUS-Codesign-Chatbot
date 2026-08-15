@@ -321,3 +321,45 @@ def test_professor_research_client_uses_versioned_routes_and_server_identity() -
         for method, _url, kwargs in calls
         if method == "POST"
     )
+
+
+def test_api_client_surfaces_safety_blocked_category(tmp_path, monkeypatch):
+    """Stream error events expose the structured category to the UI client."""
+    from backend.providers import ProviderUnavailableError
+    from backend.workflow import CoachWorkflow
+
+    store = StudentStore(tmp_path / "client-blocked.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _set_first_phase(store, thread_id)
+
+    def fail_run(self, request):
+        raise ProviderUnavailableError(
+            "AgentCore blocked this turn", category="safety_blocked"
+        )
+
+    monkeypatch.setattr(CoachWorkflow, "run", fail_run)
+    client = _client_for_store(store, auto_advance=False)
+    try:
+        events = list(
+            client.stream_coach_turn(
+                CoachRequest(
+                    thread_id=thread_id,
+                    student_message="I compared two crossing designs.",
+                    current_stage="problem_identification",
+                    response_detail="short",
+                )
+            )
+        )
+        error = next(event for event in events if event.get("event") == "error")
+        assert error["status"] == 503
+        assert error["category"] == "safety_blocked"
+        assert error["detail"] == "AgentCore blocked this turn"
+        assert LocalApiClient.coaching_error_category(error) == "safety_blocked"
+        assert (
+            LocalApiClient.coaching_error_category(
+                {"detail": {"message": "AgentCore blocked this turn", "category": "safety_blocked"}}
+            )
+            == "safety_blocked"
+        )
+    finally:
+        client.close()
