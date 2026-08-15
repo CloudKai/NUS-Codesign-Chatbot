@@ -28,6 +28,7 @@ logic.
 | Canonical harness | [`agentcore_runtime/`](../agentcore_runtime/) is the production specialist runtime (Q&A, Coaching, Review). Copy the **entire package** onto existing DEFAULT | Do not maintain a second live implementation in `scripts/agentcore/harness_patch/` |
 | `diagnostics/check_agentcore_runtime_dependencies.py` | Network-free AgentCore runtime pin + Strands API check | Requires `pip install -r agentcore_runtime/requirements.txt`; no AWS, no `specialist_invoke()` |
 | `diagnostics/test_course_retrieval.py` | Explicitly approved Bedrock KB `Retrieve` diagnostic | Requires `--i-approve-live-bedrock`; prints hit counts and short previews only; no generation; no pytest path |
+| `diagnostics/check_knowledge_base_retrieve.py` | Structured KB Retrieve health check using the production adapter | Refuses live AWS by default; `--dry-run` is safe; live requires `--i-approve-live-bedrock` and `--max-requests` 1 or 2; prints secret-safe JSON; no generation |
 | `evals/evaluate_live_coach.py` | Isolated GPT-5.6 Luna InvokeHarness quality evaluation | Requires `--i-approve-live-luna`; never changes production DEFAULT; no pytest AWS path |
 | `sync_course_materials.py` | Upload `lectureNotes/` and `readings/` to shared `course/` S3 keys | Requires `--confirm`; never writes `users/`; never deletes course objects |
 | `preview_prompt.py` | Demo-only composed stage-prompt preview | No DB, student data, tokens, or provider calls |

@@ -53,7 +53,7 @@ modules.
 | File | Covers |
 |---|---|
 | `test_architecture_contracts.py` | Façade signatures, StudentStore/OCC inventories, professor-inclusive FastAPI routes |
-| `test_deployment_config.py` | Compose/Caddy/Dockerfile production auth route allow-list, Cognito redirect, stateless prod compose |
+| `test_deployment_config.py` | Compose/Caddy/Dockerfile production auth route allow-list, Cognito redirect, stateless prod compose, host `.env` Knowledge Base contract |
 | `http/test_api.py` | FastAPI `/api/v1` health, coaching turn, transitions, integrity guards |
 | `http/test_api_client.py` | Typed `LocalApiClient` confirmation + auto-advance contracts; `/auth/me` session mapping |
 | `http/test_app_sessions.py` | Cognito refresh/ID cookie sessions, OAuth state binder, callback/logout |
@@ -74,7 +74,7 @@ modules.
 | `domain/test_runtime_model.py` | Explicit Sonnet/Luna factory, no BedrockModel(), ApplyGuardrail for Mantle, runtime pin sync |
 | `domain/test_agentcore_harness_provider.py` | Isolated Luna InvokeHarness eval adapter; trusted override; no AWS |
 | `domain/test_context_planner.py` | Full-history-first planner, compression, revision invalidation |
-| `domain/test_bedrock_retrieve.py` | Bedrock Knowledge Base Retrieve adapter: selected `[S#]` mapping, foreign-key drop, composite factory without local course fallback |
+| `domain/test_bedrock_retrieve.py` | Bedrock Knowledge Base Retrieve adapter: selected `[S#]` mapping, foreign-key drop, classified Retrieve failures, metadata-filter fallback including ValidationException, composite factory without local course fallback |
 | `domain/test_primary_path.py` | All five phases, stale/reject, restart, notebook isolation, schema |
 | `domain/test_research_coding_domain.py` | Structured provisional CLEAR/Facione/ethics coding |
 | `persistence/test_research_persistence.py` | Offset-only observations, revisions, human decisions, audit, workflow marker |

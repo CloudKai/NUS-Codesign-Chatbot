@@ -74,6 +74,7 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert 'AWS_REGION: "us-west-2"' in app
     assert 'COURSE_MATERIAL_SYNC_ENABLED: "true"' in app
     assert 'COURSE_MATERIALS_PREFIX: "course/"' in app
+    assert 'KNOWLEDGE_BASE_TYPE: "MANAGED"' in app
     assert "LECTURE_NOTES_DIR" not in app
     assert "DSQL_USER: \"admin\"" not in app
     assert "ports:" not in app
@@ -84,11 +85,14 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert "8000:8000" not in compose
     assert "8501:8501" not in compose
     assert (
-        'COGNITO_REDIRECT_URI: "https://d1sxfuoybzedj5.cloudfront.net/api/v1/auth/callback"'
+        'COGNITO_REDIRECT_URI: "${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}/api/v1/auth/callback"'
         in app
     )
-    assert 'CO_DESIGN_PUBLIC_API_URL: "https://d1sxfuoybzedj5.cloudfront.net"' in app
-    assert 'CO_DESIGN_UI_URL: "https://d1sxfuoybzedj5.cloudfront.net"' in app
+    assert (
+        'CO_DESIGN_PUBLIC_API_URL: "${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}"'
+        in app
+    )
+    assert 'CO_DESIGN_UI_URL: "${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}"' in app
     assert 'MODEL_PROVIDER: "agentcore"' in app
     assert 'MOCK_OPENAI: "false"' in app
     assert 'AGENTCORE_MODEL_ID: "global.anthropic.claude-sonnet-4-6"' in app
@@ -100,6 +104,50 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
         assert 'max-file: "3"' in block
     # Do not force a read-only root filesystem on app/caddy without verifying
     # Streamlit/Caddy writable paths; only the secrets bind mount is read_only.
+
+
+def test_production_compose_keeps_host_env_knowledge_base_contract():
+    """Host `.env` must supply KB/course/runtime IDs; Compose must not drop them.
+
+    Production Compose uses ``env_file: .env`` rather than interpolating those
+    values. CI copies `.env.example`, which comments the live IDs, so required
+    interpolations would break mock CI.
+    """
+    compose = (ROOT / "compose.prod.yaml").read_text(encoding="utf-8")
+    app = _service_block(compose, "app")
+    env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+
+    assert "env_file:" in app
+    assert "- .env" in app
+    assert "${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}" in app
+    assert 'AWS_REGION: "us-west-2"' in app
+    assert 'COURSE_MATERIALS_PREFIX: "course/"' in app
+    assert 'KNOWLEDGE_BASE_TYPE: "MANAGED"' in app
+    assert 'COURSE_MATERIAL_SYNC_ENABLED: "true"' in app
+    assert 'MODEL_PROVIDER: "agentcore"' in app
+    assert 'MOCK_OPENAI: "false"' in app
+    assert "${KNOWLEDGE_BASE_ID" not in compose
+    assert "${COURSE_MATERIALS_BUCKET" not in compose
+    assert "${AGENTCORE_RUNTIME_ARN" not in compose
+    assert "${GUARDRAIL_ID" not in compose
+    assert "${GUARDRAIL_VERSION" not in compose
+    for needle in (
+        "KNOWLEDGE_BASE_ID: set in host .env",
+        "COURSE_MATERIALS_BUCKET: set in host .env",
+        "AGENTCORE_RUNTIME_ARN: set in host .env",
+        "GUARDRAIL_ID / GUARDRAIL_VERSION: set in host .env",
+    ):
+        assert needle in compose
+    for needle in (
+        "KNOWLEDGE_BASE_ID=",
+        "KNOWLEDGE_BASE_TYPE=",
+        "COURSE_MATERIALS_BUCKET=",
+        "AGENTCORE_RUNTIME_ARN=",
+        "GUARDRAIL_ID=",
+        "GUARDRAIL_VERSION=",
+        "PUBLIC_ORIGIN=",
+    ):
+        assert needle in env_example
 
 
 def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():

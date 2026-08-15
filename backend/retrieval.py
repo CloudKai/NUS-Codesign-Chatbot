@@ -152,11 +152,17 @@ class RetrievedChunk:
 
 @dataclass(frozen=True)
 class RetrievalResult:
-    """Prompt-ready context plus structured retrieval evidence for auditing."""
+    """Prompt-ready context plus structured retrieval evidence for auditing.
+
+    ``failure_category`` is a secret-safe adapter label such as
+    ``access_denied``. The student-facing evidence-gap note stays based on
+    ``course_retrieval_status`` only.
+    """
 
     context: str
     chunks: tuple[RetrievedChunk, ...]
     course_retrieval_status: str = "ok"
+    failure_category: str = ""
 
 
 class ContextRetriever(Protocol):
@@ -299,6 +305,7 @@ def with_course_evidence_gap(
     result: RetrievalResult,
     *,
     status: str,
+    failure_category: str = "",
 ) -> RetrievalResult:
     """Attach a provider-safe course evidence-gap note without fake chunks.
 
@@ -307,12 +314,15 @@ def with_course_evidence_gap(
             :func:`bounded_retrieval_result`.
         status: ``unavailable`` when Knowledge Base retrieval cannot run,
             ``empty`` when Retrieve returned no validated excerpt.
+        failure_category: Optional adapter category such as ``access_denied``.
+            The student-facing gap note stays status-based, not category-based.
 
     Returns:
         The same chunks with a gap note in ``context`` when course evidence
         is missing. Validated Knowledge Base hits are left unchanged.
     """
     cleaned = str(status or "").strip().casefold()
+    category = str(failure_category or result.failure_category or "").strip()
     if cleaned not in {"unavailable", "empty"}:
         return result
     if any(chunk.retrieval_origin == "knowledge_base" for chunk in result.chunks):
@@ -320,6 +330,7 @@ def with_course_evidence_gap(
             context=result.context,
             chunks=result.chunks,
             course_retrieval_status=cleaned,
+            failure_category=category,
         )
     note = (
         COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT
@@ -333,6 +344,7 @@ def with_course_evidence_gap(
         context=context,
         chunks=result.chunks,
         course_retrieval_status=cleaned,
+        failure_category=category,
     )
 
 
@@ -379,19 +391,26 @@ class CompositeContextRetriever:
         )
         chunks: list[RetrievedChunk] = []
         course_status = "ok"
+        failure_category = ""
         if kb_sources:
             if self._knowledge_base is None:
                 course_status = "unavailable"
-                logger.info("course_retrieval_unavailable")
+                failure_category = "config_missing"
+                logger.warning(
+                    "course_retrieval_config_missing kb_configured=0 "
+                    "selected_course_count=%s",
+                    len(kb_sources),
+                )
             else:
                 kb_result = self._knowledge_base.retrieve(
                     replace(query, sources=kb_sources)
                 )
                 chunks.extend(kb_result.chunks)
                 kb_status = str(kb_result.course_retrieval_status or "ok")
+                failure_category = str(kb_result.failure_category or "")
                 if kb_status == "unavailable":
                     course_status = "unavailable"
-                    logger.info("course_retrieval_unavailable")
+                    # The Knowledge Base adapter already logged a specific category.
                 elif not kb_result.chunks:
                     course_status = "empty"
                     logger.info(
@@ -412,11 +431,16 @@ class CompositeContextRetriever:
         ):
             if course_status not in {"unavailable", "empty"}:
                 course_status = "empty"
-            return with_course_evidence_gap(formatted, status=course_status)
+            return with_course_evidence_gap(
+                formatted,
+                status=course_status,
+                failure_category=failure_category,
+            )
         return RetrievalResult(
             context=formatted.context,
             chunks=formatted.chunks,
             course_retrieval_status="ok" if not kb_sources else course_status,
+            failure_category=failure_category,
         )
 
 

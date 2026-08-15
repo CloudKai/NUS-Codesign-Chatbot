@@ -25,6 +25,10 @@ _COURSE_RETRIEVE = _load(
     "co_design_test_course_retrieval",
     "diagnostics/test_course_retrieval.py",
 )
+_KB_CHECK = _load(
+    "co_design_check_knowledge_base_retrieve",
+    "diagnostics/check_knowledge_base_retrieve.py",
+)
 
 
 def test_course_object_pairs_use_course_prefix_not_users(tmp_path: Path):
@@ -93,3 +97,44 @@ def test_course_retrieval_diagnostic_refuses_without_approval():
         )
         == "course/lectureNotes/Week 1 Introduction to innovation v3.pdf"
     )
+
+
+def test_knowledge_base_retrieve_diagnostic_refuses_without_approval():
+    args = _KB_CHECK.parse_args([])
+    assert (
+        _KB_CHECK.refuse_reason(args)
+        == "live knowledge base retrieve requires --i-approve-live-bedrock"
+    )
+    assert _KB_CHECK.main([]) == 2
+    dry = _KB_CHECK.parse_args(["--dry-run"])
+    assert _KB_CHECK.refuse_reason(dry) is None
+    approved = _KB_CHECK.parse_args(
+        [
+            "--i-approve-live-bedrock",
+            "--max-requests",
+            "1",
+            "--query",
+            "week 1 introduction innovation",
+        ]
+    )
+    assert _KB_CHECK.refuse_reason(approved) is None
+    too_many = _KB_CHECK.parse_args(
+        ["--i-approve-live-bedrock", "--max-requests", "3"]
+    )
+    assert "max-requests" in (_KB_CHECK.refuse_reason(too_many) or "")
+    assert (
+        _KB_CHECK.resolve_course_object_key(
+            "Week 1 Introduction to innovation v3.pdf"
+        )
+        == "course/lectureNotes/Week 1 Introduction to innovation v3.pdf"
+    )
+
+
+def test_knowledge_base_retrieve_diagnostic_dry_run_skips_aws(capsys):
+    code = _KB_CHECK.main(["--dry-run"])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "dry_run" in captured.out
+    assert "kb_configured" in captured.out
+    assert "AKIA" not in captured.out
+    assert "aws_secret" not in captured.out.casefold()
