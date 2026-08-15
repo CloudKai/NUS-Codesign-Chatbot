@@ -240,3 +240,11 @@ if app is not None:
         ):
             return await specialist_invoke(payload)
         return await _stream_specialist_invoke(payload, context)
+
+
+if __name__ == "__main__":
+    # AgentCore executes `main.py` as __main__. Without app.run() the process
+    # imports and exits, and InvokeAgentRuntime returns HTTP 502.
+    if app is None:
+        raise RuntimeError("bedrock-agentcore is required to start this runtime")
+    app.run()

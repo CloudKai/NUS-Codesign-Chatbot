@@ -94,6 +94,13 @@ def test_harness_package_does_not_import_application_backend() -> None:
                 assert not module.startswith("backend"), path
 
 
+def test_production_harness_starts_agentcore_app() -> None:
+    """Direct-code deploy runs main.py as __main__ and must serve invocations."""
+    text = Path("agentcore_runtime/main.py").read_text(encoding="utf-8")
+    assert 'if __name__ == "__main__":' in text
+    assert "app.run()" in text
+
+
 def test_production_harness_never_parses_str_agent_result() -> None:
     """str(AgentResult) must not be the coach_turn contract."""
     for relative in (

@@ -73,8 +73,12 @@ Invariants:
 The live DEFAULT harness source of truth is
 [`agentcore_runtime/`](../../agentcore_runtime/). It hosts Q&A, Coaching, and
 Formative Review with Strands `structured_output_model` and returns validated
-JSON or a category-only error envelope. Copy the **entire package** when
-publishing. [`scripts/agentcore/harness_patch/`](../../scripts/agentcore/harness_patch/)
+JSON or a category-only error envelope. Publish a zip with `main.py` at the
+root, vendored linux/arm64 Python 3.14 site-packages (AgentCore does not
+pip-install `requirements.txt`), and entrypoint
+`opentelemetry-instrument main.py`. `main.py` must call `app.run()` under
+`__name__ == "__main__"`. Do not create a second runtime.
+[`scripts/agentcore/harness_patch/`](../../scripts/agentcore/harness_patch/)
 is deployment notes plus a compatibility re-export.
 
 ## Configuration
@@ -128,7 +132,7 @@ Do not run paid invokes from pytest. After `agentcore_runtime/` is published
 to `DEFAULT` READY:
 
 ```sh
-.venv/bin/python scripts/agentcore_smoke.py \
+PYTHONPATH=. .venv/bin/python scripts/agentcore_smoke.py \
   --i-approve-live-agentcore \
   --cost-cap 1.00 \
   --max-requests 1
@@ -158,8 +162,8 @@ is disabled. Compression, if required on that path, also uses Luna.
 
 Keep these off the Thinking Path unless a later phase explicitly adds them:
 
-1. Publish this `agentcore_runtime/` package to `DEFAULT` before live
-   specialist evaluation.
+1. DEFAULT v14 is published and one capped Sonnet smoke passed. Do not treat
+   that as student-ready until host `.env`, ECR, and CloudFront/Caddy are aligned.
 2. Do not attach unrestricted KB/MCP tools to Q&A. Pre-retrieved `[S#]`
    evidence is the production path. Do not call `RetrieveAndGenerate`.
 3. Do **not** add critique-every-Nth-turn, restore scoring-as-grade, restore

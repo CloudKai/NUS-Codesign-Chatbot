@@ -45,8 +45,13 @@ agentcore_runtime/
 
 ## Deploy
 
-Do **not** change `AGENTCORE_RUNTIME_ARN`. Copy this **entire package** onto
-the existing `chatbot_harnessAgent/` sources and publish a new READY version.
+Do **not** change `AGENTCORE_RUNTIME_ARN`. Publish a zip with `main.py` at the
+root (flat layout, not nested `agentcore_runtime/`), vendored linux/arm64
+Python 3.14 site-packages, and entrypoint
+`opentelemetry-instrument main.py`. `main.py` must call `app.run()` under
+`__name__ == "__main__"` or the process exits and InvokeAgentRuntime returns
+502. Overlay this package onto the existing `chatbot_harnessAgent` artifact;
+do not create a second runtime.
 
 Rollback is the previous READY qualifier. Do not point DEFAULT at an untested
 version.

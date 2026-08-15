@@ -1,6 +1,71 @@
 # Implementation status
 
-## Current phase — AgentCore runtime dependency reproducibility
+## Current phase — Publish vendored AgentCore DEFAULT v14 and capped Sonnet smoke
+
+**Completed on 2026-08-16.** Same runtime ARN
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.
+`DEFAULT` is **version 14 READY**. One capped live smoke returned
+`{"ok": true, "stage": "problem_identification", "recommendation": "stay"}`.
+
+v11 was source-only (AgentCore does not pip-install `requirements.txt`).
+v12 vendored linux/arm64 cp314 wheels but `main.py` never called `app.run()`,
+so the process imported and exited (HTTP 502). v13 reused the last working
+v9 site-packages zip plus current sources and OTEL entrypoint; it started,
+then exited for the same missing `app.run()`. v14 is that zip with
+`if __name__ == "__main__": app.run()`.
+
+### Behavior delivered
+
+1. Live artifact is a ~47MB zip: v9 linux/arm64 Python 3.14 site-packages
+   (pydantic 2.13.4, strands-agents 1.52.0, bedrock-agentcore 1.21.0,
+   aws-opentelemetry-distro) plus current `agentcore_runtime/` sources at zip
+   root. Entrypoint `opentelemetry-instrument main.py`.
+2. Runtime env unchanged except already-set Sonnet 4.6 + guardrail keys:
+   `AGENTCORE_MODEL_PROVIDER=bedrock`,
+   `AGENTCORE_MODEL_ID=global.anthropic.claude-sonnet-4-6`,
+   `AGENTCORE_MODEL_REGION=us-west-2`, `GUARDRAIL_ID=o8aipba8m129`,
+   `GUARDRAIL_VERSION=1`.
+3. `agentcore_runtime/main.py` now starts `BedrockAgentCoreApp` when executed
+   as `__main__`.
+
+### Main files changed
+
+- `agentcore_runtime/main.py`, `agentcore_runtime/README.md`
+- Tests: `tests/domain/test_agentcore_runtime.py` asserts `app.run()`
+- Docs: this file, `docs/providers/AGENTCORE_ADAPTER.md`
+
+### Validation evidence
+
+- Focused pytest `tests/domain/test_agentcore_runtime.py`
+  `test_runtime_model.py` `test_security_invariants.py`: **passed**.
+- `PYTHONPATH=. .venv/bin/python scripts/agentcore_smoke.py
+  --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`: **passed**
+  (`ok: true`, stage `problem_identification`, recommendation `stay`).
+- `get-agent-runtime`: status READY, version **14**.
+- `DEFAULT` endpoint: READY, `liveVersion` **14**.
+- CloudWatch v13 showed OTEL + IAM credentials then silence (process exit).
+  v11 showed `ModuleNotFoundError: pydantic` (source-only zip).
+
+### Compatibility, migration, and rollback
+
+- No schema change. ARN unchanged. `DEFAULT` auto-moved on each successful
+  `update-agent-runtime` (preprod, accepted).
+- Rollback is another `update-agent-runtime` with the v9 zip
+  `agentcore-patches/chatbot_harnessAgent-structured-coach-21a5896f90b517ba8bc7843a8b5be5f5b12e33cf9c7130d81ca5c6dcb949685d.zip`
+  or a new zip built the same way from that base.
+- Live artifact:
+  `s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-sonnet46-v14-20260815T193913Z.zip`
+
+### Known risks and next exact action
+
+- This is **preprod**. Do not call the app student-ready until host `.env`,
+  ECR/`APP_IMAGE`, and CloudFront/Caddy alignment are done.
+- Next: fill the EC2/host `.env` with the existing ARN + `AGENTCORE_QUALIFIER=DEFAULT`,
+  keep `MODEL_PROVIDER=agentcore`, then build/push `APP_IMAGE` if that is the
+  remaining cutover blocker. Do not invoke unbounded Streamlit chat as the
+  next paid test.
+
+## Previous phase — AgentCore runtime dependency reproducibility
 
 **Completed locally on 2026-08-16.** Integrate-Bedrock HEAD at start of this
 pass: `529716c46fa45d20cdba02a145f6d63f088629b8`. This pass proved the
