@@ -1,15 +1,12 @@
 # AgentCore DEFAULT coaching runtime.
-# Pins are the current PyPI versions that document BedrockModel(model_id,
-# region_name, guardrail_*, guardrail_latest_message) and
-# OpenAIResponsesModel(stateful=False, bedrock_mantle_config={"region": ...}).
-# Companion pytest does not install these packages. Confirm the same versions
-# on the published runtime before promoting DEFAULT.
+# Exact pins were pip-installed and API-checked in a clean CPython 3.12.10
+# venv on 2026-08-16 against the public PyPI index. Companion pytest does
+# not install this stack; GitHub job agentcore-runtime-compatibility does.
 #
-# pydantic==2.13.4 is the version installed in this companion venv.
 # bedrock-agentcore 1.21.0 requires pydantic<2.41.3,>=2.0.0.
+# pydantic==2.13.4 is the compatible exact pin used by this runtime.
 strands-agents==1.52.0
 bedrock-agentcore==1.21.0
 pydantic==2.13.4
-# Optional Luna / Mantle Responses path (do not install for the Sonnet-first
-# publish unless AGENTCORE_MODEL_PROVIDER=bedrock_mantle_responses):
+# Optional Luna / Mantle Responses extra (not required for Sonnet 4.6):
 #   strands-agents[openai]==1.52.0

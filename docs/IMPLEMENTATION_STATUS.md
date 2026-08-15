@@ -1,6 +1,83 @@
 # Implementation status
 
-## Current phase — Explicit Sonnet 4.6 runtime model and guardrail fail-closed
+## Current phase — AgentCore runtime dependency reproducibility
+
+**Completed locally on 2026-08-16.** Integrate-Bedrock HEAD at start of this
+pass: `529716c46fa45d20cdba02a145f6d63f088629b8`. This pass proved the
+AgentCore runtime pins are installable from PyPI in a clean CPython 3.12.10
+venv, locked them as exact versions, and added a network-free compatibility
+diagnostic plus a GitHub job that actually installs
+`agentcore_runtime/requirements.txt`. Architecture, specialists, Sonnet 4.6,
+and guardrails are unchanged. No live AWS or paid model calls.
+
+### Behavior delivered
+
+1. Clean-venv `pip index` + install confirmed `strands-agents==1.52.0`,
+   `bedrock-agentcore==1.21.0`, and `pydantic==2.13.4` are available together.
+2. Installed Strands 1.52.0 exposes `Agent.invoke_async(...,
+   structured_output_model=...)`, `AgentResult.structured_output`,
+   `BedrockModel` guardrail kwargs including `guardrail_latest_message`,
+   `tools=[]`, and Converse `messages`. `BedrockAgentCoreApp` + `@app.entrypoint`
+   construct without AWS.
+3. `scripts/diagnostics/check_agentcore_runtime_dependencies.py` inspects
+   those APIs, validates a synthetic `CoachTurnOutput`, and checks Sonnet
+   constructor kwargs. It does not call AWS or `specialist_invoke()`.
+4. Provenance constants in `agentcore_runtime/model.py` stay explicit (a
+   .py-only copy must still report pins). Pytest fails if they drift from
+   `agentcore_runtime/requirements.txt`.
+5. Mock CI job `agentcore-runtime-compatibility` installs the runtime
+   requirements on Python 3.12, runs the diagnostic, and compiles
+   `agentcore_runtime`. Companion pytest remains Strands-free.
+
+### Main files changed
+
+- `agentcore_runtime/requirements.txt`, `agentcore_runtime/model.py`
+- `scripts/diagnostics/check_agentcore_runtime_dependencies.py`
+- `.github/workflows/mock-ci.yml`
+- Tests: `tests/domain/test_runtime_model.py` pin-sync assertions
+- Docs: this file, AgentCore adapter, scripts/tests agent guides
+
+### Validation evidence
+
+- Clean CPython 3.12.10 venv `/tmp/codesign-agentcore-runtime-fresh`:
+  `pip install -r agentcore_runtime/requirements.txt` **succeeded**.
+- `python scripts/diagnostics/check_agentcore_runtime_dependencies.py`:
+  **passed** (Strands 1.52.0, bedrock-agentcore 1.21.0, pydantic 2.13.4;
+  structured_output_model, AgentResult.structured_output, and
+  guardrail_latest_message present; Sonnet id explicit; no AWS).
+- Imports of `agentcore_runtime.main`, `.model`, `.models`, and
+  `.structured_coach` succeeded. `specialist_invoke()` was not called.
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`,
+  and `agentcore_runtime`: **passed**.
+- Full deterministic suite: **737 passed, 0 failed, 0 skipped** (735 prior
+  plus two pin-sync tests). Starlette/httpx deprecation warnings unchanged
+  in kind.
+- Focused AgentCore / RAG / ownership / stage files: **201 passed**.
+- `ruff check .` (ruff 0.11.13): **passed**.
+- `git diff --check`: **passed**.
+- `docker compose config --quiet`: **passed**.
+- `APP_IMAGE=co-design:test docker compose -f compose.prod.yaml config --quiet`:
+  **passed**.
+- GitHub Mock CI on committed HEAD `529716c`: mock-suite **success**
+  (https://github.com/CloudKai/NUS-Codesign-Chatbot/actions/runs/31900754387).
+  New job `agentcore-runtime-compatibility` is local-only until this change
+  is pushed: **CI CONFIGURED — RUN NOT YET OBSERVED** for that job.
+- No live AgentCore, Bedrock generation, OpenAI, KB Retrieve, DSQL, or S3
+  calls. Runtime not republished. `AGENTCORE_RUNTIME_ARN` unchanged.
+
+### Compatibility, migration, and rollback
+
+- No schema change. Five persisted stages unchanged. No runtime publish.
+- `AGENTCORE_RUNTIME_ARN` unchanged. Do not promote DEFAULT until a new
+  READY qualifier is tested with a capped Sonnet 4.6 smoke.
+
+### Known risks and next exact action
+
+- Publish `agentcore_runtime/` onto
+  `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` with explicit Sonnet
+  4.6 + guardrail env, then one capped smoke. Not done in this pass.
+
+## Previous phase — Explicit Sonnet 4.6 runtime model and guardrail fail-closed
 
 **Completed locally on 2026-08-16.** Integrate-Bedrock HEAD at start of this
 pass: `af79a693347a33ebbd9c92c5a33c297df70ce05b`. The runtime no longer

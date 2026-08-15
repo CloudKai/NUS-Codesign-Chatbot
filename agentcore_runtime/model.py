@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping
 
 logger = logging.getLogger("agentcore_runtime.model")
@@ -25,9 +26,75 @@ SONNET_4_6_MODEL_ID = "global.anthropic.claude-sonnet-4-6"
 LUNA_MODEL_ID = "openai.gpt-5.6-luna"
 DEFAULT_MODEL_REGION = "us-west-2"
 
-_PINNED_STRANDS = "1.52.0"
-_PINNED_BEDROCK_AGENTCORE = "1.21.0"
-_PINNED_PYDANTIC = "2.13.4"
+# Keep these exact pins in lockstep with ``requirements.txt``. The deployed
+# runtime reports provenance from these constants so a .py-only copy still
+# works. ``tests/domain/test_runtime_model.py`` fails if they drift.
+PINNED_RUNTIME_PACKAGES: dict[str, str] = {
+    "strands-agents": "1.52.0",
+    "bedrock-agentcore": "1.21.0",
+    "pydantic": "2.13.4",
+}
+_PINNED_STRANDS = PINNED_RUNTIME_PACKAGES["strands-agents"]
+_PINNED_BEDROCK_AGENTCORE = PINNED_RUNTIME_PACKAGES["bedrock-agentcore"]
+_PINNED_PYDANTIC = PINNED_RUNTIME_PACKAGES["pydantic"]
+_RUNTIME_PIN_NAMES = tuple(PINNED_RUNTIME_PACKAGES)
+_REQUIREMENTS_PATH = Path(__file__).resolve().parent / "requirements.txt"
+
+
+def parse_runtime_requirement_pins(text: str) -> dict[str, str]:
+    """Parse exact ``package==version`` pins from runtime requirements text.
+
+    Args:
+        text: Contents of ``agentcore_runtime/requirements.txt``.
+
+    Returns:
+        Mapping of the three production package names to exact versions.
+
+    Raises:
+        ValueError: When a required pin is missing, duplicated, or not exact.
+    """
+    pins: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "==" not in line:
+            raise ValueError("runtime requirements must use exact == pins")
+        name, version = line.split("==", 1)
+        name = name.strip()
+        if "[" in name:
+            continue
+        version = version.split("#", 1)[0].strip()
+        if not version or any(marker in version for marker in (">=", "<=", "~=", ">", "<", "!=")):
+            raise ValueError("runtime requirement version is not exact")
+        if name in _RUNTIME_PIN_NAMES:
+            if name in pins:
+                raise ValueError(f"duplicate runtime pin for {name}")
+            pins[name] = version
+    missing = [name for name in _RUNTIME_PIN_NAMES if name not in pins]
+    if missing:
+        raise ValueError("runtime requirements pins are incomplete")
+    return pins
+
+
+def load_runtime_requirement_pins(path: Path | None = None) -> dict[str, str]:
+    """Load exact production pins from ``agentcore_runtime/requirements.txt``.
+
+    Args:
+        path: Optional requirements path. Defaults to the sibling file.
+
+    Returns:
+        Mapping of package name to exact version.
+
+    Raises:
+        ValueError: When the file is missing or pins are incomplete.
+    """
+    requirements_path = path or _REQUIREMENTS_PATH
+    if not requirements_path.is_file():
+        raise ValueError("agentcore_runtime/requirements.txt is missing")
+    return parse_runtime_requirement_pins(
+        requirements_path.read_text(encoding="utf-8")
+    )
 
 
 class RuntimeModelError(RuntimeError):

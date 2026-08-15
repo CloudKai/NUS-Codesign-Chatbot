@@ -60,4 +60,6 @@ version.
 
 ## Tests
 
-Pytest imports this package without Strands or AWS.
+Pytest imports this package without Strands or AWS. Runtime pins are proven
+by `scripts/diagnostics/check_agentcore_runtime_dependencies.py` after
+`pip install -r agentcore_runtime/requirements.txt`.

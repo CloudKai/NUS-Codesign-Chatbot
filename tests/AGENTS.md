@@ -71,7 +71,7 @@ modules.
 | `domain/test_pedagogical_stage_fixtures.py` | Per-stage mock pedagogical fixtures |
 | `domain/test_thinking_path_journey.py` | Complete five-stage mock journey |
 | `domain/test_security_invariants.py` | Memory-not-transcript, no tools, adapter cannot persist stage |
-| `domain/test_runtime_model.py` | Explicit Sonnet/Luna factory, no BedrockModel(), ApplyGuardrail for Mantle |
+| `domain/test_runtime_model.py` | Explicit Sonnet/Luna factory, no BedrockModel(), ApplyGuardrail for Mantle, runtime pin sync |
 | `domain/test_agentcore_harness_provider.py` | Isolated Luna InvokeHarness eval adapter; trusted override; no AWS |
 | `domain/test_context_planner.py` | Full-history-first planner, compression, revision invalidation |
 | `domain/test_bedrock_retrieve.py` | Bedrock Knowledge Base Retrieve adapter: selected `[S#]` mapping, foreign-key drop, composite factory without local course fallback |
@@ -151,7 +151,11 @@ PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache \
 ```
 
 CI: [`.github/workflows/mock-ci.yml`](../.github/workflows/mock-ci.yml) runs
-shell syntax, compileall, and mock pytest on push/PR.
+shell syntax, compileall, and mock pytest on push/PR. Job
+`agentcore-runtime-compatibility` installs
+`agentcore_runtime/requirements.txt` and runs
+`scripts/diagnostics/check_agentcore_runtime_dependencies.py`. Companion
+pytest does not install Strands.
 
 ## Handoff
 

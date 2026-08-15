@@ -108,11 +108,16 @@ First paid specialist evaluation uses Sonnet 4.6 (`BedrockModel` with
 plus Bedrock `ApplyGuardrail` on untrusted input and model output. Do not
 pass `openai.gpt-5.6-luna` into `BedrockModel`.
 
-Pinned runtime packages (document, then confirm on the published runtime):
+Pinned runtime packages, pip-installed and API-checked in a clean CPython
+3.12.10 venv on 2026-08-16 (companion pytest still does not install them;
+GitHub job `agentcore-runtime-compatibility` does):
 
 - `strands-agents==1.52.0`
 - `bedrock-agentcore==1.21.0`
 - `pydantic==2.13.4`
+
+Confirm the same versions on the published runtime. Optional Luna extra is
+`strands-agents[openai]==1.52.0` and is not required for Sonnet 4.6.
 
 Production accepts OpenAI **xor** Bedrock **xor** AgentCore (not mock). Direct
 `BedrockCoachProvider` Converse remains a fallback/test path.

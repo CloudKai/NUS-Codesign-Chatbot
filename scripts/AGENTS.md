@@ -27,6 +27,7 @@ logic.
 | `smoke_dsql_idempotency.py` | Explicitly approved live DSQL runtime-role idempotency smoke | Requires `--confirm-live`, `DATABASE_PROVIDER=dsql`, `DSQL_USER=co_design_app`, and `--identifier cognito:<sub>`; mock provider only; no DDL/S3/Bedrock |
 | `agentcore_smoke.py` | Explicitly approved one-request AgentCore coaching smoke | Requires `--i-approve-live-agentcore`, positive `--cost-cap`, and `--max-requests 1`; no pytest path |
 | Canonical harness | [`agentcore_runtime/`](../agentcore_runtime/) is the production specialist runtime (Q&A, Coaching, Review). Copy the **entire package** onto existing DEFAULT | Do not maintain a second live implementation in `scripts/agentcore/harness_patch/` |
+| `diagnostics/check_agentcore_runtime_dependencies.py` | Network-free AgentCore runtime pin + Strands API check | Requires `pip install -r agentcore_runtime/requirements.txt`; no AWS, no `specialist_invoke()` |
 | `diagnostics/test_course_retrieval.py` | Explicitly approved Bedrock KB `Retrieve` diagnostic | Requires `--i-approve-live-bedrock`; prints hit counts and short previews only; no generation; no pytest path |
 | `evals/evaluate_live_coach.py` | Isolated GPT-5.6 Luna InvokeHarness quality evaluation | Requires `--i-approve-live-luna`; never changes production DEFAULT; no pytest AWS path |
 | `sync_course_materials.py` | Upload `lectureNotes/` and `readings/` to shared `course/` S3 keys | Requires `--confirm`; never writes `users/`; never deletes course objects |

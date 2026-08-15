@@ -13,10 +13,13 @@ from agentcore_runtime.guardrails import (
 )
 from agentcore_runtime.model import (
     LUNA_MODEL_ID,
+    PINNED_RUNTIME_PACKAGES,
     SONNET_4_6_MODEL_ID,
     RuntimeModelError,
     bedrock_model_kwargs,
+    load_runtime_requirement_pins,
     mantle_responses_kwargs,
+    parse_runtime_requirement_pins,
     runtime_model_config_from_mapping,
 )
 from agentcore_runtime.structured_coach import CoachTurnExtractionError
@@ -170,3 +173,21 @@ def test_mantle_path_requires_apply_guardrail() -> None:
 def test_guardrail_response_helper() -> None:
     assert guardrail_response_is_blocked({"action": "GUARDRAIL_INTERVENED"})
     assert not guardrail_response_is_blocked({"action": "NONE"})
+
+
+def test_runtime_requirement_pins_match_provenance_constants() -> None:
+    pins = load_runtime_requirement_pins()
+    assert pins == PINNED_RUNTIME_PACKAGES
+    assert set(pins) == {"strands-agents", "bedrock-agentcore", "pydantic"}
+    config = runtime_model_config_from_mapping(_SONNET_ENV)
+    provenance = config.provenance()
+    assert provenance["pinned_strands_agents"] == pins["strands-agents"]
+    assert provenance["pinned_bedrock_agentcore"] == pins["bedrock-agentcore"]
+    assert provenance["pinned_pydantic"] == pins["pydantic"]
+
+
+def test_runtime_requirements_reject_version_ranges() -> None:
+    with pytest.raises(ValueError, match="exact"):
+        parse_runtime_requirement_pins("strands-agents>=1.52.0\n")
+    with pytest.raises(ValueError, match="incomplete"):
+        parse_runtime_requirement_pins("pydantic==2.13.4\n")
