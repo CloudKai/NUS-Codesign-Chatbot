@@ -419,6 +419,13 @@
         white-space:nowrap;
     }
 
+    .facione-score-value {
+        color:var(--cd-text);
+        font-variant-numeric:tabular-nums;
+        font-weight:620;
+        min-width:2.15em;
+    }
+
     .facione-score .material-symbols-rounded {
         font-family:"Material Symbols Rounded";
         font-size:1.2rem;

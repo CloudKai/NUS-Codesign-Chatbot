@@ -8,12 +8,22 @@ import ui.sources as sources_module
 import ui.studio as studio_module
 
 from backend.settings import settings
-
+from ui.components import facione_scores_table_html
 
 
 def _implementation_source(module: object) -> str:
     """Read the module that owns behavior behind a compatibility alias."""
     return Path(inspect.getfile(module)).read_text(encoding="utf-8")
+
+
+def test_facione_score_shows_numeric_value_before_icon():
+    html = facione_scores_table_html({"analysis": 3, "evaluation": 1})
+    analysis = html.index("Analysis")
+    numeric = html.index(">3/4<", analysis)
+    icon = html.index("sentiment_satisfied", analysis)
+    assert numeric < icon
+    assert ">1/4<" in html
+    assert "Analysis: 3/4, Acceptable" in html
 
 
 def test_student_coach_error_copy_is_category_safe():
@@ -131,6 +141,7 @@ def test_streamlit_notebook_workspace_smoke():
     assert 'class="journey-short-label">Ethics & CT</span>' not in rendered
     assert "Summary" in rendered
     assert "Critical thinking (Facione)" in rendered
+    assert "0/4" in rendered
     assert "Discussion summary" in rendered
     assert "What to strengthen" in rendered
     assert {expander.label for expander in app.expander} >= {
@@ -451,6 +462,7 @@ def test_learning_studio_and_notebook_history_controls():
     assert "Thinking Path" in rendered
     assert "Summary" in rendered
     assert "Critical thinking (Facione)" in rendered
+    assert "0/4" in rendered
     assert "Discussion summary" in rendered
     next(button for button in app.button if button.label == "Notebooks").click().run()
     assert not app.exception
@@ -463,13 +475,15 @@ def test_learning_studio_and_notebook_history_controls():
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "notebook-card-meta" in rendered
     assert "notebook-card-activity" in rendered
+    assert "Last active" in rendered
+    assert "messages</div>" not in rendered
     assert "of 5 stages" in rendered
 
 
 def test_notebook_activity_helpers_format_relative_time_and_counts():
     from datetime import datetime, timezone
 
-    from ui.notebooks import _message_count_label, _relative_activity
+    from ui.notebooks import _relative_activity
 
     now = datetime(2026, 8, 12, 1, 0, tzinfo=timezone.utc)
     assert _relative_activity("2026-08-12T01:00:00Z", now=now) == "today"
@@ -477,9 +491,6 @@ def test_notebook_activity_helpers_format_relative_time_and_counts():
     assert _relative_activity("2026-08-09T01:00:00Z", now=now) == "3 days ago"
     assert _relative_activity("2026-07-01T01:00:00Z", now=now) == "01 Jul 2026"
     assert _relative_activity("", now=now) == "Unknown"
-    assert _message_count_label(0) == "0 messages"
-    assert _message_count_label(1) == "1 message"
-    assert _message_count_label(2) == "2 messages"
 
 
 def test_language_theme_and_journey_has_no_manual_progression_control():

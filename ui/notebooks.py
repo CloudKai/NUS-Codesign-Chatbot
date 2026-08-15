@@ -103,11 +103,6 @@ def _relative_activity(value: Any, *, now: datetime | None = None) -> str:
     return parsed.astimezone(current.tzinfo).strftime("%d %b %Y")
 
 
-def _message_count_label(count: int) -> str:
-    """Return a correctly pluralized notebook message count."""
-    return f"{count} message{'s' if count != 1 else ''}"
-
-
 @st.dialog("Your Notebooks", width="large")
 def notebooks_dialog() -> None:
     """Render a folder-free notebook library with search and actions."""
@@ -169,8 +164,7 @@ def notebooks_dialog() -> None:
                         f"{escape(overview['stage'].label)} · "
                         f"{overview['stage_index']} of {len(THINKING_STAGES)} stages</div>"
                         f'<div class="notebook-card-activity">'
-                        f"Last active {escape(overview['last_active'])} · "
-                        f"{escape(_message_count_label(overview['messages']))}</div>"
+                        f"Last active {escape(overview['last_active'])}</div>"
                         "</div>",
                         unsafe_allow_html=True,
                     )

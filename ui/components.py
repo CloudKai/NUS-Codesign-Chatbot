@@ -167,12 +167,14 @@ def facione_scores_table_html(scores: dict[str, int] | None) -> str:
             value = 0
         value = max(0, min(4, value))
         icon, rubric = _FACIONE_ICONS[value]
-        aria = f"{label}: {rubric}"
+        numeric = f"{value}/4"
+        aria = f"{label}: {numeric}, {rubric}"
         rows.append(
             "<tr>"
             f'<th scope="row">{escape(label)}</th>'
             f'<td class="facione-score facione-score-{value}">'
             '<span class="facione-score-content">'
+            f'<span class="facione-score-value">{escape(numeric)}</span>'
             f'<span class="material-symbols-rounded" role="img" '
             f'title="{escape(aria)}" aria-label="{escape(aria)}">'
             f"{escape(icon)}</span>"

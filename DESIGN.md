@@ -283,9 +283,9 @@ Required sections:
 
 1. Summary — a model-written overview of the student’s thinking (not pasted prompts).
 2. Facione critical-thinking scores — six dimensions in a compact table with
-   Holistic rubric icons (0 not started, 1 Weak, 2 Unacceptable, 3 Acceptable,
-   4 Strong): Analysis, Interpretation, Inference, Evaluation, Explanation,
-   Self-Regulation.
+   an ``n/4`` value before each Holistic rubric icon (0 not started, 1 Weak,
+   2 Unacceptable, 3 Acceptable, 4 Strong): Analysis, Interpretation,
+   Inference, Evaluation, Explanation, Self-Regulation.
 3. Strengths — collapsed expander with one subsection per Thinking Path stage.
    Stages stay empty until coaching feedback exists, and earlier stage feedback
    is preserved.
