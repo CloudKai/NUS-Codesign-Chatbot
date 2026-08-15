@@ -808,7 +808,10 @@ class StudentStore:
         support_mode: str,
         assignment: dict[str, str] | None = None,
     ) -> str:
-        """Create a notebook and return its id (``thread_id`` compatibility)."""
+        """Create a notebook and return its id (``thread_id`` compatibility).
+
+        New notebooks start on Strict coaching (``response_detail=long``).
+        """
         from backend.student_journey import DEFAULT_STAGE
 
         notebook_id = str(uuid.uuid4())
@@ -824,13 +827,14 @@ class StudentStore:
                 INSERT INTO notebooks
                   (id, user_id, title, current_stage, progress_text, settings_text,
                    conversation_revision, created_at, updated_at)
-                VALUES (?, ?, ?, ?, '{}', ?, 0, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
                 """,
                 (
                     notebook_id,
                     self.owner_id,
                     name,
                     DEFAULT_STAGE,
+                    _dump({"response_detail": DEFAULT_RESPONSE_DETAIL}),
                     _dump(settings_blob),
                     now,
                     now,

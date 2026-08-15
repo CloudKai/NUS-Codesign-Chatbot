@@ -327,13 +327,17 @@ Quick. Notebooks that already persisted Quick stay Quick.
    of the product default.
 3. Streamlit AppTest confirmation/auto-advance paths send three turns so Strict
    can recommend the next stage.
+4. Creating a notebook resets the profile **Coaching style** widget to Strict
+   so a previous Quick choice cannot leak onto the new notebook. The selected
+   chip uses the filled accent highlight.
 
 ### Main files changed
 
 - Domain/UI: `backend/learning/journey.py`, `backend/student_store.py`,
   `backend/coaching/execution.py`, `backend/chat_service.py`,
-  `backend/prompts/composer.py`, `ui/session.py`, `ui/notebooks.py`,
-  `ui/panels/chat.py`
+  `backend/prompts/composer.py`, `ui/session.py`, `ui/profile.py`,
+  `ui/notebooks.py`, `ui/panels/chat.py`, `ui/theme.py`,
+  `ui/assets/styles/60-profile-topbar.css`
 - Tests: `tests/domain/test_student_journey.py`, `tests/ui/test_streamlit_ui.py`,
   `tests/ui/test_streamlit_api_mode.py`, plus Quick pins in primary-path and HTTP
   two-turn ADVANCE tests
@@ -441,9 +445,10 @@ fake clients and never call AWS.
    than being dropped. Errors are category-only.
 2. POC harness overlay in `scripts/agentcore/harness_patch/` so the live
    coaching specialist returns `ProviderCoachOutput` JSON with zero KB tools.
-3. Shared course sync lists `course/lectureNotes/` and `course/readings/`,
-   creates locked DSQL source rows, and writes only extracted text under
-   `users/.../derived/`.
+3. Shared course sync lists `course/lectureNotes/` and `course/readings/`
+   into the Sources panel. It does **not** insert one DSQL `sources` row per
+   file on each new notebook. Older notebooks that already persisted locked
+   rows keep them. PDFs stay under shared `course/` keys.
 4. Production config accepts OpenAI xor Bedrock xor AgentCore. Course sync is
    allowed when `COURSE_MATERIALS_BUCKET` + `COURSE_MATERIALS_PREFIX=course/`
    are set (not `users/`).

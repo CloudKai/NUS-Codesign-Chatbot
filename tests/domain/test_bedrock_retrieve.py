@@ -129,6 +129,37 @@ def test_retrieve_maps_selected_course_keys_to_stable_labels():
     assert "[S1]" in result.context or "S1" in result.context
 
 
+def test_retrieve_expands_lecture_number_to_week_phrasing():
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                "s3://cde2300-course-content-s3/course/lectureNotes/week1.pdf",
+                "Introduction to innovation.",
+            )
+        ]
+    )
+    BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="cde2300-course-content-s3",
+        client=client,
+    ).retrieve(
+        RetrievalQuery(
+            current_message="what is lecture 1 about",
+            current_stage="problem_identification",
+            sources=(
+                _course_source(
+                    "src-week-1",
+                    "S1",
+                    object_key="course/lectureNotes/week1.pdf",
+                ),
+            ),
+        )
+    )
+    assert client.calls[0]["retrievalQuery"]["text"] == (
+        "what is lecture 1 about week 1"
+    )
+
+
 def test_retrieve_drops_foreign_and_unselected_course_keys():
     client = FakeRetrieveClient(
         results=[

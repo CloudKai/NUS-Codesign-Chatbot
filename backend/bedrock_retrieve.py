@@ -24,6 +24,7 @@ from .retrieval import (
     RetrievedChunk,
     bounded_retrieval_result,
     course_material_id_from_object_key,
+    expand_session_query_text,
     is_course_retrieval_source,
 )
 from .settings import settings
@@ -257,7 +258,7 @@ class BedrockKnowledgeBaseRetriever:
         client = self._runtime_client()
         if client is None:
             return RetrievalResult(context="", chunks=())
-        query_text = " ".join(str(query.current_message or "").split()).strip()
+        query_text = expand_session_query_text(query.current_message)
         if not query_text:
             return RetrievalResult(context="", chunks=())
         material_ids = _course_material_ids(course_sources)

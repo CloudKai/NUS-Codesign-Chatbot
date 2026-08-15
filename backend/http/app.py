@@ -340,7 +340,9 @@ def create_app(
         ungrounded.
         """
         try:
-            return len(owner.store.list_sources(thread_id, selected_only=True))
+            return len(
+                owner.workspace.list_sources(thread_id, selected_only=True)
+            )
         except Exception:
             return 0
 

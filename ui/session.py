@@ -36,6 +36,12 @@ from ui.retry_keys import purge_notebook_retry_keys
 from ui.settings import apply_selected_model
 
 
+_COACHING_STYLE_LABELS = {
+    "short": "Quick",
+    "long": "Strict",
+}
+
+
 def initialize_session() -> None:
     """Seed session defaults and restore the active notebook plus appearance.
 
@@ -113,10 +119,12 @@ def _persist_active_thread(thread_id: str | None) -> None:
 
 
 def new_notebook(should_rerun: bool = True) -> None:
-    """Create an untitled notebook with a fresh Focus-stage journey.
+    """Create an untitled notebook with a fresh Strict coaching journey.
 
     User-initiated creates stay on Chat with Sources open so course materials
-    can load. Shows a short loading toast, then reruns the app.
+    can load. Shows a short loading toast, then reruns the app. The profile
+    Coaching style widget is reset to Strict so a prior Quick choice cannot
+    leak onto the new notebook.
 
     Args:
         should_rerun: When True, trigger a Streamlit rerun after session updates.
@@ -141,6 +149,9 @@ def new_notebook(should_rerun: bool = True) -> None:
     st.session_state.support_mode = DEFAULT_SUPPORT_MODE
     st.session_state.learning_journey = journey
     st.session_state.response_detail = journey["response_detail"]
+    st.session_state.setting_coaching_style = _COACHING_STYLE_LABELS[
+        journey["response_detail"]
+    ]
     st.session_state.response_language = "English"
     st.session_state.assignment = {"title": "", "course": "", "brief": "", "rubric": ""}
     st.session_state.allow_model_knowledge = False
@@ -221,6 +232,9 @@ def select_thread(thread_id: str, should_rerun: bool = True) -> None:
     journey = normalize_journey(raw_journey)
     st.session_state.learning_journey = journey
     st.session_state.response_detail = journey["response_detail"]
+    st.session_state.setting_coaching_style = _COACHING_STYLE_LABELS[
+        journey["response_detail"]
+    ]
     language = str(metadata.get("response_language") or "English")
     st.session_state.response_language = (
         language if language in RESPONSE_LANGUAGES else "English"

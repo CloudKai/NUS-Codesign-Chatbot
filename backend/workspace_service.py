@@ -18,6 +18,9 @@ from .source_library import (
     LectureNotesSyncResult,
     add_file_sources,
     backfill_legacy_sources,
+    get_visible_source,
+    is_locked_course_source,
+    list_visible_sources,
     read_source_bytes,
 )
 from .student_store import StudentStore
@@ -251,19 +254,23 @@ class WorkspaceService:
     def list_sources(
         self, thread_id: str, *, selected_only: bool = False
     ) -> list[dict[str, Any]]:
-        """List notebook sources without exposing filesystem paths."""
+        """List notebook sources without exposing filesystem paths.
+
+        Shared Lecture Notes/Readings are projected from the course catalog
+        and are not inserted as per-notebook ``sources`` rows.
+        """
         if not self._store.get_thread(thread_id):
             raise ValueError("Notebook not found")
         return [
             public_source(source)
-            for source in self._store.list_sources(
-                thread_id, selected_only=selected_only
+            for source in list_visible_sources(
+                self._store, thread_id, selected_only=selected_only
             )
         ]
 
     def get_source(self, thread_id: str, source_id: str) -> dict[str, Any] | None:
         """Return one source without a filesystem path."""
-        source = self._store.get_source(thread_id, source_id)
+        source = get_visible_source(self._store, thread_id, source_id)
         return public_source(source) if source else None
 
     def upload_sources(
@@ -313,13 +320,17 @@ class WorkspaceService:
         semantics.
         """
         existed = self._store.get_source(thread_id, source_id) is not None
+        if not existed:
+            virtual = get_visible_source(self._store, thread_id, source_id)
+            if virtual and is_locked_course_source(virtual):
+                raise ValueError("Course materials cannot be removed")
         self._store.delete_source(thread_id, source_id)
         if not existed:
             raise ValueError("Source not found")
 
     def read_source_content(self, thread_id: str, source_id: str) -> SourceContent:
         """Read source file bytes for preview/download via local or object storage."""
-        source = self._store.get_source(thread_id, source_id)
+        source = get_visible_source(self._store, thread_id, source_id)
         if not source:
             raise ValueError("Source not found")
         data = read_source_bytes(source)
