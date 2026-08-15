@@ -27,11 +27,14 @@ Each coach turn makes **one** `InvokeAgentRuntime` call with:
 }
 ```
 
-`student_id` is the store owner identifier, never a notebook id. Bounded DSQL
-history (same cap as the composer) is sent as Converse `messages`. The composed
-current-turn brief omits `<recent_messages>` so those turns are not duplicated
-inside the prompt. A fresh `runtimeSessionId` (`stateless-…`) is still used per
-invoke.
+`student_id` is the store owner identifier, never a notebook id. The
+token-aware planner sends the **full active DSQL transcript** when it fits
+the conservative Luna-safe input budget. Only when that would overflow does
+the planner compress older turns into derived `conversation_memory` and keep
+a recent verbatim window (default 12). The composed current-turn brief omits
+`<recent_messages>` so those turns are not duplicated inside the prompt.
+Derived memory is model input only; DSQL remains the complete transcript.
+A fresh `runtimeSessionId` (`stateless-…`) is still used per invoke.
 
 Invariants:
 
@@ -89,6 +92,16 @@ This adapter must keep invoking with a fresh `stateless-…` session id. Do not
 wire AgentCore Runtime LRU, AgentCore Memory, DynamoDB, or a JSON file as chat
 history. Student `GET /api/v1/threads/{id}/transcript.txt` is a projection of
 `get_messages`.
+
+## Isolated Luna evaluation (not production traffic)
+
+Live pedagogical evaluation uses **InvokeHarness** with an explicit
+
+`openai.gpt-5.6-luna` / `apiFormat=responses` override. That path is
+`backend/agentcore_harness_provider.py` plus
+`scripts/evals/evaluate_live_coach.py`. It must not change production
+`AGENTCORE_QUALIFIER=DEFAULT` or `MODEL_PROVIDER=agentcore`. Claude fallback
+is disabled. Compression, if required on that path, also uses Luna.
 
 ## Deferred extras (do not copy from the POC)
 

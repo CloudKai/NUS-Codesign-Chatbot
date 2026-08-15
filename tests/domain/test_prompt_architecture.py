@@ -125,11 +125,12 @@ def test_composer_ordering_stage_separation_and_empty_sources():
     project_at = text.index("<student_project_context>")
     retrieved_at = text.index("<retrieved_course_context>")
     summary_at = text.index("<conversation_summary>")
+    memory_at = text.index("<conversation_memory>")
     recent_at = text.index("<recent_messages>")
     student_at = text.index("<student_message>")
     runtime_at = text.index("<runtime_instructions>")
     assert shared_at < stage_at < project_at < retrieved_at < summary_at
-    assert summary_at < recent_at < student_at < runtime_at
+    assert summary_at < memory_at < recent_at < student_at < runtime_at
     assert EMPTY_RETRIEVED_COURSE_CONTEXT in text
     assert _STAGE_MARKERS["deep_analysis"] in prepared.stage_instructions
     assert _STAGE_MARKERS["problem_identification"] not in prepared.stage_instructions

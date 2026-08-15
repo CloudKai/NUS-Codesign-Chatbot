@@ -20,6 +20,7 @@ def _load(name: str, filename: str):
 
 _SMOKE = _load("co_design_agentcore_smoke", "agentcore_smoke.py")
 _SYNC = _load("co_design_sync_course_materials", "sync_course_materials.py")
+_EVAL = _load("co_design_evaluate_live_coach", "evals/evaluate_live_coach.py")
 
 
 def test_course_object_pairs_use_course_prefix_not_users(tmp_path: Path):
@@ -54,3 +55,11 @@ def test_agentcore_smoke_refuses_without_approval():
         ["--i-approve-live-agentcore", "--cost-cap", "1.00", "--max-requests", "2"]
     )
     assert "max-requests" in (_SMOKE.refuse_reason(approved) or "")
+
+
+def test_live_luna_eval_refuses_without_approval():
+    args = _EVAL.parse_args([])
+    assert "i-approve-live-luna" in (_EVAL.refuse_reason(args) or "")
+    assert _EVAL.main([]) == 2
+    capped = _EVAL.parse_args(["--i-approve-live-luna", "--max-calls", "151"])
+    assert "150" in (_EVAL.refuse_reason(capped) or "")

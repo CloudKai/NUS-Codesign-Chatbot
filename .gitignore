@@ -12,3 +12,4 @@ reset-backups/
 reset-quarantine/
 .cursorignore
 .streamlit/secrets.toml
+artifacts/evals/

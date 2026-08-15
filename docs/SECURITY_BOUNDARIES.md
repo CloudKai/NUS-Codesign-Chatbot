@@ -35,8 +35,10 @@ Student → Streamlit → FastAPI
 
 - Retrieval runs only after selected sources are loaded for the authenticated
   notebook.
-- Course Retrieve results are mapped onto locked `object_key` values. Foreign
-  buckets and unselected keys are dropped.
+- Course Retrieve results are mapped onto locked `object_key` values using
+  exact canonical equality after URL decoding, slash normalization, and S3 URI
+  extraction. Foreign buckets and unselected keys are dropped. Suffix overlap
+  is not a match.
 - Student retrieval is local to extracted text of selected sources in the
   current notebook.
 - The AgentCore coach has no Knowledge Base tool and no S3 tool. It cannot
@@ -55,13 +57,17 @@ Student → Streamlit → FastAPI
 
 ## Prompt injection
 
-Retrieved course text, student uploads, websites, and student messages are
-untrusted evidence. The composer delimits them. Shared, stage, and runtime
-sections remain authoritative. Authorization is structural, not instructional.
+Retrieved course text, student uploads, websites, student messages, prior
+conversation turns, and derived conversation memory are untrusted evidence.
+The composer delimits them. Shared, stage, and runtime sections remain
+authoritative. Authorization is structural, not instructional.
 
 ## Conversation integrity
 
 - DSQL / SQLite is the only authoritative transcript.
+- The context planner is full-history-first. Compression affects model input
+  only and never deletes stored messages. `conversation_memory` is a derived
+  cache/projection that is invalidated when `conversation_revision` changes.
 - AgentCore Memory is not a production transcript. Runtime sessions are
   `stateless-<uuid>`.
 - Conversation revision keeps the active branch authoritative. Superseded

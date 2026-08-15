@@ -107,8 +107,9 @@ latency or duplicate application persistence.
   provider citations are available.
 - Knowledge Base retrieval is a separate `ContextRetriever` in
   `backend/bedrock_retrieve.py`. It uses `Retrieve` with an optional
-  `course_material_id` metadata filter plus post-retrieval object-key
-  validation. See [`docs/RAG_ARCHITECTURE.md`](../RAG_ARCHITECTURE.md). Do not
+  `course_material_id` metadata filter plus post-retrieval exact canonical
+  object-key equality (no suffix matching). See
+  [`docs/RAG_ARCHITECTURE.md`](../RAG_ARCHITECTURE.md). Do not
   use `RetrieveAndGenerate`, because it would bypass the application's prompt,
   ownership, phase, and citation boundaries.
 

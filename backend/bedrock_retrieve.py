@@ -37,7 +37,22 @@ COURSE_MATERIAL_METADATA_KEY = "course_material_id"
 
 def _normalize_key(value: str) -> str:
     """Return a comparable object-key form without a leading slash."""
-    return unquote(str(value or "").strip()).lstrip("/")
+    cleaned = unquote(str(value or "").strip().replace("\\", "/")).lstrip("/")
+    return "/".join(part for part in cleaned.split("/") if part)
+
+
+def canonical_object_key(value: str) -> str:
+    """Return the canonical S3 object key after URI extraction and slash normalize.
+
+    Exact key equality is required. Suffix matching is intentionally absent so
+    ``course/readings/week1.pdf`` cannot match ``archive/week1.pdf`` or
+    ``myweek1.pdf``.
+    """
+    cleaned = str(value or "").strip()
+    if cleaned.lower().startswith("s3://"):
+        _bucket, key = _s3_uri_parts(cleaned)
+        return key
+    return _normalize_key(cleaned)
 
 
 def _s3_uri_parts(uri: str) -> tuple[str, str]:
@@ -80,18 +95,14 @@ def _source_keys(source: RetrievalSource) -> set[str]:
 
 
 def _keys_match(result_key: str, source_keys: set[str]) -> bool:
-    """Return whether a Retrieve object key belongs to a selected source."""
-    candidate = _normalize_key(result_key)
+    """Return whether a Retrieve object key equals a selected canonical key."""
+    candidate = canonical_object_key(result_key)
     if not candidate:
         return False
-    for source_key in source_keys:
-        if not source_key:
-            continue
-        if candidate == source_key:
-            return True
-        if candidate.endswith(source_key) or source_key.endswith(candidate):
-            return True
-    return False
+    canonical_sources = {
+        canonical_object_key(source_key) for source_key in source_keys if source_key
+    }
+    return candidate in canonical_sources
 
 
 def _match_selected_source(
@@ -179,6 +190,7 @@ class BedrockKnowledgeBaseRetriever:
         max_context_chars: int = _MAX_CONTEXT_CHARS,
         course_bucket: str = "",
         client: Any | None = None,
+        strict_metadata_filter: bool | None = None,
     ) -> None:
         """Create the adapter with an injected or lazily constructed client.
 
@@ -189,6 +201,9 @@ class BedrockKnowledgeBaseRetriever:
             max_context_chars: Prompt budget after selected-source filtering.
             course_bucket: When set, Retrieve hits from other buckets are dropped.
             client: Optional injected ``bedrock-agent-runtime`` client for tests.
+            strict_metadata_filter: When true, an empty filtered Retrieve is an
+                evidence gap (no unfiltered retry). Default follows settings and
+                remains false until live KB metadata is verified.
         """
         self._knowledge_base_id = str(knowledge_base_id or "").strip()
         self._region = str(region or "").strip() or "us-west-2"
@@ -196,6 +211,12 @@ class BedrockKnowledgeBaseRetriever:
         self._max_context_chars = max(1, int(max_context_chars))
         self._course_bucket = str(course_bucket or "").strip()
         self._client = client
+        if strict_metadata_filter is None:
+            self._strict_metadata_filter = bool(
+                getattr(settings, "knowledge_base_strict_metadata_filter", False)
+            )
+        else:
+            self._strict_metadata_filter = bool(strict_metadata_filter)
 
     def _runtime_client(self) -> Any:
         """Return the injected client or construct a bedrock-agent-runtime client."""
@@ -256,7 +277,11 @@ class BedrockKnowledgeBaseRetriever:
                 if isinstance(response, Mapping)
                 else None
             )
-            if material_ids and not (isinstance(raw_hits, list) and raw_hits):
+            if (
+                material_ids
+                and not self._strict_metadata_filter
+                and not (isinstance(raw_hits, list) and raw_hits)
+            ):
                 logger.info(
                     "Knowledge Base metadata filter returned no hits; "
                     "retrying without filter"
@@ -269,6 +294,15 @@ class BedrockKnowledgeBaseRetriever:
                             number_of_results=self._number_of_results,
                         )
                     },
+                )
+            elif (
+                material_ids
+                and self._strict_metadata_filter
+                and not (isinstance(raw_hits, list) and raw_hits)
+            ):
+                logger.info(
+                    "Knowledge Base metadata filter returned no hits; "
+                    "strict filter treats this as an evidence gap"
                 )
         except Exception:
             logger.warning("Knowledge Base Retrieve failed", exc_info=False)

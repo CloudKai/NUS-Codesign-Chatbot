@@ -65,6 +65,8 @@ modules.
 | `http/test_runtime_auth.py` | Cognito owner isolation vs single-owner local API |
 | `http/test_workspace_api.py` | Notebook/source/preference CRUD API, path redaction, student transcript download |
 | `domain/test_agentcore_provider.py` | AgentCore Runtime adapter contract with an injected fake client; stateless session plus DSQL history as Converse messages |
+| `domain/test_agentcore_harness_provider.py` | Isolated Luna InvokeHarness eval adapter; trusted override; no AWS |
+| `domain/test_context_planner.py` | Full-history-first planner, compression, revision invalidation |
 | `domain/test_bedrock_retrieve.py` | Bedrock Knowledge Base Retrieve adapter: selected `[S#]` mapping, foreign-key drop, mock-local factory |
 | `domain/test_primary_path.py` | All five phases, stale/reject, restart, notebook isolation, schema |
 | `domain/test_research_coding_domain.py` | Structured provisional CLEAR/Facione/ethics coding |

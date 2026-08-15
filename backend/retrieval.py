@@ -142,16 +142,18 @@ _COURSE_MATERIAL_ID_SAFE = re.compile(r"[^a-z0-9]+")
 
 
 def course_material_id_from_object_key(object_key: str) -> str:
-    """Return a stable application-owned course-material id from an object key.
+    """Return a stable unique application-owned course-material id.
 
-    Examples::
+    Direct files keep the historical prefix+stem form::
 
         course/lectureNotes/week_02_jtbd.pdf -> lecture_week_02_jtbd
         course/readings/pixar.pdf -> reading_pixar
 
-    The identifier is used as Bedrock Knowledge Base metadata
-    ``course_material_id`` when present. Post-retrieval source/object
-    validation remains mandatory.
+    Nested directories are included so the same filename in two folders cannot
+    collide::
+
+        course/readings/week1.pdf -> reading_week1
+        course/readings/archive/week1.pdf -> reading_archive_week1
     """
     key = str(object_key or "").strip().lstrip("/")
     if not key:
@@ -165,11 +167,44 @@ def course_material_id_from_object_key(object_key: str) -> str:
         folder = parts[1].replace(" ", "").replace("_", "").casefold()
     if folder == "lecturenotes":
         prefix = "lecture"
+        nested = parts[2:-1]
     elif folder == "readings":
         prefix = "reading"
+        nested = parts[2:-1]
     else:
         prefix = "course"
-    return f"{prefix}_{slug}" if slug else prefix
+        nested = parts[1:-1] if len(parts) > 1 else []
+    nested_slug = "_".join(
+        _COURSE_MATERIAL_ID_SAFE.sub("_", part.casefold()).strip("_")
+        for part in nested
+        if _COURSE_MATERIAL_ID_SAFE.sub("_", part.casefold()).strip("_")
+    )
+    body = "_".join(item for item in (nested_slug, slug) if item)
+    return f"{prefix}_{body}" if body else prefix
+
+
+def course_material_id_collisions(
+    object_keys: Iterable[str],
+) -> dict[str, tuple[str, ...]]:
+    """Return derived ids that map to more than one distinct object key.
+
+    Used to detect filename-normalization collisions (case, punctuation, or
+    directory differences that still slug to the same identifier).
+    """
+    grouped: dict[str, list[str]] = {}
+    for raw in object_keys:
+        key = str(raw or "").strip()
+        material_id = course_material_id_from_object_key(key)
+        if not material_id:
+            continue
+        grouped.setdefault(material_id, [])
+        if key not in grouped[material_id]:
+            grouped[material_id].append(key)
+    return {
+        material_id: tuple(keys)
+        for material_id, keys in grouped.items()
+        if len(keys) > 1
+    }
 
 
 def is_course_retrieval_source(source: RetrievalSource) -> bool:
@@ -437,6 +472,11 @@ def focused_excerpt(text: str, query: str, *, limit: int = 600) -> str:
     return f"{prefix}{excerpt}{suffix}"
 
 
+def _normalized_excerpt(text: str, *, limit: int = 400) -> str:
+    """Return a comparable excerpt prefix used for near-duplicate suppression."""
+    return " ".join(str(text or "").split()).casefold()[:limit]
+
+
 def bounded_retrieval_result(
     chunks: Iterable[RetrievedChunk],
     *,
@@ -447,11 +487,20 @@ def bounded_retrieval_result(
     The application re-runs this formatter for every adapter result. Therefore
     provider context can contain only the validated chunk text, never extra
     opaque text returned alongside a future infrastructure adapter result.
+    Near-duplicate excerpts from the same source are skipped so repeated KB
+    chunks do not waste the prompt budget.
     """
     sections: list[str] = []
     included: list[RetrievedChunk] = []
+    seen_excerpts: dict[str, set[str]] = {}
     used = 0
     for chunk in chunks:
+        fingerprint = _normalized_excerpt(chunk.text)
+        source_seen = seen_excerpts.setdefault(str(chunk.source_id), set())
+        if fingerprint and fingerprint in source_seen:
+            continue
+        if fingerprint:
+            source_seen.add(fingerprint)
         header = f"--- [{chunk.label}] {chunk.title} · excerpt {chunk.chunk_id} ---"
         metadata_lines: list[str] = []
         if chunk.group:

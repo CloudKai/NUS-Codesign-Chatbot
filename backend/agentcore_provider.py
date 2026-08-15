@@ -10,11 +10,13 @@ Production coaching uses the AgentCore ``coaching`` specialist with
 ``output_contract=coach_turn``. Thinking Path stages stay in DSQL; only the
 runtime *topic* key maps ``deep_analysis`` to the POC ``ethics_critical``
 label. Invokes are stateless (a fresh ``runtimeSessionId`` per turn) so the
-runtime LRU cache is not a second transcript. Bounded DSQL history is sent as
-Converse ``messages`` (POC Memory equivalent). The composed current turn omits
-``<recent_messages>`` so those turns are not duplicated. ``student_id`` is the
-store owner identifier, never a notebook id. This adapter does not call
-RetrieveAndGenerate.
+runtime LRU cache is not a second transcript. The token-aware planner sends
+the full active DSQL transcript when it fits, otherwise derived
+``conversation_memory`` plus a recent verbatim window. The composed current
+turn omits ``<recent_messages>`` so those turns are not duplicated.
+``student_id`` is the store owner identifier, never a notebook id. This
+adapter does not call RetrieveAndGenerate. Production DEFAULT is unchanged by
+the isolated Luna InvokeHarness evaluation path.
 """
 
 from __future__ import annotations
@@ -27,6 +29,12 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
+from .context_planner import (
+    ContextBudget,
+    ContextBudgetError,
+    HistoryContextPlanner,
+    memory_from_metadata,
+)
 from .domain import (
     CoachImageInput,
     CoachRequest,
@@ -34,8 +42,8 @@ from .domain import (
     ProviderCoachOutput,
 )
 from .prompts import compose_coach_prompt
-from .prompts.composer import MAX_RECENT_MESSAGE_CHARS, MAX_RECENT_MESSAGES
 from .providers import ProviderUnavailableError
+from .settings import settings
 
 _GENERIC_FAILURE = "AgentCore could not create a structured coaching turn"
 _TRUNCATED_FAILURE = "AgentCore truncated the coaching turn"
@@ -377,39 +385,6 @@ def _stateless_session_id() -> str:
     return f"stateless-{uuid.uuid4().hex}"
 
 
-def _clip_message_text(value: Any, *, limit: int = MAX_RECENT_MESSAGE_CHARS) -> str:
-    """Return a bounded plain-text body for one Converse content block."""
-    cleaned = " ".join(str(value or "").split()).strip()
-    if len(cleaned) <= limit:
-        return cleaned
-    return cleaned[: max(1, limit - 1)].rstrip() + "…"
-
-
-def _history_converse_messages(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Map bounded DSQL history onto Converse user/assistant messages.
-
-    Args:
-        history: Canonical notebook messages already loaded from the store.
-
-    Returns:
-        At most ``MAX_RECENT_MESSAGES`` Converse messages. Unknown roles and
-        empty bodies are skipped so the harness ``messages`` path stays valid.
-    """
-    selected = list(history or [])[-MAX_RECENT_MESSAGES:]
-    messages: list[dict[str, Any]] = []
-    for item in selected:
-        if not isinstance(item, dict):
-            continue
-        role = str(item.get("role") or "").strip().lower()
-        if role not in {"user", "assistant"}:
-            continue
-        text = _clip_message_text(item.get("content"))
-        if not text:
-            continue
-        messages.append({"role": role, "content": [{"text": text}]})
-    return messages
-
-
 def _current_turn_content(
     prompt: str, images: list[CoachImageInput]
 ) -> list[dict[str, Any]]:
@@ -418,6 +393,19 @@ def _current_turn_content(
     for image in images:
         content.append(_payload_image_block(image))
     return content
+
+
+def _planner_from_settings() -> HistoryContextPlanner:
+    """Build the production planner from configured conservative token budgets."""
+    return HistoryContextPlanner(
+        ContextBudget(
+            model_context_limit_tokens=int(settings.model_context_limit_tokens),
+            max_input_tokens=int(settings.model_max_input_tokens),
+            output_reserve_tokens=int(settings.model_output_reserve_tokens),
+            safety_margin_tokens=int(settings.model_context_safety_margin_tokens),
+            recent_verbatim_messages=int(settings.history_recent_verbatim_messages),
+        )
+    )
 
 
 class AgentCoreCoachProvider:
@@ -434,6 +422,7 @@ class AgentCoreCoachProvider:
         timeout_seconds: float = 110.0,
         max_retries: int = 0,
         client: Any | None = None,
+        planner: HistoryContextPlanner | None = None,
     ) -> None:
         """Create the adapter with an injected or lazily constructed client.
 
@@ -444,6 +433,8 @@ class AgentCoreCoachProvider:
             timeout_seconds: boto read timeout; retries stay application-owned.
             max_retries: Extra SDK attempts after the first call (0 disables).
             client: Optional injected ``bedrock-agentcore`` client for tests.
+            planner: Optional history planner. Defaults to full-history-first
+                with extractive compression only (no extra model call).
 
         Raises:
             ProviderUnavailableError: When ``AGENTCORE_RUNTIME_ARN`` is empty.
@@ -457,6 +448,8 @@ class AgentCoreCoachProvider:
         self._timeout_seconds = float(timeout_seconds)
         self._max_retries = int(max_retries)
         self._client = client
+        self._planner = planner or _planner_from_settings()
+        self._last_plan = None
 
     def model_id_for(self, request: CoachRequest) -> str:
         """Return the configured AgentCore runtime ARN."""
@@ -488,16 +481,42 @@ class AgentCoreCoachProvider:
     def _invoke_payload(self, request: CoachRequest) -> dict[str, Any]:
         """Build the JSON payload for one coaching InvokeAgentRuntime call.
 
-        Always sends Converse ``messages``: bounded DSQL history plus the
-        composed current-turn brief. The brief omits ``<recent_messages>`` so
-        prior turns are not supplied twice. A top-level ``prompt`` string is
-        never used, so the live harness ``_extract_prompt`` takes the
-        caller-supplied history instead of AgentCore Memory.
+        Always sends Converse ``messages``: planner-selected DSQL history plus
+        the composed current-turn brief. The brief omits ``<recent_messages>``
+        so prior turns are not supplied twice. Derived memory appears only in
+        ``<conversation_memory>`` when compression was required. A top-level
+        ``prompt`` string is never used.
         """
-        prompt = compose_coach_prompt(
-            request, include_recent_messages=False
+        existing = memory_from_metadata(
+            {"conversation_memory": request.conversation_memory},
+            conversation_revision=int(request.conversation_revision or 0),
+        )
+        seed_request = request.model_copy(update={"conversation_memory": None})
+        preliminary = compose_coach_prompt(
+            seed_request, include_recent_messages=False
         ).composed_text
-        messages = _history_converse_messages(list(request.history))
+        try:
+            plan = self._planner.plan(
+                seed_request,
+                prompt_text=preliminary,
+                existing_memory=existing,
+            )
+        except ContextBudgetError as error:
+            raise ProviderUnavailableError(
+                "AgentCore context exceeds the safe token budget"
+            ) from error
+        self._last_plan = plan
+        planned_request = request
+        if plan.compressed_memory is not None:
+            planned_request = request.model_copy(
+                update={
+                    "conversation_memory": plan.compressed_memory.model_dump(mode="json")
+                }
+            )
+        prompt = compose_coach_prompt(
+            planned_request, include_recent_messages=False
+        ).composed_text
+        messages = list(plan.messages)
         messages.append(
             {
                 "role": "user",
@@ -541,7 +560,12 @@ class AgentCoreCoachProvider:
             if not isinstance(response, Mapping):
                 raise ProviderUnavailableError(_MALFORMED_FAILURE)
             parsed = _payload_from_runtime_response(response)
-            return _validated_result(parsed, request)
+            result = _validated_result(parsed, request)
+            plan = self._last_plan
+            memory_payload = request.conversation_memory
+            if plan is not None and plan.compressed_memory is not None:
+                memory_payload = plan.compressed_memory.model_dump(mode="json")
+            return result.model_copy(update={"conversation_memory": memory_payload})
         except ProviderUnavailableError:
             raise
         except Exception as error:

@@ -78,14 +78,20 @@ course_material_id IN selected_course_material_ids
 |---|---|---|
 | `course_material_id` | string | `lecture_week_02_jtbd`, `reading_pixar` |
 
-Application-owned IDs are derived from the object key, for example
-`course/lectureNotes/week_02_jtbd.pdf` → `lecture_week_02_jtbd`. Course sync
-stores the same id on locked source metadata.
+Application-owned IDs are derived from the object key. Direct files keep the
+historical form (`course/lectureNotes/week_02_jtbd.pdf` →
+`lecture_week_02_jtbd`). Nested directories are included so the same filename
+in two folders cannot collide (`course/readings/archive/week1.pdf` →
+`reading_archive_week1`). Duplicate-id detection is available via
+`course_material_id_collisions`. Course sync stores the same id on locked
+source metadata.
 
 If the live Knowledge Base does not yet contain that attribute, a filtered
 Retrieve can return no hits. The adapter then retries **without** the filter
-and still drops unselected or foreign S3 keys. Post-retrieval
-source/object-key validation is always applied.
+and still drops unselected or foreign S3 keys, unless
+`KNOWLEDGE_BASE_STRICT_METADATA_FILTER=true`. Post-retrieval object-key
+validation is always applied. Strict filter stays off until live KB metadata
+is verified.
 
 Until the Knowledge Base is re-ingested with `course_material_id` metadata,
 the compatibility fallback is the production path. After re-ingestion, the

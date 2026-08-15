@@ -111,6 +111,31 @@ class Settings:
     agentcore_max_retries: int = int(os.getenv("AGENTCORE_MAX_RETRIES", "0"))
     knowledge_base_id: str = os.getenv("KNOWLEDGE_BASE_ID", "").strip()
     knowledge_base_region: str = os.getenv("KNOWLEDGE_BASE_REGION", "").strip()
+    knowledge_base_strict_metadata_filter: bool = _boolean(
+        "KNOWLEDGE_BASE_STRICT_METADATA_FILTER", False
+    )
+    model_context_limit_tokens: int = int(
+        os.getenv("MODEL_CONTEXT_LIMIT_TOKENS", "272000")
+    )
+    model_max_input_tokens: int = int(os.getenv("MODEL_MAX_INPUT_TOKENS", "210000"))
+    model_output_reserve_tokens: int = int(
+        os.getenv("MODEL_OUTPUT_RESERVE_TOKENS", "32000")
+    )
+    model_context_safety_margin_tokens: int = int(
+        os.getenv("MODEL_CONTEXT_SAFETY_MARGIN_TOKENS", "30000")
+    )
+    history_recent_verbatim_messages: int = int(
+        os.getenv("HISTORY_RECENT_VERBATIM_MESSAGES", "12")
+    )
+    agentcore_eval_harness_arn: str = os.getenv(
+        "AGENTCORE_EVAL_HARNESS_ARN", ""
+    ).strip()
+    live_eval_model_id: str = os.getenv(
+        "LIVE_EVAL_MODEL_ID", "openai.gpt-5.6-luna"
+    ).strip() or "openai.gpt-5.6-luna"
+    live_eval_api_format: str = os.getenv(
+        "LIVE_EVAL_API_FORMAT", "responses"
+    ).strip() or "responses"
     course_materials_bucket: str = field(
         default_factory=lambda: os.getenv("COURSE_MATERIALS_BUCKET", "").strip()
     )

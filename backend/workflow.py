@@ -96,6 +96,9 @@ class CoachWorkflow:
     _last_research_coding: dict[str, ProvisionalResearchCoding | None] = field(
         default_factory=dict, init=False, repr=False
     )
+    _last_conversation_memory: dict[str, dict[str, Any] | None] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     @property
     def provider_id(self) -> str:
@@ -159,6 +162,9 @@ class CoachWorkflow:
             "mode": "sequential",
         }
         self._last_research_coding[request.thread_id] = provider_result.research_coding
+        self._last_conversation_memory[request.thread_id] = (
+            provider_result.conversation_memory
+        )
         return turn
 
     def _run_graph(self, request: CoachRequest) -> CoachTurn:
@@ -171,6 +177,7 @@ class CoachWorkflow:
             }
         }
         self._last_research_coding.pop(request.thread_id, None)
+        self._last_conversation_memory.pop(request.thread_id, None)
         try:
             result = graph.invoke(
                 {
@@ -209,6 +216,15 @@ class CoachWorkflow:
     ) -> ProvisionalResearchCoding | None:
         """Consume transient coding after its provider quotes become offsets."""
         return self._last_research_coding.pop(thread_id, None)
+
+    def take_conversation_memory(self, thread_id: str) -> dict[str, Any] | None:
+        """Consume derived conversation memory after the provider turn.
+
+        Returns:
+            The derived memory dict to persist, or ``None`` to clear a stale
+            projection after a conversation revision.
+        """
+        return self._last_conversation_memory.pop(thread_id, None)
 
     def _ensure_graph(self):
         """Build and cache the multi-step LangGraph runtime once."""
@@ -259,6 +275,9 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
         steps.append("assess")
         workflow._last_research_coding[request.thread_id] = (
             provider_result.research_coding
+        )
+        workflow._last_conversation_memory[request.thread_id] = (
+            provider_result.conversation_memory
         )
         return {
             "request": request.model_dump(mode="json"),

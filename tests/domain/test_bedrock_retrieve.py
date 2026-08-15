@@ -354,3 +354,61 @@ def test_composite_student_only_does_not_call_knowledge_base():
     assert "school gate" in result.context
     assert "secret" not in result.context
 
+
+def test_retrieve_rejects_suffix_overlapping_unselected_keys():
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                "s3://cde2300-course-content-s3/course/readings/week1.pdf",
+                "Selected week1 excerpt.",
+            ),
+            _hit(
+                "s3://cde2300-course-content-s3/course/readings/archive/week1.pdf",
+                "Archive week1 must not match by suffix.",
+            ),
+            _hit(
+                "s3://cde2300-course-content-s3/course/readings/myweek1.pdf",
+                "myweek1 must not match week1.pdf.",
+            ),
+        ]
+    )
+    result = BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="cde2300-course-content-s3",
+        client=client,
+    ).retrieve(
+        _query(
+            _course_source(
+                "src-reading",
+                "S1",
+                object_key="course/readings/week1.pdf",
+                title="Week 1",
+            )
+        )
+    )
+    assert [chunk.text for chunk in result.chunks] == ["Selected week1 excerpt."]
+    assert "Archive week1" not in result.context
+    assert "myweek1" not in result.context
+
+
+def test_strict_metadata_filter_does_not_retry_unfiltered(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(settings, "knowledge_base_strict_metadata_filter", True)
+    client = FakeRetrieveClient(results=[])
+    result = BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="cde2300-course-content-s3",
+        client=client,
+        strict_metadata_filter=True,
+    ).retrieve(
+        _query(
+            _course_source(
+                "src-lecture",
+                "S1",
+                object_key="course/lectureNotes/crossing.pdf",
+            )
+        )
+    )
+    assert len(client.calls) == 1
+    assert result.chunks == ()
+    assert result.context == ""
+

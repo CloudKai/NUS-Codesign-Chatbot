@@ -283,7 +283,7 @@ def test_runtime_session_is_never_notebook_memory_or_history():
     assert "student_id" not in payload
 
 
-def test_agentcore_payload_sends_bounded_history_and_owner_student_id():
+def test_agentcore_payload_sends_full_history_and_owner_student_id():
     """DSQL history is Converse messages; student_id is the store owner, not the notebook."""
     client = FakeAgentCoreRuntime(payload=_output())
     history = [
@@ -306,14 +306,59 @@ def test_agentcore_payload_sends_bounded_history_and_owner_student_id():
     assert messages[-1]["role"] == "user"
     assert _STAGE_MARKERS["problem_identification"] in messages[-1]["content"][0]["text"]
     prior = messages[:-1]
-    assert len(prior) == 6
-    assert prior[0]["content"][0]["text"] == "Earlier student turn 3."
+    assert len(prior) == 9
+    assert prior[0]["content"][0]["text"] == "Earlier student turn 0."
     assert prior[-1]["role"] == "assistant"
     current_text = messages[-1]["content"][0]["text"]
-    assert "Earlier student turn 3." not in current_text
+    assert "Earlier student turn 0." not in current_text
     assert "Earlier coach reply." not in current_text
     assert "<recent_messages>" in current_text
     assert "supplied separately as message history" in current_text
+
+
+def test_agentcore_compression_keeps_early_decision_out_of_recent_messages():
+    from backend.context_planner import ContextBudget, HistoryContextPlanner
+
+    client = FakeAgentCoreRuntime(payload=_output())
+    planner = HistoryContextPlanner(
+        ContextBudget(
+            model_context_limit_tokens=7_000,
+            max_input_tokens=6_000,
+            output_reserve_tokens=500,
+            safety_margin_tokens=500,
+            recent_verbatim_messages=4,
+        )
+    )
+    history = [
+        {
+            "role": "user",
+            "content": "EARLY_DECISION I chose a raised crossing for older pedestrians.",
+        },
+        {"role": "assistant", "content": "What evidence supports that choice?"},
+    ]
+    history.extend(
+        {
+            "role": "user" if index % 2 == 0 else "assistant",
+            "content": f"later-{index} " + ("padding " * 40),
+        }
+        for index in range(20)
+    )
+    provider = AgentCoreCoachProvider(
+        _RUNTIME_ARN,
+        client=client,
+        planner=planner,
+    )
+    provider.assess(_request(history=history, conversation_revision=1))
+    payload = _decoded_payload(client.calls[0])
+    prior = payload["messages"][:-1]
+    assert 1 <= len(prior) <= 4
+    current_text = _current_turn_text(payload)
+    assert "EARLY_DECISION" in current_text
+    assert "<conversation_memory>" in current_text
+    assert "supplied separately as message history" in current_text
+    for item in prior:
+        assert "EARLY_DECISION" not in item["content"][0]["text"]
+    assert current_text.count(_STUDENT_MESSAGE) == 1
 
 
 def test_application_path_stamps_store_identifier_as_student_id(tmp_path):

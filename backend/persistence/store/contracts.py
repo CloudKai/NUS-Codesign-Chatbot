@@ -36,6 +36,7 @@ SETTINGS_KEYS = frozenset(
         "last_workflow_user_message_id",
         "tags",
         "revoked_coach_idempotency_keys",
+        "conversation_memory",
     }
 )
 

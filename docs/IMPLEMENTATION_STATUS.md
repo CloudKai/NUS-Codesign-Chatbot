@@ -1,6 +1,60 @@
 # Implementation status
 
-## Current phase — Ethics & CT integration, KB metadata filter, history de-dup
+## Current phase — Full-history-first planner, exact RAG keys, isolated Luna eval path
+
+**Completed locally on 2026-08-15.** Integrate-Bedrock remains the product.
+Production `MODEL_PROVIDER=agentcore` still uses `InvokeAgentRuntime` and
+does **not** change DEFAULT. The last-six history cap is replaced by a
+full-history-first token-aware planner. Compression is derived model context
+only. Object-key matching is exact. Live pedagogical evaluation, when
+approved, uses isolated InvokeHarness + GPT-5.6 Luna with zero Claude calls.
+
+### Behavior delivered
+
+1. `HistoryContextPlanner` sends the entire active DSQL transcript when it
+   fits; otherwise extractive (production) or Luna (eval) compression plus a
+   recent verbatim window. DSQL is never truncated.
+2. Derived `conversation_memory` persists in notebook settings, stamped with
+   `conversation_revision`, and is discarded after revise-and-resubmit.
+3. Retrieve object keys match by canonical equality only. Nested
+   `course_material_id` values distinguish same filenames in different folders.
+   Strict metadata filter remains off until live KB metadata is verified.
+4. Isolated `AgentCoreHarnessCoachProvider` asserts
+   `openai.gpt-5.6-luna` / `responses` before every eval invoke. Production
+   factory is unchanged.
+
+### Main files changed
+
+- Planner/eval: `backend/context_planner.py`, `backend/live_eval_config.py`,
+  `backend/agentcore_harness_provider.py`, `backend/agentcore_provider.py`,
+  `backend/prompts/composer.py`, `backend/coaching/execution.py`,
+  `backend/workflow.py`, `scripts/evals/evaluate_live_coach.py`
+- Retrieval: `backend/retrieval.py`, `backend/bedrock_retrieve.py`
+- Docs: prompt, AgentCore, RAG, security, this status file
+
+### Validation evidence
+
+- Full deterministic suite: **579 passed, 0 failed** (Starlette/httpx deprecation
+  warnings only; classified as harmless test-client debt). `compileall` passed.
+  `git diff --check` passed. No live AWS or paid OpenAI call from pytest.
+
+### Compatibility, migration, and rollback
+
+- No database migration. `conversation_memory` is an additive settings key.
+- Production DEFAULT and InvokeAgentRuntime ARN are unchanged.
+- Rollback is reverting this working tree.
+
+### Known risks and next exact action
+
+- Live KB `course_material_id` metadata may still be absent; filter fallback
+  remains. Local venv boto3 1.35.99 lacks `InvokeHarness` (need 1.43+ in the
+  eval environment only). Production DEFAULT is unchanged.
+- Next: after `aws login`, create or set `AGENTCORE_EVAL_HARNESS_ARN` for an
+  isolated eval harness and run
+  `.venv/bin/python scripts/evals/evaluate_live_coach.py --i-approve-live-luna --quick`.
+  Do not commit/push or switch production DEFAULT unless asked.
+
+## Previous completed phase — Ethics & CT integration, KB metadata filter, history de-dup
 
 **Completed locally on 2026-08-15.** Integrate-Bedrock remains the product.
 AgentCore is still a stateless reasoning adapter. Course Retrieve can send a

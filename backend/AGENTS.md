@@ -50,6 +50,9 @@ FastAPI (`api.py` façade → `http/app.py`)
 | `providers.py` | OpenAI, mock selection, Bedrock and AgentCore factory wiring |
 | `bedrock_provider.py` | Amazon Bedrock Converse coach adapter (injected client; no AWS in tests) |
 | `agentcore_provider.py` | AgentCore Runtime coach adapter (injected client; no AWS in tests) |
+| `agentcore_harness_provider.py` | Isolated InvokeHarness Luna eval adapter (not production DEFAULT) |
+| `context_planner.py` | Full-history-first token-aware model-context planner |
+| `live_eval_config.py` | Trusted Luna override assertions for live evaluation |
 | `bedrock_retrieve.py` | Bedrock Knowledge Base `Retrieve` adapter for selected locked course sources |
 | `prompts/` | Framework-neutral five-phase prompt files, loader, and composer |
 | `mock_provider.py` | Deterministic provider for tests and offline demo |

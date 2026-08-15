@@ -8,6 +8,7 @@ import re
 import time
 from typing import Any
 
+from backend.context_planner import memory_from_metadata
 from backend.domain import (
     CitationReference,
     CoachImageInput,
@@ -548,6 +549,9 @@ class CoachApplicationService:
                 "working_conclusion": turn.assessment.working_conclusion,
                 "understanding_change": turn.assessment.understanding_change,
                 "critical_understanding": turn.assessment.critical_understanding_level,
+                "conversation_memory": self._workflow.take_conversation_memory(
+                    prepared_request.thread_id
+                ),
             },
             generated_title=generated_title,
             existing_user_message_id=prepared_request.revise_user_message_id,
@@ -719,6 +723,9 @@ class CoachApplicationService:
             else thread.get("conversation_revision")
             or 0
         )
+        conversation_memory = memory_from_metadata(
+            metadata, conversation_revision=conversation_revision
+        )
         return request.model_copy(
             update={
                 "current_stage": authoritative_stage,
@@ -727,6 +734,11 @@ class CoachApplicationService:
                 "source_context": retrieval_result.context,
                 "student_project_context": project_context,
                 "conversation_summary": conversation_summary,
+                "conversation_memory": (
+                    None
+                    if conversation_memory is None
+                    else conversation_memory.model_dump(mode="json")
+                ),
                 "retrieved_chunks": retrieved_chunks,
                 "image_inputs": image_inputs,
                 "model_id": selected_model.id,

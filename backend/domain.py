@@ -279,6 +279,7 @@ class CoachRequest(BaseModel):
     source_context: str = ""
     student_project_context: str = ""
     conversation_summary: str = ""
+    conversation_memory: dict[str, Any] | None = None
     retrieved_chunks: list[RetrievalChunkReference] = Field(default_factory=list)
     image_inputs: list[CoachImageInput] = Field(default_factory=list, max_length=5)
     allow_model_knowledge: bool = False
@@ -372,6 +373,7 @@ class ProviderAssessmentResult(BaseModel):
     response_text: str = Field(min_length=1)
     assessment: EducationalAssessment
     research_coding: ProvisionalResearchCoding | None = None
+    conversation_memory: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def holistic_candidate_is_reflection_only(self) -> "ProviderAssessmentResult":

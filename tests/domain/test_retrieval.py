@@ -21,6 +21,8 @@ from backend.retrieval import (
     RetrievalResult,
     RetrievalSource,
     RetrievedChunk,
+    bounded_retrieval_result,
+    course_material_id_collisions,
     course_material_id_from_object_key,
     retrieval_sources_from_notebook,
 )
@@ -406,6 +408,68 @@ def test_course_material_id_is_stable_from_object_key():
         course_material_id_from_object_key("course/readings/pixar.pdf")
         == "reading_pixar"
     )
+    assert (
+        course_material_id_from_object_key("course/readings/week1.pdf")
+        == "reading_week1"
+    )
+    assert (
+        course_material_id_from_object_key("course/readings/archive/week1.pdf")
+        == "reading_archive_week1"
+    )
+    assert (
+        course_material_id_from_object_key("course/readings/myweek1.pdf")
+        == "reading_myweek1"
+    )
+    collisions = course_material_id_collisions(
+        [
+            "course/readings/week 01.pdf",
+            "course/readings/week_01.pdf",
+            "course/Readings/WEEK_01.PDF",
+            "course/lectureNotes/week1.pdf",
+        ]
+    )
+    assert "reading_week_01" in collisions
+    assert "lecture_week1" not in collisions
+
+
+def test_bounded_retrieval_skips_near_duplicate_chunks_from_the_same_source():
+    duplicate = "Older pedestrians need a longer crossing interval at night."
+    result = bounded_retrieval_result(
+        [
+            RetrievedChunk(
+                source_id="src-1",
+                label="S1",
+                title="Lecture",
+                chunk_id="S1-KB1",
+                text=duplicate,
+                score=0.9,
+                source_index=1,
+                chunk_index=1,
+            ),
+            RetrievedChunk(
+                source_id="src-1",
+                label="S1",
+                title="Lecture",
+                chunk_id="S1-KB2",
+                text=duplicate,
+                score=0.8,
+                source_index=1,
+                chunk_index=2,
+            ),
+            RetrievedChunk(
+                source_id="src-1",
+                label="S1",
+                title="Lecture",
+                chunk_id="S1-KB3",
+                text="A different excerpt about signal timing and kerb height.",
+                score=0.7,
+                source_index=1,
+                chunk_index=3,
+            ),
+        ]
+    )
+    assert [chunk.chunk_id for chunk in result.chunks] == ["S1-KB1", "S1-KB3"]
+    assert result.context.count(duplicate) == 1
 
 
 def test_forged_citation_is_not_persisted(tmp_path):

@@ -84,8 +84,11 @@ tell the coach to identify an evidence gap when the retrieved excerpts do not
 answer the question.
 
 AgentCore omits `<recent_messages>` from the composed brief because the same
-bounded turns are already Converse `messages`. Mock, OpenAI, and Bedrock
-Converse keep the inline recent-history block.
+turns are already Converse `messages`. When history no longer fits, derived
+`<conversation_memory>` is inserted once between summary and recent_messages.
+That block is untrusted student/project content, not instructions. Mock,
+OpenAI, and Bedrock Converse keep the inline recent-history block unless a
+provider opts into the same planner.
 
 ## Production Knowledge Base path
 
@@ -116,7 +119,10 @@ not mock. It:
 - sends a `course_material_id` Knowledge Base metadata filter when ids exist,
   then retries without the filter if that returns no hits (compatibility until
   the KB is re-ingested with metadata);
-- maps S3 locations onto locked course `object_key` values and `[S#]` labels;
+- maps S3 locations onto locked course `object_key` values and `[S#]` labels
+  using exact canonical key equality (URL-decoded, slash-normalized, S3 URI
+  extracted). Suffix matching is not used, so `week1.pdf` cannot match
+  `archive/week1.pdf` or `myweek1.pdf`;
 - returns bounded `RetrievedChunk` values with `retrieval_origin`;
 - uses Knowledge Base `Retrieve`, then feeds the existing composer/workflow, so
   stage decisions and persistence do not move into `RetrieveAndGenerate`;
