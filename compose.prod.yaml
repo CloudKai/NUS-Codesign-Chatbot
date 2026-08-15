@@ -21,10 +21,10 @@ services:
       STUDENT_STAGE_SELECTION: "false"
       USE_LOCAL_API: "true"
       CO_DESIGN_API_URL: "http://127.0.0.1:8000"
-      CO_DESIGN_PUBLIC_API_URL: "https://cde2300chatbot.duckdns.org"
-      CO_DESIGN_UI_URL: "https://cde2300chatbot.duckdns.org"
+      CO_DESIGN_PUBLIC_API_URL: "https://d1sxfuoybzedj5.cloudfront.net"
+      CO_DESIGN_UI_URL: "https://d1sxfuoybzedj5.cloudfront.net"
       # Must never silently fall back to the local 127.0.0.1 Cognito callback.
-      COGNITO_REDIRECT_URI: "https://cde2300chatbot.duckdns.org/api/v1/auth/callback"
+      COGNITO_REDIRECT_URI: "https://d1sxfuoybzedj5.cloudfront.net/api/v1/auth/callback"
       AUTH_COOKIE_SECURE: "true"
       DSQL_SSLROOTCERT: "/etc/ssl/certs/ca-certificates.crt"
       DATABASE_PROVIDER: "dsql"
@@ -36,19 +36,20 @@ services:
       # Do not copy those PDFs into USER_UPLOADS_BUCKET/users/.
       COURSE_MATERIAL_SYNC_ENABLED: "true"
       COURSE_MATERIALS_PREFIX: "course/"
+      MODEL_PROVIDER: "agentcore"
+      MOCK_OPENAI: "false"
+      AGENTCORE_MODEL_PROVIDER: "bedrock"
+      AGENTCORE_MODEL_ID: "global.anthropic.claude-sonnet-4-6"
+      AGENTCORE_MODEL_REGION: "us-west-2"
       # Runtime-configured; do not hard-code account IDs or bucket names in Git.
+      # APP_IMAGE: set on the host to the ECR image URI + immutable tag
       # DSQL_ENDPOINT: set in host .env
       # USER_UPLOADS_BUCKET: set in host .env
       # COURSE_MATERIALS_BUCKET: set in host .env (cde2300-course-content-s3)
       # AGENTCORE_RUNTIME_ARN: set in host .env
-      # AGENTCORE_MODEL_PROVIDER=bedrock
-      # AGENTCORE_MODEL_ID=global.anthropic.claude-sonnet-4-6
-      # AGENTCORE_MODEL_REGION=us-west-2
-      # GUARDRAIL_ID / GUARDRAIL_VERSION: required for student-facing AgentCore
-      # Those same keys must be injected on the published AgentCore runtime.
-      # KNOWLEDGE_BASE_ID: required in host .env when COURSE_MATERIAL_SYNC_ENABLED=true
-      # MODEL_PROVIDER=agentcore once the harness emits coach_turn JSON
-      # APP_IMAGE: set on the host to the ECR image URI + immutable tag
+      # AGENTCORE_QUALIFIER: set in host .env (DEFAULT after v11 is smoke-tested)
+      # GUARDRAIL_ID / GUARDRAIL_VERSION: set in host .env; also inject on the runtime
+      # KNOWLEDGE_BASE_ID: set in host .env (JUQNP8AZAZ) when course sync is on
       # Lecture notes are not bundled into the production image.
     expose:
       - "8000"
