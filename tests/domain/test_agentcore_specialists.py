@@ -26,6 +26,7 @@ from agentcore_runtime.structured_coach import (
 )
 from backend.agentcore_provider import AgentCoreCoachProvider, agentcore_topic_for_stage
 from backend.domain import CoachRequest, StageDecision
+from fake_agentcore_runtime import FakeAgentCoreRuntime
 
 
 _RUNTIME_ARN = (
@@ -34,25 +35,16 @@ _RUNTIME_ARN = (
 _RUNTIME_PROMPTS = Path("agentcore_runtime/prompts")
 
 
-class _FakeBody:
-    def __init__(self, payload: bytes) -> None:
-        self._payload = payload
-
-    def read(self) -> bytes:
-        return self._payload
-
-
-class FakeAgentCoreRuntime:
-    def __init__(self, *, payload: dict[str, Any] | None = None) -> None:
-        self.calls: list[dict[str, Any]] = []
-        self._payload = payload or {}
-
-    def invoke_agent_runtime(self, **kwargs: Any) -> dict[str, Any]:
-        self.calls.append(kwargs)
-        return {
-            "contentType": "application/json",
-            "response": _FakeBody(json.dumps(self._payload).encode("utf-8")),
-        }
+def _specialist_payload(client: FakeAgentCoreRuntime) -> dict[str, Any]:
+    """Return the first non-router AgentCore payload."""
+    for call in client.calls:
+        payload = json.loads(call["payload"].decode("utf-8"))
+        if (
+            payload.get("phase") not in {"router"}
+            and str(payload.get("review_mode") or "") != "incremental"
+        ):
+            return payload
+    raise AssertionError("no specialist invoke recorded")
 
 
 def _provider(client: FakeAgentCoreRuntime) -> AgentCoreCoachProvider:
@@ -152,7 +144,12 @@ def test_agentcore_payload_routes_week_question_to_qa() -> None:
         payload={
             "response_text": "Week 1 covers the course introduction [S1].",
             "citations": [],
-        }
+        },
+        router_payload={
+            "specialist": "qa",
+            "confidence": 0.95,
+            "rationale_category": "course_information",
+        },
     )
     result = _provider(client).assess(
         CoachRequest(
@@ -162,7 +159,7 @@ def test_agentcore_payload_routes_week_question_to_qa() -> None:
             response_detail="short",
         )
     )
-    payload = json.loads(client.calls[0]["payload"].decode("utf-8"))
+    payload = _specialist_payload(client)
     assert payload["phase"] == "qa"
     assert payload["output_contract"] == "qa_turn"
     assert "STAGE: PROBLEM IDENTIFICATION" not in payload["trusted_instructions"]
@@ -178,7 +175,12 @@ def test_agentcore_payload_routes_review_request() -> None:
             "strengths": ["Concrete setting"],
             "areas_to_develop": ["Name who is affected"],
             "synthesis": "Formative progress, not a grade.",
-        }
+        },
+        router_payload={
+            "specialist": "review",
+            "confidence": 0.92,
+            "rationale_category": "formative_review",
+        },
     )
     result = _provider(client).assess(
         CoachRequest(
@@ -188,7 +190,7 @@ def test_agentcore_payload_routes_review_request() -> None:
             response_detail="short",
         )
     )
-    payload = json.loads(client.calls[0]["payload"].decode("utf-8"))
+    payload = _specialist_payload(client)
     assert payload["phase"] == "review"
     assert payload["output_contract"] == "review_turn"
     assert result.assessment.recommendation is StageDecision.STAY

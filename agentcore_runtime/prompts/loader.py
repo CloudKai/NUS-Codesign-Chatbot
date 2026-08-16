@@ -25,6 +25,9 @@ _PROMPTS_ROOT = Path(__file__).resolve().parent
 _SHARED_PATH = _PROMPTS_ROOT / "shared_coaching.md"
 _QA_PATH = _PROMPTS_ROOT / "qa.md"
 _REVIEW_PATH = _PROMPTS_ROOT / "review.md"
+_REVIEW_INCREMENTAL_PATH = _PROMPTS_ROOT / "review_incremental.md"
+_REVIEW_DEEP_PATH = _PROMPTS_ROOT / "review_deep.md"
+_ROUTER_PATH = _PROMPTS_ROOT / "router.md"
 _STAGES_DIR = _PROMPTS_ROOT / "stages"
 
 
@@ -86,6 +89,24 @@ def load_qa_prompt() -> str:
 def load_review_prompt() -> str:
     """Return the canonical Formative Review specialist prompt."""
     return _read_utf8(_REVIEW_PATH)
+
+
+@lru_cache(maxsize=1)
+def load_router_prompt() -> str:
+    """Return the canonical Luna router classification prompt."""
+    return _read_utf8(_ROUTER_PATH)
+
+
+@lru_cache(maxsize=1)
+def load_review_incremental_prompt() -> str:
+    """Return the Incremental Luna Review prompt."""
+    return _read_utf8(_REVIEW_INCREMENTAL_PATH)
+
+
+@lru_cache(maxsize=1)
+def load_review_deep_prompt() -> str:
+    """Return the Deep Sonnet Review prompt, including stage readiness."""
+    return _read_utf8(_REVIEW_DEEP_PATH)
 
 
 @lru_cache(maxsize=8)

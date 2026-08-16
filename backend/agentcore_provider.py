@@ -1,25 +1,22 @@
 """Amazon Bedrock AgentCore Runtime adapter for one structured specialist turn.
 
-The adapter invokes ``InvokeAgentRuntime`` once per turn with application
-runtime rules plus untrusted turn content, validates structured output, and
-returns the provider-neutral result. It does not own phase progression,
-citations, persistence, retrieval, or IAM. Tests inject a fake client so
-automated runs never contact AWS.
+The adapter may invoke ``InvokeAgentRuntime`` more than once per student turn
+on the same runtime ARN:
 
-Production uses one AgentCore runtime with three specialists: ``qa``,
-``coaching``, and ``review``. Thinking Path stages stay in DSQL; only the
-runtime *topic* key maps ``deep_analysis`` to the POC ``ethics_critical``
-label. Invokes are stateless (a fresh ``runtimeSessionId`` per turn) so the
-runtime LRU cache is not a second transcript. The token-aware planner sends
-the full active DSQL transcript when it fits, otherwise derived
-``conversation_memory`` plus a recent verbatim window. Canonical pedagogy
-lives in ``agentcore_runtime/prompts``. FastAPI sends runtime constraints in
-``trusted_instructions`` and ``runtime_context``. Untrusted project,
-evidence, memory, and the current student contribution travel as the last
-user message. ``student_id`` is the store owner identifier, never a notebook
-id. This adapter does not call RetrieveAndGenerate. Production DEFAULT is
-unchanged by the isolated Luna InvokeHarness evaluation path. Guardrail
-blocks are category-only failures and never persist refusal text.
+1. Luna router (unless the specialist is already server-owned)
+2. The selected specialist (Q&A, Coaching, or explicit Deep Review)
+3. Incremental Luna Review after a successful Coaching turn
+4. Deep Sonnet Review on periodic or event triggers
+
+It does not own phase progression, citations, persistence, retrieval, or IAM.
+Tests inject a fake client so automated runs never contact AWS.
+
+FastAPI remains the authority for authentication, source ownership, and DSQL
+writes. Thinking Path stages stay in DSQL; only the runtime *topic* key maps
+``deep_analysis`` to the POC ``ethics_critical`` label. Invokes are stateless
+(a fresh ``runtimeSessionId`` per invoke) so the runtime LRU cache is not a
+second transcript. Guardrail blocks are category-only failures and never
+persist refusal text.
 """
 
 from __future__ import annotations
@@ -29,9 +26,14 @@ import binascii
 import json
 import logging
 import re
+import time
 import uuid
 from collections.abc import Mapping
 from typing import Any
+
+from pydantic import ValidationError
+
+from agentcore_runtime.models import ReviewTurnOutput, RouterOutput
 
 from .context_planner import (
     ContextBudget,
@@ -52,10 +54,21 @@ from .domain import (
 from .prompts import compose_coach_prompt
 from .providers import ProviderUnavailableError
 from .settings import settings
+from .specialists.review_orchestration import (
+    REVIEW_DEPTH_DEEP,
+    REVIEW_DEPTH_INCREMENTAL,
+    REVIEW_TRIGGER_INCREMENTAL,
+    bound_deep_review_interval,
+    resolve_deep_review_trigger,
+    should_run_deep_review,
+)
 from .specialists.routing import (
+    ALLOWED_SPECIALISTS,
     SPECIALIST_COACHING,
     SPECIALIST_QA,
     SPECIALIST_REVIEW,
+    apply_semantic_route,
+    bound_router_min_confidence,
     select_specialist,
 )
 
@@ -486,14 +499,28 @@ def _payload_from_runtime_response(response: Mapping[str, Any]) -> dict[str, Any
 
 
 def _request_specialist(request: CoachRequest) -> str:
-    """Return the server-owned specialist for one request."""
+    """Return the specialist already stamped on a routed request.
+
+    Args:
+        request: Coach request whose ``specialist`` must already be
+            server-resolved. This helper does not call the Luna router.
+
+    Returns:
+        ``qa``, ``coaching``, or ``review``.
+    """
     return select_specialist(
         request.student_message,
         requested=request.specialist,
     )
 
 
-def _runtime_context(request: CoachRequest) -> dict[str, Any]:
+def _runtime_context(
+    request: CoachRequest,
+    specialist: str,
+    *,
+    review_mode: str | None = None,
+    review_trigger: str | None = None,
+) -> dict[str, Any]:
     """Return application-owned runtime constraints for the AgentCore specialist."""
     labels = sorted(
         {
@@ -502,8 +529,10 @@ def _runtime_context(request: CoachRequest) -> dict[str, Any]:
             if str(chunk.label or "").strip()
         }
     )
-    specialist = _request_specialist(request)
-    return {
+    cleaned = str(specialist or "").strip().lower()
+    if cleaned not in ALLOWED_SPECIALISTS:
+        cleaned = SPECIALIST_COACHING
+    context = {
         "current_stage": request.current_stage,
         "agentcore_topic": agentcore_topic_for_stage(request.current_stage),
         "response_detail": "quick" if request.response_detail == "short" else "strict",
@@ -511,8 +540,13 @@ def _runtime_context(request: CoachRequest) -> dict[str, Any]:
         "allowed_citations": labels,
         "allow_model_knowledge": bool(request.allow_model_knowledge),
         "conversation_revision": request.conversation_revision,
-        "specialist": specialist,
+        "specialist": cleaned,
     }
+    if review_mode in {REVIEW_DEPTH_INCREMENTAL, REVIEW_DEPTH_DEEP}:
+        context["review_mode"] = review_mode
+    if review_trigger:
+        context["review_trigger"] = str(review_trigger)
+    return context
 
 
 def _citations_from_items(items: Any) -> list[CitationReference]:
@@ -573,8 +607,9 @@ def _validated_result(
 ) -> ProviderAssessmentResult:
     """Validate structured specialist output and force the persisted phase.
 
-    Q&A and Review never persist a stage transition. Coaching remains the only
-    pedagogical readiness authority.
+    Q&A never persists a stage transition. Coaching ADVANCE is treated as a
+    readiness candidate only. Incremental Review cannot advance. Deep Review
+    may recommend stay/advance; FastAPI still executes the transition.
     """
     specialist = _request_specialist(request)
     if specialist == SPECIALIST_QA:
@@ -714,6 +749,201 @@ def _planner_from_settings() -> HistoryContextPlanner:
     )
 
 
+def _compact_text(value: Any, limit: int) -> str:
+    """Return whitespace-normalized text truncated to ``limit`` characters."""
+    return " ".join(str(value or "").split())[:limit]
+
+
+def _compact_string_list(values: Any, *, item_limit: int, max_items: int) -> list[str]:
+    """Return unique non-empty strings for bounded Stage Judge context."""
+    items: list[str] = []
+    seen: set[str] = set()
+    if not isinstance(values, list):
+        return items
+    for value in values:
+        text = _compact_text(value, item_limit)
+        if text and text not in seen:
+            seen.add(text)
+            items.append(text)
+        if len(items) >= max_items:
+            break
+    return items
+
+
+def _router_payload(request: CoachRequest) -> dict[str, Any]:
+    """Build a small Luna router payload. Never includes RAG or pedagogy."""
+    return {
+        "phase": "router",
+        "output_contract": "router_turn",
+        "runtime_context": {"current_stage": request.current_stage},
+        "messages": [
+            {
+                "role": "user",
+                "content": [{"text": str(request.student_message)}],
+            }
+        ],
+    }
+
+
+def _merge_unique_strings(*groups: list[str], limit: int = 8) -> list[str]:
+    """Merge assessment bullet lists without duplicates or empty items."""
+    merged: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for item in group:
+            text = _compact_text(item, 400)
+            if text and text not in seen:
+                seen.add(text)
+                merged.append(text)
+            if len(merged) >= limit:
+                return merged
+    return merged
+
+
+def _stay_after_deep_review_failure(
+    result: ProviderAssessmentResult,
+    extra_missing: list[str] | None = None,
+) -> ProviderAssessmentResult:
+    """Fail closed to STAY while keeping the coaching or review response text."""
+    missing = _merge_unique_strings(
+        list(result.assessment.missing_reasoning_elements),
+        extra_missing or [],
+    )
+    assessment = result.assessment.model_copy(
+        update={
+            "recommendation": StageDecision.STAY,
+            "missing_reasoning_elements": missing,
+        }
+    )
+    return result.model_copy(update={"assessment": assessment, "deep_review_succeeded": False})
+
+
+def _coaching_without_advancement(
+    result: ProviderAssessmentResult,
+) -> tuple[ProviderAssessmentResult, bool]:
+    """Force Coaching STAY and surface ADVANCE as a readiness candidate."""
+    assessment = result.assessment
+    candidate = bool(assessment.readiness_candidate) or (
+        assessment.recommendation is StageDecision.ADVANCE
+    )
+    if assessment.recommendation is StageDecision.ADVANCE or candidate:
+        assessment = assessment.model_copy(
+            update={
+                "recommendation": StageDecision.STAY,
+                "readiness_candidate": True if candidate else False,
+            }
+        )
+        result = result.model_copy(update={"assessment": assessment})
+    return result, bool(result.assessment.readiness_candidate)
+
+
+def _overlay_review_fields(
+    result: ProviderAssessmentResult,
+    review: ReviewTurnOutput,
+    *,
+    review_depth: str,
+    review_model: str,
+    review_trigger: str,
+    force_stay: bool,
+) -> ProviderAssessmentResult:
+    """Copy Review projection fields onto the current assessment."""
+    strengths = _merge_unique_strings(
+        list(review.strengths), list(result.assessment.review_strengths), limit=4
+    )
+    improvements = _merge_unique_strings(
+        list(review.areas_to_develop),
+        list(result.assessment.review_improvements),
+        limit=4,
+    )
+    facione = result.assessment.facione_scores
+    if review.facione_profile is not None:
+        try:
+            facione = FacioneDimensionScores.model_validate(
+                review.facione_profile.model_dump(mode="json")
+            )
+        except (ValidationError, TypeError, ValueError):
+            facione = result.assessment.facione_scores
+    synthesis = _compact_text(review.synthesis, 4_000)
+    working = _compact_text(review.working_conclusion, 4_000) or (
+        result.assessment.working_conclusion
+    )
+    learning = synthesis or result.assessment.learning_summary
+    update: dict[str, Any] = {
+        "review_strengths": strengths,
+        "review_improvements": improvements,
+        "facione_scores": facione,
+        "learning_summary": learning,
+        "working_conclusion": working,
+        "review_depth": review_depth,
+        "review_model": review_model,
+        "review_trigger": review_trigger,
+        "readiness_candidate": bool(
+            result.assessment.readiness_candidate or review.readiness_candidate
+        ),
+    }
+    if review_depth == REVIEW_DEPTH_DEEP and synthesis:
+        update["stage_assessment"] = synthesis
+    if force_stay:
+        update["recommendation"] = StageDecision.STAY
+    assessment = result.assessment.model_copy(update=update)
+    return result.model_copy(update={"assessment": assessment})
+
+
+def _merge_deep_review(
+    request: CoachRequest,
+    result: ProviderAssessmentResult,
+    review: ReviewTurnOutput,
+    *,
+    review_model: str,
+    review_trigger: str,
+) -> tuple[ProviderAssessmentResult, bool]:
+    """Combine prior output with Deep Review. Wrong stage fails closed to STAY."""
+    merged = _overlay_review_fields(
+        result,
+        review,
+        review_depth=REVIEW_DEPTH_DEEP,
+        review_model=review_model,
+        review_trigger=review_trigger,
+        force_stay=True,
+    )
+    judged_stage = str(review.current_stage or "").strip()
+    if judged_stage and judged_stage != str(request.current_stage).strip():
+        logger.info(
+            "agentcore_invoke role=review review_depth=deep success=false "
+            "failure_category=wrong_stage"
+        )
+        return _stay_after_deep_review_failure(
+            merged, list(review.missing_requirements)
+        ), False
+    missing = _merge_unique_strings(
+        list(merged.assessment.missing_reasoning_elements),
+        list(review.missing_requirements),
+    )
+    rationale = _compact_text(review.rationale_summary, 4_000) or (
+        merged.assessment.recommendation_rationale
+    )
+    evidence = _merge_unique_strings(
+        list(merged.assessment.evidence_identified),
+        list(review.readiness_evidence),
+    )
+    recommendation = StageDecision.STAY
+    if str(review.recommendation or "").strip().lower() == "advance":
+        recommendation = StageDecision.ADVANCE
+    assessment = merged.assessment.model_copy(
+        update={
+            "recommendation": recommendation,
+            "recommendation_rationale": rationale,
+            "missing_reasoning_elements": missing,
+            "evidence_identified": evidence,
+            "readiness_candidate": recommendation is StageDecision.ADVANCE
+            or merged.assessment.readiness_candidate,
+        }
+    )
+    return merged.model_copy(
+        update={"assessment": assessment, "deep_review_succeeded": True}
+    ), True
+
+
 class AgentCoreCoachProvider:
     """Call Bedrock AgentCore Runtime for one validated structured coaching turn."""
 
@@ -784,7 +1014,14 @@ class AgentCoreCoachProvider:
         )
         return self._client
 
-    def _invoke_payload(self, request: CoachRequest) -> dict[str, Any]:
+    def _invoke_payload(
+        self,
+        request: CoachRequest,
+        specialist: str,
+        *,
+        review_mode: str | None = None,
+        review_trigger: str | None = None,
+    ) -> dict[str, Any]:
         """Build the JSON payload for one coaching InvokeAgentRuntime call.
 
         Always sends Converse ``messages``: planner-selected DSQL history plus
@@ -834,21 +1071,355 @@ class AgentCoreCoachProvider:
                 ),
             }
         )
-        specialist = _request_specialist(request)
+        specialist = str(specialist or "").strip().lower()
+        if specialist not in ALLOWED_SPECIALISTS:
+            specialist = SPECIALIST_COACHING
         payload: dict[str, Any] = {
             "phase": specialist,
             "topic": agentcore_topic_for_stage(request.current_stage),
             "output_contract": _CONTRACT_BY_SPECIALIST.get(
                 specialist, _OUTPUT_CONTRACT
             ),
-            "runtime_context": _runtime_context(request),
+            "runtime_context": _runtime_context(
+                request,
+                specialist,
+                review_mode=review_mode,
+                review_trigger=review_trigger,
+            ),
             _TRUSTED_INSTRUCTIONS_FIELD: prepared.runtime_instructions,
             "messages": messages,
         }
+        if review_mode in {REVIEW_DEPTH_INCREMENTAL, REVIEW_DEPTH_DEEP}:
+            payload["review_mode"] = review_mode
         student_id = " ".join(str(request.student_id or "").split()).strip()
         if student_id and student_id != str(request.thread_id or "").strip():
             payload["student_id"] = student_id[:128]
         return payload
+
+    def _call_runtime(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Invoke AgentCore once and return the parsed JSON object.
+
+        Args:
+            payload: Companion InvokeAgentRuntime JSON.
+
+        Returns:
+            Unwrapped runtime JSON. Harness error envelopes raise.
+
+        Raises:
+            ProviderUnavailableError: When the runtime is blocked, malformed,
+                timed out, or otherwise unavailable.
+        """
+        encoded = json.dumps(payload).encode("utf-8")
+        response = self._runtime_client().invoke_agent_runtime(
+            agentRuntimeArn=self._runtime_arn,
+            qualifier=self._qualifier,
+            runtimeSessionId=_stateless_session_id(),
+            payload=encoded,
+            contentType="application/json",
+            accept="application/json",
+        )
+        if not isinstance(response, Mapping):
+            raise _malformed_error()
+        return _payload_from_runtime_response(response)
+
+    def _role_provider_model(self, role: str) -> tuple[str, str]:
+        """Return configured provider/model ids for one role without secrets."""
+        mapping = {
+            "router": (settings.router_model_provider, settings.router_model_id),
+            "qa": (settings.qa_model_provider, settings.qa_model_id),
+            "coaching": (
+                settings.coaching_model_provider,
+                settings.coaching_model_id,
+            ),
+            "review": (
+                settings.review_deep_model_provider or settings.review_model_provider,
+                settings.review_deep_model_id or settings.review_model_id,
+            ),
+            "review_incremental": (
+                settings.review_incremental_model_provider,
+                settings.review_incremental_model_id,
+            ),
+            "review_deep": (
+                settings.review_deep_model_provider,
+                settings.review_deep_model_id,
+            ),
+        }
+        provider, model_id = mapping.get(role, ("", ""))
+        if provider and model_id:
+            return provider, model_id
+        return settings.agentcore_model_provider, settings.agentcore_model_id
+
+    def _log_role_precise(
+        self,
+        *,
+        role: str,
+        started: float,
+        success: bool,
+        failure_category: str = "",
+        extra: str = "",
+        model_role: str | None = None,
+    ) -> None:
+        """Log role provenance using per-role settings when present."""
+        provider, model_id = self._role_provider_model(model_role or role)
+        logger.info(
+            "agentcore_invoke role=%s provider=%s model_id=%s latency_ms=%s "
+            "success=%s failure_category=%s guardrail_configured=%s%s",
+            role,
+            provider or "unknown",
+            model_id or "unknown",
+            max(0, int((time.monotonic() - started) * 1000)),
+            "true" if success else "false",
+            failure_category or ("ok" if success else "unavailable"),
+            "true" if (settings.guardrail_id and settings.guardrail_version) else "false",
+            extra,
+        )
+
+    def _resolve_specialist(self, request: CoachRequest) -> str:
+        """Return the server-owned specialist, using Luna only for free text.
+
+        Explicit ``request.specialist`` is treated as already validated by
+        application code or tests. HTTP overwrites browser hints to ``None``
+        before this adapter runs.
+        """
+        requested = str(request.specialist or "").strip().lower()
+        if requested in ALLOWED_SPECIALISTS:
+            logger.info(
+                "agentcore_invoke role=router router_fallback=false "
+                "router_skipped=true router_specialist=%s",
+                requested,
+            )
+            return requested
+        started = time.monotonic()
+        min_confidence = bound_router_min_confidence(settings.router_min_confidence)
+        try:
+            parsed = self._call_runtime(_router_payload(request))
+            routed = RouterOutput.model_validate(parsed)
+            specialist = apply_semantic_route(
+                routed.specialist,
+                routed.confidence,
+                min_confidence=min_confidence,
+            )
+            fallback = (
+                routed.confidence < min_confidence
+                or specialist != routed.specialist
+            )
+            self._log_role_precise(
+                role="router",
+                started=started,
+                success=True,
+                extra=(
+                    f" router_specialist={specialist} router_confidence="
+                    f"{routed.confidence:.2f} router_fallback="
+                    f"{'true' if fallback else 'false'}"
+                ),
+            )
+            return specialist
+        except ProviderUnavailableError as error:
+            if error.category == "safety_blocked":
+                self._log_role_precise(
+                    role="router",
+                    started=started,
+                    success=False,
+                    failure_category="safety_blocked",
+                    extra=" router_fallback=false",
+                )
+                raise
+            self._log_role_precise(
+                role="router",
+                started=started,
+                success=False,
+                failure_category=error.category,
+                extra=" router_fallback=true router_specialist=coaching",
+            )
+            return SPECIALIST_COACHING
+        except (ValidationError, TypeError, ValueError):
+            self._log_role_precise(
+                role="router",
+                started=started,
+                success=False,
+                failure_category="structured_output_failure",
+                extra=" router_fallback=true router_specialist=coaching",
+            )
+            return SPECIALIST_COACHING
+        except Exception as error:
+            translated = _translate_agentcore_error(error)
+            if translated.category == "safety_blocked":
+                self._log_role_precise(
+                    role="router",
+                    started=started,
+                    success=False,
+                    failure_category="safety_blocked",
+                    extra=" router_fallback=false",
+                )
+                raise translated from error
+            self._log_role_precise(
+                role="router",
+                started=started,
+                success=False,
+                failure_category=translated.category,
+                extra=" router_fallback=true router_specialist=coaching",
+            )
+            return SPECIALIST_COACHING
+
+    def _parse_review_turn(self, parsed: dict[str, Any]) -> ReviewTurnOutput:
+        """Validate Review structured output or raise."""
+        return ReviewTurnOutput.model_validate(parsed)
+
+    def _apply_incremental_review(
+        self, request: CoachRequest, result: ProviderAssessmentResult
+    ) -> ProviderAssessmentResult:
+        """Keep the Review projection current after Coaching. Cannot advance."""
+        started = time.monotonic()
+        model_id = self._role_provider_model("review_incremental")[1]
+        payload = self._invoke_payload(
+            request,
+            SPECIALIST_REVIEW,
+            review_mode=REVIEW_DEPTH_INCREMENTAL,
+            review_trigger=REVIEW_TRIGGER_INCREMENTAL,
+        )
+        try:
+            parsed = self._call_runtime(payload)
+            review = self._parse_review_turn(parsed)
+            merged = _overlay_review_fields(
+                result,
+                review,
+                review_depth=REVIEW_DEPTH_INCREMENTAL,
+                review_model=model_id or "openai.gpt-5.6-luna",
+                review_trigger=REVIEW_TRIGGER_INCREMENTAL,
+                force_stay=True,
+            )
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=True,
+                extra=(
+                    " review_depth=incremental review_trigger=incremental"
+                ),
+                model_role="review_incremental",
+            )
+            return merged
+        except ProviderUnavailableError as error:
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=False,
+                failure_category=error.category,
+                extra=" review_depth=incremental",
+                model_role="review_incremental",
+            )
+            raise
+        except (ValidationError, TypeError, ValueError) as error:
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=False,
+                failure_category="structured_output_failure",
+                extra=" review_depth=incremental",
+                model_role="review_incremental",
+            )
+            raise _malformed_error() from error
+        except Exception as error:
+            translated = _translate_agentcore_error(error)
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=False,
+                failure_category=translated.category,
+                extra=" review_depth=incremental",
+                model_role="review_incremental",
+            )
+            raise translated from error
+
+    def _apply_deep_review(
+        self,
+        request: CoachRequest,
+        result: ProviderAssessmentResult,
+        *,
+        review_trigger: str,
+        replace_response_text: bool,
+    ) -> tuple[ProviderAssessmentResult, bool]:
+        """Run Sonnet Deep Review. Fail closed to STAY without resetting state."""
+        started = time.monotonic()
+        model_id = self._role_provider_model("review_deep")[1]
+        payload = self._invoke_payload(
+            request,
+            SPECIALIST_REVIEW,
+            review_mode=REVIEW_DEPTH_DEEP,
+            review_trigger=review_trigger,
+        )
+        extra = (
+            f" review_depth=deep review_trigger={review_trigger}"
+            f" coaching_turns_since_deep_review="
+            f"{int(request.coaching_turns_since_deep_review)}"
+            f" deep_review_interval="
+            f"{bound_deep_review_interval(request.deep_review_interval_turns)}"
+            " deep_review_triggered=true"
+        )
+        try:
+            parsed = self._call_runtime(payload)
+            review = self._parse_review_turn(parsed)
+            merged, succeeded = _merge_deep_review(
+                request,
+                result,
+                review,
+                review_model=model_id or "global.anthropic.claude-sonnet-4-6",
+                review_trigger=review_trigger,
+            )
+            if replace_response_text:
+                text = str(review.response_text or "").strip()
+                if text:
+                    merged = merged.model_copy(update={"response_text": text})
+            failure_category = "" if succeeded else "wrong_stage"
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=succeeded,
+                failure_category=failure_category,
+                extra=extra,
+                model_role="review_deep",
+            )
+            return merged, succeeded
+        except ProviderUnavailableError as error:
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=False,
+                failure_category=error.category,
+                extra=extra,
+                model_role="review_deep",
+            )
+            return _stay_after_deep_review_failure(result), False
+        except (ValidationError, TypeError, ValueError):
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=False,
+                failure_category="structured_output_failure",
+                extra=extra,
+                model_role="review_deep",
+            )
+            return _stay_after_deep_review_failure(result), False
+        except Exception as error:
+            translated = _translate_agentcore_error(error)
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=False,
+                failure_category=translated.category,
+                extra=extra,
+                model_role="review_deep",
+            )
+            return _stay_after_deep_review_failure(result), False
+
+    def _with_memory(
+        self, request: CoachRequest, result: ProviderAssessmentResult
+    ) -> ProviderAssessmentResult:
+        """Attach planner memory without changing the pedagogical result."""
+        plan = self._last_plan
+        memory_payload = request.conversation_memory
+        if plan is not None and plan.compressed_memory is not None:
+            memory_payload = plan.compressed_memory.model_dump(mode="json")
+        return result.model_copy(update={"conversation_memory": memory_payload})
 
     def assess(self, request: CoachRequest) -> ProviderAssessmentResult:
         """Request one structured coaching turn from AgentCore Runtime.
@@ -862,27 +1433,157 @@ class AgentCoreCoachProvider:
         Raises:
             ProviderUnavailableError: When AgentCore cannot produce a valid turn.
         """
-        payload = self._invoke_payload(request)
-        encoded = json.dumps(payload).encode("utf-8")
-        try:
-            response = self._runtime_client().invoke_agent_runtime(
-                agentRuntimeArn=self._runtime_arn,
-                qualifier=self._qualifier,
-                runtimeSessionId=_stateless_session_id(),
-                payload=encoded,
-                contentType="application/json",
-                accept="application/json",
+        for image in request.image_inputs:
+            _payload_image_block(image)
+        specialist = self._resolve_specialist(request)
+        routed = request.model_copy(update={"specialist": specialist})
+        interval = bound_deep_review_interval(request.deep_review_interval_turns)
+        if specialist == SPECIALIST_QA:
+            result = self._invoke_specialist(routed, SPECIALIST_QA)
+            return self._with_memory(
+                request,
+                result.model_copy(
+                    update={
+                        "specialist": SPECIALIST_QA,
+                        "qualifying_coaching_turn": False,
+                        "deep_review_succeeded": False,
+                        "review_trigger": None,
+                    }
+                ),
             )
-            if not isinstance(response, Mapping):
-                raise _malformed_error()
-            parsed = _payload_from_runtime_response(response)
+        if specialist == SPECIALIST_REVIEW:
+            started = time.monotonic()
+            try:
+                parsed = self._call_runtime(
+                    self._invoke_payload(
+                        routed,
+                        SPECIALIST_REVIEW,
+                        review_mode=REVIEW_DEPTH_DEEP,
+                        review_trigger="explicit",
+                    )
+                )
+                result = _validated_result(parsed, routed)
+                self._log_role_precise(
+                    role="review",
+                    started=started,
+                    success=True,
+                    extra=" review_depth=deep review_trigger=explicit",
+                    model_role="review_deep",
+                )
+            except ProviderUnavailableError as error:
+                self._log_role_precise(
+                    role="review",
+                    started=started,
+                    success=False,
+                    failure_category=error.category,
+                    extra=" review_depth=deep review_trigger=explicit",
+                    model_role="review_deep",
+                )
+                raise
+            except Exception as error:
+                translated = _translate_agentcore_error(error)
+                self._log_role_precise(
+                    role="review",
+                    started=started,
+                    success=False,
+                    failure_category=translated.category,
+                    extra=" review_depth=deep review_trigger=explicit",
+                    model_role="review_deep",
+                )
+                raise translated from error
+            review = self._parse_review_turn(parsed)
+            model_id = self._role_provider_model("review_deep")[1]
+            merged, succeeded = _merge_deep_review(
+                routed,
+                result,
+                review,
+                review_model=model_id or "global.anthropic.claude-sonnet-4-6",
+                review_trigger="explicit",
+            )
+            if not succeeded:
+                merged = _stay_after_deep_review_failure(merged)
+            text = str(review.response_text or "").strip()
+            if text:
+                merged = merged.model_copy(update={"response_text": text})
+            return self._with_memory(
+                request,
+                merged.model_copy(
+                    update={
+                        "specialist": SPECIALIST_REVIEW,
+                        "qualifying_coaching_turn": False,
+                        "deep_review_succeeded": succeeded,
+                        "review_trigger": "explicit",
+                    }
+                ),
+            )
+
+        result = self._invoke_specialist(routed, SPECIALIST_COACHING)
+        result, readiness = _coaching_without_advancement(result)
+        result = self._apply_incremental_review(routed, result)
+        readiness = bool(result.assessment.readiness_candidate)
+        trigger = resolve_deep_review_trigger(
+            specialist=SPECIALIST_COACHING,
+            current_stage=routed.current_stage,
+            readiness_candidate=readiness,
+            coaching_turns_since_deep_review=int(
+                routed.coaching_turns_since_deep_review
+            ),
+            interval=interval,
+            qualifying_coaching_turn=True,
+        )
+        logger.info(
+            "agentcore_invoke role=review review_depth=incremental "
+            "review_trigger=incremental coaching_turns_since_deep_review=%s "
+            "deep_review_interval=%s deep_review_triggered=%s",
+            int(routed.coaching_turns_since_deep_review),
+            interval,
+            "true" if should_run_deep_review(trigger) else "false",
+        )
+        deep_succeeded = False
+        if should_run_deep_review(trigger):
+            result, deep_succeeded = self._apply_deep_review(
+                routed,
+                result,
+                review_trigger=str(trigger),
+                replace_response_text=False,
+            )
+        return self._with_memory(
+            request,
+            result.model_copy(
+                update={
+                    "specialist": SPECIALIST_COACHING,
+                    "qualifying_coaching_turn": True,
+                    "deep_review_succeeded": deep_succeeded,
+                    "review_trigger": trigger,
+                }
+            ),
+        )
+
+    def _invoke_specialist(
+        self, request: CoachRequest, specialist: str
+    ) -> ProviderAssessmentResult:
+        """Invoke one Q&A or Coaching specialist and validate the result."""
+        payload = self._invoke_payload(request, specialist)
+        started = time.monotonic()
+        try:
+            parsed = self._call_runtime(payload)
             result = _validated_result(parsed, request)
-            plan = self._last_plan
-            memory_payload = request.conversation_memory
-            if plan is not None and plan.compressed_memory is not None:
-                memory_payload = plan.compressed_memory.model_dump(mode="json")
-            return result.model_copy(update={"conversation_memory": memory_payload})
-        except ProviderUnavailableError:
+            self._log_role_precise(role=specialist, started=started, success=True)
+            return result
+        except ProviderUnavailableError as error:
+            self._log_role_precise(
+                role=specialist,
+                started=started,
+                success=False,
+                failure_category=error.category,
+            )
             raise
         except Exception as error:
-            raise _translate_agentcore_error(error) from error
+            translated = _translate_agentcore_error(error)
+            self._log_role_precise(
+                role=specialist,
+                started=started,
+                success=False,
+                failure_category=translated.category,
+            )
+            raise translated from error

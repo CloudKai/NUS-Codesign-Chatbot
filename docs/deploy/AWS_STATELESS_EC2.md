@@ -435,11 +435,31 @@ Required production `.env` keys (host-only):
 - `MODEL_PROVIDER=agentcore`
 - `AGENTCORE_RUNTIME_ARN=arn:aws:bedrock-agentcore:us-west-2:355604674280:runtime/NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`
 - `AGENTCORE_QUALIFIER=DEFAULT`
-- `AGENTCORE_MODEL_PROVIDER=bedrock`
-- `AGENTCORE_MODEL_ID=global.anthropic.claude-sonnet-4-6`
+- `AGENTCORE_MODEL_PROVIDER=bedrock_mantle_responses`
+- `AGENTCORE_MODEL_ID=openai.gpt-5.6-luna`
 - `AGENTCORE_MODEL_REGION=us-west-2`
+- `ROUTER_MODEL_PROVIDER=bedrock_mantle_responses`
+- `ROUTER_MODEL_ID=openai.gpt-5.6-luna`
+- `QA_MODEL_PROVIDER=bedrock_mantle_responses`
+- `QA_MODEL_ID=openai.gpt-5.6-luna`
+- `COACHING_MODEL_PROVIDER=bedrock_mantle_responses`
+- `COACHING_MODEL_ID=openai.gpt-5.6-luna`
+- `REVIEW_INCREMENTAL_MODEL_PROVIDER=bedrock_mantle_responses`
+- `REVIEW_INCREMENTAL_MODEL_ID=openai.gpt-5.6-luna`
+- `REVIEW_DEEP_MODEL_PROVIDER=bedrock`
+- `REVIEW_DEEP_MODEL_ID=global.anthropic.claude-sonnet-4-6`
+- `ROUTER_MIN_CONFIDENCE=0.60`
+- `DEEP_REVIEW_INTERVAL_TURNS=3`
+
+Periodic Deep Review means every N newly executed, successful Coaching
+turns since the previous successfully persisted Deep Review. It is
+turn-based rather than time-based because it represents new learning
+evidence, not elapsed time. Opening the Review tab does not invoke a
+model. FastAPI/DSQL remain authoritative; AgentCore never writes stage
+state.
+
 - `GUARDRAIL_ID=<configured guardrail>`
-- `GUARDRAIL_VERSION=<configured version>`
+- `GUARDRAIL_VERSION=3`
 - `KNOWLEDGE_BASE_ID=<configured KB id>` (required when shared course sync is on)
 - `KNOWLEDGE_BASE_TYPE=MANAGED` (Compose sets this; `JUQNP8AZAZ` is MANAGED)
 - `KNOWLEDGE_BASE_REGION=us-west-2` (optional; falls back to `AWS_REGION`)
@@ -620,6 +640,40 @@ Grant least privilege for:
 
 Do **not** place long-lived AWS access keys in `.env`. Credentials must come
 from the EC2 instance profile.
+
+### AgentCore runtime execution role (Luna / Mantle)
+
+The runtime role
+`AgentCore-NUSCodesignChat-ApplicationAgentChatbotHa-EVjV8lBDgqdP` needs
+`bedrock-mantle:CreateInference` on this account's default Mantle project.
+Without it, GPT-5.6 Luna (router, Q&A, coaching) returns HTTP 401
+`access_denied`. Claude Sonnet 4.6 (review, stage judge) uses
+`bedrock:InvokeModel` and does not need this action.
+
+Keep this as a non-CDK inline policy (same pattern as
+`ManualGuardrailAccess-NotCDKManaged`). Luna also needs
+`bedrock-mantle:CallWithBearerToken` because Strands OpenAIResponsesModel
+authenticates to the Mantle endpoint with a bearer token:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BedrockMantleInference",
+      "Effect": "Allow",
+      "Action": "bedrock-mantle:CreateInference",
+      "Resource": "arn:aws:bedrock-mantle:us-west-2:355604674280:project/default"
+    },
+    {
+      "Sid": "BedrockMantleCallWithBearerToken",
+      "Effect": "Allow",
+      "Action": "bedrock-mantle:CallWithBearerToken",
+      "Resource": "*"
+    }
+  ]
+}
+```
 
 ### Bedrock Knowledge Base Retrieve (required for shared course files)
 

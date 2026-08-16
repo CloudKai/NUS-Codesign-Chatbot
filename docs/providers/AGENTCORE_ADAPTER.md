@@ -11,7 +11,35 @@ Base owner), not the student UI.
 
 ## Contract
 
-Each coach turn makes **one** `InvokeAgentRuntime` call with:
+Free-text turns may make **more than one** `InvokeAgentRuntime` call on the
+same runtime ARN:
+
+1. A small Luna **router** (`phase=router`, `output_contract=router_turn`)
+   unless FastAPI already stamped a server-owned specialist.
+2. The selected specialist (`qa` | `coaching` | explicit `review`).
+3. Incremental Luna Review (`phase=review`, `review_mode=incremental`) after
+   a successful Coaching turn.
+4. Deep Sonnet Review (`phase=review`, `review_mode=deep`) on periodic or
+   event triggers (explicit Review, readiness candidate, Reflection
+   checkpoint, or every N successful new Coaching turns).
+
+Q&A never advances the Thinking Path. Incremental Review cannot advance.
+Deep Review may recommend stay/advance; FastAPI still validates and
+persists. AgentCore never writes DSQL.
+
+Periodic Deep Review means every N newly executed, successful Coaching
+turns since the previous successfully persisted Deep Review. It is
+turn-based rather than time-based because it represents new learning
+evidence, not elapsed time. Opening the Review tab does not invoke a
+model.
+
+The runtime execution role must allow `bedrock-mantle:CreateInference` on
+`arn:aws:bedrock-mantle:us-west-2:<account>:project/default` and
+`bedrock-mantle:CallWithBearerToken`, or Luna invokes fail closed. Sonnet
+Deep Review uses `bedrock:InvokeModel` on the existing runtime role
+statements.
+
+Specialist payloads look like:
 
 ```json
 {
@@ -35,9 +63,10 @@ Each coach turn makes **one** `InvokeAgentRuntime` call with:
 }
 ```
 
-`phase` is `qa`, `coaching`, or `review`, selected by FastAPI. Canonical
-specialist and stage pedagogy live in `agentcore_runtime/prompts/`. FastAPI
-must not resend a second full curriculum in `trusted_instructions`.
+`phase` is `qa`, `coaching`, or `review` after routing. Canonical specialist
+and stage pedagogy live in `agentcore_runtime/prompts/`. FastAPI must not
+resend a second full curriculum in `trusted_instructions`. The router payload
+contains only the current student message plus optional current stage.
 
 `student_id` is the store owner identifier, never a notebook id. The
 token-aware planner sends the **full active DSQL transcript** when it fits
@@ -90,27 +119,47 @@ AGENTCORE_RUNTIME_ARN=arn:aws:bedrock-agentcore:us-west-2:<account>:runtime/<id>
 AGENTCORE_QUALIFIER=DEFAULT
 AGENTCORE_TIMEOUT_SECONDS=110
 AGENTCORE_MAX_RETRIES=0
-AGENTCORE_MODEL_PROVIDER=bedrock
-AGENTCORE_MODEL_ID=global.anthropic.claude-sonnet-4-6
+AGENTCORE_MODEL_PROVIDER=bedrock_mantle_responses
+AGENTCORE_MODEL_ID=openai.gpt-5.6-luna
 AGENTCORE_MODEL_REGION=us-west-2
+ROUTER_MODEL_PROVIDER=bedrock_mantle_responses
+ROUTER_MODEL_ID=openai.gpt-5.6-luna
+QA_MODEL_PROVIDER=bedrock_mantle_responses
+QA_MODEL_ID=openai.gpt-5.6-luna
+COACHING_MODEL_PROVIDER=bedrock_mantle_responses
+COACHING_MODEL_ID=openai.gpt-5.6-luna
+REVIEW_INCREMENTAL_MODEL_PROVIDER=bedrock_mantle_responses
+REVIEW_INCREMENTAL_MODEL_ID=openai.gpt-5.6-luna
+REVIEW_DEEP_MODEL_PROVIDER=bedrock
+REVIEW_DEEP_MODEL_ID=global.anthropic.claude-sonnet-4-6
+ROUTER_MIN_CONFIDENCE=0.60
+DEEP_REVIEW_INTERVAL_TURNS=3
 GUARDRAIL_ID=<configured guardrail>
-GUARDRAIL_VERSION=<configured version>
+GUARDRAIL_VERSION=3
 KNOWLEDGE_BASE_ID=<configured KB>
 MOCK_OPENAI=false
 ```
 
-The published AgentCore runtime reads `AGENTCORE_MODEL_*` and `GUARDRAIL_*`
-from **its own** process environment. FastAPI production validation requires
-the same keys so the host `.env` cannot look ready while the runtime would
-still construct a bare `BedrockModel()`. Missing model or guardrail config
-fails closed. There is no Claude↔Luna fallback.
+The published AgentCore runtime reads per-role `*_MODEL_*` keys plus shared
+`AGENTCORE_MODEL_REGION` and `GUARDRAIL_*` from **its own** process
+environment. Legacy `AGENTCORE_MODEL_PROVIDER` / `AGENTCORE_MODEL_ID` remain
+as a local/testing fallback only when no role keys are set. FastAPI
+production validation requires explicit role configuration. Missing model or
+guardrail config fails closed. There is no Claude↔Luna fallback.
 
-First paid specialist evaluation uses Sonnet 4.6 (`BedrockModel` with
-`guardrail_latest_message=True`). Optional Luna uses
-`AGENTCORE_MODEL_PROVIDER=bedrock_mantle_responses` and
+Roles:
+
+- ROUTER, Q&A, COACHING, INCREMENTAL REVIEW → GPT-5.6 Luna (`bedrock_mantle_responses`)
+- DEEP REVIEW → Claude Sonnet 4.6 (`bedrock`)
+
+Changing model environment variables requires a new AgentCore Runtime
+**version** on the same ARN, not a new runtime resource.
+
+DEFAULT Luna uses
 `OpenAIResponsesModel(stateful=False, bedrock_mantle_config={"region": ...})`
-plus Bedrock `ApplyGuardrail` on untrusted input and model output. Do not
-pass `openai.gpt-5.6-luna` into `BedrockModel`.
+plus Bedrock `ApplyGuardrail` on untrusted input and model output
+(`GUARDRAIL_VERSION=3`). Do not pass `openai.gpt-5.6-luna` into `BedrockModel`.
+Sonnet uses `BedrockModel` with `guardrail_latest_message=True`.
 
 Pinned runtime packages, pip-installed and API-checked in a clean CPython
 3.12.10 venv on 2026-08-16 (companion pytest still does not install them;
@@ -120,8 +169,8 @@ GitHub job `agentcore-runtime-compatibility` does):
 - `bedrock-agentcore==1.21.0`
 - `pydantic==2.13.4`
 
-Confirm the same versions on the published runtime. Optional Luna extra is
-`strands-agents[openai]==1.52.0` and is not required for Sonnet 4.6.
+Confirm the same versions on the published runtime. DEFAULT Luna requires
+the `strands-agents[openai]==1.52.0` extra in the published zip.
 
 Production accepts OpenAI **xor** Bedrock **xor** AgentCore (not mock). Direct
 `BedrockCoachProvider` Converse remains a fallback/test path.
@@ -148,24 +197,26 @@ wire AgentCore Runtime LRU, AgentCore Memory, DynamoDB, or a JSON file as chat
 history. Student `GET /api/v1/threads/{id}/transcript.txt` is a projection of
 `get_messages`.
 
-## Isolated Luna evaluation (not production traffic)
+## Isolated InvokeHarness evaluation
 
-Live pedagogical evaluation uses **InvokeHarness** with an explicit
-
+Live pedagogical evaluation can still use **InvokeHarness** with an explicit
 `openai.gpt-5.6-luna` / `apiFormat=responses` override. That path is
 `backend/agentcore_harness_provider.py` plus
 `scripts/evals/evaluate_live_coach.py`. It must not change production
 `AGENTCORE_QUALIFIER=DEFAULT` or `MODEL_PROVIDER=agentcore`. Claude fallback
 is disabled. Compression, if required on that path, also uses Luna.
 
+Production DEFAULT generation is the AgentCore runtime with the same Luna
+model id, not this InvokeHarness adapter.
+
 ## Deferred extras (do not copy from the POC)
 
 Keep these off the Thinking Path unless a later phase explicitly adds them:
 
-1. DEFAULT v14 is published and one capped Sonnet smoke passed. Do not treat
-   that as student-ready until host `.env`, ECR, and CloudFront/Caddy are aligned.
+1. DEFAULT uses Luna + guardrail version 3. Do not treat the app as
+   student-ready until host `.env`, ECR, and CloudFront/Caddy stay aligned.
 2. Do not attach unrestricted KB/MCP tools to Q&A. Pre-retrieved `[S#]`
    evidence is the production path. Do not call `RetrieveAndGenerate`.
-3. Do **not** add critique-every-Nth-turn, restore scoring-as-grade, restore
-   a sixth `ethics_critical` application stage, restore AgentCore Memory as
-   transcript, or merge the CDK student UI.
+3. Periodic Deep Review is already the N-turn checkpoint (not a grade).
+   Do **not** restore scoring-as-grade, a sixth `ethics_critical`
+   application stage, AgentCore Memory as transcript, or the CDK student UI.

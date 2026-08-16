@@ -24,7 +24,6 @@ from backend.models import DEFAULT_CHAT_MODEL_ID, get_model, validate_reasoning
 from backend.prompts.composer import COACH_PROMPT_VERSION
 from backend.research.models import ResearchEvidenceSpan, ResearchObservationCreate
 from backend.repositories import NotebookRepository
-from backend.specialists.routing import select_specialist
 from backend.retrieval import (
     ContextRetriever,
     LocalChunkRetriever,
@@ -33,6 +32,13 @@ from backend.retrieval import (
     focused_excerpt,
     retrieval_sources_from_notebook,
     with_course_evidence_gap,
+)
+from backend.settings import settings as runtime_settings
+from backend.specialists.review_orchestration import (
+    COUNTER_SETTINGS_KEY,
+    bound_deep_review_interval,
+    next_persisted_counter,
+    parse_coaching_turns_since_deep_review,
 )
 from backend.source_library import (
     get_visible_source,
@@ -446,6 +452,17 @@ class CoachApplicationService:
         )
         from backend.settings import settings as runtime_settings
 
+        orchestration = self._workflow.take_review_orchestration(
+            prepared_request.thread_id
+        )
+        next_counter = next_persisted_counter(
+            current=int(prepared_request.coaching_turns_since_deep_review),
+            qualifying_coaching_turn=bool(
+                orchestration.get("qualifying_coaching_turn")
+            ),
+            deep_review_succeeded=bool(orchestration.get("deep_review_succeeded")),
+        )
+
         auto_advance: AtomicAutoAdvance | None = None
         if (
             self._auto_advance_stages
@@ -559,6 +576,7 @@ class CoachApplicationService:
                 "conversation_memory": self._workflow.take_conversation_memory(
                     prepared_request.thread_id
                 ),
+                COUNTER_SETTINGS_KEY: next_counter,
             },
             generated_title=generated_title,
             existing_user_message_id=prepared_request.revise_user_message_id,
@@ -763,7 +781,16 @@ class CoachApplicationService:
                 "conversation_revision": conversation_revision,
                 "student_id": str(getattr(self._store, "identifier", "") or "").strip()
                 or None,
-                "specialist": select_specialist(request.student_message, requested=None),
+                # Drop client specialist hints. Mock uses regex fallback;
+                # AgentCore uses the Luna router unless a server-owned
+                # specialist is stamped after this method.
+                "specialist": None,
+                COUNTER_SETTINGS_KEY: parse_coaching_turns_since_deep_review(
+                    metadata.get(COUNTER_SETTINGS_KEY)
+                ),
+                "deep_review_interval_turns": bound_deep_review_interval(
+                    runtime_settings.deep_review_interval_turns
+                ),
             }
         )
 

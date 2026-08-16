@@ -232,6 +232,10 @@ class EducationalAssessment(BaseModel):
     )
     review_strengths: list[str] = Field(default_factory=list, max_length=4)
     review_improvements: list[str] = Field(default_factory=list, max_length=4)
+    readiness_candidate: bool = False
+    review_depth: str | None = Field(default=None, max_length=32)
+    review_model: str | None = Field(default=None, max_length=128)
+    review_trigger: str | None = Field(default=None, max_length=64)
 
     @model_validator(mode="before")
     @classmethod
@@ -367,6 +371,10 @@ class CoachRequest(BaseModel):
     )
     # Server-filled specialist. Clients cannot make this authoritative.
     specialist: str | None = Field(default=None, max_length=32)
+    # Server-filled periodic Deep Review counter. Clients cannot make this
+    # authoritative. Persisted on notebook settings_text.
+    coaching_turns_since_deep_review: int = Field(default=0, ge=0)
+    deep_review_interval_turns: int = Field(default=3, ge=1, le=50)
 
     @field_validator("current_stage")
     @classmethod
@@ -451,6 +459,10 @@ class ProviderAssessmentResult(BaseModel):
     assessment: EducationalAssessment
     research_coding: ProvisionalResearchCoding | None = None
     conversation_memory: dict[str, Any] | None = None
+    specialist: str = "coaching"
+    qualifying_coaching_turn: bool = False
+    deep_review_succeeded: bool = False
+    review_trigger: str | None = None
 
     @model_validator(mode="after")
     def holistic_candidate_is_reflection_only(self) -> "ProviderAssessmentResult":

@@ -8,10 +8,17 @@ data/database/files tree and clears Streamlit resource caches.
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 from pathlib import Path
 
 import pytest
+
+# Allow sibling test helpers such as ``fake_agentcore_runtime`` to import
+# without making ``tests`` a package.
+_TESTS_DIR = Path(__file__).resolve().parent
+if str(_TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TESTS_DIR))
 
 # Bootstrap paths before backend.settings is imported during collection.
 _BOOTSTRAP_ROOT = Path(tempfile.mkdtemp(prefix="co-design-tests-bootstrap-"))

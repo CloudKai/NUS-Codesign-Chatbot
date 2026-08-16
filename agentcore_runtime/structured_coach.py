@@ -26,7 +26,12 @@ try:
     from .specialists.coaching import coaching_system_prompt
     from .specialists.qa import qa_system_prompt
     from .specialists.review import review_system_prompt
-    from .specialists.routing import PHASE_QA, PHASE_REVIEW, payload_phase
+    from .specialists.routing import (
+        PHASE_QA,
+        PHASE_REVIEW,
+        payload_phase,
+        payload_review_mode,
+    )
 except ImportError:  # pragma: no cover - flat runtime copy next to main.py
     from models import (
         CoachTurnOutput,
@@ -39,7 +44,12 @@ except ImportError:  # pragma: no cover - flat runtime copy next to main.py
     from specialists.coaching import coaching_system_prompt
     from specialists.qa import qa_system_prompt
     from specialists.review import review_system_prompt
-    from specialists.routing import PHASE_QA, PHASE_REVIEW, payload_phase
+    from specialists.routing import (
+        PHASE_QA,
+        PHASE_REVIEW,
+        payload_phase,
+        payload_review_mode,
+    )
 
 logger = logging.getLogger("agentcore_runtime.structured_coach")
 
@@ -74,8 +84,10 @@ Do not wrap the JSON in markdown fences. Do not call tools.
 """
 
 _REVIEW_JSON_CONTRACT = """Return JSON with response_text, strengths,
-areas_to_develop, and synthesis. Do not wrap the JSON in markdown fences.
-Do not call tools. Do not assign a grade.
+areas_to_develop, synthesis, and readiness_candidate. Deep Review also
+returns current_stage, recommendation (stay or advance), confidence,
+readiness_evidence, missing_requirements, and rationale_summary. Do not
+wrap the JSON in markdown fences. Do not call tools. Do not assign a grade.
 """
 
 _SAFETY_STOP_REASONS = frozenset({"guardrail_intervened", "content_filtered"})
@@ -89,6 +101,35 @@ _KNOWN_ERROR_CATEGORIES = frozenset(
         "unavailable",
     }
 )
+
+
+def invoke_failure_category(error: BaseException) -> str:
+    """Map an unhandled model SDK exception to a category-only failure.
+
+    Authentication and permission failures are ``unavailable``, not malformed
+    structured output. The return value never includes exception text.
+
+    Args:
+        error: Exception raised during a Strands invoke.
+
+    Returns:
+        One of ``unavailable``, ``throttled``, ``timeout``, or
+        ``structured_output_failure``.
+    """
+    name = type(error).__name__
+    if name in {
+        "AuthenticationError",
+        "PermissionDeniedError",
+        "PermissionError",
+        "AccessDeniedException",
+        "AuthorizationError",
+    }:
+        return "unavailable"
+    if name in {"RateLimitError", "ThrottlingException", "TooManyRequestsException"}:
+        return "throttled"
+    if name in {"TimeoutError", "APITimeoutError", "ReadTimeoutError"}:
+        return "timeout"
+    return "structured_output_failure"
 
 
 class CoachTurnExtractionError(ValueError):
@@ -162,7 +203,12 @@ def specialist_system_prompt(payload: Mapping[str, Any] | None) -> str:
     if phase == PHASE_QA:
         return qa_system_prompt(trusted) + "\n\n" + _QA_JSON_CONTRACT
     if phase == PHASE_REVIEW:
-        return review_system_prompt(trusted) + "\n\n" + _REVIEW_JSON_CONTRACT
+        mode = payload_review_mode(payload)
+        return (
+            review_system_prompt(trusted, review_mode=mode)
+            + "\n\n"
+            + _REVIEW_JSON_CONTRACT
+        )
     return (
         coaching_system_prompt(payload_topic(payload), trusted)
         + "\n\n"
@@ -466,6 +512,40 @@ def log_coach_turn_outcome(
         shape.get("stop_reason", "unknown"),
         elapsed_ms if elapsed_ms is not None else "unknown",
         category or ("ok" if ok else "structured_output_failure"),
+    )
+
+
+def log_role_invocation(
+    *,
+    role: str,
+    provider: str,
+    model_id: str,
+    latency_ms: int | None,
+    success: bool,
+    failure_category: str = "",
+    guardrail_configured: bool = False,
+) -> None:
+    """Write category-only model provenance. Never logs prompts or student text.
+
+    Args:
+        role: ``router``, ``qa``, ``coaching``, or ``review``.
+        provider: Model provider id.
+        model_id: Foundation model id.
+        latency_ms: Invoke duration in milliseconds.
+        success: Whether structured output was produced.
+        failure_category: Stable failure category when ``success`` is false.
+        guardrail_configured: Whether a guardrail id and version were set.
+    """
+    logger.info(
+        "role=%s provider=%s model_id=%s latency_ms=%s success=%s "
+        "failure_category=%s guardrail_configured=%s",
+        str(role or "unknown").strip() or "unknown",
+        str(provider or "unknown").strip() or "unknown",
+        str(model_id or "unknown").strip() or "unknown",
+        latency_ms if latency_ms is not None else "unknown",
+        "true" if success else "false",
+        (failure_category or ("ok" if success else "structured_output_failure")),
+        "true" if guardrail_configured else "false",
     )
 
 

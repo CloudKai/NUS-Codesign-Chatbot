@@ -15,32 +15,12 @@ from backend.domain import (
     ProviderCoachOutput,
     StageDecision,
 )
+from fake_agentcore_runtime import FakeAgentCoreRuntime
 
 
 _RUNTIME_ARN = (
     "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/test-harness"
 )
-
-
-class _FakeBody:
-    def __init__(self, payload: bytes) -> None:
-        self._payload = payload
-
-    def read(self) -> bytes:
-        return self._payload
-
-
-class FakeAgentCoreRuntime:
-    def __init__(self, *, payload: dict[str, Any] | None = None) -> None:
-        self.calls: list[dict[str, Any]] = []
-        self._payload = payload or {}
-
-    def invoke_agent_runtime(self, **kwargs: Any) -> dict[str, Any]:
-        self.calls.append(kwargs)
-        return {
-            "contentType": "application/json",
-            "response": _FakeBody(json.dumps(self._payload).encode("utf-8")),
-        }
 
 
 def _output(*, recommendation: StageDecision = StageDecision.STAY) -> dict[str, Any]:
@@ -82,7 +62,13 @@ def test_j_agentcore_memory_is_not_authoritative_transcript() -> None:
             student_id="cognito:owner",
         )
     )
-    payload = json.loads(client.calls[0]["payload"].decode("utf-8"))
+    payload = json.loads(
+        next(
+            call
+            for call in client.calls
+            if json.loads(call["payload"].decode("utf-8")).get("phase") != "router"
+        )["payload"].decode("utf-8")
+    )
     session_id = str(client.calls[0]["runtimeSessionId"])
     assert session_id.startswith("stateless-")
     for forbidden in ("memoryId", "memory_id", "AgentCoreMemory", "session_manager"):

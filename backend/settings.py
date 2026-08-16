@@ -31,6 +31,30 @@ def _boolean(name: str, default: bool = False) -> bool:
     return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _unit_interval(name: str, default: float) -> float:
+    """Parse a ``[0.0, 1.0]`` env float, ignoring invalid values."""
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    if value != value:
+        return default
+    return min(1.0, max(0.0, value))
+
+
+def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    """Parse an integer env value and clamp it to ``[minimum, maximum]``."""
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    if value < minimum or value > maximum:
+        return default
+    return value
+
+
 def _project_path(name: str, default: str) -> Path:
     """Resolve a configured path relative to the project when it is not absolute."""
     configured = Path(os.getenv(name, default)).expanduser()
@@ -114,6 +138,28 @@ class Settings:
     agentcore_model_provider: str = os.getenv("AGENTCORE_MODEL_PROVIDER", "").strip().lower()
     agentcore_model_id: str = os.getenv("AGENTCORE_MODEL_ID", "").strip()
     agentcore_model_region: str = os.getenv("AGENTCORE_MODEL_REGION", "").strip()
+    router_model_provider: str = os.getenv("ROUTER_MODEL_PROVIDER", "").strip().lower()
+    router_model_id: str = os.getenv("ROUTER_MODEL_ID", "").strip()
+    qa_model_provider: str = os.getenv("QA_MODEL_PROVIDER", "").strip().lower()
+    qa_model_id: str = os.getenv("QA_MODEL_ID", "").strip()
+    coaching_model_provider: str = os.getenv("COACHING_MODEL_PROVIDER", "").strip().lower()
+    coaching_model_id: str = os.getenv("COACHING_MODEL_ID", "").strip()
+    review_model_provider: str = os.getenv("REVIEW_MODEL_PROVIDER", "").strip().lower()
+    review_model_id: str = os.getenv("REVIEW_MODEL_ID", "").strip()
+    review_incremental_model_provider: str = os.getenv(
+        "REVIEW_INCREMENTAL_MODEL_PROVIDER", ""
+    ).strip().lower()
+    review_incremental_model_id: str = os.getenv(
+        "REVIEW_INCREMENTAL_MODEL_ID", ""
+    ).strip()
+    review_deep_model_provider: str = os.getenv(
+        "REVIEW_DEEP_MODEL_PROVIDER", ""
+    ).strip().lower()
+    review_deep_model_id: str = os.getenv("REVIEW_DEEP_MODEL_ID", "").strip()
+    router_min_confidence: float = _unit_interval("ROUTER_MIN_CONFIDENCE", 0.60)
+    deep_review_interval_turns: int = _bounded_int(
+        "DEEP_REVIEW_INTERVAL_TURNS", 3, 1, 20
+    )
     guardrail_id: str = os.getenv("GUARDRAIL_ID", "").strip()
     guardrail_version: str = os.getenv("GUARDRAIL_VERSION", "").strip()
     knowledge_base_id: str = os.getenv("KNOWLEDGE_BASE_ID", "").strip()
@@ -330,6 +376,66 @@ def _require_public_https_origin(label: str, value: str) -> None:
         raise ValueError(f"{label} must not use a loopback host in production")
 
 
+def _validate_provider_model_pair(
+    provider: str,
+    model_id: str,
+    *,
+    provider_env: str,
+    model_env: str,
+) -> None:
+    """Reject unsafe provider/model pairs without substituting a model."""
+    cleaned_provider = (provider or "").strip().lower()
+    cleaned_model = (model_id or "").strip()
+    if cleaned_provider not in {"bedrock", "bedrock_mantle_responses"}:
+        raise ValueError(f"{provider_env} is not configured")
+    if not cleaned_model:
+        raise ValueError(f"{model_env} is not configured")
+    if cleaned_provider == "bedrock" and cleaned_model.lower().startswith("openai."):
+        raise ValueError("Luna cannot use BedrockModel")
+    if cleaned_provider == "bedrock_mantle_responses" and not cleaned_model.lower().startswith(
+        "openai."
+    ):
+        raise ValueError("Mantle Responses requires an openai.* model id")
+
+
+def _validate_agentcore_role_models() -> None:
+    """Require explicit per-role production models. No silent Luna↔Sonnet swap."""
+    roles = (
+        ("router", settings.router_model_provider, settings.router_model_id),
+        ("qa", settings.qa_model_provider, settings.qa_model_id),
+        ("coaching", settings.coaching_model_provider, settings.coaching_model_id),
+        (
+            "review_incremental",
+            settings.review_incremental_model_provider,
+            settings.review_incremental_model_id,
+        ),
+        (
+            "review_deep",
+            settings.review_deep_model_provider,
+            settings.review_deep_model_id,
+        ),
+    )
+    env_names = {
+        "router": ("ROUTER_MODEL_PROVIDER", "ROUTER_MODEL_ID"),
+        "qa": ("QA_MODEL_PROVIDER", "QA_MODEL_ID"),
+        "coaching": ("COACHING_MODEL_PROVIDER", "COACHING_MODEL_ID"),
+        "review_incremental": (
+            "REVIEW_INCREMENTAL_MODEL_PROVIDER",
+            "REVIEW_INCREMENTAL_MODEL_ID",
+        ),
+        "review_deep": ("REVIEW_DEEP_MODEL_PROVIDER", "REVIEW_DEEP_MODEL_ID"),
+    }
+    for role, provider, model_id in roles:
+        provider_env, model_env = env_names[role]
+        _validate_provider_model_pair(
+            provider, model_id, provider_env=provider_env, model_env=model_env
+        )
+    if not 0.0 <= float(settings.router_min_confidence) <= 1.0:
+        raise ValueError("ROUTER_MIN_CONFIDENCE must be between 0 and 1")
+    if not 1 <= int(settings.deep_review_interval_turns) <= 20:
+        raise ValueError("DEEP_REVIEW_INTERVAL_TURNS must be between 1 and 20")
+
+
 def validate_production_configuration() -> None:
     """Fail closed when ``APP_ENV=production`` and runtime config is unsafe.
 
@@ -368,23 +474,17 @@ def validate_production_configuration() -> None:
             raise ValueError("AGENTCORE_TIMEOUT_SECONDS must be between 1 and 120")
         if not 0 <= settings.agentcore_max_retries <= 2:
             raise ValueError("AGENTCORE_MAX_RETRIES must be between 0 and 2")
-        provider = (settings.agentcore_model_provider or "").strip().lower()
-        if provider not in {"bedrock", "bedrock_mantle_responses"}:
-            raise ValueError("AGENTCORE_MODEL_PROVIDER is not configured")
-        if not settings.agentcore_model_id.strip():
-            raise ValueError("AGENTCORE_MODEL_ID is not configured")
         if not settings.agentcore_model_region.strip():
             raise ValueError("AGENTCORE_MODEL_REGION is not configured")
         if not settings.guardrail_id.strip() or not settings.guardrail_version.strip():
             raise ValueError("GUARDRAIL_ID and GUARDRAIL_VERSION are required")
-        if provider == "bedrock" and settings.agentcore_model_id.lower().startswith(
-            "openai."
-        ):
-            raise ValueError("Luna cannot use BedrockModel")
-        if provider == "bedrock_mantle_responses" and not (
-            settings.agentcore_model_id.lower().startswith("openai.")
-        ):
-            raise ValueError("Mantle Responses requires an openai.* model id")
+        _validate_provider_model_pair(
+            settings.agentcore_model_provider,
+            settings.agentcore_model_id,
+            provider_env="AGENTCORE_MODEL_PROVIDER",
+            model_env="AGENTCORE_MODEL_ID",
+        )
+        _validate_agentcore_role_models()
     else:
         raise ValueError(
             f"Unsupported MODEL_PROVIDER for production: {settings.model_provider}"

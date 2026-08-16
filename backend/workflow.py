@@ -39,6 +39,18 @@ class AssessmentProvider(Protocol):
         """Return one provider result; legacy two-item adapters remain accepted."""
 
 
+def _review_orchestration(
+    provider_result: ProviderAssessmentResult,
+) -> dict[str, Any]:
+    """Return persistence flags for the periodic Deep Review counter."""
+    return {
+        "specialist": str(provider_result.specialist or "coaching"),
+        "qualifying_coaching_turn": bool(provider_result.qualifying_coaching_turn),
+        "deep_review_succeeded": bool(provider_result.deep_review_succeeded),
+        "review_trigger": provider_result.review_trigger,
+    }
+
+
 def _provider_result(
     value: ProviderAssessmentResult | tuple[str, EducationalAssessment],
 ) -> ProviderAssessmentResult:
@@ -97,6 +109,9 @@ class CoachWorkflow:
         default_factory=dict, init=False, repr=False
     )
     _last_conversation_memory: dict[str, dict[str, Any] | None] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _last_review_orchestration: dict[str, dict[str, Any]] = field(
         default_factory=dict, init=False, repr=False
     )
 
@@ -165,6 +180,9 @@ class CoachWorkflow:
         self._last_conversation_memory[request.thread_id] = (
             provider_result.conversation_memory
         )
+        self._last_review_orchestration[request.thread_id] = _review_orchestration(
+            provider_result
+        )
         return turn
 
     def _run_graph(self, request: CoachRequest) -> CoachTurn:
@@ -178,6 +196,7 @@ class CoachWorkflow:
         }
         self._last_research_coding.pop(request.thread_id, None)
         self._last_conversation_memory.pop(request.thread_id, None)
+        self._last_review_orchestration.pop(request.thread_id, None)
         try:
             result = graph.invoke(
                 {
@@ -225,6 +244,16 @@ class CoachWorkflow:
             projection after a conversation revision.
         """
         return self._last_conversation_memory.pop(thread_id, None)
+
+    def take_review_orchestration(self, thread_id: str) -> dict[str, Any]:
+        """Consume Review orchestration flags after a provider turn.
+
+        Returns:
+            Qualifying-coaching and Deep Review success flags used to persist
+            the periodic counter. Missing extras default closed (no increment,
+            no reset).
+        """
+        return dict(self._last_review_orchestration.pop(thread_id, {}) or {})
 
     def _ensure_graph(self):
         """Build and cache the multi-step LangGraph runtime once."""
@@ -278,6 +307,9 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
         )
         workflow._last_conversation_memory[request.thread_id] = (
             provider_result.conversation_memory
+        )
+        workflow._last_review_orchestration[request.thread_id] = _review_orchestration(
+            provider_result
         )
         return {
             "request": request.model_dump(mode="json"),

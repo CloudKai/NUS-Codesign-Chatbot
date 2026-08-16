@@ -20,7 +20,9 @@ from agentcore_runtime.model import (
     load_runtime_requirement_pins,
     mantle_responses_kwargs,
     parse_runtime_requirement_pins,
+    role_model_config_from_mapping,
     runtime_model_config_from_mapping,
+    validate_all_role_configs,
 )
 from agentcore_runtime.structured_coach import CoachTurnExtractionError
 
@@ -110,7 +112,8 @@ def test_harness_never_constructs_empty_bedrock_model() -> None:
     loader = Path("agentcore_runtime/model.py").read_text(encoding="utf-8")
     assert "BedrockModel()" not in main
     assert "return BedrockModel()" not in loader
-    assert "load_runtime_model" in main
+    assert "get_role_model" in main
+    assert "tools=[]" in main
 
 
 class _FakeGuardrail:
@@ -191,3 +194,60 @@ def test_runtime_requirements_reject_version_ranges() -> None:
         parse_runtime_requirement_pins("strands-agents>=1.52.0\n")
     with pytest.raises(ValueError, match="incomplete"):
         parse_runtime_requirement_pins("pydantic==2.13.4\n")
+
+
+_HYBRID_ENV = {
+    "AGENTCORE_MODEL_REGION": "us-west-2",
+    "GUARDRAIL_ID": "gr-test",
+    "GUARDRAIL_VERSION": "3",
+    "ROUTER_MODEL_PROVIDER": "bedrock_mantle_responses",
+    "ROUTER_MODEL_ID": LUNA_MODEL_ID,
+    "QA_MODEL_PROVIDER": "bedrock_mantle_responses",
+    "QA_MODEL_ID": LUNA_MODEL_ID,
+    "COACHING_MODEL_PROVIDER": "bedrock_mantle_responses",
+    "COACHING_MODEL_ID": LUNA_MODEL_ID,
+    "REVIEW_INCREMENTAL_MODEL_PROVIDER": "bedrock_mantle_responses",
+    "REVIEW_INCREMENTAL_MODEL_ID": LUNA_MODEL_ID,
+    "REVIEW_DEEP_MODEL_PROVIDER": "bedrock",
+    "REVIEW_DEEP_MODEL_ID": SONNET_4_6_MODEL_ID,
+}
+
+
+def test_role_configs_load_luna_and_sonnet_without_substitution() -> None:
+    roles = validate_all_role_configs(_HYBRID_ENV)
+    assert roles["router"].provider == "bedrock_mantle_responses"
+    assert roles["router"].model_id == LUNA_MODEL_ID
+    assert roles["qa"].model_id == LUNA_MODEL_ID
+    assert roles["coaching"].model_id == LUNA_MODEL_ID
+    assert roles["review_incremental"].model_id == LUNA_MODEL_ID
+    assert roles["review_deep"].provider == "bedrock"
+    assert roles["review_deep"].model_id == SONNET_4_6_MODEL_ID
+    assert bedrock_model_kwargs(roles["review_deep"])["guardrail_version"] == "3"
+    assert mantle_responses_kwargs(roles["router"])["stateful"] is False
+
+
+def test_legacy_env_is_used_only_when_no_role_keys_are_present() -> None:
+    config = role_model_config_from_mapping(_SONNET_ENV, "review_deep")
+    assert config.provider == "bedrock"
+    assert config.model_id == SONNET_4_6_MODEL_ID
+    assert config.role == "review_deep"
+
+
+def test_partial_role_config_fails_closed_without_legacy_fallback() -> None:
+    env = dict(_HYBRID_ENV)
+    env["REVIEW_DEEP_MODEL_ID"] = ""
+    with pytest.raises(RuntimeModelError, match="REVIEW_DEEP_MODEL_ID"):
+        role_model_config_from_mapping(env, "review_deep")
+    coaching = role_model_config_from_mapping(env, "coaching")
+    assert coaching.model_id == LUNA_MODEL_ID
+
+
+def test_role_luna_cannot_use_bedrock_and_sonnet_cannot_use_mantle() -> None:
+    env = dict(_HYBRID_ENV)
+    env["COACHING_MODEL_PROVIDER"] = "bedrock"
+    with pytest.raises(RuntimeModelError, match="Luna cannot use BedrockModel"):
+        role_model_config_from_mapping(env, "coaching")
+    env = dict(_HYBRID_ENV)
+    env["REVIEW_DEEP_MODEL_PROVIDER"] = "bedrock_mantle_responses"
+    with pytest.raises(RuntimeModelError, match="openai"):
+        role_model_config_from_mapping(env, "review_deep")

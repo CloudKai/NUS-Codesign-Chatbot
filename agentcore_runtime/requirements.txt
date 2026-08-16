@@ -8,5 +8,6 @@
 strands-agents==1.52.0
 bedrock-agentcore==1.21.0
 pydantic==2.13.4
-# Optional Luna / Mantle Responses extra (not required for Sonnet 4.6):
-#   strands-agents[openai]==1.52.0
+# Luna / Mantle Responses extra required for DEFAULT openai.gpt-5.6-luna.
+# The parser in model.py skips extra markers; keep the exact strands-agents pin above.
+strands-agents[openai]==1.52.0

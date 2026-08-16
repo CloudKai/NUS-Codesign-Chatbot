@@ -1,4 +1,4 @@
-"""Deterministic specialist routing tests. There is no LLM router."""
+"""Deterministic specialist routing tests."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from backend.specialists.routing import (
     SPECIALIST_COACHING,
     SPECIALIST_QA,
     SPECIALIST_REVIEW,
+    apply_semantic_route,
     select_specialist,
 )
 
@@ -48,3 +49,32 @@ def test_client_cannot_force_qa_on_project_reasoning() -> None:
 
 def test_server_surface_review_is_honored() -> None:
     assert select_specialist("Keep going.", surface="review") == SPECIALIST_REVIEW
+
+
+def test_semantic_router_examples_map_to_expected_specialists() -> None:
+    assert apply_semantic_route("qa", 0.9) == SPECIALIST_QA
+    assert apply_semantic_route("coaching", 0.7) == SPECIALIST_COACHING
+    assert apply_semantic_route("review", 0.8) == SPECIALIST_REVIEW
+
+
+def test_malformed_or_low_confidence_semantic_route_falls_back_to_coaching() -> None:
+    assert apply_semantic_route("admin", 0.99) == SPECIALIST_COACHING
+    assert apply_semantic_route("qa", 0.2) == SPECIALIST_COACHING
+    assert apply_semantic_route("qa", None) == SPECIALIST_COACHING
+    assert apply_semantic_route("review", 1.2) == SPECIALIST_COACHING
+    assert (
+        select_specialist("What is Week 2 about?", use_semantic=True, semantic_specialist="qa", semantic_confidence=0.1)
+        == SPECIALIST_COACHING
+    )
+
+
+def test_use_semantic_skips_regex_fallback() -> None:
+    assert (
+        select_specialist(
+            "What is Week 2 about?",
+            use_semantic=True,
+            semantic_specialist="coaching",
+            semantic_confidence=0.9,
+        )
+        == SPECIALIST_COACHING
+    )
