@@ -42,6 +42,8 @@ os.environ["APP_WORKSPACES_DIR"] = str(_BOOTSTRAP_ROOT / "workspaces")
 os.environ["LECTURE_NOTES_DIR"] = str(_BOOTSTRAP_ROOT / "lecture_notes")
 os.environ["DATABASE_PROVIDER"] = "sqlite"
 os.environ["FILE_STORAGE_PROVIDER"] = "local"
+os.environ["FAST_CHAT_RECENT_VERBATIM_MESSAGES"] = "6"
+os.environ["FAST_CHAT_PROMPT_CACHE_ENABLED"] = "false"
 os.environ.pop("DSQL_SSLROOTCERT", None)
 os.environ.pop("COURSE_MATERIALS_BUCKET", None)
 os.environ.pop("AGENTCORE_RUNTIME_ARN", None)
@@ -141,6 +143,14 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     )
     monkeypatch.setattr(
         settings_module.settings, "max_active_coach_requests_per_notebook", 10_000
+    )
+    monkeypatch.setenv("FAST_CHAT_RECENT_VERBATIM_MESSAGES", "6")
+    monkeypatch.setenv("FAST_CHAT_PROMPT_CACHE_ENABLED", "false")
+    monkeypatch.setattr(
+        settings_module.settings, "fast_chat_recent_verbatim_messages", 6
+    )
+    monkeypatch.setattr(
+        settings_module.settings, "fast_chat_prompt_cache_enabled", False
     )
 
     assert settings_module.settings.app_env == "development"

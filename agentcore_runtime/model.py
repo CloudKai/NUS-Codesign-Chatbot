@@ -390,7 +390,9 @@ def bedrock_model_kwargs(config: RuntimeModelConfig) -> dict[str, Any]:
         Keyword arguments including ``model_id``, ``region_name``, and
         guardrail settings. ``guardrail_latest_message`` is True so input
         evaluation targets the latest untrusted user turn, not the trusted
-        system curriculum.
+        system curriculum. Prompt caching is not configured here:
+        ``CacheConfig(strategy="auto")`` would cache student messages.
+        Fast-chat prefix caching uses SystemContentBlock cachePoint instead.
 
     Raises:
         RuntimeModelError: When the config is not the Bedrock Converse path.

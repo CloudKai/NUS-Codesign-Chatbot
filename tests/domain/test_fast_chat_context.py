@@ -91,7 +91,7 @@ def test_fast_chat_hard_budget_is_enforced() -> None:
             max_input_tokens=int(settings.fast_chat_max_input_tokens),
             output_reserve_tokens=4_000,
             safety_margin_tokens=1_000,
-            recent_verbatim_messages=8,
+            recent_verbatim_messages=6,
         ),
         policy=CONTEXT_POLICY_FAST_CHAT,
     )
@@ -178,3 +178,39 @@ def test_relevant_evidence_survives_before_old_history() -> None:
     )
     assert plan.verbatim_message_count <= int(settings.fast_chat_recent_verbatim_messages)
     assert plan.estimated_input_tokens <= int(settings.fast_chat_max_input_tokens)
+
+
+def test_fast_chat_default_window_is_six_message_objects() -> None:
+    assert int(settings.fast_chat_recent_verbatim_messages) == 6
+
+
+def test_fast_chat_window_for_short_and_long_histories() -> None:
+    planner = _fast_planner()
+    for count in (0, 1, 2, 4, 6, 7, 20, 50):
+        history = _history(count)
+        plan = planner.plan(_request(history=history), prompt_text="brief")
+        expected = min(count, 6)
+        assert plan.verbatim_message_count == expected
+        assert plan.original_message_count == count
+        if count > 6:
+            assert plan.compressed_message_count == count - expected
+            assert plan.compressed_memory is not None
+        messages = plan.messages
+        assert len(messages) == expected
+        if expected:
+            assert messages[-1]["role"] == history[-1]["role"]
+            last_text = messages[-1]["content"][0]["text"]
+            assert last_text == history[-1]["content"]
+            first_text = messages[0]["content"][0]["text"]
+            assert first_text == history[-expected]["content"]
+            assert history[0]["role"] in {"user", "assistant"}
+        if count >= 7:
+            aged_text = " ".join(item["content"] for item in history[:-expected])
+            recent_text = " ".join(
+                block["text"]
+                for item in messages
+                for block in item["content"]
+            )
+            assert history[0]["content"] in aged_text
+            assert history[0]["content"] not in recent_text
+

@@ -92,7 +92,7 @@ guardrail configuration fails production startup and the runtime loader.
 
 - DSQL / SQLite is the only authoritative transcript.
 - Fast-chat planning always sends derived `conversation_memory` plus a bounded
-  recent verbatim window (default 8). Deep Review may still use full-history
+  recent verbatim window (default 6). Deep Review may still use full-history
   when it fits that broader budget. Compression affects model input only and
   never deletes stored messages. `conversation_memory` is a derived
   cache/projection that is invalidated when `conversation_revision` changes.

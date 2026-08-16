@@ -73,7 +73,7 @@ try:
         payload_stage,
         qa_turn_from_agent_result,
         review_turn_from_agent_result,
-        specialist_system_prompt,
+        agent_system_prompt,
         structured_wire_payload,
     )
 except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
@@ -128,7 +128,7 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
         payload_stage,
         qa_turn_from_agent_result,
         review_turn_from_agent_result,
-        specialist_system_prompt,
+        agent_system_prompt,
         structured_wire_payload,
     )
 
@@ -142,6 +142,36 @@ except ImportError:  # pragma: no cover - companion tests never import this modu
 app = BedrockAgentCoreApp() if BedrockAgentCoreApp is not None else None
 
 _ROLE_CONFIGS_READY = False
+
+
+def _with_cache_telemetry(
+    payload: dict[str, Any],
+    result: Any,
+    system_prompt: str | list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Attach numeric cache telemetry without student text or prompt content.
+
+    ``prompt_cache_enabled`` is true only when this invoke actually sent a
+    SystemContentBlock cachePoint. Cache token counts are copied only when
+    AgentResult metrics expose them.
+    """
+    enabled = isinstance(system_prompt, list) and any(
+        isinstance(block, Mapping) and "cachePoint" in block for block in system_prompt
+    )
+    payload["prompt_cache_enabled"] = bool(enabled)
+    try:
+        from prompt_cache import cache_usage_from_agent_result
+    except ImportError:  # pragma: no cover - companion package import
+        from agentcore_runtime.prompt_cache import cache_usage_from_agent_result
+    payload.update(cache_usage_from_agent_result(result))
+    if enabled:
+        logger.info(
+            "prompt_cache_enabled=true cache_read_input_tokens=%s "
+            "cache_write_input_tokens=%s",
+            payload.get("cache_read_input_tokens", "absent"),
+            payload.get("cache_write_input_tokens", "absent"),
+        )
+    return payload
 
 
 def _ensure_role_configs() -> None:
@@ -350,7 +380,8 @@ async def _structured_role_invoke(
             result=result,
             elapsed_ms=elapsed_ms_since(started),
         )
-        return structured_wire_payload(output)
+        payload_out = structured_wire_payload(output)
+        return _with_cache_telemetry(payload_out, result, system_prompt)
     except CoachTurnExtractionError as error:
         _log_role(
             role=role,
@@ -400,7 +431,7 @@ async def specialist_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]
     contract = ""
     if isinstance(payload, Mapping):
         contract = str(payload.get("output_contract") or "").strip().lower()
-    system_prompt = specialist_system_prompt(payload)
+    system_prompt = agent_system_prompt(payload)
     prior, prompt = conversation_for_invoke(payload)
     del prior
     return await _structured_role_invoke(
@@ -424,7 +455,7 @@ async def fast_chat_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     return await _structured_role_invoke(
         role=MODEL_ROLE_FAST_CHAT,
         payload=payload,
-        system_prompt=specialist_system_prompt(payload),
+        system_prompt=agent_system_prompt(payload),
         user_prompt=conversation_for_invoke(payload)[1],
         output_model=FastChatTurnOutput,
         parse=fast_chat_turn_from_agent_result,

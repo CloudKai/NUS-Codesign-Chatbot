@@ -48,6 +48,7 @@ def _review_orchestration(
         "qualifying_coaching_turn": bool(provider_result.qualifying_coaching_turn),
         "deep_review_succeeded": bool(provider_result.deep_review_succeeded),
         "review_trigger": provider_result.review_trigger,
+        "needs_source_retrieval": bool(provider_result.needs_source_retrieval),
     }
 
 
@@ -188,10 +189,13 @@ class CoachWorkflow:
     def _run_graph(self, request: CoachRequest) -> CoachTurn:
         """Execute the multi-step LangGraph workflow with a durable checkpointer."""
         graph = self._ensure_graph()
+        # Unique namespace per run so a RAG fallback retry cannot resume the
+        # first Haiku graph checkpoint for the same notebook thread_id.
+        run_ns = f"coach-{uuid4().hex}"
         config = {
             "configurable": {
                 "thread_id": request.thread_id,
-                "checkpoint_ns": "coach",
+                "checkpoint_ns": run_ns,
             }
         }
         self._last_research_coding.pop(request.thread_id, None)
@@ -215,7 +219,7 @@ class CoachWorkflow:
             "mode": "langgraph",
             "checkpoint": {
                 "thread_id": request.thread_id,
-                "checkpoint_ns": "coach",
+                "checkpoint_ns": run_ns,
             },
         }
         return turn
@@ -244,6 +248,15 @@ class CoachWorkflow:
             projection after a conversation revision.
         """
         return self._last_conversation_memory.pop(thread_id, None)
+
+    def peek_needs_source_retrieval(self, thread_id: str) -> bool:
+        """Return whether the latest provider result asked for source evidence.
+
+        Does not consume orchestration flags. Used by the application-owned
+        RAG fallback before persist.
+        """
+        data = self._last_review_orchestration.get(thread_id) or {}
+        return bool(data.get("needs_source_retrieval"))
 
     def take_review_orchestration(self, thread_id: str) -> dict[str, Any]:
         """Consume Review orchestration flags after a provider turn.

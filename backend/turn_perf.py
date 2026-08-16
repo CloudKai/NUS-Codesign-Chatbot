@@ -61,7 +61,15 @@ SAFE_PERF_FIELDS = frozenset(
         "guardrail_configured",
         "context_policy",
         "fast_chat_needs_source_retrieval",
+        "fast_chat_recent_message_count",
         "agentcore_call_count",
+        "rag_fallback_used",
+        "rag_fallback_model_calls",
+        "rag_fallback_retrieval_ms",
+        "prompt_cache_enabled",
+        "prompt_cache_hit",
+        "cache_write_input_tokens",
+        "cache_read_input_tokens",
     }
 )
 

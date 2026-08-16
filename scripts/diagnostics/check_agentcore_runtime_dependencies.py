@@ -94,10 +94,19 @@ def _check_strands_api() -> dict[str, str]:
     missing = [name for name in required if name not in config_fields]
     if missing:
         _fail("BedrockModel.BedrockConfig is missing " + ", ".join(missing))
+    if "cache_config" not in config_fields:
+        _fail("BedrockModel.BedrockConfig is missing cache_config")
+    try:
+        from strands.models import CacheConfig
+    except ImportError as error:
+        _fail(f"CacheConfig import failed: {error.__class__.__name__}")
+    cache_init = inspect.signature(CacheConfig.__init__)
+    _require_param(cache_init, "strategy", "CacheConfig.__init__")
     return {
         "agent": f"{Agent.__module__}.{Agent.__name__}",
         "agent_result": f"{AgentResult.__module__}.{AgentResult.__name__}",
         "bedrock_model": f"{BedrockModel.__module__}.{BedrockModel.__name__}",
+        "cache_config": f"{CacheConfig.__module__}.{CacheConfig.__name__}",
     }
 
 

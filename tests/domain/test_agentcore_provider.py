@@ -353,8 +353,8 @@ def test_agentcore_payload_sends_bounded_history_and_owner_student_id():
     assert _STAGE_MARKERS["problem_identification"] not in payload["trusted_instructions"]
     assert _STAGE_MARKERS["problem_identification"] not in messages[-1]["content"][0]["text"]
     prior = messages[:-1]
-    assert len(prior) == 8
-    assert prior[0]["content"][0]["text"] == "Earlier student turn 1."
+    assert len(prior) <= 6
+    assert prior[0]["content"][0]["text"] == "Earlier student turn 3."
     assert prior[-1]["role"] == "assistant"
     current_text = messages[-1]["content"][0]["text"]
     assert all("Earlier student turn 0." not in item["content"][0]["text"] for item in prior)

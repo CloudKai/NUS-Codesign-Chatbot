@@ -735,10 +735,31 @@ def _allowed_citation_labels(request: CoachRequest) -> set[str]:
     }
 
 
+def _record_runtime_cache_metrics(payload: dict[str, Any]) -> None:
+    """Copy safe cache telemetry from the runtime JSON onto coach_turn_perf.
+
+    Missing keys are left unset. A cache hit is recorded only when the runtime
+    supplied a non-negative ``cache_read_input_tokens`` integer.
+    """
+    if "prompt_cache_enabled" in payload:
+        record_field("prompt_cache_enabled", bool(payload.get("prompt_cache_enabled")))
+    read_raw = payload.get("cache_read_input_tokens")
+    write_raw = payload.get("cache_write_input_tokens")
+    if isinstance(read_raw, bool) or isinstance(write_raw, bool):
+        return
+    if isinstance(read_raw, (int, float)):
+        read_tokens = int(read_raw)
+        record_field("cache_read_input_tokens", read_tokens)
+        record_field("prompt_cache_hit", read_tokens > 0)
+    if isinstance(write_raw, (int, float)):
+        record_field("cache_write_input_tokens", int(write_raw))
+
+
 def _validated_fast_chat(
     payload: dict[str, Any], request: CoachRequest
 ) -> ProviderAssessmentResult:
     """Validate one-call fast-chat output and fail closed on a bad contract."""
+    _record_runtime_cache_metrics(payload)
     try:
         output = FastChatTurnOutput.model_validate(payload)
     except Exception as error:
@@ -783,6 +804,7 @@ def _validated_fast_chat(
             qualifying_coaching_turn=False,
             deep_review_succeeded=False,
             review_trigger=None,
+            needs_source_retrieval=bool(output.needs_source_retrieval),
         )
     if output.assessment is None:
         raise _malformed_error()
@@ -815,6 +837,7 @@ def _validated_fast_chat(
         qualifying_coaching_turn=True,
         deep_review_succeeded=False,
         review_trigger=None,
+        needs_source_retrieval=bool(output.needs_source_retrieval),
     )
 
 
@@ -1206,6 +1229,10 @@ class AgentCoreCoachProvider:
         record_field("prompt_tokens", int(plan.prompt_tokens))
         record_field("original_message_count", int(plan.original_message_count))
         record_field("verbatim_message_count", int(plan.verbatim_message_count))
+        if context_policy == CONTEXT_POLICY_FAST_CHAT:
+            record_field(
+                "fast_chat_recent_message_count", int(plan.verbatim_message_count)
+            )
         record_field("compressed_message_count", int(plan.compressed_message_count))
         record_field("compression_used", bool(plan.compression_used))
         record_field("context_policy", context_policy)

@@ -79,7 +79,12 @@ modules.
 | `domain/test_research_coding_domain.py` | Structured provisional CLEAR/Facione/ethics coding |
 | `persistence/test_research_persistence.py` | Offset-only observations, revisions, human decisions, audit, workflow marker |
 | `scripts/test_reset_learning_data.py` | Dry-run manifest, backup/quarantine, exact confirmation, stale-plan rejection |
-| `domain/test_workflow.py` | LangGraph workflow routing and structured output |
+| `domain/test_fast_chat_one_call.py` | One Haiku fast-chat invoke; no router/incremental/Sonnet on the normal path |
+| `domain/test_fast_chat_context.py` | Six-message verbatim window, current-turn uniqueness, derived memory |
+| `domain/test_rag_fallback.py` | Application-owned needs_source_retrieval retry; persist-final-only |
+| `domain/test_coaching_prompt_baseline.py` | SHA-256 lock on canonical Coaching/stage prompt files |
+| `domain/test_prompt_cache.py` | SystemContentBlock prefix cache; no CacheConfig auto on student text |
+| `scripts/test_evaluate_fast_chat_regression.py` | Dry-run behaviour-regression CLI; no live Claude |
 | `domain/test_prompt_architecture.py` | Stage prompt files, composer ordering, authoritative stage selection |
 | `domain/test_bedrock_provider.py` | Bedrock Converse adapter contract with an injected fake client |
 | `domain/test_learning_service.py` | Phase transition confirmation, resolution, atomic rollback |

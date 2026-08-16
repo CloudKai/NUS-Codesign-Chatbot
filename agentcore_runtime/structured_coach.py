@@ -26,7 +26,7 @@ try:
         parse_review_turn_output,
     )
     from .specialists.coaching import coaching_system_prompt
-    from .specialists.fast_chat import fast_chat_system_prompt
+    from .specialists.fast_chat import fast_chat_static_prefix, fast_chat_system_prompt
     from .specialists.qa import qa_system_prompt
     from .specialists.review import review_system_prompt
     from .specialists.routing import (
@@ -49,7 +49,7 @@ except ImportError:  # pragma: no cover - flat runtime copy next to main.py
         parse_review_turn_output,
     )
     from specialists.coaching import coaching_system_prompt
-    from specialists.fast_chat import fast_chat_system_prompt
+    from specialists.fast_chat import fast_chat_static_prefix, fast_chat_system_prompt
     from specialists.qa import qa_system_prompt
     from specialists.review import review_system_prompt
     from specialists.routing import (
@@ -105,6 +105,8 @@ _FAST_CHAT_JSON_CONTRACT = """Return one JSON object with:
 - assessment: required when mode is coaching; omit or null for qa
 - citations: only supplied [S#] labels; empty when unused
 - research_coding: optional and observational; omit for qa unless required
+- needs_source_retrieval: true only when selected-source evidence was
+  required for this turn and was not supplied; otherwise false
 
 Do not wrap the JSON in markdown fences. Do not call tools. Do not claim to
 mutate the Thinking Path stage.
@@ -251,6 +253,49 @@ def specialist_system_prompt(payload: Mapping[str, Any] | None) -> str:
         coaching_system_prompt(payload_topic(payload), trusted)
         + "\n\n"
         + STRUCTURED_COACH_TURN_PROMPT
+    )
+
+
+def agent_system_prompt(payload: Mapping[str, Any] | None) -> str | list[dict[str, Any]]:
+    """Return the Agent system prompt, optionally with a prefix cache point.
+
+    Fast-chat may split the canonical string into SystemContentBlock objects
+    when ``FAST_CHAT_PROMPT_CACHE_ENABLED`` is true and the static prefix is
+    estimated at or above the Haiku 4.5 minimum. Deep Review is unchanged.
+    Cache-disabled output is the exact ``specialist_system_prompt`` string.
+
+    Args:
+        payload: Companion InvokeAgentRuntime JSON.
+
+    Returns:
+        A string system prompt, or a content-block list for Bedrock caching.
+    """
+    assembled = specialist_system_prompt(payload)
+    raw_phase = ""
+    contract = ""
+    if isinstance(payload, Mapping):
+        raw_phase = str(payload.get("phase") or "").strip().lower()
+        contract = payload_output_contract(payload)
+    if raw_phase != PHASE_FAST_CHAT and contract != "fast_chat_turn":
+        return assembled
+    try:
+        from .prompt_cache import (
+            prompt_cache_enabled_from_environ,
+            system_prompt_with_optional_cache_point,
+        )
+    except ImportError:  # pragma: no cover - flat runtime copy
+        from prompt_cache import (  # type: ignore
+            prompt_cache_enabled_from_environ,
+            system_prompt_with_optional_cache_point,
+        )
+    prefix = fast_chat_static_prefix(payload_topic(payload))
+    if not assembled.startswith(prefix):
+        return assembled
+    suffix = assembled[len(prefix) :]
+    return system_prompt_with_optional_cache_point(
+        static_prefix=prefix,
+        dynamic_suffix=suffix,
+        enabled=prompt_cache_enabled_from_environ(),
     )
 
 

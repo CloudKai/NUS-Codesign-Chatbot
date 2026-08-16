@@ -59,6 +59,8 @@ def test_compose_persists_data_and_mounts_private_secrets_read_only():
     assert 'REVIEW_DEEP_MODEL_ID: "global.anthropic.claude-sonnet-4-6"' in app
     assert 'ROUTER_MIN_CONFIDENCE: "0.60"' in app
     assert 'DEEP_REVIEW_INTERVAL_TURNS: "3"' in app
+    assert 'FAST_CHAT_RECENT_VERBATIM_MESSAGES: "6"' in app
+    assert 'FAST_CHAT_PROMPT_CACHE_ENABLED: "false"' in app
     assert 'AGENTCORE_QUALIFIER: "DEFAULT"' in app
     assert 'GUARDRAIL_VERSION: "3"' in app
     assert "source: ./lecture_notes" in app
@@ -118,6 +120,8 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert 'REVIEW_DEEP_MODEL_ID: "global.anthropic.claude-sonnet-4-6"' in app
     assert 'ROUTER_MIN_CONFIDENCE: "0.60"' in app
     assert 'DEEP_REVIEW_INTERVAL_TURNS: "3"' in app
+    assert 'FAST_CHAT_RECENT_VERBATIM_MESSAGES: "6"' in app
+    assert 'FAST_CHAT_PROMPT_CACHE_ENABLED: "false"' in app
     assert 'GUARDRAIL_VERSION: "3"' in app
     assert 'MAX_ACTIVE_COACH_REQUESTS_PER_NOTEBOOK: "1"' in app
     assert 'MAX_ACTIVE_COACH_REQUESTS_PER_USER: "2"' in app
@@ -165,6 +169,8 @@ def test_production_compose_keeps_host_env_knowledge_base_contract():
     assert 'REVIEW_DEEP_MODEL_ID: "global.anthropic.claude-sonnet-4-6"' in app
     assert 'ROUTER_MIN_CONFIDENCE: "0.60"' in app
     assert 'DEEP_REVIEW_INTERVAL_TURNS: "3"' in app
+    assert 'FAST_CHAT_RECENT_VERBATIM_MESSAGES: "6"' in app
+    assert 'FAST_CHAT_PROMPT_CACHE_ENABLED: "false"' in app
     assert 'GUARDRAIL_VERSION: "3"' in app
     assert "${KNOWLEDGE_BASE_ID" not in compose
     assert "${COURSE_MATERIALS_BUCKET" not in compose

@@ -15,6 +15,8 @@ from agentcore_runtime.model import (
     HAIKU_4_5_MODEL_ID,
     LIGHTWEIGHT_MODEL_ROLES,
     LUNA_MODEL_ID,
+    MODEL_ROLE_FAST_CHAT,
+    MODEL_ROLE_REVIEW_DEEP,
     PINNED_RUNTIME_PACKAGES,
     SONNET_4_6_MODEL_ID,
     RuntimeModelError,
@@ -47,6 +49,8 @@ def test_sonnet_bedrock_kwargs_are_explicit_and_use_latest_message() -> None:
     assert kwargs["guardrail_latest_message"] is True
     assert "fallback" not in kwargs
     assert "structured_output_prompt" not in kwargs
+    assert "cache_config" not in kwargs
+    assert "cache_prompt" not in kwargs
 
 
 def test_missing_provider_or_model_fails_closed() -> None:
@@ -83,6 +87,8 @@ def test_haiku_bedrock_kwargs_are_explicit_and_use_latest_message() -> None:
     assert kwargs["guardrail_latest_message"] is True
     assert "fallback" not in kwargs
     assert "structured_output_prompt" not in kwargs
+    assert "cache_config" not in kwargs
+    assert "cache_prompt" not in kwargs
 
 
 def test_luna_cannot_use_bedrock_model() -> None:
@@ -252,6 +258,19 @@ _LUNA_HYBRID_ENV = {
     "REVIEW_DEEP_MODEL_PROVIDER": "bedrock",
     "REVIEW_DEEP_MODEL_ID": SONNET_4_6_MODEL_ID,
 }
+
+
+def test_fast_chat_role_is_haiku_and_deep_review_is_sonnet() -> None:
+    roles = validate_all_role_configs(_HYBRID_ENV)
+    assert roles[MODEL_ROLE_FAST_CHAT].model_id == HAIKU_4_5_MODEL_ID
+    assert roles[MODEL_ROLE_REVIEW_DEEP].model_id == SONNET_4_6_MODEL_ID
+    assert roles[MODEL_ROLE_FAST_CHAT].model_id != roles[MODEL_ROLE_REVIEW_DEEP].model_id
+    haiku_kwargs = bedrock_model_kwargs(roles[MODEL_ROLE_FAST_CHAT])
+    sonnet_kwargs = bedrock_model_kwargs(roles[MODEL_ROLE_REVIEW_DEEP])
+    assert haiku_kwargs["model_id"] == HAIKU_4_5_MODEL_ID
+    assert sonnet_kwargs["model_id"] == SONNET_4_6_MODEL_ID
+    assert "cache_config" not in haiku_kwargs
+    assert "cache_config" not in sonnet_kwargs
 
 
 def test_role_configs_load_haiku_and_sonnet_without_substitution() -> None:

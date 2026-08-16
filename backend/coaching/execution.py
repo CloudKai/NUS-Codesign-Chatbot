@@ -28,6 +28,7 @@ from backend.retrieval import (
     ContextRetriever,
     LocalChunkRetriever,
     RetrievalQuery,
+    RetrievalSource,
     bounded_retrieval_result,
     focused_excerpt,
     retrieval_sources_from_notebook,
@@ -477,6 +478,7 @@ class CoachApplicationService:
             message.get("role") == "user" for message in prepared_request.history
         )
         turn = self._workflow.run(prepared_request)
+        prepared_request, turn = self._maybe_rag_fallback(prepared_request, turn)
         research_observation = _research_observation_from_coding(
             self._workflow.take_provisional_research_coding(
                 prepared_request.thread_id
@@ -647,6 +649,156 @@ class CoachApplicationService:
         record_field("persist_turn_ms", elapsed_ms(persist_started))
         return turn
 
+    def _retrieve_for_turn(
+        self,
+        *,
+        student_message: str,
+        current_stage: str,
+        retrieval_sources: tuple[RetrievalSource, ...] | list[RetrievalSource],
+        project_context: str,
+        conversation_summary: str,
+        recent_messages: list[dict[str, Any]],
+        timing_field: str = "retrieval_total_ms",
+    ) -> tuple[list[RetrievalChunkReference], str]:
+        """Run authoritative selected-source retrieval for one coaching turn.
+
+        Args:
+            student_message: Current student contribution.
+            current_stage: Server-authoritative Thinking Path stage.
+            retrieval_sources: Selected, ownership-checked retrieval sources.
+            project_context: Bounded project/assignment context.
+            conversation_summary: Bounded learning summary.
+            recent_messages: Stored transcript turns for lexical retrieval.
+            timing_field: Performance field that records this retrieve duration.
+
+        Returns:
+            Validated chunk references and prompt context. Ownership mismatches
+            raise ``ValueError``. Retriever exceptions propagate after timing
+            is recorded.
+
+        Raises:
+            ValueError: When the retriever returns a source outside the
+                selected notebook catalog.
+        """
+        retrieval_started = time.perf_counter()
+        try:
+            retrieval_result = self._retriever.retrieve(
+                RetrievalQuery(
+                    current_message=student_message,
+                    current_stage=current_stage,
+                    sources=tuple(retrieval_sources),
+                    project_context=project_context,
+                    conversation_summary=conversation_summary,
+                    recent_messages=tuple(recent_messages),
+                )
+            )
+        except Exception as error:
+            duration = elapsed_ms(retrieval_started)
+            record_field(timing_field, duration)
+            if timing_field != "retrieval_total_ms":
+                current = current_perf()
+                if current is not None:
+                    current.add_ms("retrieval_total_ms", duration)
+            record_failure(str(getattr(error, "category", "") or "retrieval_failed"))
+            raise
+        duration = elapsed_ms(retrieval_started)
+        record_field(timing_field, duration)
+        if timing_field != "retrieval_total_ms":
+            current = current_perf()
+            if current is not None:
+                current.add_ms("retrieval_total_ms", duration)
+        expected_labels = {
+            source.source_id: source.label for source in retrieval_sources
+        }
+        for chunk in retrieval_result.chunks:
+            if expected_labels.get(chunk.source_id) != chunk.label:
+                record_failure("retrieval_failed")
+                raise ValueError(
+                    "Retriever returned a source outside the selected notebook scope"
+                )
+        course_status = str(retrieval_result.course_retrieval_status or "ok")
+        retrieval_result = bounded_retrieval_result(
+            retrieval_result.chunks,
+            max_context_chars=int(runtime_settings.fast_chat_retrieval_max_chars),
+            max_chunks=int(runtime_settings.fast_chat_retrieval_max_chunks),
+        )
+        if course_status in {"unavailable", "empty"}:
+            retrieval_result = with_course_evidence_gap(
+                retrieval_result, status=course_status
+            )
+        retrieved_chunks: list[RetrievalChunkReference] = []
+        for chunk in retrieval_result.chunks:
+            excerpt = focused_excerpt(
+                chunk.text,
+                student_message,
+                limit=600,
+            )
+            retrieved_chunks.append(
+                RetrievalChunkReference(
+                    source_id=chunk.source_id,
+                    label=chunk.label,
+                    title=chunk.title,
+                    chunk_id=chunk.chunk_id,
+                    excerpt=excerpt,
+                    score=chunk.score,
+                    retrieval_origin=str(chunk.retrieval_origin or ""),
+                )
+            )
+        return retrieved_chunks, retrieval_result.context
+
+    def _maybe_rag_fallback(
+        self,
+        request: CoachRequest,
+        turn: CoachTurn,
+    ) -> tuple[CoachRequest, CoachTurn]:
+        """Retry once with application RAG when Haiku reports missing evidence.
+
+        The first model result is not persisted. The retry stays inside the
+        same notebook execution lease and idempotency claim. A second
+        ``needs_source_retrieval`` flag cannot trigger another retrieve.
+        """
+        record_field("rag_fallback_used", False)
+        record_field("rag_fallback_model_calls", 1)
+        if str(request.specialist or "").strip().lower() == "review":
+            return request, turn
+        if request.retrieval_required:
+            return request, turn
+        if request.retrieved_chunks:
+            return request, turn
+        if not request.source_ids:
+            return request, turn
+        if not self._workflow.peek_needs_source_retrieval(request.thread_id):
+            return request, turn
+        selected_sources = list_visible_sources(
+            self._store, request.thread_id, selected_only=True
+        )
+        retrieval_sources = retrieval_sources_from_notebook(selected_sources)
+        if not retrieval_sources:
+            return request, turn
+        record_field("rag_fallback_used", True)
+        chunks, context = self._retrieve_for_turn(
+            student_message=request.student_message,
+            current_stage=request.current_stage,
+            retrieval_sources=retrieval_sources,
+            project_context=request.student_project_context,
+            conversation_summary=request.conversation_summary,
+            recent_messages=list(request.history),
+            timing_field="rag_fallback_retrieval_ms",
+        )
+        retried = request.model_copy(
+            update={
+                "retrieved_chunks": chunks,
+                "source_context": context,
+                "retrieval_required": True,
+            }
+        )
+        turn = self._workflow.run(retried)
+        record_field("rag_fallback_model_calls", 2)
+        record_field("retrieved_chunk_count", len(chunks))
+        record_field("retrieved_context_chars", len(context))
+        record_field("rag_used", bool(chunks))
+        return retried, turn
+
     def _authoritative_request(self, request: CoachRequest) -> CoachRequest:
         """Reload trusted coaching inputs from the notebook store.
 
@@ -775,62 +927,14 @@ class CoachApplicationService:
         retrieved_chunks: list[RetrievalChunkReference] = []
         retrieval_result_context = ""
         if needs_retrieval and retrieval_sources:
-            retrieval_started = time.perf_counter()
-            try:
-                retrieval_result = self._retriever.retrieve(
-                    RetrievalQuery(
-                        current_message=request.student_message,
-                        current_stage=authoritative_stage,
-                        sources=retrieval_sources,
-                        project_context=project_context,
-                        conversation_summary=conversation_summary,
-                        recent_messages=tuple(store_history),
-                    )
-                )
-            except Exception as error:
-                record_field("retrieval_total_ms", elapsed_ms(retrieval_started))
-                record_failure(
-                    str(getattr(error, "category", "") or "retrieval_failed")
-                )
-                raise
-            record_field("retrieval_total_ms", elapsed_ms(retrieval_started))
-            expected_labels = {
-                source.source_id: source.label for source in retrieval_sources
-            }
-            for chunk in retrieval_result.chunks:
-                if expected_labels.get(chunk.source_id) != chunk.label:
-                    record_failure("retrieval_failed")
-                    raise ValueError(
-                        "Retriever returned a source outside the selected notebook scope"
-                    )
-            course_status = str(retrieval_result.course_retrieval_status or "ok")
-            retrieval_result = bounded_retrieval_result(
-                retrieval_result.chunks,
-                max_context_chars=int(runtime_settings.fast_chat_retrieval_max_chars),
-                max_chunks=int(runtime_settings.fast_chat_retrieval_max_chunks),
+            retrieved_chunks, retrieval_result_context = self._retrieve_for_turn(
+                student_message=request.student_message,
+                current_stage=authoritative_stage,
+                retrieval_sources=retrieval_sources,
+                project_context=project_context,
+                conversation_summary=conversation_summary,
+                recent_messages=store_history,
             )
-            if course_status in {"unavailable", "empty"}:
-                retrieval_result = with_course_evidence_gap(
-                    retrieval_result, status=course_status
-                )
-            for chunk in retrieval_result.chunks:
-                excerpt = focused_excerpt(
-                    chunk.text,
-                    request.student_message,
-                    limit=600,
-                )
-                retrieved_chunks.append(
-                    RetrievalChunkReference(
-                        source_id=chunk.source_id,
-                        label=chunk.label,
-                        title=chunk.title,
-                        chunk_id=chunk.chunk_id,
-                        excerpt=excerpt,
-                        score=chunk.score,
-                        retrieval_origin=str(chunk.retrieval_origin or ""),
-                    )
-                )
-            retrieval_result_context = retrieval_result.context
         else:
             record_field("retrieval_total_ms", 0)
             record_field("course_kb_retrieval_ms", 0)

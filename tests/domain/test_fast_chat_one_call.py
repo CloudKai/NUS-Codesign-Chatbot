@@ -241,7 +241,9 @@ def test_fifty_history_messages_send_at_most_configured_verbatim() -> None:
         for block in item.get("content") or []
         if isinstance(block, dict)
     )
-    assert len(prior) <= 8
+    assert len(prior) <= 6
+    assert "historic-turn-0" not in prior_text
+    assert len(prior) <= 6
     assert "historic-turn-0" not in prior_text
     assert "historic-turn-49" in prior_text
     current = payload["messages"][-1]["content"][0]["text"]

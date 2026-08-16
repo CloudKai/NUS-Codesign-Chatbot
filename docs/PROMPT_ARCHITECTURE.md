@@ -124,8 +124,11 @@ The composer orders and delimits these sections:
 2. the one authoritative Thinking Path stage prompt;
 3. student project context;
 4. retrieved source excerpts;
-5. bounded learning summary and, unless the provider already sends DSQL
-   history as conversation messages, recent conversation;
+5. bounded learning summary / derived ConversationMemory and, unless the
+   provider already sends DSQL history as conversation messages, recent
+   conversation. Fast chat sends at most 6 recent verbatim message objects;
+   the current student message stays separate. Deep Review may keep a larger
+   window.
 6. the current student message;
 7. runtime rules for language, detail, grounding, citations, and structured
    assessment.

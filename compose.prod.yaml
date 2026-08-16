@@ -55,6 +55,8 @@ services:
       REVIEW_DEEP_MODEL_ID: "global.anthropic.claude-sonnet-4-6"
       ROUTER_MIN_CONFIDENCE: "0.60"
       DEEP_REVIEW_INTERVAL_TURNS: "3"
+      FAST_CHAT_RECENT_VERBATIM_MESSAGES: "6"
+      FAST_CHAT_PROMPT_CACHE_ENABLED: "false"
       GUARDRAIL_VERSION: "3"
       # Process-local coach workflow capacity for ~100 concurrent students.
       # MAX_CONCURRENT_MODEL_CALLS is the historical name for active workflows,

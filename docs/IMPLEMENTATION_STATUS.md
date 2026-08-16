@@ -1,8 +1,102 @@
 # Implementation status
 
-## Current phase — One-call Haiku fast chat, selective RAG, latency instrumentation
+## Current phase — Fast-chat 6-message window, RAG fallback, pedagogy lock
 
 **Code is local on `Integrate-Bedrock` and is not committed or deployed.**
+Starting HEAD was `db6d1bae7403c05e68c38bad39dd2afd9bd268fc`. Canonical
+Coaching prompts match baseline `a6d163668902beae4938fe552cced7ba92b15e88`.
+Do **not** publish AgentCore, mutate AWS, push, or deploy EC2 until authorized.
+
+Normal student chat remains one Claude Haiku 4.5 `phase=fast_chat` invoke.
+The rare accuracy fallback may add one application-owned retrieve and one
+Haiku retry. Deep Review remains explicit Sonnet 4.6. Router and Incremental
+Review stay off the active path.
+
+### What changed and why
+
+1. **Six recent messages.** Fast chat now sends ConversationMemory plus at
+   most **6** recent verbatim message objects (not pairs). The current
+   student turn stays separate. Deep Review history is unchanged. DSQL still
+   stores the full transcript.
+2. **Pedagogy lock.** `fast_chat_system_prompt` still concatenates the
+   canonical `shared_coaching.md` and current stage file. Hash fixtures fail
+   if those files change without explicit pedagogical review.
+3. **Rare RAG fallback.** When the gate skipped retrieval and Haiku sets
+   `needs_source_retrieval=true` and selected sources exist, FastAPI
+   retrieves once and retries Haiku once. The first result is not persisted.
+   Same notebook lease and idempotency claim.
+4. **Prompt cache (opt-in, conservative).** Pinned Strands 1.52.0 supports
+   `SystemContentBlock` cachePoint and `CacheConfig(strategy="auto")`. Auto
+   caching would cache student messages, so it is not used. Prefix cache is
+   behind `FAST_CHAT_PROMPT_CACHE_ENABLED` (default false). Current static
+   prefixes are below the Haiku 4.5 4,096-token minimum under a conservative
+   estimator; they are not padded.
+5. **Behaviour regression suite.** Versioned cases plus a dry-run CLI
+   (`scripts/evals/evaluate_fast_chat_regression.py`). Live Claude is not
+   run unless `--i-approve-live-claude` is passed.
+
+### Main files changed
+
+- Settings / planner: `backend/settings.py`, `backend/context_planner.py`,
+  `.env.example`
+- Fallback: `backend/coaching/execution.py`, `backend/domain.py`,
+  `backend/workflow.py`, `backend/agentcore_provider.py`,
+  `backend/turn_perf.py`
+- Runtime cache split: `agentcore_runtime/specialists/fast_chat.py`,
+  `agentcore_runtime/structured_coach.py`, `agentcore_runtime/prompt_cache.py`,
+  `agentcore_runtime/main.py`, `agentcore_runtime/model.py`
+- Tests / evals / docs: fast-chat context, RAG fallback, prompt hashes,
+  behaviour cases, `evaluate_fast_chat_regression.py`, this file
+
+### Validation evidence
+
+- Canonical Coaching hashes match `a6d163668902beae4938fe552cced7ba92b15e88`
+  (`git diff` empty; SHA-256 fixture in
+  `tests/fixtures/coaching_prompt_baseline.json`).
+- `ruff check .` passed.
+- `PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache python -m compileall -q
+  backend ui streamlit_app.py tests scripts agentcore_runtime` passed.
+- Focused pytest: fast-chat context/one-call/pedagogy, prompt hashes, RAG
+  fallback, prompt cache, runtime models, retrieval gate, conversation
+  memory, AgentCore provider/runtime, workflow, idempotency, deployment
+  config, eval CLI — passed.
+- Full deterministic `.venv/bin/python -m pytest -q`: **933 passed**.
+- Live Claude / AWS / AgentCore publish: **NOT RUN**.
+- Conservative prefix estimates (chars/4): ~3,052–3,327 tokens vs Haiku
+  4,096 minimum → `prompt_cache_eligible=false reason=prefix_below_minimum`.
+  No padding. Flag remains false.
+- ConversationMemory continuity (20/50/100) passed with the existing
+  extractive schema; no extra memory fields were added.
+
+### Production readiness (do not collapse these)
+
+- **CODE CORRECT:** YES for the mock/deterministic path
+- **CONCURRENCY SAFE:** YES — fallback stays inside the existing notebook
+  lease; graph retries use a unique checkpoint namespace
+- **IDEMPOTENCY SAFE:** YES — one claim; replay does not re-run Haiku
+- **MOCK TESTED:** YES (933)
+- **CI GREEN:** NOT RUN (no push)
+- **DOCKER READY:** NO
+- **LIVE LOAD TESTED:** NO
+- **AWS QUOTAS VERIFIED:** NO
+- **PRODUCTION READY:** **NO** until AgentCore is republished and live
+  timings are collected. Prompt cache stays disabled until prefix size is
+  verified on Haiku 4.5.
+
+### Next exact action
+
+1. Review this patch. Do not commit unless authorized.
+2. **AGENTCORE REPUBLISH REQUIRED: YES** (prompt-cache SystemContentBlock
+   path and `needs_source_retrieval` telemetry extras). Same ARN.
+3. Keep `FAST_CHAT_PROMPT_CACHE_ENABLED=false` until a live prefix-token
+   measurement shows the static pedagogy is above 4,096 tokens.
+4. Live Claude behaviour eval requires explicit `--i-approve-live-claude`.
+
+---
+
+## Previous phase — One-call Haiku fast chat, selective RAG, latency instrumentation
+
+**Committed on `Integrate-Bedrock` as `db6d1bae7403c05e68c38bad39dd2afd9bd268fc`.**
 Starting HEAD was `a6d163668902beae4938fe552cced7ba92b15e88`. Do **not**
 publish AgentCore, mutate AWS, push, or deploy EC2 until authorized.
 

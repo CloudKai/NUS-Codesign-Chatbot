@@ -465,6 +465,9 @@ class ProviderAssessmentResult(BaseModel):
     qualifying_coaching_turn: bool = False
     deep_review_succeeded: bool = False
     review_trigger: str | None = None
+    # Transient orchestration flag from FastChatTurnOutput. Not educational
+    # assessment, research coding, or a persisted student-facing field.
+    needs_source_retrieval: bool = False
 
     @model_validator(mode="after")
     def holistic_candidate_is_reflection_only(self) -> "ProviderAssessmentResult":

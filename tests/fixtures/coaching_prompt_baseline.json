@@ -1,0 +1,30 @@
+{
+  "baseline_commit": "a6d163668902beae4938fe552cced7ba92b15e88",
+  "note": "Updating these hashes requires explicit pedagogical review.",
+  "files": [
+    {
+      "path": "agentcore_runtime/prompts/shared_coaching.md",
+      "sha256": "3e7ddb569931799b34222aeec2cf2236e882655b3dba7026f9091c249935f02e"
+    },
+    {
+      "path": "agentcore_runtime/prompts/stages/problem_identification.md",
+      "sha256": "2c671ba9955af82522bf5b8af476304d2ef71cb73e1c29798ca53c75a634c26d"
+    },
+    {
+      "path": "agentcore_runtime/prompts/stages/concept_generation.md",
+      "sha256": "7965254ade7aefeda4a848629f65676a89082727ae31df0a7d7a755d1cafcb4e"
+    },
+    {
+      "path": "agentcore_runtime/prompts/stages/design_specification.md",
+      "sha256": "ede4f49627b8bffc00ff65b8c7d33921fe719bf42207a09fa5fa969918bbfed8"
+    },
+    {
+      "path": "agentcore_runtime/prompts/stages/ethics_critical.md",
+      "sha256": "640d5a1289feef00c5ecad8c96ed89d511c8dcad27a8167f40e4c59a742271ab"
+    },
+    {
+      "path": "agentcore_runtime/prompts/stages/reflection.md",
+      "sha256": "ed33d8dde924c6fab79e20a24b716f8e4d88c4f67947710bf8b670ba438147b5"
+    }
+  ]
+}

@@ -70,7 +70,7 @@ runtime for compatibility and are unused by the active FastAPI path.
 
 `student_id` is the store owner identifier, never a notebook id. The
 fast-chat planner always sends derived `conversation_memory` plus a bounded
-recent verbatim window (default **8** messages, hard estimated input
+recent verbatim window (default **6** messages, hard estimated input
 ceiling **20,000** tokens). Deep Review uses a separate `full_history`
 policy. Application runtime rules travel in `trusted_instructions` and
 `runtime_context`. The last user message is the untrusted product from

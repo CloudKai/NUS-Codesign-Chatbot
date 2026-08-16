@@ -188,7 +188,12 @@ class Settings:
         "FAST_CHAT_SOFT_INPUT_TOKENS", 15_000, 2_000, 64_000
     )
     fast_chat_recent_verbatim_messages: int = _bounded_int(
-        "FAST_CHAT_RECENT_VERBATIM_MESSAGES", 8, 4, 12
+        "FAST_CHAT_RECENT_VERBATIM_MESSAGES", 6, 4, 12
+    )
+    # Runtime-owned Bedrock prefix cache. Default false keeps tests
+    # deterministic. Production may enable after prefix-size verification.
+    fast_chat_prompt_cache_enabled: bool = _boolean(
+        "FAST_CHAT_PROMPT_CACHE_ENABLED", False
     )
     fast_chat_retrieval_max_chunks: int = _bounded_int(
         "FAST_CHAT_RETRIEVAL_MAX_CHUNKS", 4, 1, 8

@@ -27,20 +27,31 @@ the Knowledge Base or student S3.
                 │ skip                  │ retrieve
                 ▼                       ▼
         conversation memory     Course materials
-        + recent turns                  │
+        + 6 recent turns                │
                                 Bedrock KB Retrieve
                                 + student-source retrieve
                                 + ownership / selected-source checks
                                         │
                                         ▼
-                              Unified [S#] excerpts (2–4)
+                              Unified [S#] excerpts (≤4, ~8k chars)
                             │
                             ▼
               FastAPI runtime rules + untrusted evidence
                             │
                             ▼
               AgentCore fast_chat (one Haiku call)
+                            │
+              rare: needs_source_retrieval after skip
+                            │
+                            ▼
+              FastAPI retrieves once, one Haiku retry
+              (provisional first result is not persisted)
 ```
+
+A rare accuracy fallback runs only when the deterministic gate skipped
+retrieval, selected sources exist, and Haiku sets
+`needs_source_retrieval=true`. FastAPI owns that retrieve. AgentCore still
+has `tools=[]` and cannot search KB, S3, or DSQL. Maximum two Haiku calls.
 
 ## Authority
 
