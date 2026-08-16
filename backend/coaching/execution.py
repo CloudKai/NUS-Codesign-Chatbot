@@ -220,8 +220,16 @@ class CoachApplicationService:
         self._retriever = retriever or LocalChunkRetriever()
 
     def _rate_limit_user_key(self) -> str:
-        """Return the authenticated store owner key for coach rate limiting."""
+        """Return the authenticated store owner key for coach rate limiting.
+
+        Identity comes from the owner-scoped store, never from a browser-supplied
+        user identifier.
+        """
         return str(getattr(self._store, "owner_id", "") or "").strip()
+
+    def _rate_limit_thread_id(self, request: CoachRequest) -> str:
+        """Return the authoritative notebook id already validated for this turn."""
+        return str(getattr(request, "thread_id", "") or "").strip()
 
     def _execute_rate_limited(
         self,
@@ -239,7 +247,10 @@ class CoachApplicationService:
         """
         from backend.rate_limit import get_coach_rate_limiter
 
-        with get_coach_rate_limiter().limit(self._rate_limit_user_key()):
+        with get_coach_rate_limiter().limit(
+            self._rate_limit_user_key(),
+            self._rate_limit_thread_id(request),
+        ):
             return self._submit_once(
                 request,
                 idempotency_marker_id=idempotency_marker_id,

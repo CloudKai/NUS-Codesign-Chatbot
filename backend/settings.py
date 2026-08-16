@@ -247,14 +247,26 @@ class Settings:
         os.getenv("MAX_COURSE_MATERIAL_SIZE_MB", "50")
     )
     max_file_size_mb: int = int(os.getenv("MAX_FILE_SIZE_MB", "10"))
-    # Single-EC2 in-process coach limits (see backend/rate_limit.py).
-    max_active_coach_requests_per_user: int = int(
-        os.getenv("MAX_ACTIVE_COACH_REQUESTS_PER_USER", "1")
+    # Single-EC2 in-process coach workflow limits (see backend/rate_limit.py).
+    # MAX_CONCURRENT_MODEL_CALLS is the historical name for the global number of
+    # simultaneously active provider-backed coaching workflows, not internal
+    # Haiku/Sonnet invokes inside one workflow. Production Compose sets 120.
+    max_active_coach_requests_per_notebook: int = _bounded_int(
+        "MAX_ACTIVE_COACH_REQUESTS_PER_NOTEBOOK", 1, 1, 8
     )
-    coach_requests_per_minute: int = int(os.getenv("COACH_REQUESTS_PER_MINUTE", "8"))
-    max_concurrent_model_calls: int = int(
-        os.getenv("MAX_CONCURRENT_MODEL_CALLS", "20")
+    max_active_coach_requests_per_user: int = _bounded_int(
+        "MAX_ACTIVE_COACH_REQUESTS_PER_USER", 2, 1, 20
     )
+    coach_requests_per_minute: int = _bounded_int(
+        "COACH_REQUESTS_PER_MINUTE", 8, 1, 120
+    )
+    max_concurrent_model_calls: int = _bounded_int(
+        "MAX_CONCURRENT_MODEL_CALLS", 20, 1, 500
+    )
+    # AnyIO default worker-thread limiter for sync FastAPI/Starlette routes.
+    # Production Compose sets 120 so ~100 concurrent coaching turns are not
+    # queued behind the library default of 40.
+    sync_threadpool_tokens: int = _bounded_int("SYNC_THREADPOOL_TOKENS", 40, 8, 500)
     # Public Cognito login-start throttle (OAuth-state DSQL writes).
     auth_login_requests_per_minute_per_ip: int = int(
         os.getenv("AUTH_LOGIN_REQUESTS_PER_MINUTE_PER_IP", "10")

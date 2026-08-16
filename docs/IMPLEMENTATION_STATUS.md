@@ -1,6 +1,93 @@
 # Implementation status
 
-## Current phase — Strands structured-output repair prompt (Guardrail PROMPT_ATTACK false positive)
+## Current phase — Notebook-scoped coach concurrency for ~100 students
+
+**Code landed 2026-08-16 on `Integrate-Bedrock`.** AgentCore DEFAULT v19,
+models, Guardrail v3, and pedagogical orchestration are **unchanged**. This
+patch only changes process-local coaching capacity on the existing single
+FastAPI process.
+
+### Root cause / previous limitation
+
+`CoachRateLimiter` allowed only **one active coaching workflow per
+authenticated user** (`MAX_ACTIVE_COACH_REQUESTS_PER_USER=1`) and **20**
+global workflows (`MAX_CONCURRENT_MODEL_CALLS=20`). Unrelated students did
+not share that per-user lock, but:
+
+- a student could not coach in two notebooks at once;
+- the global ceiling of 20 was too low for a ~100-student class;
+- AnyIO's default sync thread limiter (40) could queue FastAPI coaching
+  work below the intended workflow ceiling;
+- the mock load probe treated every virtual user as the shared
+  `local-student` owner, so concurrent probe workers hit the per-user lock.
+
+Students still must not overlap two executions in the **same** notebook.
+
+### Concurrency policy implemented
+
+| Ceiling | Production | Meaning |
+|---|---|---|
+| `MAX_ACTIVE_COACH_REQUESTS_PER_NOTEBOOK` | 1 | One provider-backed workflow per `(owner_id, thread_id)` |
+| `MAX_ACTIVE_COACH_REQUESTS_PER_USER` | 2 | Two different notebooks per student |
+| `COACH_REQUESTS_PER_MINUTE` | 8 | Per-user rolling burst |
+| `MAX_CONCURRENT_MODEL_CALLS` | 120 | Historical name: active **workflows** in one process, not internal Haiku/Sonnet invokes |
+| `SYNC_THREADPOOL_TOKENS` | 120 | AnyIO default worker-thread limiter for sync FastAPI routes |
+
+Enforcement order under one lock: notebook → user → RPM → global. Same-key
+idempotency replays/waiters still do **not** acquire slots. Release is in a
+`finally` on both user and notebook counters.
+
+### Main files changed
+
+- `backend/rate_limit.py`, `backend/settings.py`, `backend/coaching/execution.py`
+- `backend/http/app.py`, `backend/operational_metrics.py`
+- `compose.prod.yaml`, `.env.example`
+- Tests: `tests/http/test_rate_limit.py`, `tests/http/test_coach_concurrency.py`,
+  `tests/http/test_threadpool.py`, `tests/scripts/test_load_probe.py`,
+  `tests/test_deployment_config.py`, `tests/conftest.py`
+- `scripts/load_probe.py`, `docs/operations/LOAD_PROBE.md`, this file
+
+### Validation evidence
+
+- `ruff check` on the concurrency patch files: **passed**.
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`: **passed**.
+- Focused: `tests/http/test_rate_limit.py`, `tests/http/test_coach_concurrency.py`,
+  `tests/http/test_threadpool.py`, `tests/scripts/test_load_probe.py`,
+  `tests/test_deployment_config.py`, `tests/persistence/test_coach_idempotency.py`,
+  `tests/http/test_production_config.py`: **passed**.
+- Full mock pytest: **passed** (exit 0; 860 tests collected).
+- AgentCore runtime compatibility diagnostic: **not re-run** (unaffected; no
+  runtime/prompt/model changes).
+- Docker Compose config: **not executed** (`PUBLIC_ORIGIN` is required on the
+  host; daemon/env not used for this patch).
+- No live AWS, AgentCore, or Bedrock calls.
+
+### Production readiness (do not collapse these)
+
+- **CODE READY:** YES for this limiter/threadpool patch (mock suite green).
+- **MOCK CONCURRENCY TESTED:** YES (unit + HTTP + mock load-probe scenarios).
+- **CI READY:** YES for deterministic mock CI; image rebuild still required
+  before EC2 picks up the code.
+- **LIVE LOAD TESTED:** **NO** — requires staged CloudFront/AgentCore test
+  (2 → 5 → 10 → 25 concurrent real students).
+- **PRODUCTION READY:** **NO** — live load, five-stage walk, ~105s UI timeout,
+  and AgentCore/Bedrock quotas remain separate gates.
+
+### Next exact action
+
+1. Build/push a new ARM64 app image that includes this code, then recreate
+   the production app container so Compose injects the new capacity env vars.
+   Do **not** apply the Compose env vars onto the previous image: old code
+   has no notebook key, so `MAX_ACTIVE_COACH_REQUESTS_PER_USER=2` would allow
+   two overlapping turns in the **same** notebook.
+2. No AgentCore republish. Keep `AGENTCORE_QUALIFIER=DEFAULT` (v19) and
+   Guardrail v3.
+3. Staged live concurrency: 2, then 5, then 10, then 25 students.
+4. Remaining separate gates: five-stage CloudFront walk, Streamlit/CloudFront
+   timeout, Incremental Review fail-closed follow-up.
+
+## Previous phase — Strands structured-output repair prompt (Guardrail PROMPT_ATTACK false positive)
+
 
 **Runtime published 2026-08-16.** Same ARN
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.

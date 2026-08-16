@@ -136,6 +136,12 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(
         settings_module.settings, "max_concurrent_model_calls", 10_000
     )
+    monkeypatch.setattr(
+        settings_module.settings, "max_active_coach_requests_per_user", 10_000
+    )
+    monkeypatch.setattr(
+        settings_module.settings, "max_active_coach_requests_per_notebook", 10_000
+    )
 
     assert settings_module.settings.app_env == "development"
     assert settings_module.settings.model_provider == "mock"

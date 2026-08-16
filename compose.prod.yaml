@@ -56,6 +56,14 @@ services:
       ROUTER_MIN_CONFIDENCE: "0.60"
       DEEP_REVIEW_INTERVAL_TURNS: "3"
       GUARDRAIL_VERSION: "3"
+      # Process-local coach workflow capacity for ~100 concurrent students.
+      # MAX_CONCURRENT_MODEL_CALLS is the historical name for active workflows,
+      # not internal Haiku/Sonnet invokes inside one coaching turn.
+      MAX_ACTIVE_COACH_REQUESTS_PER_NOTEBOOK: "1"
+      MAX_ACTIVE_COACH_REQUESTS_PER_USER: "2"
+      COACH_REQUESTS_PER_MINUTE: "8"
+      MAX_CONCURRENT_MODEL_CALLS: "120"
+      SYNC_THREADPOOL_TOKENS: "120"
       # Runtime-configured; do not hard-code account IDs or bucket names in Git.
       # APP_IMAGE: set on the host to the ECR image URI + immutable tag
       # DSQL_ENDPOINT: set in host .env

@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import re
+from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import quote, urlparse
 from uuid import uuid4
 
+import anyio.to_thread
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import (
     JSONResponse,
@@ -34,6 +36,7 @@ from backend.domain import (
 )
 from backend.owner_context import OwnerResolver, OwnerServices
 from backend.operational_metrics import (
+    record_coach_rate_limit,
     record_coach_turn,
     record_http_request,
     record_stage_transition,
@@ -146,6 +149,35 @@ def _expire_streamlit_auth_cookie(response: RedirectResponse, cookie_name: str) 
     )
 
 
+def configure_sync_threadpool(total_tokens: int) -> int:
+    """Set AnyIO's default worker-thread limiter for sync FastAPI routes.
+
+    Must be called from an async lifespan/startup context so AnyIO can resolve
+    the running backend. Call once during application lifespan, not per request.
+    Returns the token count actually applied so tests can assert startup
+    configuration without logging user information.
+
+    Args:
+        total_tokens: Configured ``SYNC_THREADPOOL_TOKENS`` value.
+
+    Returns:
+        The positive integer assigned to the default thread limiter.
+    """
+    tokens = max(1, int(total_tokens))
+    limiter = anyio.to_thread.current_default_thread_limiter()
+    limiter.total_tokens = tokens
+    logger.info("sync_threadpool_configured tokens=%s", tokens)
+    return tokens
+
+
+@asynccontextmanager
+async def _app_lifespan(app: FastAPI):
+    """Configure process-local sync thread capacity during startup."""
+    tokens = configure_sync_threadpool(settings.sync_threadpool_tokens)
+    app.state.sync_threadpool_tokens = tokens
+    yield
+
+
 def create_app(
     store: StudentStore | None = None,
     *,
@@ -217,6 +249,7 @@ def create_app(
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+        lifespan=_app_lifespan,
     )
     register_auth_routes(
         app,
@@ -329,6 +362,25 @@ def create_app(
             status_code=429,
             detail=error.detail,
             headers={"Retry-After": str(max(1, int(error.retry_after_seconds)))},
+        )
+
+    def _record_coach_rate_limit(
+        error: RateLimitExceeded,
+        *,
+        selected_source_count: int,
+        request_id: str = "-",
+    ) -> None:
+        """Emit privacy-safe rate-limit telemetry without student identifiers."""
+        category = str(getattr(error, "category", "") or "throttled")
+        record_coach_rate_limit(category=category)
+        _emit_coach_metric(
+            outcome=f"rate_limited_{category}",
+            selected_source_count=selected_source_count,
+        )
+        logger.info(
+            "coach_turn rate_limited request_id=%s category=%s",
+            request_id,
+            category,
         )
 
     def _selected_source_count(owner: OwnerServices, thread_id: str) -> int:
@@ -1102,6 +1154,10 @@ def create_app(
                 response_language=request.response_language,
             )
         except RateLimitExceeded as error:
+            _record_coach_rate_limit(
+                error,
+                selected_source_count=selected_source_count,
+            )
             raise _rate_limit_http_error(error) from error
         except CoachIdempotencyConflictError as error:
             _emit_coach_metric(
@@ -1177,6 +1233,11 @@ def create_app(
             # provider execution is claimed, so same-key waiters can converge.
             turn = owner.coach.submit(request)
         except RateLimitExceeded as error:
+            _record_coach_rate_limit(
+                error,
+                selected_source_count=selected_source_count,
+                request_id=request_id,
+            )
             raise _rate_limit_http_error(error) from error
         except CoachIdempotencyConflictError as error:
             _emit_coach_metric(
@@ -1263,11 +1324,19 @@ def create_app(
             try:
                 turn = owner.coach.submit(request)
             except RateLimitExceeded as error:
+                _record_coach_rate_limit(
+                    error,
+                    selected_source_count=selected_source_count,
+                    request_id=str(
+                        getattr(http_request.state, "request_id", None) or "-"
+                    ),
+                )
                 yield json.dumps(
                     {
                         "event": "error",
                         "detail": error.detail,
                         "status": 429,
+                        "category": str(getattr(error, "category", "") or "throttled"),
                         "retry_after": max(1, int(error.retry_after_seconds)),
                     }
                 ) + "\n"

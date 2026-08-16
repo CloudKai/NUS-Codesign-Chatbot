@@ -11,6 +11,10 @@ from fastapi.testclient import TestClient
 from backend.api import create_app
 from backend.application import CoachApplicationService
 from backend.rate_limit import (
+    GLOBAL_CAPACITY,
+    NOTEBOOK_CONCURRENCY,
+    USER_CONCURRENCY,
+    USER_RPM,
     CoachRateLimiter,
     LoginStartLimiter,
     RateLimitExceeded,
@@ -29,50 +33,166 @@ def _reset_limiter():
     reset_login_start_limiter_for_tests()
 
 
-def test_limiter_releases_after_success_and_exception():
-    limiter = CoachRateLimiter(
-        max_active_per_user=1,
-        requests_per_minute=8,
-        max_concurrent_model_calls=20,
-    )
-    with limiter.limit("user-a"):
-        pass
-    with limiter.limit("user-a"):
-        pass
+def _production_limiter(**overrides: int) -> CoachRateLimiter:
+    """Return a limiter with the intended production ceilings."""
+    values = {
+        "max_active_per_notebook": 1,
+        "max_active_per_user": 2,
+        "requests_per_minute": 8,
+        "max_concurrent_model_calls": 120,
+    }
+    values.update(overrides)
+    return CoachRateLimiter(**values)
+
+
+def test_same_user_same_notebook_second_acquire_fails():
+    limiter = _production_limiter()
+    limiter.acquire("user-a", "notebook-1")
+    with pytest.raises(RateLimitExceeded) as raised:
+        limiter.acquire("user-a", "notebook-1")
+    assert raised.value.category == NOTEBOOK_CONCURRENCY
+    assert "per notebook" in raised.value.detail.lower()
+    limiter.release("user-a", "notebook-1")
+
+
+def test_same_user_two_notebooks_succeed_concurrently():
+    limiter = _production_limiter()
+    barrier = threading.Barrier(2)
+    held: list[str] = []
+
+    def hold(thread_id: str) -> None:
+        with limiter.limit("user-a", thread_id):
+            barrier.wait(timeout=2)
+            held.append(thread_id)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(hold, "notebook-1"),
+            executor.submit(hold, "notebook-2"),
+        ]
+        for future in futures:
+            future.result(timeout=5)
+    assert sorted(held) == ["notebook-1", "notebook-2"]
+
+
+def test_same_user_third_notebook_rejected_at_user_limit():
+    limiter = _production_limiter()
+    limiter.acquire("user-a", "notebook-1")
+    limiter.acquire("user-a", "notebook-2")
+    with pytest.raises(RateLimitExceeded) as raised:
+        limiter.acquire("user-a", "notebook-3")
+    assert raised.value.category == USER_CONCURRENCY
+    limiter.release("user-a", "notebook-1")
+    limiter.release("user-a", "notebook-2")
+
+
+def test_different_users_do_not_block_each_other():
+    limiter = _production_limiter()
+    barrier = threading.Barrier(3)
+    held: list[str] = []
+
+    def hold(user_id: str, thread_id: str) -> None:
+        with limiter.limit(user_id, thread_id):
+            barrier.wait(timeout=2)
+            held.append(user_id)
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [
+            executor.submit(hold, "user-a", "notebook-a"),
+            executor.submit(hold, "user-b", "notebook-b"),
+            executor.submit(hold, "user-c", "notebook-c"),
+        ]
+        for future in futures:
+            future.result(timeout=5)
+    assert sorted(held) == ["user-a", "user-b", "user-c"]
+
+
+def test_one_hundred_distinct_students_acquire_under_global_120():
+    limiter = _production_limiter()
+    for index in range(100):
+        limiter.acquire(f"user-{index}", f"notebook-{index}")
+    assert limiter._global_active == 100  # noqa: SLF001
+    for index in range(100):
+        limiter.release(f"user-{index}", f"notebook-{index}")
+    assert limiter._global_active == 0  # noqa: SLF001
+    assert limiter._active_per_user == {}  # noqa: SLF001
+    assert limiter._active_per_notebook == {}  # noqa: SLF001
+
+
+def test_one_hundred_twenty_workflows_fill_global_capacity():
+    limiter = _production_limiter()
+    for index in range(120):
+        limiter.acquire(f"user-{index}", f"notebook-{index}")
+    assert limiter._global_active == 120  # noqa: SLF001
+
+
+def test_one_hundred_twenty_first_workflow_is_rejected():
+    limiter = _production_limiter()
+    for index in range(120):
+        limiter.acquire(f"user-{index}", f"notebook-{index}")
+    with pytest.raises(RateLimitExceeded) as raised:
+        limiter.acquire("user-overflow", "notebook-overflow")
+    assert raised.value.category == GLOBAL_CAPACITY
+    limiter.release("user-0", "notebook-0")
+    limiter.acquire("user-overflow", "notebook-overflow")
+
+
+def test_release_frees_notebook_slot_for_same_notebook():
+    limiter = _production_limiter()
+    limiter.acquire("user-a", "notebook-1")
+    limiter.release("user-a", "notebook-1")
+    limiter.acquire("user-a", "notebook-1")
+    limiter.release("user-a", "notebook-1")
+
+
+def test_exception_inside_limit_resets_all_counters():
+    limiter = _production_limiter()
     with pytest.raises(RuntimeError):
-        with limiter.limit("user-a"):
+        with limiter.limit("user-a", "notebook-1"):
             raise RuntimeError("boom")
-    with limiter.limit("user-a"):
+    assert limiter._global_active == 0  # noqa: SLF001
+    assert limiter._active_per_user == {}  # noqa: SLF001
+    assert limiter._active_per_notebook == {}  # noqa: SLF001
+    with limiter.limit("user-a", "notebook-1"):
         pass
 
 
-def test_limiter_isolates_users_and_returns_retry_after():
-    limiter = CoachRateLimiter(
-        max_active_per_user=1,
-        requests_per_minute=1,
-        max_concurrent_model_calls=20,
-    )
-    limiter.acquire("user-a")
-    with pytest.raises(RateLimitExceeded) as active:
-        limiter.acquire("user-a")
-    assert active.value.retry_after_seconds >= 1
-    limiter.acquire("user-b")
-    limiter.release("user-a")
-    limiter.release("user-b")
-    with pytest.raises(RateLimitExceeded) as burst:
-        limiter.acquire("user-a")
-    assert burst.value.retry_after_seconds >= 1
+def test_per_user_rpm_window_still_rejects_ninth_acquire():
+    limiter = _production_limiter(requests_per_minute=8, max_concurrent_model_calls=20)
+    for index in range(8):
+        limiter.acquire("user-a", f"notebook-{index % 2}")
+        limiter.release("user-a", f"notebook-{index % 2}")
+    with pytest.raises(RateLimitExceeded) as raised:
+        limiter.acquire("user-a", "notebook-1")
+    assert raised.value.category == USER_RPM
+    assert raised.value.retry_after_seconds >= 1
+
+
+def test_double_release_does_not_underflow():
+    limiter = _production_limiter()
+    limiter.acquire("user-a", "notebook-1")
+    limiter.release("user-a", "notebook-1")
+    limiter.release("user-a", "notebook-1")
+    assert limiter._global_active == 0  # noqa: SLF001
+    limiter.acquire("user-a", "notebook-1")
+    limiter.release("user-a", "notebook-1")
+
+
+def test_missing_identity_is_rejected_without_consuming_capacity():
+    limiter = _production_limiter()
+    with pytest.raises(RateLimitExceeded) as raised:
+        limiter.acquire("", "notebook-1")
+    assert raised.value.category == "missing_identity"
+    with pytest.raises(RateLimitExceeded):
+        limiter.acquire("user-a", "")
+    assert limiter._global_active == 0  # noqa: SLF001
 
 
 def test_api_returns_429_with_retry_after_for_active_limit(tmp_path, monkeypatch):
-    """Distinct in-flight coach executions for one user are limited to one."""
+    """Overlapping executions for the same notebook are limited to one."""
     from backend import rate_limit as rate_limit_module
 
-    limiter = CoachRateLimiter(
-        max_active_per_user=1,
-        requests_per_minute=20,
-        max_concurrent_model_calls=20,
-    )
+    limiter = _production_limiter(requests_per_minute=20, max_concurrent_model_calls=20)
     monkeypatch.setattr(rate_limit_module, "_LIMITER", limiter)
 
     store = StudentStore(tmp_path / "rate-limit.sqlite3")
@@ -120,18 +240,14 @@ def test_api_returns_429_with_retry_after_for_active_limit(tmp_path, monkeypatch
     assert first.status_code == 200
     assert second.status_code == 429
     assert second.headers.get("retry-after")
-    assert "one active" in second.json()["detail"].lower()
+    assert "per notebook" in second.json()["detail"].lower()
 
 
 def test_api_same_key_waiters_converge_under_active_limit(tmp_path, monkeypatch):
     """Same-key concurrent callers must wait/replay, not receive HTTP 429."""
     from backend import rate_limit as rate_limit_module
 
-    limiter = CoachRateLimiter(
-        max_active_per_user=1,
-        requests_per_minute=20,
-        max_concurrent_model_calls=20,
-    )
+    limiter = _production_limiter(requests_per_minute=20, max_concurrent_model_calls=20)
     monkeypatch.setattr(rate_limit_module, "_LIMITER", limiter)
 
     store = StudentStore(tmp_path / "rate-limit-same-key.sqlite3")
@@ -179,32 +295,6 @@ def test_api_same_key_waiters_converge_under_active_limit(tmp_path, monkeypatch)
     assert first.json() == second.json()
     assert provider_calls["count"] == 1
     assert len(store.get_messages(thread_id)) == 2
-
-
-def test_limiter_allows_concurrent_distinct_users():
-    """Two different authenticated owners may hold active slots simultaneously."""
-    limiter = CoachRateLimiter(
-        max_active_per_user=1,
-        requests_per_minute=8,
-        max_concurrent_model_calls=20,
-    )
-    barrier = threading.Barrier(2)
-    results: list[str] = []
-
-    def hold(user_id: str) -> None:
-        with limiter.limit(user_id):
-            barrier.wait(timeout=2)
-            results.append(user_id)
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = [
-            executor.submit(hold, "user-a"),
-            executor.submit(hold, "user-b"),
-        ]
-        for future in futures:
-            future.result(timeout=5)
-
-    assert sorted(results) == ["user-a", "user-b"]
 
 
 def test_login_start_limiter_enforces_per_client_and_global_ceilings():
