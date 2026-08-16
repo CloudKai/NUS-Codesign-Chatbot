@@ -37,7 +37,6 @@ from backend.settings import settings as runtime_settings
 from backend.specialists.review_orchestration import (
     COUNTER_SETTINGS_KEY,
     bound_deep_review_interval,
-    next_persisted_counter,
     parse_coaching_turns_since_deep_review,
 )
 from backend.source_library import (
@@ -455,13 +454,6 @@ class CoachApplicationService:
         orchestration = self._workflow.take_review_orchestration(
             prepared_request.thread_id
         )
-        next_counter = next_persisted_counter(
-            current=int(prepared_request.coaching_turns_since_deep_review),
-            qualifying_coaching_turn=bool(
-                orchestration.get("qualifying_coaching_turn")
-            ),
-            deep_review_succeeded=bool(orchestration.get("deep_review_succeeded")),
-        )
 
         auto_advance: AtomicAutoAdvance | None = None
         if (
@@ -576,7 +568,6 @@ class CoachApplicationService:
                 "conversation_memory": self._workflow.take_conversation_memory(
                     prepared_request.thread_id
                 ),
-                COUNTER_SETTINGS_KEY: next_counter,
             },
             generated_title=generated_title,
             existing_user_message_id=prepared_request.revise_user_message_id,
@@ -586,6 +577,12 @@ class CoachApplicationService:
             idempotency_fingerprint=idempotency_fingerprint,
             research_observation=research_observation,
             auto_advance=auto_advance,
+            review_counter_qualifying=bool(
+                orchestration.get("qualifying_coaching_turn")
+            ),
+            review_counter_deep_succeeded=bool(
+                orchestration.get("deep_review_succeeded")
+            ),
         )
         return turn
 

@@ -36,7 +36,7 @@ from backend.settings import settings
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
 
-from fake_agentcore_runtime import FakeAgentCoreRuntime, FakeBody
+from fake_agentcore_runtime import FakeAgentCoreRuntime
 
 _TINY_PNG = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQ"

@@ -77,32 +77,43 @@ display-only: zero model calls.
 ### Validation evidence
 
 - Focused AgentCore/review tests: **passed**.
-- Full mock pytest: **passed** (exit 0).
+- Full mock pytest: **passed** (exit 0; 822 tests on 2026-08-16 readiness pass).
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`,
   `scripts`, `agentcore_runtime`: **passed**.
+- `ruff check .`: **passed** locally after removing an unused `FakeBody`
+  import in `tests/domain/test_agentcore_provider.py`. GitHub Mock CI on
+  `af04f11` failed that Ruff check only; `agentcore-runtime-compatibility`
+  succeeded.
+- Periodic counter is recomputed inside `persist_coach_turn` from the
+  notebook `settings_text` row, and the notebook `updated_at` is part of
+  the UPDATE CAS predicate. A stale pre-provider snapshot cannot overwrite
+  a newer count. Concurrent overlapping persists either serialize to 1 then
+  2, or one writer loses the CAS and rolls back.
 - Adversarial review: no confirmed production defects. Residual: runtime
-  still shares legacy `AGENTCORE_MODEL_*` when **no** role keys are set;
-  counter last-write-wins if two API replicas overlap on one notebook.
-- AgentCore `DEFAULT` **v17 READY**. Artifact
+  still shares legacy `AGENTCORE_MODEL_*` when **no** role keys are set.
+- AgentCore `DEFAULT` **v17 READY** (last AWS-verified 2026-08-16 before
+  this readiness pass). Artifact
   `agentcore-patches/chatbot_harnessAgent-review-depths-v17-20260816T064539Z.zip`.
-- Guardrail `o8aipba8m129` version **3** READY.
-- Live Deep Review (Sonnet, explicit): **passed** (STAY; Singapore kept;
-  no `{ADDRESS}`).
-- Live Luna router / coaching / incremental: **failed** (account model
-  access). CloudWatch loaded the correct per-role models (no Luna↔Sonnet
-  swap).
-- EC2 was not restarted. CloudFront UI / Review-tab live path was not
-  exercised. Periodic three-turn live sequence was not executed.
+- Guardrail `o8aipba8m129` version **3** READY (last AWS-verified 2026-08-16).
+- Live Deep Review (Sonnet, explicit): **passed** on that earlier pass
+  (STAY; Singapore kept; no `{ADDRESS}`).
+- Live Luna router / coaching / incremental: **failed** on that earlier
+  pass (account model access). CloudWatch loaded the correct per-role
+  models (no Luna↔Sonnet swap).
+- This readiness pass could not re-query AWS, EC2, or Knowledge Base:
+  local AWS SSO session expired (`aws login` required). Docker daemon was
+  down, so Caddy validate and image build were not executed. CloudFront UI
+  / Review-tab live path was not exercised. Periodic three-turn live
+  sequence was not executed.
 
 ### Next exact action
 
-Enable GPT-5.6 Luna for account `355604674280` in `us-west-2` (Bedrock
-model access / AWS Sales). Then rerun capped Luna smokes, including the
-periodic three-turn sequence. Recreate the EC2 app container so FastAPI
-Compose env matches the five role pins. Until then, production
-coaching/QA/router/incremental on DEFAULT v17 will fail closed. Rollback
-to **version 14** (Sonnet-only, known-good generation) if students need a
-working coach today. Do not delete v15, v16, or v17.
+Reauthenticate AWS SSO (`aws login`), then re-verify AgentCore DEFAULT,
+Guardrail 3, Managed KB `course/` retrieval, and Luna account access.
+Push the local Ruff + counter-CAS fixes so Mock CI can go green on a new
+SHA. Recreate the EC2 app container only after Luna is enabled and CI is
+green. Rollback remains **version 14** (Sonnet-only generation) if
+students need a working coach today. Do not delete v15, v16, or v17.
 
 ## Previous phase — Hybrid Luna router + Sonnet Stage Judge (DEFAULT v16)
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,10 @@ from backend.domain import (
 )
 from backend.student_journey import learning_review
 from backend.learning_service import LearningProgressService
-from backend.persistence.store.contracts import SETTINGS_KEYS
+from backend.persistence.store.contracts import (
+    SETTINGS_KEYS,
+    ConversationRevisionConflictError,
+)
 from backend.repositories import (
     SQLiteNotebookRepository,
     SQLitePhaseTransitionRepository,
@@ -158,6 +162,45 @@ def _counter(store: StudentStore, thread_id: str) -> int:
         return int(metadata.get(COUNTER_SETTINGS_KEY) or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _persist_review_turn(
+    store: StudentStore,
+    thread_id: str,
+    *,
+    user_content: str,
+    qualifying: bool,
+    deep_succeeded: bool,
+    stale_counter: int | None = None,
+) -> None:
+    """Persist one coach turn with Review-counter flags and optional stale metadata."""
+    thread = store.get_thread(thread_id) or {}
+    summary: dict[str, Any] = {}
+    if stale_counter is not None:
+        summary[COUNTER_SETTINGS_KEY] = stale_counter
+    store.persist_coach_turn(
+        thread_id,
+        expected_stage="problem_identification",
+        expected_conversation_revision=int(thread.get("conversation_revision") or 0),
+        user_content=user_content,
+        user_metadata={},
+        assistant_content="What trade-off still needs evidence?",
+        assistant_metadata={
+            "assessment": {
+                "recommendation": "stay",
+                "contribution_summary": "The student named a constraint.",
+                "learning_summary": "Learning",
+                "working_conclusion": "Conclusion",
+                "understanding_change": "Change",
+                "critical_understanding_level": "developing",
+                "guidance_questions": ["What next?"],
+                "citations": [],
+            }
+        },
+        summary_metadata=summary,
+        review_counter_qualifying=qualifying,
+        review_counter_deep_succeeded=deep_succeeded,
+    )
 
 
 def test_periodic_definition_is_turn_based() -> None:
@@ -563,6 +606,70 @@ def test_idempotent_replay_does_not_repeat_review_calls(tmp_path) -> None:
     assert _review_modes(client).count("incremental") == 1
     assert _review_modes(client).count("deep") == 0
     assert _counter(store, thread_id) == 1
+
+
+def test_persist_recomputes_counter_from_stored_settings(tmp_path) -> None:
+    """Stale pre-provider counter values must not overwrite the stored count."""
+    store = StudentStore(tmp_path / "counter-cas.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _persist_review_turn(
+        store,
+        thread_id,
+        user_content="Qualifying coaching turn one.",
+        qualifying=True,
+        deep_succeeded=False,
+        stale_counter=0,
+    )
+    assert _counter(store, thread_id) == 1
+    _persist_review_turn(
+        store,
+        thread_id,
+        user_content="Qualifying coaching turn two.",
+        qualifying=True,
+        deep_succeeded=False,
+        stale_counter=1,
+    )
+    assert _counter(store, thread_id) == 2
+
+
+def test_concurrent_persist_does_not_lose_counter_increment(tmp_path) -> None:
+    """Two overlapping persists must not both write the same counter value."""
+    database = tmp_path / "counter-race.sqlite3"
+    owner = StudentStore(database)
+    thread_id = owner.create_thread(model_id="mock", support_mode="critical-thinking")
+    barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
+
+    def _worker(label: str) -> None:
+        store = StudentStore(database)
+        barrier.wait()
+        try:
+            _persist_review_turn(
+                store,
+                thread_id,
+                user_content=f"Concurrent qualifying turn {label}.",
+                qualifying=True,
+                deep_succeeded=False,
+            )
+        except Exception as error:
+            errors.append(error)
+
+    first = threading.Thread(target=_worker, args=("a",))
+    second = threading.Thread(target=_worker, args=("b",))
+    first.start()
+    second.start()
+    first.join()
+    second.join()
+    successes = 2 - len(errors)
+    assert successes in {1, 2}
+    if successes == 2:
+        assert _counter(owner, thread_id) == 2
+        assert len(owner.get_messages(thread_id)) == 4
+        return
+    assert _counter(owner, thread_id) == 1
+    assert len(owner.get_messages(thread_id)) == 2
+    assert len(errors) == 1
+    assert isinstance(errors[0], ConversationRevisionConflictError)
 
 
 def test_review_tab_projection_does_not_invoke_models() -> None:
