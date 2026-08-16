@@ -76,7 +76,7 @@ services:
       # USER_UPLOADS_BUCKET: set in host .env
       # COURSE_MATERIALS_BUCKET: set in host .env (cde2300-course-content-s3)
       # AGENTCORE_RUNTIME_ARN: set in host .env
-      # AGENTCORE_QUALIFIER: DEFAULT (currently liveVersion 19, repair-prompt).
+      # AGENTCORE_QUALIFIER: DEFAULT (currently liveVersion 20, fast_chat).
       # GUARDRAIL_ID: set in host .env; also inject the same ID and version 3 on the runtime
       # KNOWLEDGE_BASE_ID: set in host .env (JUQNP8AZAZ) when course sync is on
       # Lecture notes are not bundled into the production image.

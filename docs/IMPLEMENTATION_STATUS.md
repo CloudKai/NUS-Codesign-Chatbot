@@ -2,10 +2,11 @@
 
 ## Current phase — Explicit Deep Review HTTP + token-aware Fast Chat
 
-**Code is local on `Integrate-Bedrock` and is not committed or deployed.**
-Starting HEAD was `2620db115a0671042859743daace3fc54de335d3`. Canonical
-Coaching prompts still match baseline `a6d163668902beae4938fe552cced7ba92b15e88`.
-Do **not** publish AgentCore, mutate AWS, push, or deploy EC2 until authorized.
+**Committed on `Integrate-Bedrock` as `f663740`.** Canonical Coaching prompts
+still match baseline `a6d163668902beae4938fe552cced7ba92b15e88`. AgentCore
+**version 20 READY** on the existing ARN
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`; `DEFAULT` liveVersion
+is **20**. EC2 app image has **not** been rebuilt (Docker daemon was down).
 
 This patch does **not** redo the 2620db one-call Haiku / RAG-fallback
 architecture. It makes explicit Deep Review reachable and makes Fast Chat
@@ -88,8 +89,17 @@ history token-aware, including AgentCore system-prompt overhead in the
 - Focused pytest: fast-chat context/memory, AgentCore provider, prompt cache,
   and context planner passed after the token-policy follow-up.
 - Full deterministic `.venv/bin/python -m pytest -q`: **967 passed**.
-- GitHub CI for **this** uncommitted patch: **NOT RUN**.
-- Live Claude / AWS mutation / AgentCore publish / EC2 deploy: **NOT RUN**.
+- GitHub CI for `f663740`: **NOT RUN** in this session.
+- AgentCore publish 2026-08-16: **version 20 READY**. Same ARN
+  `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. `DEFAULT`
+  liveVersion **20**. Artifact
+  `s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-fast-chat-v20-20260816T184830Z.zip`.
+  Env copied from v19 (Haiku coaching/fast_chat, Sonnet Deep Review,
+  Guardrail v3). Site-packages preserved from v19.
+- EC2 image build/push: **NOT RUN** (Docker daemon down on this machine).
+  ECR repository `cde2300-chatbot` does **not** exist yet in account
+  `355604674280`.
+- Capped live smoke / Deep Review live invoke: **NOT RUN**.
 - Local Fast Chat system-prompt estimate for problem_identification: 12,958
   chars / **4,320** estimated tokens (chars/3) before `runtime_context`.
   Typical no-RAG short coaching with that reserve stayed <= 12,000 in tests.
@@ -105,27 +115,28 @@ history token-aware, including AgentCore system-prompt overhead in the
 - **IDEMPOTENCY SAFE:** YES — completed Deep Review keys replay without a
   second Sonnet call or a second counter reset
 - **MOCK TESTED:** YES (967)
-- **CI GREEN:** NOT RUN for this patch (no push). Previous committed HEAD
-  `2620db1` had Mock CI + AgentCore runtime compatibility successful.
-- **DOCKER READY:** NO (compose config includes new env; image not built)
+- **CI GREEN:** NOT RUN for `f663740`. Previous committed HEAD `2620db1`
+  had Mock CI + AgentCore runtime compatibility successful.
+- **DOCKER READY:** NO (image not built; Docker daemon down)
 - **LIVE LOAD TESTED:** NO
 - **AWS QUOTAS VERIFIED:** NO
-- **PRODUCTION READY:** **NO** until live Haiku timings confirm the 12k/16k
-  local estimate, Deep Review is exercised on the existing AgentCore ARN, and
-  this patch is reviewed/committed. Prompt cache stays disabled.
+- **PRODUCTION READY:** **NO** until the EC2 app image at `f663740` is
+  running, a capped Haiku smoke succeeds, and Deep Review is exercised.
+  Prompt cache stays disabled.
 
 ### Next exact action
 
-1. Review this local patch. Do not commit unless authorized.
-2. **AGENTCORE REPUBLISH REQUIRED: NO** for this follow-up (canonical prompts
-   and runtime Fast Chat/Review orchestration are unchanged). The 2620db
-   runtime still needs the previously noted republish if DEFAULT is not yet
-   on that code.
+1. Create ECR repo `cde2300-chatbot` if missing, start Docker, then
+   `docker buildx build --platform linux/arm64 --build-arg GIT_SHA=f663740
+   -t 355604674280.dkr.ecr.us-west-2.amazonaws.com/cde2300-chatbot:f663740 --push .`
+2. On EC2: set `APP_IMAGE` to that tag, keep `AGENTCORE_QUALIFIER=DEFAULT`
+   (now v20), then `sh scripts/deploy_ecr.sh`. Recreate the app container.
 3. Keep `FAST_CHAT_PROMPT_CACHE_ENABLED=false`.
-4. Authorized live candidate eval:
-   `python scripts/evals/evaluate_fast_chat_regression.py --i-approve-live-claude --max-calls N`.
-5. When building an EC2 image later:
-   `docker build --build-arg GIT_SHA=$(git rev-parse HEAD) ...`
+4. Capped smoke:
+   `PYTHONPATH=. python scripts/agentcore_smoke.py --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`
+5. Rollback runtime if needed: `update-agent-runtime` with the v19 zip
+   `agentcore-patches/chatbot_harnessAgent-repair-prompt-v19-20260816T101413Z.zip`,
+   or pin `AGENTCORE_QUALIFIER=19`.
 
 ---
 

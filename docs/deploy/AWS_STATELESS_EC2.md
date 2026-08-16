@@ -28,7 +28,7 @@ Persistent state lives in **Aurora DSQL** and **S3**. Replacing the app
 container must not destroy conversations, progress, or uploads.
 Production coaching uses `MODEL_PROVIDER=agentcore` against runtime
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` (qualifier `DEFAULT`,
-currently liveVersion 19).
+currently liveVersion 20).
 Invokes are stateless; Aurora DSQL `messages` is the only durable transcript.
 The published runtime source of truth is `agentcore_runtime/` in this
 repository (Q&A, Coaching, and Formative Review specialists). Do not treat
