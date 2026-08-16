@@ -34,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_RESULTS = 8
 _MAX_CONTEXT_CHARS = 16_000
+_RETRIEVE_READ_TIMEOUT_SECONDS = 15.0
+_RETRIEVE_CONNECT_TIMEOUT_SECONDS = 3.0
 COURSE_MATERIAL_METADATA_KEY = "course_material_id"
 _S3_VIRTUAL_HOST = re.compile(
     r"^(?P<bucket>.+)\.s3(?:[.-](?:dualstack\.)?(?:[a-z0-9-]+))?\.amazonaws\.com$",
@@ -329,7 +331,9 @@ class BedrockKnowledgeBaseRetriever:
             client: Optional injected ``bedrock-agent-runtime`` client for tests.
             strict_metadata_filter: When true, an empty filtered Retrieve is an
                 evidence gap (no unfiltered retry). Default follows settings and
-                remains false until live KB metadata is verified.
+                remains false until live KB metadata is verified. A MANAGED
+                Knowledge Base skips its unverified optional filter while this
+                setting is false and relies on exact bucket/key post-validation.
             knowledge_base_type: ``vector`` or ``managed``. MANAGED Knowledge
                 Bases require ``managedSearchConfiguration``.
         """
@@ -369,9 +373,11 @@ class BedrockKnowledgeBaseRetriever:
             )
             return None
         config = Config(
-            retries={"max_attempts": 1, "mode": "standard"},
-            read_timeout=30.0,
-            connect_timeout=10.0,
+            # Retrieve is optional evidence gathering, not the model call. Do
+            # not let SDK retries consume the UI client's 120-second timeout.
+            retries={"total_max_attempts": 1, "mode": "standard"},
+            read_timeout=_RETRIEVE_READ_TIMEOUT_SECONDS,
+            connect_timeout=_RETRIEVE_CONNECT_TIMEOUT_SECONDS,
         )
         try:
             self._client = boto3.client(
@@ -446,9 +452,11 @@ class BedrockKnowledgeBaseRetriever:
 
         Foreign S3 keys and non-course sources are dropped. AWS and SDK
         failures return an empty result so the composer can apply evidence-gap
-        rules instead of inventing sources. A metadata-filter
+        rules instead of inventing sources. VECTOR metadata-filter
         ``ValidationException`` retries unfiltered Retrieve when strict
-        metadata mode is off; exact-key validation still applies.
+        metadata mode is off. MANAGED retrieval skips its optional filter until
+        strict metadata mode confirms the indexed attribute is usable. Exact
+        bucket/key validation applies to every result.
 
         Args:
             query: Selected-source retrieval query from FastAPI.
@@ -485,7 +493,18 @@ class BedrockKnowledgeBaseRetriever:
         if not query_text:
             return RetrievalResult(context="", chunks=())
         material_ids = _course_material_ids(course_sources)
-        used_filter = bool(material_ids)
+        # The production MANAGED KB currently rejects its course_material_id
+        # filter because that optional attribute has not been verified in the
+        # index. While strict mode is off, retrieve once without that filter
+        # and retain the mandatory exact bucket/key validation below. Strict
+        # mode opts back into the supported filter after metadata verification.
+        request_material_ids = (
+            ()
+            if self._knowledge_base_type == "managed"
+            and not self._strict_metadata_filter
+            else material_ids
+        )
+        used_filter = bool(request_material_ids)
         fallback = False
         logger.info(
             "course_retrieval_query kb_configured=1 region=%s "
@@ -499,10 +518,10 @@ class BedrockKnowledgeBaseRetriever:
             int(query_text != original_query),
         )
         try:
-            response = self._call_retrieve(client, query_text, material_ids)
+            response = self._call_retrieve(client, query_text, request_material_ids)
         except Exception as exc:
             category = classify_retrieve_failure(exc)
-            if self._can_retry_unfiltered(category, material_ids):
+            if self._can_retry_unfiltered(category, request_material_ids):
                 logger.warning(
                     "course_retrieval_validation_error exception=%s region=%s "
                     "retrying_unfiltered=1",
@@ -522,7 +541,7 @@ class BedrockKnowledgeBaseRetriever:
         else:
             raw_hits = _retrieval_results(response)
             if (
-                material_ids
+                request_material_ids
                 and not self._strict_metadata_filter
                 and not raw_hits
             ):
@@ -538,7 +557,11 @@ class BedrockKnowledgeBaseRetriever:
                     return self._unavailable_result(
                         classify_retrieve_failure(retry_exc), retry_exc
                     )
-            elif material_ids and self._strict_metadata_filter and not raw_hits:
+            elif (
+                request_material_ids
+                and self._strict_metadata_filter
+                and not raw_hits
+            ):
                 logger.info(
                     "Knowledge Base metadata filter returned no hits; "
                     "strict filter treats this as an evidence gap"

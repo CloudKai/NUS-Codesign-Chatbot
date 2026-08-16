@@ -779,6 +779,39 @@ def test_retrieve_boto_client_unavailable():
     assert result.failure_category == "client_error"
 
 
+def test_runtime_client_bounds_retrieve_wait_and_disables_sdk_retries(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import boto3
+    import botocore.config
+
+    observed: dict[str, Any] = {}
+    sentinel = object()
+
+    class FakeConfig:
+        def __init__(self, **kwargs: Any) -> None:
+            observed["config"] = kwargs
+
+    def fake_client(service: str, *, region_name: str, config: Any) -> object:
+        observed.update(
+            {"service": service, "region_name": region_name, "client_config": config}
+        )
+        return sentinel
+
+    monkeypatch.setattr(botocore.config, "Config", FakeConfig)
+    monkeypatch.setattr(boto3, "client", fake_client)
+
+    retriever = BedrockKnowledgeBaseRetriever("JUQNP8AZAZ", region="us-west-2")
+    assert retriever._runtime_client() is sentinel
+    assert observed["service"] == "bedrock-agent-runtime"
+    assert observed["region_name"] == "us-west-2"
+    assert observed["config"] == {
+        "retries": {"total_max_attempts": 1, "mode": "standard"},
+        "read_timeout": 15.0,
+        "connect_timeout": 3.0,
+    }
+
+
 def test_retrieve_access_denied_is_unavailable(caplog: pytest.LogCaptureFixture):
     client = FakeRetrieveClient(error=_aws_error("AccessDeniedException"))
     with caplog.at_level(logging.WARNING, logger="backend.bedrock_retrieve"):
@@ -1100,7 +1133,7 @@ def test_configured_live_retriever_uses_region_fallback(
     assert retriever._knowledge_base._knowledge_base_type == "vector"
 
 
-def test_managed_retrieve_uses_managed_search_configuration():
+def test_strict_managed_retrieve_uses_managed_search_configuration():
     client = FakeRetrieveClient(
         results=[
             _hit(
@@ -1133,18 +1166,8 @@ def test_managed_retrieve_uses_managed_search_configuration():
     assert result.chunks[0].retrieval_origin == "knowledge_base"
 
 
-def test_managed_retrieve_falls_back_without_filter():
-    client = FakeRetrieveClient(
-        results_sequence=[
-            [],
-            [
-                _hit(
-                    "s3://cde2300-course-content-s3/course/lectureNotes/crossing.pdf",
-                    "Managed fallback excerpt.",
-                )
-            ],
-        ]
-    )
+def test_managed_retrieve_does_not_retry_empty_unfiltered_search():
+    client = FakeRetrieveClient(results=[])
     result = BedrockKnowledgeBaseRetriever(
         "JUQNP8AZAZ",
         course_bucket="cde2300-course-content-s3",
@@ -1160,13 +1183,10 @@ def test_managed_retrieve_falls_back_without_filter():
             )
         )
     )
-    assert len(client.calls) == 2
-    first = client.calls[0]["retrievalConfiguration"]["managedSearchConfiguration"]
-    second = client.calls[1]["retrievalConfiguration"]["managedSearchConfiguration"]
-    assert "filter" in first
-    assert "filter" not in second
-    assert "vectorSearchConfiguration" not in client.calls[1]["retrievalConfiguration"]
-    assert result.chunks[0].text == "Managed fallback excerpt."
+    assert len(client.calls) == 1
+    search = client.calls[0]["retrievalConfiguration"]["managedSearchConfiguration"]
+    assert "filter" not in search
+    assert result.course_retrieval_status == "empty"
 
 
 def test_configured_live_retriever_uses_managed_type(

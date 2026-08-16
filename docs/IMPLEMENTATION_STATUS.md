@@ -1,6 +1,57 @@
 # Implementation status
 
-## Current phase — Explicit Deep Review HTTP + token-aware Fast Chat
+## Current phase — Bound MANAGED Knowledge Base retrieval latency
+
+**Implemented locally on 2026-08-17; not yet committed or deployed.**
+
+### What changed and why
+
+Production evidence for the Week 1 query showed the Streamlit-to-FastAPI
+stream begin at `19:14:52.527`, a MANAGED Knowledge Base metadata-filter
+`ValidationException` at `19:14:53.265`, and the first post-turn UI reload at
+`19:16:51.484`. The AgentCore trace itself was 4.73 seconds and already
+contained `<retrieved_course_context>`, so nearly all of the roughly
+119-second wait was outside Haiku.
+
+1. MANAGED Retrieve now makes one unfiltered request while strict metadata
+   mode is off. Production `JUQNP8AZAZ` rejects its current
+   `course_material_id` filter because that optional indexed attribute has not
+   been verified. Exact selected bucket/object-key validation remains
+   mandatory after Retrieve, so skipping the rejected optimization does not
+   broaden citations. Strict mode can opt back into the AWS-supported filter
+   after the KB metadata is corrected and verified.
+2. The Bedrock Agent Runtime client now uses `total_max_attempts=1`, a
+   15-second read timeout, and a 3-second connect timeout. Optional evidence
+   retrieval can fail closed as an evidence gap instead of consuming the
+   UI client's 120-second timeout.
+3. VECTOR Knowledge Bases retain the existing metadata-filter behavior,
+   including the non-strict unfiltered fallback.
+
+### Files and validation
+
+- Changed: `backend/bedrock_retrieve.py`,
+  `tests/domain/test_bedrock_retrieve.py`, and this status file.
+- Deterministic retrieval tests: **44 passed**.
+- Repository-wide Ruff: **passed**.
+- Full deterministic pytest: **968 passed**.
+- Compileall for backend, UI, tests, scripts, and AgentCore runtime: **passed**.
+- No paid/live Bedrock or AgentCore call was made for this patch.
+
+### Compatibility, rollback, risks, and next action
+
+- No schema, DSQL, S3, Cognito, AgentCore runtime, or prompt change.
+- Rollback is the previous app image; persisted notebooks and sources are
+  unchanged.
+- A slow MANAGED Retrieve now returns an evidence gap after its bounded SDK
+  wait rather than inventing course content. The exact end-to-end latency
+  still requires one explicitly approved production query after deployment.
+- Next: build a new ARM64 app image from this tree, deploy only the `app`
+  container, then repeat the Week 1 query and compare app timestamps with the
+  AgentCore trace.
+
+---
+
+## Previous phase — Explicit Deep Review HTTP + token-aware Fast Chat
 
 **Committed on `Integrate-Bedrock` as `f663740`.** Canonical Coaching prompts
 still match baseline `a6d163668902beae4938fe552cced7ba92b15e88`. AgentCore
