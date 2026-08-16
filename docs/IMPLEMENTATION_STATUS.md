@@ -2,12 +2,19 @@
 
 ## Current phase — Strands structured-output repair prompt (Guardrail PROMPT_ATTACK false positive)
 
-**Code fix 2026-08-16. Not published. Not production-ready.** Same ARN
+**Runtime published 2026-08-16.** Same ARN
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.
-Guardrail v3 (`NUSCodesignChatbotGuardrail` `o8aipba8m129`) is **unchanged**.
-Model assignments are **unchanged** (Haiku 4.5 router/Q&A/coaching/incremental;
+`DEFAULT` is **version 19 READY**. Production Compose and the EC2 host
+`.env` pin `AGENTCORE_QUALIFIER=19` so FastAPI invokes that version
+explicitly even if DEFAULT later moves. Guardrail v3
+(`NUSCodesignChatbotGuardrail` `o8aipba8m129`) is **unchanged**. Model
+assignments are **unchanged** (Haiku 4.5 router/Q&A/coaching/incremental;
 Sonnet 4.6 deep). Incremental Review remains fail-closed. Frontend timeout
-handling is unchanged.
+handling is unchanged. This is **not** production-ready: the live five-stage
+CloudFront walk and ~105–117s timeout remain separate gates.
+
+Artifact:
+`s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-repair-prompt-v19-20260816T101413Z.zip`
 
 ### Root cause
 
@@ -65,18 +72,34 @@ still a separate follow-up.
   build were **not executed**.
 - No existing safe ApplyGuardrail diagnostic script was present; live
   ApplyGuardrail was **not** added and **not** run.
-- Live AWS Incremental Review retest and AgentCore republish were **not**
-  authorized. DEFAULT remains **v18** until a new version is published.
+- Live AgentCore republish: **version 19 READY**. `DEFAULT` `liveVersion`
+  **19**. Env copied from v18 (Haiku lightweight roles, Sonnet Deep Review,
+  `GUARDRAIL_ID=o8aipba8m129`, `GUARDRAIL_VERSION=3`).
+- Packaged zip contains
+  `structured_output_prompt=STRUCTURED_OUTPUT_REPAIR_PROMPT` and
+  `Please use the output tool now.` Site-packages from v18 were preserved
+  (`strands-agents` / `pydantic` present).
+- Live Incremental Review retest after publish was **not** run in this
+  step. Timeout and fail-closed Incremental Review are unchanged.
+- Production env pin 2026-08-16: host `.env` and `compose.prod.yaml` set
+  `AGENTCORE_QUALIFIER=19`. App container
+  `nus-codesign-chatbot-app-1` force-recreated (`cde2300-chatbot:753ec96`).
+  `/api/v1/ready` returned 200. Caddy was not recreated. Stale host
+  `AGENTCORE_MODEL_ID` (Sonnet) was corrected to Haiku 4.5 to match Compose.
 
 ### Next exact action
 
-1. Commit/push only when authorized.
-2. Publish a new VERSION on the **same** AgentCore runtime only when
-   deployment is authorized, then retest one Incremental Review path that
-   previously hit the structured-output repair cycle.
-3. Remaining separate gates: live five-stage CloudFront walk, Streamlit /
+1. Retest one Incremental Review path that previously hit the structured-output
+   repair cycle (CloudWatch should show Haiku incremental, not `safety_blocked`
+   from the Strands repair instruction).
+2. Remaining separate gates: live five-stage CloudFront walk, Streamlit /
    CloudFront timeout, Incremental Review fail-closed follow-up, EC2 image
-   cutover. Do not mark production ready from this code fix alone.
+   cutover. Do not mark production ready from this pin alone.
+3. Rollback if needed: set `AGENTCORE_QUALIFIER=18` on host `.env` and
+   `compose.prod.yaml`, recreate the app container; or
+   `update-agent-runtime` with the v18 zip
+   `agentcore-patches/chatbot_harnessAgent-haiku-sonnet-v18-20260816T082420Z.zip`.
+   Do not delete old versions.
 
 ## Previous phase — Three pedagogical agents + Haiku 4.5 / Sonnet 4.6 (DEFAULT v18)
 
