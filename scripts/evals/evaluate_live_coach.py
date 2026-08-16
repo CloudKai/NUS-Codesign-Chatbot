@@ -183,7 +183,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         current_stage="problem_identification",
         response_detail="long",
     )
-    messages, trusted = provider._planned_turn(probe)
+    messages, trusted, _plan = provider._planned_turn(probe)
     kwargs = provider.build_invoke_kwargs(
         messages=messages,
         system_prompt=_system_prompt_with_trusted(trusted),

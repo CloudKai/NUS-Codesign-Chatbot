@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pytest
@@ -11,6 +13,7 @@ from fastapi.testclient import TestClient
 from backend.agentcore_provider import AgentCoreCoachProvider, agentcore_topic_for_stage
 from backend.api import create_app
 from backend.application import CoachApplicationService
+from backend.context_planner import ConversationMemory, ModelContextPlan
 from backend.domain import (
     CitationReference,
     ClearCode,
@@ -36,7 +39,7 @@ from backend.settings import settings
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
 
-from fake_agentcore_runtime import FakeAgentCoreRuntime
+from fake_agentcore_runtime import FakeAgentCoreRuntime, _payload_kind
 
 _TINY_PNG = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQ"
@@ -917,3 +920,193 @@ def test_street_advance_auto_applies_when_configured(tmp_path):
     messages = store.get_messages(thread_id)
     assert [item["role"] for item in messages].count("assistant") == 1
     assert all(str(item.get("content") or "").strip() for item in messages)
+
+
+_NOTEBOOK_A_MARKER = "NOTEBOOK_A_ONLY"
+_NOTEBOOK_B_MARKER = "NOTEBOOK_B_ONLY"
+
+
+def _marker_plan(marker: str, request: CoachRequest) -> ModelContextPlan:
+    """Return a compressed plan whose derived memory carries a notebook marker."""
+    memory = ConversationMemory(
+        conversation_revision=int(request.conversation_revision or 0),
+        problem_definition=marker,
+        quoted_student_statements=[marker],
+    )
+    return ModelContextPlan(
+        messages=[],
+        compressed_memory=memory,
+        full_history_used=False,
+        compression_used=True,
+        original_message_count=1,
+        verbatim_message_count=0,
+        compressed_message_count=1,
+        estimated_input_tokens=8,
+        history_tokens=1,
+        evidence_tokens=0,
+        prompt_tokens=1,
+        safety_margin=40,
+        model_context_limit=200_000,
+        max_input_tokens=180_000,
+    )
+
+
+class _InterleavedMarkerPlanner:
+    """Force A to plan first, then B, before either AgentCore invoke returns."""
+
+    def __init__(self, events: dict[str, threading.Event]) -> None:
+        self._events = events
+
+    def plan(self, request: CoachRequest, **_kwargs: Any) -> ModelContextPlan:
+        """Return a notebook-local plan and publish the interleaving events."""
+        marker = (
+            _NOTEBOOK_A_MARKER
+            if str(request.thread_id) == "notebook-a"
+            else _NOTEBOOK_B_MARKER
+        )
+        if str(request.thread_id) == "notebook-a":
+            if not self._events["a_planned"].is_set():
+                self._events["a_planned"].set()
+                assert self._events["b_planned"].wait(timeout=3)
+        else:
+            if not self._events["b_planned"].is_set():
+                assert self._events["a_planned"].wait(timeout=3)
+                self._events["b_planned"].set()
+        return _marker_plan(marker, request)
+
+
+class _GatedAgentCoreRuntime:
+    """Complete notebook A after B would have overwritten shared planner state."""
+
+    def __init__(
+        self,
+        inner: FakeAgentCoreRuntime,
+        events: dict[str, threading.Event],
+    ) -> None:
+        self._inner = inner
+        self._events = events
+        self.calls = inner.calls
+
+    def invoke_agent_runtime(self, **kwargs: Any) -> dict[str, Any]:
+        """Gate specialist invokes so A finishes assess before B's specialist runs."""
+        raw = kwargs.get("payload")
+        if isinstance(raw, (bytes, bytearray)):
+            incoming = json.loads(bytes(raw).decode("utf-8"))
+        else:
+            incoming = json.loads(str(raw or "{}"))
+        blob = json.dumps(incoming)
+        if _payload_kind(incoming) == "specialist":
+            a_only = _NOTEBOOK_A_MARKER in blob and _NOTEBOOK_B_MARKER not in blob
+            b_only = _NOTEBOOK_B_MARKER in blob and _NOTEBOOK_A_MARKER not in blob
+            if a_only:
+                assert self._events["b_planned"].wait(timeout=3)
+                response = self._inner.invoke_agent_runtime(**kwargs)
+                self._events["a_specialist_done"].set()
+                return response
+            if b_only:
+                assert self._events["a_done"].wait(timeout=3)
+                return self._inner.invoke_agent_runtime(**kwargs)
+        return self._inner.invoke_agent_runtime(**kwargs)
+
+
+def test_same_agentcore_provider_does_not_cross_notebook_memory():
+    """Two notebooks sharing one provider cannot swap conversation-memory plans."""
+    events = {
+        "a_planned": threading.Event(),
+        "b_planned": threading.Event(),
+        "a_specialist_done": threading.Event(),
+        "a_done": threading.Event(),
+    }
+    inner = FakeAgentCoreRuntime(payload=_output())
+    provider = AgentCoreCoachProvider(
+        _RUNTIME_ARN,
+        client=_GatedAgentCoreRuntime(inner, events),
+        planner=_InterleavedMarkerPlanner(events),  # type: ignore[arg-type]
+        timeout_seconds=110.0,
+        max_retries=0,
+    )
+    assert not hasattr(provider, "_last_plan")
+    request_a = _request(
+        thread_id="notebook-a",
+        student_message=f"Assess {_NOTEBOOK_A_MARKER} in this notebook.",
+        specialist="coaching",
+    )
+    request_b = _request(
+        thread_id="notebook-b",
+        student_message=f"Assess {_NOTEBOOK_B_MARKER} in this notebook.",
+        specialist="coaching",
+    )
+    results: dict[str, Any] = {}
+    errors: list[BaseException] = []
+
+    def run(label: str, request: CoachRequest) -> None:
+        try:
+            results[label] = provider.assess(request)
+        except BaseException as error:  # noqa: BLE001 - capture for the parent thread
+            errors.append(error)
+        finally:
+            if label == "a":
+                events["a_done"].set()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_a = executor.submit(run, "a", request_a)
+        future_b = executor.submit(run, "b", request_b)
+        future_a.result(timeout=8)
+        future_b.result(timeout=8)
+
+    assert errors == []
+    memory_a = json.dumps(results["a"].conversation_memory or {})
+    memory_b = json.dumps(results["b"].conversation_memory or {})
+    assert _NOTEBOOK_A_MARKER in memory_a
+    assert _NOTEBOOK_B_MARKER not in memory_a
+    assert _NOTEBOOK_B_MARKER in memory_b
+    assert _NOTEBOOK_A_MARKER not in memory_b
+    assert not hasattr(provider, "_last_plan")
+
+
+def test_same_agentcore_provider_accepts_two_notebooks_concurrently():
+    """The same cached provider instance may service two notebooks at once."""
+    barrier = threading.Barrier(2)
+    inner = FakeAgentCoreRuntime(payload=_output())
+    entered = {"count": 0}
+    lock = threading.Lock()
+
+    class BarrierRuntime:
+        def invoke_agent_runtime(self, **kwargs: Any) -> dict[str, Any]:
+            raw = kwargs.get("payload")
+            if isinstance(raw, (bytes, bytearray)):
+                incoming = json.loads(bytes(raw).decode("utf-8"))
+            else:
+                incoming = json.loads(str(raw or "{}"))
+            if _payload_kind(incoming) == "specialist":
+                with lock:
+                    entered["count"] += 1
+                barrier.wait(timeout=3)
+            return inner.invoke_agent_runtime(**kwargs)
+
+    provider = AgentCoreCoachProvider(
+        _RUNTIME_ARN,
+        client=BarrierRuntime(),
+        timeout_seconds=110.0,
+        max_retries=0,
+    )
+
+    def run(thread_id: str, marker: str):
+        return provider.assess(
+            _request(
+                thread_id=thread_id,
+                student_message=f"Assess {marker}",
+                specialist="coaching",
+            )
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_a = executor.submit(run, "notebook-a", _NOTEBOOK_A_MARKER)
+        future_b = executor.submit(run, "notebook-b", _NOTEBOOK_B_MARKER)
+        turn_a = future_a.result(timeout=8)
+        turn_b = future_b.result(timeout=8)
+
+    assert entered["count"] == 2
+    assert turn_a.response_text
+    assert turn_b.response_text
+    assert not hasattr(provider, "_last_plan")

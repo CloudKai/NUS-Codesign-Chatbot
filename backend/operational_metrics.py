@@ -78,6 +78,17 @@ def record_coach_turn(
     )
 
 
+def record_coach_rate_limit(*, category: str) -> None:
+    """Record one privacy-safe coach concurrency rejection.
+
+    ``category`` is one of ``notebook_concurrency``, ``user_concurrency``,
+    ``user_rpm``, ``global_capacity``, or ``missing_identity``. No user,
+    notebook, or message identifiers are included.
+    """
+    label = str(category or "throttled").strip() or "throttled"
+    _emit("coach_rate_limited", category=label)
+
+
 def record_stage_transition(*, outcome: str) -> None:
     """Record an anonymous accepted/rejected stage-decision outcome."""
     _emit("stage_transition", outcome=outcome)

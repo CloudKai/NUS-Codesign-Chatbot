@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any
 
 
@@ -177,6 +178,7 @@ class FakeAgentCoreRuntime:
         self._router_error = router_error
         self._incremental_error = incremental_error
         self._deep_error = deep_error if deep_error is not None else judge_error
+        self._lock = threading.Lock()
 
     def _queued_response(self, queue: list[Any], label: str) -> dict[str, Any]:
         """Pop one queued body or raise when the queue is exhausted."""
@@ -192,57 +194,58 @@ class FakeAgentCoreRuntime:
 
     def invoke_agent_runtime(self, **kwargs: Any) -> dict[str, Any]:
         """Record one runtime invocation and return a fake structured response."""
-        self.calls.append(kwargs)
-        incoming = _decode_payload(kwargs.get("payload"))
-        kind = _payload_kind(incoming)
-        if kind == "router":
-            if self._router_error is not None:
-                raise self._router_error
-            if self._router_queue is not None:
-                return self._queued_response(self._router_queue, "router")
-            if self._router_payload is not None:
+        with self._lock:
+            self.calls.append(kwargs)
+            incoming = _decode_payload(kwargs.get("payload"))
+            kind = _payload_kind(incoming)
+            if kind == "router":
+                if self._router_error is not None:
+                    raise self._router_error
+                if self._router_queue is not None:
+                    return self._queued_response(self._router_queue, "router")
+                if self._router_payload is not None:
+                    return {
+                        "contentType": self._content_type,
+                        "response": FakeBody(_encode_item(self._router_payload)),
+                    }
                 return {
                     "contentType": self._content_type,
-                    "response": FakeBody(_encode_item(self._router_payload)),
+                    "response": FakeBody(_default_router_body()),
                 }
-            return {
-                "contentType": self._content_type,
-                "response": FakeBody(_default_router_body()),
-            }
-        if kind == "review_incremental":
-            if self._incremental_error is not None:
-                raise self._incremental_error
-            if self._incremental_queue is not None:
-                return self._queued_response(self._incremental_queue, "incremental")
-            if self._incremental_payload is not None:
+            if kind == "review_incremental":
+                if self._incremental_error is not None:
+                    raise self._incremental_error
+                if self._incremental_queue is not None:
+                    return self._queued_response(self._incremental_queue, "incremental")
+                if self._incremental_payload is not None:
+                    return {
+                        "contentType": self._content_type,
+                        "response": FakeBody(_encode_item(self._incremental_payload)),
+                    }
                 return {
                     "contentType": self._content_type,
-                    "response": FakeBody(_encode_item(self._incremental_payload)),
+                    "response": FakeBody(_default_incremental_body()),
                 }
-            return {
-                "contentType": self._content_type,
-                "response": FakeBody(_default_incremental_body()),
-            }
-        if kind == "review_deep":
-            if self._deep_error is not None:
-                raise self._deep_error
-            if self._deep_queue is not None:
-                return self._queued_response(self._deep_queue, "deep")
-            if self._deep_payload is not None:
+            if kind == "review_deep":
+                if self._deep_error is not None:
+                    raise self._deep_error
+                if self._deep_queue is not None:
+                    return self._queued_response(self._deep_queue, "deep")
+                if self._deep_payload is not None:
+                    return {
+                        "contentType": self._content_type,
+                        "response": FakeBody(_encode_item(self._deep_payload)),
+                    }
+                if _looks_like_review_body(self._payload):
+                    return {
+                        "contentType": self._content_type,
+                        "response": FakeBody(_encode_item(self._payload)),
+                    }
                 return {
                     "contentType": self._content_type,
-                    "response": FakeBody(_encode_item(self._deep_payload)),
+                    "response": FakeBody(_default_deep_body(incoming)),
                 }
-            if _looks_like_review_body(self._payload):
-                return {
-                    "contentType": self._content_type,
-                    "response": FakeBody(_encode_item(self._payload)),
-                }
-            return {
-                "contentType": self._content_type,
-                "response": FakeBody(_default_deep_body(incoming)),
-            }
-        return self._specialist_response()
+            return self._specialist_response()
 
     def _specialist_response(self) -> dict[str, Any]:
         """Return the next queued specialist body or the default payload."""

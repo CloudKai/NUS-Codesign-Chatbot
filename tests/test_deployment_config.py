@@ -119,6 +119,11 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert 'ROUTER_MIN_CONFIDENCE: "0.60"' in app
     assert 'DEEP_REVIEW_INTERVAL_TURNS: "3"' in app
     assert 'GUARDRAIL_VERSION: "3"' in app
+    assert 'MAX_ACTIVE_COACH_REQUESTS_PER_NOTEBOOK: "1"' in app
+    assert 'MAX_ACTIVE_COACH_REQUESTS_PER_USER: "2"' in app
+    assert 'COACH_REQUESTS_PER_MINUTE: "8"' in app
+    assert 'MAX_CONCURRENT_MODEL_CALLS: "120"' in app
+    assert 'SYNC_THREADPOOL_TOKENS: "120"' in app
     assert "source: ./.streamlit/secrets.toml" in app
     for block in (app, caddy):
         assert "no-new-privileges:true" in block
@@ -182,6 +187,11 @@ def test_production_compose_keeps_host_env_knowledge_base_contract():
         "GUARDRAIL_ID=",
         "GUARDRAIL_VERSION=",
         "PUBLIC_ORIGIN=",
+        "MAX_ACTIVE_COACH_REQUESTS_PER_NOTEBOOK=",
+        "MAX_ACTIVE_COACH_REQUESTS_PER_USER=",
+        "COACH_REQUESTS_PER_MINUTE=",
+        "MAX_CONCURRENT_MODEL_CALLS=",
+        "SYNC_THREADPOOL_TOKENS=",
     ):
         assert needle in env_example
 

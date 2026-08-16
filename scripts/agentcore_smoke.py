@@ -81,7 +81,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         timeout_seconds=min(settings.agentcore_timeout_seconds, 30.0),
         max_retries=0,
     )
-    payload = provider._invoke_payload(request, "coaching")
+    payload, _plan = provider._invoke_payload(request, "coaching")
     if args.dry_run:
         print(json.dumps({"dry_run": True, "phase": payload.get("phase")}, indent=2))
         return 0
