@@ -235,26 +235,6 @@
         margin:0;
         padding:0;
     }
-    .cd-profile-help {
-        display:grid;
-        gap:.35rem;
-        padding:.05rem 0 .6rem .1rem;
-    }
-    .cd-profile-help-title {
-        margin:0;
-        color:var(--cd-text);
-        font-size:.84rem;
-        font-weight:700;
-        line-height:1.35;
-        padding: 0.4rem 0 0 0;
-    }
-    .cd-profile-help-body {
-        margin:0;
-        color:var(--cd-muted);
-        font-size:.68rem;
-        font-weight:450;
-        line-height:1.4;
-    }
     .cd-notebook-card.is-active {
         border:1px solid color-mix(in srgb, var(--cd-accent) 40%, var(--cd-border));
         background:var(--cd-accent-soft);

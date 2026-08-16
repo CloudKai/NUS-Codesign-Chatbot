@@ -1,4 +1,4 @@
-"""Profile settings popover for local appearance, language, and help."""
+"""Profile settings popover for local appearance, language, and coaching style."""
 
 from __future__ import annotations
 
@@ -147,14 +147,6 @@ def render_profile_menu() -> None:
                 _render_language_fragment()
                 _render_coaching_style_fragment()
                 st.divider()
-                st.markdown(
-                    '<div class="cd-profile-help">'
-                    '<div class="cd-profile-help-title">Help</div>'
-                    '<div class="cd-profile-help-body">(Will input myself later)</div>'
-                    "</div>",
-                    unsafe_allow_html=True,
-                )
-                st.divider()
                 # --- Logout (same-tab) ---
                 # Prefer a real <a target="_self"> to the local API logout callback.
                 # st.link_button opens a new tab; components.html top-navigation is
@@ -261,8 +253,7 @@ def _sync_profile_popover_close_on_leave() -> None:
   function profileBody() {
     return doc.querySelector(
       '[data-testid="stPopoverBody"]:has(.st-key-profile_menu_root), ' +
-      '[data-testid="stPopoverBody"]:has(.cd-profile-menu), ' +
-      '[data-testid="stPopoverBody"]:has(.cd-profile-help)'
+      '[data-testid="stPopoverBody"]:has(.cd-profile-menu)'
     );
   }
 
@@ -279,7 +270,6 @@ def _sync_profile_popover_close_on_leave() -> None:
       node.closest(".st-key-topbar_profile") ||
       node.closest(".st-key-profile_menu_root") ||
       node.closest('[data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)') ||
-      node.closest('[data-testid="stPopoverBody"]:has(.cd-profile-help)') ||
       node.closest('[data-testid="stPopoverBody"]:has(.cd-profile-menu)') ||
       node.closest('[data-testid="stPopoverBody"]:has([class*="st-key-profile-language-"])')
     ) {

@@ -77,7 +77,7 @@ Top bar
     ├── Display name
     ├── Appearance
     ├── Language
-    └── Help and support
+    └── Logout
 
 Workspace
 ├── Thinking Path

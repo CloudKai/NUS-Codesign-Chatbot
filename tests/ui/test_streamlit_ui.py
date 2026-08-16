@@ -341,9 +341,11 @@ def test_streamlit_notebook_workspace_smoke():
         (button.key or "").startswith("profile-language-") for button in app.button
     )
     assert "cd-profile-menu" in rendered
-    assert "cd-profile-help-title" in rendered
-    assert "cd-profile-help-title" in rendered
-    assert "cd-profile-help-body" in rendered
+    assert "cd-profile-help" not in rendered
+    assert "Will input myself later" not in rendered
+    assert "cd-profile-logout-link" in rendered or any(
+        button.label == "Logout" for button in app.button
+    )
     assert "stTooltipHoverTarget" in rendered
     assert not any(
         (button.key or "").startswith("composer-model-") for button in app.button
