@@ -646,13 +646,14 @@ def learning_review(
     journey: dict[str, Any],
     *,
     detail: str | None = None,
+    deep_review_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the Review-tab payload for the current notebook.
 
-    Summary and Facione scores come from the newest assessment. Strengths and
-    areas for improvement are aggregated by Thinking Path stage across the full
-    conversation so past feedback is preserved. Empty notebooks stay empty
-    instead of showing generic filler.
+    Summary, Facione profile, and working conclusion prefer the latest
+    successful Deep Review snapshot when one exists. Strengths and areas for
+    improvement are still aggregated by Thinking Path stage across the full
+    conversation. Empty notebooks stay empty instead of showing generic filler.
 
     Returns:
         A dict consumed by ``ui.studio.render_learning_review``, including
@@ -668,7 +669,17 @@ def learning_review(
     contributions = student_messages[-contribution_limit:]
     level, level_description = understanding_level(normalized)
     assessment = _latest_assessment(message_list)
-    if assessment:
+    snapshot = deep_review_snapshot if isinstance(deep_review_snapshot, dict) else None
+    if snapshot:
+        assessed_level = str(snapshot.get("critical_understanding_level") or "").strip()
+        if assessed_level:
+            level = assessed_level
+        snapshot_description = " ".join(
+            str(snapshot.get("synthesis") or snapshot.get("summary") or "").split()
+        ).strip()
+        if snapshot_description:
+            level_description = snapshot_description
+    elif assessment:
         assessed_level = str(
             assessment.get("critical_understanding_level") or ""
         ).strip()
@@ -700,6 +711,24 @@ def learning_review(
         _research_facione_projection(message_list)
     )
     summary = _review_summary(assessment)
+    if snapshot:
+        snapshot_summary = " ".join(
+            str(snapshot.get("synthesis") or snapshot.get("summary") or "").split()
+        ).strip()
+        if snapshot_summary:
+            summary = snapshot_summary
+        raw_facione = snapshot.get("facione_scores")
+        if isinstance(raw_facione, dict) and raw_facione:
+            facione_scores = raw_facione
+        snapshot_conclusion = " ".join(
+            str(snapshot.get("working_conclusion") or "").split()
+        ).strip()
+        if snapshot_conclusion:
+            conclusion_override = snapshot_conclusion
+        else:
+            conclusion_override = None
+    else:
+        conclusion_override = None
     completed_labels = [
         STAGE_BY_ID[stage_id].label for stage_id in normalized["completed_stages"]
     ]
@@ -712,7 +741,8 @@ def learning_review(
         if normalized["stage_notes"].get(stage_id)
     ]
     conclusion = (
-        (
+        conclusion_override
+        or (
             " ".join(str(assessment.get("working_conclusion") or "").split()).strip()
             if assessment
             else ""
@@ -750,5 +780,5 @@ def learning_review(
         "improvement_areas": list(current_improvements),
         "next_question": stage.reflection_prompt,
         "turn_count": len(student_messages),
-        "has_personalized_assessment": assessment is not None,
+        "has_personalized_assessment": assessment is not None or snapshot is not None,
     }

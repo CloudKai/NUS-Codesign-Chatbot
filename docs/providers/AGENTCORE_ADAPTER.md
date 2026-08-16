@@ -23,9 +23,11 @@ same runtime ARN:
    the same structured output.
 
 The Haiku router, Incremental Review, and automatic Sonnet are **not** on
-this path. Deep Sonnet Review (`phase=review`, `review_mode=deep`) remains
-an explicit `specialist=review` operation. Opening Journey / Review /
-Summary performs zero model calls.
+this path. Deep Sonnet Review (`phase=review`, `review_mode=deep`) is a
+server-owned operation started by `POST /api/v1/threads/{thread_id}/deep-review`.
+The browser cannot select Sonnet by sending `specialist=review` on
+`POST /api/v1/coach/turn`. Opening Journey / Review / Summary performs zero
+model calls.
 
 Q&A never advances the Thinking Path. Coaching may recommend stay or
 advance; the recommendation is advisory. FastAPI still validates and
@@ -70,10 +72,13 @@ runtime for compatibility and are unused by the active FastAPI path.
 
 `student_id` is the store owner identifier, never a notebook id. The
 fast-chat planner always sends derived `conversation_memory` plus a bounded
-recent verbatim window (default **6** messages, hard estimated input
-ceiling **20,000** tokens). Deep Review uses a separate `full_history`
-policy. Application runtime rules travel in `trusted_instructions` and
-`runtime_context`. The last user message is the untrusted product from
+recent verbatim window (at most **6** messages, **3,000** estimated
+recent-history tokens, **1,500** per historical message). The local total
+input estimate includes the AgentCore system prompt, with a **12,000** soft
+target and **16,000** hard ceiling. Deep Review uses a separate
+`full_history` policy. Application runtime rules travel in
+`trusted_instructions` and `runtime_context`. The last user message is the
+untrusted product from
 `compose_coach_prompt(..., include_recent_messages=False, context_policy="fast_chat")`.
 Derived memory is model input only; DSQL remains the complete transcript.
 A fresh `runtimeSessionId` (`stateless-…`) is still used per invoke.

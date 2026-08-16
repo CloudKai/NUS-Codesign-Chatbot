@@ -405,6 +405,7 @@ aws ecr get-login-password --region "${AWS_REGION}" \
 
 docker buildx build \
   --platform linux/arm64 \
+  --build-arg GIT_SHA="$(git rev-parse HEAD)" \
   -t "${APP_IMAGE}" \
   --push .
 ```

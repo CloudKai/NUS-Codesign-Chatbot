@@ -26,6 +26,7 @@ from backend.auth_routes import register_auth_routes
 from backend.domain import (
     CoachRequest,
     CoachTurn,
+    DeepReviewRequest,
     MessageCreateRequest,
     NotebookCreateRequest,
     NotebookUpdateRequest,
@@ -1289,6 +1290,99 @@ def create_app(
             turn.assessment.recommendation.value,
             bool(turn.auto_advanced_to),
         )
+        _emit_coach_metric(
+            outcome="ok",
+            selected_source_count=selected_source_count,
+            turn=turn,
+        )
+        return turn
+
+    @app.post("/api/v1/threads/{thread_id}/deep-review", response_model=CoachTurn)
+    def start_deep_review(
+        thread_id: str,
+        http_request: Request,
+        payload: DeepReviewRequest | None = None,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> CoachTurn:
+        """Run one server-owned explicit Deep Review for the owned notebook.
+
+        The browser cannot choose Sonnet by sending ``specialist=review`` on
+        ``POST /api/v1/coach/turn``. Eligibility, stage, history, and sources
+        are loaded from authenticated notebook state.
+        """
+        body = payload or DeepReviewRequest()
+        header_key = http_request.headers.get("idempotency-key")
+        idempotency_key = body.idempotency_key
+        if header_key is not None:
+            if idempotency_key and idempotency_key != header_key:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Idempotency-Key header does not match the request body",
+                )
+            idempotency_key = header_key
+        if not owner.store.get_thread(thread_id):
+            raise HTTPException(status_code=404, detail="Notebook not found")
+        selected_source_count = _selected_source_count(owner, thread_id)
+        request_id = str(getattr(http_request.state, "request_id", None) or "-")
+        logger.info(
+            "deep_review request request_id=%s sources=%s",
+            request_id,
+            selected_source_count,
+        )
+        try:
+            turn = owner.coach.run_deep_review(
+                thread_id, idempotency_key=idempotency_key
+            )
+        except RateLimitExceeded as error:
+            _record_coach_rate_limit(
+                error,
+                selected_source_count=selected_source_count,
+                request_id=request_id,
+            )
+            raise _rate_limit_http_error(error) from error
+        except CoachIdempotencyConflictError as error:
+            _emit_coach_metric(
+                outcome="idempotency_conflict",
+                selected_source_count=selected_source_count,
+            )
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ConversationRevisionConflictError as error:
+            _emit_coach_metric(
+                outcome="revision_conflict",
+                selected_source_count=selected_source_count,
+            )
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except (CoachRequestInProgressError, CoachRequestLeaseLostError) as error:
+            _emit_coach_metric(
+                outcome="idempotency_in_progress",
+                selected_source_count=selected_source_count,
+            )
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ProviderUnavailableError as error:
+            _emit_coach_metric(
+                outcome=provider_unavailable_outcome(error),
+                selected_source_count=selected_source_count,
+            )
+            logger.warning(
+                "deep_review provider unavailable request_id=%s", request_id
+            )
+            raise HTTPException(
+                status_code=503, detail=_provider_unavailable_detail(error)
+            ) from error
+        except ValueError as error:
+            _emit_coach_metric(
+                outcome="rejected",
+                selected_source_count=selected_source_count,
+            )
+            logger.info("deep_review rejected request_id=%s", request_id)
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        except Exception:
+            _emit_coach_metric(
+                outcome="failed",
+                selected_source_count=selected_source_count,
+            )
+            raise
+        logger.info("deep_review ok request_id=%s", request_id)
         _emit_coach_metric(
             outcome="ok",
             selected_source_count=selected_source_count,

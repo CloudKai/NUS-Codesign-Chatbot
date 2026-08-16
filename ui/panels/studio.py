@@ -10,6 +10,7 @@ with only the student's current stage open by default.
 from __future__ import annotations
 
 import logging
+import uuid
 from contextlib import nullcontext
 from html import escape
 from typing import Any
@@ -17,6 +18,12 @@ from typing import Any
 import streamlit as st
 
 from backend.settings import settings
+from backend.specialists.review_orchestration import (
+    COUNTER_SETTINGS_KEY,
+    DEEP_REVIEW_SNAPSHOT_KEY,
+    explicit_deep_review_available,
+    parse_coaching_turns_since_deep_review,
+)
 from backend.student_journey import (
     THINKING_STAGES,
     ThinkingStage,
@@ -31,7 +38,7 @@ from ui.components import (
     review_card_html,
     review_feedback_items_html,
 )
-from ui.runtime import rerun_app, rerun_fragment, store
+from ui.runtime import rerun_app, rerun_fragment, start_deep_review, store
 
 logger = logging.getLogger(__name__)
 
@@ -359,10 +366,14 @@ def render_learning_review(journey: dict[str, Any]) -> None:
     Review notification fingerprint as seen when the Review tab is active.
     """
     messages = store.get_messages(st.session_state.thread_id)
+    thread = store.get_thread(st.session_state.thread_id) or {}
+    metadata = dict(thread.get("metadata") or {})
+    snapshot = metadata.get(DEEP_REVIEW_SNAPSHOT_KEY)
     review = learning_review(
         messages,
         journey,
         detail=journey["response_detail"],
+        deep_review_snapshot=snapshot if isinstance(snapshot, dict) else None,
     )
     fingerprint = _review_fingerprint(review)
     st.session_state.review_fingerprint = fingerprint
@@ -374,6 +385,27 @@ def render_learning_review(journey: dict[str, Any]) -> None:
     current_stage_id = str(
         journey.get("current_stage") or THINKING_STAGES[0].id
     )
+    if explicit_deep_review_available(
+        coaching_turns_since_deep_review=parse_coaching_turns_since_deep_review(
+            metadata.get(COUNTER_SETTINGS_KEY)
+        ),
+        interval=settings.deep_review_interval_turns,
+    ):
+        st.caption(
+            "Deep Review is available. It synthesizes your progress with a "
+            "broader reading and does not change your Thinking Path stage."
+        )
+        if st.button("Start Deep Review", key="start_deep_review"):
+            try:
+                start_deep_review(
+                    str(st.session_state.thread_id),
+                    idempotency_key=f"deep-review-{uuid.uuid4().hex[:16]}",
+                )
+            except Exception:
+                logger.exception("deep_review_ui_failed")
+                st.error("Deep Review could not be completed. Try again.")
+            else:
+                rerun_app()
     st.markdown(
         review_card_html(
             label="Summary",

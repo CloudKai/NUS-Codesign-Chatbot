@@ -38,6 +38,7 @@ SETTINGS_KEYS = frozenset(
         "revoked_coach_idempotency_keys",
         "conversation_memory",
         "coaching_turns_since_deep_review",
+        "deep_review_snapshot",
     }
 )
 

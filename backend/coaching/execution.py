@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 from backend.context_planner import memory_from_metadata
@@ -18,6 +19,7 @@ from backend.domain import (
     RESEARCH_CODING_VERSION,
     ResearchCodingStatus,
     RetrievalChunkReference,
+    StageDecision,
 )
 from backend.learning_service import LearningProgressService
 from backend.models import DEFAULT_CHAT_MODEL_ID, get_model, validate_reasoning
@@ -36,9 +38,14 @@ from backend.retrieval import (
 )
 from backend.retrieval_gate import retrieval_required
 from backend.settings import settings as runtime_settings
+from backend.providers import ProviderUnavailableError
 from backend.specialists.review_orchestration import (
     COUNTER_SETTINGS_KEY,
+    DEEP_REVIEW_SNAPSHOT_KEY,
+    DEEP_REVIEW_TURN_MESSAGE,
     bound_deep_review_interval,
+    deep_review_snapshot_payload,
+    explicit_deep_review_available,
     parse_coaching_turns_since_deep_review,
 )
 from backend.source_library import (
@@ -56,6 +63,7 @@ from backend.student_journey import (
 )
 from backend.student_store import (
     AtomicAutoAdvance,
+    CoachIdempotencyConflictError,
     CoachRequestInProgressError,
     StudentStore,
 )
@@ -72,6 +80,8 @@ from backend.turn_perf import (
 from backend.workflow import CoachWorkflow
 
 _CITATION_LABEL = re.compile(r"\[(S\d+)\]")
+IDEMPOTENCY_SURFACE_COACH_TURN = "coach_turn"
+IDEMPOTENCY_SURFACE_DEEP_REVIEW = "deep_review"
 
 
 def _quote_offsets(text: str, quote: str) -> tuple[int, int] | None:
@@ -167,19 +177,33 @@ def _history_signature(messages: list[dict[str, Any]]) -> list[tuple[str, str]]:
     return signature
 
 
-def _coach_request_fingerprint(request: CoachRequest) -> str:
+def _coach_request_fingerprint(
+    request: CoachRequest,
+    *,
+    surface: str = IDEMPOTENCY_SURFACE_COACH_TURN,
+) -> str:
     """Return a stable digest for idempotency comparison without storing content.
 
     The marker keeps only this digest, never the raw request or source/image
     payload.  All request fields except the retry key are included so reusing a
     key for a modified turn fails closed instead of returning a misleading
-    earlier answer.
+    earlier answer. Deep Review hashes a distinct surface so ``/coach/turn``
+    cannot complete a ``/deep-review`` key. The default coach-turn hash stays
+    backward-compatible with existing markers.
     """
     payload = request.model_dump(mode="json", exclude={"idempotency_key"})
+    cleaned = str(surface or IDEMPOTENCY_SURFACE_COACH_TURN).strip().lower()
+    if cleaned and cleaned != IDEMPOTENCY_SURFACE_COACH_TURN:
+        payload["idempotency_surface"] = cleaned
     encoded = json.dumps(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _is_persisted_deep_review_turn(turn: CoachTurn) -> bool:
+    """Return whether a recovered turn is an explicit Deep Review result."""
+    return str(turn.assessment.review_depth or "").strip().lower() == "deep"
 
 
 def _coach_turn_from_payload(payload: dict[str, Any] | None) -> CoachTurn | None:
@@ -250,6 +274,7 @@ class CoachApplicationService:
         idempotency_lease_token: str | None = None,
         idempotency_fingerprint: str | None = None,
         execution_lease_held: bool = False,
+        server_owned_specialist: str | None = None,
     ) -> CoachTurn:
         """Run one provider-backed turn under the process-local coach limiter.
 
@@ -267,6 +292,7 @@ class CoachApplicationService:
                 idempotency_marker_id=idempotency_marker_id,
                 idempotency_lease_token=idempotency_lease_token,
                 idempotency_fingerprint=idempotency_fingerprint,
+                server_owned_specialist=server_owned_specialist,
             )
         with get_coach_rate_limiter().limit(
             self._rate_limit_user_key(),
@@ -277,6 +303,7 @@ class CoachApplicationService:
                 idempotency_marker_id=idempotency_marker_id,
                 idempotency_lease_token=idempotency_lease_token,
                 idempotency_fingerprint=idempotency_fingerprint,
+                server_owned_specialist=server_owned_specialist,
             )
 
     def _recover_durable_coach_turn(
@@ -347,7 +374,11 @@ class CoachApplicationService:
         return None
 
     def submit(
-        self, request: CoachRequest, *, execution_lease_held: bool = False
+        self,
+        request: CoachRequest,
+        *,
+        execution_lease_held: bool = False,
+        server_owned_specialist: str | None = None,
     ) -> CoachTurn:
         """Run and persist one turn, optionally applying its recommendation.
 
@@ -360,6 +391,8 @@ class CoachApplicationService:
         for store CAS/stamping; normal submit does not bump that revision.
         When *execution_lease_held* is true, the caller already owns the
         notebook execution slot and this method must not acquire another.
+        *server_owned_specialist* is never taken from the HTTP coach-turn
+        body; only ``run_deep_review`` may pass ``review``.
         """
         thread = self._notebooks.get_thread(request.thread_id)
         if not thread:
@@ -379,12 +412,19 @@ class CoachApplicationService:
         try:
             if not idempotency_key:
                 turn = self._execute_rate_limited(
-                    request, execution_lease_held=execution_lease_held
+                    request,
+                    execution_lease_held=execution_lease_held,
+                    server_owned_specialist=server_owned_specialist,
                 )
                 record_success()
                 return turn
 
-            fingerprint = _coach_request_fingerprint(request)
+            surface = (
+                IDEMPOTENCY_SURFACE_DEEP_REVIEW
+                if str(server_owned_specialist or "").strip().lower() == "review"
+                else IDEMPOTENCY_SURFACE_COACH_TURN
+            )
+            fingerprint = _coach_request_fingerprint(request, surface=surface)
             deadline = time.monotonic() + 125.0
             while True:
                 claim_started = time.perf_counter()
@@ -407,6 +447,7 @@ class CoachApplicationService:
                             idempotency_lease_token=reservation.lease_token,
                             idempotency_fingerprint=fingerprint,
                             execution_lease_held=execution_lease_held,
+                            server_owned_specialist=server_owned_specialist,
                         )
                         complete_started = time.perf_counter()
                         self._store.complete_coach_request(
@@ -448,6 +489,68 @@ class CoachApplicationService:
         finally:
             emit_coach_turn_perf(perf)
 
+    def run_deep_review(
+        self,
+        thread_id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> CoachTurn:
+        """Run one server-owned explicit Deep Review for an owned notebook.
+
+        Eligibility, stage, history, and sources come from persisted state.
+        The browser cannot choose Sonnet through ``CoachRequest.specialist``.
+        A completed idempotency key is replayed even after the counter resets.
+
+        Args:
+            thread_id: Authenticated owner's notebook id.
+            idempotency_key: Optional retry key; same key replays one result.
+
+        Returns:
+            The persisted Deep Review turn. Stage is unchanged.
+
+        Raises:
+            ValueError: Missing notebook or Deep Review is not yet eligible.
+            CoachIdempotencyConflictError: The key already completed a
+                non-review coach turn.
+            ProviderUnavailableError: Validated Deep Review did not succeed.
+        """
+        thread = self._notebooks.get_thread(thread_id)
+        if not thread:
+            raise ValueError("Notebook not found")
+        cleaned_key = str(idempotency_key or "").strip() or None
+        if cleaned_key:
+            recovered = self._recover_durable_coach_turn(thread_id, cleaned_key)
+            if recovered is not None:
+                if _is_persisted_deep_review_turn(recovered):
+                    return recovered
+                raise CoachIdempotencyConflictError(
+                    "Idempotency key was already used for a different coach request"
+                )
+        metadata = dict(thread.get("metadata") or {})
+        journey = normalize_journey(metadata.get("learning_journey"))
+        counter = parse_coaching_turns_since_deep_review(
+            metadata.get(COUNTER_SETTINGS_KEY)
+        )
+        interval = bound_deep_review_interval(
+            runtime_settings.deep_review_interval_turns
+        )
+        if not explicit_deep_review_available(
+            coaching_turns_since_deep_review=counter,
+            interval=interval,
+        ):
+            raise ValueError(
+                "Deep Review is not available yet. Complete more Coaching turns first."
+            )
+        request = CoachRequest(
+            thread_id=thread_id,
+            student_message=DEEP_REVIEW_TURN_MESSAGE,
+            current_stage=current_stage(journey).id,
+            response_detail=str(journey.get("response_detail") or DEFAULT_RESPONSE_DETAIL),
+            idempotency_key=cleaned_key,
+            specialist=None,
+        )
+        return self.submit(request, server_owned_specialist="review")
+
     def _submit_once(
         self,
         request: CoachRequest,
@@ -455,6 +558,7 @@ class CoachApplicationService:
         idempotency_marker_id: str | None = None,
         idempotency_lease_token: str | None = None,
         idempotency_fingerprint: str | None = None,
+        server_owned_specialist: str | None = None,
     ) -> CoachTurn:
         """Execute the original authoritative workflow path exactly once."""
         if current_perf() is None:
@@ -466,7 +570,15 @@ class CoachApplicationService:
             raise ValueError(
                 "Research workflow contract is not ready; use explicit reset/bootstrap"
             )
-        prepared_request = self._authoritative_request(request)
+        owned_review = str(server_owned_specialist or "").strip().lower() == "review"
+        if owned_review:
+            record_field("deep_review_invoked", True)
+            record_field("deep_review_model_role", "review_deep")
+        prepared_request = self._authoritative_request(
+            request, force_retrieval=owned_review
+        )
+        if owned_review:
+            prepared_request = self._server_owned_deep_review_request(prepared_request)
         initial_thread = self._notebooks.get_thread(prepared_request.thread_id)
         if not initial_thread:
             raise ValueError("Notebook not found")
@@ -479,6 +591,8 @@ class CoachApplicationService:
         )
         turn = self._workflow.run(prepared_request)
         prepared_request, turn = self._maybe_rag_fallback(prepared_request, turn)
+        if owned_review:
+            should_generate_title = False
         research_observation = _research_observation_from_coding(
             self._workflow.take_provisional_research_coding(
                 prepared_request.thread_id
@@ -488,6 +602,8 @@ class CoachApplicationService:
             model_id=self._workflow.model_id_for(prepared_request),
         )
         citations = self._relevant_citations(prepared_request, turn)
+        if owned_review:
+            research_observation = None
         turn = turn.model_copy(
             update={
                 "assessment": turn.assessment.model_copy(update={"citations": citations})
@@ -515,10 +631,27 @@ class CoachApplicationService:
         orchestration = self._workflow.take_review_orchestration(
             prepared_request.thread_id
         )
+        if owned_review:
+            if not orchestration.get("deep_review_succeeded"):
+                raise ProviderUnavailableError(
+                    "Deep Review could not be completed",
+                    category="malformed",
+                )
+            stay_assessment = turn.assessment.model_copy(
+                update={"recommendation": StageDecision.STAY}
+            )
+            turn = turn.model_copy(
+                update={
+                    "assessment": stay_assessment,
+                    "pending_transition": None,
+                    "auto_advanced_to": None,
+                }
+            )
 
         auto_advance: AtomicAutoAdvance | None = None
         if (
-            self._auto_advance_stages
+            not owned_review
+            and self._auto_advance_stages
             and not runtime_settings.student_stage_selection
             and self._progress is not None
             and turn.pending_transition is not None
@@ -629,6 +762,38 @@ class CoachApplicationService:
                 "critical_understanding": turn.assessment.critical_understanding_level,
                 "conversation_memory": self._workflow.take_conversation_memory(
                     prepared_request.thread_id
+                ),
+                **(
+                    {
+                        DEEP_REVIEW_SNAPSHOT_KEY: deep_review_snapshot_payload(
+                            conversation_revision=int(
+                                prepared_request.conversation_revision or 0
+                            ),
+                            created_at=datetime.now(timezone.utc).isoformat(),
+                            synthesis=turn.assessment.learning_summary
+                            or turn.assessment.stage_assessment,
+                            summary=turn.assessment.learning_summary,
+                            strengths=list(turn.assessment.review_strengths),
+                            areas_to_develop=list(turn.assessment.review_improvements),
+                            facione_scores=turn.assessment.facione_scores.model_dump(
+                                mode="json"
+                            ),
+                            working_conclusion=turn.assessment.working_conclusion,
+                            readiness_candidate=bool(
+                                turn.assessment.readiness_candidate
+                            ),
+                            readiness_evidence=list(
+                                turn.assessment.evidence_identified
+                            ),
+                            missing_requirements=list(
+                                turn.assessment.missing_reasoning_elements
+                            ),
+                            model_id=str(turn.assessment.review_model or "").strip()
+                            or "global.anthropic.claude-sonnet-4-6",
+                        )
+                    }
+                    if owned_review
+                    else {}
                 ),
             },
             generated_title=generated_title,
@@ -799,7 +964,9 @@ class CoachApplicationService:
         record_field("rag_used", bool(chunks))
         return retried, turn
 
-    def _authoritative_request(self, request: CoachRequest) -> CoachRequest:
+    def _authoritative_request(
+        self, request: CoachRequest, *, force_retrieval: bool = False
+    ) -> CoachRequest:
         """Reload trusted coaching inputs from the notebook store.
 
         Raises:
@@ -922,6 +1089,8 @@ class CoachApplicationService:
             ],
             has_selected_sources=bool(retrieval_sources),
         )
+        if force_retrieval and retrieval_sources:
+            needs_retrieval = True
         record_field("retrieval_gate_ms", elapsed_ms(gate_started))
         record_field("retrieval_required", bool(needs_retrieval))
         retrieved_chunks: list[RetrievalChunkReference] = []
@@ -996,6 +1165,18 @@ class CoachApplicationService:
                 ),
             }
         )
+
+    def _server_owned_deep_review_request(self, request: CoachRequest) -> CoachRequest:
+        """Stamp ``specialist=review`` after client-controlled fields were dropped.
+
+        Args:
+            request: Output of :meth:`_authoritative_request` with ``specialist``
+                already cleared.
+
+        Returns:
+            The same request with a server-owned Deep Review specialist.
+        """
+        return request.model_copy(update={"specialist": "review"})
 
     def revise_and_resubmit(
         self,

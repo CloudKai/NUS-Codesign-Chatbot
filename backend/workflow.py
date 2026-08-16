@@ -97,6 +97,27 @@ def _normalize_terminal_assessment(
     return assessment
 
 
+def _formative_review_stays(
+    request: CoachRequest, assessment: EducationalAssessment
+) -> EducationalAssessment:
+    """Keep Deep Review formative so FastAPI remains stage authority.
+
+    Args:
+        request: Authoritative coach request. ``specialist=review`` is
+            server-stamped only.
+        assessment: Provider assessment, which may still mention ADVANCE as
+            readiness information.
+
+    Returns:
+        The same assessment, or a STAY copy when this turn is Deep Review.
+    """
+    if str(request.specialist or "").strip().lower() != "review":
+        return assessment
+    if assessment.recommendation is StageDecision.STAY:
+        return assessment
+    return assessment.model_copy(update={"recommendation": StageDecision.STAY})
+
+
 @dataclass
 class CoachWorkflow:
     """Run one student turn and return a confirmation-gated recommendation."""
@@ -152,6 +173,7 @@ class CoachWorkflow:
         provider_result = _provider_result(self.provider.assess(request))
         response_text, assessment = provider_result
         assessment = _normalize_terminal_assessment(request, assessment)
+        assessment = _formative_review_stays(request, assessment)
         if assessment.current_stage != request.current_stage:
             raise ValueError("Assessment stage does not match the active journey stage")
         pending: PendingPhaseTransition | None = None
@@ -309,6 +331,7 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
         provider_result = _provider_result(workflow.provider.assess(request))
         response_text, assessment = provider_result
         assessment = _normalize_terminal_assessment(request, assessment)
+        assessment = _formative_review_stays(request, assessment)
         if assessment.current_stage != request.current_stage:
             raise ValueError(
                 "Assessment stage does not match the active journey stage"

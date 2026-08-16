@@ -239,12 +239,13 @@ class DeterministicCoachProvider:
         prepared = compose_coach_prompt(request)
         self.last_prepared_prompt = prepared
         self.last_stage_id = request.current_stage
+        requested = str(request.specialist or "").strip().lower()
         specialist = select_specialist(
             request.student_message, requested=request.specialist
         )
         if specialist == SPECIALIST_QA:
             return self._qa_result(request)
-        if specialist == SPECIALIST_REVIEW:
+        if requested == SPECIALIST_REVIEW:
             return self._review_result(request)
         stage = STAGE_BY_ID[request.current_stage]
         prior_stage_contributions = _prior_assessed_turns(request)
@@ -387,9 +388,16 @@ class DeterministicCoachProvider:
             learning_summary="Formative review of the student's reasoning.",
             review_strengths=["You located the work in a concrete setting."],
             review_improvements=["Name who is affected and what success would look like."],
+            review_depth="deep",
+            review_model="global.anthropic.claude-sonnet-4-6",
+            review_trigger="explicit",
         )
         return ProviderAssessmentResult(
             response_text=response,
             assessment=assessment,
             research_coding=None,
+            specialist="review",
+            qualifying_coaching_turn=False,
+            deep_review_succeeded=True,
+            review_trigger="explicit",
         )

@@ -30,7 +30,7 @@ logic.
 | `diagnostics/test_course_retrieval.py` | Explicitly approved Bedrock KB `Retrieve` diagnostic | Requires `--i-approve-live-bedrock`; prints hit counts and short previews only; no generation; no pytest path |
 | `diagnostics/check_knowledge_base_retrieve.py` | Structured KB Retrieve health check using the production adapter | Refuses live AWS by default; `--dry-run` is safe; live requires `--i-approve-live-bedrock` and `--max-requests` 1 or 2; prints secret-safe JSON; no generation |
 | `evals/evaluate_live_coach.py` | Isolated GPT-5.6 Luna InvokeHarness quality evaluation | Requires `--i-approve-live-luna`; never changes production DEFAULT; no pytest AWS path |
-| `evals/evaluate_fast_chat_regression.py` | Fast-chat coaching behaviour regression | Safe by default; `--dry-run` only; live Claude requires `--i-approve-live-claude`; does not publish AgentCore |
+| `evals/evaluate_fast_chat_regression.py` | Fast-chat coaching behaviour regression | Safe by default; `--dry-run` inspects cases; live candidate execution requires `--i-approve-live-claude` plus `AGENTCORE_RUNTIME_ARN`; `--baseline-artifact` is optional and never invented; does not publish AgentCore |
 | `sync_course_materials.py` | Upload `lectureNotes/` and `readings/` to shared `course/` S3 keys | Requires `--confirm`; never writes `users/`; never deletes course objects |
 | `preview_prompt.py` | Demo-only composed stage-prompt preview | No DB, student data, tokens, or provider calls |
 | `reset_learning_data.py` | Dry-run inventory and explicit five-phase learning-data reset | Apply requires an unchanged signed manifest and exact phrase; preserves accounts/auth; creates SQLite backup and file quarantine |

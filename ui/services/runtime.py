@@ -143,6 +143,16 @@ def submit_coach_turn(request: CoachRequest) -> CoachTurn:
     return coach.submit(request)
 
 
+def start_deep_review(thread_id: str, *, idempotency_key: str | None = None) -> CoachTurn:
+    """Run one server-owned explicit Deep Review via API or in-process service."""
+    if local_api_enabled():
+        return local_api_client().start_deep_review(
+            thread_id, idempotency_key=idempotency_key
+        )
+    _, _, coach, _ = _resolve_resources()
+    return coach.run_deep_review(thread_id, idempotency_key=idempotency_key)
+
+
 def stream_coach_turn_events(request: CoachRequest) -> Iterator[dict[str, Any]]:
     """Yield progress/token/done events for one coaching turn.
 

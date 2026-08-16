@@ -28,6 +28,11 @@ def _planner() -> HistoryContextPlanner:
             output_reserve_tokens=4_000,
             safety_margin_tokens=1_000,
             recent_verbatim_messages=6,
+            recent_history_max_tokens=int(settings.fast_chat_recent_history_max_tokens),
+            history_message_max_tokens=int(
+                settings.fast_chat_history_message_max_tokens
+            ),
+            soft_input_tokens=int(settings.fast_chat_soft_input_tokens),
         ),
         policy=CONTEXT_POLICY_FAST_CHAT,
         compressor=ExtractiveHistoryCompressor(),
@@ -99,6 +104,50 @@ def test_long_histories_keep_decision_reject_and_tradeoff_in_memory() -> None:
         assert _DECISION not in recent
         turns = active_history_turns(history, current_student_message=current)
         assert all(item["content"] != current for item in turns)
+
+
+def test_chunky_history_preserves_rejected_alternative_in_memory() -> None:
+    planner = _planner()
+    bulky = "Pasted ChatGPT draft. " + ("lorem ipsum " * 1_200)
+    history = [
+        {
+            "role": "user",
+            "content": "Older pedestrians need a safer crossing at night.",
+        },
+        {"role": "assistant", "content": "Which constraint is shaping that need?"},
+        {"role": "user", "content": _DECISION},
+        {
+            "role": "assistant",
+            "content": "What remains unresolved about maintenance?",
+        },
+    ]
+    for index in range(26):
+        role = "user" if index % 2 == 0 else "assistant"
+        history.append(
+            {
+                "role": role,
+                "content": bulky if role == "user" else f"What still needs checking {index}?",
+            }
+        )
+    plan = planner.plan(
+        CoachRequest(
+            thread_id="thread-chunky",
+            student_message="Why did I reject A?",
+            current_stage="concept_generation",
+            response_detail="short",
+            history=history,
+            conversation_revision=1,
+        ),
+        prompt_text="stage rules",
+    )
+    assert plan.verbatim_message_count <= 6
+    assert plan.estimated_recent_history_tokens <= 3_000
+    assert plan.compressed_memory is not None
+    rendered = plan.compressed_memory.format_for_prompt()
+    assert "rejected A" in rendered
+    assert "chose B" in rendered
+    assert "accessibility" in rendered.lower()
+    assert "maintenance" in rendered
 
 
 def test_revision_mismatch_drops_stale_memory() -> None:

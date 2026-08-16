@@ -182,13 +182,19 @@ class Settings:
         os.getenv("HISTORY_RECENT_VERBATIM_MESSAGES", "12")
     )
     fast_chat_max_input_tokens: int = _bounded_int(
-        "FAST_CHAT_MAX_INPUT_TOKENS", 20_000, 4_000, 64_000
+        "FAST_CHAT_MAX_INPUT_TOKENS", 16_000, 4_000, 64_000
     )
     fast_chat_soft_input_tokens: int = _bounded_int(
-        "FAST_CHAT_SOFT_INPUT_TOKENS", 15_000, 2_000, 64_000
+        "FAST_CHAT_SOFT_INPUT_TOKENS", 12_000, 2_000, 64_000
     )
     fast_chat_recent_verbatim_messages: int = _bounded_int(
         "FAST_CHAT_RECENT_VERBATIM_MESSAGES", 6, 4, 12
+    )
+    fast_chat_recent_history_max_tokens: int = _bounded_int(
+        "FAST_CHAT_RECENT_HISTORY_MAX_TOKENS", 3_000, 500, 20_000
+    )
+    fast_chat_history_message_max_tokens: int = _bounded_int(
+        "FAST_CHAT_HISTORY_MESSAGE_MAX_TOKENS", 1_500, 200, 8_000
     )
     # Runtime-owned Bedrock prefix cache. Default false keeps tests
     # deterministic. Production may enable after prefix-size verification.
@@ -483,6 +489,10 @@ def _validate_agentcore_role_models() -> None:
         raise ValueError("ROUTER_MIN_CONFIDENCE must be between 0 and 1")
     if not 1 <= int(settings.deep_review_interval_turns) <= 20:
         raise ValueError("DEEP_REVIEW_INTERVAL_TURNS must be between 1 and 20")
+    if int(settings.fast_chat_soft_input_tokens) > int(settings.fast_chat_max_input_tokens):
+        raise ValueError(
+            "FAST_CHAT_SOFT_INPUT_TOKENS must be <= FAST_CHAT_MAX_INPUT_TOKENS"
+        )
 
 
 def validate_production_configuration() -> None:

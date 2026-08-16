@@ -60,6 +60,10 @@ def test_compose_persists_data_and_mounts_private_secrets_read_only():
     assert 'ROUTER_MIN_CONFIDENCE: "0.60"' in app
     assert 'DEEP_REVIEW_INTERVAL_TURNS: "3"' in app
     assert 'FAST_CHAT_RECENT_VERBATIM_MESSAGES: "6"' in app
+    assert 'FAST_CHAT_RECENT_HISTORY_MAX_TOKENS: "3000"' in app
+    assert 'FAST_CHAT_HISTORY_MESSAGE_MAX_TOKENS: "1500"' in app
+    assert 'FAST_CHAT_SOFT_INPUT_TOKENS: "12000"' in app
+    assert 'FAST_CHAT_MAX_INPUT_TOKENS: "16000"' in app
     assert 'FAST_CHAT_PROMPT_CACHE_ENABLED: "false"' in app
     assert 'AGENTCORE_QUALIFIER: "DEFAULT"' in app
     assert 'GUARDRAIL_VERSION: "3"' in app
@@ -121,6 +125,10 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert 'ROUTER_MIN_CONFIDENCE: "0.60"' in app
     assert 'DEEP_REVIEW_INTERVAL_TURNS: "3"' in app
     assert 'FAST_CHAT_RECENT_VERBATIM_MESSAGES: "6"' in app
+    assert 'FAST_CHAT_RECENT_HISTORY_MAX_TOKENS: "3000"' in app
+    assert 'FAST_CHAT_HISTORY_MESSAGE_MAX_TOKENS: "1500"' in app
+    assert 'FAST_CHAT_SOFT_INPUT_TOKENS: "12000"' in app
+    assert 'FAST_CHAT_MAX_INPUT_TOKENS: "16000"' in app
     assert 'FAST_CHAT_PROMPT_CACHE_ENABLED: "false"' in app
     assert 'GUARDRAIL_VERSION: "3"' in app
     assert 'MAX_ACTIVE_COACH_REQUESTS_PER_NOTEBOOK: "1"' in app
@@ -170,6 +178,10 @@ def test_production_compose_keeps_host_env_knowledge_base_contract():
     assert 'ROUTER_MIN_CONFIDENCE: "0.60"' in app
     assert 'DEEP_REVIEW_INTERVAL_TURNS: "3"' in app
     assert 'FAST_CHAT_RECENT_VERBATIM_MESSAGES: "6"' in app
+    assert 'FAST_CHAT_RECENT_HISTORY_MAX_TOKENS: "3000"' in app
+    assert 'FAST_CHAT_HISTORY_MESSAGE_MAX_TOKENS: "1500"' in app
+    assert 'FAST_CHAT_SOFT_INPUT_TOKENS: "12000"' in app
+    assert 'FAST_CHAT_MAX_INPUT_TOKENS: "16000"' in app
     assert 'FAST_CHAT_PROMPT_CACHE_ENABLED: "false"' in app
     assert 'GUARDRAIL_VERSION: "3"' in app
     assert "${KNOWLEDGE_BASE_ID" not in compose
@@ -350,6 +362,13 @@ def test_ci_validates_compose_and_caddy_configuration():
     assert "docker compose -f compose.prod.yaml config --quiet" in workflow
     assert "--entrypoint caddy" in workflow
     assert "validate --config /etc/caddy/Caddyfile" in workflow
+
+
+def test_dockerfile_records_immutable_git_revision():
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "ARG GIT_SHA=unknown" in dockerfile
+    assert "org.opencontainers.image.revision" in dockerfile
+    assert "APP_GIT_SHA" in dockerfile
 
 
 def test_student_stage_selection_boolean_and_effective_auto_advance(monkeypatch):

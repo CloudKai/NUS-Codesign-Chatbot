@@ -39,6 +39,7 @@ from .context_planner import (
     ContextBudgetError,
     HistoryContextPlanner,
     ModelContextPlan,
+    estimate_tokens,
     memory_from_metadata,
 )
 from .domain import (
@@ -66,8 +67,6 @@ from .turn_perf import (
 from .specialists.review_orchestration import (
     REVIEW_DEPTH_DEEP,
     REVIEW_DEPTH_INCREMENTAL,
-    REVIEW_TRIGGER_INCREMENTAL,
-    bound_deep_review_interval,
 )
 from .specialists.routing import (
     ALLOWED_SPECIALISTS,
@@ -618,7 +617,8 @@ def _validated_result(
 
     Q&A never persists a stage transition. Coaching ADVANCE is treated as a
     readiness candidate only. Incremental Review cannot advance. Deep Review
-    may recommend stay/advance; FastAPI still executes the transition.
+    may record readiness information; FastAPI does not execute a stage
+    transition from that recommendation.
     """
     specialist = _request_specialist(request)
     if specialist == SPECIALIST_QA:
@@ -895,6 +895,9 @@ def _fast_chat_planner_from_settings() -> HistoryContextPlanner:
             output_reserve_tokens=4_000,
             safety_margin_tokens=1_000,
             recent_verbatim_messages=int(settings.fast_chat_recent_verbatim_messages),
+            recent_history_max_tokens=int(settings.fast_chat_recent_history_max_tokens),
+            history_message_max_tokens=int(settings.fast_chat_history_message_max_tokens),
+            soft_input_tokens=int(settings.fast_chat_soft_input_tokens),
         ),
         policy=CONTEXT_POLICY_FAST_CHAT,
     )
@@ -1082,16 +1085,16 @@ def _merge_deep_review(
         list(merged.assessment.evidence_identified),
         list(review.readiness_evidence),
     )
-    recommendation = StageDecision.STAY
-    if str(review.recommendation or "").strip().lower() == "advance":
-        recommendation = StageDecision.ADVANCE
+    review_ready = bool(getattr(review, "readiness_candidate", False)) or (
+        str(review.recommendation or "").strip().lower() == "advance"
+    )
     assessment = merged.assessment.model_copy(
         update={
-            "recommendation": recommendation,
+            "recommendation": StageDecision.STAY,
             "recommendation_rationale": rationale,
             "missing_reasoning_elements": missing,
             "evidence_identified": evidence,
-            "readiness_candidate": recommendation is StageDecision.ADVANCE
+            "readiness_candidate": review_ready
             or merged.assessment.readiness_candidate,
         }
     )
@@ -1208,15 +1211,65 @@ class AgentCoreCoachProvider:
             seed_request,
             include_recent_messages=False,
             context_policy=compose_policy,
-        ).composed_text
+        )
         record_field("prompt_compose_ms", elapsed_ms(compose_started))
+        system_prompt_tokens = 0
+        prompt_text = preliminary.composed_text
+        if context_policy == CONTEXT_POLICY_FAST_CHAT:
+            try:
+                from agentcore_runtime.system_prompt_budget import (
+                    fast_chat_system_prompt_for_estimate,
+                )
+            except ImportError:
+                from agentcore_runtime.structured_coach import specialist_system_prompt
+
+                def fast_chat_system_prompt_for_estimate(
+                    *,
+                    topic: str,
+                    trusted_runtime_rules: str = "",
+                    runtime_context: dict[str, Any] | None = None,
+                ) -> str:
+                    payload: dict[str, Any] = {
+                        "phase": "fast_chat",
+                        "topic": topic,
+                        "output_contract": "fast_chat_turn",
+                        "trusted_instructions": trusted_runtime_rules,
+                    }
+                    if runtime_context:
+                        payload["runtime_context"] = runtime_context
+                    return specialist_system_prompt(payload)
+
+            estimate_specialist = str(specialist or "").strip().lower()
+            if (
+                estimate_specialist not in ALLOWED_SPECIALISTS
+                and estimate_specialist != _FAST_CHAT_PHASE
+            ):
+                estimate_specialist = SPECIALIST_COACHING
+            runtime_specialist = (
+                SPECIALIST_COACHING
+                if estimate_specialist == _FAST_CHAT_PHASE
+                else estimate_specialist
+            )
+            system_text = fast_chat_system_prompt_for_estimate(
+                topic=agentcore_topic_for_stage(request.current_stage),
+                trusted_runtime_rules=preliminary.runtime_instructions,
+                runtime_context=_runtime_context(
+                    request,
+                    runtime_specialist,
+                    review_mode=review_mode,
+                    review_trigger=review_trigger,
+                ),
+            )
+            system_prompt_tokens = estimate_tokens(system_text)
+            prompt_text = preliminary.untrusted_turn_text
         plan_started = time.perf_counter()
         try:
             plan = planner.plan(
                 seed_request,
-                prompt_text=preliminary,
+                prompt_text=prompt_text,
                 existing_memory=existing,
                 policy=context_policy,
+                system_prompt_tokens=system_prompt_tokens,
             )
         except ContextBudgetError as error:
             raise ProviderUnavailableError(
@@ -1224,8 +1277,21 @@ class AgentCoreCoachProvider:
             ) from error
         record_field("context_planner_ms", elapsed_ms(plan_started))
         record_field("estimated_input_tokens", int(plan.estimated_input_tokens))
+        record_field("estimated_system_prompt_tokens", int(plan.estimated_system_prompt_tokens))
+        record_field(
+            "estimated_dynamic_input_tokens", int(plan.estimated_dynamic_input_tokens)
+        )
+        record_field(
+            "estimated_total_model_input_tokens", int(plan.estimated_input_tokens)
+        )
         record_field("history_tokens", int(plan.history_tokens))
         record_field("evidence_tokens", int(plan.evidence_tokens))
+        record_field("estimated_rag_tokens", int(plan.evidence_tokens))
+        record_field("estimated_memory_tokens", int(plan.estimated_memory_tokens))
+        record_field(
+            "estimated_current_message_tokens",
+            int(plan.estimated_current_message_tokens),
+        )
         record_field("prompt_tokens", int(plan.prompt_tokens))
         record_field("original_message_count", int(plan.original_message_count))
         record_field("verbatim_message_count", int(plan.verbatim_message_count))
@@ -1233,10 +1299,40 @@ class AgentCoreCoachProvider:
             record_field(
                 "fast_chat_recent_message_count", int(plan.verbatim_message_count)
             )
+            record_field(
+                "estimated_recent_history_tokens",
+                int(plan.estimated_recent_history_tokens),
+            )
+            record_field(
+                "recent_history_budget_tokens", int(plan.recent_history_budget_tokens)
+            )
+            record_field(
+                "largest_historical_message_tokens",
+                int(plan.largest_historical_message_tokens),
+            )
+            record_field(
+                "historical_messages_trimmed", int(plan.historical_messages_trimmed)
+            )
+            record_field(
+                "historical_message_tokens_trimmed",
+                int(plan.historical_message_tokens_trimmed),
+            )
+            record_field(
+                "fast_chat_soft_input_tokens",
+                int(settings.fast_chat_soft_input_tokens),
+            )
+            record_field(
+                "fast_chat_hard_input_tokens",
+                int(settings.fast_chat_max_input_tokens),
+            )
+        is_review = str(specialist or "").strip().lower() == SPECIALIST_REVIEW
+        record_field("deep_review_invoked", is_review)
+        if is_review:
+            record_field("deep_review_model_role", "review_deep")
         record_field("compressed_message_count", int(plan.compressed_message_count))
         record_field("compression_used", bool(plan.compression_used))
         record_field("context_policy", context_policy)
-        soft_ceiling = int(getattr(settings, "fast_chat_soft_input_tokens", 15_000))
+        soft_ceiling = int(getattr(settings, "fast_chat_soft_input_tokens", 12_000))
         if (
             context_policy == CONTEXT_POLICY_FAST_CHAT
             and int(plan.estimated_input_tokens) > soft_ceiling
@@ -1388,13 +1484,15 @@ class AgentCoreCoachProvider:
         )
 
     def _resolve_specialist(self, request: CoachRequest) -> str:
-        """Return the server-owned specialist, using Haiku only for free text.
+        """Return a non-review specialist for the retired Haiku router path.
 
-        Explicit ``request.specialist`` is treated as already validated by
-        application code or tests. HTTP overwrites browser hints to ``None``
-        before this adapter runs.
+        ``assess()`` does not call this. If it is reattached, ``review`` is
+        never honored here so a browser or router hint cannot select Sonnet.
+        Explicit Deep Review uses ``_assess_explicit_review``.
         """
         requested = str(request.specialist or "").strip().lower()
+        if requested == SPECIALIST_REVIEW:
+            requested = SPECIALIST_COACHING
         if requested in ALLOWED_SPECIALISTS:
             logger.info(
                 "agentcore_invoke role=router router_fallback=false "
@@ -1412,6 +1510,8 @@ class AgentCoreCoachProvider:
                 routed.confidence,
                 min_confidence=min_confidence,
             )
+            if specialist == SPECIALIST_REVIEW:
+                specialist = SPECIALIST_COACHING
             fallback = (
                 routed.confidence < min_confidence
                 or specialist != routed.specialist
@@ -1477,152 +1577,6 @@ class AgentCoreCoachProvider:
     def _parse_review_turn(self, parsed: dict[str, Any]) -> ReviewTurnOutput:
         """Validate Review structured output or raise."""
         return ReviewTurnOutput.model_validate(parsed)
-
-    def _apply_incremental_review(
-        self, request: CoachRequest, result: ProviderAssessmentResult
-    ) -> ProviderAssessmentResult:
-        """Keep the Review projection current after Coaching. Cannot advance."""
-        started = time.monotonic()
-        model_id = self._role_provider_model("review_incremental")[1]
-        payload, _plan = self._invoke_payload(
-            request,
-            SPECIALIST_REVIEW,
-            review_mode=REVIEW_DEPTH_INCREMENTAL,
-            review_trigger=REVIEW_TRIGGER_INCREMENTAL,
-        )
-        try:
-            parsed = self._call_runtime(payload)
-            review = self._parse_review_turn(parsed)
-            merged = _overlay_review_fields(
-                result,
-                review,
-                review_depth=REVIEW_DEPTH_INCREMENTAL,
-                review_model=model_id or HAIKU_4_5_MODEL_ID,
-                review_trigger=REVIEW_TRIGGER_INCREMENTAL,
-                force_stay=True,
-            )
-            self._log_role_precise(
-                role="review",
-                started=started,
-                success=True,
-                extra=(
-                    " review_depth=incremental review_trigger=incremental"
-                ),
-                model_role="review_incremental",
-            )
-            return merged
-        except ProviderUnavailableError as error:
-            self._log_role_precise(
-                role="review",
-                started=started,
-                success=False,
-                failure_category=error.category,
-                extra=" review_depth=incremental",
-                model_role="review_incremental",
-            )
-            raise
-        except (ValidationError, TypeError, ValueError) as error:
-            self._log_role_precise(
-                role="review",
-                started=started,
-                success=False,
-                failure_category="structured_output_failure",
-                extra=" review_depth=incremental",
-                model_role="review_incremental",
-            )
-            raise _malformed_error() from error
-        except Exception as error:
-            translated = _translate_agentcore_error(error)
-            self._log_role_precise(
-                role="review",
-                started=started,
-                success=False,
-                failure_category=translated.category,
-                extra=" review_depth=incremental",
-                model_role="review_incremental",
-            )
-            raise translated from error
-
-    def _apply_deep_review(
-        self,
-        request: CoachRequest,
-        result: ProviderAssessmentResult,
-        *,
-        review_trigger: str,
-        replace_response_text: bool,
-    ) -> tuple[ProviderAssessmentResult, bool]:
-        """Run Sonnet Deep Review. Fail closed to STAY without resetting state."""
-        started = time.monotonic()
-        model_id = self._role_provider_model("review_deep")[1]
-        payload, _plan = self._invoke_payload(
-            request,
-            SPECIALIST_REVIEW,
-            review_mode=REVIEW_DEPTH_DEEP,
-            review_trigger=review_trigger,
-        )
-        extra = (
-            f" review_depth=deep review_trigger={review_trigger}"
-            f" coaching_turns_since_deep_review="
-            f"{int(request.coaching_turns_since_deep_review)}"
-            f" deep_review_interval="
-            f"{bound_deep_review_interval(request.deep_review_interval_turns)}"
-            " deep_review_triggered=true"
-        )
-        try:
-            parsed = self._call_runtime(payload)
-            review = self._parse_review_turn(parsed)
-            merged, succeeded = _merge_deep_review(
-                request,
-                result,
-                review,
-                review_model=model_id or SONNET_4_6_MODEL_ID,
-                review_trigger=review_trigger,
-            )
-            if replace_response_text:
-                text = str(review.response_text or "").strip()
-                if text:
-                    merged = merged.model_copy(update={"response_text": text})
-            failure_category = "" if succeeded else "wrong_stage"
-            self._log_role_precise(
-                role="review",
-                started=started,
-                success=succeeded,
-                failure_category=failure_category,
-                extra=extra,
-                model_role="review_deep",
-            )
-            return merged, succeeded
-        except ProviderUnavailableError as error:
-            self._log_role_precise(
-                role="review",
-                started=started,
-                success=False,
-                failure_category=error.category,
-                extra=extra,
-                model_role="review_deep",
-            )
-            return _stay_after_deep_review_failure(result), False
-        except (ValidationError, TypeError, ValueError):
-            self._log_role_precise(
-                role="review",
-                started=started,
-                success=False,
-                failure_category="structured_output_failure",
-                extra=extra,
-                model_role="review_deep",
-            )
-            return _stay_after_deep_review_failure(result), False
-        except Exception as error:
-            translated = _translate_agentcore_error(error)
-            self._log_role_precise(
-                role="review",
-                started=started,
-                success=False,
-                failure_category=translated.category,
-                extra=extra,
-                model_role="review_deep",
-            )
-            return _stay_after_deep_review_failure(result), False
 
     def _with_memory(
         self,

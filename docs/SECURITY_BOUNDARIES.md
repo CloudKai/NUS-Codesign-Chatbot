@@ -30,7 +30,10 @@ Student → Streamlit → FastAPI
   object key, or placing instructions in an uploaded document.
 - Client-supplied `history`, `retrieved_chunks`, `image_inputs`,
   `source_context`, and privileged `specialist` names are not authoritative.
-  The server loads store state and selects `qa` / `coaching` / `review`.
+  Normal `POST /api/v1/coach/turn` always clears `specialist`. Explicit Deep
+  Review is `POST /api/v1/threads/{thread_id}/deep-review`, which loads
+  owner, notebook, stage, history, sources, and eligibility from server
+  state and stamps `specialist=review` only after that sanitization.
 
 ## Retrieval authorization
 
@@ -92,10 +95,12 @@ guardrail configuration fails production startup and the runtime loader.
 
 - DSQL / SQLite is the only authoritative transcript.
 - Fast-chat planning always sends derived `conversation_memory` plus a bounded
-  recent verbatim window (default 6). Deep Review may still use full-history
-  when it fits that broader budget. Compression affects model input only and
-  never deletes stored messages. `conversation_memory` is a derived
-  cache/projection that is invalidated when `conversation_revision` changes.
+  recent verbatim window (at most 6 messages, 3,000 estimated recent-history
+  tokens, 1,500 per historical message). Deep Review may still use
+  full-history when it fits that broader budget. Compression affects model
+  input only and never deletes stored messages. `conversation_memory` is a
+  derived cache/projection that is invalidated when `conversation_revision`
+  changes.
 - AgentCore Memory is not a production transcript. Runtime sessions are
   `stateless-<uuid>`.
 - Conversation revision keeps the active branch authoritative. Superseded

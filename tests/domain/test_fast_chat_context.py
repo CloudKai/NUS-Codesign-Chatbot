@@ -48,6 +48,11 @@ def _fast_planner() -> HistoryContextPlanner:
             output_reserve_tokens=4_000,
             safety_margin_tokens=1_000,
             recent_verbatim_messages=int(settings.fast_chat_recent_verbatim_messages),
+            recent_history_max_tokens=int(settings.fast_chat_recent_history_max_tokens),
+            history_message_max_tokens=int(
+                settings.fast_chat_history_message_max_tokens
+            ),
+            soft_input_tokens=int(settings.fast_chat_soft_input_tokens),
         ),
         policy=CONTEXT_POLICY_FAST_CHAT,
     )
@@ -63,10 +68,12 @@ def test_four_messages_are_kept_verbatim() -> None:
 
 
 def test_fifty_messages_are_capped_and_compressed() -> None:
+    history = _history(50)
     plan = _fast_planner().plan(
-        _request(history=_history(50)),
+        _request(history=history),
         prompt_text="brief",
     )
+    assert len(history) == 50
     assert plan.verbatim_message_count <= int(settings.fast_chat_recent_verbatim_messages)
     assert plan.compressed_message_count == 50 - plan.verbatim_message_count
     assert plan.compression_used is True
@@ -186,7 +193,7 @@ def test_fast_chat_default_window_is_six_message_objects() -> None:
 
 def test_fast_chat_window_for_short_and_long_histories() -> None:
     planner = _fast_planner()
-    for count in (0, 1, 2, 4, 6, 7, 20, 50):
+    for count in (0, 1, 2, 4, 6, 7, 20, 50, 100):
         history = _history(count)
         plan = planner.plan(_request(history=history), prompt_text="brief")
         expected = min(count, 6)
@@ -214,3 +221,200 @@ def test_fast_chat_window_for_short_and_long_histories() -> None:
             assert history[0]["content"] in aged_text
             assert history[0]["content"] not in recent_text
 
+
+def _message_texts(plan) -> list[str]:
+    """Return planner history texts in chronological order."""
+    texts: list[str] = []
+    for item in plan.messages:
+        for block in item["content"]:
+            texts.append(str(block.get("text") or ""))
+    return texts
+
+
+def test_six_short_messages_fit_under_history_token_budget() -> None:
+    plan = _fast_planner().plan(_request(history=_history(6)), prompt_text="brief")
+    assert plan.verbatim_message_count == 6
+    assert plan.estimated_recent_history_tokens <= 3_000
+
+
+def test_six_medium_messages_never_exceed_history_token_budget() -> None:
+    history = [
+        {"role": "user" if index % 2 == 0 else "assistant", "content": ("medium " * 400)}
+        for index in range(6)
+    ]
+    plan = _fast_planner().plan(_request(history=history), prompt_text="brief")
+    assert plan.verbatim_message_count <= 6
+    assert plan.estimated_recent_history_tokens <= 3_000
+
+
+def test_six_huge_messages_send_fewer_than_six() -> None:
+    history = [
+        {
+            "role": "user" if index % 2 == 0 else "assistant",
+            "content": ("huge-paste " * 2_000),
+        }
+        for index in range(6)
+    ]
+    plan = _fast_planner().plan(_request(history=history), prompt_text="brief")
+    assert plan.verbatim_message_count < 6
+    assert plan.estimated_recent_history_tokens <= 3_000
+
+
+def test_one_huge_historical_paste_is_capped_per_message() -> None:
+    from backend.context_planner import estimate_tokens
+
+    paste = "x" * 30_000
+    assert estimate_tokens(paste) >= 10_000
+    plan = _fast_planner().plan(
+        _request(history=[{"role": "user", "content": paste}]),
+        prompt_text="brief",
+    )
+    texts = _message_texts(plan)
+    assert texts
+    assert estimate_tokens(texts[0]) <= 1_500
+    assert plan.largest_historical_message_tokens >= 1_500
+
+
+def test_current_message_is_not_history_capped() -> None:
+    from backend.context_planner import estimate_tokens
+
+    current = "CURRENT_UNIQUE_TURN " + ("detail " * 1_400)
+    history = [
+        {"role": "user", "content": "old paste " + ("y" * 8_000)},
+        {"role": "assistant", "content": "What remains unresolved?"},
+    ]
+    assert len(current) <= 12_000
+    plan = _fast_planner().plan(
+        _request(student_message=current, history=history),
+        prompt_text=current,
+    )
+    recent = " ".join(_message_texts(plan))
+    assert "CURRENT_UNIQUE_TURN" not in recent
+    assert estimate_tokens(current) > 1_500
+    assert plan.estimated_current_message_tokens == estimate_tokens(current)
+    assert plan.estimated_recent_history_tokens <= 3_000
+
+
+def test_total_estimate_includes_system_prompt_reserve() -> None:
+    plan = _fast_planner().plan(
+        _request(history=_history(2)),
+        prompt_text="untrusted-turn",
+        system_prompt_tokens=4_321,
+    )
+    assert plan.estimated_system_prompt_tokens == 4_321
+    assert plan.estimated_input_tokens >= 4_321
+    assert plan.estimated_dynamic_input_tokens == plan.estimated_input_tokens - 4_321
+
+
+def test_typical_no_rag_short_coaching_aims_at_soft_budget() -> None:
+    from agentcore_runtime.system_prompt_budget import (
+        fast_chat_system_prompt_for_estimate,
+    )
+    from backend.context_planner import estimate_tokens
+
+    system_text = fast_chat_system_prompt_for_estimate(
+        topic="problem_identification",
+        trusted_runtime_rules="Keep the stage authoritative.",
+    )
+    system_tokens = estimate_tokens(system_text)
+    plan = _fast_planner().plan(
+        _request(history=_history(6), student_message="I compared two constraints."),
+        prompt_text="untrusted current turn",
+        system_prompt_tokens=system_tokens,
+    )
+    assert plan.estimated_system_prompt_tokens == system_tokens
+    assert plan.estimated_input_tokens <= 12_000
+
+
+def test_rag_fallback_repack_stays_under_hard_total() -> None:
+    rag = "EVIDENCE " + ("chunk " * 2_000)
+    history = [
+        {"role": "user" if index % 2 == 0 else "assistant", "content": ("old " * 1_500)}
+        for index in range(6)
+    ]
+    first = _fast_planner().plan(
+        _request(history=history, student_message="What does lecture 3 say?"),
+        prompt_text="current without rag",
+        system_prompt_tokens=4_000,
+    )
+    second = _fast_planner().plan(
+        _request(
+            history=history,
+            student_message="What does lecture 3 say?",
+            source_context=rag,
+        ),
+        prompt_text="current with rag\n" + rag,
+        system_prompt_tokens=4_000,
+    )
+    assert first.estimated_input_tokens <= 16_000
+    assert second.estimated_input_tokens <= 16_000
+    assert second.estimated_system_prompt_tokens == 4_000
+    assert second.verbatim_message_count <= first.verbatim_message_count
+
+
+def test_total_budget_shrink_ages_original_history_not_clipped_copy() -> None:
+    """Soft-budget drops must feed ConversationMemory the unclipped original."""
+    from backend.context_planner import estimate_tokens
+
+    decision = (
+        "We rejected A after accessibility review and chose B, although "
+        "maintenance remains a concern."
+    )
+    prefix = "lorem " * 900
+    history = [
+        {"role": "user", "content": prefix + " " + decision},
+        {"role": "assistant", "content": "What remains unresolved?"},
+    ]
+    clipped = _fast_planner().plan(
+        _request(history=history),
+        prompt_text="brief",
+        system_prompt_tokens=1_000,
+    )
+    recent = " ".join(_message_texts(clipped))
+    assert "rejected A" not in recent
+    plan = _fast_planner().plan(
+        _request(history=history, student_message="Why did I reject A?"),
+        prompt_text="Why did I reject A?",
+        system_prompt_tokens=11_000,
+    )
+    assert plan.estimated_input_tokens <= 12_000
+    assert plan.compressed_memory is not None
+    assert "rejected A" not in " ".join(_message_texts(plan))
+    rendered = plan.compressed_memory.format_for_prompt()
+    assert "rejected A" in rendered
+    assert "chose B" in rendered
+    assert estimate_tokens(prefix + " " + decision) > 1_500
+
+
+def test_system_prompt_estimate_includes_runtime_context() -> None:
+    from agentcore_runtime.structured_coach import specialist_system_prompt
+    from agentcore_runtime.system_prompt_budget import (
+        fast_chat_system_prompt_for_estimate,
+    )
+    from backend.context_planner import estimate_tokens
+
+    runtime_context = {
+        "current_stage": "problem_identification",
+        "specialist": "coaching",
+        "allowed_citations": ["S1"],
+    }
+    without_ctx = fast_chat_system_prompt_for_estimate(
+        topic="problem_identification",
+        trusted_runtime_rules="Keep the stage authoritative.",
+    )
+    with_ctx = fast_chat_system_prompt_for_estimate(
+        topic="problem_identification",
+        trusted_runtime_rules="Keep the stage authoritative.",
+        runtime_context=runtime_context,
+    )
+    assert with_ctx == specialist_system_prompt(
+        {
+            "phase": "fast_chat",
+            "topic": "problem_identification",
+            "output_contract": "fast_chat_turn",
+            "trusted_instructions": "Keep the stage authoritative.",
+            "runtime_context": runtime_context,
+        }
+    )
+    assert "Trusted runtime context" in with_ctx
+    assert estimate_tokens(with_ctx) > estimate_tokens(without_ctx)

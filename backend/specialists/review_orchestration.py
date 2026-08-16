@@ -27,6 +27,8 @@ MIN_DEEP_REVIEW_INTERVAL_TURNS = 1
 MAX_DEEP_REVIEW_INTERVAL_TURNS = 20
 
 COUNTER_SETTINGS_KEY = "coaching_turns_since_deep_review"
+DEEP_REVIEW_SNAPSHOT_KEY = "deep_review_snapshot"
+DEEP_REVIEW_TURN_MESSAGE = "Start Deep Review"
 
 REVIEW_DEPTH_INCREMENTAL = "incremental"
 REVIEW_DEPTH_DEEP = "deep"
@@ -168,3 +170,87 @@ def resolve_deep_review_trigger(
 def should_run_deep_review(trigger: str | None) -> bool:
     """Return whether Sonnet Deep Review should run for ``trigger``."""
     return str(trigger or "").strip().lower() in DEEP_REVIEW_TRIGGERS
+
+
+def explicit_deep_review_available(
+    *,
+    coaching_turns_since_deep_review: int,
+    interval: int,
+) -> bool:
+    """Return whether persisted Coaching turns unlock one explicit Deep Review.
+
+    Reaching 4, 5, or 6 unused qualifying turns still yields one entitlement.
+    The counter is not a bank of stacked reviews.
+
+    Args:
+        coaching_turns_since_deep_review: Durable notebook counter.
+        interval: Configured ``DEEP_REVIEW_INTERVAL_TURNS``.
+
+    Returns:
+        ``True`` when ``counter >= interval``.
+    """
+    current = parse_coaching_turns_since_deep_review(coaching_turns_since_deep_review)
+    return current >= bound_deep_review_interval(interval)
+
+
+def deep_review_snapshot_payload(
+    *,
+    conversation_revision: int,
+    created_at: str,
+    synthesis: str,
+    summary: str,
+    strengths: list[str],
+    areas_to_develop: list[str],
+    facione_scores: dict[str, Any],
+    working_conclusion: str,
+    readiness_candidate: bool,
+    readiness_evidence: list[str],
+    missing_requirements: list[str],
+    model_id: str,
+) -> dict[str, Any]:
+    """Return the durable Deep Review snapshot stored in notebook settings.
+
+    Hidden prompts are never included. Normal Coaching persist must omit this
+    key so a later Haiku turn cannot overwrite the snapshot.
+
+    Args:
+        conversation_revision: Revision reviewed through.
+        created_at: UTC timestamp of the successful review.
+        synthesis: Formative synthesis text.
+        summary: Student-facing summary.
+        strengths: Named strengths.
+        areas_to_develop: Named development areas.
+        facione_scores: Facione profile mapping.
+        working_conclusion: Working conclusion at review time.
+        readiness_candidate: Whether Sonnet marked stage readiness.
+        readiness_evidence: Evidence strings supporting readiness.
+        missing_requirements: Remaining requirements.
+        model_id: Review model identifier (Sonnet 4.6).
+
+    Returns:
+        JSON-serialisable snapshot dictionary.
+    """
+    return {
+        "reviewed_through_revision": max(0, int(conversation_revision)),
+        "created_at": str(created_at or "").strip(),
+        "synthesis": " ".join(str(synthesis or "").split()).strip()[:4_000],
+        "summary": " ".join(str(summary or "").split()).strip()[:4_000],
+        "strengths": [str(item).strip() for item in strengths if str(item).strip()][:8],
+        "areas_to_develop": [
+            str(item).strip() for item in areas_to_develop if str(item).strip()
+        ][:8],
+        "facione_scores": dict(facione_scores or {}),
+        "working_conclusion": " ".join(str(working_conclusion or "").split()).strip()[
+            :4_000
+        ],
+        "readiness_candidate": bool(readiness_candidate),
+        "readiness_evidence": [
+            str(item).strip() for item in readiness_evidence if str(item).strip()
+        ][:12],
+        "missing_requirements": [
+            str(item).strip() for item in missing_requirements if str(item).strip()
+        ][:12],
+        "model_id": str(model_id or "").strip()[:128],
+        "review_depth": REVIEW_DEPTH_DEEP,
+        "review_trigger": REVIEW_TRIGGER_EXPLICIT,
+    }

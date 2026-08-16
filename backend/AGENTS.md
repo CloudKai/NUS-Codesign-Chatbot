@@ -50,7 +50,7 @@ FastAPI (`api.py` façade → `http/app.py`)
 | `providers.py` | OpenAI, mock selection, Bedrock and AgentCore factory wiring |
 | `bedrock_provider.py` | Amazon Bedrock Converse coach adapter (injected client; no AWS in tests) |
 | `agentcore_provider.py` | AgentCore Runtime coach adapter (injected client; no AWS in tests). Live parsing lives in `agentcore_runtime/`. Runtime model/guardrail env is fail-closed in `agentcore_runtime/model.py`. |
-| `specialists/` | Legacy server-owned `qa` / `coaching` / `review` helpers. Active AgentCore chat uses one `fast_chat` invoke; the browser cannot pick a privileged specialist. |
+| `specialists/` | Legacy server-owned `qa` / `coaching` / `review` helpers. Active AgentCore chat uses one `fast_chat` invoke. Explicit Deep Review is a dedicated FastAPI route; the browser cannot pick a privileged specialist on `/coach/turn`. |
 | `prompts/` | Application composer for mock/OpenAI/Bedrock. Canonical AgentCore pedagogy is `agentcore_runtime/prompts/`. |
 | `agentcore_harness_provider.py` | Isolated InvokeHarness Luna eval adapter (not production DEFAULT) |
 | `context_planner.py` | Token-aware model-context planner (`fast_chat` vs Deep Review `full_history`) |

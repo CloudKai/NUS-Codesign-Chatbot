@@ -250,6 +250,9 @@ def test_counter_resets_only_after_successful_deep_review() -> None:
 
 def test_settings_key_survives_notebook_split() -> None:
     assert COUNTER_SETTINGS_KEY in SETTINGS_KEYS
+    from backend.specialists.review_orchestration import DEEP_REVIEW_SNAPSHOT_KEY
+
+    assert DEEP_REVIEW_SNAPSHOT_KEY in SETTINGS_KEYS
 
 
 def test_successful_coaching_is_one_fast_chat_call() -> None:

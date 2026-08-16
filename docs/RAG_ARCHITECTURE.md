@@ -27,7 +27,8 @@ the Knowledge Base or student S3.
                 │ skip                  │ retrieve
                 ▼                       ▼
         conversation memory     Course materials
-        + 6 recent turns                │
+        + <=6 recent turns              │
+        + <=3000 hist tokens            │
                                 Bedrock KB Retrieve
                                 + student-source retrieve
                                 + ownership / selected-source checks

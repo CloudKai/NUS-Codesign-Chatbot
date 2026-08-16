@@ -26,8 +26,10 @@ DEFAULT_OUTPUT_RESERVE_TOKENS = 32_000
 DEFAULT_SAFETY_MARGIN_TOKENS = 30_000
 DEFAULT_RECENT_VERBATIM_MESSAGES = 12
 DEFAULT_FAST_CHAT_RECENT_VERBATIM_MESSAGES = 6
-DEFAULT_FAST_CHAT_MAX_INPUT_TOKENS = 20_000
-DEFAULT_FAST_CHAT_SOFT_INPUT_TOKENS = 15_000
+DEFAULT_FAST_CHAT_MAX_INPUT_TOKENS = 16_000
+DEFAULT_FAST_CHAT_SOFT_INPUT_TOKENS = 12_000
+DEFAULT_FAST_CHAT_RECENT_HISTORY_MAX_TOKENS = 3_000
+DEFAULT_FAST_CHAT_HISTORY_MESSAGE_MAX_TOKENS = 1_500
 CONTEXT_POLICY_FULL_HISTORY = "full_history"
 CONTEXT_POLICY_FAST_CHAT = "fast_chat"
 # Conservative: under-use the window rather than overflow it.
@@ -79,6 +81,9 @@ class ContextBudget(BaseModel):
     recent_verbatim_messages: int = Field(
         default=DEFAULT_RECENT_VERBATIM_MESSAGES, ge=1, le=64
     )
+    recent_history_max_tokens: int = Field(default=0, ge=0, le=64_000)
+    history_message_max_tokens: int = Field(default=0, ge=0, le=32_000)
+    soft_input_tokens: int = Field(default=0, ge=0, le=64_000)
     chars_per_token: float = Field(default=DEFAULT_CHARS_PER_TOKEN, gt=0.5, le=8.0)
     image_tokens: int = Field(default=DEFAULT_IMAGE_TOKENS, ge=0, le=20_000)
 
@@ -225,6 +230,15 @@ class ModelContextPlan(BaseModel):
     model_context_limit: int
     max_input_tokens: int
     compression_failed: bool = False
+    estimated_system_prompt_tokens: int = 0
+    estimated_dynamic_input_tokens: int = 0
+    estimated_recent_history_tokens: int = 0
+    recent_history_budget_tokens: int = 0
+    largest_historical_message_tokens: int = 0
+    historical_messages_trimmed: int = 0
+    historical_message_tokens_trimmed: int = 0
+    estimated_memory_tokens: int = 0
+    estimated_current_message_tokens: int = 0
 
 
 class HistoryCompressor(Protocol):
@@ -260,6 +274,115 @@ def clip_history_text(value: Any, *, limit: int = MAX_HISTORY_MESSAGE_CHARS) -> 
     if len(cleaned) <= limit:
         return cleaned
     return cleaned[: max(1, limit - 1)].rstrip() + "…"
+
+
+def clip_text_to_estimated_tokens(
+    value: Any,
+    max_tokens: int,
+    *,
+    chars_per_token: float = DEFAULT_CHARS_PER_TOKEN,
+) -> str:
+    """Clip one historical message to an estimated token budget.
+
+    The current student message must not use this helper. Historical context
+    is expendable; the active turn is not.
+
+    Args:
+        value: Message text.
+        max_tokens: Inclusive estimated-token ceiling.
+        chars_per_token: Conservative characters-per-token ratio.
+
+    Returns:
+        Whitespace-normalized text whose local estimate is ``<= max_tokens``.
+    """
+    cleaned = " ".join(str(value or "").split()).strip()
+    if max_tokens <= 0 or not cleaned:
+        return ""
+    if estimate_tokens(cleaned, chars_per_token=chars_per_token) <= max_tokens:
+        return cleaned
+    max_chars = max(1, int(max_tokens * max(0.5, float(chars_per_token))))
+    clipped = cleaned[: max(1, max_chars - 1)].rstrip() + "…"
+    while (
+        clipped
+        and estimate_tokens(clipped, chars_per_token=chars_per_token) > max_tokens
+    ):
+        if len(clipped) <= 1:
+            return ""
+        clipped = clipped[:-2].rstrip() + "…"
+    return clipped
+
+
+def pack_fast_chat_recent_turns(
+    turns: list[dict[str, str]],
+    *,
+    max_messages: int,
+    max_history_tokens: int,
+    max_message_tokens: int,
+    chars_per_token: float = DEFAULT_CHARS_PER_TOKEN,
+) -> tuple[list[dict[str, str]], list[dict[str, str]], dict[str, int]]:
+    """Pack newest-first Fast Chat history under count and token budgets.
+
+    Walks newest to oldest, clips each historical message, and stops (does not
+    skip) once the recent-history total would exceed ``max_history_tokens``.
+    Returned packed turns are restored to chronological order.
+
+    Args:
+        turns: Active historical user/assistant turns, oldest first.
+        max_messages: Maximum message objects (typically 6).
+        max_history_tokens: Total estimated-token budget for packed history.
+        max_message_tokens: Per-historical-message estimated-token cap.
+        chars_per_token: Conservative estimator ratio.
+
+    Returns:
+        Packed chronological turns, dropped older turns from the window, and
+        integer telemetry about clipping.
+    """
+    window = turns[-max_messages:] if max_messages > 0 else []
+    clipped_window: list[dict[str, str]] = []
+    largest = 0
+    trimmed_messages = 0
+    trimmed_tokens = 0
+    for item in window:
+        original_tokens = estimate_tokens(
+            item["content"], chars_per_token=chars_per_token
+        )
+        largest = max(largest, original_tokens)
+        clipped = clip_text_to_estimated_tokens(
+            item["content"],
+            max_message_tokens,
+            chars_per_token=chars_per_token,
+        )
+        new_tokens = estimate_tokens(clipped, chars_per_token=chars_per_token)
+        if new_tokens < original_tokens:
+            trimmed_messages += 1
+            trimmed_tokens += original_tokens - new_tokens
+        clipped_window.append({"role": item["role"], "content": clipped})
+    packed_newest_first: list[dict[str, str]] = []
+    dropped_original_newest_first: list[dict[str, str]] = []
+    total = 0
+    newest_first_clipped = list(reversed(clipped_window))
+    newest_first_original = list(reversed(window))
+    for index, item in enumerate(newest_first_clipped):
+        cost = (
+            estimate_tokens(item["content"], chars_per_token=chars_per_token)
+            + DEFAULT_MESSAGE_OVERHEAD_TOKENS
+        )
+        if packed_newest_first and total + cost > max_history_tokens:
+            dropped_original_newest_first = newest_first_original[index:]
+            break
+        packed_newest_first.append(item)
+        total += cost
+    packed = list(reversed(packed_newest_first))
+    dropped = list(reversed(dropped_original_newest_first))
+    telemetry = {
+        "estimated_recent_history_tokens": total,
+        "recent_history_budget_tokens": int(max_history_tokens),
+        "largest_historical_message_tokens": largest,
+        "historical_messages_trimmed": trimmed_messages,
+        "historical_message_tokens_trimmed": trimmed_tokens,
+        "fast_chat_recent_message_count": len(packed),
+    }
+    return packed, dropped, telemetry
 
 
 def active_history_turns(
@@ -326,9 +449,22 @@ def _tokens_for_turns(
     return total
 
 
+def _memory_excerpt(value: str) -> str:
+    """Clip a memory item, keeping a late decision cue instead of only the head."""
+    cleaned = " ".join(str(value).split()).strip()
+    if len(cleaned) <= MAX_MEMORY_FIELD_CHARS:
+        return cleaned
+    head = cleaned[:MAX_MEMORY_FIELD_CHARS]
+    match = _DECISION_HINT.search(cleaned)
+    if match is not None and match.start() >= MAX_MEMORY_FIELD_CHARS - 40:
+        start = max(0, match.start() - 80)
+        return cleaned[start : start + MAX_MEMORY_FIELD_CHARS]
+    return head
+
+
 def _append_unique(items: list[str], value: str) -> None:
     """Append a clipped unique memory item."""
-    cleaned = " ".join(str(value).split()).strip()[:MAX_MEMORY_FIELD_CHARS]
+    cleaned = _memory_excerpt(value)
     if not cleaned:
         return
     key = cleaned.casefold()
@@ -386,7 +522,7 @@ class ExtractiveHistoryCompressor:
                 if not memory.selected_concept and re.search(
                     r"\b(chose|selected|will use|going with)\b", text, re.IGNORECASE
                 ):
-                    memory.selected_concept = text[:MAX_MEMORY_FIELD_CHARS]
+                    memory.selected_concept = _memory_excerpt(text)
                 if re.search(r"\breject", text, re.IGNORECASE):
                     _append_unique(memory.rejected_alternatives, text)
             if _ASSUMPTION_HINT.search(text):
@@ -455,18 +591,24 @@ class HistoryContextPlanner:
         existing_memory: ConversationMemory | None = None,
         compressor: HistoryCompressor | None = None,
         policy: str | None = None,
+        system_prompt_tokens: int = 0,
     ) -> ModelContextPlan:
         """Return history messages and optional derived memory for one turn.
 
         Fast-chat policy always keeps at most ``recent_verbatim_messages``
-        turns verbatim and compresses the rest into ConversationMemory. The
-        current student message is not copied into history because it already
-        appears once in the composed prompt.
+        turns verbatim, then applies the recent-history token budget and
+        per-historical-message cap. Memory is derived from aged-out turns
+        before model-facing clipping. The current student message is not
+        copied into history and is never history-capped.
+
+        ``estimated_input_tokens`` is the local total of system-prompt
+        reserve + dynamic prompt + history + memory + image overhead.
         """
         budget = self._budget
         active_policy = str(policy or self._policy).strip().lower()
         if active_policy != CONTEXT_POLICY_FAST_CHAT:
             active_policy = CONTEXT_POLICY_FULL_HISTORY
+        revision = int(request.conversation_revision or 0)
         turns = active_history_turns(
             list(request.history),
             current_student_message=request.student_message,
@@ -477,8 +619,15 @@ class HistoryContextPlanner:
         evidence_tokens = estimate_tokens(
             request.source_context, chars_per_token=budget.chars_per_token
         )
+        current_message_tokens = estimate_tokens(
+            request.student_message, chars_per_token=budget.chars_per_token
+        )
+        system_tokens = max(0, int(system_prompt_tokens))
         image_tokens = budget.image_tokens * len(request.image_inputs)
-        reserved = prompt_tokens + image_tokens
+        current_turn_overhead = (
+            DEFAULT_MESSAGE_OVERHEAD_TOKENS if str(request.student_message or "").strip() else 0
+        )
+        reserved = prompt_tokens + image_tokens + system_tokens + current_turn_overhead
         remaining = budget.max_input_tokens - reserved
         if remaining <= 0:
             raise ContextBudgetError(
@@ -488,9 +637,7 @@ class HistoryContextPlanner:
             turns, chars_per_token=budget.chars_per_token
         )
         memory = existing_memory
-        if memory is not None and not memory.matches_revision(
-            int(request.conversation_revision or 0)
-        ):
+        if memory is not None and not memory.matches_revision(revision):
             memory = None
 
         cap_verbatim = (
@@ -499,21 +646,22 @@ class HistoryContextPlanner:
         )
         if not cap_verbatim:
             estimated = reserved + history_tokens
-            return ModelContextPlan(
-                messages=converse_messages(turns),
-                compressed_memory=None,
-                full_history_used=True,
-                compression_used=False,
-                original_message_count=len(turns),
-                verbatim_message_count=len(turns),
-                compressed_message_count=0,
-                estimated_input_tokens=estimated,
-                history_tokens=history_tokens,
-                evidence_tokens=evidence_tokens,
+            return self._result(
+                turns=turns,
+                aged_count=0,
+                memory=None,
                 prompt_tokens=prompt_tokens,
-                safety_margin=budget.safety_margin_tokens,
-                model_context_limit=budget.model_context_limit_tokens,
-                max_input_tokens=budget.max_input_tokens,
+                evidence_tokens=evidence_tokens,
+                current_message_tokens=current_message_tokens,
+                system_tokens=system_tokens,
+                estimated=estimated,
+                history_tokens=history_tokens,
+                memory_tokens=0,
+                pack_telemetry={},
+                compression_used=False,
+                compression_failed=False,
+                full_history_used=True,
+                original_count=len(turns),
             )
 
         recent_n = min(budget.recent_verbatim_messages, len(turns))
@@ -521,55 +669,215 @@ class HistoryContextPlanner:
         recent = turns[-recent_n:] if recent_n else []
         compression_failed = False
         active_compressor = compressor or self._compressor
-        if aged:
+
+        def merge_aged(
+            extra: list[dict[str, str]],
+            current: ConversationMemory | None,
+        ) -> ConversationMemory | None:
+            nonlocal compression_failed
+            if not extra:
+                return current
             try:
-                memory = active_compressor.compress(
-                    aged_messages=aged,
-                    existing=memory,
-                    conversation_revision=int(request.conversation_revision or 0),
+                return active_compressor.compress(
+                    aged_messages=extra,
+                    existing=current,
+                    conversation_revision=revision,
                 )
             except Exception:
                 compression_failed = True
-                if memory is None or not memory.matches_revision(
-                    int(request.conversation_revision or 0)
-                ):
-                    memory = None
-        memory_tokens = (
-            estimate_tokens(memory.format_for_prompt(), chars_per_token=budget.chars_per_token)
-            if memory is not None
-            else 0
-        )
+                if current is None or not current.matches_revision(revision):
+                    return None
+                return current
+
+        memory = merge_aged(aged, memory)
+        pack_telemetry: dict[str, int] = {}
+        recent_for_memory = list(recent)
+        if active_policy == CONTEXT_POLICY_FAST_CHAT:
+            history_cap = (
+                int(budget.recent_history_max_tokens)
+                or DEFAULT_FAST_CHAT_RECENT_HISTORY_MAX_TOKENS
+            )
+            message_cap = (
+                int(budget.history_message_max_tokens)
+                or DEFAULT_FAST_CHAT_HISTORY_MESSAGE_MAX_TOKENS
+            )
+            unclipped_recent = list(recent)
+            recent, dropped_from_window, pack_telemetry = pack_fast_chat_recent_turns(
+                recent,
+                max_messages=len(recent),
+                max_history_tokens=history_cap,
+                max_message_tokens=message_cap,
+                chars_per_token=budget.chars_per_token,
+            )
+            recent_for_memory = (
+                unclipped_recent[-len(recent) :] if recent else []
+            )
+            if dropped_from_window:
+                memory = merge_aged(dropped_from_window, memory)
+                aged = aged + dropped_from_window
+
+        def memory_token_count(current: ConversationMemory | None) -> int:
+            if current is None:
+                return 0
+            return estimate_tokens(
+                current.format_for_prompt(), chars_per_token=budget.chars_per_token
+            )
+
+        def drop_oldest_recent() -> None:
+            nonlocal recent, recent_for_memory, aged, memory, memory_tokens
+            if not recent:
+                return
+            dropped_original = recent_for_memory[:1] or recent[:1]
+            recent = recent[1:]
+            recent_for_memory = recent_for_memory[1:]
+            aged = aged + dropped_original
+            memory = merge_aged(dropped_original, memory)
+            memory_tokens = memory_token_count(memory)
+
+        memory_tokens = memory_token_count(memory)
+        soft_ceiling = int(budget.soft_input_tokens or 0)
+        if active_policy == CONTEXT_POLICY_FAST_CHAT and soft_ceiling <= 0:
+            soft_ceiling = DEFAULT_FAST_CHAT_SOFT_INPUT_TOKENS
+
+        def estimated_total(recent_turns: list[dict[str, str]], mem_tokens: int) -> int:
+            return (
+                reserved
+                + _tokens_for_turns(recent_turns, chars_per_token=budget.chars_per_token)
+                + mem_tokens
+            )
+
         while True:
             recent_tokens = _tokens_for_turns(
                 recent, chars_per_token=budget.chars_per_token
             )
             estimated = reserved + recent_tokens + memory_tokens
-            if estimated <= budget.max_input_tokens:
-                return ModelContextPlan(
-                    messages=converse_messages(recent),
-                    compressed_memory=memory,
-                    full_history_used=not aged,
-                    compression_used=bool(aged),
-                    original_message_count=len(turns),
-                    verbatim_message_count=len(recent),
-                    compressed_message_count=len(aged),
-                    estimated_input_tokens=estimated,
-                    history_tokens=recent_tokens + memory_tokens,
-                    evidence_tokens=evidence_tokens,
+            over_hard = estimated > budget.max_input_tokens
+            over_soft = (
+                active_policy == CONTEXT_POLICY_FAST_CHAT
+                and soft_ceiling > 0
+                and estimated > soft_ceiling
+            )
+            if not over_hard and not over_soft:
+                return self._result(
+                    turns=recent,
+                    aged_count=len(aged),
+                    memory=memory,
                     prompt_tokens=prompt_tokens,
-                    safety_margin=budget.safety_margin_tokens,
-                    model_context_limit=budget.model_context_limit_tokens,
-                    max_input_tokens=budget.max_input_tokens,
+                    evidence_tokens=evidence_tokens,
+                    current_message_tokens=current_message_tokens,
+                    system_tokens=system_tokens,
+                    estimated=estimated,
+                    history_tokens=recent_tokens + memory_tokens,
+                    memory_tokens=memory_tokens,
+                    pack_telemetry=pack_telemetry,
+                    compression_used=bool(aged),
                     compression_failed=compression_failed,
+                    full_history_used=not aged,
+                    original_count=len(turns),
                 )
-            if len(recent) > 2:
-                recent = recent[1:]
+            if over_hard:
+                if len(recent) > 2:
+                    drop_oldest_recent()
+                    continue
+                if memory is not None:
+                    memory = None
+                    memory_tokens = 0
+                    continue
+                if recent:
+                    drop_oldest_recent()
+                    continue
+                break
+            # Soft overage: drop oldest recent history first, then memory.
+            # Never drop the current student message (it is not in ``recent``).
+            if len(recent) > 1:
+                drop_oldest_recent()
                 continue
-            if memory is not None:
+            if memory is not None and estimated_total(recent, 0) <= (
+                soft_ceiling or budget.max_input_tokens
+            ):
                 memory = None
                 memory_tokens = 0
                 continue
-            break
+            return self._result(
+                turns=recent,
+                aged_count=len(aged),
+                memory=memory,
+                prompt_tokens=prompt_tokens,
+                evidence_tokens=evidence_tokens,
+                current_message_tokens=current_message_tokens,
+                system_tokens=system_tokens,
+                estimated=estimated,
+                history_tokens=recent_tokens + memory_tokens,
+                memory_tokens=memory_tokens,
+                pack_telemetry=pack_telemetry,
+                compression_used=bool(aged),
+                compression_failed=compression_failed,
+                full_history_used=not aged,
+                original_count=len(turns),
+            )
         raise ContextBudgetError(
             "No safe model context fits inside the token budget after compression"
+        )
+
+    def _result(
+        self,
+        *,
+        turns: list[dict[str, str]],
+        aged_count: int,
+        memory: ConversationMemory | None,
+        prompt_tokens: int,
+        evidence_tokens: int,
+        current_message_tokens: int,
+        system_tokens: int,
+        estimated: int,
+        history_tokens: int,
+        memory_tokens: int,
+        pack_telemetry: dict[str, int],
+        compression_used: bool,
+        compression_failed: bool,
+        full_history_used: bool,
+        original_count: int,
+    ) -> ModelContextPlan:
+        """Build one planner result with Fast Chat telemetry fields."""
+        budget = self._budget
+        recent_tokens = _tokens_for_turns(
+            turns, chars_per_token=budget.chars_per_token
+        )
+        telemetry = dict(pack_telemetry)
+        return ModelContextPlan(
+            messages=converse_messages(turns),
+            compressed_memory=memory,
+            full_history_used=full_history_used,
+            compression_used=compression_used,
+            original_message_count=original_count,
+            verbatim_message_count=len(turns),
+            compressed_message_count=aged_count,
+            estimated_input_tokens=estimated,
+            history_tokens=history_tokens,
+            evidence_tokens=evidence_tokens,
+            prompt_tokens=prompt_tokens,
+            safety_margin=budget.safety_margin_tokens,
+            model_context_limit=budget.model_context_limit_tokens,
+            max_input_tokens=budget.max_input_tokens,
+            compression_failed=compression_failed,
+            estimated_system_prompt_tokens=system_tokens,
+            estimated_dynamic_input_tokens=max(0, estimated - system_tokens),
+            estimated_recent_history_tokens=recent_tokens,
+            recent_history_budget_tokens=int(
+                telemetry.get(
+                    "recent_history_budget_tokens",
+                    budget.recent_history_max_tokens,
+                )
+            ),
+            largest_historical_message_tokens=int(
+                telemetry.get("largest_historical_message_tokens", 0)
+            ),
+            historical_messages_trimmed=int(
+                telemetry.get("historical_messages_trimmed", 0)
+            ),
+            historical_message_tokens_trimmed=int(
+                telemetry.get("historical_message_tokens_trimmed", 0)
+            ),
+            estimated_memory_tokens=memory_tokens,
+            estimated_current_message_tokens=current_message_tokens,
         )

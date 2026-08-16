@@ -625,6 +625,26 @@ class LocalApiClient:
         response.raise_for_status()
         return CoachTurn.model_validate(response.json())
 
+    def start_deep_review(
+        self,
+        thread_id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> CoachTurn:
+        """Start a server-owned explicit Deep Review for one owned notebook."""
+        payload: dict[str, Any] = {}
+        if idempotency_key:
+            payload["idempotency_key"] = idempotency_key
+        headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
+        kwargs = self._request_kwargs(**({"headers": headers} if headers else {}))
+        response = self._http.post(
+            f"{self._base_url}/api/v1/threads/{quote(thread_id, safe='')}/deep-review",
+            json=payload,
+            **kwargs,
+        )
+        response.raise_for_status()
+        return CoachTurn.model_validate(response.json())
+
     @staticmethod
     def coaching_error_category(payload: Mapping[str, Any] | None) -> str:
         """Return the structured coaching error category from an API payload.

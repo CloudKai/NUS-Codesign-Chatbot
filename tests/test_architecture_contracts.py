@@ -152,7 +152,7 @@ def test_compatibility_facade_exports_and_signatures_are_stable() -> None:
         "backend.student_journey": {
             "normalize_journey": "(value: 'Any') -> 'dict[str, Any]'",
             "complete_and_advance": "(journey: 'dict[str, Any]', *, note: 'str | None' = None) -> 'dict[str, Any]'",
-            "learning_review": "(messages: 'Iterable[dict[str, Any]]', journey: 'dict[str, Any]', *, detail: 'str | None' = None) -> 'dict[str, Any]'",
+            "learning_review": "(messages: 'Iterable[dict[str, Any]]', journey: 'dict[str, Any]', *, detail: 'str | None' = None, deep_review_snapshot: 'dict[str, Any] | None' = None) -> 'dict[str, Any]'",
         },
         "backend.source_library": {
             "add_file_sources": "(store: 'StudentStore', thread_id: 'str', uploads: 'Iterable[tuple[str, bytes, str | None]]', *, origin: 'str' = 'source_panel', extra_metadata: 'dict[str, Any] | None' = None, max_file_size_mb: 'int | None' = None, preserve_display_names: 'bool' = False, compress: 'bool' = True) -> 'list[dict[str, Any]]'",
@@ -367,6 +367,11 @@ def test_complete_fastapi_route_inventory_is_stable(tmp_path: Path) -> None:
             ("GET", "/api/v1/threads/{thread_id}/graph", "graph_inspection"),
             ("POST", "/api/v1/coach/turn", "coach_turn"),
             ("POST", "/api/v1/coach/turn/stream", "coach_turn_stream"),
+            (
+                "POST",
+                "/api/v1/threads/{thread_id}/deep-review",
+                "start_deep_review",
+            ),
             ("GET", "/api/v1/professor/overview", "professor_overview"),
             ("GET", "/api/v1/professor/students", "professor_students"),
             (

@@ -43,6 +43,10 @@ os.environ["LECTURE_NOTES_DIR"] = str(_BOOTSTRAP_ROOT / "lecture_notes")
 os.environ["DATABASE_PROVIDER"] = "sqlite"
 os.environ["FILE_STORAGE_PROVIDER"] = "local"
 os.environ["FAST_CHAT_RECENT_VERBATIM_MESSAGES"] = "6"
+os.environ["FAST_CHAT_RECENT_HISTORY_MAX_TOKENS"] = "3000"
+os.environ["FAST_CHAT_HISTORY_MESSAGE_MAX_TOKENS"] = "1500"
+os.environ["FAST_CHAT_SOFT_INPUT_TOKENS"] = "12000"
+os.environ["FAST_CHAT_MAX_INPUT_TOKENS"] = "16000"
 os.environ["FAST_CHAT_PROMPT_CACHE_ENABLED"] = "false"
 os.environ.pop("DSQL_SSLROOTCERT", None)
 os.environ.pop("COURSE_MATERIALS_BUCKET", None)
@@ -145,9 +149,25 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
         settings_module.settings, "max_active_coach_requests_per_notebook", 10_000
     )
     monkeypatch.setenv("FAST_CHAT_RECENT_VERBATIM_MESSAGES", "6")
+    monkeypatch.setenv("FAST_CHAT_RECENT_HISTORY_MAX_TOKENS", "3000")
+    monkeypatch.setenv("FAST_CHAT_HISTORY_MESSAGE_MAX_TOKENS", "1500")
+    monkeypatch.setenv("FAST_CHAT_SOFT_INPUT_TOKENS", "12000")
+    monkeypatch.setenv("FAST_CHAT_MAX_INPUT_TOKENS", "16000")
     monkeypatch.setenv("FAST_CHAT_PROMPT_CACHE_ENABLED", "false")
     monkeypatch.setattr(
         settings_module.settings, "fast_chat_recent_verbatim_messages", 6
+    )
+    monkeypatch.setattr(
+        settings_module.settings, "fast_chat_recent_history_max_tokens", 3_000
+    )
+    monkeypatch.setattr(
+        settings_module.settings, "fast_chat_history_message_max_tokens", 1_500
+    )
+    monkeypatch.setattr(
+        settings_module.settings, "fast_chat_soft_input_tokens", 12_000
+    )
+    monkeypatch.setattr(
+        settings_module.settings, "fast_chat_max_input_tokens", 16_000
     )
     monkeypatch.setattr(
         settings_module.settings, "fast_chat_prompt_cache_enabled", False

@@ -17,14 +17,14 @@ FastAPI (Cognito, notebook ownership, selected sources, RAG)
     ↓
 DSQL / SQLite  (authoritative transcript + persisted stage)
     ↓
-HistoryContextPlanner  (fast_chat: memory + last 8; Deep Review: broader)
+HistoryContextPlanner  (fast_chat: memory + last 6 / 3000 hist tokens; Deep Review: broader)
     ↓
 runtime_context + runtime_instructions   ← application rules
 untrusted turn (project, optional evidence, student text)
     ↓
 ONE AgentCore Runtime
     ├── fast_chat (Haiku 4.5; one call chooses coaching | qa)
-    └── Deep Review (Sonnet 4.6; explicit specialist=review only)
+    └── Deep Review (Sonnet 4.6; POST /api/v1/threads/{id}/deep-review)
     ↓
 structured output  (fast_chat_turn | review_turn)
     ↓
@@ -34,9 +34,12 @@ FastAPI validates → workflow → atomic DSQL persist
 Integrate-Bedrock is the production shell. AgentCore is the pedagogical
 brain. DSQL is transcript/state authority. AgentCore Memory is not used.
 
-Deep Review is an explicit FastAPI operation (`specialist=review`), not a
-follow-up after normal chat. Unlock still requires 3 successful Coaching
-replies; opening the Review tab is display-only and makes zero model calls.
+Deep Review is an explicit FastAPI operation
+(`POST /api/v1/threads/{thread_id}/deep-review`). FastAPI stamps
+`specialist=review` only after client-controlled fields are discarded.
+`POST /api/v1/coach/turn` cannot choose Sonnet. Unlock still requires 3
+successful Coaching replies; opening the Review tab is display-only until
+the student starts Deep Review.
 Legacy router / Q&A / Coaching / Incremental Review payloads remain in the
 runtime for compatibility and are unused on the active FastAPI path.
 
@@ -126,8 +129,10 @@ The composer orders and delimits these sections:
 4. retrieved source excerpts;
 5. bounded learning summary / derived ConversationMemory and, unless the
    provider already sends DSQL history as conversation messages, recent
-   conversation. Fast chat sends at most 6 recent verbatim message objects;
-   the current student message stays separate. Deep Review may keep a larger
+   conversation. Fast chat sends at most 6 recent verbatim message objects,
+   and at most ~3,000 estimated recent-history tokens, with each historical
+   message capped at ~1,500 estimated tokens. The current student message
+   stays separate and is not history-capped. Deep Review may keep a larger
    window.
 6. the current student message;
 7. runtime rules for language, detail, grounding, citations, and structured
@@ -153,8 +158,11 @@ The composer exposes two bounded products in addition to `composed_text`:
 Mock, OpenAI, and Bedrock Converse still send the ordered `composed_text`.
 AgentCore sends trusted instructions in a dedicated `trusted_instructions`
 harness field and keeps DSQL history plus the untrusted current turn in
-`messages`. Token budgeting still counts the full `composed_text` so the split
-cannot overflow the window.
+`messages`. Fast-chat token budgeting estimates the AgentCore system prompt
+through `agentcore_runtime/system_prompt_budget.py` (the same canonical
+loader the runtime uses) plus the untrusted turn, history, memory, RAG, and
+per-message overhead. That local total is what the 12k/16k Fast Chat
+targets mean. It is not a Bedrock CountTokens measurement.
 
 AgentCore omits duplicated `<recent_messages>` from the untrusted turn because
 the same turns are already Converse `messages`. When history no longer fits,

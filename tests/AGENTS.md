@@ -80,11 +80,14 @@ modules.
 | `persistence/test_research_persistence.py` | Offset-only observations, revisions, human decisions, audit, workflow marker |
 | `scripts/test_reset_learning_data.py` | Dry-run manifest, backup/quarantine, exact confirmation, stale-plan rejection |
 | `domain/test_fast_chat_one_call.py` | One Haiku fast-chat invoke; no router/incremental/Sonnet on the normal path |
-| `domain/test_fast_chat_context.py` | Six-message verbatim window, current-turn uniqueness, derived memory |
+| `domain/test_fast_chat_context.py` | Six-message window, 3000/1500 history budgets, 12k/16k totals, system-prompt estimate, RAG repack |
+| `domain/test_conversation_memory_continuity.py` | 20/50/100-message and chunky-history extractive memory; no LLM summarizer |
 | `domain/test_rag_fallback.py` | Application-owned needs_source_retrieval retry; persist-final-only |
+| `domain/test_deep_review_execution.py` | Server-owned Deep Review eligibility, Sonnet, counter, snapshot, idempotency |
+| `http/test_deep_review.py` | Dedicated Deep Review HTTP route, ownership, concurrency, specialist sanitization |
 | `domain/test_coaching_prompt_baseline.py` | SHA-256 lock on canonical Coaching/stage prompt files |
 | `domain/test_prompt_cache.py` | SystemContentBlock prefix cache; no CacheConfig auto on student text |
-| `scripts/test_evaluate_fast_chat_regression.py` | Dry-run behaviour-regression CLI; no live Claude |
+| `scripts/test_evaluate_fast_chat_regression.py` | Dry-run and mocked live-candidate regression CLI; no live Claude |
 | `domain/test_prompt_architecture.py` | Stage prompt files, composer ordering, authoritative stage selection |
 | `domain/test_bedrock_provider.py` | Bedrock Converse adapter contract with an injected fake client |
 | `domain/test_learning_service.py` | Phase transition confirmation, resolution, atomic rollback |

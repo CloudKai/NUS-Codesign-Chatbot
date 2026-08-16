@@ -408,6 +408,24 @@ class CoachRequest(BaseModel):
         return None
 
 
+class DeepReviewRequest(BaseModel):
+    """Student request to start an explicit Deep Review.
+
+    Ownership, stage, history, sources, and specialist are never accepted
+    from the browser. FastAPI loads those from authenticated notebook state
+    and stamps ``specialist=review`` only after sanitization.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    idempotency_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
+
+
 class CoachTurn(BaseModel):
     """Stable result of one coaching workflow turn for API and UI consumers."""
 

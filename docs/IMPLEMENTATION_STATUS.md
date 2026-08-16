@@ -1,96 +1,183 @@
 # Implementation status
 
-## Current phase — Fast-chat 6-message window, RAG fallback, pedagogy lock
+## Current phase — Explicit Deep Review HTTP + token-aware Fast Chat
 
 **Code is local on `Integrate-Bedrock` and is not committed or deployed.**
-Starting HEAD was `db6d1bae7403c05e68c38bad39dd2afd9bd268fc`. Canonical
-Coaching prompts match baseline `a6d163668902beae4938fe552cced7ba92b15e88`.
+Starting HEAD was `2620db115a0671042859743daace3fc54de335d3`. Canonical
+Coaching prompts still match baseline `a6d163668902beae4938fe552cced7ba92b15e88`.
 Do **not** publish AgentCore, mutate AWS, push, or deploy EC2 until authorized.
 
-Normal student chat remains one Claude Haiku 4.5 `phase=fast_chat` invoke.
-The rare accuracy fallback may add one application-owned retrieve and one
-Haiku retry. Deep Review remains explicit Sonnet 4.6. Router and Incremental
-Review stay off the active path.
+This patch does **not** redo the 2620db one-call Haiku / RAG-fallback
+architecture. It makes explicit Deep Review reachable and makes Fast Chat
+history token-aware, including AgentCore system-prompt overhead in the
+12k/16k total.
 
 ### What changed and why
 
-1. **Six recent messages.** Fast chat now sends ConversationMemory plus at
-   most **6** recent verbatim message objects (not pairs). The current
-   student turn stays separate. Deep Review history is unchanged. DSQL still
-   stores the full transcript.
-2. **Pedagogy lock.** `fast_chat_system_prompt` still concatenates the
-   canonical `shared_coaching.md` and current stage file. Hash fixtures fail
-   if those files change without explicit pedagogical review.
-3. **Rare RAG fallback.** When the gate skipped retrieval and Haiku sets
-   `needs_source_retrieval=true` and selected sources exist, FastAPI
-   retrieves once and retries Haiku once. The first result is not persisted.
-   Same notebook lease and idempotency claim.
-4. **Prompt cache (opt-in, conservative).** Pinned Strands 1.52.0 supports
-   `SystemContentBlock` cachePoint and `CacheConfig(strategy="auto")`. Auto
-   caching would cache student messages, so it is not used. Prefix cache is
-   behind `FAST_CHAT_PROMPT_CACHE_ENABLED` (default false). Current static
-   prefixes are below the Haiku 4.5 4,096-token minimum under a conservative
-   estimator; they are not padded.
-5. **Behaviour regression suite.** Versioned cases plus a dry-run CLI
-   (`scripts/evals/evaluate_fast_chat_regression.py`). Live Claude is not
-   run unless `--i-approve-live-claude` is passed.
+1. **Server-owned Deep Review HTTP.** `POST /api/v1/threads/{thread_id}/deep-review`
+   authenticates the owner, loads notebook/stage/history/sources, checks
+   persisted eligibility (`coaching_turns_since_deep_review >= 3`), acquires
+   the same notebook execution lease, then stamps `specialist=review` **after**
+   `_authoritative_request()` has already cleared client specialist hints.
+   `POST /api/v1/coach/turn` still cannot choose Sonnet. Body accepts only
+   `idempotency_key` (`extra=forbid`).
+2. **Eligibility / counter.** One entitlement at counter >= 3; unused 4/5/6
+   still yield one review. Successful persist resets to 0. Failure, timeout,
+   guardrail, malformed output, and persist failure leave the counter
+   unchanged. Q&A, Deep Review, UI navigation, and idempotent replay do not
+   increment. Replay of a completed Deep Review key is allowed even after
+   the counter has reset. Idempotency fingerprints include a Deep Review
+   surface, so ``/coach/turn`` cannot complete a ``/deep-review`` key even
+   with the fixed ``Start Deep Review`` message.
+3. **Deep Review persistence.** Latest successful review is stored as
+   `deep_review_snapshot` in notebook settings. Normal Haiku Coaching persist
+   omits that key, so the snapshot is not overwritten. The next successful
+   Deep Review replaces it. Stage stays `STAY`; FastAPI remains stage
+   authority.
+4. **Token-aware Fast Chat history.** At most 6 recent message objects **and**
+   <= 3000 estimated recent-history tokens **and** <= 1500 estimated tokens
+   per historical message. Newest-to-oldest packing; dropped window turns
+   **and** later total-budget shrinks feed ConversationMemory from the
+   original text, not the 1500-token clip. Late decision cues in a huge
+   paste are kept in the 800-character memory excerpt. The current student
+   message is not history-capped (CoachRequest still enforces the
+   12,000-character safety cap). Current-turn Converse overhead is reserved
+   in the total estimate. The current message is still not 1500-capped; a
+   max-length paste can crowd out recent history under the 12k/16k totals,
+   which is the intended current-turn priority.
+5. **Total budget includes system prompt.** FastAPI estimates the AgentCore
+   Fast Chat system prompt via `agentcore_runtime/system_prompt_budget.py`
+   (same canonical loader; no prompt copy), including `runtime_context`
+   JSON. Soft 12,000 / hard 16,000 are local total estimates (system +
+   untrusted turn + history + memory + images + current-turn overhead).
+   Conservative local estimator; not Bedrock CountTokens.
+6. **RAG fallback repacks.** The second Haiku invoke re-enters workflow
+   planning with retrieved evidence. History is reduced if needed so the
+   estimated total stays <= 16,000.
+7. **Live eval candidate path.** `evaluate_fast_chat_regression.py` can invoke
+   the already-configured AgentCore runtime when `--i-approve-live-claude` is
+   set and `AGENTCORE_RUNTIME_ARN` is present. Default remains refuse. No
+   judge model, no publish, no fake baseline (`--baseline-artifact` or
+   "baseline comparison unavailable").
+8. **OCI provenance.** Dockerfile accepts `ARG GIT_SHA` and sets
+   `org.opencontainers.image.revision` plus `APP_GIT_SHA`. Recommended:
+   `docker build --build-arg GIT_SHA=$(git rev-parse HEAD) ...`. Image was
+   not rebuilt or deployed.
 
 ### Main files changed
 
-- Settings / planner: `backend/settings.py`, `backend/context_planner.py`,
-  `.env.example`
-- Fallback: `backend/coaching/execution.py`, `backend/domain.py`,
-  `backend/workflow.py`, `backend/agentcore_provider.py`,
-  `backend/turn_perf.py`
-- Runtime cache split: `agentcore_runtime/specialists/fast_chat.py`,
-  `agentcore_runtime/structured_coach.py`, `agentcore_runtime/prompt_cache.py`,
-  `agentcore_runtime/main.py`, `agentcore_runtime/model.py`
-- Tests / evals / docs: fast-chat context, RAG fallback, prompt hashes,
-  behaviour cases, `evaluate_fast_chat_regression.py`, this file
+- Deep Review: `backend/http/app.py`, `backend/coaching/execution.py`,
+  `backend/domain.py`, `backend/workflow.py`, `backend/mock_provider.py`,
+  `backend/specialists/review_orchestration.py`, `backend/learning/journey.py`,
+  `backend/api_client.py`, `ui/panels/studio.py`, `ui/services/runtime.py`
+- Fast Chat tokens: `backend/context_planner.py`, `backend/settings.py`,
+  `backend/agentcore_provider.py`, `backend/turn_perf.py`,
+  `agentcore_runtime/system_prompt_budget.py`, `.env.example`, Compose
+- Eval / Docker / docs / tests: `scripts/evals/evaluate_fast_chat_regression.py`,
+  `Dockerfile`, this file, architecture/security/prompt docs, Deep Review and
+  token-budget tests
 
 ### Validation evidence
 
-- Canonical Coaching hashes match `a6d163668902beae4938fe552cced7ba92b15e88`
-  (`git diff` empty; SHA-256 fixture in
-  `tests/fixtures/coaching_prompt_baseline.json`).
+- Canonical Coaching hashes unchanged vs `a6d163668902beae4938fe552cced7ba92b15e88`
+  (`git diff` empty on `shared_coaching.md` and `prompts/stages/`; SHA-256
+  fixture still `tests/fixtures/coaching_prompt_baseline.json`).
 - `ruff check .` passed.
 - `PYTHONPYCACHEPREFIX=/private/tmp/co-design-pycache python -m compileall -q
   backend ui streamlit_app.py tests scripts agentcore_runtime` passed.
-- Focused pytest: fast-chat context/one-call/pedagogy, prompt hashes, RAG
-  fallback, prompt cache, runtime models, retrieval gate, conversation
-  memory, AgentCore provider/runtime, workflow, idempotency, deployment
-  config, eval CLI — passed.
-- Full deterministic `.venv/bin/python -m pytest -q`: **933 passed**.
-- Live Claude / AWS / AgentCore publish: **NOT RUN**.
-- Conservative prefix estimates (chars/4): ~3,052–3,327 tokens vs Haiku
-  4,096 minimum → `prompt_cache_eligible=false reason=prefix_below_minimum`.
-  No padding. Flag remains false.
-- ConversationMemory continuity (20/50/100) passed with the existing
-  extractive schema; no extra memory fields were added.
+- Focused pytest: fast-chat context/memory, AgentCore provider, prompt cache,
+  and context planner passed after the token-policy follow-up.
+- Full deterministic `.venv/bin/python -m pytest -q`: **967 passed**.
+- GitHub CI for **this** uncommitted patch: **NOT RUN**.
+- Live Claude / AWS mutation / AgentCore publish / EC2 deploy: **NOT RUN**.
+- Local Fast Chat system-prompt estimate for problem_identification: 12,958
+  chars / **4,320** estimated tokens (chars/3) before `runtime_context`.
+  Typical no-RAG short coaching with that reserve stayed <= 12,000 in tests.
+- ConversationMemory continuity 20/50/100 plus chunky-history passed. Soft
+  total-budget shrink now preserves a decision that sits after the 1500-token
+  history clip. No LLM summarizer.
 
 ### Production readiness (do not collapse these)
 
 - **CODE CORRECT:** YES for the mock/deterministic path
-- **CONCURRENCY SAFE:** YES — fallback stays inside the existing notebook
-  lease; graph retries use a unique checkpoint namespace
-- **IDEMPOTENCY SAFE:** YES — one claim; replay does not re-run Haiku
-- **MOCK TESTED:** YES (933)
-- **CI GREEN:** NOT RUN (no push)
-- **DOCKER READY:** NO
+- **CONCURRENCY SAFE:** YES — Deep Review uses the same notebook lease as
+  Coaching; RAG fallback stays inside that lease
+- **IDEMPOTENCY SAFE:** YES — completed Deep Review keys replay without a
+  second Sonnet call or a second counter reset
+- **MOCK TESTED:** YES (967)
+- **CI GREEN:** NOT RUN for this patch (no push). Previous committed HEAD
+  `2620db1` had Mock CI + AgentCore runtime compatibility successful.
+- **DOCKER READY:** NO (compose config includes new env; image not built)
 - **LIVE LOAD TESTED:** NO
 - **AWS QUOTAS VERIFIED:** NO
-- **PRODUCTION READY:** **NO** until AgentCore is republished and live
-  timings are collected. Prompt cache stays disabled until prefix size is
-  verified on Haiku 4.5.
+- **PRODUCTION READY:** **NO** until live Haiku timings confirm the 12k/16k
+  local estimate, Deep Review is exercised on the existing AgentCore ARN, and
+  this patch is reviewed/committed. Prompt cache stays disabled.
 
 ### Next exact action
 
-1. Review this patch. Do not commit unless authorized.
-2. **AGENTCORE REPUBLISH REQUIRED: YES** (prompt-cache SystemContentBlock
-   path and `needs_source_retrieval` telemetry extras). Same ARN.
-3. Keep `FAST_CHAT_PROMPT_CACHE_ENABLED=false` until a live prefix-token
-   measurement shows the static pedagogy is above 4,096 tokens.
-4. Live Claude behaviour eval requires explicit `--i-approve-live-claude`.
+1. Review this local patch. Do not commit unless authorized.
+2. **AGENTCORE REPUBLISH REQUIRED: NO** for this follow-up (canonical prompts
+   and runtime Fast Chat/Review orchestration are unchanged). The 2620db
+   runtime still needs the previously noted republish if DEFAULT is not yet
+   on that code.
+3. Keep `FAST_CHAT_PROMPT_CACHE_ENABLED=false`.
+4. Authorized live candidate eval:
+   `python scripts/evals/evaluate_fast_chat_regression.py --i-approve-live-claude --max-calls N`.
+5. When building an EC2 image later:
+   `docker build --build-arg GIT_SHA=$(git rev-parse HEAD) ...`
+
+---
+
+## Previous phase — Fast-chat 6-message window, RAG fallback, pedagogy lock
+
+**Committed on `Integrate-Bedrock` as `2620db115a0671042859743daace3fc54de335d3`.**
+Starting HEAD was `db6d1bae7403c05e68c38bad39dd2afd9bd268fc`. Canonical
+Coaching prompts match baseline `a6d163668902beae4938fe552cced7ba92b15e88`.
+
+GitHub CI for **that** commit: Mock CI successful; AgentCore runtime
+compatibility successful. That CI result does **not** apply to later local
+work.
+
+Normal student chat remains one Claude Haiku 4.5 `phase=fast_chat` invoke.
+The rare accuracy fallback may add one application-owned retrieve and one
+Haiku retry. Router and Incremental Review stay off the active path.
+
+### What changed and why
+
+1. **Six recent messages.** Fast chat sent ConversationMemory plus at most
+   **6** recent verbatim message objects (not pairs). No per-message token
+   cap yet; soft/hard totals were 15k/20k and undercounted the AgentCore
+   system prompt. Deep Review HTTP was still unreachable because
+   `_authoritative_request()` cleared `specialist`.
+2. **Pedagogy lock.** `fast_chat_system_prompt` concatenates the canonical
+   `shared_coaching.md` and current stage file. Hash fixtures fail if those
+   files change without explicit pedagogical review.
+3. **Rare RAG fallback.** When the gate skipped retrieval and Haiku sets
+   `needs_source_retrieval=true` and selected sources exist, FastAPI
+   retrieves once and retries Haiku once. The first result is not persisted.
+   Same notebook lease and idempotency claim.
+4. **Prompt cache (opt-in, conservative).** Prefix cache behind
+   `FAST_CHAT_PROMPT_CACHE_ENABLED` (default false). No
+   `CacheConfig(strategy="auto")`. No padding.
+5. **Behaviour regression suite.** Versioned cases plus a dry-run CLI.
+   Live Claude was harness-only until the follow-up patch.
+
+### Validation evidence (that commit)
+
+- Canonical Coaching hashes match `a6d163668902beae4938fe552cced7ba92b15e88`.
+- Local `ruff check .` and `compileall` passed before commit.
+- Full deterministic pytest at that handoff: **933 passed**.
+- GitHub CI for `2620db1`: Mock CI successful; AgentCore runtime
+  compatibility successful.
+- Live Claude / AWS / AgentCore publish / EC2 deploy: **NOT RUN**.
+
+### Production readiness (that commit)
+
+- **CODE CORRECT:** YES for the mock/deterministic path
+- **CI GREEN:** YES for `2620db1` (Mock CI + AgentCore runtime compatibility)
+- **PRODUCTION READY:** **NO** until AgentCore DEFAULT matches that runtime
+  and live timings are collected.
 
 ---
 
