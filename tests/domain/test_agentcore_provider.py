@@ -194,7 +194,7 @@ def _specialist_call(client: FakeAgentCoreRuntime) -> dict[str, Any]:
 
 
 def _router_calls(client: FakeAgentCoreRuntime) -> list[dict[str, Any]]:
-    """Return recorded Luna router invokes."""
+    """Return recorded Haiku router invokes."""
     return [call for call in client.calls if _call_phase(call) == "router"]
 
 

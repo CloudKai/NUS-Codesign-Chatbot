@@ -1,4 +1,4 @@
-"""Formative Review specialist: incremental Luna or deep Sonnet."""
+"""Formative Review specialist: incremental Haiku or deep Sonnet."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def review_system_prompt(
 
     Args:
         trusted_runtime_rules: Application-owned constraints from FastAPI.
-        review_mode: ``incremental`` (Luna) or ``deep`` (Sonnet).
+        review_mode: ``incremental`` (Haiku) or ``deep`` (Sonnet).
 
     Returns:
         Review identity plus optional runtime rules. No tools are attached.

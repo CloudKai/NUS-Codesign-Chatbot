@@ -1,6 +1,6 @@
 """Server-owned specialist selection.
 
-Production AgentCore uses a GPT-5.6 Luna semantic router for free-text turns.
+Production AgentCore uses a Claude Haiku 4.5 semantic router for free-text turns.
 This module still owns:
 
 1. Explicit validated server-owned specialist/surface (never from the browser)
@@ -103,7 +103,7 @@ def apply_semantic_route(
     *,
     min_confidence: float = DEFAULT_ROUTER_MIN_CONFIDENCE,
 ) -> str:
-    """Map a Luna router result onto a specialist, or fall closed to coaching.
+    """Map a Haiku router result onto a specialist, or fall closed to coaching.
 
     Args:
         specialist: Claimed specialist from structured router output.
@@ -150,13 +150,13 @@ def select_specialist(
 
     Args:
         student_message: Untrusted student text used only for the mock
-            fallback. The production Luna router reads this separately.
+            fallback. The production Haiku router reads this separately.
         requested: Optional already-validated specialist from application
             code. HTTP handlers must pass ``None`` so the browser cannot
             select a privileged specialist.
         surface: Optional server-owned UI surface such as ``review``.
-        semantic_specialist: Optional Luna router specialist.
-        semantic_confidence: Optional Luna router confidence.
+        semantic_specialist: Optional Haiku router specialist.
+        semantic_confidence: Optional Haiku router confidence.
         min_confidence: Inclusive confidence floor for semantic routes.
         use_semantic: When true, skip regex and use the semantic result
             or coaching.

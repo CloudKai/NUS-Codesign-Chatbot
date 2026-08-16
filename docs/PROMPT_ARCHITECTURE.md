@@ -23,10 +23,10 @@ runtime_context + runtime_instructions   ← application rules
 untrusted turn (project, evidence, student text)
     ↓
 ONE AgentCore Runtime
-    ├── Luna router (qa | coaching | review)
-    ├── Q&A specialist (Luna)
-    ├── Coaching specialist + stage prompts (Luna)
-    ├── Incremental Review (Luna; after Coaching)
+    ├── Haiku 4.5 router (qa | coaching | review)
+    ├── Q&A specialist (Haiku 4.5)
+    ├── Coaching specialist + stage prompts (Haiku 4.5)
+    ├── Incremental Review (Haiku 4.5; after Coaching)
     └── Deep Review (Sonnet 4.6; periodic / event / explicit)
     ↓
 structured output  (router_turn | coach_turn | qa_turn | review_turn)

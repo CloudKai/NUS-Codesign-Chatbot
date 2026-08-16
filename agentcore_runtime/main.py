@@ -5,7 +5,7 @@ Copy this package onto the existing runtime
 READY version. Do not change ``AGENTCORE_RUNTIME_ARN``. Do not create a second
 student-facing runtime.
 
-One runtime hosts the Luna router, Q&A, Coaching, Incremental Review, and
+One runtime hosts the Haiku router, Q&A, Coaching, Incremental Review, and
 Deep Review. The caller sends ``phase`` / ``output_contract`` and
 ``review_mode`` for Review. Specialists use ``tools=[]`` plus Strands
 ``structured_output_model``. The harness never parses ``str(AgentResult)``

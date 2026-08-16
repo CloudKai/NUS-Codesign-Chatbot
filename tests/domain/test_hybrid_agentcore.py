@@ -1,4 +1,4 @@
-"""Hybrid Luna router + Sonnet Stage Judge adapter tests (no AWS)."""
+"""Hybrid Haiku router + Sonnet Deep Review adapter tests (no AWS)."""
 
 from __future__ import annotations
 

@@ -1,6 +1,124 @@
 # Implementation status
 
-## Current phase — Three pedagogical agents + Luna router (DEFAULT v17)
+## Current phase — Three pedagogical agents + Haiku 4.5 / Sonnet 4.6 (DEFAULT v18)
+
+**Runtime published 2026-08-16.** Same ARN
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.
+`DEFAULT` is **version 18 READY**. FastAPI + DSQL remain authoritative. LLMs
+never mutate stage or DSQL.
+
+Lightweight roles use Claude Haiku 4.5 on Strands `BedrockModel`. Deep
+Review stays Claude Sonnet 4.6. GPT-5.6 Luna / Bedrock Mantle remains
+supported as a historical provider pair for rollback versions; it is not
+the active production path.
+
+The Stage Judge is not the readiness authority. Deep Review (Sonnet)
+performs the final pedagogical readiness assessment. Incremental Review
+(Haiku) keeps the Review projection current after Coaching.
+
+Artifact:
+`s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-haiku-sonnet-v18-20260816T082420Z.zip`
+
+### Model assignment
+
+| Role | Provider | Model |
+|---|---|---|
+| Router (not a pedagogical agent) | `bedrock` | `global.anthropic.claude-haiku-4-5-20251001-v1:0` |
+| Q&A Agent | `bedrock` | `global.anthropic.claude-haiku-4-5-20251001-v1:0` |
+| Coaching Agent | `bedrock` | `global.anthropic.claude-haiku-4-5-20251001-v1:0` |
+| Review Agent — incremental | `bedrock` | `global.anthropic.claude-haiku-4-5-20251001-v1:0` |
+| Review Agent — deep | `bedrock` | `global.anthropic.claude-sonnet-4-6` |
+
+There is no silent Haiku↔Sonnet substitution and no Luna fallback.
+
+### Periodic Deep Review
+
+Unchanged: every N newly executed, successful Coaching turns since the
+previous successfully persisted Deep Review (`DEEP_REVIEW_INTERVAL_TURNS=3`).
+The Review tab remains display-only: zero model calls.
+
+### Behavior delivered
+
+1. Haiku router selects `qa` | `coaching` | `review`. Browser specialist
+   hints are dropped. Router failure/timeout/malformed/low confidence
+   falls back to Coaching. Safety blocks do not fallback.
+2. Successful Coaching always runs Incremental Haiku Review once.
+   Incremental Review cannot advance. Incremental failure fails the turn.
+3. Deep Sonnet Review runs on periodic N, readiness candidate, Reflection
+   checkpoint, or explicit Review. Explicit Review skips Coaching and
+   Incremental Review.
+4. Q&A never runs Incremental or Deep Review and does not increment the
+   counter.
+5. Mock CI Compose step now sets `PUBLIC_ORIGIN` and `APP_IMAGE` for both
+   Compose files.
+
+### Main files changed
+
+- Runtime: `agentcore_runtime/model.py`, `agentcore_runtime/main.py`,
+  `agentcore_runtime/README.md`
+- Backend: `backend/agentcore_provider.py`, `backend/settings.py`,
+  `backend/specialists/routing.py`, `backend/coaching/execution.py`
+- Compose/env: `compose.yaml`, `compose.prod.yaml`, `.env.example`
+- Tests: `tests/domain/test_runtime_model.py`,
+  `tests/http/test_production_config.py`, `tests/test_deployment_config.py`
+- CI: `.github/workflows/mock-ci.yml`
+- Docs: this file, `docs/providers/AGENTCORE_ADAPTER.md`,
+  `docs/PROMPT_ARCHITECTURE.md`, `docs/deploy/AWS_STATELESS_EC2.md`,
+  `docs/SECURITY_BOUNDARIES.md`
+
+### Validation evidence
+
+- `ruff check .`: **passed**.
+- Shell syntax (`start.sh`, `build.sh`, `start_prod.sh`, `deploy_ecr.sh`,
+  `browser_e2e_smoke.sh`): **passed**.
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`,
+  `scripts`, `agentcore_runtime`: **passed**.
+- Production/deployment config tests: **passed**.
+- Ownership/idempotency gates: **passed**.
+- Full mock pytest: **passed** (exit 0; 825 tests collected).
+- AgentCore runtime compatibility diagnostic (`strands-agents==1.52.0`,
+  `bedrock-agentcore==1.21.0`, `pydantic==2.13.4`, Haiku and Sonnet
+  `BedrockModel` kwargs, `structured_output_model` present): **passed**.
+- Docker daemon was **down**, so Compose config, Caddy validate, and image
+  build were **not executed**.
+- Haiku 4.5 inference profile
+  `global.anthropic.claude-haiku-4-5-20251001-v1:0` in `us-west-2`: **ACTIVE**,
+  `AUTHORIZED` / `AVAILABLE`.
+- AgentCore `DEFAULT` **v18 READY** (AWS-verified 2026-08-16). v14–v17 remain
+  READY and were not deleted.
+- Live Router Haiku: Week 2 → `qa` (0.95); caregivers → `coaching` (0.92);
+  “Can you review my progress?” → `review` (0.95).
+- Live Q&A Haiku: STAY; no Deep Review.
+- Live Coaching Haiku + Incremental Haiku (`provider.assess`): STAY,
+  `review_depth=incremental`.
+- Live explicit Deep Review Sonnet: STAY, `deep_review_succeeded=true`.
+- CloudWatch provenance:
+  `role=router provider=bedrock model_id=global.anthropic.claude-haiku-4-5-20251001-v1:0`;
+  same Haiku id for `qa`, `coaching`, `review_incremental`;
+  `role=review_deep provider=bedrock model_id=global.anthropic.claude-sonnet-4-6`.
+- Guardrail: AWS example credential fixture → `safety_blocked`. Caregiver
+  Singapore coaching/incremental was not blocked and had no `{ADDRESS}`.
+- Live FastAPI `CoachApplicationService.submit` three-turn periodic sequence
+  **failed closed** twice at Incremental Review (`safety_blocked`) on the
+  richer application payload. Periodic counter semantics remain covered by
+  mock tests. Stopped after two live attempts.
+- GitHub Mock CI is **not green** on this SHA: changes are uncommitted.
+- EC2 / CloudFront E2E were **not** run. Host compose remains stale until
+  CI is green and the app image is recreated.
+
+### Next exact action
+
+1. Commit/push only when authorized so Mock CI can go green.
+2. After CI is green, recreate the EC2 app container from the current
+   five-role `compose.prod.yaml` and a new immutable image. Do not reuse
+   the stale host Compose.
+3. Optionally re-run the three-turn FastAPI periodic sequence after EC2
+   cutover, using a student notebook rather than a local SQLite submit
+   that already failed closed twice.
+   Rollback remains **version 14** (Sonnet-only) or **v17** (Luna/Sonnet)
+   if needed. Do not delete old versions.
+
+## Previous phase — Three pedagogical agents + Luna router (DEFAULT v17)
 
 **Runtime published 2026-08-16.** Same ARN
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.
@@ -15,7 +133,8 @@ Luna live inference is **not available on this AWS account**
 (`openai.gpt-5.6-luna is not available for this account`). Router, Q&A,
 Coaching, and Incremental Review live smokes therefore failed closed. Deep
 Review live smoke on Claude Sonnet 4.6 succeeded. Do not treat DEFAULT v17
-as student-ready until Bedrock enables GPT-5.6 Luna.
+as student-ready until Bedrock enables GPT-5.6 Luna. This phase is superseded
+by the Haiku 4.5 lightweight migration above.
 
 ### Model assignment
 

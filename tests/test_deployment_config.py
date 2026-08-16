@@ -49,10 +49,13 @@ def test_compose_persists_data_and_mounts_private_secrets_read_only():
     assert 'DATABASE_PROVIDER: "sqlite"' in app
     assert 'FILE_STORAGE_PROVIDER: "local"' in app
     assert 'COURSE_MATERIAL_SYNC_ENABLED: "true"' in app
-    assert 'AGENTCORE_MODEL_PROVIDER: "bedrock_mantle_responses"' in app
-    assert 'AGENTCORE_MODEL_ID: "openai.gpt-5.6-luna"' in app
-    assert 'ROUTER_MODEL_ID: "openai.gpt-5.6-luna"' in app
-    assert 'REVIEW_INCREMENTAL_MODEL_ID: "openai.gpt-5.6-luna"' in app
+    assert 'AGENTCORE_MODEL_PROVIDER: "bedrock"' in app
+    assert 'AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
+    assert 'ROUTER_MODEL_PROVIDER: "bedrock"' in app
+    assert 'ROUTER_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
+    assert 'QA_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
+    assert 'COACHING_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
+    assert 'REVIEW_INCREMENTAL_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
     assert 'REVIEW_DEEP_MODEL_ID: "global.anthropic.claude-sonnet-4-6"' in app
     assert 'ROUTER_MIN_CONFIDENCE: "0.60"' in app
     assert 'DEEP_REVIEW_INTERVAL_TURNS: "3"' in app
@@ -103,10 +106,13 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert 'CO_DESIGN_UI_URL: "${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}"' in app
     assert 'MODEL_PROVIDER: "agentcore"' in app
     assert 'MOCK_OPENAI: "false"' in app
-    assert 'AGENTCORE_MODEL_PROVIDER: "bedrock_mantle_responses"' in app
-    assert 'AGENTCORE_MODEL_ID: "openai.gpt-5.6-luna"' in app
-    assert 'ROUTER_MODEL_ID: "openai.gpt-5.6-luna"' in app
-    assert 'REVIEW_INCREMENTAL_MODEL_ID: "openai.gpt-5.6-luna"' in app
+    assert 'AGENTCORE_MODEL_PROVIDER: "bedrock"' in app
+    assert 'AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
+    assert 'ROUTER_MODEL_PROVIDER: "bedrock"' in app
+    assert 'ROUTER_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
+    assert 'QA_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
+    assert 'COACHING_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
+    assert 'REVIEW_INCREMENTAL_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
     assert 'REVIEW_DEEP_MODEL_ID: "global.anthropic.claude-sonnet-4-6"' in app
     assert 'ROUTER_MIN_CONFIDENCE: "0.60"' in app
     assert 'DEEP_REVIEW_INTERVAL_TURNS: "3"' in app
@@ -141,10 +147,13 @@ def test_production_compose_keeps_host_env_knowledge_base_contract():
     assert 'COURSE_MATERIAL_SYNC_ENABLED: "true"' in app
     assert 'MODEL_PROVIDER: "agentcore"' in app
     assert 'MOCK_OPENAI: "false"' in app
-    assert 'AGENTCORE_MODEL_PROVIDER: "bedrock_mantle_responses"' in app
-    assert 'AGENTCORE_MODEL_ID: "openai.gpt-5.6-luna"' in app
-    assert 'ROUTER_MODEL_ID: "openai.gpt-5.6-luna"' in app
-    assert 'REVIEW_INCREMENTAL_MODEL_ID: "openai.gpt-5.6-luna"' in app
+    assert 'AGENTCORE_MODEL_PROVIDER: "bedrock"' in app
+    assert 'AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
+    assert 'ROUTER_MODEL_PROVIDER: "bedrock"' in app
+    assert 'ROUTER_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
+    assert 'QA_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
+    assert 'COACHING_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
+    assert 'REVIEW_INCREMENTAL_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
     assert 'REVIEW_DEEP_MODEL_ID: "global.anthropic.claude-sonnet-4-6"' in app
     assert 'ROUTER_MIN_CONFIDENCE: "0.60"' in app
     assert 'DEEP_REVIEW_INTERVAL_TURNS: "3"' in app
@@ -315,7 +324,10 @@ def test_ci_validates_compose_and_caddy_configuration():
     workflow = (ROOT / ".github" / "workflows" / "mock-ci.yml").read_text(
         encoding="utf-8"
     )
-    assert "APP_IMAGE=co-design:test docker compose -f compose.prod.yaml" in workflow
+    assert "PUBLIC_ORIGIN: https://d1sxfuoybzedj5.cloudfront.net" in workflow
+    assert "APP_IMAGE: co-design:test" in workflow
+    assert "docker compose config --quiet" in workflow
+    assert "docker compose -f compose.prod.yaml config --quiet" in workflow
     assert "--entrypoint caddy" in workflow
     assert "validate --config /etc/caddy/Caddyfile" in workflow
 

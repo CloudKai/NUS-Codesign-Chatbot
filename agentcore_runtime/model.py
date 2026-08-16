@@ -1,8 +1,9 @@
 """Fail-closed AgentCore model factory.
 
 The production runtime must not construct a bare ``BedrockModel()``. Roles
-select GPT-5.6 Luna (router, Q&A, coaching, incremental Review) or Claude
-Sonnet 4.6 (deep Review). There is no silent Luna↔Sonnet substitution.
+select Claude Haiku 4.5 (router, Q&A, coaching, incremental Review) or
+Claude Sonnet 4.6 (deep Review). There is no silent Haiku↔Sonnet
+substitution. Mantle/Luna remains a supported historical provider pair.
 
 This module is Strands-import free except ``load_runtime_model``, so pytest can
 assert constructor kwargs without AWS.
@@ -23,6 +24,7 @@ PROVIDER_MANTLE_RESPONSES = "bedrock_mantle_responses"
 ALLOWED_PROVIDERS = frozenset({PROVIDER_BEDROCK, PROVIDER_MANTLE_RESPONSES})
 
 SONNET_4_6_MODEL_ID = "global.anthropic.claude-sonnet-4-6"
+HAIKU_4_5_MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 LUNA_MODEL_ID = "openai.gpt-5.6-luna"
 DEFAULT_MODEL_REGION = "us-west-2"
 
@@ -37,6 +39,12 @@ MODEL_ROLES = (
     MODEL_ROLE_COACHING,
     MODEL_ROLE_REVIEW_INCREMENTAL,
     MODEL_ROLE_REVIEW_DEEP,
+)
+LIGHTWEIGHT_MODEL_ROLES = (
+    MODEL_ROLE_ROUTER,
+    MODEL_ROLE_QA,
+    MODEL_ROLE_COACHING,
+    MODEL_ROLE_REVIEW_INCREMENTAL,
 )
 ROLE_ENV_KEYS: dict[str, tuple[str, str]] = {
     MODEL_ROLE_ROUTER: ("ROUTER_MODEL_PROVIDER", "ROUTER_MODEL_ID"),
@@ -180,8 +188,9 @@ def validate_provider_model_pair(provider: str, model_id: str) -> None:
         model_id: Foundation model id.
 
     Raises:
-        RuntimeModelError: When Luna is pointed at ``BedrockModel`` or Mantle
-            is pointed at a non-OpenAI model. Never swaps Claude for Luna.
+        RuntimeModelError: When an ``openai.*`` id is pointed at ``BedrockModel``
+            or Mantle is pointed at a non-OpenAI model. Never swaps Haiku,
+            Sonnet, or Luna.
     """
     cleaned_provider = _clean(provider).lower()
     cleaned_model = _clean(model_id)
@@ -235,7 +244,7 @@ def runtime_model_config_from_mapping(values: Mapping[str, Any] | None) -> Runti
 
     Raises:
         RuntimeModelError: When provider, model, region, or guardrail is missing
-            or when Luna is pointed at ``BedrockModel``.
+            or when an ``openai.*`` id is pointed at ``BedrockModel``.
     """
     data = values or {}
     provider = _clean(data.get("AGENTCORE_MODEL_PROVIDER")).lower()
@@ -269,7 +278,7 @@ def role_model_config_from_mapping(
     When no per-role keys are present, every role reuses the legacy
     ``AGENTCORE_MODEL_*`` pair. When any role key is present, all five roles
     must be complete. Partial role configuration fails closed instead of
-    substituting Claude for Luna or Luna for Claude.
+    substituting Haiku for Sonnet, Sonnet for Haiku, or Luna for Claude.
 
     Args:
         values: Typically ``os.environ``.
@@ -416,8 +425,8 @@ def load_runtime_model(config: RuntimeModelConfig | None = None) -> Any:
 
     Raises:
         RuntimeModelError: When configuration is invalid, Strands imports fail,
-            or Luna is requested without the OpenAI extra. Never falls back
-            between Claude and Luna.
+            or Mantle is requested without the OpenAI extra. Never falls back
+            between Haiku, Sonnet, and Luna.
     """
     resolved = config or runtime_model_config_from_environ()
     log_runtime_model_config(resolved)
@@ -431,7 +440,7 @@ def load_runtime_model(config: RuntimeModelConfig | None = None) -> Any:
         from strands.models.openai_responses import OpenAIResponsesModel
     except ImportError as error:  # pragma: no cover - optional Luna extra
         raise RuntimeModelError(
-            "Luna requires strands-agents[openai]; Claude was not substituted"
+            "Mantle requires strands-agents[openai]; Claude was not substituted"
         ) from error
     return OpenAIResponsesModel(**mantle_responses_kwargs(resolved))
 

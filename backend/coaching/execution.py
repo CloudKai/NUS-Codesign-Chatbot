@@ -779,7 +779,7 @@ class CoachApplicationService:
                 "student_id": str(getattr(self._store, "identifier", "") or "").strip()
                 or None,
                 # Drop client specialist hints. Mock uses regex fallback;
-                # AgentCore uses the Luna router unless a server-owned
+                # AgentCore uses the Haiku router unless a server-owned
                 # specialist is stamped after this method.
                 "specialist": None,
                 COUNTER_SETTINGS_KEY: parse_coaching_turns_since_deep_review(

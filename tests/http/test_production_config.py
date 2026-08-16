@@ -66,14 +66,44 @@ def _apply_valid_production_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _apply_hybrid_role_models(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Set production per-role Luna/Sonnet configuration."""
+    """Set production per-role Haiku/Sonnet configuration."""
+    monkeypatch.setattr(settings, "router_model_provider", "bedrock")
+    monkeypatch.setattr(
+        settings, "router_model_id", "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    )
+    monkeypatch.setattr(settings, "qa_model_provider", "bedrock")
+    monkeypatch.setattr(
+        settings, "qa_model_id", "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    )
+    monkeypatch.setattr(settings, "coaching_model_provider", "bedrock")
+    monkeypatch.setattr(
+        settings, "coaching_model_id", "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    )
+    monkeypatch.setattr(settings, "review_incremental_model_provider", "bedrock")
+    monkeypatch.setattr(
+        settings,
+        "review_incremental_model_id",
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+    )
+    monkeypatch.setattr(settings, "review_deep_model_provider", "bedrock")
+    monkeypatch.setattr(
+        settings, "review_deep_model_id", "global.anthropic.claude-sonnet-4-6"
+    )
+    monkeypatch.setattr(settings, "router_min_confidence", 0.60)
+    monkeypatch.setattr(settings, "deep_review_interval_turns", 3)
+
+
+def _apply_luna_role_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set historical Mantle Luna / Sonnet Deep Review configuration."""
     monkeypatch.setattr(settings, "router_model_provider", "bedrock_mantle_responses")
     monkeypatch.setattr(settings, "router_model_id", "openai.gpt-5.6-luna")
     monkeypatch.setattr(settings, "qa_model_provider", "bedrock_mantle_responses")
     monkeypatch.setattr(settings, "qa_model_id", "openai.gpt-5.6-luna")
     monkeypatch.setattr(settings, "coaching_model_provider", "bedrock_mantle_responses")
     monkeypatch.setattr(settings, "coaching_model_id", "openai.gpt-5.6-luna")
-    monkeypatch.setattr(settings, "review_incremental_model_provider", "bedrock_mantle_responses")
+    monkeypatch.setattr(
+        settings, "review_incremental_model_provider", "bedrock_mantle_responses"
+    )
     monkeypatch.setattr(settings, "review_incremental_model_id", "openai.gpt-5.6-luna")
     monkeypatch.setattr(settings, "review_deep_model_provider", "bedrock")
     monkeypatch.setattr(
@@ -116,7 +146,7 @@ def test_valid_agentcore_production_configuration_passes_without_openai_key(monk
     )
     monkeypatch.setattr(settings, "agentcore_model_provider", "bedrock")
     monkeypatch.setattr(
-        settings, "agentcore_model_id", "global.anthropic.claude-sonnet-4-6"
+        settings, "agentcore_model_id", "global.anthropic.claude-haiku-4-5-20251001-v1:0"
     )
     monkeypatch.setattr(settings, "agentcore_model_region", "us-west-2")
     monkeypatch.setattr(settings, "guardrail_id", "test-guardrail")
@@ -139,7 +169,7 @@ def test_valid_agentcore_mantle_luna_configuration_passes(monkeypatch):
     monkeypatch.setattr(settings, "agentcore_model_region", "us-west-2")
     monkeypatch.setattr(settings, "guardrail_id", "test-guardrail")
     monkeypatch.setattr(settings, "guardrail_version", "1")
-    _apply_hybrid_role_models(monkeypatch)
+    _apply_luna_role_models(monkeypatch)
     validate_production_configuration()
 
 
@@ -244,8 +274,10 @@ def test_production_rejects_missing_role_model_configuration(monkeypatch):
         "agentcore_runtime_arn",
         "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/test",
     )
-    monkeypatch.setattr(settings, "agentcore_model_provider", "bedrock_mantle_responses")
-    monkeypatch.setattr(settings, "agentcore_model_id", "openai.gpt-5.6-luna")
+    monkeypatch.setattr(settings, "agentcore_model_provider", "bedrock")
+    monkeypatch.setattr(
+        settings, "agentcore_model_id", "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    )
     monkeypatch.setattr(settings, "agentcore_model_region", "us-west-2")
     monkeypatch.setattr(settings, "guardrail_id", "test-guardrail")
     monkeypatch.setattr(settings, "guardrail_version", "1")
@@ -254,6 +286,7 @@ def test_production_rejects_missing_role_model_configuration(monkeypatch):
     with pytest.raises(ValueError, match="ROUTER_MODEL_PROVIDER"):
         validate_production_configuration()
     monkeypatch.setattr(settings, "router_model_provider", "bedrock")
+    monkeypatch.setattr(settings, "router_model_id", "openai.gpt-5.6-luna")
     with pytest.raises(ValueError, match="Luna cannot use BedrockModel"):
         validate_production_configuration()
 

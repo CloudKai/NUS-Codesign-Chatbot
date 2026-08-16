@@ -3,9 +3,9 @@
 The adapter may invoke ``InvokeAgentRuntime`` more than once per student turn
 on the same runtime ARN:
 
-1. Luna router (unless the specialist is already server-owned)
+1. Haiku router (unless the specialist is already server-owned)
 2. The selected specialist (Q&A, Coaching, or explicit Deep Review)
-3. Incremental Luna Review after a successful Coaching turn
+3. Incremental Haiku Review after a successful Coaching turn
 4. Deep Sonnet Review on periodic or event triggers
 
 It does not own phase progression, citations, persistence, retrieval, or IAM.
@@ -33,6 +33,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from agentcore_runtime.model import HAIKU_4_5_MODEL_ID, SONNET_4_6_MODEL_ID
 from agentcore_runtime.models import ReviewTurnOutput, RouterOutput
 
 from .context_planner import (
@@ -503,7 +504,7 @@ def _request_specialist(request: CoachRequest) -> str:
 
     Args:
         request: Coach request whose ``specialist`` must already be
-            server-resolved. This helper does not call the Luna router.
+            server-resolved. This helper does not call the Haiku router.
 
     Returns:
         ``qa``, ``coaching``, or ``review``.
@@ -771,7 +772,7 @@ def _compact_string_list(values: Any, *, item_limit: int, max_items: int) -> lis
 
 
 def _router_payload(request: CoachRequest) -> dict[str, Any]:
-    """Build a small Luna router payload. Never includes RAG or pedagogy."""
+    """Build a small Haiku router payload. Never includes RAG or pedagogy."""
     return {
         "phase": "router",
         "output_contract": "router_turn",
@@ -1175,7 +1176,7 @@ class AgentCoreCoachProvider:
         )
 
     def _resolve_specialist(self, request: CoachRequest) -> str:
-        """Return the server-owned specialist, using Luna only for free text.
+        """Return the server-owned specialist, using Haiku only for free text.
 
         Explicit ``request.specialist`` is treated as already validated by
         application code or tests. HTTP overwrites browser hints to ``None``
@@ -1284,7 +1285,7 @@ class AgentCoreCoachProvider:
                 result,
                 review,
                 review_depth=REVIEW_DEPTH_INCREMENTAL,
-                review_model=model_id or "openai.gpt-5.6-luna",
+                review_model=model_id or HAIKU_4_5_MODEL_ID,
                 review_trigger=REVIEW_TRIGGER_INCREMENTAL,
                 force_stay=True,
             )
@@ -1362,7 +1363,7 @@ class AgentCoreCoachProvider:
                 request,
                 result,
                 review,
-                review_model=model_id or "global.anthropic.claude-sonnet-4-6",
+                review_model=model_id or SONNET_4_6_MODEL_ID,
                 review_trigger=review_trigger,
             )
             if replace_response_text:
@@ -1497,7 +1498,7 @@ class AgentCoreCoachProvider:
                 routed,
                 result,
                 review,
-                review_model=model_id or "global.anthropic.claude-sonnet-4-6",
+                review_model=model_id or SONNET_4_6_MODEL_ID,
                 review_trigger="explicit",
             )
             if not succeeded:

@@ -1,4 +1,4 @@
-"""Luna router helpers. Classification only; FastAPI owns authorization."""
+"""Haiku router helpers. Classification only; FastAPI owns authorization."""
 
 from __future__ import annotations
 

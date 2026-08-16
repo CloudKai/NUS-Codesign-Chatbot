@@ -167,7 +167,7 @@ class QATurnOutput(BaseModel):
 
 
 class ReviewTurnOutput(BaseModel):
-    """Formative Review result for incremental Luna or deep Sonnet.
+    """Formative Review result for incremental Haiku or deep Sonnet.
 
     Incremental mode keeps the Review projection current and may flag
     ``readiness_candidate``. Deep mode may recommend stay/advance. FastAPI

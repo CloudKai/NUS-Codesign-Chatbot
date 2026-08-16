@@ -4,7 +4,7 @@ This directory is the **authoritative** harness for
 
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`.
 
-One runtime hosts the Luna router, Q&A, Coaching, Incremental Review, and
+One runtime hosts the Haiku router, Q&A, Coaching, Incremental Review, and
 Deep Review. Do not treat `scripts/agentcore/harness_patch/` as a second
 implementation.
 
@@ -25,12 +25,12 @@ implementation.
    `REVIEW_INCREMENTAL_*` / `REVIEW_DEEP_*` plus shared
    `AGENTCORE_MODEL_REGION`, `GUARDRAIL_ID`, `GUARDRAIL_VERSION`. Legacy
    `AGENTCORE_MODEL_PROVIDER` / `AGENTCORE_MODEL_ID` are a local fallback only
-   when no role keys are set. No bare `BedrockModel()`. No Claude↔Luna
+   when no role keys are set. No bare `BedrockModel()`. No Haiku↔Sonnet
    fallback.
 
 Roles:
 
-- ROUTER, Q&A, COACHING, INCREMENTAL REVIEW → `bedrock_mantle_responses` + `openai.gpt-5.6-luna`
+- ROUTER, Q&A, COACHING, INCREMENTAL REVIEW → `bedrock` + `global.anthropic.claude-haiku-4-5-20251001-v1:0`
 - DEEP REVIEW → `bedrock` + `global.anthropic.claude-sonnet-4-6`
 
 Changing these environment variables publishes a new Runtime **version** on

@@ -1,4 +1,4 @@
-"""Incremental Luna Review and periodic/event Deep Review tests (no AWS)."""
+"""Incremental Haiku Review and periodic/event Deep Review tests (no AWS)."""
 
 from __future__ import annotations
 

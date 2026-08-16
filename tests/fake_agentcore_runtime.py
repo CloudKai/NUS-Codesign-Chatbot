@@ -77,7 +77,7 @@ def _default_router_body() -> bytes:
 
 
 def _default_incremental_body() -> bytes:
-    """Return a lightweight Luna Review that cannot advance the stage."""
+    """Return a lightweight Incremental Review that cannot advance the stage."""
     return json.dumps(
         {
             "response_text": "Incremental review of the latest coaching turn.",

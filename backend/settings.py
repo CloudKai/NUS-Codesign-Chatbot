@@ -399,7 +399,7 @@ def _validate_provider_model_pair(
 
 
 def _validate_agentcore_role_models() -> None:
-    """Require explicit per-role production models. No silent Luna↔Sonnet swap."""
+    """Require explicit per-role production models. No silent Haiku↔Sonnet swap."""
     roles = (
         ("router", settings.router_model_provider, settings.router_model_id),
         ("qa", settings.qa_model_provider, settings.qa_model_id),

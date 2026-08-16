@@ -39,17 +39,17 @@ services:
       KNOWLEDGE_BASE_TYPE: "MANAGED"
       MODEL_PROVIDER: "agentcore"
       MOCK_OPENAI: "false"
-      AGENTCORE_MODEL_PROVIDER: "bedrock_mantle_responses"
-      AGENTCORE_MODEL_ID: "openai.gpt-5.6-luna"
+      AGENTCORE_MODEL_PROVIDER: "bedrock"
+      AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       AGENTCORE_MODEL_REGION: "us-west-2"
-      ROUTER_MODEL_PROVIDER: "bedrock_mantle_responses"
-      ROUTER_MODEL_ID: "openai.gpt-5.6-luna"
-      QA_MODEL_PROVIDER: "bedrock_mantle_responses"
-      QA_MODEL_ID: "openai.gpt-5.6-luna"
-      COACHING_MODEL_PROVIDER: "bedrock_mantle_responses"
-      COACHING_MODEL_ID: "openai.gpt-5.6-luna"
-      REVIEW_INCREMENTAL_MODEL_PROVIDER: "bedrock_mantle_responses"
-      REVIEW_INCREMENTAL_MODEL_ID: "openai.gpt-5.6-luna"
+      ROUTER_MODEL_PROVIDER: "bedrock"
+      ROUTER_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+      QA_MODEL_PROVIDER: "bedrock"
+      QA_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+      COACHING_MODEL_PROVIDER: "bedrock"
+      COACHING_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+      REVIEW_INCREMENTAL_MODEL_PROVIDER: "bedrock"
+      REVIEW_INCREMENTAL_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       REVIEW_DEEP_MODEL_PROVIDER: "bedrock"
       REVIEW_DEEP_MODEL_ID: "global.anthropic.claude-sonnet-4-6"
       ROUTER_MIN_CONFIDENCE: "0.60"
@@ -61,7 +61,7 @@ services:
       # USER_UPLOADS_BUCKET: set in host .env
       # COURSE_MATERIALS_BUCKET: set in host .env (cde2300-course-content-s3)
       # AGENTCORE_RUNTIME_ARN: set in host .env
-      # AGENTCORE_QUALIFIER: set in host .env (DEFAULT after the Luna runtime is READY)
+      # AGENTCORE_QUALIFIER: set in host .env (DEFAULT after the Haiku runtime is READY)
       # GUARDRAIL_ID: set in host .env; also inject the same ID and version 3 on the runtime
       # KNOWLEDGE_BASE_ID: set in host .env (JUQNP8AZAZ) when course sync is on
       # Lecture notes are not bundled into the production image.

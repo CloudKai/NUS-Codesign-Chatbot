@@ -1,8 +1,8 @@
-"""Review Agent orchestration: incremental Luna vs deep Sonnet.
+"""Review Agent orchestration: incremental Haiku vs deep Sonnet.
 
 The Review Agent has two depths.
 
-Incremental Review uses Luna after normal Coaching turns to keep the
+Incremental Review uses Haiku 4.5 after normal Coaching turns to keep the
 student-facing Review projection current at low cost.
 
 Deep Review uses Sonnet at periodic or event-driven checkpoints to perform

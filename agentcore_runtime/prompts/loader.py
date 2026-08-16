@@ -93,13 +93,13 @@ def load_review_prompt() -> str:
 
 @lru_cache(maxsize=1)
 def load_router_prompt() -> str:
-    """Return the canonical Luna router classification prompt."""
+    """Return the canonical Haiku router classification prompt."""
     return _read_utf8(_ROUTER_PATH)
 
 
 @lru_cache(maxsize=1)
 def load_review_incremental_prompt() -> str:
-    """Return the Incremental Luna Review prompt."""
+    """Return the Incremental Haiku Review prompt."""
     return _read_utf8(_REVIEW_INCREMENTAL_PATH)
 
 
