@@ -59,6 +59,7 @@ def test_compose_persists_data_and_mounts_private_secrets_read_only():
     assert 'REVIEW_DEEP_MODEL_ID: "global.anthropic.claude-sonnet-4-6"' in app
     assert 'ROUTER_MIN_CONFIDENCE: "0.60"' in app
     assert 'DEEP_REVIEW_INTERVAL_TURNS: "3"' in app
+    assert 'AGENTCORE_QUALIFIER: "DEFAULT"' in app
     assert 'GUARDRAIL_VERSION: "3"' in app
     assert "source: ./lecture_notes" in app
     assert "target: /app/lecture_notes" in app
@@ -106,7 +107,7 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert 'CO_DESIGN_UI_URL: "${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}"' in app
     assert 'MODEL_PROVIDER: "agentcore"' in app
     assert 'MOCK_OPENAI: "false"' in app
-    assert 'AGENTCORE_QUALIFIER: "19"' in app
+    assert 'AGENTCORE_QUALIFIER: "DEFAULT"' in app
     assert 'AGENTCORE_MODEL_PROVIDER: "bedrock"' in app
     assert 'AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
     assert 'ROUTER_MODEL_PROVIDER: "bedrock"' in app
@@ -148,7 +149,7 @@ def test_production_compose_keeps_host_env_knowledge_base_contract():
     assert 'COURSE_MATERIAL_SYNC_ENABLED: "true"' in app
     assert 'MODEL_PROVIDER: "agentcore"' in app
     assert 'MOCK_OPENAI: "false"' in app
-    assert 'AGENTCORE_QUALIFIER: "19"' in app
+    assert 'AGENTCORE_QUALIFIER: "DEFAULT"' in app
     assert 'AGENTCORE_MODEL_PROVIDER: "bedrock"' in app
     assert 'AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
     assert 'ROUTER_MODEL_PROVIDER: "bedrock"' in app

@@ -38,6 +38,7 @@ services:
       REVIEW_DEEP_MODEL_ID: "global.anthropic.claude-sonnet-4-6"
       ROUTER_MIN_CONFIDENCE: "0.60"
       DEEP_REVIEW_INTERVAL_TURNS: "3"
+      AGENTCORE_QUALIFIER: "DEFAULT"
       GUARDRAIL_VERSION: "3"
     expose:
       - "8000"

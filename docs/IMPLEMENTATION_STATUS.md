@@ -5,8 +5,8 @@
 **Runtime published 2026-08-16.** Same ARN
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.
 `DEFAULT` is **version 19 READY**. Production Compose and the EC2 host
-`.env` pin `AGENTCORE_QUALIFIER=19` so FastAPI invokes that version
-explicitly even if DEFAULT later moves. Guardrail v3
+`.env` use `AGENTCORE_QUALIFIER=DEFAULT` (currently liveVersion 19) and
+`GUARDRAIL_VERSION=3`. Guardrail v3
 (`NUSCodesignChatbotGuardrail` `o8aipba8m129`) is **unchanged**. Model
 assignments are **unchanged** (Haiku 4.5 router/Q&A/coaching/incremental;
 Sonnet 4.6 deep). Incremental Review remains fail-closed. Frontend timeout
@@ -81,11 +81,10 @@ still a separate follow-up.
   (`strands-agents` / `pydantic` present).
 - Live Incremental Review retest after publish was **not** run in this
   step. Timeout and fail-closed Incremental Review are unchanged.
-- Production env pin 2026-08-16: host `.env` and `compose.prod.yaml` set
-  `AGENTCORE_QUALIFIER=19`. App container
-  `nus-codesign-chatbot-app-1` force-recreated (`cde2300-chatbot:753ec96`).
-  `/api/v1/ready` returned 200. Caddy was not recreated. Stale host
-  `AGENTCORE_MODEL_ID` (Sonnet) was corrected to Haiku 4.5 to match Compose.
+- Production env 2026-08-16: host `.env` and `compose.prod.yaml` use
+  `AGENTCORE_QUALIFIER=DEFAULT` and `GUARDRAIL_VERSION=3`. DEFAULT
+  liveVersion remains **19**. App container recreated after the qualifier
+  change. Caddy was not recreated.
 
 ### Next exact action
 

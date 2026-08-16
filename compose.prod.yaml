@@ -39,7 +39,7 @@ services:
       KNOWLEDGE_BASE_TYPE: "MANAGED"
       MODEL_PROVIDER: "agentcore"
       MOCK_OPENAI: "false"
-      AGENTCORE_QUALIFIER: "19"
+      AGENTCORE_QUALIFIER: "DEFAULT"
       AGENTCORE_MODEL_PROVIDER: "bedrock"
       AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       AGENTCORE_MODEL_REGION: "us-west-2"
@@ -62,7 +62,7 @@ services:
       # USER_UPLOADS_BUCKET: set in host .env
       # COURSE_MATERIALS_BUCKET: set in host .env (cde2300-course-content-s3)
       # AGENTCORE_RUNTIME_ARN: set in host .env
-      # AGENTCORE_QUALIFIER: pinned to runtime version 19 (repair-prompt).
+      # AGENTCORE_QUALIFIER: DEFAULT (currently liveVersion 19, repair-prompt).
       # GUARDRAIL_ID: set in host .env; also inject the same ID and version 3 on the runtime
       # KNOWLEDGE_BASE_ID: set in host .env (JUQNP8AZAZ) when course sync is on
       # Lecture notes are not bundled into the production image.
