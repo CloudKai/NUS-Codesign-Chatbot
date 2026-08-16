@@ -1,6 +1,84 @@
 # Implementation status
 
-## Current phase — Three pedagogical agents + Haiku 4.5 / Sonnet 4.6 (DEFAULT v18)
+## Current phase — Strands structured-output repair prompt (Guardrail PROMPT_ATTACK false positive)
+
+**Code fix 2026-08-16. Not published. Not production-ready.** Same ARN
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.
+Guardrail v3 (`NUSCodesignChatbotGuardrail` `o8aipba8m129`) is **unchanged**.
+Model assignments are **unchanged** (Haiku 4.5 router/Q&A/coaching/incremental;
+Sonnet 4.6 deep). Incremental Review remains fail-closed. Frontend timeout
+handling is unchanged.
+
+### Root cause
+
+All Bedrock roles use Strands `structured_output_model`. If a model first
+responds in prose, Strands enters a forced structured-output repair turn.
+The default Strands repair instruction was classified as `PROMPT_ATTACK`
+by Guardrail v3 when it was the latest scanned message
+(`guardrail_latest_message=True`). That produced
+`stop_reason=guardrail_intervened` / `failure_category=safety_blocked`
+during Haiku Incremental Review. The student message was not the cause:
+Coaching had already succeeded on the same content.
+
+### Fix
+
+Shared custom repair prompt on `Agent.invoke_async(...)` for every
+structured Bedrock role (Router, Q&A, Coaching, Incremental Review, Deep
+Review):
+
+`structured_output_prompt="Please use the output tool now."`
+
+Constant: `STRUCTURED_OUTPUT_REPAIR_PROMPT` in
+`agentcore_runtime/structured_coach.py`. Not set on `BedrockModel()`.
+
+This code fix alone does **not** make the CloudFront path production ready.
+The live five-stage walk and the ~105–117s Streamlit/CloudFront timeout
+remain separate gates. Incremental Review fail-closed behavior is also
+still a separate follow-up.
+
+### Main files changed
+
+- Runtime: `agentcore_runtime/structured_coach.py`,
+  `agentcore_runtime/main.py`, `agentcore_runtime/README.md`
+- Tests: `tests/domain/test_agentcore_runtime.py`,
+  `tests/domain/test_runtime_model.py`
+- Diagnostic: `scripts/diagnostics/check_agentcore_runtime_dependencies.py`
+- Docs: this file, `docs/providers/AGENTCORE_ADAPTER.md`,
+  `docs/SECURITY_BOUNDARIES.md`, `scripts/AGENTS.md`
+
+### Validation evidence
+
+- Strands `1.52.0` `Agent.invoke_async` parameters include
+  `structured_output_prompt` (installed pin inspection in a clean venv).
+- `ruff check .`: **passed**.
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`,
+  `scripts`, `agentcore_runtime`: **passed**.
+- Focused runtime tests (`test_agentcore_runtime.py`,
+  `test_runtime_model.py`, `test_agentcore_provider.py`,
+  `test_agentcore_specialists.py`): **passed**.
+- Full mock pytest: **passed** (exit 0; 833 tests collected).
+- AgentCore runtime compatibility diagnostic (`strands-agents==1.52.0`,
+  `bedrock-agentcore==1.21.0`, `pydantic==2.13.4`,
+  `structured_output_model=present`, `structured_output_prompt=present`):
+  **passed**.
+- Docker daemon was **down**, so Compose config, Caddy validate, and image
+  build were **not executed**.
+- No existing safe ApplyGuardrail diagnostic script was present; live
+  ApplyGuardrail was **not** added and **not** run.
+- Live AWS Incremental Review retest and AgentCore republish were **not**
+  authorized. DEFAULT remains **v18** until a new version is published.
+
+### Next exact action
+
+1. Commit/push only when authorized.
+2. Publish a new VERSION on the **same** AgentCore runtime only when
+   deployment is authorized, then retest one Incremental Review path that
+   previously hit the structured-output repair cycle.
+3. Remaining separate gates: live five-stage CloudFront walk, Streamlit /
+   CloudFront timeout, Incremental Review fail-closed follow-up, EC2 image
+   cutover. Do not mark production ready from this code fix alone.
+
+## Previous phase — Three pedagogical agents + Haiku 4.5 / Sonnet 4.6 (DEFAULT v18)
 
 **Runtime published 2026-08-16.** Same ARN
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.

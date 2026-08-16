@@ -46,6 +46,7 @@ def test_sonnet_bedrock_kwargs_are_explicit_and_use_latest_message() -> None:
     assert kwargs["guardrail_version"] == "1"
     assert kwargs["guardrail_latest_message"] is True
     assert "fallback" not in kwargs
+    assert "structured_output_prompt" not in kwargs
 
 
 def test_missing_provider_or_model_fails_closed() -> None:
@@ -81,6 +82,7 @@ def test_haiku_bedrock_kwargs_are_explicit_and_use_latest_message() -> None:
     assert kwargs["guardrail_version"] == "3"
     assert kwargs["guardrail_latest_message"] is True
     assert "fallback" not in kwargs
+    assert "structured_output_prompt" not in kwargs
 
 
 def test_luna_cannot_use_bedrock_model() -> None:
@@ -135,6 +137,8 @@ def test_harness_never_constructs_empty_bedrock_model() -> None:
     assert "return BedrockModel()" not in loader
     assert "get_role_model" in main
     assert "tools=[]" in main
+    assert "structured_output_prompt=STRUCTURED_OUTPUT_REPAIR_PROMPT" in main
+    assert "structured_output_prompt=" not in loader
 
 
 class _FakeGuardrail:

@@ -79,7 +79,11 @@ On the Haiku and Sonnet `BedrockModel` path, `GUARDRAIL_ID` and
 `GUARDRAIL_VERSION` are required and `guardrail_latest_message=True` so input
 evaluation targets the latest untrusted user turn (current student/evidence),
 not the trusted specialist curriculum. Specialists use `tools=[]`, so the
-Strands tool-result guardrail wrapping bug does not apply. The historical Luna
+Strands tool-result guardrail wrapping bug does not apply. The runtime also
+overrides Strands' structured-output repair prompt with
+`Please use the output tool now.` so the latest-message scan does not treat
+the framework recovery turn as `PROMPT_ATTACK`. Guardrail policy is unchanged.
+The historical Luna
 `OpenAIResponsesModel` path does not accept those constructor fields; it must
 call Bedrock `ApplyGuardrail` on untrusted input and on model output. Missing
 guardrail configuration fails production startup and the runtime loader.

@@ -3,16 +3,25 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import logging
+import sys
+import types
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from agentcore_runtime.models import CoachTurnOutput
+from agentcore_runtime.models import (
+    CoachTurnOutput,
+    QATurnOutput,
+    ReviewTurnOutput,
+    RouterOutput,
+)
 from agentcore_runtime.structured_coach import (
+    STRUCTURED_OUTPUT_REPAIR_PROMPT,
     CoachTurnExtractionError,
     coach_turn_from_agent_result,
     coaching_invoke_prompts,
@@ -20,10 +29,15 @@ from agentcore_runtime.structured_coach import (
     invoke_failure_category,
     last_user_text,
     log_coach_turn_outcome,
+    qa_turn_from_agent_result,
+    review_turn_from_agent_result,
 )
 
 _STREET = "A quiet residential street"
 _RUNTIME_DIR = Path("agentcore_runtime")
+_STRANDS_DEFAULT_REPAIR_PROMPT = (
+    "You must format the previous response as structured output."
+)
 
 
 def _assessment(**overrides: Any) -> dict[str, Any]:
@@ -376,3 +390,303 @@ def test_invoke_failure_category_maps_auth_to_unavailable() -> None:
     assert invoke_failure_category(RateLimitError("slow down")) == "throttled"
     assert invoke_failure_category(TimeoutError()) == "timeout"
     assert invoke_failure_category(RuntimeError("parse")) == "structured_output_failure"
+
+
+def _review_turn() -> dict[str, Any]:
+    """Return one valid review_turn mapping."""
+    return {
+        "response_text": "Your problem statement is becoming more specific.",
+        "strengths": ["Named a place"],
+        "areas_to_develop": ["Name who is affected"],
+        "synthesis": "Keep locating the users.",
+    }
+
+
+def _sample_structured_output(output_model: type[Any]) -> Any:
+    """Return a valid instance of one specialist structured-output contract."""
+    if output_model is RouterOutput:
+        return RouterOutput.model_validate(
+            {
+                "specialist": "qa",
+                "confidence": 0.9,
+                "rationale_category": "course_information",
+            }
+        )
+    if output_model is QATurnOutput:
+        return QATurnOutput.model_validate(
+            {"response_text": "Week 2 covers the JTBD framework.", "citations": []}
+        )
+    if output_model is ReviewTurnOutput:
+        return ReviewTurnOutput.model_validate(_review_turn())
+    return CoachTurnOutput.model_validate(_coach_turn())
+
+
+def _user_payload(phase: str, **extra: Any) -> dict[str, Any]:
+    """Return a specialist payload with one student user turn."""
+    payload = {
+        "phase": phase,
+        "topic": "problem_identification",
+        "messages": [
+            {"role": "user", "content": [{"text": "Caregivers wait on a quiet street at night."}]}
+        ],
+    }
+    payload.update(extra)
+    return payload
+
+
+def _invoke_async_calls(tree: ast.AST) -> list[ast.Call]:
+    """Return Agent.invoke_async call nodes from one parsed module."""
+    calls: list[ast.Call] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr == "invoke_async":
+            calls.append(node)
+    return calls
+
+
+def test_structured_output_repair_prompt_is_the_safe_override() -> None:
+    assert STRUCTURED_OUTPUT_REPAIR_PROMPT == "Please use the output tool now."
+    assert STRUCTURED_OUTPUT_REPAIR_PROMPT != _STRANDS_DEFAULT_REPAIR_PROMPT
+
+
+def test_application_does_not_inject_strands_default_repair_prompt() -> None:
+    """The default Strands repair instruction must not be our repair prompt."""
+    roots = (
+        Path("agentcore_runtime"),
+        Path("backend"),
+        Path("ui"),
+        Path("streamlit_app.py"),
+    )
+    for root in roots:
+        paths = [root] if root.is_file() else sorted(root.rglob("*.py"))
+        for path in paths:
+            text = path.read_text(encoding="utf-8")
+            assert _STRANDS_DEFAULT_REPAIR_PROMPT not in text, path
+
+
+def test_structured_role_invoke_passes_custom_repair_prompt() -> None:
+    """The shared invoke path is the only Agent.invoke_async call site."""
+    tree = ast.parse(
+        Path("agentcore_runtime/main.py").read_text(encoding="utf-8"),
+        filename="agentcore_runtime/main.py",
+    )
+    calls = _invoke_async_calls(tree)
+    assert len(calls) == 1
+    keywords = {keyword.arg: keyword.value for keyword in calls[0].keywords}
+    assert "structured_output_model" in keywords
+    prompt_node = keywords.get("structured_output_prompt")
+    assert isinstance(prompt_node, ast.Name)
+    assert prompt_node.id == "STRUCTURED_OUTPUT_REPAIR_PROMPT"
+    model_node = keywords["structured_output_model"]
+    assert isinstance(model_node, ast.Name)
+    assert model_node.id == "output_model"
+
+
+def test_router_and_specialists_share_structured_role_invoke() -> None:
+    tree = ast.parse(
+        Path("agentcore_runtime/main.py").read_text(encoding="utf-8"),
+        filename="agentcore_runtime/main.py",
+    )
+    callers: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.AsyncFunctionDef):
+            continue
+        if node.name not in {"router_invoke", "specialist_invoke"}:
+            continue
+        for child in ast.walk(node):
+            if (
+                isinstance(child, ast.Call)
+                and isinstance(child.func, ast.Name)
+                and child.func.id == "_structured_role_invoke"
+            ):
+                callers.add(node.name)
+    assert callers == {"router_invoke", "specialist_invoke"}
+
+
+def test_all_structured_roles_use_shared_output_contracts() -> None:
+    """Router stays on router_invoke; specialists share _role_for_payload."""
+    from agentcore_runtime.main import _output_model_for, _role_for_payload
+    from agentcore_runtime.model import (
+        MODEL_ROLE_COACHING,
+        MODEL_ROLE_QA,
+        MODEL_ROLE_REVIEW_DEEP,
+        MODEL_ROLE_REVIEW_INCREMENTAL,
+        MODEL_ROLE_ROUTER,
+    )
+
+    assert _role_for_payload({"phase": "qa"}) == MODEL_ROLE_QA
+    assert _role_for_payload({"phase": "coaching"}) == MODEL_ROLE_COACHING
+    assert (
+        _role_for_payload({"phase": "review", "review_mode": "incremental"})
+        == MODEL_ROLE_REVIEW_INCREMENTAL
+    )
+    assert (
+        _role_for_payload({"phase": "review", "review_mode": "deep"})
+        == MODEL_ROLE_REVIEW_DEEP
+    )
+    assert _output_model_for("qa", "qa_turn") is QATurnOutput
+    assert _output_model_for("coaching", "coach_turn") is CoachTurnOutput
+    assert _output_model_for("review", "review_turn") is ReviewTurnOutput
+    assert MODEL_ROLE_ROUTER == "router"
+
+
+def test_structured_output_contracts_still_validate() -> None:
+    router = RouterOutput.model_validate(
+        {
+            "specialist": "coaching",
+            "confidence": 0.92,
+            "rationale_category": "project_coaching",
+        }
+    )
+    qa = QATurnOutput.model_validate(
+        {"response_text": "Week 1 covers innovation.", "citations": []}
+    )
+    coach = CoachTurnOutput.model_validate(_coach_turn())
+    review = ReviewTurnOutput.model_validate(_review_turn())
+    assert router.specialist == "coaching"
+    assert qa.response_text.startswith("Week 1")
+    assert coach.assessment.recommendation == "stay"
+    assert "users" in review.synthesis
+
+
+def test_review_guardrail_intervened_is_still_safety_blocked() -> None:
+    with pytest.raises(CoachTurnExtractionError) as raised:
+        review_turn_from_agent_result(
+            _result(
+                stop_reason="guardrail_intervened",
+                structured_output=ReviewTurnOutput.model_validate(_review_turn()),
+            )
+        )
+    assert raised.value.category == "safety_blocked"
+    with pytest.raises(CoachTurnExtractionError) as qa_raised:
+        qa_turn_from_agent_result(
+            _result(
+                stop_reason="guardrail_intervened",
+                structured_output=QATurnOutput.model_validate(
+                    {"response_text": "Week 1 covers innovation.", "citations": []}
+                ),
+            )
+        )
+    assert qa_raised.value.category == "safety_blocked"
+
+
+def test_structured_roles_pass_custom_repair_prompt_to_invoke_async(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Router, Q&A, Coaching, Incremental Review, and Deep Review share the fix."""
+    import agentcore_runtime.main as runtime_main
+    from agentcore_runtime.model import (
+        HAIKU_4_5_MODEL_ID,
+        MODEL_ROLE_COACHING,
+        MODEL_ROLE_QA,
+        MODEL_ROLE_REVIEW_DEEP,
+        MODEL_ROLE_REVIEW_INCREMENTAL,
+        MODEL_ROLE_ROUTER,
+        SONNET_4_6_MODEL_ID,
+        RuntimeModelConfig,
+    )
+
+    calls: list[dict[str, Any]] = []
+
+    class FakeAgent:
+        """Record invoke_async kwargs without importing Strands."""
+
+        def __init__(self, **kwargs: Any) -> None:
+            self.init_kwargs = kwargs
+
+        async def invoke_async(self, prompt: Any, **kwargs: Any) -> SimpleNamespace:
+            calls.append(
+                {
+                    "init_kwargs": self.init_kwargs,
+                    "prompt": prompt,
+                    "kwargs": kwargs,
+                }
+            )
+            output_model = kwargs["structured_output_model"]
+            return SimpleNamespace(
+                stop_reason="end_turn",
+                structured_output=_sample_structured_output(output_model),
+                message=None,
+            )
+
+    fake_strands = types.ModuleType("strands")
+    fake_strands.Agent = FakeAgent  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "strands", fake_strands)
+    monkeypatch.setattr(runtime_main, "_ensure_role_configs", lambda: None)
+
+    def fake_config(role: str, values: Any = None) -> RuntimeModelConfig:
+        del values
+        model_id = (
+            SONNET_4_6_MODEL_ID if role == MODEL_ROLE_REVIEW_DEEP else HAIKU_4_5_MODEL_ID
+        )
+        return RuntimeModelConfig(
+            provider="bedrock",
+            model_id=model_id,
+            region="us-west-2",
+            guardrail_id="o8aipba8m129",
+            guardrail_version="3",
+            role=role,
+        )
+
+    monkeypatch.setattr(runtime_main, "get_role_config", fake_config)
+    roles_seen: list[str] = []
+
+    def fake_model(role: str) -> object:
+        roles_seen.append(role)
+        return object()
+
+    monkeypatch.setattr(runtime_main, "get_role_model", fake_model)
+
+    invocations = (
+        runtime_main.router_invoke(
+            _user_payload(
+                "router",
+                output_contract="router_turn",
+                runtime_context={"current_stage": "problem_identification"},
+            )
+        ),
+        runtime_main.specialist_invoke(_user_payload("qa", output_contract="qa_turn")),
+        runtime_main.specialist_invoke(
+            _user_payload("coaching", output_contract="coach_turn")
+        ),
+        runtime_main.specialist_invoke(
+            _user_payload(
+                "review",
+                review_mode="incremental",
+                output_contract="review_turn",
+            )
+        ),
+        runtime_main.specialist_invoke(
+            _user_payload(
+                "review",
+                review_mode="deep",
+                output_contract="review_turn",
+            )
+        ),
+    )
+    results = [asyncio.run(item) for item in invocations]
+    assert roles_seen == [
+        MODEL_ROLE_ROUTER,
+        MODEL_ROLE_QA,
+        MODEL_ROLE_COACHING,
+        MODEL_ROLE_REVIEW_INCREMENTAL,
+        MODEL_ROLE_REVIEW_DEEP,
+    ]
+    assert len(calls) == 5
+    expected_models = (
+        RouterOutput,
+        QATurnOutput,
+        CoachTurnOutput,
+        ReviewTurnOutput,
+        ReviewTurnOutput,
+    )
+    for call, expected_model, result in zip(calls, expected_models, results, strict=True):
+        assert "structured_output_prompt" not in call["init_kwargs"]
+        assert call["init_kwargs"]["tools"] == []
+        assert call["kwargs"]["structured_output_model"] is expected_model
+        assert call["kwargs"]["structured_output_prompt"] == (
+            "Please use the output tool now."
+        )
+        assert result.get("error") is not True
+

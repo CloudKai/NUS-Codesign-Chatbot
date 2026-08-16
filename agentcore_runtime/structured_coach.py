@@ -53,6 +53,12 @@ except ImportError:  # pragma: no cover - flat runtime copy next to main.py
 
 logger = logging.getLogger("agentcore_runtime.structured_coach")
 
+# Bedrock Guardrail v3 PROMPT_ATTACK (INPUT=BLOCK, MEDIUM) classifies Strands'
+# default structured-output repair instruction as an attack when it is the
+# latest scanned message (guardrail_latest_message=True). This override is the
+# documented safe repair text and is shared by every Bedrock specialist role.
+STRUCTURED_OUTPUT_REPAIR_PROMPT = "Please use the output tool now."
+
 STRUCTURED_COACH_TURN_PROMPT = """Return one JSON object that matches the
 coach_turn contract used by the companion application. Required top-level keys:
 

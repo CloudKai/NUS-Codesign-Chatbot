@@ -102,8 +102,12 @@ Invariants:
 
 The live DEFAULT harness source of truth is
 [`agentcore_runtime/`](../../agentcore_runtime/). It hosts Q&A, Coaching, and
-Formative Review with Strands `structured_output_model` and returns validated
-JSON or a category-only error envelope. Publish a zip with `main.py` at the
+Formative Review with Strands `structured_output_model` plus a shared
+`structured_output_prompt` (`Please use the output tool now.`) so Guardrail v3
+does not classify the Strands structured-output recovery turn as
+`PROMPT_ATTACK`. Guardrail ID, version, and PROMPT_ATTACK policy stay
+unchanged. The harness returns validated JSON or a category-only error
+envelope. Publish a zip with `main.py` at the
 root, vendored linux/arm64 Python 3.14 site-packages (AgentCore does not
 pip-install `requirements.txt`), and entrypoint
 `opentelemetry-instrument main.py`. `main.py` must call `app.run()` under
