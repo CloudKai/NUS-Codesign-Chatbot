@@ -2,7 +2,7 @@
 
 ## Current phase — Bound MANAGED Knowledge Base retrieval latency
 
-**Implemented locally on 2026-08-17; not yet committed or deployed.**
+**Prepared on 2026-08-17; not yet deployed.**
 
 ### What changed and why
 
