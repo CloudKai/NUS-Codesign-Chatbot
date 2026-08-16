@@ -37,6 +37,7 @@ from backend.domain import (
 )
 from backend.owner_context import OwnerResolver, OwnerServices
 from backend.operational_metrics import (
+    configure_operational_loggers,
     record_coach_rate_limit,
     record_coach_turn,
     record_http_request,
@@ -198,6 +199,7 @@ def create_app(
         validate_storage_configuration,
     )
 
+    configure_operational_loggers()
     validate_storage_configuration()
     validate_production_configuration()
     if store is not None:

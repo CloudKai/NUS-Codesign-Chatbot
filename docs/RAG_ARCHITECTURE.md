@@ -115,12 +115,28 @@ in two folders cannot collide (`course/readings/archive/week1.pdf` →
 `course_material_id_collisions`. Course sync stores the same id on locked
 source metadata.
 
-If the live Knowledge Base does not yet contain that attribute, a filtered
-Retrieve can return no hits **or raise `ValidationException`**. The adapter
-then retries **without** the filter and still drops unselected or foreign S3
-keys, unless `KNOWLEDGE_BASE_STRICT_METADATA_FILTER=true`. Post-retrieval
-object-key validation is always applied. Strict filter stays off until live
-KB metadata is verified.
+If the live Knowledge Base does not yet contain that attribute, behaviour
+depends on Knowledge Base type while
+`KNOWLEDGE_BASE_STRICT_METADATA_FILTER` is false:
+
+- **VECTOR:** try the metadata filter first. An empty result or
+  `ValidationException` retries once without the filter, then drops
+  unselected or foreign S3 keys.
+- **MANAGED (production `JUQNP8AZAZ`):** skip the unverified filter and make
+  **one** unfiltered Retrieve. The optional attribute currently raises
+  `ValidationException`; a failed filtered call plus an unfiltered retry
+  previously consumed most of the UI timeout. Exact bucket/object-key
+  validation still applies to every hit.
+
+`KNOWLEDGE_BASE_STRICT_METADATA_FILTER=true` opts the filter back in after
+the indexed attribute is verified. Retrieve is optional evidence gathering:
+the adapter uses a wall-clock timeout (`KNOWLEDGE_BASE_RETRIEVE_TIMEOUT_SECONDS`,
+default 5s), `total_max_attempts=1`, and `numberOfResults` equal to
+`FAST_CHAT_RETRIEVAL_MAX_CHUNKS` (default 4). A timeout or SDK failure is an
+evidence gap, not invented course content.
+
+Post-retrieval object-key validation is always applied. Strict filter stays
+off until live KB metadata is verified.
 
 Sidecar metadata files are optional until you turn strict mode on. For the
 S3 data source, Bedrock expects a sibling file named

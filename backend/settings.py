@@ -168,6 +168,11 @@ class Settings:
     knowledge_base_strict_metadata_filter: bool = _boolean(
         "KNOWLEDGE_BASE_STRICT_METADATA_FILTER", False
     )
+    # Optional evidence gathering only. Keep this well under the Streamlit
+    # 120s client timeout so a slow MANAGED Retrieve cannot dominate Fast Chat.
+    knowledge_base_retrieve_timeout_seconds: int = _bounded_int(
+        "KNOWLEDGE_BASE_RETRIEVE_TIMEOUT_SECONDS", 5, 2, 20
+    )
     model_context_limit_tokens: int = int(
         os.getenv("MODEL_CONTEXT_LIMIT_TOKENS", "272000")
     )

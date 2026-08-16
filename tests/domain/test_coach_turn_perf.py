@@ -193,3 +193,28 @@ def test_retrieval_failure_still_emits_timing(caplog, tmp_path) -> None:
     assert payload["success"] is False
     assert payload["retrieval_total_ms"] >= 0
     assert payload["failure_category"]
+
+
+def test_configure_operational_loggers_enables_info_without_root_debug():
+    from backend.operational_metrics import configure_operational_loggers
+
+    root = logging.getLogger()
+    previous_root = root.level
+    retrieve_logger = logging.getLogger("backend.bedrock_retrieve")
+    perf_logger = logging.getLogger("co_design.turn_perf")
+    previous_retrieve = retrieve_logger.level
+    previous_perf = perf_logger.level
+    try:
+        root.setLevel(logging.WARNING)
+        retrieve_logger.setLevel(logging.NOTSET)
+        perf_logger.setLevel(logging.NOTSET)
+        configure_operational_loggers()
+        assert retrieve_logger.level == logging.INFO
+        assert perf_logger.level == logging.INFO
+        assert retrieve_logger.isEnabledFor(logging.INFO)
+        assert perf_logger.isEnabledFor(logging.INFO)
+        assert root.level == logging.WARNING
+    finally:
+        root.setLevel(previous_root)
+        retrieve_logger.setLevel(previous_retrieve)
+        perf_logger.setLevel(previous_perf)

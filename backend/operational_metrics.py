@@ -17,6 +17,26 @@ from typing import Any
 
 logger = logging.getLogger("co_design.operational")
 
+_OPERATIONAL_LOGGERS = (
+    "backend.api",
+    "backend.bedrock_retrieve",
+    "backend.retrieval",
+    "co_design.operational",
+    "co_design.turn_perf",
+)
+
+
+def configure_operational_loggers() -> None:
+    """Enable INFO operational logs without lowering the process root logger.
+
+    Production uvicorn leaves the root logger at WARNING, which hid
+    ``coach_turn_perf`` and Knowledge Base Retrieve timings. Child loggers
+    set to INFO still propagate to the existing handlers. These loggers
+    must not emit student text, prompts, or notebook identifiers.
+    """
+    for name in _OPERATIONAL_LOGGERS:
+        logging.getLogger(name).setLevel(logging.INFO)
+
 
 def _emit(event: str, **fields: Any) -> None:
     """Write one compact JSON metric event with only caller-approved fields."""

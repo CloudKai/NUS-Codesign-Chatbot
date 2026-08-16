@@ -1,57 +1,80 @@
 # Implementation status
 
-## Current phase — Bound MANAGED Knowledge Base retrieval latency
+## Current phase — Cap Fast Chat Retrieve at five seconds
 
 **Prepared on 2026-08-17; not yet deployed.**
 
 ### What changed and why
 
-Production evidence for the Week 1 query showed the Streamlit-to-FastAPI
-stream begin at `19:14:52.527`, a MANAGED Knowledge Base metadata-filter
-`ValidationException` at `19:14:53.265`, and the first post-turn UI reload at
-`19:16:51.484`. The AgentCore trace itself was 4.73 seconds and already
-contained `<retrieved_course_context>`, so nearly all of the roughly
-119-second wait was outside Haiku.
+`f271088` is live on EC2 (`cde2300-chatbot:f271088`). That image skipped the
+rejected MANAGED metadata filter and set a 15-second SDK read timeout. The
+119-second double-Retrieve path is gone, but asking what is in the Week 1
+lecture still took more than 30 seconds.
 
-1. MANAGED Retrieve now makes one unfiltered request while strict metadata
-   mode is off. Production `JUQNP8AZAZ` rejects its current
-   `course_material_id` filter because that optional indexed attribute has not
-   been verified. Exact selected bucket/object-key validation remains
-   mandatory after Retrieve, so skipping the rejected optimization does not
-   broaden citations. Strict mode can opt back into the AWS-supported filter
-   after the KB metadata is corrected and verified.
-2. The Bedrock Agent Runtime client now uses `total_max_attempts=1`, a
-   15-second read timeout, and a 3-second connect timeout. Optional evidence
-   retrieval can fail closed as an evidence gap instead of consuming the
-   UI client's 120-second timeout.
-3. VECTOR Knowledge Bases retain the existing metadata-filter behavior,
-   including the non-strict unfiltered fallback.
+Production evidence after that recreate:
+
+- Application loggers were at WARNING, so `coach_turn_perf` and
+  `course_retrieval_query` never appeared in Docker logs.
+- No `course_retrieval_validation_error` / `retrying_unfiltered` after restart.
+- The blocking `POST .../messages/.../revise` path completed at `19:55:32`.
+  Haiku itself remains ~5 seconds. A 15-second Retrieve plus that invoke plus
+  the Streamlit reload still exceeds 30 seconds.
+
+1. Knowledge Base Retrieve now has a **5-second wall-clock** cap
+   (`KNOWLEDGE_BASE_RETRIEVE_TIMEOUT_SECONDS`, also used as the SDK read
+   timeout) and `numberOfResults=4` (the Fast Chat chunk budget). A hung
+   MANAGED search fails closed as an evidence gap instead of occupying the
+   spinner. Catalog titles still reach AgentCore.
+2. FastAPI sets INFO on the operational loggers so `coach_turn_perf` and
+   Retrieve elapsed-ms lines are visible without lowering the root logger.
+   Slow or unavailable Retrieve also logs at WARNING.
 
 ### Files and validation
 
-- Changed: `backend/bedrock_retrieve.py`,
-  `tests/domain/test_bedrock_retrieve.py`, and this status file.
-- Deterministic retrieval tests: **44 passed**.
+- Changed: `backend/bedrock_retrieve.py`, `backend/settings.py`,
+  `backend/operational_metrics.py`, `backend/http/app.py`,
+  `tests/domain/test_bedrock_retrieve.py`,
+  `tests/domain/test_coach_turn_perf.py`, `docs/RAG_ARCHITECTURE.md`,
+  `.env.example`, and this status file.
+- Deterministic retrieval + perf tests: **focused passed**.
 - Repository-wide Ruff: **passed**.
-- Full deterministic pytest: **968 passed**.
-- Compileall for backend, UI, tests, scripts, and AgentCore runtime: **passed**.
+- Full deterministic pytest: **970 passed**.
+- Compileall for backend, UI, tests, scripts: **passed**.
 - No paid/live Bedrock or AgentCore call was made for this patch.
 
 ### Compatibility, rollback, risks, and next action
 
 - No schema, DSQL, S3, Cognito, AgentCore runtime, or prompt change.
-- Rollback is the previous app image; persisted notebooks and sources are
-  unchanged.
-- A slow MANAGED Retrieve now returns an evidence gap after its bounded SDK
-  wait rather than inventing course content. The exact end-to-end latency
-  still requires one explicitly approved production query after deployment.
-- Next: build a new ARM64 app image from this tree, deploy only the `app`
-  container, then repeat the Week 1 query and compare app timestamps with the
-  AgentCore trace.
+- Rollback is the previous app image (`cde2300-chatbot:f271088`); persisted
+  notebooks and sources are unchanged.
+- A Retrieve that cannot finish in 5 seconds becomes an evidence gap. Week 1
+  answers may cite catalog titles without PDF excerpts until the MANAGED KB
+  is faster or `course_material_id` metadata is verified.
+- Next: build a new ARM64 app image from this tree, recreate only the `app`
+  container, ask the Week 1 lecture question once, and confirm Docker shows
+  `course_retrieval_elapsed_ms` plus `coach_turn_perf`.
+
+---
+
+## Previous phase — Bound MANAGED Knowledge Base retrieval latency
+
+**Committed on `Integrate-Bedrock` as `3b393d6` / `f271088` and deployed as
+`cde2300-chatbot:f271088`.**
+
+Production evidence for the earlier Week 1 query showed the Streamlit-to-FastAPI
+stream begin at `19:14:52.527`, a MANAGED Knowledge Base metadata-filter
+`ValidationException` at `19:14:53.265`, and the first post-turn UI reload at
+`19:16:51.484`. The AgentCore trace itself was 4.73 seconds.
+
+MANAGED Retrieve makes one unfiltered request while strict metadata mode is
+off. The Bedrock Agent Runtime client used `total_max_attempts=1` and a
+15-second read timeout. That removed the ~119-second filter-retry hole but
+left Fast Chat above 30 seconds.
 
 ---
 
 ## Previous phase — Explicit Deep Review HTTP + token-aware Fast Chat
+
 
 **Committed on `Integrate-Bedrock` as `f663740`.** Canonical Coaching prompts
 still match baseline `a6d163668902beae4938fe552cced7ba92b15e88`. AgentCore

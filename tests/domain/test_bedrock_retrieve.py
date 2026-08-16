@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from typing import Any
 
 import pytest
@@ -323,6 +325,7 @@ def test_retrieve_sends_course_material_id_metadata_filter():
     )
     assert len(client.calls) == 1
     vector = client.calls[0]["retrievalConfiguration"]["vectorSearchConfiguration"]
+    assert vector["numberOfResults"] == 4
     assert vector["filter"] == {
         "equals": {"key": "course_material_id", "value": "lecture_crossing"}
     }
@@ -807,9 +810,49 @@ def test_runtime_client_bounds_retrieve_wait_and_disables_sdk_retries(
     assert observed["region_name"] == "us-west-2"
     assert observed["config"] == {
         "retries": {"total_max_attempts": 1, "mode": "standard"},
-        "read_timeout": 15.0,
-        "connect_timeout": 3.0,
+        "read_timeout": retriever._retrieve_timeout_seconds,
+        "connect_timeout": min(2.0, retriever._retrieve_timeout_seconds),
     }
+
+
+def test_hung_retrieve_fails_closed_within_wall_clock_timeout(
+    caplog: pytest.LogCaptureFixture,
+):
+    class HungRetrieveClient:
+        """Injected client that blocks until the test releases it."""
+
+        def __init__(self) -> None:
+            self.release = threading.Event()
+
+        def retrieve(self, **kwargs: Any) -> Any:
+            self.release.wait(timeout=30)
+            return {"retrievalResults": []}
+
+    hung = HungRetrieveClient()
+    started = time.perf_counter()
+    with caplog.at_level(logging.WARNING, logger="backend.bedrock_retrieve"):
+        result = BedrockKnowledgeBaseRetriever(
+            "JUQNP8AZAZ",
+            course_bucket="cde2300-course-content-s3",
+            client=hung,
+            retrieve_timeout_seconds=0.05,
+        ).retrieve(
+            _query(
+                _course_source(
+                    "src-lecture",
+                    "S1",
+                    object_key="course/lectureNotes/crossing.pdf",
+                )
+            )
+        )
+    elapsed = time.perf_counter() - started
+    hung.release.set()
+    assert elapsed < 0.5
+    assert result.chunks == ()
+    assert result.course_retrieval_status == "unavailable"
+    assert result.failure_category == "timeout"
+    assert "course_retrieval_timeout" in caplog.text
+    assert "course_retrieval_elapsed_ms=" in caplog.text
 
 
 def test_retrieve_access_denied_is_unavailable(caplog: pytest.LogCaptureFixture):

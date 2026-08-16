@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any
 from urllib.parse import ParseResult, unquote, urlparse
 
@@ -32,10 +35,11 @@ from .settings import settings
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_RESULTS = 8
+_DEFAULT_RESULTS = 4
 _MAX_CONTEXT_CHARS = 16_000
-_RETRIEVE_READ_TIMEOUT_SECONDS = 15.0
-_RETRIEVE_CONNECT_TIMEOUT_SECONDS = 3.0
+_DEFAULT_RETRIEVE_TIMEOUT_SECONDS = 5.0
+_RETRIEVE_CONNECT_TIMEOUT_SECONDS = 2.0
+_SLOW_RETRIEVE_WARNING_MS = 3_000
 COURSE_MATERIAL_METADATA_KEY = "course_material_id"
 _S3_VIRTUAL_HOST = re.compile(
     r"^(?P<bucket>.+)\.s3(?:[.-](?:dualstack\.)?(?:[a-z0-9-]+))?\.amazonaws\.com$",
@@ -313,19 +317,22 @@ class BedrockKnowledgeBaseRetriever:
         knowledge_base_id: str,
         *,
         region: str = "us-west-2",
-        number_of_results: int = _DEFAULT_RESULTS,
+        number_of_results: int | None = None,
         max_context_chars: int = _MAX_CONTEXT_CHARS,
         course_bucket: str = "",
         client: Any | None = None,
         strict_metadata_filter: bool | None = None,
         knowledge_base_type: str | None = None,
+        retrieve_timeout_seconds: float | None = None,
     ) -> None:
         """Create the adapter with an injected or lazily constructed client.
 
         Args:
             knowledge_base_id: Bedrock Knowledge Base id (non-secret).
             region: AWS region for the data-plane client.
-            number_of_results: Retrieve ``numberOfResults``.
+            number_of_results: Retrieve ``numberOfResults``. Defaults to the
+                Fast Chat chunk budget so MANAGED search does not fetch unused
+                hits.
             max_context_chars: Prompt budget after selected-source filtering.
             course_bucket: When set, Retrieve hits from other buckets are dropped.
             client: Optional injected ``bedrock-agent-runtime`` client for tests.
@@ -336,13 +343,38 @@ class BedrockKnowledgeBaseRetriever:
                 setting is false and relies on exact bucket/key post-validation.
             knowledge_base_type: ``vector`` or ``managed``. MANAGED Knowledge
                 Bases require ``managedSearchConfiguration``.
+            retrieve_timeout_seconds: Wall-clock and SDK read timeout. Optional
+                evidence gathering fails closed after this budget. Tests may
+                pass a sub-second value; production uses settings.
         """
         self._knowledge_base_id = str(knowledge_base_id or "").strip()
         self._region = str(region or "").strip() or "us-west-2"
-        self._number_of_results = max(1, int(number_of_results))
+        if number_of_results is None:
+            self._number_of_results = max(
+                1,
+                int(
+                    getattr(
+                        settings,
+                        "fast_chat_retrieval_max_chunks",
+                        _DEFAULT_RESULTS,
+                    )
+                ),
+            )
+        else:
+            self._number_of_results = max(1, int(number_of_results))
         self._max_context_chars = max(1, int(max_context_chars))
         self._course_bucket = str(course_bucket or "").strip()
         self._client = client
+        if retrieve_timeout_seconds is None:
+            self._retrieve_timeout_seconds = float(
+                getattr(
+                    settings,
+                    "knowledge_base_retrieve_timeout_seconds",
+                    _DEFAULT_RETRIEVE_TIMEOUT_SECONDS,
+                )
+            )
+        else:
+            self._retrieve_timeout_seconds = max(0.05, float(retrieve_timeout_seconds))
         if knowledge_base_type is None:
             self._knowledge_base_type = str(
                 getattr(settings, "normalized_knowledge_base_type", "vector")
@@ -372,12 +404,14 @@ class BedrockKnowledgeBaseRetriever:
                 self._region,
             )
             return None
+        read_timeout = self._retrieve_timeout_seconds
+        connect_timeout = min(_RETRIEVE_CONNECT_TIMEOUT_SECONDS, read_timeout)
         config = Config(
             # Retrieve is optional evidence gathering, not the model call. Do
             # not let SDK retries consume the UI client's 120-second timeout.
             retries={"total_max_attempts": 1, "mode": "standard"},
-            read_timeout=_RETRIEVE_READ_TIMEOUT_SECONDS,
-            connect_timeout=_RETRIEVE_CONNECT_TIMEOUT_SECONDS,
+            read_timeout=read_timeout,
+            connect_timeout=connect_timeout,
         )
         try:
             self._client = boto3.client(
@@ -423,12 +457,33 @@ class BedrockKnowledgeBaseRetriever:
 
         Returns:
             The raw ``client.retrieve`` response.
+
+        Raises:
+            TimeoutError: When the wall-clock budget expires. Botocore
+                ``read_timeout`` is a per-read idle timeout and is not a
+                reliable total-request cap on a slow MANAGED Retrieve.
         """
-        return client.retrieve(
-            knowledgeBaseId=self._knowledge_base_id,
-            retrievalQuery={"text": query_text},
-            retrievalConfiguration=self._retrieval_configuration(material_ids),
-        )
+        timeout = self._retrieve_timeout_seconds
+
+        def _invoke() -> Any:
+            return client.retrieve(
+                knowledgeBaseId=self._knowledge_base_id,
+                retrievalQuery={"text": query_text},
+                retrievalConfiguration=self._retrieval_configuration(material_ids),
+            )
+
+        # shutdown(wait=False) is required: a ``with ThreadPoolExecutor``
+        # block waits for the still-running boto call after timeout and
+        # would cancel the latency bound.
+        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kb-retrieve")
+        try:
+            future = executor.submit(_invoke)
+            try:
+                return future.result(timeout=timeout)
+            except FutureTimeoutError as exc:
+                raise TimeoutError("knowledge_base_retrieve_timeout") from exc
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     def _unavailable_result(
         self, category: str, error: BaseException
@@ -447,6 +502,34 @@ class BedrockKnowledgeBaseRetriever:
             failure_category=category,
         )
 
+    def _log_retrieve_elapsed(
+        self, started: float, result: RetrievalResult
+    ) -> None:
+        """Log secret-safe Retrieve duration. Slow or failed calls use WARNING.
+
+        Args:
+            started: ``time.perf_counter()`` mark from ``retrieve``.
+            result: Adapter result after filtering. Query text is never logged.
+        """
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        status = str(result.course_retrieval_status or "ok")
+        category = str(result.failure_category or "-")
+        payload = (
+            "course_retrieval_elapsed_ms=%s status=%s category=%s "
+            "timeout_s=%s kb_type=%s"
+            % (
+                elapsed_ms,
+                status,
+                category,
+                self._retrieve_timeout_seconds,
+                self._knowledge_base_type,
+            )
+        )
+        if elapsed_ms >= _SLOW_RETRIEVE_WARNING_MS or status == "unavailable":
+            logger.warning(payload)
+            return
+        logger.info(payload)
+
     def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
         """Return selected-source chunks from Knowledge Base Retrieve.
 
@@ -456,13 +539,28 @@ class BedrockKnowledgeBaseRetriever:
         ``ValidationException`` retries unfiltered Retrieve when strict
         metadata mode is off. MANAGED retrieval skips its optional filter until
         strict metadata mode confirms the indexed attribute is usable. Exact
-        bucket/key validation applies to every result.
+        bucket/key validation applies to every result. A wall-clock timeout
+        fails closed as ``unavailable`` / ``timeout``.
 
         Args:
             query: Selected-source retrieval query from FastAPI.
 
         Returns:
             Validated Knowledge Base chunks, or an empty evidence-gap result.
+        """
+        started = time.perf_counter()
+        result = self._retrieve_once(query)
+        self._log_retrieve_elapsed(started, result)
+        return result
+
+    def _retrieve_once(self, query: RetrievalQuery) -> RetrievalResult:
+        """Run one Retrieve attempt, including VECTOR unfiltered fallback.
+
+        Args:
+            query: Selected-source retrieval query from FastAPI.
+
+        Returns:
+            Validated chunks or an evidence-gap result. Does not log query text.
         """
         if not self._knowledge_base_id:
             logger.warning(
@@ -697,6 +795,16 @@ def configured_context_retriever(
         client=client,
         knowledge_base_type=str(
             getattr(settings, "normalized_knowledge_base_type", "vector")
+        ),
+        number_of_results=int(
+            getattr(settings, "fast_chat_retrieval_max_chunks", _DEFAULT_RESULTS)
+        ),
+        retrieve_timeout_seconds=float(
+            getattr(
+                settings,
+                "knowledge_base_retrieve_timeout_seconds",
+                _DEFAULT_RETRIEVE_TIMEOUT_SECONDS,
+            )
         ),
     )
     return CompositeContextRetriever(
