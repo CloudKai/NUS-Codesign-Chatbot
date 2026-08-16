@@ -26,6 +26,7 @@ from .context_planner import (
     ConversationMemory,
     HistoryCompressor,
     HistoryContextPlanner,
+    ModelContextPlan,
     memory_from_metadata,
 )
 from .domain import CoachRequest, ProviderAssessmentResult
@@ -233,15 +234,13 @@ class AgentCoreHarnessCoachProvider:
         self._planner = planner or _planner_from_settings()
         self._model_config = model_config or LiveEvalModelConfig()
         self._model_config.assert_ready()
-        self._last_plan = None
-        self._last_invoke_kwargs: dict[str, Any] | None = None
         self.call_count = 0
+        self._last_invoke_kwargs: dict[str, Any] | None = None
+        self._compressor = None
         if compressor is not None:
             self._compressor = compressor
         elif use_luna_compression:
             self._compressor = LunaHistoryCompressor(self)
-        else:
-            self._compressor = None
 
     def model_id_for(self, request: CoachRequest) -> str:
         """Return the asserted Luna model id, never a caller-supplied override."""
@@ -341,7 +340,7 @@ class AgentCoreHarnessCoachProvider:
 
     def _planned_turn(
         self, request: CoachRequest
-    ) -> tuple[list[dict[str, Any]], str]:
+    ) -> tuple[list[dict[str, Any]], str, ModelContextPlan]:
         """Plan history and split trusted instructions from untrusted content."""
         existing = memory_from_metadata(
             {"conversation_memory": request.conversation_memory},
@@ -362,7 +361,6 @@ class AgentCoreHarnessCoachProvider:
             raise ProviderUnavailableError(
                 "Harness context exceeds the safe token budget"
             ) from error
-        self._last_plan = plan
         planned_request = request
         if plan.compressed_memory is not None:
             planned_request = request.model_copy(
@@ -382,7 +380,7 @@ class AgentCoreHarnessCoachProvider:
                 ),
             }
         )
-        return messages, prepared.trusted_instructions
+        return messages, prepared.trusted_instructions, plan
 
     def assess(self, request: CoachRequest) -> ProviderAssessmentResult:
         """Request one structured coaching turn from isolated InvokeHarness.
@@ -390,7 +388,7 @@ class AgentCoreHarnessCoachProvider:
         Caller-supplied ``request.model_id`` is ignored. The Luna override is
         asserted immediately before the AWS call. Claude is never used.
         """
-        messages, trusted = self._planned_turn(request)
+        messages, trusted, plan = self._planned_turn(request)
         kwargs = self.build_invoke_kwargs(
             messages=messages,
             system_prompt=_system_prompt_with_trusted(trusted),
@@ -399,9 +397,8 @@ class AgentCoreHarnessCoachProvider:
         try:
             parsed = self.invoke_harness_json(kwargs)
             result = _validated_result(parsed, request)
-            plan = self._last_plan
             memory_payload = request.conversation_memory
-            if plan is not None and plan.compressed_memory is not None:
+            if plan.compressed_memory is not None:
                 memory_payload = plan.compressed_memory.model_dump(mode="json")
             return result.model_copy(update={"conversation_memory": memory_payload})
         except LiveEvalConfigurationError as error:

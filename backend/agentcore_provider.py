@@ -9,7 +9,9 @@ on the same runtime ARN:
 4. Deep Sonnet Review on periodic or event triggers
 
 It does not own phase progression, citations, persistence, retrieval, or IAM.
-Tests inject a fake client so automated runs never contact AWS.
+Tests inject a fake client so automated runs never contact AWS. Planner
+output is request-local so one cached provider instance may coach two
+notebooks for the same owner without cross-notebook memory contamination.
 
 FastAPI remains the authority for authentication, source ownership, and DSQL
 writes. Thinking Path stages stay in DSQL; only the runtime *topic* key maps
@@ -40,6 +42,7 @@ from .context_planner import (
     ContextBudget,
     ContextBudgetError,
     HistoryContextPlanner,
+    ModelContextPlan,
     memory_from_metadata,
 )
 from .domain import (
@@ -986,7 +989,6 @@ class AgentCoreCoachProvider:
         self._max_retries = int(max_retries)
         self._client = client
         self._planner = planner or _planner_from_settings()
-        self._last_plan = None
 
     def model_id_for(self, request: CoachRequest) -> str:
         """Return the configured AgentCore runtime ARN."""
@@ -1022,8 +1024,8 @@ class AgentCoreCoachProvider:
         *,
         review_mode: str | None = None,
         review_trigger: str | None = None,
-    ) -> dict[str, Any]:
-        """Build the JSON payload for one coaching InvokeAgentRuntime call.
+    ) -> tuple[dict[str, Any], ModelContextPlan]:
+        """Build the JSON payload and request-local context plan for one invoke.
 
         Always sends Converse ``messages``: planner-selected DSQL history plus
         the untrusted current-turn content. Canonical pedagogy lives in the
@@ -1033,6 +1035,9 @@ class AgentCoreCoachProvider:
         ``<conversation_memory>`` when compression was required. A top-level
         ``prompt`` string is never used. Token budgeting still uses the full
         ordered ``composed_text`` so the split cannot overflow the window.
+
+        The plan is returned to the caller so two notebooks sharing this
+        provider instance cannot overwrite each other's conversation memory.
         """
         existing = memory_from_metadata(
             {"conversation_memory": request.conversation_memory},
@@ -1052,7 +1057,6 @@ class AgentCoreCoachProvider:
             raise ProviderUnavailableError(
                 "AgentCore context exceeds the safe token budget"
             ) from error
-        self._last_plan = plan
         planned_request = request
         if plan.compressed_memory is not None:
             planned_request = request.model_copy(
@@ -1095,7 +1099,7 @@ class AgentCoreCoachProvider:
         student_id = " ".join(str(request.student_id or "").split()).strip()
         if student_id and student_id != str(request.thread_id or "").strip():
             payload["student_id"] = student_id[:128]
-        return payload
+        return payload, plan
 
     def _call_runtime(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Invoke AgentCore once and return the parsed JSON object.
@@ -1272,7 +1276,7 @@ class AgentCoreCoachProvider:
         """Keep the Review projection current after Coaching. Cannot advance."""
         started = time.monotonic()
         model_id = self._role_provider_model("review_incremental")[1]
-        payload = self._invoke_payload(
+        payload, _plan = self._invoke_payload(
             request,
             SPECIALIST_REVIEW,
             review_mode=REVIEW_DEPTH_INCREMENTAL,
@@ -1342,7 +1346,7 @@ class AgentCoreCoachProvider:
         """Run Sonnet Deep Review. Fail closed to STAY without resetting state."""
         started = time.monotonic()
         model_id = self._role_provider_model("review_deep")[1]
-        payload = self._invoke_payload(
+        payload, _plan = self._invoke_payload(
             request,
             SPECIALIST_REVIEW,
             review_mode=REVIEW_DEPTH_DEEP,
@@ -1413,10 +1417,12 @@ class AgentCoreCoachProvider:
             return _stay_after_deep_review_failure(result), False
 
     def _with_memory(
-        self, request: CoachRequest, result: ProviderAssessmentResult
+        self,
+        request: CoachRequest,
+        result: ProviderAssessmentResult,
+        plan: ModelContextPlan | None,
     ) -> ProviderAssessmentResult:
-        """Attach planner memory without changing the pedagogical result."""
-        plan = self._last_plan
+        """Attach this invocation's planner memory without changing pedagogy."""
         memory_payload = request.conversation_memory
         if plan is not None and plan.compressed_memory is not None:
             memory_payload = plan.compressed_memory.model_dump(mode="json")
@@ -1440,7 +1446,7 @@ class AgentCoreCoachProvider:
         routed = request.model_copy(update={"specialist": specialist})
         interval = bound_deep_review_interval(request.deep_review_interval_turns)
         if specialist == SPECIALIST_QA:
-            result = self._invoke_specialist(routed, SPECIALIST_QA)
+            result, plan = self._invoke_specialist(routed, SPECIALIST_QA)
             return self._with_memory(
                 request,
                 result.model_copy(
@@ -1451,18 +1457,18 @@ class AgentCoreCoachProvider:
                         "review_trigger": None,
                     }
                 ),
+                plan,
             )
         if specialist == SPECIALIST_REVIEW:
             started = time.monotonic()
             try:
-                parsed = self._call_runtime(
-                    self._invoke_payload(
-                        routed,
-                        SPECIALIST_REVIEW,
-                        review_mode=REVIEW_DEPTH_DEEP,
-                        review_trigger="explicit",
-                    )
+                payload, plan = self._invoke_payload(
+                    routed,
+                    SPECIALIST_REVIEW,
+                    review_mode=REVIEW_DEPTH_DEEP,
+                    review_trigger="explicit",
                 )
+                parsed = self._call_runtime(payload)
                 result = _validated_result(parsed, routed)
                 self._log_role_precise(
                     role="review",
@@ -1516,9 +1522,10 @@ class AgentCoreCoachProvider:
                         "review_trigger": "explicit",
                     }
                 ),
+                plan,
             )
 
-        result = self._invoke_specialist(routed, SPECIALIST_COACHING)
+        result, plan = self._invoke_specialist(routed, SPECIALIST_COACHING)
         result, readiness = _coaching_without_advancement(result)
         result = self._apply_incremental_review(routed, result)
         readiness = bool(result.assessment.readiness_candidate)
@@ -1558,19 +1565,20 @@ class AgentCoreCoachProvider:
                     "review_trigger": trigger,
                 }
             ),
+            plan,
         )
 
     def _invoke_specialist(
         self, request: CoachRequest, specialist: str
-    ) -> ProviderAssessmentResult:
+    ) -> tuple[ProviderAssessmentResult, ModelContextPlan]:
         """Invoke one Q&A or Coaching specialist and validate the result."""
-        payload = self._invoke_payload(request, specialist)
+        payload, plan = self._invoke_payload(request, specialist)
         started = time.monotonic()
         try:
             parsed = self._call_runtime(payload)
             result = _validated_result(parsed, request)
             self._log_role_precise(role=specialist, started=started, success=True)
-            return result
+            return result, plan
         except ProviderUnavailableError as error:
             self._log_role_precise(
                 role=specialist,

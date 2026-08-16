@@ -398,3 +398,266 @@ def test_client_supplied_owner_header_is_ignored_for_limiter(tmp_path, monkeypat
 
     assert first.status_code == 200
     assert spoofed.status_code == 429
+
+
+def _conversation_revision(store: StudentStore, thread_id: str) -> int:
+    """Return the durable notebook conversation revision."""
+    thread = store.get_thread(thread_id) or {}
+    metadata = dict(thread.get("metadata") or {})
+    if metadata.get("conversation_revision") is not None:
+        return int(metadata["conversation_revision"])
+    return int(thread.get("conversation_revision") or 0)
+
+
+def _user_message_id(store: StudentStore, thread_id: str) -> str:
+    """Return the first active user message id."""
+    for message in store.get_messages(thread_id):
+        if str(message.get("role") or "") == "user":
+            return str(message["id"])
+    raise AssertionError("expected a user message")
+
+
+def test_overlapping_revise_is_rejected_before_notebook_mutation(tmp_path, monkeypatch):
+    """An in-flight send must 429 revise before any conversation mutation."""
+    limiter = CoachRateLimiter(
+        max_active_per_notebook=1,
+        max_active_per_user=2,
+        requests_per_minute=20,
+        max_concurrent_model_calls=20,
+    )
+    _inject_limiter(monkeypatch, limiter)
+    store = StudentStore(tmp_path / "revise-busy.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    service = _service(store)
+    service.submit(_request(thread_id, key="seed-revise-busy", message="Original"))
+    user_id = _user_message_id(store, thread_id)
+    before_messages = store.get_messages(thread_id)
+    before_revision = _conversation_revision(store, thread_id)
+    started = threading.Event()
+    release = threading.Event()
+    original = CoachApplicationService._submit_once
+
+    def slow_submit_once(self, request, **kwargs):
+        started.set()
+        assert release.wait(timeout=2)
+        return original(self, request, **kwargs)
+
+    monkeypatch.setattr(CoachApplicationService, "_submit_once", slow_submit_once)
+
+    def first():
+        return service.submit(_request(thread_id, key="in-flight-send", message="Second"))
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(first)
+        assert started.wait(timeout=2)
+        with pytest.raises(RateLimitExceeded) as raised:
+            service.revise_and_resubmit(
+                thread_id,
+                user_id,
+                "NOTEBOOK_A_ONLY edited",
+                idempotency_key="revise-while-busy",
+            )
+        assert raised.value.category == "notebook_concurrency"
+        after_messages = store.get_messages(thread_id)
+        assert [item["content"] for item in after_messages] == [
+            item["content"] for item in before_messages
+        ]
+        assert _conversation_revision(store, thread_id) == before_revision
+        release.set()
+        first_turn = future.result(timeout=5)
+
+    assert first_turn.response_text
+    assert limiter._global_active == 0  # noqa: SLF001
+
+
+def test_revise_succeeds_after_notebook_slot_is_released(tmp_path, monkeypatch):
+    limiter = CoachRateLimiter(
+        max_active_per_notebook=1,
+        max_active_per_user=2,
+        requests_per_minute=20,
+        max_concurrent_model_calls=20,
+    )
+    _inject_limiter(monkeypatch, limiter)
+    store = StudentStore(tmp_path / "revise-after-free.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    service = _service(store)
+    service.submit(_request(thread_id, key="seed-free", message="Original"))
+    user_id = _user_message_id(store, thread_id)
+    turn = service.revise_and_resubmit(
+        thread_id,
+        user_id,
+        "Edited after free",
+        idempotency_key="revise-after-free",
+    )
+    assert turn.response_text
+    messages = store.get_messages(thread_id)
+    assert messages[0]["content"] == "Edited after free"
+    assert _conversation_revision(store, thread_id) == 1
+    assert limiter._global_active == 0  # noqa: SLF001
+
+
+def test_same_key_revise_retry_does_not_mutate_twice(tmp_path, monkeypatch):
+    limiter = CoachRateLimiter(
+        max_active_per_notebook=1,
+        max_active_per_user=2,
+        requests_per_minute=20,
+        max_concurrent_model_calls=20,
+    )
+    _inject_limiter(monkeypatch, limiter)
+    store = StudentStore(tmp_path / "revise-same-key.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    service = _service(store)
+    service.submit(_request(thread_id, key="seed-same-key", message="Original"))
+    user_id = _user_message_id(store, thread_id)
+    first = service.revise_and_resubmit(
+        thread_id,
+        user_id,
+        "Edited once",
+        idempotency_key="revise-same-key",
+    )
+    second = service.revise_and_resubmit(
+        thread_id,
+        user_id,
+        "Edited once",
+        idempotency_key="revise-same-key",
+    )
+    assert first.response_text == second.response_text
+    messages = store.get_messages(thread_id)
+    assert [item["content"] for item in messages if item["role"] == "user"] == [
+        "Edited once"
+    ]
+    assert _conversation_revision(store, thread_id) == 1
+    assert limiter._global_active == 0  # noqa: SLF001
+
+
+def test_provider_failure_after_revision_releases_exact_lease(tmp_path, monkeypatch):
+    limiter = CoachRateLimiter(
+        max_active_per_notebook=1,
+        max_active_per_user=2,
+        requests_per_minute=20,
+        max_concurrent_model_calls=20,
+    )
+    _inject_limiter(monkeypatch, limiter)
+    store = StudentStore(tmp_path / "revise-provider-fail.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    seed = _service(store)
+    seed.submit(_request(thread_id, key="seed-fail-revise", message="Original"))
+    user_id = _user_message_id(store, thread_id)
+    failing = _service(store, CountingProvider(fail=True))
+    with pytest.raises(RuntimeError, match="deterministic provider failure"):
+        failing.revise_and_resubmit(
+            thread_id,
+            user_id,
+            "Edited then failed",
+            idempotency_key="revise-fail-once",
+        )
+    assert limiter._global_active == 0  # noqa: SLF001
+    assert _conversation_revision(store, thread_id) == 1
+    recovered = _service(store, CountingProvider()).revise_and_resubmit(
+        thread_id,
+        user_id,
+        "Edited then failed",
+        idempotency_key="revise-fail-once",
+    )
+    assert recovered.response_text
+    assert _conversation_revision(store, thread_id) == 1
+    assert limiter._global_active == 0  # noqa: SLF001
+
+
+def test_guardrail_provider_unavailable_releases_exact_lease(tmp_path, monkeypatch):
+    from backend.providers import ProviderUnavailableError
+
+    limiter = CoachRateLimiter(
+        max_active_per_notebook=1,
+        max_active_per_user=2,
+        requests_per_minute=20,
+        max_concurrent_model_calls=20,
+    )
+    _inject_limiter(monkeypatch, limiter)
+    store = StudentStore(tmp_path / "guardrail-release.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+
+    class GuardrailProvider:
+        def assess(self, request: CoachRequest):
+            raise ProviderUnavailableError(
+                "blocked this turn", category="safety_blocked"
+            )
+
+    with pytest.raises(ProviderUnavailableError) as raised:
+        _service(store, GuardrailProvider()).submit(  # type: ignore[arg-type]
+            _request(thread_id, key="guardrail-blocked")
+        )
+    assert raised.value.category == "safety_blocked"
+    assert limiter._global_active == 0  # noqa: SLF001
+    recovered = _service(store).submit(_request(thread_id, key="guardrail-blocked"))
+    assert recovered.response_text
+
+
+def test_api_overlapping_revise_returns_429_without_mutation(tmp_path, monkeypatch):
+    from backend import rate_limit as rate_limit_module
+
+    limiter = CoachRateLimiter(
+        max_active_per_notebook=1,
+        max_active_per_user=2,
+        requests_per_minute=20,
+        max_concurrent_model_calls=20,
+    )
+    monkeypatch.setattr(rate_limit_module, "_LIMITER", limiter)
+    store = StudentStore(tmp_path / "http-revise-busy.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = TestClient(create_app(store))
+    seed = client.post(
+        "/api/v1/coach/turn",
+        json={
+            "thread_id": thread_id,
+            "student_message": "Original",
+            "current_stage": "problem_identification",
+            "response_detail": "short",
+            "idempotency_key": "http-seed",
+        },
+    )
+    assert seed.status_code == 200, seed.text
+    user_id = _user_message_id(store, thread_id)
+    before = [item["content"] for item in store.get_messages(thread_id)]
+    started = threading.Event()
+    release = threading.Event()
+    original = CoachApplicationService._submit_once
+
+    def slow_submit_once(self, request, **kwargs):
+        started.set()
+        assert release.wait(timeout=2)
+        return original(self, request, **kwargs)
+
+    monkeypatch.setattr(CoachApplicationService, "_submit_once", slow_submit_once)
+
+    def first_call():
+        return client.post(
+            "/api/v1/coach/turn",
+            json={
+                "thread_id": thread_id,
+                "student_message": "Second",
+                "current_stage": "problem_identification",
+                "response_detail": "short",
+                "idempotency_key": "http-in-flight",
+            },
+        )
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(first_call)
+        assert started.wait(timeout=2)
+        revise = client.post(
+            f"/api/v1/threads/{thread_id}/messages/{user_id}/revise",
+            json={
+                "content": "Should not land",
+                "idempotency_key": "http-revise-busy",
+            },
+        )
+        release.set()
+        first = future.result(timeout=5)
+
+    assert first.status_code == 200, first.text
+    assert revise.status_code == 429
+    assert [item["content"] for item in store.get_messages(thread_id)][0] == before[0]
+    assert "Should not land" not in [
+        item["content"] for item in store.get_messages(thread_id)
+    ]

@@ -381,3 +381,86 @@ def test_cognito_callback_error_log_is_allow_listed(tmp_path, caplog):
     joined = "\n".join(record.getMessage() for record in caplog.records)
     assert "attacker-controlled payload" not in joined
     assert "category=unlisted" in joined
+
+
+def _assert_counter_invariant(limiter: CoachRateLimiter) -> None:
+    """Prove global active equals notebook slots, user totals, and lease tokens."""
+    notebook_sum = sum(limiter._active_per_notebook.values())  # noqa: SLF001
+    user_sum = sum(limiter._active_per_user.values())  # noqa: SLF001
+    assert limiter._global_active == notebook_sum == user_sum  # noqa: SLF001
+    lease_sum = sum(len(tokens) for tokens in limiter._leases.values())  # noqa: SLF001
+    assert lease_sum == notebook_sum
+
+
+def test_duplicate_release_does_not_steal_other_user_capacity():
+    limiter = _production_limiter()
+    limiter.acquire("user-a", "notebook-1")
+    limiter.acquire("user-b", "notebook-2")
+    _assert_counter_invariant(limiter)
+    assert limiter._global_active == 2  # noqa: SLF001
+    limiter.release("user-a", "notebook-1")
+    assert limiter._global_active == 1  # noqa: SLF001
+    assert limiter._active_per_user == {"user-b": 1}  # noqa: SLF001
+    assert ("user-b", "notebook-2") in limiter._active_per_notebook  # noqa: SLF001
+    limiter.release("user-a", "notebook-1")
+    assert limiter._global_active == 1  # noqa: SLF001
+    assert limiter._active_per_user == {"user-b": 1}  # noqa: SLF001
+    assert ("user-b", "notebook-2") in limiter._active_per_notebook  # noqa: SLF001
+    limiter.release("user-b", "notebook-2")
+    assert limiter._global_active == 0  # noqa: SLF001
+    assert limiter._active_per_user == {}  # noqa: SLF001
+    assert limiter._active_per_notebook == {}  # noqa: SLF001
+    _assert_counter_invariant(limiter)
+
+
+def test_duplicate_release_does_not_steal_same_user_other_notebook():
+    limiter = _production_limiter()
+    limiter.acquire("user-a", "notebook-1")
+    limiter.acquire("user-a", "notebook-2")
+    limiter.release("user-a", "notebook-1")
+    limiter.release("user-a", "notebook-1")
+    assert limiter._global_active == 1  # noqa: SLF001
+    assert limiter._active_per_user == {"user-a": 1}  # noqa: SLF001
+    assert limiter._active_per_notebook == {("user-a", "notebook-2"): 1}  # noqa: SLF001
+    _assert_counter_invariant(limiter)
+    limiter.release("user-a", "notebook-2")
+    _assert_counter_invariant(limiter)
+
+
+def test_wrong_thread_or_user_release_is_a_noop():
+    limiter = _production_limiter()
+    limiter.acquire("user-a", "notebook-1")
+    limiter.acquire("user-b", "notebook-2")
+    limiter.release("user-a", "notebook-2")
+    limiter.release("user-b", "notebook-1")
+    limiter.release("user-c", "notebook-1")
+    assert limiter._global_active == 2  # noqa: SLF001
+    _assert_counter_invariant(limiter)
+    limiter.release("user-a", "notebook-1")
+    limiter.release("user-b", "notebook-2")
+
+
+def test_stale_lease_token_does_not_release_reacquired_slot():
+    limiter = _production_limiter()
+    stale = limiter.acquire("user-a", "notebook-1")
+    limiter.release("user-a", "notebook-1", lease=stale)
+    current = limiter.acquire("user-a", "notebook-1")
+    limiter.release("user-a", "notebook-1", lease=stale)
+    assert limiter._global_active == 1  # noqa: SLF001
+    assert limiter._active_per_notebook == {("user-a", "notebook-1"): 1}  # noqa: SLF001
+    limiter.release("user-a", "notebook-1", lease=current)
+    assert limiter._global_active == 0  # noqa: SLF001
+    _assert_counter_invariant(limiter)
+
+
+def test_one_hundred_and_twenty_workflows_preserve_exact_invariant():
+    limiter = _production_limiter()
+    leases = [
+        limiter.acquire(f"user-{index}", f"notebook-{index}")
+        for index in range(120)
+    ]
+    _assert_counter_invariant(limiter)
+    limiter.release("user-0", "notebook-0", lease=leases[0])
+    limiter.release("user-0", "notebook-0", lease=leases[0])
+    assert limiter._global_active == 119  # noqa: SLF001
+    _assert_counter_invariant(limiter)

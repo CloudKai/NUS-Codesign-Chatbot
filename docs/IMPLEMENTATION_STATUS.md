@@ -1,6 +1,81 @@
 # Implementation status
 
-## Current phase — Notebook-scoped coach concurrency for ~100 students
+## Current phase — Request-local AgentCore state, revise lease, exact limiter release
+
+**Code is local on `Integrate-Bedrock` and is not committed or deployed.**
+Base commit for this work is `d619e73` (notebook-scoped limiter). AgentCore
+DEFAULT v19, models, Guardrail v3, `AGENTCORE_QUALIFIER=DEFAULT`, and
+pedagogical orchestration are **unchanged**.
+
+### Root causes fixed
+
+1. `AgentCoreCoachProvider._last_plan` was instance-wide. One cached provider
+   per owner can now run two notebooks concurrently, so Notebook B could
+   overwrite Notebook A's plan before `_with_memory`. **Fix:** `_invoke_payload`
+   returns `(payload, plan)` and `_with_memory` takes that request-local plan.
+2. `revise_and_resubmit` mutated conversation state, then `submit` acquired the
+   notebook lease. An in-flight send caused 429 after the transcript had already
+   changed. **Fix:** acquire the same execution lease before any revise
+   mutation; call `submit(..., execution_lease_held=True)`.
+3. `release()` decremented user/global counters even when the notebook slot was
+   not held, so a duplicate release could steal another request's capacity.
+   **Fix:** `acquire()` returns a `CoachExecutionLease` token; `release` only
+   decrements if that exact `(owner_id, thread_id)` slot (and token) is held.
+
+### Main files changed
+
+- `backend/agentcore_provider.py`, `backend/agentcore_harness_provider.py`
+- `backend/rate_limit.py`, `backend/coaching/execution.py`
+- `scripts/agentcore_smoke.py`, `scripts/evals/evaluate_live_coach.py`
+- Tests: `tests/domain/test_agentcore_provider.py`,
+  `tests/fake_agentcore_runtime.py`, `tests/http/test_rate_limit.py`,
+  `tests/http/test_coach_concurrency.py`
+- This file
+
+### Validation evidence
+
+- `ruff check .`: **passed**.
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`: **passed**.
+- Focused concurrency / AgentCore / limiter / revise / idempotency / threadpool /
+  API / deployment / DSQL OCC compatibility tests: **passed**.
+- Full mock pytest: **passed** (exit 0; 873 tests in the last complete run).
+- Mock load probe (`PYTHONPATH=.`): 2/10/25/50/100 distinct owners all accepted;
+  two notebooks accepted; same notebook 1 accepted + 1 HTTP 429.
+- AgentCore runtime diagnostic: **not run in the app venv** (`strands-agents`
+  is installed only in the CI runtime job). No runtime/prompt/model edits.
+- Docker Compose config (`compose.yaml` and `compose.prod.yaml`): **passed**
+  with placeholder `PUBLIC_ORIGIN` / `APP_IMAGE`. Docker daemon was not running,
+  so Caddy container validate and image build did **not** run.
+- GitHub Actions for this uncommitted patch: **NOT RUN**.
+- No live AWS, AgentCore, Bedrock, DSQL, S3, or quota changes.
+
+### Production readiness (do not collapse these)
+
+- **CODE CORRECT:** YES for the three defects (mock-proven).
+- **CONCURRENCY SAFE:** YES for the identified races under mock interleavings.
+  Live AgentCore/DSQL contention is unproven.
+- **IDEMPOTENCY SAFE:** YES (completed replay, same-key waiter, revise retry).
+- **MOCK TESTED:** YES.
+- **CI GREEN:** NOT RUN (no push).
+- **DOCKER READY:** NO (compose config ok; image not built; daemon down).
+- **LIVE LOAD TESTED:** NO.
+- **AWS QUOTAS VERIFIED:** NO / PARTIAL (read-only documentation only).
+- **PRODUCTION READY:** **NO**.
+
+### Next exact action
+
+1. Commit this patch only when explicitly authorized. Do **not** push, merge,
+   or deploy until the image and `compose.prod.yaml` can ship **together**.
+2. Do not apply `MAX_ACTIVE_COACH_REQUESTS_PER_USER=2` onto an image that still
+   has `_last_plan` or revise-before-lease.
+3. Keep `AGENTCORE_QUALIFIER=DEFAULT` (v19) and Guardrail v3. No runtime publish.
+4. After authorized deploy: staged live load 2 → 5 → 10 → 25 → 50 → ~100 with
+   429-category, AgentCore/Bedrock/KB/DSQL, EC2 CPU/RAM/FD, and timeout metrics.
+5. Remaining separate gates: CloudFront/Streamlit timeout (~105s observed vs
+   110s AgentCore / 120s API client), Incremental Review fail-closed, explicit
+   Review ADVANCE auto-apply under month-1 `AUTO_ADVANCE_STAGES=true`.
+
+## Previous phase — Notebook-scoped coach concurrency for ~100 students
 
 **Code landed 2026-08-16 on `Integrate-Bedrock`.** AgentCore DEFAULT v19,
 models, Guardrail v3, and pedagogical orchestration are **unchanged**. This

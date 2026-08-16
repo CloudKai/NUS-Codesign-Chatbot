@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import uuid
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -32,6 +33,19 @@ USER_CONCURRENCY = "user_concurrency"
 USER_RPM = "user_rpm"
 GLOBAL_CAPACITY = "global_capacity"
 MISSING_IDENTITY = "missing_identity"
+
+
+@dataclass(frozen=True)
+class CoachExecutionLease:
+    """Proof that ``acquire`` granted one notebook workflow slot.
+
+    ``release`` must present this token so a duplicate or mismatched release
+    cannot decrement another request's notebook, user, or global counters.
+    """
+
+    owner_id: str
+    thread_id: str
+    token: str
 
 
 @dataclass(frozen=True)
@@ -68,6 +82,7 @@ class CoachRateLimiter:
         self._active_per_notebook: dict[tuple[str, str], int] = {}
         self._global_active = 0
         self._recent: dict[str, deque[float]] = {}
+        self._leases: dict[tuple[str, str], list[str]] = {}
 
     def _notebook_key(self, user_id: str, thread_id: str) -> tuple[str, str]:
         """Return the owner-scoped notebook identity used for concurrency."""
@@ -104,11 +119,12 @@ class CoachRateLimiter:
             category=category,
         )
 
-    def acquire(self, user_id: str, thread_id: str) -> None:
+    def acquire(self, user_id: str, thread_id: str) -> CoachExecutionLease:
         """Reserve one coach workflow slot for *user_id* / *thread_id* or raise.
 
         Checks and increments happen under one lock. This method must not sleep,
-        call AWS, or perform DSQL/network I/O.
+        call AWS, or perform DSQL/network I/O. The returned lease is the only
+        safe way to release this exact slot.
         """
         owner = str(user_id or "").strip()
         notebook = str(thread_id or "").strip()
@@ -152,21 +168,35 @@ class CoachRateLimiter:
                     "The service is at capacity; retry shortly",
                     1,
                 )
+            token = uuid.uuid4().hex
             self._active_per_notebook[notebook_key] = (
                 self._active_per_notebook.get(notebook_key, 0) + 1
             )
             self._active_per_user[owner] = self._active_per_user.get(owner, 0) + 1
             self._global_active += 1
+            self._leases.setdefault(notebook_key, []).append(token)
             if recent is None:
                 recent = deque()
                 self._recent[owner] = recent
             recent.append(now)
+            return CoachExecutionLease(
+                owner_id=owner,
+                thread_id=notebook,
+                token=token,
+            )
 
-    def release(self, user_id: str, thread_id: str) -> None:
+    def release(
+        self,
+        user_id: str,
+        thread_id: str,
+        *,
+        lease: CoachExecutionLease | None = None,
+    ) -> None:
         """Release one previously acquired coach slot for *user_id* / *thread_id*.
 
-        Missing or already-zero counters are ignored so a mismatched or double
-        release cannot underflow. Zero-value map entries are removed.
+        Only the currently held ``(owner_id, thread_id)`` slot is decremented.
+        A duplicate release, a mismatched owner/thread, or a stale lease token
+        is a no-op and cannot underflow or steal another request's capacity.
         """
         owner = str(user_id or "").strip()
         notebook = str(thread_id or "").strip()
@@ -174,19 +204,34 @@ class CoachRateLimiter:
             return
         notebook_key = self._notebook_key(owner, notebook)
         with self._lock:
+            tokens = self._leases.get(notebook_key)
+            if not tokens:
+                return
+            if lease is not None:
+                if (
+                    lease.owner_id != owner
+                    or lease.thread_id != notebook
+                    or lease.token not in tokens
+                ):
+                    return
+                tokens.remove(lease.token)
+            else:
+                tokens.pop()
+            if not tokens:
+                self._leases.pop(notebook_key, None)
             self._decrement_map(self._active_per_notebook, notebook_key)
             self._decrement_map(self._active_per_user, owner)
             if self._global_active > 0:
                 self._global_active -= 1
 
     @contextmanager
-    def limit(self, user_id: str, thread_id: str) -> Iterator[None]:
-        """Acquire on enter and always release on exit."""
-        self.acquire(user_id, thread_id)
+    def limit(self, user_id: str, thread_id: str) -> Iterator[CoachExecutionLease]:
+        """Acquire on enter and always release the exact acquired lease on exit."""
+        lease = self.acquire(user_id, thread_id)
         try:
-            yield
+            yield lease
         finally:
-            self.release(user_id, thread_id)
+            self.release(user_id, thread_id, lease=lease)
 
 
 _LIMITER: CoachRateLimiter | None = None

@@ -238,15 +238,25 @@ class CoachApplicationService:
         idempotency_marker_id: str | None = None,
         idempotency_lease_token: str | None = None,
         idempotency_fingerprint: str | None = None,
+        execution_lease_held: bool = False,
     ) -> CoachTurn:
         """Run one provider-backed turn under the process-local coach limiter.
 
         Same-key waiters and completed replays never call this helper, so they
         do not consume active/RPM slots. Only a newly claimed execution (or a
-        turn without an idempotency key) is limited.
+        turn without an idempotency key) is limited. When *execution_lease_held*
+        is true, the caller already owns the notebook/user/global slot and this
+        helper must not acquire a second one.
         """
         from backend.rate_limit import get_coach_rate_limiter
 
+        if execution_lease_held:
+            return self._submit_once(
+                request,
+                idempotency_marker_id=idempotency_marker_id,
+                idempotency_lease_token=idempotency_lease_token,
+                idempotency_fingerprint=idempotency_fingerprint,
+            )
         with get_coach_rate_limiter().limit(
             self._rate_limit_user_key(),
             self._rate_limit_thread_id(request),
@@ -325,7 +335,9 @@ class CoachApplicationService:
             )
         return None
 
-    def submit(self, request: CoachRequest) -> CoachTurn:
+    def submit(
+        self, request: CoachRequest, *, execution_lease_held: bool = False
+    ) -> CoachTurn:
         """Run and persist one turn, optionally applying its recommendation.
 
         Persisted notebook state is authoritative for stage, history, selected
@@ -335,6 +347,8 @@ class CoachApplicationService:
 
         Stamps the current notebook ``conversation_revision`` onto the request
         for store CAS/stamping; normal submit does not bump that revision.
+        When *execution_lease_held* is true, the caller already owns the
+        notebook execution slot and this method must not acquire another.
         """
         thread = self._notebooks.get_thread(request.thread_id)
         if not thread:
@@ -350,7 +364,9 @@ class CoachApplicationService:
 
         idempotency_key = str(request.idempotency_key or "").strip()
         if not idempotency_key:
-            return self._execute_rate_limited(request)
+            return self._execute_rate_limited(
+                request, execution_lease_held=execution_lease_held
+            )
 
         fingerprint = _coach_request_fingerprint(request)
         deadline = time.monotonic() + 125.0
@@ -371,6 +387,7 @@ class CoachApplicationService:
                         idempotency_marker_id=reservation.marker_id,
                         idempotency_lease_token=reservation.lease_token,
                         idempotency_fingerprint=fingerprint,
+                        execution_lease_held=execution_lease_held,
                     )
                     self._store.complete_coach_request(
                         request.thread_id,
@@ -821,6 +838,11 @@ class CoachApplicationService:
         keeps a retry after persist-before-complete from superseding another
         branch or bumping ``conversation_revision`` again.
 
+        The notebook/user/global execution lease is acquired before any
+        conversation mutation so an overlapping send cannot leave a revised
+        transcript after a 429. ``submit`` is then invoked with that lease
+        already held so the provider path is not double-acquired.
+
         The revision transaction commits before the provider call. If the
         provider fails afterward, the append-only supersede remains. Clients
         must retry with the **same** idempotency key so durable-turn recovery
@@ -833,57 +855,66 @@ class CoachApplicationService:
         cached = self._recover_durable_coach_turn(thread_id, cleaned_key)
         if cached is not None:
             return cached
-        thread = self._notebooks.get_thread(thread_id)
-        if not thread:
-            raise ValueError("Notebook not found")
-        metadata = dict(thread.get("metadata") or {})
-        detail = (
-            response_detail
-            if response_detail in {"short", "long"}
-            else str(
-                (metadata.get("learning_journey") or {}).get("response_detail")
-                or metadata.get("response_detail")
-                or DEFAULT_RESPONSE_DETAIL
+        from backend.rate_limit import get_coach_rate_limiter
+
+        with get_coach_rate_limiter().limit(
+            self._rate_limit_user_key(),
+            str(thread_id or "").strip(),
+        ):
+            cached = self._recover_durable_coach_turn(thread_id, cleaned_key)
+            if cached is not None:
+                return cached
+            thread = self._notebooks.get_thread(thread_id)
+            if not thread:
+                raise ValueError("Notebook not found")
+            metadata = dict(thread.get("metadata") or {})
+            detail = (
+                response_detail
+                if response_detail in {"short", "long"}
+                else str(
+                    (metadata.get("learning_journey") or {}).get("response_detail")
+                    or metadata.get("response_detail")
+                    or DEFAULT_RESPONSE_DETAIL
+                )
             )
-        )
-        if detail not in {"short", "long"}:
-            detail = DEFAULT_RESPONSE_DETAIL
-        resumed = None
-        resume_fn = getattr(self._store, "try_resume_revision_result", None)
-        if callable(resume_fn):
-            resumed = resume_fn(thread_id, message_id, content)
-        if resumed is not None:
-            revision = resumed
-        else:
-            revision = self._store.revise_conversation_from_user_message(
-                thread_id,
-                message_id,
-                content,
-                model_id=model_id or str(metadata.get("selected_model") or ""),
-                metadata={
-                    "response_detail": detail,
-                    **(
-                        {"response_language": response_language}
-                        if response_language
-                        else {}
-                    ),
-                },
+            if detail not in {"short", "long"}:
+                detail = DEFAULT_RESPONSE_DETAIL
+            resumed = None
+            resume_fn = getattr(self._store, "try_resume_revision_result", None)
+            if callable(resume_fn):
+                resumed = resume_fn(thread_id, message_id, content)
+            if resumed is not None:
+                revision = resumed
+            else:
+                revision = self._store.revise_conversation_from_user_message(
+                    thread_id,
+                    message_id,
+                    content,
+                    model_id=model_id or str(metadata.get("selected_model") or ""),
+                    metadata={
+                        "response_detail": detail,
+                        **(
+                            {"response_language": response_language}
+                            if response_language
+                            else {}
+                        ),
+                    },
+                )
+            # Store returns the replacement user row id as edited_message_id.
+            replacement_user_message_id = str(revision.edited_message_id)
+            request = CoachRequest(
+                thread_id=thread_id,
+                student_message=content.strip(),
+                current_stage=revision.current_stage,
+                response_detail=detail,
+                model_id=model_id,
+                reasoning_effort=reasoning_effort,
+                response_language=response_language or "English",
+                idempotency_key=cleaned_key,
+                conversation_revision=revision.conversation_revision,
+                revise_user_message_id=replacement_user_message_id,
             )
-        # Store returns the replacement user row id as edited_message_id.
-        replacement_user_message_id = str(revision.edited_message_id)
-        request = CoachRequest(
-            thread_id=thread_id,
-            student_message=content.strip(),
-            current_stage=revision.current_stage,
-            response_detail=detail,
-            model_id=model_id,
-            reasoning_effort=reasoning_effort,
-            response_language=response_language or "English",
-            idempotency_key=cleaned_key,
-            conversation_revision=revision.conversation_revision,
-            revise_user_message_id=replacement_user_message_id,
-        )
-        return self.submit(request)
+            return self.submit(request, execution_lease_held=True)
 
     def _selected_citation_catalog(
         self, request: CoachRequest
