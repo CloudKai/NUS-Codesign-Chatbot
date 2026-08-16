@@ -2,7 +2,7 @@
 
 Install ``agentcore_runtime/requirements.txt`` first. This script does not
 call AWS, AgentCore, Bedrock generation, Knowledge Base Retrieve, DSQL, or S3.
-It must not invoke Sonnet, Luna, or ``specialist_invoke()``.
+It must not invoke Haiku, Sonnet, Luna, or ``specialist_invoke()``.
 """
 
 from __future__ import annotations
@@ -123,13 +123,19 @@ def _check_agentcore_app() -> str:
 def _check_runtime_contracts() -> None:
     """Import runtime models and validate one synthetic CoachTurnOutput."""
     from agentcore_runtime.model import (
+        HAIKU_4_5_MODEL_ID,
         PINNED_RUNTIME_PACKAGES,
         SONNET_4_6_MODEL_ID,
         bedrock_model_kwargs,
         load_runtime_requirement_pins,
         runtime_model_config_from_mapping,
     )
-    from agentcore_runtime.models import CoachTurnOutput, QATurnOutput, ReviewTurnOutput
+    from agentcore_runtime.models import (
+        CoachTurnOutput,
+        QATurnOutput,
+        ReviewTurnOutput,
+        RouterOutput,
+    )
 
     pins = load_runtime_requirement_pins()
     if pins != PINNED_RUNTIME_PACKAGES:
@@ -147,6 +153,13 @@ def _check_runtime_contracts() -> None:
             "synthesis": "Keep locating the users.",
         }
     )
+    RouterOutput.model_validate(
+        {
+            "specialist": "qa",
+            "confidence": 0.9,
+            "rationale_category": "course_information",
+        }
+    )
 
     kwargs = bedrock_model_kwargs(
         runtime_model_config_from_mapping(
@@ -159,6 +172,21 @@ def _check_runtime_contracts() -> None:
             }
         )
     )
+    haiku_kwargs = bedrock_model_kwargs(
+        runtime_model_config_from_mapping(
+            {
+                "AGENTCORE_MODEL_PROVIDER": "bedrock",
+                "AGENTCORE_MODEL_ID": HAIKU_4_5_MODEL_ID,
+                "AGENTCORE_MODEL_REGION": "us-west-2",
+                "GUARDRAIL_ID": "test-guardrail",
+                "GUARDRAIL_VERSION": "1",
+            }
+        )
+    )
+    if haiku_kwargs.get("model_id") != HAIKU_4_5_MODEL_ID:
+        _fail("Haiku model_id is not global.anthropic.claude-haiku-4-5-20251001-v1:0")
+    if haiku_kwargs.get("guardrail_latest_message") is not True:
+        _fail("Haiku guardrail_latest_message is not True")
     if kwargs.get("model_id") != SONNET_4_6_MODEL_ID:
         _fail("Sonnet model_id is not global.anthropic.claude-sonnet-4-6")
     if kwargs.get("region_name") != "us-west-2":
@@ -190,7 +218,11 @@ def main() -> int:
         "bedrock-agentcore": _installed("bedrock-agentcore"),
         "pydantic": _installed("pydantic"),
     }
-    from agentcore_runtime.model import PINNED_RUNTIME_PACKAGES, SONNET_4_6_MODEL_ID
+    from agentcore_runtime.model import (
+        HAIKU_4_5_MODEL_ID,
+        PINNED_RUNTIME_PACKAGES,
+        SONNET_4_6_MODEL_ID,
+    )
 
     for name, pinned in PINNED_RUNTIME_PACKAGES.items():
         installed = expected[name]
@@ -213,6 +245,7 @@ def main() -> int:
     print("structured_output_model=present")
     print("agent_result.structured_output=present")
     print("guardrail_latest_message=present")
+    print(f"haiku_model_id={HAIKU_4_5_MODEL_ID}")
     print(f"sonnet_model_id={SONNET_4_6_MODEL_ID}")
     print("implicit_model_fallback=false")
     print("aws_calls=none")

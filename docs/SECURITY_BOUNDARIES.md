@@ -75,11 +75,11 @@ Runtime guardrail intervention (`guardrail_intervened` or `action=BLOCKED`)
 fails closed as category `safety_blocked`. Refusal text, prompt text, and AWS
 trace bodies are never returned to the student UI or persisted.
 
-On the Sonnet `BedrockModel` path, `GUARDRAIL_ID` and `GUARDRAIL_VERSION` are
-required and `guardrail_latest_message=True` so input evaluation targets the
-latest untrusted user turn (current student/evidence), not the trusted
-specialist curriculum. Specialists use `tools=[]`, so the Strands tool-result
-guardrail wrapping bug does not apply. The optional Luna
+On the Haiku and Sonnet `BedrockModel` path, `GUARDRAIL_ID` and
+`GUARDRAIL_VERSION` are required and `guardrail_latest_message=True` so input
+evaluation targets the latest untrusted user turn (current student/evidence),
+not the trusted specialist curriculum. Specialists use `tools=[]`, so the
+Strands tool-result guardrail wrapping bug does not apply. The historical Luna
 `OpenAIResponsesModel` path does not accept those constructor fields; it must
 call Bedrock `ApplyGuardrail` on untrusted input and on model output. Missing
 guardrail configuration fails production startup and the runtime loader.

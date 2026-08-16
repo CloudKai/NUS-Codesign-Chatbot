@@ -89,6 +89,7 @@ class AssessmentOutput(BaseModel):
     understanding_change: str = Field(default="", max_length=4_000)
     review_strengths: list[str] = Field(default_factory=list, max_length=4)
     review_improvements: list[str] = Field(default_factory=list, max_length=4)
+    readiness_candidate: bool = False
 
     @model_validator(mode="before")
     @classmethod
@@ -166,7 +167,12 @@ class QATurnOutput(BaseModel):
 
 
 class ReviewTurnOutput(BaseModel):
-    """Formative review result. Never a grade and never a stage transition."""
+    """Formative Review result for incremental Haiku or deep Sonnet.
+
+    Incremental mode keeps the Review projection current and may flag
+    ``readiness_candidate``. Deep mode may recommend stay/advance. FastAPI
+    still owns stage mutation. This is never a grade.
+    """
 
     model_config = ConfigDict(extra="ignore")
 
@@ -176,6 +182,148 @@ class ReviewTurnOutput(BaseModel):
     synthesis: str = Field(min_length=1)
     citations: list[CitationOutput] = Field(default_factory=list)
     facione_profile: FacioneScoresOutput | None = None
+    readiness_candidate: bool = False
+    review_depth: str | None = None
+    working_conclusion: str = Field(default="", max_length=4_000)
+    current_stage: str | None = Field(default=None, max_length=64)
+    recommendation: str | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    readiness_evidence: list[str] = Field(default_factory=list, max_length=8)
+    missing_requirements: list[str] = Field(default_factory=list, max_length=8)
+    rationale_summary: str = Field(default="", max_length=1_000)
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_live_and_judge_shapes(cls, value: Any) -> Any:
+        """Fill student-facing fields from synthesis or judge-shaped output."""
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        rationale = str(data.get("rationale_summary") or "").strip()
+        synthesis = str(data.get("synthesis") or "").strip()
+        response = str(data.get("response_text") or "").strip()
+        if not response:
+            filled = synthesis or rationale
+            if filled:
+                data["response_text"] = filled
+        if not synthesis and rationale:
+            data["synthesis"] = rationale
+        recommendation = data.get("recommendation")
+        if isinstance(recommendation, str):
+            cleaned = recommendation.strip().lower()
+            data["recommendation"] = cleaned or None
+        depth = str(data.get("review_depth") or "").strip().lower()
+        data["review_depth"] = depth if depth in {"incremental", "deep"} else depth or None
+        return data
+
+    @field_validator("recommendation")
+    @classmethod
+    def recommendation_must_be_stay_advance_or_empty(cls, value: str | None) -> str | None:
+        """Accept stay/advance from Deep Review; drop empty incremental values."""
+        cleaned = str(value or "").strip().lower()
+        if cleaned in {"", "none", "null"}:
+            return None
+        if cleaned not in {"stay", "advance"}:
+            raise ValueError("recommendation must be stay or advance")
+        return cleaned
+
+    @field_validator("current_stage")
+    @classmethod
+    def current_stage_is_compact(cls, value: str | None) -> str | None:
+        """Keep an optional stage token compact for equality checks."""
+        cleaned = " ".join(str(value or "").split())[:64]
+        return cleaned or None
+
+    @field_validator("readiness_evidence", "missing_requirements")
+    @classmethod
+    def compact_string_lists(cls, values: list[str]) -> list[str]:
+        """Bound Deep Review bullet lists without keeping empty items."""
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for item in values:
+            text = " ".join(str(item or "").split())[:400]
+            if text and text not in seen:
+                seen.add(text)
+                cleaned.append(text)
+        return cleaned[:8]
+
+
+class RouterOutput(BaseModel):
+    """Strict specialist classification. Never a stage or authorization decision."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    specialist: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    rationale_category: str | None = None
+
+    @field_validator("specialist")
+    @classmethod
+    def specialist_must_be_supported(cls, value: str) -> str:
+        """Accept only the three FastAPI-owned specialists."""
+        cleaned = str(value or "").strip().lower()
+        if cleaned not in {"qa", "coaching", "review"}:
+            raise ValueError("specialist must be qa, coaching, or review")
+        return cleaned
+
+    @field_validator("rationale_category")
+    @classmethod
+    def rationale_category_must_be_known(cls, value: str | None) -> str | None:
+        """Drop unknown category labels. Do not store free-text rationale."""
+        cleaned = str(value or "").strip().lower()
+        if cleaned in {"", "none", "null"}:
+            return None
+        if cleaned not in {
+            "course_information",
+            "project_coaching",
+            "formative_review",
+        }:
+            return None
+        return cleaned
+
+
+class StageJudgeOutput(BaseModel):
+    """Sonnet readiness classification. FastAPI still owns stage mutation."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    current_stage: str = Field(min_length=1, max_length=64)
+    recommendation: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    readiness_evidence: list[str] = Field(default_factory=list, max_length=8)
+    missing_requirements: list[str] = Field(default_factory=list, max_length=8)
+    rationale_summary: str = Field(min_length=1, max_length=1_000)
+
+    @field_validator("current_stage")
+    @classmethod
+    def current_stage_is_compact(cls, value: str) -> str:
+        """Keep the judge's stage token compact for equality checks."""
+        cleaned = " ".join(str(value or "").split())[:64]
+        if not cleaned:
+            raise ValueError("current_stage is required")
+        return cleaned
+
+    @field_validator("recommendation")
+    @classmethod
+    def recommendation_must_be_stay_or_advance(cls, value: str) -> str:
+        """Reject recommendations outside stay/advance."""
+        cleaned = str(value or "").strip().lower()
+        if cleaned not in {"stay", "advance"}:
+            raise ValueError("recommendation must be stay or advance")
+        return cleaned
+
+    @field_validator("readiness_evidence", "missing_requirements")
+    @classmethod
+    def compact_string_lists(cls, values: list[str]) -> list[str]:
+        """Bound judge bullet lists without keeping empty items."""
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for item in values:
+            text = " ".join(str(item or "").split())[:400]
+            if text and text not in seen:
+                seen.add(text)
+                cleaned.append(text)
+        return cleaned[:8]
 
 
 def parse_coach_turn_output(value: Any) -> CoachTurnOutput:
@@ -222,3 +370,27 @@ def parse_review_turn_output(value: Any) -> ReviewTurnOutput:
         except (TypeError, ValidationError):
             return ReviewTurnOutput.model_validate(value)
     return ReviewTurnOutput.model_validate(value)
+
+
+def parse_router_output(value: Any) -> RouterOutput:
+    """Validate one router payload or raise ``ValidationError``."""
+    if isinstance(value, RouterOutput):
+        return value
+    if hasattr(value, "model_dump") and callable(value.model_dump):
+        try:
+            return RouterOutput.model_validate(value.model_dump(mode="json"))
+        except (TypeError, ValidationError):
+            return RouterOutput.model_validate(value)
+    return RouterOutput.model_validate(value)
+
+
+def parse_stage_judge_output(value: Any) -> StageJudgeOutput:
+    """Validate one stage-judge payload or raise ``ValidationError``."""
+    if isinstance(value, StageJudgeOutput):
+        return value
+    if hasattr(value, "model_dump") and callable(value.model_dump):
+        try:
+            return StageJudgeOutput.model_validate(value.model_dump(mode="json"))
+        except (TypeError, ValidationError):
+            return StageJudgeOutput.model_validate(value)
+    return StageJudgeOutput.model_validate(value)

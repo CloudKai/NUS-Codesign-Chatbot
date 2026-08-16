@@ -1791,6 +1791,8 @@ class StudentStore:
         idempotency_fingerprint: str | None = None,
         research_observation: ResearchObservationCreate | None = None,
         auto_advance: AtomicAutoAdvance | None = None,
+        review_counter_qualifying: bool | None = None,
+        review_counter_deep_succeeded: bool | None = None,
     ) -> tuple[str, str]:
         """Persist one completed coaching turn in a single DB transaction.
 
@@ -1806,6 +1808,13 @@ class StudentStore:
         rewritten destructively; metadata may be refreshed without clearing
         lineage columns. An assistant row stamped with the expected revision is
         inserted.
+
+        The periodic Deep Review counter is recomputed from the notebook
+        ``settings_text`` row inside this transaction, not from a
+        pre-provider snapshot. The notebook ``updated_at`` value is included
+        in the UPDATE predicate so a concurrent replica cannot last-write-wins
+        overwrite ``coaching_turns_since_deep_review`` (or the rest of
+        settings) while ``conversation_revision`` stays unchanged.
         """
         cleaned_user = user_content.strip()
         cleaned_assistant = assistant_content.strip()
@@ -1872,6 +1881,24 @@ class StudentStore:
                 )
             thread = self._thread_dict(notebook)
             current_meta = dict(thread.get("metadata") or {})
+            summary_metadata = dict(summary_metadata)
+            if (
+                review_counter_qualifying is not None
+                or review_counter_deep_succeeded is not None
+            ):
+                from backend.specialists.review_orchestration import (
+                    COUNTER_SETTINGS_KEY,
+                    next_persisted_counter,
+                    parse_coaching_turns_since_deep_review,
+                )
+
+                summary_metadata[COUNTER_SETTINGS_KEY] = next_persisted_counter(
+                    current=parse_coaching_turns_since_deep_review(
+                        current_meta.get(COUNTER_SETTINGS_KEY)
+                    ),
+                    qualifying_coaching_turn=bool(review_counter_qualifying),
+                    deep_review_succeeded=bool(review_counter_deep_succeeded),
+                )
             current_journey = dict(current_meta.get("learning_journey") or {})
             active_detail = str(
                 current_journey.get("response_detail") or DEFAULT_RESPONSE_DETAIL
@@ -2072,24 +2099,47 @@ class StudentStore:
             if stage != expected_saved_stage:
                 raise ValueError("Coach summary cannot change the notebook stage")
             title = generated_title or notebook["title"]
-            updated = connection.execute(
-                """
-                UPDATE notebooks
-                SET title=?, current_stage=?, progress_text=?, settings_text=?,
-                    updated_at=?
-                WHERE id=? AND user_id=? AND conversation_revision=?
-                """,
-                (
-                    title,
-                    stage,
-                    progress_text,
-                    settings_text,
-                    assistant_created_at,
-                    thread_id,
-                    self.owner_id,
-                    active_revision,
-                ),
-            )
+            expected_updated_at = notebook["updated_at"]
+            if expected_updated_at:
+                updated = connection.execute(
+                    """
+                    UPDATE notebooks
+                    SET title=?, current_stage=?, progress_text=?, settings_text=?,
+                        updated_at=?
+                    WHERE id=? AND user_id=? AND conversation_revision=?
+                      AND updated_at=?
+                    """,
+                    (
+                        title,
+                        stage,
+                        progress_text,
+                        settings_text,
+                        assistant_created_at,
+                        thread_id,
+                        self.owner_id,
+                        active_revision,
+                        expected_updated_at,
+                    ),
+                )
+            else:
+                updated = connection.execute(
+                    """
+                    UPDATE notebooks
+                    SET title=?, current_stage=?, progress_text=?, settings_text=?,
+                        updated_at=?
+                    WHERE id=? AND user_id=? AND conversation_revision=?
+                    """,
+                    (
+                        title,
+                        stage,
+                        progress_text,
+                        settings_text,
+                        assistant_created_at,
+                        thread_id,
+                        self.owner_id,
+                        active_revision,
+                    ),
+                )
             if int(getattr(updated, "rowcount", 0) or 0) == 0:
                 raise ConversationRevisionConflictError(
                     "The conversation was revised before the coaching turn was saved"

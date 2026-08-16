@@ -12,6 +12,8 @@ from agentcore_runtime.guardrails import (
     guardrail_response_is_blocked,
 )
 from agentcore_runtime.model import (
+    HAIKU_4_5_MODEL_ID,
+    LIGHTWEIGHT_MODEL_ROLES,
     LUNA_MODEL_ID,
     PINNED_RUNTIME_PACKAGES,
     SONNET_4_6_MODEL_ID,
@@ -20,7 +22,9 @@ from agentcore_runtime.model import (
     load_runtime_requirement_pins,
     mantle_responses_kwargs,
     parse_runtime_requirement_pins,
+    role_model_config_from_mapping,
     runtime_model_config_from_mapping,
+    validate_all_role_configs,
 )
 from agentcore_runtime.structured_coach import CoachTurnExtractionError
 
@@ -58,6 +62,25 @@ def test_unknown_provider_fails_closed_without_claude_fallback() -> None:
     env["AGENTCORE_MODEL_PROVIDER"] = "openai"
     with pytest.raises(RuntimeModelError, match="unsupported"):
         runtime_model_config_from_mapping(env)
+
+
+def test_haiku_bedrock_kwargs_are_explicit_and_use_latest_message() -> None:
+    config = runtime_model_config_from_mapping(
+        {
+            "AGENTCORE_MODEL_PROVIDER": "bedrock",
+            "AGENTCORE_MODEL_ID": HAIKU_4_5_MODEL_ID,
+            "AGENTCORE_MODEL_REGION": "us-west-2",
+            "GUARDRAIL_ID": "gr-test",
+            "GUARDRAIL_VERSION": "3",
+        }
+    )
+    kwargs = bedrock_model_kwargs(config)
+    assert kwargs["model_id"] == HAIKU_4_5_MODEL_ID
+    assert kwargs["region_name"] == "us-west-2"
+    assert kwargs["guardrail_id"] == "gr-test"
+    assert kwargs["guardrail_version"] == "3"
+    assert kwargs["guardrail_latest_message"] is True
+    assert "fallback" not in kwargs
 
 
 def test_luna_cannot_use_bedrock_model() -> None:
@@ -110,7 +133,8 @@ def test_harness_never_constructs_empty_bedrock_model() -> None:
     loader = Path("agentcore_runtime/model.py").read_text(encoding="utf-8")
     assert "BedrockModel()" not in main
     assert "return BedrockModel()" not in loader
-    assert "load_runtime_model" in main
+    assert "get_role_model" in main
+    assert "tools=[]" in main
 
 
 class _FakeGuardrail:
@@ -191,3 +215,98 @@ def test_runtime_requirements_reject_version_ranges() -> None:
         parse_runtime_requirement_pins("strands-agents>=1.52.0\n")
     with pytest.raises(ValueError, match="incomplete"):
         parse_runtime_requirement_pins("pydantic==2.13.4\n")
+
+
+_HYBRID_ENV = {
+    "AGENTCORE_MODEL_REGION": "us-west-2",
+    "GUARDRAIL_ID": "gr-test",
+    "GUARDRAIL_VERSION": "3",
+    "ROUTER_MODEL_PROVIDER": "bedrock",
+    "ROUTER_MODEL_ID": HAIKU_4_5_MODEL_ID,
+    "QA_MODEL_PROVIDER": "bedrock",
+    "QA_MODEL_ID": HAIKU_4_5_MODEL_ID,
+    "COACHING_MODEL_PROVIDER": "bedrock",
+    "COACHING_MODEL_ID": HAIKU_4_5_MODEL_ID,
+    "REVIEW_INCREMENTAL_MODEL_PROVIDER": "bedrock",
+    "REVIEW_INCREMENTAL_MODEL_ID": HAIKU_4_5_MODEL_ID,
+    "REVIEW_DEEP_MODEL_PROVIDER": "bedrock",
+    "REVIEW_DEEP_MODEL_ID": SONNET_4_6_MODEL_ID,
+}
+
+_LUNA_HYBRID_ENV = {
+    "AGENTCORE_MODEL_REGION": "us-west-2",
+    "GUARDRAIL_ID": "gr-test",
+    "GUARDRAIL_VERSION": "3",
+    "ROUTER_MODEL_PROVIDER": "bedrock_mantle_responses",
+    "ROUTER_MODEL_ID": LUNA_MODEL_ID,
+    "QA_MODEL_PROVIDER": "bedrock_mantle_responses",
+    "QA_MODEL_ID": LUNA_MODEL_ID,
+    "COACHING_MODEL_PROVIDER": "bedrock_mantle_responses",
+    "COACHING_MODEL_ID": LUNA_MODEL_ID,
+    "REVIEW_INCREMENTAL_MODEL_PROVIDER": "bedrock_mantle_responses",
+    "REVIEW_INCREMENTAL_MODEL_ID": LUNA_MODEL_ID,
+    "REVIEW_DEEP_MODEL_PROVIDER": "bedrock",
+    "REVIEW_DEEP_MODEL_ID": SONNET_4_6_MODEL_ID,
+}
+
+
+def test_role_configs_load_haiku_and_sonnet_without_substitution() -> None:
+    roles = validate_all_role_configs(_HYBRID_ENV)
+    for role in LIGHTWEIGHT_MODEL_ROLES:
+        assert roles[role].provider == "bedrock"
+        assert roles[role].model_id == HAIKU_4_5_MODEL_ID
+    assert roles["review_deep"].provider == "bedrock"
+    assert roles["review_deep"].model_id == SONNET_4_6_MODEL_ID
+    assert roles["router"].model_id != roles["review_deep"].model_id
+    assert bedrock_model_kwargs(roles["router"])["guardrail_latest_message"] is True
+    assert bedrock_model_kwargs(roles["review_deep"])["guardrail_version"] == "3"
+
+
+def test_historical_luna_role_configs_still_load_without_substitution() -> None:
+    roles = validate_all_role_configs(_LUNA_HYBRID_ENV)
+    assert roles["router"].provider == "bedrock_mantle_responses"
+    assert roles["router"].model_id == LUNA_MODEL_ID
+    assert roles["review_deep"].model_id == SONNET_4_6_MODEL_ID
+    assert mantle_responses_kwargs(roles["router"])["stateful"] is False
+
+
+def test_legacy_env_is_used_only_when_no_role_keys_are_present() -> None:
+    config = role_model_config_from_mapping(_SONNET_ENV, "review_deep")
+    assert config.provider == "bedrock"
+    assert config.model_id == SONNET_4_6_MODEL_ID
+    assert config.role == "review_deep"
+
+
+def test_partial_role_config_fails_closed_without_legacy_fallback() -> None:
+    env = dict(_HYBRID_ENV)
+    env["REVIEW_DEEP_MODEL_ID"] = ""
+    with pytest.raises(RuntimeModelError, match="REVIEW_DEEP_MODEL_ID"):
+        role_model_config_from_mapping(env, "review_deep")
+    coaching = role_model_config_from_mapping(env, "coaching")
+    assert coaching.model_id == HAIKU_4_5_MODEL_ID
+
+
+def test_swapped_haiku_and_sonnet_ids_are_not_silently_rewritten() -> None:
+    env = dict(_HYBRID_ENV)
+    env["ROUTER_MODEL_ID"] = SONNET_4_6_MODEL_ID
+    env["REVIEW_DEEP_MODEL_ID"] = HAIKU_4_5_MODEL_ID
+    roles = validate_all_role_configs(env)
+    assert roles["router"].model_id == SONNET_4_6_MODEL_ID
+    assert roles["review_deep"].model_id == HAIKU_4_5_MODEL_ID
+    assert roles["qa"].model_id == HAIKU_4_5_MODEL_ID
+
+
+def test_role_luna_cannot_use_bedrock_and_sonnet_cannot_use_mantle() -> None:
+    env = dict(_HYBRID_ENV)
+    env["COACHING_MODEL_PROVIDER"] = "bedrock"
+    env["COACHING_MODEL_ID"] = LUNA_MODEL_ID
+    with pytest.raises(RuntimeModelError, match="Luna cannot use BedrockModel"):
+        role_model_config_from_mapping(env, "coaching")
+    env = dict(_HYBRID_ENV)
+    env["REVIEW_DEEP_MODEL_PROVIDER"] = "bedrock_mantle_responses"
+    with pytest.raises(RuntimeModelError, match="openai"):
+        role_model_config_from_mapping(env, "review_deep")
+    env = dict(_HYBRID_ENV)
+    env["ROUTER_MODEL_PROVIDER"] = "bedrock_mantle_responses"
+    with pytest.raises(RuntimeModelError, match="openai"):
+        role_model_config_from_mapping(env, "router")

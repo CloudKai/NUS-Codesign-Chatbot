@@ -23,17 +23,24 @@ runtime_context + runtime_instructions   ← application rules
 untrusted turn (project, evidence, student text)
     ↓
 ONE AgentCore Runtime
-    ├── Q&A specialist
-    ├── Coaching specialist + stage prompts
-    └── Formative Review specialist
+    ├── Haiku 4.5 router (qa | coaching | review)
+    ├── Q&A specialist (Haiku 4.5)
+    ├── Coaching specialist + stage prompts (Haiku 4.5)
+    ├── Incremental Review (Haiku 4.5; after Coaching)
+    └── Deep Review (Sonnet 4.6; periodic / event / explicit)
     ↓
-structured output  (coach_turn | qa_turn | review_turn)
+structured output  (router_turn | coach_turn | qa_turn | review_turn)
     ↓
 FastAPI validates → workflow → atomic DSQL persist
 ```
 
 Integrate-Bedrock is the production shell. AgentCore is the pedagogical
 brain. DSQL is transcript/state authority. AgentCore Memory is not used.
+
+Periodic Deep Review means every N newly executed, successful Coaching
+turns since the previous successfully persisted Deep Review. It is
+turn-based rather than time-based because it represents new learning
+evidence, not elapsed time. The Review tab is display-only.
 
 ## Framework preservation matrix
 

@@ -4,28 +4,44 @@ This directory is the **authoritative** harness for
 
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`.
 
-One runtime hosts Q&A, Coaching, and Formative Review. Do not treat
-`scripts/agentcore/harness_patch/` as a second implementation.
+One runtime hosts the Haiku router, Q&A, Coaching, Incremental Review, and
+Deep Review. Do not treat `scripts/agentcore/harness_patch/` as a second
+implementation.
 
 ## Contract
 
 1. `tools=[]` on every specialist — no Knowledge Base, S3, MCP, shell, or files.
-2. Caller sends `phase` (`qa` | `coaching` | `review`). Unknown phases fall
+2. Caller sends `phase` (`router` | `qa` | `coaching` | `review`). Review also
+   sends `review_mode` (`incremental` | `deep`). Unknown specialist phases fall
    closed to coaching, never to Q&A-with-tools.
 3. Canonical pedagogy lives in `prompts/`. FastAPI sends runtime rules only.
+   The router prompt is classification-only and must not receive full RAG.
 4. DSQL history is Strands `messages`. AgentCore Memory is not the transcript.
 5. `invoke_async(..., structured_output_model=...)` then
    `result.structured_output`. Text-block JSON is a fallback.
 6. Never `json.loads(str(result))`.
 7. Failures return `{ok: false, error: true, category: ...}`.
-8. Explicit `load_runtime_model()`: `AGENTCORE_MODEL_PROVIDER`,
-   `AGENTCORE_MODEL_ID`, `AGENTCORE_MODEL_REGION`, `GUARDRAIL_ID`,
-   `GUARDRAIL_VERSION`. No bare `BedrockModel()`. No Claude↔Luna fallback.
+8. Per-role `load_runtime_model()` via `ROUTER_*` / `QA_*` / `COACHING_*` /
+   `REVIEW_INCREMENTAL_*` / `REVIEW_DEEP_*` plus shared
+   `AGENTCORE_MODEL_REGION`, `GUARDRAIL_ID`, `GUARDRAIL_VERSION`. Legacy
+   `AGENTCORE_MODEL_PROVIDER` / `AGENTCORE_MODEL_ID` are a local fallback only
+   when no role keys are set. No bare `BedrockModel()`. No Haiku↔Sonnet
+   fallback.
 
-First paid evaluation: `bedrock` + `global.anthropic.claude-sonnet-4-6` +
-`guardrail_latest_message=True`. Optional Luna:
-`bedrock_mantle_responses` + `openai.gpt-5.6-luna` + `stateful=False` +
-ApplyGuardrail. Pin versions in `requirements.txt`.
+Roles:
+
+- ROUTER, Q&A, COACHING, INCREMENTAL REVIEW → `bedrock` + `global.anthropic.claude-haiku-4-5-20251001-v1:0`
+- DEEP REVIEW → `bedrock` + `global.anthropic.claude-sonnet-4-6`
+
+Changing these environment variables publishes a new Runtime **version** on
+the same ARN. Do not create a second runtime resource.
+
+Periodic Deep Review is configured on FastAPI
+(`DEEP_REVIEW_INTERVAL_TURNS`), not inside this runtime. FastAPI decides
+when to send `review_mode=deep`. Periodic Deep Review means every N newly
+executed, successful Coaching turns since the previous successfully
+persisted Deep Review. It is turn-based rather than time-based because it
+represents new learning evidence, not elapsed time.
 
 ## Layout
 
@@ -35,12 +51,18 @@ agentcore_runtime/
   models.py
   structured_coach.py
   specialists/{qa,coaching,review,routing}.py
+  router.py
+  prompts/router.md
+  prompts/review.md
+  prompts/review_incremental.md
+  prompts/review_deep.md
+  stage_judge.py / prompts/stage_judge.md / contracts/stage_judge_turn.py
+    (compatibility only; leftover judge payloads map to Deep Review)
   prompts/shared_coaching.md
   prompts/qa.md
-  prompts/review.md
   prompts/stages/{problem_identification,concept_generation,
                   design_specification,ethics_critical,reflection}.md
-  contracts/{coach_turn,qa_turn,review_turn}.py
+  contracts/{coach_turn,qa_turn,review_turn,router_turn}.py
 ```
 
 ## Deploy

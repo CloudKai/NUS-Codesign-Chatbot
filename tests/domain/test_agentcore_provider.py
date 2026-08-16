@@ -36,6 +36,8 @@ from backend.settings import settings
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
 
+from fake_agentcore_runtime import FakeAgentCoreRuntime
+
 _TINY_PNG = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQ"
     "AAAABJRU5ErkJggg=="
@@ -59,59 +61,6 @@ class FakeClientError(Exception):
     def __init__(self, code: str, message: str = "aws-error") -> None:
         super().__init__(message)
         self.response = {"Error": {"Code": code, "Message": message}}
-
-
-class FakeBody:
-    """Minimal streaming-body stand-in used by the fake runtime client."""
-
-    def __init__(self, payload: bytes) -> None:
-        self._payload = payload
-
-    def read(self) -> bytes:
-        """Return the whole fake response body."""
-        return self._payload
-
-
-class FakeAgentCoreRuntime:
-    """Injected bedrock-agentcore client that records InvokeAgentRuntime calls."""
-
-    def __init__(
-        self,
-        *,
-        payload: dict[str, Any] | None = None,
-        raw: bytes | None = None,
-        payloads: list[Any] | None = None,
-        content_type: str = "application/json",
-        error: BaseException | None = None,
-    ) -> None:
-        self.calls: list[dict[str, Any]] = []
-        self._payload = payload
-        self._raw = raw
-        self._queue = list(payloads) if payloads is not None else None
-        self._content_type = content_type
-        self._error = error
-
-    def invoke_agent_runtime(self, **kwargs: Any) -> dict[str, Any]:
-        """Record one runtime invocation and return a fake structured response."""
-        self.calls.append(kwargs)
-        if self._queue is not None:
-            if not self._queue:
-                raise AssertionError("FakeAgentCoreRuntime has no queued responses left")
-            item = self._queue.pop(0)
-            if isinstance(item, BaseException):
-                raise item
-            if isinstance(item, bytes):
-                body = item
-            else:
-                body = json.dumps(item).encode("utf-8")
-            return {"contentType": self._content_type, "response": FakeBody(body)}
-        if self._error is not None:
-            raise self._error
-        if self._raw is not None:
-            body = self._raw
-        else:
-            body = json.dumps(self._payload or {}).encode("utf-8")
-        return {"contentType": self._content_type, "response": FakeBody(body)}
 
 
 def _assessment(
@@ -224,6 +173,47 @@ def _decoded_payload(call: dict[str, Any]) -> dict[str, Any]:
     return json.loads(str(raw))
 
 
+def _call_phase(call: dict[str, Any]) -> str:
+    """Return the payload phase for one recorded runtime call."""
+    return str(_decoded_payload(call).get("phase") or "")
+
+
+def _specialist_call(client: FakeAgentCoreRuntime) -> dict[str, Any]:
+    """Return the first non-router, non-judge InvokeAgentRuntime call."""
+    calls = [
+        call
+        for call in client.calls
+        if _call_phase(call) not in {"router"}
+        and not (
+            _call_phase(call) == "review"
+            and str(_decoded_payload(call).get("review_mode") or "") == "incremental"
+        )
+    ]
+    assert calls
+    return calls[0]
+
+
+def _router_calls(client: FakeAgentCoreRuntime) -> list[dict[str, Any]]:
+    """Return recorded Haiku router invokes."""
+    return [call for call in client.calls if _call_phase(call) == "router"]
+
+
+def _deep_review_calls(client: FakeAgentCoreRuntime) -> list[dict[str, Any]]:
+    """Return recorded Deep Review invokes."""
+    calls = []
+    for call in client.calls:
+        payload = _decoded_payload(call)
+        if payload.get("phase") != "review":
+            continue
+        mode = str(payload.get("review_mode") or "")
+        context = payload.get("runtime_context")
+        if isinstance(context, dict) and not mode:
+            mode = str(context.get("review_mode") or "")
+        if mode == "deep":
+            calls.append(call)
+    return calls
+
+
 def _current_turn_text(payload: dict[str, Any]) -> str:
     """Return the composed current-turn text from Converse messages."""
     messages = payload["messages"]
@@ -248,8 +238,9 @@ def test_valid_structured_coaching_and_research_coding():
     assert result.assessment.current_stage == "problem_identification"
     assert result.research_coding is not None
     assert result.research_coding.coding_status is ResearchCodingStatus.CODED
-    assert len(client.calls) == 1
-    call = client.calls[0]
+    assert len(_router_calls(client)) == 1
+    assert len(_deep_review_calls(client)) == 0
+    call = _specialist_call(client)
     assert call["agentRuntimeArn"] == _RUNTIME_ARN
     assert call["qualifier"] == "DEFAULT"
     assert str(call["runtimeSessionId"]).startswith("stateless-")
@@ -288,7 +279,7 @@ def test_deep_analysis_maps_only_to_agentcore_ethics_critical_topic():
     client = FakeAgentCoreRuntime(payload=_output(stage="deep_analysis"))
     result = _provider(client).assess(_request(current_stage="deep_analysis"))
     assert result.assessment.current_stage == "deep_analysis"
-    payload = _decoded_payload(client.calls[0])
+    payload = _decoded_payload(_specialist_call(client))
     assert payload["topic"] == "ethics_critical"
     assert _STAGE_MARKERS["deep_analysis"] not in payload["trusted_instructions"]
     assert _STAGE_MARKERS["deep_analysis"] not in _current_turn_text(payload)
@@ -319,7 +310,7 @@ def test_runtime_session_is_never_notebook_memory_or_history():
     assert "thread-" not in session_id
     assert not hasattr(provider, "_history")
     assert not hasattr(provider, "_sessions")
-    payload = _decoded_payload(client.calls[0])
+    payload = _decoded_payload(_specialist_call(client))
     for forbidden in (
         "memoryId",
         "memory_id",
@@ -346,7 +337,7 @@ def test_agentcore_payload_sends_full_history_and_owner_student_id():
             history=history,
         )
     )
-    payload = _decoded_payload(client.calls[0])
+    payload = _decoded_payload(_specialist_call(client))
     assert payload["student_id"] == "cognito:critical-path-student"
     assert payload["student_id"] != "thread-notebook-id"
     messages = payload["messages"]
@@ -398,7 +389,7 @@ def test_agentcore_compression_keeps_early_decision_out_of_recent_messages():
         planner=planner,
     )
     provider.assess(_request(history=history, conversation_revision=1))
-    payload = _decoded_payload(client.calls[0])
+    payload = _decoded_payload(_specialist_call(client))
     prior = payload["messages"][:-1]
     assert 1 <= len(prior) <= 4
     current_text = _current_turn_text(payload)
@@ -419,7 +410,7 @@ def test_application_path_stamps_store_identifier_as_student_id(tmp_path):
     store.add_message(thread_id, "assistant", "Who is affected at night?")
     client = FakeAgentCoreRuntime(payload=_output())
     _service(store, _provider(client)).submit(_request(thread_id=thread_id))
-    payload = _decoded_payload(client.calls[0])
+    payload = _decoded_payload(_specialist_call(client))
     assert payload["student_id"] == "cognito:owner-sub"
     assert payload["student_id"] != thread_id
     prior = payload["messages"][:-1]
@@ -505,7 +496,7 @@ def test_images_are_mapped_into_runtime_messages():
     )
     client = FakeAgentCoreRuntime(payload=_output())
     _provider(client).assess(_request(image_inputs=[image]))
-    payload = _decoded_payload(client.calls[0])
+    payload = _decoded_payload(_specialist_call(client))
     assert "prompt" not in payload
     content = payload["messages"][-1]["content"]
     assert content[0]["text"] == compose_coach_prompt(
@@ -814,7 +805,7 @@ def test_short_street_contribution_is_invoked_and_not_treated_as_empty():
     result = _provider(client).assess(_request(student_message=_STREET))
     assert result.response_text
     assert result.assessment.recommendation is StageDecision.STAY
-    payload = _decoded_payload(client.calls[0])
+    payload = _decoded_payload(_specialist_call(client))
     current = _current_turn_text(payload)
     assert current.count(_STREET) == 1
     assert json.dumps(payload).count(_STREET) == 1
@@ -842,10 +833,10 @@ def test_large_history_and_evidence_keep_current_street_contribution_once():
     client = FakeAgentCoreRuntime(payload=_output(research=None))
     result = _provider(client).assess(request)
     assert result.response_text
-    encoded = client.calls[0]["payload"]
+    encoded = _specialist_call(client)["payload"]
     size = len(encoded if isinstance(encoded, (bytes, bytearray)) else str(encoded))
     assert 30_000 <= size <= 150_000
-    payload = _decoded_payload(client.calls[0])
+    payload = _decoded_payload(_specialist_call(client))
     current = _current_turn_text(payload)
     assert current.count(_STREET) == 1
     assert json.dumps(payload).count(_STREET) == 1

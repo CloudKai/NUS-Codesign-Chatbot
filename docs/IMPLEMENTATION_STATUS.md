@@ -1,6 +1,363 @@
 # Implementation status
 
-## Current phase — Production Knowledge Base Retrieve diagnosis and adapter fix
+## Current phase — Three pedagogical agents + Haiku 4.5 / Sonnet 4.6 (DEFAULT v18)
+
+**Runtime published 2026-08-16.** Same ARN
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.
+`DEFAULT` is **version 18 READY**. FastAPI + DSQL remain authoritative. LLMs
+never mutate stage or DSQL.
+
+Lightweight roles use Claude Haiku 4.5 on Strands `BedrockModel`. Deep
+Review stays Claude Sonnet 4.6. GPT-5.6 Luna / Bedrock Mantle remains
+supported as a historical provider pair for rollback versions; it is not
+the active production path.
+
+The Stage Judge is not the readiness authority. Deep Review (Sonnet)
+performs the final pedagogical readiness assessment. Incremental Review
+(Haiku) keeps the Review projection current after Coaching.
+
+Artifact:
+`s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-haiku-sonnet-v18-20260816T082420Z.zip`
+
+### Model assignment
+
+| Role | Provider | Model |
+|---|---|---|
+| Router (not a pedagogical agent) | `bedrock` | `global.anthropic.claude-haiku-4-5-20251001-v1:0` |
+| Q&A Agent | `bedrock` | `global.anthropic.claude-haiku-4-5-20251001-v1:0` |
+| Coaching Agent | `bedrock` | `global.anthropic.claude-haiku-4-5-20251001-v1:0` |
+| Review Agent — incremental | `bedrock` | `global.anthropic.claude-haiku-4-5-20251001-v1:0` |
+| Review Agent — deep | `bedrock` | `global.anthropic.claude-sonnet-4-6` |
+
+There is no silent Haiku↔Sonnet substitution and no Luna fallback.
+
+### Periodic Deep Review
+
+Unchanged: every N newly executed, successful Coaching turns since the
+previous successfully persisted Deep Review (`DEEP_REVIEW_INTERVAL_TURNS=3`).
+The Review tab remains display-only: zero model calls.
+
+### Behavior delivered
+
+1. Haiku router selects `qa` | `coaching` | `review`. Browser specialist
+   hints are dropped. Router failure/timeout/malformed/low confidence
+   falls back to Coaching. Safety blocks do not fallback.
+2. Successful Coaching always runs Incremental Haiku Review once.
+   Incremental Review cannot advance. Incremental failure fails the turn.
+3. Deep Sonnet Review runs on periodic N, readiness candidate, Reflection
+   checkpoint, or explicit Review. Explicit Review skips Coaching and
+   Incremental Review.
+4. Q&A never runs Incremental or Deep Review and does not increment the
+   counter.
+5. Mock CI Compose step now sets `PUBLIC_ORIGIN` and `APP_IMAGE` for both
+   Compose files.
+
+### Main files changed
+
+- Runtime: `agentcore_runtime/model.py`, `agentcore_runtime/main.py`,
+  `agentcore_runtime/README.md`
+- Backend: `backend/agentcore_provider.py`, `backend/settings.py`,
+  `backend/specialists/routing.py`, `backend/coaching/execution.py`
+- Compose/env: `compose.yaml`, `compose.prod.yaml`, `.env.example`
+- Tests: `tests/domain/test_runtime_model.py`,
+  `tests/http/test_production_config.py`, `tests/test_deployment_config.py`
+- CI: `.github/workflows/mock-ci.yml`
+- Docs: this file, `docs/providers/AGENTCORE_ADAPTER.md`,
+  `docs/PROMPT_ARCHITECTURE.md`, `docs/deploy/AWS_STATELESS_EC2.md`,
+  `docs/SECURITY_BOUNDARIES.md`
+
+### Validation evidence
+
+- `ruff check .`: **passed**.
+- Shell syntax (`start.sh`, `build.sh`, `start_prod.sh`, `deploy_ecr.sh`,
+  `browser_e2e_smoke.sh`): **passed**.
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`,
+  `scripts`, `agentcore_runtime`: **passed**.
+- Production/deployment config tests: **passed**.
+- Ownership/idempotency gates: **passed**.
+- Full mock pytest: **passed** (exit 0; 825 tests collected).
+- AgentCore runtime compatibility diagnostic (`strands-agents==1.52.0`,
+  `bedrock-agentcore==1.21.0`, `pydantic==2.13.4`, Haiku and Sonnet
+  `BedrockModel` kwargs, `structured_output_model` present): **passed**.
+- Docker daemon was **down**, so Compose config, Caddy validate, and image
+  build were **not executed**.
+- Haiku 4.5 inference profile
+  `global.anthropic.claude-haiku-4-5-20251001-v1:0` in `us-west-2`: **ACTIVE**,
+  `AUTHORIZED` / `AVAILABLE`.
+- AgentCore `DEFAULT` **v18 READY** (AWS-verified 2026-08-16). v14–v17 remain
+  READY and were not deleted.
+- Live Router Haiku: Week 2 → `qa` (0.95); caregivers → `coaching` (0.92);
+  “Can you review my progress?” → `review` (0.95).
+- Live Q&A Haiku: STAY; no Deep Review.
+- Live Coaching Haiku + Incremental Haiku (`provider.assess`): STAY,
+  `review_depth=incremental`.
+- Live explicit Deep Review Sonnet: STAY, `deep_review_succeeded=true`.
+- CloudWatch provenance:
+  `role=router provider=bedrock model_id=global.anthropic.claude-haiku-4-5-20251001-v1:0`;
+  same Haiku id for `qa`, `coaching`, `review_incremental`;
+  `role=review_deep provider=bedrock model_id=global.anthropic.claude-sonnet-4-6`.
+- Guardrail: AWS example credential fixture → `safety_blocked`. Caregiver
+  Singapore coaching/incremental was not blocked and had no `{ADDRESS}`.
+- Live FastAPI `CoachApplicationService.submit` three-turn periodic sequence
+  **failed closed** twice at Incremental Review (`safety_blocked`) on the
+  richer application payload. Periodic counter semantics remain covered by
+  mock tests. Stopped after two live attempts.
+- GitHub Mock CI is **not green** on this SHA: changes are uncommitted.
+- EC2 / CloudFront E2E were **not** run. Host compose remains stale until
+  CI is green and the app image is recreated.
+
+### Next exact action
+
+1. Commit/push only when authorized so Mock CI can go green.
+2. After CI is green, recreate the EC2 app container from the current
+   five-role `compose.prod.yaml` and a new immutable image. Do not reuse
+   the stale host Compose.
+3. Optionally re-run the three-turn FastAPI periodic sequence after EC2
+   cutover, using a student notebook rather than a local SQLite submit
+   that already failed closed twice.
+   Rollback remains **version 14** (Sonnet-only) or **v17** (Luna/Sonnet)
+   if needed. Do not delete old versions.
+
+## Previous phase — Three pedagogical agents + Luna router (DEFAULT v17)
+
+**Runtime published 2026-08-16.** Same ARN
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.
+`DEFAULT` is **version 17 READY**. FastAPI + DSQL remain authoritative. LLMs
+never mutate stage or DSQL.
+
+The Stage Judge is no longer the readiness authority. Deep Review (Sonnet)
+performs the final pedagogical readiness assessment. Incremental Review
+(Luna) keeps the Review projection current after Coaching.
+
+Luna live inference is **not available on this AWS account**
+(`openai.gpt-5.6-luna is not available for this account`). Router, Q&A,
+Coaching, and Incremental Review live smokes therefore failed closed. Deep
+Review live smoke on Claude Sonnet 4.6 succeeded. Do not treat DEFAULT v17
+as student-ready until Bedrock enables GPT-5.6 Luna. This phase is superseded
+by the Haiku 4.5 lightweight migration above.
+
+### Model assignment
+
+| Role | Model |
+|---|---|
+| Router (not a pedagogical agent) | GPT-5.6 Luna |
+| Q&A Agent | GPT-5.6 Luna |
+| Coaching Agent | GPT-5.6 Luna |
+| Review Agent — incremental | GPT-5.6 Luna |
+| Review Agent — deep | Claude Sonnet 4.6 |
+
+### Periodic Deep Review
+
+Periodic Deep Review means every N newly executed, successful Coaching
+turns since the previous successfully persisted Deep Review. It is
+turn-based rather than time-based because it represents new learning
+evidence, not elapsed time. Configured by `DEEP_REVIEW_INTERVAL_TURNS`
+(default 3). The counter `coaching_turns_since_deep_review` lives in
+notebook settings and resets to 0 only after a Deep Review result is
+validated and persisted. Failed Deep Review fails closed to STAY and
+keeps the checkpoint due.
+
+Event overrides (explicit Review, `readiness_candidate`, Reflection
+checkpoint) run Deep Review immediately. The Review tab remains
+display-only: zero model calls.
+
+### Behavior delivered
+
+1. Luna router selects `qa` | `coaching` | `review`. Browser specialist
+   hints are dropped. Router failure/timeout/malformed/low confidence
+   falls back to Coaching.
+2. Successful Coaching always runs Incremental Luna Review once. Incremental
+   Review cannot advance the stage. Incremental failure fails the turn
+   (no persist).
+3. Deep Sonnet Review runs on periodic N, readiness candidate, Reflection
+   checkpoint, or explicit Review. Explicit Review skips Coaching and
+   Incremental Review.
+4. Q&A never runs Incremental or Deep Review and does not increment the
+   counter.
+5. Deep Review may recommend stay/advance; FastAPI still owns the
+   transition pipeline. Malformed/timeout/unavailable/wrong-stage Deep
+   Review fails closed to STAY.
+
+### Main files changed
+
+- Runtime: `agentcore_runtime/main.py`, `model.py`, `models.py`,
+  `specialists/routing.py`, `prompts/review_incremental.md`,
+  `prompts/review_deep.md`
+- Backend: `backend/agentcore_provider.py`,
+  `backend/specialists/review_orchestration.py`,
+  `backend/coaching/execution.py`, `backend/workflow.py`,
+  `backend/settings.py`, `backend/domain.py`
+- Tests: `tests/domain/test_review_agent.py`,
+  `tests/domain/test_hybrid_agentcore.py`, `tests/fake_agentcore_runtime.py`
+- Docs/env: `.env.example`, compose files, this file,
+  `docs/providers/AGENTCORE_ADAPTER.md`, `docs/PROMPT_ARCHITECTURE.md`,
+  `docs/deploy/AWS_STATELESS_EC2.md`
+
+### Validation evidence
+
+- Focused AgentCore/review tests: **passed**.
+- Full mock pytest: **passed** (exit 0; 822 tests on 2026-08-16 readiness pass).
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`,
+  `scripts`, `agentcore_runtime`: **passed**.
+- `ruff check .`: **passed** locally after removing an unused `FakeBody`
+  import in `tests/domain/test_agentcore_provider.py`. GitHub Mock CI on
+  `af04f11` failed that Ruff check only; `agentcore-runtime-compatibility`
+  succeeded.
+- Periodic counter is recomputed inside `persist_coach_turn` from the
+  notebook `settings_text` row, and the notebook `updated_at` is part of
+  the UPDATE CAS predicate. A stale pre-provider snapshot cannot overwrite
+  a newer count. Concurrent overlapping persists either serialize to 1 then
+  2, or one writer loses the CAS and rolls back.
+- Adversarial review: no confirmed production defects. Residual: runtime
+  still shares legacy `AGENTCORE_MODEL_*` when **no** role keys are set.
+- AgentCore `DEFAULT` **v17 READY** (last AWS-verified 2026-08-16 before
+  this readiness pass). Artifact
+  `agentcore-patches/chatbot_harnessAgent-review-depths-v17-20260816T064539Z.zip`.
+- Guardrail `o8aipba8m129` version **3** READY (last AWS-verified 2026-08-16).
+- Live Deep Review (Sonnet, explicit): **passed** on that earlier pass
+  (STAY; Singapore kept; no `{ADDRESS}`).
+- Live Luna router / coaching / incremental: **failed** on that earlier
+  pass (account model access). CloudWatch loaded the correct per-role
+  models (no Luna↔Sonnet swap).
+- This readiness pass could not re-query AWS, EC2, or Knowledge Base:
+  local AWS SSO session expired (`aws login` required). Docker daemon was
+  down, so Caddy validate and image build were not executed. CloudFront UI
+  / Review-tab live path was not exercised. Periodic three-turn live
+  sequence was not executed.
+
+### Next exact action
+
+Reauthenticate AWS SSO (`aws login`), then re-verify AgentCore DEFAULT,
+Guardrail 3, Managed KB `course/` retrieval, and Luna account access.
+Push the local Ruff + counter-CAS fixes so Mock CI can go green on a new
+SHA. Recreate the EC2 app container only after Luna is enabled and CI is
+green. Rollback remains **version 14** (Sonnet-only generation) if
+students need a working coach today. Do not delete v15, v16, or v17.
+
+## Previous phase — Hybrid Luna router + Sonnet Stage Judge (DEFAULT v16)
+
+**Runtime published 2026-08-16.** Same ARN
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.
+`DEFAULT` is **version 16 READY**. FastAPI + DSQL remain authoritative.
+
+Luna live inference is **not available on this AWS account**
+(`openai.gpt-5.6-luna is not available for this account`). Router, Q&A, and
+Coaching live smokes therefore failed closed. Review and Stage Judge live
+smokes on Claude Sonnet 4.6 succeeded. Do not treat DEFAULT v16 as
+student-ready until Bedrock enables GPT-5.6 Luna.
+
+### Behavior delivered
+
+1. Free-text routing is GPT-5.6 Luna (`router_turn`). Server-owned specialist
+   or review surface still bypasses the router. Browser specialist hints are
+   dropped. Router failure/timeout/malformed/low confidence falls back to
+   coaching. Guardrail-blocked router input fails the turn.
+2. Per-role models on one runtime: router/QA/coaching = Luna; review/stage
+   judge = Claude Sonnet 4.6. No silent Luna↔Sonnet substitution.
+3. Coaching ADVANCE is a candidate only. Sonnet Stage Judge confirms or
+   returns STAY. Judge failure fails closed to STAY. Q&A and Review still
+   force STAY and never call the judge.
+4. Research coding remains observational and is not sent to the Stage Judge.
+5. Runtime role now has non-CDK
+   `ManualMantleInferenceAccess-NotCDKManaged`
+   (`bedrock-mantle:CreateInference` on `project/default` plus
+   `bedrock-mantle:CallWithBearerToken`). After that grant, Luna still
+   returns account-level model unavailability.
+
+### Main files changed
+
+- Runtime: `agentcore_runtime/model.py`, `main.py`, `models.py`, `router.py`,
+  `stage_judge.py`, `prompts/router.md`, `prompts/stage_judge.md`
+- Backend: `backend/agentcore_provider.py`, `backend/specialists/routing.py`,
+  `backend/coaching/execution.py`, `backend/settings.py`
+- Tests: `tests/domain/test_hybrid_agentcore.py`, routing/model/provider/
+  production/deployment tests
+- Docs/env: `.env.example`, compose files, this file,
+  `docs/providers/AGENTCORE_ADAPTER.md`
+
+### Validation evidence
+
+- Full mock pytest: **passed**.
+- AgentCore `DEFAULT` **v16 READY**. Artifact
+  `agentcore-patches/chatbot_harnessAgent-hybrid-v16-20260816T053702Z.zip`.
+- Guardrail `o8aipba8m129` version **3** READY.
+- Live Review + Stage Judge (Sonnet): **passed** (forced STAY; judge STAY).
+- Live credential guardrail: **safety_blocked**.
+- Live Luna router/QA/coaching: **failed** (account model access).
+- EC2 was not restarted. CloudFront UI hybrid path was not exercised.
+
+### Next exact action
+
+Enable GPT-5.6 Luna for account `355604674280` in `us-west-2` (Bedrock model
+access / AWS Sales). Then rerun capped Luna smokes. Until then, production
+coaching/QA/router on DEFAULT v16 will fail closed. Rollback to **version 14**
+(Sonnet-only, known-good generation) if students need a working coach today.
+Do not delete v15 or v16.
+
+## Previous phase — AgentCore DEFAULT v15 Luna + guardrail version 3
+
+**Completed on 2026-08-16.** Same runtime ARN
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.
+`DEFAULT` is **version 15 READY**. Guardrail id unchanged; version skipped
+from 1 to **3**. Generation model is GPT-5.6 Luna. No live paid smoke in
+this pass.
+
+### Behavior delivered
+
+1. AgentCore runtime env is now
+   `AGENTCORE_MODEL_PROVIDER=bedrock_mantle_responses`,
+   `AGENTCORE_MODEL_ID=openai.gpt-5.6-luna`,
+   `AGENTCORE_MODEL_REGION=us-west-2`, `GUARDRAIL_ID=o8aipba8m129`,
+   `GUARDRAIL_VERSION=3`. Gateway and Memory env keys were preserved.
+2. Published zip is v14 linux/arm64 Python 3.14 site-packages plus the Luna
+   extra (`openai`, `jiter` aarch64 cp314, `distro`, `sniffio`, `tqdm`,
+   `aws_bedrock_token_generator`) and current `agentcore_runtime/` sources.
+   Entrypoint remains `opentelemetry-instrument main.py`.
+3. Local and production Compose pin Luna + `GUARDRAIL_VERSION=3`. Guardrail
+   **id** stays in host `.env` (not interpolated). FastAPI fail-closed env
+   must match the runtime.
+
+### Main files changed
+
+- `compose.yaml`, `compose.prod.yaml`, `.env.example`
+- `agentcore_runtime/requirements.txt`, `agentcore_runtime/README.md`,
+  `agentcore_runtime/model.py`
+- Tests: `tests/test_deployment_config.py`
+- Docs: this file, `docs/providers/AGENTCORE_ADAPTER.md`,
+  `docs/deploy/AWS_STATELESS_EC2.md`
+
+### Validation evidence
+
+- Focused pytest `tests/test_deployment_config.py`
+  `tests/domain/test_runtime_model.py`
+  `tests/http/test_production_config.py`: **passed**.
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`,
+  `agentcore_runtime`: **passed**.
+- `get-agent-runtime`: status READY, version **15**, Luna + guardrail 3.
+- `DEFAULT` endpoint: READY, `liveVersion` **15**.
+- Guardrail `o8aipba8m129` version 3: READY. Version 2 was not used.
+
+### Compatibility, migration, and rollback
+
+- No schema change. ARN unchanged. `DEFAULT` auto-moved on
+  `update-agent-runtime`.
+- Rollback is another `update-agent-runtime` with the v14 zip
+  `agentcore-patches/chatbot_harnessAgent-sonnet46-v14-20260815T193913Z.zip`
+  and the previous Sonnet + `GUARDRAIL_VERSION=1` env.
+- Live artifact:
+  `s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-luna-v15-20260816T044445Z.zip`
+
+### Known risks and next exact action
+
+- Recreate the EC2 app container so FastAPI Compose env matches Luna +
+  guardrail 3. Runtime DEFAULT already serves Luna; a stale container still
+  advertises Sonnet in its own process env.
+- Luna uses ApplyGuardrail, not `BedrockModel` constructor fields. Do not
+  pass `openai.gpt-5.6-luna` into `BedrockModel`.
+- Next paid check is a capped Luna smoke only if explicitly approved:
+  `PYTHONPATH=. .venv/bin/python scripts/agentcore_smoke.py --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`.
+
+## Previous phase — Production Knowledge Base Retrieve diagnosis and adapter fix
 
 **Completed locally on 2026-08-16.** Integrate-Bedrock HEAD
 `8b0d5f06e80f78efaf277dd8c3f8f7899fe0b4a2`. AgentCore / Sonnet / Q&A routing

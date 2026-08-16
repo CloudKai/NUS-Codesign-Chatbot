@@ -17,6 +17,7 @@ from agentcore_runtime.structured_coach import (
     coach_turn_from_agent_result,
     coaching_invoke_prompts,
     inspect_agent_result,
+    invoke_failure_category,
     last_user_text,
     log_coach_turn_outcome,
 )
@@ -312,20 +313,27 @@ def test_conversation_for_invoke_keeps_history_out_of_current_prompt() -> None:
 
 
 def test_unknown_phase_falls_closed_to_coaching_not_qa() -> None:
-    from agentcore_runtime.specialists.routing import payload_phase
+    from agentcore_runtime.specialists.routing import invoke_kind, payload_phase
     from agentcore_runtime.structured_coach import specialist_system_prompt
 
     assert payload_phase({"phase": "coach"}) == "coaching"
     assert payload_phase({"phase": "scoring"}) == "review"
+    assert invoke_kind({"output_contract": "router_turn"}) == "router"
+    assert invoke_kind({"phase": "stage_judge"}) == "specialist"
+    assert invoke_kind({"phase": "qa"}) == "specialist"
     system = specialist_system_prompt({"phase": "unknown", "topic": "problem_identification"})
     assert "Coaching specialist" in system
     assert "Q&A specialist" not in system
     qa = specialist_system_prompt({"phase": "qa"})
     assert "Q&A specialist" in qa
     assert "Socratic Thinking Path coaching" in qa
-    review = specialist_system_prompt({"phase": "review"})
-    assert "Formative Review specialist" in review
+    review = specialist_system_prompt({"phase": "review", "review_mode": "deep"})
+    assert "Deep Review specialist" in review
     assert "not a grade" in review.lower()
+    incremental = specialist_system_prompt(
+        {"phase": "review", "review_mode": "incremental"}
+    )
+    assert "Incremental Review specialist" in incremental
 
 
 def test_inspect_and_log_omit_student_text(caplog: pytest.LogCaptureFixture) -> None:
@@ -353,3 +361,18 @@ def test_inspect_and_log_omit_student_text(caplog: pytest.LogCaptureFixture) -> 
     assert "text_blocks=1" in joined
     assert "elapsed_ms=912" in joined
     assert _STREET not in joined
+
+
+def test_invoke_failure_category_maps_auth_to_unavailable() -> None:
+    """Mantle 401s are provider unavailability, not malformed structured output."""
+
+    class AuthenticationError(Exception):
+        """SDK-shaped auth failure without importing openai."""
+
+    class RateLimitError(Exception):
+        """SDK-shaped throttle without importing openai."""
+
+    assert invoke_failure_category(AuthenticationError("access_denied")) == "unavailable"
+    assert invoke_failure_category(RateLimitError("slow down")) == "throttled"
+    assert invoke_failure_category(TimeoutError()) == "timeout"
+    assert invoke_failure_category(RuntimeError("parse")) == "structured_output_failure"

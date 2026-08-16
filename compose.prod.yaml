@@ -40,16 +40,29 @@ services:
       MODEL_PROVIDER: "agentcore"
       MOCK_OPENAI: "false"
       AGENTCORE_MODEL_PROVIDER: "bedrock"
-      AGENTCORE_MODEL_ID: "global.anthropic.claude-sonnet-4-6"
+      AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       AGENTCORE_MODEL_REGION: "us-west-2"
+      ROUTER_MODEL_PROVIDER: "bedrock"
+      ROUTER_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+      QA_MODEL_PROVIDER: "bedrock"
+      QA_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+      COACHING_MODEL_PROVIDER: "bedrock"
+      COACHING_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+      REVIEW_INCREMENTAL_MODEL_PROVIDER: "bedrock"
+      REVIEW_INCREMENTAL_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+      REVIEW_DEEP_MODEL_PROVIDER: "bedrock"
+      REVIEW_DEEP_MODEL_ID: "global.anthropic.claude-sonnet-4-6"
+      ROUTER_MIN_CONFIDENCE: "0.60"
+      DEEP_REVIEW_INTERVAL_TURNS: "3"
+      GUARDRAIL_VERSION: "3"
       # Runtime-configured; do not hard-code account IDs or bucket names in Git.
       # APP_IMAGE: set on the host to the ECR image URI + immutable tag
       # DSQL_ENDPOINT: set in host .env
       # USER_UPLOADS_BUCKET: set in host .env
       # COURSE_MATERIALS_BUCKET: set in host .env (cde2300-course-content-s3)
       # AGENTCORE_RUNTIME_ARN: set in host .env
-      # AGENTCORE_QUALIFIER: set in host .env (DEFAULT after v11 is smoke-tested)
-      # GUARDRAIL_ID / GUARDRAIL_VERSION: set in host .env; also inject on the runtime
+      # AGENTCORE_QUALIFIER: set in host .env (DEFAULT after the Haiku runtime is READY)
+      # GUARDRAIL_ID: set in host .env; also inject the same ID and version 3 on the runtime
       # KNOWLEDGE_BASE_ID: set in host .env (JUQNP8AZAZ) when course sync is on
       # Lecture notes are not bundled into the production image.
     expose:

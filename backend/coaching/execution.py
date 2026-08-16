@@ -24,7 +24,6 @@ from backend.models import DEFAULT_CHAT_MODEL_ID, get_model, validate_reasoning
 from backend.prompts.composer import COACH_PROMPT_VERSION
 from backend.research.models import ResearchEvidenceSpan, ResearchObservationCreate
 from backend.repositories import NotebookRepository
-from backend.specialists.routing import select_specialist
 from backend.retrieval import (
     ContextRetriever,
     LocalChunkRetriever,
@@ -33,6 +32,12 @@ from backend.retrieval import (
     focused_excerpt,
     retrieval_sources_from_notebook,
     with_course_evidence_gap,
+)
+from backend.settings import settings as runtime_settings
+from backend.specialists.review_orchestration import (
+    COUNTER_SETTINGS_KEY,
+    bound_deep_review_interval,
+    parse_coaching_turns_since_deep_review,
 )
 from backend.source_library import (
     get_visible_source,
@@ -446,6 +451,10 @@ class CoachApplicationService:
         )
         from backend.settings import settings as runtime_settings
 
+        orchestration = self._workflow.take_review_orchestration(
+            prepared_request.thread_id
+        )
+
         auto_advance: AtomicAutoAdvance | None = None
         if (
             self._auto_advance_stages
@@ -568,6 +577,12 @@ class CoachApplicationService:
             idempotency_fingerprint=idempotency_fingerprint,
             research_observation=research_observation,
             auto_advance=auto_advance,
+            review_counter_qualifying=bool(
+                orchestration.get("qualifying_coaching_turn")
+            ),
+            review_counter_deep_succeeded=bool(
+                orchestration.get("deep_review_succeeded")
+            ),
         )
         return turn
 
@@ -763,7 +778,16 @@ class CoachApplicationService:
                 "conversation_revision": conversation_revision,
                 "student_id": str(getattr(self._store, "identifier", "") or "").strip()
                 or None,
-                "specialist": select_specialist(request.student_message, requested=None),
+                # Drop client specialist hints. Mock uses regex fallback;
+                # AgentCore uses the Haiku router unless a server-owned
+                # specialist is stamped after this method.
+                "specialist": None,
+                COUNTER_SETTINGS_KEY: parse_coaching_turns_since_deep_review(
+                    metadata.get(COUNTER_SETTINGS_KEY)
+                ),
+                "deep_review_interval_turns": bound_deep_review_interval(
+                    runtime_settings.deep_review_interval_turns
+                ),
             }
         )
 

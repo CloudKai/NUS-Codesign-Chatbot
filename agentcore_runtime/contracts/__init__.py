@@ -10,6 +10,8 @@ try:
         FacioneScoresOutput,
         QATurnOutput,
         ReviewTurnOutput,
+        RouterOutput,
+        StageJudgeOutput,
         parse_coach_turn_output,
     )
 except ImportError:  # pragma: no cover - imported as agentcore_runtime.*
@@ -20,6 +22,8 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.*
         FacioneScoresOutput,
         QATurnOutput,
         ReviewTurnOutput,
+        RouterOutput,
+        StageJudgeOutput,
         parse_coach_turn_output,
     )
 
@@ -30,5 +34,7 @@ __all__ = [
     "FacioneScoresOutput",
     "QATurnOutput",
     "ReviewTurnOutput",
+    "RouterOutput",
+    "StageJudgeOutput",
     "parse_coach_turn_output",
 ]
