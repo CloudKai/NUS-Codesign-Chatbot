@@ -283,8 +283,8 @@ def test_production_rejects_missing_role_model_configuration(monkeypatch):
     monkeypatch.setattr(settings, "guardrail_version", "1")
     _apply_hybrid_role_models(monkeypatch)
     monkeypatch.setattr(settings, "router_model_provider", "")
-    with pytest.raises(ValueError, match="ROUTER_MODEL_PROVIDER"):
-        validate_production_configuration()
+    monkeypatch.setattr(settings, "router_model_id", "")
+    validate_production_configuration()
     monkeypatch.setattr(settings, "router_model_provider", "bedrock")
     monkeypatch.setattr(settings, "router_model_id", "openai.gpt-5.6-luna")
     with pytest.raises(ValueError, match="Luna cannot use BedrockModel"):

@@ -375,6 +375,8 @@ class CoachRequest(BaseModel):
     # authoritative. Persisted on notebook settings_text.
     coaching_turns_since_deep_review: int = Field(default=0, ge=0)
     deep_review_interval_turns: int = Field(default=3, ge=1, le=50)
+    # Server-filled retrieval decision. Clients cannot make this authoritative.
+    retrieval_required: bool = False
 
     @field_validator("current_stage")
     @classmethod

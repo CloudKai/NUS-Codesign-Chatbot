@@ -166,6 +166,47 @@ class QATurnOutput(BaseModel):
     citations: list[CitationOutput] = Field(default_factory=list)
 
 
+class FastChatTurnOutput(BaseModel):
+    """One-call normal-chat result: Coaching or Q&A in the same inference."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    mode: str
+    response_text: str = Field(min_length=1)
+    assessment: AssessmentOutput | None = None
+    citations: list[CitationOutput] = Field(default_factory=list)
+    research_coding: dict[str, Any] | None = None
+    needs_source_retrieval: bool = False
+
+    @field_validator("mode")
+    @classmethod
+    def mode_must_be_coaching_or_qa(cls, value: str) -> str:
+        """Reject modes outside the two-value fast-chat contract."""
+        cleaned = str(value or "").strip().lower()
+        if cleaned not in {"coaching", "qa"}:
+            raise ValueError("mode must be coaching or qa")
+        return cleaned
+
+    @field_validator("research_coding", mode="before")
+    @classmethod
+    def invalid_research_coding_becomes_absent(cls, value: Any) -> Any:
+        """Drop invalid optional research data without losing the student reply."""
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            return None
+        if "coding_status" not in value and "dominant_clear" not in value:
+            return None
+        return value
+
+    @model_validator(mode="after")
+    def coaching_requires_assessment(self) -> "FastChatTurnOutput":
+        """Fail closed when Coaching omits the educational assessment."""
+        if self.mode == "coaching" and self.assessment is None:
+            raise ValueError("coaching mode requires assessment")
+        return self
+
+
 class ReviewTurnOutput(BaseModel):
     """Formative Review result for incremental Haiku or deep Sonnet.
 
@@ -358,6 +399,18 @@ def parse_qa_turn_output(value: Any) -> QATurnOutput:
         except (TypeError, ValidationError):
             return QATurnOutput.model_validate(value)
     return QATurnOutput.model_validate(value)
+
+
+def parse_fast_chat_turn_output(value: Any) -> FastChatTurnOutput:
+    """Validate one fast-chat payload or raise ``ValidationError``."""
+    if isinstance(value, FastChatTurnOutput):
+        return value
+    if hasattr(value, "model_dump") and callable(value.model_dump):
+        try:
+            return FastChatTurnOutput.model_validate(value.model_dump(mode="json"))
+        except (TypeError, ValidationError):
+            return FastChatTurnOutput.model_validate(value)
+    return FastChatTurnOutput.model_validate(value)
 
 
 def parse_review_turn_output(value: Any) -> ReviewTurnOutput:

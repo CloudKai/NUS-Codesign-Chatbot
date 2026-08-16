@@ -80,13 +80,15 @@ def _output(
     readiness_candidate: bool = False,
 ) -> dict[str, Any]:
     """Return a coach_turn payload."""
-    return ProviderCoachOutput(
+    dumped = ProviderCoachOutput(
         response_text="What trade-off still needs evidence?",
         assessment=_assessment(
             recommendation=recommendation, readiness_candidate=readiness_candidate
         ),
         research_coding=None,
     ).model_dump(mode="json")
+    dumped["mode"] = "coaching"
+    return dumped
 
 
 def _provider(client: FakeAgentCoreRuntime) -> AgentCoreCoachProvider:
@@ -250,32 +252,26 @@ def test_settings_key_survives_notebook_split() -> None:
     assert COUNTER_SETTINGS_KEY in SETTINGS_KEYS
 
 
-def test_successful_coaching_calls_incremental_review_once() -> None:
+def test_successful_coaching_is_one_fast_chat_call() -> None:
     client = FakeAgentCoreRuntime(payload=_output())
     result = _provider(client).assess(_request())
-    assert _phases(client)[:2] == ["router", "coaching"]
-    assert _review_modes(client) == ["incremental"]
+    assert _phases(client) == ["fast_chat"]
+    assert _review_modes(client) == []
     assert result.assessment.recommendation is StageDecision.STAY
-    assert result.assessment.review_depth == "incremental"
+    assert result.assessment.review_depth != "incremental"
     assert result.qualifying_coaching_turn is True
-    router = _decoded(client.calls[0])
-    assert router["phase"] == "router"
 
 
 def test_qa_does_not_call_incremental_or_deep_review() -> None:
     client = FakeAgentCoreRuntime(
         payload={
+            "mode": "qa",
             "response_text": "Week 2 covers stakeholder mapping [S1].",
             "citations": [],
-        },
-        router_payload={
-            "specialist": "qa",
-            "confidence": 0.91,
-            "rationale_category": "course_information",
-        },
+        }
     )
     result = _provider(client).assess(_request(student_message="What is Week 2 about?"))
-    assert _phases(client) == ["router", "qa"]
+    assert _phases(client) == ["fast_chat"]
     assert _review_modes(client) == []
     assert result.assessment.recommendation is StageDecision.STAY
     assert result.qualifying_coaching_turn is False
@@ -291,18 +287,14 @@ def test_explicit_review_goes_to_deep_review_without_coaching() -> None:
             "current_stage": "problem_identification",
             "recommendation": "stay",
             "rationale_summary": "Stay and name who is affected.",
-        },
-        router_payload={
-            "specialist": "review",
-            "confidence": 0.88,
-            "rationale_category": "formative_review",
-        },
+        }
     )
     result = _provider(client).assess(
-        _request(student_message="Can you assess how I am doing?")
+        _request(student_message="Can you assess how I am doing?", specialist="review")
     )
-    assert _phases(client) == ["router", "review"]
+    assert _phases(client) == ["review"]
     assert _review_modes(client) == ["deep"]
+    assert "fast_chat" not in _phases(client)
     assert "coaching" not in _phases(client)
     assert result.assessment.recommendation is StageDecision.STAY
     assert result.deep_review_succeeded is True
@@ -316,26 +308,22 @@ def test_failed_coaching_does_not_call_incremental_review() -> None:
     assert "review" not in _phases(client)
 
 
-def test_incremental_review_timeout_does_not_persist(tmp_path) -> None:
-    """Incremental Review failure must fail the turn before DSQL writes."""
-    store = StudentStore(tmp_path / "incremental-timeout.sqlite3")
+def test_fast_chat_timeout_does_not_persist(tmp_path) -> None:
+    """A failed fast-chat invoke must fail the turn before DSQL writes."""
+    store = StudentStore(tmp_path / "fast-chat-timeout.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
-    client = FakeAgentCoreRuntime(
-        payload=_output(),
-        incremental_error=TimeoutError("incremental-timeout"),
-    )
+    client = FakeAgentCoreRuntime(error=TimeoutError("fast-chat-timeout"))
     with pytest.raises(ProviderUnavailableError) as raised:
         _service(store, client).submit(
-            _request(thread_id=thread_id, idempotency_key="incremental-fail")
+            _request(thread_id=thread_id, idempotency_key="fast-chat-fail")
         )
     assert raised.value.category == "timeout"
-    assert "deep" not in _review_modes(client)
-    assert _review_modes(client) == ["incremental"]
+    assert _review_modes(client) == []
     assert _counter(store, thread_id) == 0
     assert all(item["role"] != "assistant" for item in store.get_messages(thread_id))
 
 
-def test_incremental_review_cannot_advance_stage() -> None:
+def test_incremental_review_is_not_on_the_active_path() -> None:
     client = FakeAgentCoreRuntime(
         payload=_output(),
         incremental_payload={
@@ -351,19 +339,12 @@ def test_incremental_review_cannot_advance_stage() -> None:
     result = _provider(client).assess(_request())
     assert result.assessment.recommendation is StageDecision.STAY
     assert "deep" not in _review_modes(client)
+    assert "incremental" not in _review_modes(client)
 
 
-def test_readiness_candidate_triggers_deep_review_immediately() -> None:
+def test_readiness_candidate_does_not_auto_invoke_sonnet() -> None:
     client = FakeAgentCoreRuntime(
-        payload=_output(),
-        incremental_payload={
-            "response_text": "Incremental review.",
-            "strengths": ["Named stakeholders"],
-            "areas_to_develop": ["Gather night-time evidence"],
-            "synthesis": "Ready for a deeper check.",
-            "readiness_candidate": True,
-            "recommendation": "stay",
-        },
+        payload=_output(readiness_candidate=True),
         deep_payload={
             "response_text": "Deep review stay.",
             "strengths": ["Named stakeholders"],
@@ -378,12 +359,12 @@ def test_readiness_candidate_triggers_deep_review_immediately() -> None:
     result = _provider(client).assess(
         _request(coaching_turns_since_deep_review=1)
     )
-    assert _review_modes(client) == ["incremental", "deep"]
+    assert _review_modes(client) == []
     assert result.assessment.recommendation is StageDecision.STAY
-    assert result.deep_review_succeeded is True
+    assert result.deep_review_succeeded is False
 
 
-def test_coaching_advance_is_only_a_candidate_until_deep_review() -> None:
+def test_coaching_advance_is_advisory_without_deep_review() -> None:
     client = FakeAgentCoreRuntime(
         payload=_output(recommendation=StageDecision.ADVANCE),
         deep_payload={
@@ -398,43 +379,33 @@ def test_coaching_advance_is_only_a_candidate_until_deep_review() -> None:
         },
     )
     result = _provider(client).assess(_request())
-    assert _review_modes(client) == ["incremental", "deep"]
-    assert result.assessment.recommendation is StageDecision.STAY
-    assert "Name who is affected at night" in result.assessment.missing_reasoning_elements
+    assert _review_modes(client) == []
+    assert result.assessment.recommendation is StageDecision.ADVANCE
+    assert result.assessment.readiness_candidate is True
 
 
-def test_deep_review_advance_uses_existing_transition_path() -> None:
+def test_fast_chat_advance_uses_existing_transition_path() -> None:
     client = FakeAgentCoreRuntime(payload=_output(recommendation=StageDecision.ADVANCE))
     result = _provider(client).assess(_request())
     assert result.assessment.recommendation is StageDecision.ADVANCE
-    assert result.deep_review_succeeded is True
-
-
-def test_deep_review_malformed_fails_closed_to_stay() -> None:
-    client = FakeAgentCoreRuntime(
-        payload=_output(recommendation=StageDecision.ADVANCE),
-        deep_payload={"recommendation": "maybe"},
-    )
-    result = _provider(client).assess(_request())
-    assert result.assessment.recommendation is StageDecision.STAY
-    assert result.deep_review_succeeded is False
-    assert result.response_text.startswith("What trade-off")
-
-
-def test_deep_review_timeout_fails_closed_to_stay() -> None:
-    client = FakeAgentCoreRuntime(
-        payload=_output(recommendation=StageDecision.ADVANCE),
-        deep_error=TimeoutError("deep-timeout"),
-    )
-    result = _provider(client).assess(_request())
-    assert result.assessment.recommendation is StageDecision.STAY
     assert result.deep_review_succeeded is False
 
 
-def test_deep_review_wrong_stage_fails_closed_to_stay() -> None:
+def test_explicit_deep_review_malformed_fails_closed() -> None:
+    client = FakeAgentCoreRuntime(deep_payload={"recommendation": "maybe"})
+    with pytest.raises(Exception):
+        _provider(client).assess(_request(specialist="review"))
+
+
+def test_explicit_deep_review_timeout_fails_closed() -> None:
+    client = FakeAgentCoreRuntime(deep_error=TimeoutError("deep-timeout"))
+    with pytest.raises(Exception):
+        _provider(client).assess(_request(specialist="review"))
+
+
+def test_explicit_deep_review_wrong_stage_fails_closed_to_stay() -> None:
     client = FakeAgentCoreRuntime(
-        payload=_output(recommendation=StageDecision.ADVANCE),
-        deep_payload={
+        payload={
             "response_text": "Ready.",
             "strengths": ["Looks ready"],
             "areas_to_develop": [],
@@ -442,34 +413,24 @@ def test_deep_review_wrong_stage_fails_closed_to_stay() -> None:
             "current_stage": "reflection",
             "recommendation": "advance",
             "rationale_summary": "Ready.",
-        },
+        }
     )
-    result = _provider(client).assess(_request())
+    result = _provider(client).assess(_request(specialist="review"))
     assert result.assessment.recommendation is StageDecision.STAY
     assert result.deep_review_succeeded is False
 
 
-def test_reflection_checkpoint_triggers_deep_review() -> None:
-    client = FakeAgentCoreRuntime(
-        payload=_output(),
-        deep_payload={
-            "response_text": "Reflection synthesis.",
-            "strengths": ["Named a constraint"],
-            "areas_to_develop": ["Calibrate the claim"],
-            "synthesis": "Stay in Reflection.",
-            "current_stage": "reflection",
-            "recommendation": "stay",
-            "rationale_summary": "Reflection is terminal.",
-        },
-    )
+def test_reflection_checkpoint_does_not_auto_invoke_sonnet() -> None:
+    client = FakeAgentCoreRuntime(payload=_output())
     result = _provider(client).assess(
         _request(current_stage="reflection", coaching_turns_since_deep_review=0)
     )
-    assert "deep" in _review_modes(client)
-    assert result.review_trigger == "reflection_checkpoint"
+    assert "deep" not in _review_modes(client)
+    assert result.review_trigger is None
+    assert _phases(client) == ["fast_chat"]
 
 
-def test_periodic_three_coaching_turns_then_reset(tmp_path) -> None:
+def test_periodic_three_coaching_turns_unlock_without_sonnet(tmp_path) -> None:
     store = StudentStore(tmp_path / "periodic.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     client = FakeAgentCoreRuntime(payload=_output())
@@ -485,9 +446,10 @@ def test_periodic_three_coaching_turns_then_reset(tmp_path) -> None:
                 ),
             )
         )
-    assert _review_modes(client).count("incremental") == 3
-    assert _review_modes(client).count("deep") == 1
-    assert _counter(store, thread_id) == 0
+    assert _review_modes(client).count("incremental") == 0
+    assert _review_modes(client).count("deep") == 0
+    assert _phases(client).count("fast_chat") == 3
+    assert _counter(store, thread_id) == 3
     service.submit(
         _request(
             thread_id=thread_id,
@@ -495,11 +457,21 @@ def test_periodic_three_coaching_turns_then_reset(tmp_path) -> None:
             student_message="I still want to solve caregiver shortages in Singapore.",
         )
     )
-    assert _counter(store, thread_id) == 1
-    assert _review_modes(client).count("deep") == 1
+    assert _counter(store, thread_id) == 4
+    assert _review_modes(client).count("deep") == 0
+    _persist_review_turn(
+        store,
+        thread_id,
+        user_content="Successful explicit Deep Review.",
+        qualifying=False,
+        deep_succeeded=True,
+    )
+    assert _counter(store, thread_id) == 0
 
 
-def test_qa_and_explicit_review_do_not_increment_counter(tmp_path) -> None:
+def test_qa_does_not_increment_counter_and_free_text_review_is_not_deep(
+    tmp_path,
+) -> None:
     store = StudentStore(tmp_path / "counter-qa.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     client = FakeAgentCoreRuntime(payload=_output())
@@ -509,12 +481,11 @@ def test_qa_and_explicit_review_do_not_increment_counter(tmp_path) -> None:
     )
     assert _counter(store, thread_id) == 1
     qa_client = FakeAgentCoreRuntime(
-        payload={"response_text": "Week 2 covers mapping [S1].", "citations": []},
-        router_payload={
-            "specialist": "qa",
-            "confidence": 0.93,
-            "rationale_category": "course_information",
-        },
+        payload={
+            "mode": "qa",
+            "response_text": "Week 2 covers mapping [S1].",
+            "citations": [],
+        }
     )
     _service(store, qa_client).submit(
         _request(
@@ -525,22 +496,7 @@ def test_qa_and_explicit_review_do_not_increment_counter(tmp_path) -> None:
     )
     assert _counter(store, thread_id) == 1
     assert "review" not in _phases(qa_client)
-    review_client = FakeAgentCoreRuntime(
-        payload={
-            "response_text": "Formative review of progress.",
-            "strengths": ["Concrete setting"],
-            "areas_to_develop": ["Name who is affected"],
-            "synthesis": "Not a grade.",
-            "current_stage": "problem_identification",
-            "recommendation": "stay",
-            "rationale_summary": "Stay.",
-        },
-        router_payload={
-            "specialist": "review",
-            "confidence": 0.9,
-            "rationale_category": "formative_review",
-        },
-    )
+    review_client = FakeAgentCoreRuntime(payload=_output())
     _service(store, review_client).submit(
         _request(
             thread_id=thread_id,
@@ -548,9 +504,9 @@ def test_qa_and_explicit_review_do_not_increment_counter(tmp_path) -> None:
             idempotency_key="review-one",
         )
     )
-    assert "coaching" not in _phases(review_client)
-    assert _review_modes(review_client) == ["deep"]
-    assert _counter(store, thread_id) == 0
+    assert _phases(review_client) == ["fast_chat"]
+    assert _review_modes(review_client) == []
+    assert _counter(store, thread_id) == 2
 
 
 def test_failed_deep_review_keeps_due_counter(tmp_path) -> None:
@@ -566,34 +522,34 @@ def test_failed_deep_review_keeps_due_counter(tmp_path) -> None:
             student_message="I want to solve caregiver shortages. Turn 2.",
         )
     )
-    assert _counter(store, thread_id) == 2
-    failing = FakeAgentCoreRuntime(
-        payload=_output(),
-        deep_error=TimeoutError("deep-timeout"),
-    )
-    turn = _service(store, failing).submit(
+    service.submit(
         _request(
             thread_id=thread_id,
             idempotency_key="due-3",
             student_message="I want to solve caregiver shortages. Turn 3.",
         )
     )
-    assert turn.assessment.recommendation is StageDecision.STAY
-    assert _review_modes(failing).count("deep") == 1
     assert _counter(store, thread_id) == 3
-    retry = FakeAgentCoreRuntime(payload=_output())
-    _service(store, retry).submit(
-        _request(
-            thread_id=thread_id,
-            idempotency_key="due-4",
-            student_message="I want to solve caregiver shortages. Turn 4.",
-        )
+    assert _review_modes(client).count("deep") == 0
+    _persist_review_turn(
+        store,
+        thread_id,
+        user_content="Failed explicit Deep Review.",
+        qualifying=False,
+        deep_succeeded=False,
     )
-    assert _review_modes(retry).count("deep") == 1
+    assert _counter(store, thread_id) == 3
+    _persist_review_turn(
+        store,
+        thread_id,
+        user_content="Successful explicit Deep Review.",
+        qualifying=False,
+        deep_succeeded=True,
+    )
     assert _counter(store, thread_id) == 0
 
 
-def test_idempotent_replay_does_not_repeat_review_calls(tmp_path) -> None:
+def test_idempotent_replay_does_not_repeat_model_calls(tmp_path) -> None:
     store = StudentStore(tmp_path / "review-idempotent.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     client = FakeAgentCoreRuntime(payload=_output())
@@ -602,8 +558,8 @@ def test_idempotent_replay_does_not_repeat_review_calls(tmp_path) -> None:
     first = service.submit(request)
     second = service.submit(request)
     assert first.response_text == second.response_text
-    assert _phases(client).count("coaching") == 1
-    assert _review_modes(client).count("incremental") == 1
+    assert _phases(client).count("fast_chat") == 1
+    assert _review_modes(client).count("incremental") == 0
     assert _review_modes(client).count("deep") == 0
     assert _counter(store, thread_id) == 1
 
@@ -683,12 +639,12 @@ def test_review_tab_projection_does_not_invoke_models() -> None:
     )[0]
 
 
-def test_review_logs_omit_student_text(caplog: pytest.LogCaptureFixture) -> None:
+def test_fast_chat_logs_omit_student_text(caplog: pytest.LogCaptureFixture) -> None:
     client = FakeAgentCoreRuntime(payload=_output())
     with caplog.at_level(logging.INFO):
         _provider(client).assess(_request())
     joined = " ".join(record.getMessage() for record in caplog.records)
     assert "elderly caregivers" not in joined
-    assert "review_depth=incremental" in joined
-    assert "deep_review_triggered=false" in joined
-    assert "router_fallback=false" in joined
+    assert "role=fast_chat" in joined
+    assert "review_depth=incremental" not in joined
+    assert "role=router" not in joined

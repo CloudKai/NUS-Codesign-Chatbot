@@ -17,36 +17,46 @@ from pydantic import BaseModel, ValidationError
 try:
     from .models import (
         CoachTurnOutput,
+        FastChatTurnOutput,
         QATurnOutput,
         ReviewTurnOutput,
         parse_coach_turn_output,
+        parse_fast_chat_turn_output,
         parse_qa_turn_output,
         parse_review_turn_output,
     )
     from .specialists.coaching import coaching_system_prompt
+    from .specialists.fast_chat import fast_chat_system_prompt
     from .specialists.qa import qa_system_prompt
     from .specialists.review import review_system_prompt
     from .specialists.routing import (
+        PHASE_FAST_CHAT,
         PHASE_QA,
         PHASE_REVIEW,
+        payload_output_contract,
         payload_phase,
         payload_review_mode,
     )
 except ImportError:  # pragma: no cover - flat runtime copy next to main.py
     from models import (
         CoachTurnOutput,
+        FastChatTurnOutput,
         QATurnOutput,
         ReviewTurnOutput,
         parse_coach_turn_output,
+        parse_fast_chat_turn_output,
         parse_qa_turn_output,
         parse_review_turn_output,
     )
     from specialists.coaching import coaching_system_prompt
+    from specialists.fast_chat import fast_chat_system_prompt
     from specialists.qa import qa_system_prompt
     from specialists.review import review_system_prompt
     from specialists.routing import (
+        PHASE_FAST_CHAT,
         PHASE_QA,
         PHASE_REVIEW,
+        payload_output_contract,
         payload_phase,
         payload_review_mode,
     )
@@ -87,6 +97,17 @@ Rules:
 
 _QA_JSON_CONTRACT = """Return JSON with response_text and optional citations.
 Do not wrap the JSON in markdown fences. Do not call tools.
+"""
+
+_FAST_CHAT_JSON_CONTRACT = """Return one JSON object with:
+- mode: exactly "coaching" or "qa"
+- response_text
+- assessment: required when mode is coaching; omit or null for qa
+- citations: only supplied [S#] labels; empty when unused
+- research_coding: optional and observational; omit for qa unless required
+
+Do not wrap the JSON in markdown fences. Do not call tools. Do not claim to
+mutate the Thinking Path stage.
 """
 
 _REVIEW_JSON_CONTRACT = """Return JSON with response_text, strengths,
@@ -205,6 +226,17 @@ def specialist_system_prompt(payload: Mapping[str, Any] | None) -> str:
             f"{trusted}\n\nTrusted runtime context:\n{compact}".strip()
             if trusted
             else f"Trusted runtime context:\n{compact}"
+        )
+    raw_phase = ""
+    contract = ""
+    if isinstance(payload, Mapping):
+        raw_phase = str(payload.get("phase") or "").strip().lower()
+        contract = payload_output_contract(payload)
+    if raw_phase == PHASE_FAST_CHAT or contract == "fast_chat_turn":
+        return (
+            fast_chat_system_prompt(payload_topic(payload), trusted)
+            + "\n\n"
+            + _FAST_CHAT_JSON_CONTRACT
         )
     if phase == PHASE_QA:
         return qa_system_prompt(trusted) + "\n\n" + _QA_JSON_CONTRACT
@@ -617,6 +649,14 @@ def qa_turn_from_agent_result(result: Any) -> QATurnOutput:
     """Convert a Strands AgentResult into a validated Q&A turn."""
     output = structured_from_agent_result(result, parse_qa_turn_output)
     if not isinstance(output, QATurnOutput):
+        raise CoachTurnExtractionError("structured_output_failure")
+    return output
+
+
+def fast_chat_turn_from_agent_result(result: Any) -> FastChatTurnOutput:
+    """Convert a Strands AgentResult into a validated fast-chat turn."""
+    output = structured_from_agent_result(result, parse_fast_chat_turn_output)
+    if not isinstance(output, FastChatTurnOutput):
         raise CoachTurnExtractionError("structured_output_failure")
     return output
 

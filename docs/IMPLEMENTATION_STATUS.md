@@ -1,6 +1,86 @@
 # Implementation status
 
-## Current phase — Request-local AgentCore state, revise lease, exact limiter release
+## Current phase — One-call Haiku fast chat, selective RAG, latency instrumentation
+
+**Code is local on `Integrate-Bedrock` and is not committed or deployed.**
+Starting HEAD was `a6d163668902beae4938fe552cced7ba92b15e88`. Do **not**
+publish AgentCore, mutate AWS, push, or deploy EC2 until authorized.
+
+Normal student chat is now one Claude Haiku 4.5 `phase=fast_chat` invoke.
+The Haiku router, Incremental Review, and automatic Sonnet are off the
+active path. Deep Review remains an explicit `specialist=review` operation.
+
+### What changed and why
+
+1. **One model call.** FastAPI invokes AgentCore once. Haiku chooses
+   Coaching vs Q&A and writes the student reply in the same structured
+   `FastChatTurnOutput`. ADVANCE is advisory; `AUTO_ADVANCE_STAGES=false`
+   (tests) does not mutate stage. Production Compose still has
+   `AUTO_ADVANCE_STAGES=true`, so a Haiku ADVANCE can still auto-apply
+   there without Deep Review confirmation — product risk, not changed here.
+2. **Bounded context.** Fast chat always sends ConversationMemory plus at
+   most 8 recent verbatim messages (hard ~20k estimated input tokens, soft
+   ~15k). Deep Review keeps a separate `full_history` planner.
+3. **Selective RAG.** A deterministic gate decides retrieval before
+   AgentCore. No extra LLM. Ownership and selected-source validation are
+   unchanged. Opening Review/Journey still performs zero model/KB calls.
+4. **Safe timings.** `coach_turn_perf` records DSQL load/claim/persist,
+   retrieval, context, AgentCore, and estimated tokens without student
+   text, prompts, excerpts, or secrets. DSQL pooling was not added.
+
+### Main files changed
+
+- Runtime: `agentcore_runtime/main.py`, `models.py`, `model.py`,
+  `structured_coach.py`, `specialists/routing.py`,
+  `specialists/fast_chat.py`, `prompts/fast_chat.md`, `prompts/loader.py`
+- Backend: `agentcore_provider.py`, `coaching/execution.py`,
+  `context_planner.py`, `prompts/composer.py`, `retrieval.py`,
+  `retrieval_gate.py`, `turn_perf.py`, `operational_metrics.py`,
+  `settings.py`, `domain.py`
+- Tests: `test_fast_chat_one_call.py`, `test_fast_chat_context.py`,
+  `test_retrieval_gate.py`, `test_coach_turn_perf.py`, plus AgentCore,
+  Review, hybrid, retrieval, API, and production-path updates
+- Docs / example env: this file, `docs/providers/AGENTCORE_ADAPTER.md`,
+  `docs/RAG_ARCHITECTURE.md`, `agentcore_runtime/README.md`, `.env.example`
+
+### Validation evidence
+
+- `ruff check .`: **passed**.
+- `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`,
+  `scripts`, `agentcore_runtime`: **passed**.
+- Focused AgentCore / fast_chat / context / retrieval / Review /
+  production-config tests: **passed**.
+- Full mock pytest: **passed** (902 collected, exit 0).
+- Docker Compose config (`compose.yaml` and `compose.prod.yaml` with
+  placeholder `PUBLIC_ORIGIN` / `APP_IMAGE`): **passed**. Daemon image
+  build did **not** run.
+- Live Haiku/AgentCore latency: **not measured**.
+- GitHub Actions / AWS / AgentCore publish: **NOT RUN**.
+
+### Production readiness (do not collapse these)
+
+- **CODE CORRECT:** YES for the one-call fast path under mock.
+- **CONCURRENCY SAFE:** YES for existing lease/idempotency tests.
+- **IDEMPOTENCY SAFE:** YES.
+- **MOCK TESTED:** YES.
+- **CI GREEN:** NOT RUN (no push).
+- **DOCKER READY:** NO (compose config ok; image not built).
+- **LIVE LOAD TESTED:** NO.
+- **AWS QUOTAS VERIFIED:** NO.
+- **PRODUCTION READY:** **NO** until AgentCore is republished on the same
+  ARN and live timings are collected.
+
+### Next exact action
+
+1. Code review this patch. Do not commit unless authorized.
+2. **AGENTCORE REPUBLISH REQUIRED: YES** (new `fast_chat` phase, output
+   contract, and prompt). Same ARN. Do not create a second runtime.
+3. After authorized republish: measure live `coach_turn_perf` breakdowns
+   before considering DSQL pooling.
+4. Keep `AGENTCORE_QUALIFIER=DEFAULT` until the new runtime version is
+   published and the qualifier is pointed at it.
+
+## Previous phase — Request-local AgentCore state, revise lease, exact limiter release
 
 **Code is local on `Integrate-Bedrock` and is not committed or deployed.**
 Base commit for this work is `d619e73` (notebook-scoped limiter). AgentCore

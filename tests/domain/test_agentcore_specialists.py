@@ -139,17 +139,13 @@ def test_review_turn_from_structured_output() -> None:
     assert "grade" in parsed.synthesis
 
 
-def test_agentcore_payload_routes_week_question_to_qa() -> None:
+def test_agentcore_payload_uses_fast_chat_for_week_question() -> None:
     client = FakeAgentCoreRuntime(
         payload={
+            "mode": "qa",
             "response_text": "Week 1 covers the course introduction [S1].",
             "citations": [],
-        },
-        router_payload={
-            "specialist": "qa",
-            "confidence": 0.95,
-            "rationale_category": "course_information",
-        },
+        }
     )
     result = _provider(client).assess(
         CoachRequest(
@@ -160,27 +156,32 @@ def test_agentcore_payload_routes_week_question_to_qa() -> None:
         )
     )
     payload = _specialist_payload(client)
-    assert payload["phase"] == "qa"
-    assert payload["output_contract"] == "qa_turn"
-    assert "STAGE: PROBLEM IDENTIFICATION" not in payload["trusted_instructions"]
+    assert payload["phase"] == "fast_chat"
+    assert payload["output_contract"] == "fast_chat_turn"
     assert result.assessment.recommendation is StageDecision.STAY
     assert "Week 1" in result.response_text
     assert "Socratic" not in result.response_text
 
 
-def test_agentcore_payload_routes_review_request() -> None:
+def test_agentcore_free_text_review_stays_on_fast_chat() -> None:
     client = FakeAgentCoreRuntime(
         payload={
-            "response_text": "You located a real street context.",
-            "strengths": ["Concrete setting"],
-            "areas_to_develop": ["Name who is affected"],
-            "synthesis": "Formative progress, not a grade.",
-        },
-        router_payload={
-            "specialist": "review",
-            "confidence": 0.92,
-            "rationale_category": "formative_review",
-        },
+            "mode": "coaching",
+            "response_text": "What trade-off still needs evidence?",
+            "assessment": {
+                "current_stage": "problem_identification",
+                "contribution_summary": "The student asked for a progress check.",
+                "stage_assessment": "The contribution is usable.",
+                "critical_understanding_level": "Developing",
+                "confidence": 0.7,
+                "recommendation": "stay",
+                "recommendation_rationale": "Stay and name who is affected.",
+                "guidance_questions": ["Who is affected at night?"],
+                "learning_summary": "The student is developing the problem.",
+                "citations": [],
+                "facione_scores": {},
+            },
+        }
     )
     result = _provider(client).assess(
         CoachRequest(
@@ -191,11 +192,9 @@ def test_agentcore_payload_routes_review_request() -> None:
         )
     )
     payload = _specialist_payload(client)
-    assert payload["phase"] == "review"
-    assert payload["output_contract"] == "review_turn"
+    assert payload["phase"] == "fast_chat"
+    assert payload["output_contract"] == "fast_chat_turn"
     assert result.assessment.recommendation is StageDecision.STAY
-    assert "grade" in result.response_text.lower() or "grade" in result.assessment.stage_assessment.lower()
-    assert result.assessment.review_strengths
 
 
 def test_coaching_structured_output_still_required() -> None:

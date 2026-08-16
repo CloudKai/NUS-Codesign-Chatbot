@@ -5,9 +5,9 @@ Copy this package onto the existing runtime
 READY version. Do not change ``AGENTCORE_RUNTIME_ARN``. Do not create a second
 student-facing runtime.
 
-One runtime hosts the Haiku router, Q&A, Coaching, Incremental Review, and
-Deep Review. The caller sends ``phase`` / ``output_contract`` and
-``review_mode`` for Review. Specialists use ``tools=[]`` plus Strands
+Normal student chat uses one Haiku ``phase=fast_chat`` invoke. Legacy router,
+Q&A, Coaching, Incremental Review, and Deep Review phases remain for
+compatibility. Specialists use ``tools=[]`` plus Strands
 ``structured_output_model`` and a shared ``structured_output_prompt``. The
 harness never parses ``str(AgentResult)`` as JSON. DSQL history is passed
 as Strands ``messages``; AgentCore Memory is not the transcript. Models are
@@ -25,6 +25,7 @@ try:
     from guardrails import enforce_mantle_guardrail
     from model import (
         MODEL_ROLE_COACHING,
+        MODEL_ROLE_FAST_CHAT,
         MODEL_ROLE_QA,
         MODEL_ROLE_REVIEW_DEEP,
         MODEL_ROLE_REVIEW_INCREMENTAL,
@@ -34,7 +35,13 @@ try:
         get_role_model,
         validate_all_role_configs,
     )
-    from models import CoachTurnOutput, QATurnOutput, ReviewTurnOutput, RouterOutput
+    from models import (
+        CoachTurnOutput,
+        FastChatTurnOutput,
+        QATurnOutput,
+        ReviewTurnOutput,
+        RouterOutput,
+    )
     from router import (
         router_output_from_agent_result,
         router_output_text,
@@ -42,6 +49,7 @@ try:
         router_user_prompt,
     )
     from specialists.routing import (
+        PHASE_FAST_CHAT,
         PHASE_QA,
         PHASE_REVIEW,
         PHASE_ROUTER,
@@ -56,6 +64,7 @@ try:
         conversation_for_invoke,
         coach_turn_from_agent_result,
         elapsed_ms_since,
+        fast_chat_turn_from_agent_result,
         harness_error_payload,
         invoke_failure_category,
         log_coach_turn_outcome,
@@ -71,6 +80,7 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
     from agentcore_runtime.guardrails import enforce_mantle_guardrail
     from agentcore_runtime.model import (
         MODEL_ROLE_COACHING,
+        MODEL_ROLE_FAST_CHAT,
         MODEL_ROLE_QA,
         MODEL_ROLE_REVIEW_DEEP,
         MODEL_ROLE_REVIEW_INCREMENTAL,
@@ -82,6 +92,7 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
     )
     from agentcore_runtime.models import (
         CoachTurnOutput,
+        FastChatTurnOutput,
         QATurnOutput,
         ReviewTurnOutput,
         RouterOutput,
@@ -93,6 +104,7 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
         router_user_prompt,
     )
     from agentcore_runtime.specialists.routing import (
+        PHASE_FAST_CHAT,
         PHASE_QA,
         PHASE_REVIEW,
         PHASE_ROUTER,
@@ -107,6 +119,7 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
         conversation_for_invoke,
         coach_turn_from_agent_result,
         elapsed_ms_since,
+        fast_chat_turn_from_agent_result,
         harness_error_payload,
         invoke_failure_category,
         log_coach_turn_outcome,
@@ -142,6 +155,13 @@ def _ensure_role_configs() -> None:
 
 def _role_for_payload(payload: Mapping[str, Any] | None) -> str:
     """Map a specialist payload onto a model role."""
+    raw_phase = ""
+    contract = ""
+    if isinstance(payload, Mapping):
+        raw_phase = str(payload.get("phase") or "").strip().lower()
+        contract = str(payload.get("output_contract") or "").strip().lower()
+    if raw_phase == PHASE_FAST_CHAT or contract == "fast_chat_turn":
+        return MODEL_ROLE_FAST_CHAT
     phase = payload_phase(payload)
     if phase == PHASE_QA:
         return MODEL_ROLE_QA
@@ -155,9 +175,12 @@ def _role_for_payload(payload: Mapping[str, Any] | None) -> str:
 def _output_model_for(phase: str, output_contract: str) -> type[Any]:
     """Return the Pydantic structured-output class for one specialist invoke."""
     contract = str(output_contract or "").strip().lower()
-    if contract == "qa_turn" or phase == PHASE_QA:
+    cleaned_phase = str(phase or "").strip().lower()
+    if contract == "fast_chat_turn" or cleaned_phase == PHASE_FAST_CHAT:
+        return FastChatTurnOutput
+    if contract == "qa_turn" or cleaned_phase == PHASE_QA:
         return QATurnOutput
-    if contract == "review_turn" or phase == PHASE_REVIEW:
+    if contract == "review_turn" or cleaned_phase == PHASE_REVIEW:
         return ReviewTurnOutput
     return CoachTurnOutput
 
@@ -165,6 +188,8 @@ def _output_model_for(phase: str, output_contract: str) -> type[Any]:
 def _parse_result(phase: str, output_contract: str, result: Any) -> Any:
     """Validate AgentResult against the specialist contract."""
     model = _output_model_for(phase, output_contract)
+    if model is FastChatTurnOutput:
+        return fast_chat_turn_from_agent_result(result)
     if model is QATurnOutput:
         return qa_turn_from_agent_result(result)
     if model is ReviewTurnOutput:
@@ -390,6 +415,24 @@ async def specialist_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]
     )
 
 
+async def fast_chat_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Invoke one Haiku fast-chat generation for Coaching or Q&A.
+
+    The runtime must not call another AgentCore phase internally. One Strands
+    Agent and one foundation-model generation serve the request.
+    """
+    return await _structured_role_invoke(
+        role=MODEL_ROLE_FAST_CHAT,
+        payload=payload,
+        system_prompt=specialist_system_prompt(payload),
+        user_prompt=conversation_for_invoke(payload)[1],
+        output_model=FastChatTurnOutput,
+        parse=fast_chat_turn_from_agent_result,
+        output_text=lambda output: str(getattr(output, "response_text", "") or ""),
+        include_history=True,
+    )
+
+
 async def router_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     """Classify one free-text message as qa, coaching, or review."""
     return await _structured_role_invoke(
@@ -426,6 +469,8 @@ if app is not None:
     async def invoke(payload: Any, context: Any) -> Any:
         """Route companion structured specialists to JSON return; never ``yield``."""
         kind = invoke_kind(payload if isinstance(payload, dict) else None)
+        if kind == PHASE_FAST_CHAT:
+            return await fast_chat_invoke(payload)
         if kind == PHASE_ROUTER:
             return await router_invoke(payload)
         if kind == "specialist":

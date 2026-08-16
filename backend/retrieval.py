@@ -16,6 +16,7 @@ from dataclasses import dataclass, replace
 import logging
 import math
 import re
+import time
 from typing import Any, Iterable, Protocol, Sequence
 
 logger = logging.getLogger(__name__)
@@ -402,9 +403,15 @@ class CompositeContextRetriever:
                     len(kb_sources),
                 )
             else:
+                kb_started = time.perf_counter()
                 kb_result = self._knowledge_base.retrieve(
                     replace(query, sources=kb_sources)
                 )
+                from backend.turn_perf import current_perf, elapsed_ms
+
+                perf = current_perf()
+                if perf is not None:
+                    perf.set("course_kb_retrieval_ms", elapsed_ms(kb_started))
                 chunks.extend(kb_result.chunks)
                 kb_status = str(kb_result.course_retrieval_status or "ok")
                 failure_category = str(kb_result.failure_category or "")
@@ -419,9 +426,15 @@ class CompositeContextRetriever:
                         len(kb_sources),
                     )
         if local_sources:
+            local_started = time.perf_counter()
             local_result = self._local.retrieve(
                 replace(query, sources=local_sources)
             )
+            from backend.turn_perf import current_perf, elapsed_ms
+
+            perf = current_perf()
+            if perf is not None:
+                perf.set("student_source_retrieval_ms", elapsed_ms(local_started))
             chunks.extend(local_result.chunks)
         formatted = bounded_retrieval_result(
             chunks, max_context_chars=self._max_context_chars
@@ -757,6 +770,7 @@ def bounded_retrieval_result(
     chunks: Iterable[RetrievedChunk],
     *,
     max_context_chars: int = 16_000,
+    max_chunks: int | None = None,
 ) -> RetrievalResult:
     """Build canonical prompt context from structured, already-scoped chunks.
 
@@ -770,7 +784,10 @@ def bounded_retrieval_result(
     included: list[RetrievedChunk] = []
     seen_excerpts: dict[str, set[str]] = {}
     used = 0
+    chunk_limit = int(max_chunks) if max_chunks is not None else None
     for chunk in chunks:
+        if chunk_limit is not None and len(included) >= chunk_limit:
+            break
         if is_placeholder_retrieval_text(chunk.text):
             continue
         fingerprint = _normalized_excerpt(chunk.text)

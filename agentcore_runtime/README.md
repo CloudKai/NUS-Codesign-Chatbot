@@ -4,18 +4,19 @@ This directory is the **authoritative** harness for
 
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`.
 
-One runtime hosts the Haiku router, Q&A, Coaching, Incremental Review, and
-Deep Review. Do not treat `scripts/agentcore/harness_patch/` as a second
-implementation.
+One runtime hosts one-call Haiku `fast_chat` plus legacy router, Q&A,
+Coaching, Incremental Review, and Deep Review. Do not treat
+`scripts/agentcore/harness_patch/` as a second implementation.
 
 ## Contract
 
 1. `tools=[]` on every specialist — no Knowledge Base, S3, MCP, shell, or files.
-2. Caller sends `phase` (`router` | `qa` | `coaching` | `review`). Review also
-   sends `review_mode` (`incremental` | `deep`). Unknown specialist phases fall
-   closed to coaching, never to Q&A-with-tools.
+2. Active normal chat sends `phase=fast_chat` and `output_contract=fast_chat_turn`.
+   Legacy `phase` values (`router` | `qa` | `coaching` | `review`) remain for
+   compatibility. Review also sends `review_mode` (`incremental` | `deep`).
+   Unknown specialist phases fall closed to coaching, never to Q&A-with-tools.
 3. Canonical pedagogy lives in `prompts/`. FastAPI sends runtime rules only.
-   The router prompt is classification-only and must not receive full RAG.
+   The combined `fast_chat` prompt must not role-play router → coach → reviewer.
 4. DSQL history is Strands `messages`. AgentCore Memory is not the transcript.
 5. `invoke_async(..., structured_output_model=..., structured_output_prompt=...)`
    then `result.structured_output`. Text-block JSON is a fallback. The custom
@@ -23,20 +24,23 @@ implementation.
    classify the Strands structured-output recovery turn as PROMPT_ATTACK.
 6. Never `json.loads(str(result))`.
 7. Failures return `{ok: false, error: true, category: ...}`.
-8. Per-role `load_runtime_model()` via `ROUTER_*` / `QA_*` / `COACHING_*` /
-   `REVIEW_INCREMENTAL_*` / `REVIEW_DEEP_*` plus shared
-   `AGENTCORE_MODEL_REGION`, `GUARDRAIL_ID`, `GUARDRAIL_VERSION`. Legacy
-   `AGENTCORE_MODEL_PROVIDER` / `AGENTCORE_MODEL_ID` are a local fallback only
-   when no role keys are set. No bare `BedrockModel()`. No Haiku↔Sonnet
-   fallback.
+8. Per-role `load_runtime_model()` via `COACHING_*` (fast_chat/Haiku) /
+   `REVIEW_DEEP_*` plus shared `AGENTCORE_MODEL_REGION`, `GUARDRAIL_ID`,
+   `GUARDRAIL_VERSION`. Router / Q&A / Incremental Review keys are optional
+   legacy. `AGENTCORE_MODEL_PROVIDER` / `AGENTCORE_MODEL_ID` are a local
+   fallback only when no role keys are set. No bare `BedrockModel()`. No
+   Haiku↔Sonnet fallback.
 
 Roles:
 
-- ROUTER, Q&A, COACHING, INCREMENTAL REVIEW → `bedrock` + `global.anthropic.claude-haiku-4-5-20251001-v1:0`
+- FAST CHAT / COACHING → `bedrock` + `global.anthropic.claude-haiku-4-5-20251001-v1:0`
 - DEEP REVIEW → `bedrock` + `global.anthropic.claude-sonnet-4-6`
 
 Changing these environment variables publishes a new Runtime **version** on
 the same ARN. Do not create a second runtime resource.
+
+Deep Review is invoked only when FastAPI sends an explicit Review payload.
+This runtime never starts a second phase internally for a normal request.
 
 Periodic Deep Review is configured on FastAPI
 (`DEEP_REVIEW_INTERVAL_TURNS`), not inside this runtime. FastAPI decides
@@ -52,9 +56,10 @@ agentcore_runtime/
   main.py
   models.py
   structured_coach.py
-  specialists/{qa,coaching,review,routing}.py
+  specialists/{qa,coaching,review,fast_chat,routing}.py
   router.py
   prompts/router.md
+  prompts/fast_chat.md
   prompts/review.md
   prompts/review_incremental.md
   prompts/review_deep.md

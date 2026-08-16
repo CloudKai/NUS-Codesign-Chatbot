@@ -1,8 +1,11 @@
-"""Provider-neutral full-history-first token-aware model-context planner.
+"""Provider-neutral token-aware model-context planner.
 
 DSQL/SQLite remains the complete transcript. This module only decides what the
 model may receive for one turn. Compression never deletes or overwrites stored
 messages. AgentCore Memory is not a transcript.
+
+``fast_chat`` always uses bounded recent history plus derived memory.
+``full_history`` (Deep Review) may send the full transcript when it fits.
 """
 
 from __future__ import annotations
@@ -22,6 +25,11 @@ DEFAULT_MAX_INPUT_TOKENS = 210_000
 DEFAULT_OUTPUT_RESERVE_TOKENS = 32_000
 DEFAULT_SAFETY_MARGIN_TOKENS = 30_000
 DEFAULT_RECENT_VERBATIM_MESSAGES = 12
+DEFAULT_FAST_CHAT_RECENT_VERBATIM_MESSAGES = 8
+DEFAULT_FAST_CHAT_MAX_INPUT_TOKENS = 20_000
+DEFAULT_FAST_CHAT_SOFT_INPUT_TOKENS = 15_000
+CONTEXT_POLICY_FULL_HISTORY = "full_history"
+CONTEXT_POLICY_FAST_CHAT = "fast_chat"
 # Conservative: under-use the window rather than overflow it.
 DEFAULT_CHARS_PER_TOKEN = 3.0
 DEFAULT_IMAGE_TOKENS = 2_000
@@ -412,24 +420,32 @@ class ExtractiveHistoryCompressor:
 
 
 class HistoryContextPlanner:
-    """Decide full-history versus compressed model input for one coaching turn."""
+    """Decide verbatim history versus compressed model input for one turn."""
 
     def __init__(
         self,
         budget: ContextBudget | None = None,
         *,
         compressor: HistoryCompressor | None = None,
+        policy: str = CONTEXT_POLICY_FULL_HISTORY,
     ) -> None:
         """Create a planner with a conservative token budget.
 
         Args:
-            budget: Token and recent-window limits. Defaults to Luna 272K-safe
-                values that leave output headroom and a safety margin.
+            budget: Token and recent-window limits.
             compressor: Optional derived-memory producer. Defaults to extractive
                 compression so ordinary notebooks never incur a model call.
+            policy: ``fast_chat`` always caps verbatim history. ``full_history``
+                may send every turn when it fits the budget.
         """
         self._budget = budget or ContextBudget()
         self._compressor = compressor or ExtractiveHistoryCompressor()
+        cleaned = str(policy or CONTEXT_POLICY_FULL_HISTORY).strip().lower()
+        self._policy = (
+            CONTEXT_POLICY_FAST_CHAT
+            if cleaned == CONTEXT_POLICY_FAST_CHAT
+            else CONTEXT_POLICY_FULL_HISTORY
+        )
 
     def plan(
         self,
@@ -438,15 +454,19 @@ class HistoryContextPlanner:
         prompt_text: str,
         existing_memory: ConversationMemory | None = None,
         compressor: HistoryCompressor | None = None,
+        policy: str | None = None,
     ) -> ModelContextPlan:
         """Return history messages and optional derived memory for one turn.
 
-        If the full active transcript fits the remaining input budget, every
-        user/assistant message is sent verbatim and no compression runs. The
+        Fast-chat policy always keeps at most ``recent_verbatim_messages``
+        turns verbatim and compresses the rest into ConversationMemory. The
         current student message is not copied into history because it already
         appears once in the composed prompt.
         """
         budget = self._budget
+        active_policy = str(policy or self._policy).strip().lower()
+        if active_policy != CONTEXT_POLICY_FAST_CHAT:
+            active_policy = CONTEXT_POLICY_FULL_HISTORY
         turns = active_history_turns(
             list(request.history),
             current_student_message=request.student_message,
@@ -473,7 +493,11 @@ class HistoryContextPlanner:
         ):
             memory = None
 
-        if history_tokens <= remaining:
+        cap_verbatim = (
+            active_policy == CONTEXT_POLICY_FAST_CHAT
+            or history_tokens > remaining
+        )
+        if not cap_verbatim:
             estimated = reserved + history_tokens
             return ModelContextPlan(
                 messages=converse_messages(turns),
@@ -497,18 +521,19 @@ class HistoryContextPlanner:
         recent = turns[-recent_n:] if recent_n else []
         compression_failed = False
         active_compressor = compressor or self._compressor
-        try:
-            memory = active_compressor.compress(
-                aged_messages=aged,
-                existing=memory,
-                conversation_revision=int(request.conversation_revision or 0),
-            )
-        except Exception:
-            compression_failed = True
-            if memory is None or not memory.matches_revision(
-                int(request.conversation_revision or 0)
-            ):
-                memory = None
+        if aged:
+            try:
+                memory = active_compressor.compress(
+                    aged_messages=aged,
+                    existing=memory,
+                    conversation_revision=int(request.conversation_revision or 0),
+                )
+            except Exception:
+                compression_failed = True
+                if memory is None or not memory.matches_revision(
+                    int(request.conversation_revision or 0)
+                ):
+                    memory = None
         memory_tokens = (
             estimate_tokens(memory.format_for_prompt(), chars_per_token=budget.chars_per_token)
             if memory is not None
@@ -523,8 +548,8 @@ class HistoryContextPlanner:
                 return ModelContextPlan(
                     messages=converse_messages(recent),
                     compressed_memory=memory,
-                    full_history_used=False,
-                    compression_used=True,
+                    full_history_used=not aged,
+                    compression_used=bool(aged),
                     original_message_count=len(turns),
                     verbatim_message_count=len(recent),
                     compressed_message_count=len(aged),

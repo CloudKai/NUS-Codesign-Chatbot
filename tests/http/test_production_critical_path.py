@@ -222,7 +222,7 @@ def test_authenticated_production_critical_path_survives_restart_and_cleanup(
         "/api/v1/coach/turn",
         json=_turn(
             thread_id,
-            "I will compare signal timing and lighting at junctions so older pedestrians can cross safely.",
+            "I will compare signal timing with the selected source so older pedestrians can cross safely.",
             source_id,
         ),
         cookies=cookies,

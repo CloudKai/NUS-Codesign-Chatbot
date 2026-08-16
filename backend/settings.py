@@ -181,6 +181,33 @@ class Settings:
     history_recent_verbatim_messages: int = int(
         os.getenv("HISTORY_RECENT_VERBATIM_MESSAGES", "12")
     )
+    fast_chat_max_input_tokens: int = _bounded_int(
+        "FAST_CHAT_MAX_INPUT_TOKENS", 20_000, 4_000, 64_000
+    )
+    fast_chat_soft_input_tokens: int = _bounded_int(
+        "FAST_CHAT_SOFT_INPUT_TOKENS", 15_000, 2_000, 64_000
+    )
+    fast_chat_recent_verbatim_messages: int = _bounded_int(
+        "FAST_CHAT_RECENT_VERBATIM_MESSAGES", 8, 4, 12
+    )
+    fast_chat_retrieval_max_chunks: int = _bounded_int(
+        "FAST_CHAT_RETRIEVAL_MAX_CHUNKS", 4, 1, 8
+    )
+    fast_chat_retrieval_max_chars: int = _bounded_int(
+        "FAST_CHAT_RETRIEVAL_MAX_CHARS", 8_000, 1_000, 24_000
+    )
+    fast_chat_project_context_chars: int = _bounded_int(
+        "FAST_CHAT_PROJECT_CONTEXT_CHARS", 2_000, 200, 8_000
+    )
+    deep_review_max_input_tokens: int = int(
+        os.getenv("DEEP_REVIEW_MAX_INPUT_TOKENS", os.getenv("MODEL_MAX_INPUT_TOKENS", "210000"))
+    )
+    deep_review_recent_verbatim_messages: int = int(
+        os.getenv(
+            "DEEP_REVIEW_RECENT_VERBATIM_MESSAGES",
+            os.getenv("HISTORY_RECENT_VERBATIM_MESSAGES", "12"),
+        )
+    )
     agentcore_eval_harness_arn: str = os.getenv(
         "AGENTCORE_EVAL_HARNESS_ARN", ""
     ).strip()
@@ -411,38 +438,43 @@ def _validate_provider_model_pair(
 
 
 def _validate_agentcore_role_models() -> None:
-    """Require explicit per-role production models. No silent Haiku↔Sonnet swap."""
-    roles = (
-        ("router", settings.router_model_provider, settings.router_model_id),
-        ("qa", settings.qa_model_provider, settings.qa_model_id),
-        ("coaching", settings.coaching_model_provider, settings.coaching_model_id),
-        (
-            "review_incremental",
-            settings.review_incremental_model_provider,
-            settings.review_incremental_model_id,
-        ),
+    """Require active production models. Legacy router/incremental are optional."""
+    required = (
+        ("coaching", settings.coaching_model_provider, settings.coaching_model_id,
+         "COACHING_MODEL_PROVIDER", "COACHING_MODEL_ID"),
         (
             "review_deep",
             settings.review_deep_model_provider,
             settings.review_deep_model_id,
+            "REVIEW_DEEP_MODEL_PROVIDER",
+            "REVIEW_DEEP_MODEL_ID",
         ),
     )
-    env_names = {
-        "router": ("ROUTER_MODEL_PROVIDER", "ROUTER_MODEL_ID"),
-        "qa": ("QA_MODEL_PROVIDER", "QA_MODEL_ID"),
-        "coaching": ("COACHING_MODEL_PROVIDER", "COACHING_MODEL_ID"),
-        "review_incremental": (
-            "REVIEW_INCREMENTAL_MODEL_PROVIDER",
-            "REVIEW_INCREMENTAL_MODEL_ID",
-        ),
-        "review_deep": ("REVIEW_DEEP_MODEL_PROVIDER", "REVIEW_DEEP_MODEL_ID"),
-    }
-    for role, provider, model_id in roles:
-        provider_env, model_env = env_names[role]
+    for _role, provider, model_id, provider_env, model_env in required:
         _validate_provider_model_pair(
             provider, model_id, provider_env=provider_env, model_env=model_env
         )
-    if not 0.0 <= float(settings.router_min_confidence) <= 1.0:
+    optional = (
+        ("router", settings.router_model_provider, settings.router_model_id,
+         "ROUTER_MODEL_PROVIDER", "ROUTER_MODEL_ID"),
+        ("qa", settings.qa_model_provider, settings.qa_model_id,
+         "QA_MODEL_PROVIDER", "QA_MODEL_ID"),
+        (
+            "review_incremental",
+            settings.review_incremental_model_provider,
+            settings.review_incremental_model_id,
+            "REVIEW_INCREMENTAL_MODEL_PROVIDER",
+            "REVIEW_INCREMENTAL_MODEL_ID",
+        ),
+    )
+    for _role, provider, model_id, provider_env, model_env in optional:
+        if str(provider or "").strip() or str(model_id or "").strip():
+            _validate_provider_model_pair(
+                provider, model_id, provider_env=provider_env, model_env=model_env
+            )
+    if str(settings.router_model_provider or "").strip() and not (
+        0.0 <= float(settings.router_min_confidence) <= 1.0
+    ):
         raise ValueError("ROUTER_MIN_CONFIDENCE must be between 0 and 1")
     if not 1 <= int(settings.deep_review_interval_turns) <= 20:
         raise ValueError("DEEP_REVIEW_INTERVAL_TURNS must be between 1 and 20")

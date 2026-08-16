@@ -33,6 +33,7 @@ from backend.retrieval import (
     retrieval_sources_from_notebook,
     with_course_evidence_gap,
 )
+from backend.retrieval_gate import retrieval_required
 from backend.settings import settings as runtime_settings
 from backend.specialists.review_orchestration import (
     COUNTER_SETTINGS_KEY,
@@ -58,6 +59,15 @@ from backend.student_store import (
     StudentStore,
 )
 from backend.title_service import NotebookTitleService
+from backend.turn_perf import (
+    begin_coach_turn_perf,
+    current_perf,
+    elapsed_ms,
+    emit_coach_turn_perf,
+    record_failure,
+    record_field,
+    record_success,
+)
 from backend.workflow import CoachWorkflow
 
 _CITATION_LABEL = re.compile(r"\[(S\d+)\]")
@@ -361,62 +371,81 @@ class CoachApplicationService:
             or 0
         )
         request = request.model_copy(update={"conversation_revision": revision})
+        perf = current_perf() or begin_coach_turn_perf()
+        record_field("stage", request.current_stage)
 
         idempotency_key = str(request.idempotency_key or "").strip()
-        if not idempotency_key:
-            return self._execute_rate_limited(
-                request, execution_lease_held=execution_lease_held
-            )
-
-        fingerprint = _coach_request_fingerprint(request)
-        deadline = time.monotonic() + 125.0
-        while True:
-            reservation = self._store.claim_coach_request(
-                request.thread_id,
-                idempotency_key=idempotency_key,
-                request_fingerprint=fingerprint,
-            )
-            if reservation.state == "completed":
-                if not isinstance(reservation.turn_payload, dict):
-                    raise ValueError("Completed coach idempotency result is invalid")
-                return CoachTurn.model_validate(reservation.turn_payload)
-            if reservation.state == "claimed":
-                try:
-                    turn = self._execute_rate_limited(
-                        request,
-                        idempotency_marker_id=reservation.marker_id,
-                        idempotency_lease_token=reservation.lease_token,
-                        idempotency_fingerprint=fingerprint,
-                        execution_lease_held=execution_lease_held,
-                    )
-                    self._store.complete_coach_request(
-                        request.thread_id,
-                        marker_id=reservation.marker_id,
-                        idempotency_key=idempotency_key,
-                        request_fingerprint=fingerprint,
-                        lease_token=str(reservation.lease_token or ""),
-                        turn_payload=turn.model_dump(mode="json"),
-                    )
-                    return turn
-                except Exception:
-                    # A provider/validation/persistence failure is deliberately
-                    # not cached as a completed reply. A retry with this same
-                    # key can acquire the released reservation. Rate-limit
-                    # rejection also releases the lease so a later retry can
-                    # execute when capacity returns.
-                    self._store.fail_coach_request(
-                        request.thread_id,
-                        marker_id=reservation.marker_id,
-                        request_fingerprint=fingerprint,
-                        lease_token=str(reservation.lease_token or ""),
-                    )
-                    raise
-            if time.monotonic() >= deadline:
-                raise CoachRequestInProgressError(
-                    "This coach request is still processing; retry with the same "
-                    "idempotency key to recover its completed turn."
+        try:
+            if not idempotency_key:
+                turn = self._execute_rate_limited(
+                    request, execution_lease_held=execution_lease_held
                 )
-            time.sleep(0.05)
+                record_success()
+                return turn
+
+            fingerprint = _coach_request_fingerprint(request)
+            deadline = time.monotonic() + 125.0
+            while True:
+                claim_started = time.perf_counter()
+                reservation = self._store.claim_coach_request(
+                    request.thread_id,
+                    idempotency_key=idempotency_key,
+                    request_fingerprint=fingerprint,
+                )
+                record_field("idempotency_claim_ms", elapsed_ms(claim_started))
+                if reservation.state == "completed":
+                    if not isinstance(reservation.turn_payload, dict):
+                        raise ValueError("Completed coach idempotency result is invalid")
+                    record_success()
+                    return CoachTurn.model_validate(reservation.turn_payload)
+                if reservation.state == "claimed":
+                    try:
+                        turn = self._execute_rate_limited(
+                            request,
+                            idempotency_marker_id=reservation.marker_id,
+                            idempotency_lease_token=reservation.lease_token,
+                            idempotency_fingerprint=fingerprint,
+                            execution_lease_held=execution_lease_held,
+                        )
+                        complete_started = time.perf_counter()
+                        self._store.complete_coach_request(
+                            request.thread_id,
+                            marker_id=reservation.marker_id,
+                            idempotency_key=idempotency_key,
+                            request_fingerprint=fingerprint,
+                            lease_token=str(reservation.lease_token or ""),
+                            turn_payload=turn.model_dump(mode="json"),
+                        )
+                        record_field(
+                            "idempotency_complete_ms", elapsed_ms(complete_started)
+                        )
+                        record_success()
+                        return turn
+                    except Exception as error:
+                        self._store.fail_coach_request(
+                            request.thread_id,
+                            marker_id=reservation.marker_id,
+                            request_fingerprint=fingerprint,
+                            lease_token=str(reservation.lease_token or ""),
+                        )
+                        category = str(getattr(error, "category", "") or "")
+                        record_failure(category or "unavailable")
+                        raise
+                if time.monotonic() >= deadline:
+                    raise CoachRequestInProgressError(
+                        "This coach request is still processing; retry with the same "
+                        "idempotency key to recover its completed turn."
+                    )
+                time.sleep(0.05)
+        except Exception as error:
+            category = str(getattr(error, "category", "") or "")
+            if category:
+                record_failure(category)
+            elif current_perf() is not None and not current_perf().failure_category:
+                record_failure("unavailable")
+            raise
+        finally:
+            emit_coach_turn_perf(perf)
 
     def _submit_once(
         self,
@@ -427,6 +456,8 @@ class CoachApplicationService:
         idempotency_fingerprint: str | None = None,
     ) -> CoachTurn:
         """Execute the original authoritative workflow path exactly once."""
+        if current_perf() is None:
+            begin_coach_turn_perf()
         contract_ready = getattr(
             self._store, "research_workflow_contract_ready", None
         )
@@ -519,6 +550,7 @@ class CoachApplicationService:
                     "auto_advanced_to": pending.to_stage,
                 }
             )
+        persist_started = time.perf_counter()
         self._store.persist_coach_turn(
             prepared_request.thread_id,
             expected_stage=prepared_request.current_stage,
@@ -612,6 +644,7 @@ class CoachApplicationService:
                 orchestration.get("deep_review_succeeded")
             ),
         )
+        record_field("persist_turn_ms", elapsed_ms(persist_started))
         return turn
 
     def _authoritative_request(self, request: CoachRequest) -> CoachRequest:
@@ -621,7 +654,9 @@ class CoachApplicationService:
             ValueError: When the notebook is missing or client hints disagree
                 with persisted stage, history, or selected sources.
         """
+        load_started = time.perf_counter()
         thread = self._notebooks.get_thread(request.thread_id)
+        record_field("notebook_load_ms", elapsed_ms(load_started))
         if not thread:
             raise ValueError("Notebook not found")
         metadata = dict(thread.get("metadata") or {})
@@ -632,6 +667,7 @@ class CoachApplicationService:
                 "current_stage does not match the notebook Thinking Path stage"
             )
 
+        history_started = time.perf_counter()
         store_history = self._store.get_messages(request.thread_id)
         # Append-only revise persists the replacement user row before the
         # provider runs. Exclude that id so history is prefix-only; the revised
@@ -643,14 +679,17 @@ class CoachApplicationService:
                 for message in store_history
                 if str(message.get("id") or "") != revise_message_id
             ]
+        record_field("history_load_ms", elapsed_ms(history_started))
         if request.history and _history_signature(request.history) != _history_signature(
             store_history
         ):
             raise ValueError("history does not match the notebook conversation")
 
+        source_started = time.perf_counter()
         selected_sources = list_visible_sources(
             self._store, request.thread_id, selected_only=True
         )
+        record_field("source_load_ms", elapsed_ms(source_started))
         authoritative_ids = [str(source["id"]) for source in selected_sources]
         authoritative_id_set = set(authoritative_ids)
         if request.source_ids:
@@ -719,52 +758,86 @@ class CoachApplicationService:
             str(metadata.get("learning_summary") or "").split()
         ).strip()
         retrieval_sources = retrieval_sources_from_notebook(selected_sources)
-        retrieval_result = self._retriever.retrieve(
-            RetrievalQuery(
-                current_message=request.student_message,
-                current_stage=authoritative_stage,
-                sources=retrieval_sources,
-                project_context=project_context,
-                conversation_summary=conversation_summary,
-                recent_messages=tuple(store_history),
-            )
+        gate_started = time.perf_counter()
+        needs_retrieval = retrieval_required(
+            request.student_message,
+            selected_source_titles=[
+                str(source.get("title") or "") for source in selected_sources
+            ],
+            selected_source_filenames=[
+                str(source.get("filename") or source.get("name") or "")
+                for source in selected_sources
+            ],
+            has_selected_sources=bool(retrieval_sources),
         )
-        expected_labels = {
-            source.source_id: source.label for source in retrieval_sources
-        }
+        record_field("retrieval_gate_ms", elapsed_ms(gate_started))
+        record_field("retrieval_required", bool(needs_retrieval))
         retrieved_chunks: list[RetrievalChunkReference] = []
-        for chunk in retrieval_result.chunks:
-            if expected_labels.get(chunk.source_id) != chunk.label:
-                raise ValueError(
-                    "Retriever returned a source outside the selected notebook scope"
+        retrieval_result_context = ""
+        if needs_retrieval and retrieval_sources:
+            retrieval_started = time.perf_counter()
+            try:
+                retrieval_result = self._retriever.retrieve(
+                    RetrievalQuery(
+                        current_message=request.student_message,
+                        current_stage=authoritative_stage,
+                        sources=retrieval_sources,
+                        project_context=project_context,
+                        conversation_summary=conversation_summary,
+                        recent_messages=tuple(store_history),
+                    )
                 )
-        # Rebuild context solely from the validated chunks. Do not trust an
-        # adapter-provided opaque context string, even from future Bedrock code.
-        # Re-attach the application-owned course evidence-gap note when the
-        # composite reported missing Knowledge Base excerpts.
-        course_status = str(retrieval_result.course_retrieval_status or "ok")
-        retrieval_result = bounded_retrieval_result(retrieval_result.chunks)
-        if course_status in {"unavailable", "empty"}:
-            retrieval_result = with_course_evidence_gap(
-                retrieval_result, status=course_status
-            )
-        for chunk in retrieval_result.chunks:
-            excerpt = focused_excerpt(
-                chunk.text,
-                request.student_message,
-                limit=600,
-            )
-            retrieved_chunks.append(
-                RetrievalChunkReference(
-                    source_id=chunk.source_id,
-                    label=chunk.label,
-                    title=chunk.title,
-                    chunk_id=chunk.chunk_id,
-                    excerpt=excerpt,
-                    score=chunk.score,
-                    retrieval_origin=str(chunk.retrieval_origin or ""),
+            except Exception as error:
+                record_field("retrieval_total_ms", elapsed_ms(retrieval_started))
+                record_failure(
+                    str(getattr(error, "category", "") or "retrieval_failed")
                 )
+                raise
+            record_field("retrieval_total_ms", elapsed_ms(retrieval_started))
+            expected_labels = {
+                source.source_id: source.label for source in retrieval_sources
+            }
+            for chunk in retrieval_result.chunks:
+                if expected_labels.get(chunk.source_id) != chunk.label:
+                    record_failure("retrieval_failed")
+                    raise ValueError(
+                        "Retriever returned a source outside the selected notebook scope"
+                    )
+            course_status = str(retrieval_result.course_retrieval_status or "ok")
+            retrieval_result = bounded_retrieval_result(
+                retrieval_result.chunks,
+                max_context_chars=int(runtime_settings.fast_chat_retrieval_max_chars),
+                max_chunks=int(runtime_settings.fast_chat_retrieval_max_chunks),
             )
+            if course_status in {"unavailable", "empty"}:
+                retrieval_result = with_course_evidence_gap(
+                    retrieval_result, status=course_status
+                )
+            for chunk in retrieval_result.chunks:
+                excerpt = focused_excerpt(
+                    chunk.text,
+                    request.student_message,
+                    limit=600,
+                )
+                retrieved_chunks.append(
+                    RetrievalChunkReference(
+                        source_id=chunk.source_id,
+                        label=chunk.label,
+                        title=chunk.title,
+                        chunk_id=chunk.chunk_id,
+                        excerpt=excerpt,
+                        score=chunk.score,
+                        retrieval_origin=str(chunk.retrieval_origin or ""),
+                    )
+                )
+            retrieval_result_context = retrieval_result.context
+        else:
+            record_field("retrieval_total_ms", 0)
+            record_field("course_kb_retrieval_ms", 0)
+            record_field("student_source_retrieval_ms", 0)
+        record_field("retrieved_chunk_count", len(retrieved_chunks))
+        record_field("retrieved_context_chars", len(retrieval_result_context))
+        record_field("rag_used", bool(retrieved_chunks))
         response_language = " ".join(
             str(metadata.get("response_language") or "English").split()
         )[:50]
@@ -788,7 +861,7 @@ class CoachApplicationService:
                 "current_stage": authoritative_stage,
                 "history": store_history,
                 "source_ids": authoritative_ids,
-                "source_context": retrieval_result.context,
+                "source_context": retrieval_result_context,
                 "student_project_context": project_context,
                 "conversation_summary": conversation_summary,
                 "conversation_memory": (
@@ -807,9 +880,10 @@ class CoachApplicationService:
                 "student_id": str(getattr(self._store, "identifier", "") or "").strip()
                 or None,
                 # Drop client specialist hints. Mock uses regex fallback;
-                # AgentCore uses the Haiku router unless a server-owned
+                # AgentCore uses one-call fast_chat unless a server-owned
                 # specialist is stamped after this method.
                 "specialist": None,
+                "retrieval_required": bool(needs_retrieval),
                 COUNTER_SETTINGS_KEY: parse_coaching_turns_since_deep_review(
                     metadata.get(COUNTER_SETTINGS_KEY)
                 ),

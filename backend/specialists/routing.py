@@ -1,15 +1,15 @@
-"""Server-owned specialist selection.
+"""Server-owned specialist selection for mock/offline fallback.
 
-Production AgentCore uses a Claude Haiku 4.5 semantic router for free-text turns.
-This module still owns:
+Production AgentCore normal chat uses one Haiku ``fast_chat`` invoke. This
+module still owns:
 
 1. Explicit validated server-owned specialist/surface (never from the browser)
 2. Deterministic mock/offline fallback (conservative regex)
 3. Fail-closed coaching when a semantic route is missing or low-confidence
 
 Client-supplied specialist names are ignored unless application code already
-validated them. The router never decides stage advancement, source ownership,
-or database changes.
+validated them. Routing helpers never decide stage advancement, source
+ownership, or database changes.
 """
 
 from __future__ import annotations

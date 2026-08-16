@@ -68,11 +68,13 @@ def _assessment(
 
 def _output(*, recommendation: StageDecision = StageDecision.STAY) -> dict[str, Any]:
     """Return a coach_turn payload."""
-    return ProviderCoachOutput(
+    dumped = ProviderCoachOutput(
         response_text="What trade-off still needs evidence?",
         assessment=_assessment(recommendation=recommendation),
         research_coding=None,
     ).model_dump(mode="json")
+    dumped["mode"] = "coaching"
+    return dumped
 
 
 def _provider(client: FakeAgentCoreRuntime) -> AgentCoreCoachProvider:
@@ -124,117 +126,54 @@ def _phases(client: FakeAgentCoreRuntime) -> list[str]:
     return [str(_decoded(call).get("phase") or "") for call in client.calls]
 
 
-def test_clear_qa_router_result_selects_qa() -> None:
+def test_fast_chat_qa_mode_is_one_call() -> None:
     client = FakeAgentCoreRuntime(
         payload={
+            "mode": "qa",
             "response_text": "Week 2 covers stakeholder mapping [S1].",
             "citations": [],
-        },
-        router_payload={
-            "specialist": "qa",
-            "confidence": 0.91,
-            "rationale_category": "course_information",
-        },
+        }
     )
     result = _provider(client).assess(_request(student_message="What is Week 2 about?"))
-    assert _phases(client) == ["router", "qa"]
+    assert _phases(client) == ["fast_chat"]
+    assert result.specialist == SPECIALIST_QA
     assert result.assessment.recommendation is StageDecision.STAY
     assert "does not recommend" in result.assessment.recommendation_rationale
 
 
-def test_implicit_qa_router_result_selects_qa() -> None:
-    client = FakeAgentCoreRuntime(
-        payload={"response_text": "The brief asks for a JTBD statement.", "citations": []},
-        router_payload={
-            "specialist": "qa",
-            "confidence": 0.84,
-            "rationale_category": "course_information",
-        },
-    )
-    result = _provider(client).assess(
-        _request(student_message="Can you explain the assignment brief?")
-    )
-    assert _phases(client) == ["router", "qa"]
-    assert result.assessment.recommendation is StageDecision.STAY
-
-
-def test_project_discussion_routes_to_coaching() -> None:
+def test_project_discussion_is_one_fast_chat_call() -> None:
     client = FakeAgentCoreRuntime(payload=_output())
     result = _provider(client).assess(_request())
-    assert _phases(client)[:2] == ["router", "coaching"]
+    assert _phases(client) == ["fast_chat"]
     assert result.assessment.recommendation is StageDecision.STAY
     assert "deep" not in [
         str(_decoded(call).get("review_mode") or "") for call in client.calls
     ]
 
 
-def test_semantic_review_routes_to_review_and_cannot_advance() -> None:
-    client = FakeAgentCoreRuntime(
-        payload={
-            "response_text": "Your reasoning is more specific than last week.",
-            "strengths": ["Named a real constraint"],
-            "areas_to_develop": ["Name who is affected"],
-            "synthesis": "Formative progress, not a grade.",
-            "current_stage": "problem_identification",
-            "recommendation": "stay",
-            "rationale_summary": "Stay.",
-        },
-        router_payload={
-            "specialist": "review",
-            "confidence": 0.88,
-            "rationale_category": "formative_review",
-        },
-    )
+def test_free_text_review_request_does_not_invoke_deep_review() -> None:
+    client = FakeAgentCoreRuntime(payload=_output())
     result = _provider(client).assess(
         _request(student_message="Do you think my reasoning has improved enough?")
     )
-    assert _phases(client) == ["router", "review"]
-    assert result.assessment.recommendation is StageDecision.STAY
-    assert "coaching" not in _phases(client)
-
-
-def test_malformed_router_output_falls_back_to_coaching() -> None:
-    client = FakeAgentCoreRuntime(
-        payload=_output(),
-        router_payload={"specialist": "admin", "confidence": 0.99},
-    )
-    result = _provider(client).assess(_request())
-    assert "coaching" in _phases(client)
+    assert _phases(client) == ["fast_chat"]
+    assert result.specialist == SPECIALIST_COACHING
     assert result.assessment.recommendation is StageDecision.STAY
 
 
-def test_router_timeout_falls_back_to_coaching() -> None:
-    client = FakeAgentCoreRuntime(payload=_output(), router_error=TimeoutError("timed out"))
-    result = _provider(client).assess(_request())
-    assert _phases(client)[:2] == ["router", "coaching"]
-    assert result.response_text
-
-
-def test_low_confidence_router_falls_back_to_coaching() -> None:
-    client = FakeAgentCoreRuntime(
-        payload=_output(),
-        router_payload={
-            "specialist": "qa",
-            "confidence": 0.2,
-            "rationale_category": "course_information",
-        },
-    )
-    result = _provider(client).assess(_request(student_message="What is Week 2 about?"))
+def test_legacy_semantic_route_helper_still_falls_back() -> None:
     assert apply_semantic_route("qa", 0.2) == SPECIALIST_COACHING
-    assert _phases(client)[0] == "router"
-    assert "coaching" in _phases(client)
-    assert result.assessment.recommendation is StageDecision.STAY
+    assert apply_semantic_route("admin", 0.99) == SPECIALIST_COACHING
 
 
-def test_router_safety_blocked_does_not_fallback_to_coaching() -> None:
+def test_fast_chat_safety_blocked_fails_closed() -> None:
     client = FakeAgentCoreRuntime(
-        payload=_output(),
-        router_payload={"ok": False, "error": True, "category": "safety_blocked"},
+        payload={"ok": False, "error": True, "category": "safety_blocked"}
     )
     with pytest.raises(Exception, match="blocked") as raised:
         _provider(client).assess(_request())
     assert getattr(raised.value, "category", "") == "safety_blocked"
-    assert _phases(client) == ["router"]
+    assert _phases(client) == ["fast_chat"]
 
 
 def test_server_owned_review_skips_router() -> None:
@@ -250,6 +189,7 @@ def test_server_owned_review_skips_router() -> None:
         _request(student_message="Keep going.", specialist="review")
     )
     assert "router" not in _phases(client)
+    assert "fast_chat" not in _phases(client)
     assert _phases(client) == ["review"]
     assert result.assessment.recommendation is StageDecision.STAY
 
@@ -267,9 +207,9 @@ def test_application_service_drops_browser_specialist_hint(tmp_path) -> None:
             idempotency_key="browser-cannot-force-qa",
         )
     )
-    assert _phases(client)[0] == "router"
+    assert _phases(client) == ["fast_chat"]
     assert "qa" not in _phases(client)
-    assert "coaching" in _phases(client)
+    assert "review" not in _phases(client)
 
 
 def test_coaching_stay_does_not_call_deep_review() -> None:
@@ -282,21 +222,21 @@ def test_coaching_stay_does_not_call_deep_review() -> None:
     assert result.assessment.recommendation is StageDecision.STAY
 
 
-def test_coaching_advance_calls_deep_review_once() -> None:
+def test_coaching_advance_is_advisory_without_sonnet() -> None:
     client = FakeAgentCoreRuntime(payload=_output(recommendation=StageDecision.ADVANCE))
     result = _provider(client).assess(_request())
     modes = [
         str(_decoded(call).get("review_mode") or "") for call in client.calls
     ]
-    assert modes.count("deep") == 1
-    assert _phases(client).count("coaching") == 1
+    assert modes.count("deep") == 0
+    assert _phases(client) == ["fast_chat"]
     assert result.assessment.recommendation is StageDecision.ADVANCE
+    assert result.assessment.readiness_candidate is True
 
 
-def test_deep_review_stay_blocks_transition() -> None:
+def test_explicit_deep_review_stay_does_not_advance() -> None:
     client = FakeAgentCoreRuntime(
-        payload=_output(recommendation=StageDecision.ADVANCE),
-        judge_payload={
+        payload={
             "response_text": "Stay for now.",
             "strengths": [],
             "areas_to_develop": ["Name who is affected at night"],
@@ -307,37 +247,29 @@ def test_deep_review_stay_blocks_transition() -> None:
             "readiness_evidence": [],
             "missing_requirements": ["Name who is affected at night"],
             "rationale_summary": "The affected people are still unnamed.",
-        },
+        }
     )
-    result = _provider(client).assess(_request())
+    result = _provider(client).assess(_request(specialist="review"))
     assert result.assessment.recommendation is StageDecision.STAY
     assert "Name who is affected at night" in result.assessment.missing_reasoning_elements
     assert "unnamed" in result.assessment.recommendation_rationale
 
 
-def test_deep_review_malformed_fails_closed_to_stay() -> None:
+def test_explicit_deep_review_malformed_fails_closed() -> None:
+    client = FakeAgentCoreRuntime(deep_payload={"recommendation": "maybe"})
+    with pytest.raises(Exception):
+        _provider(client).assess(_request(specialist="review"))
+
+
+def test_explicit_deep_review_timeout_fails_closed() -> None:
+    client = FakeAgentCoreRuntime(deep_error=TimeoutError("judge-timeout"))
+    with pytest.raises(Exception):
+        _provider(client).assess(_request(specialist="review"))
+
+
+def test_explicit_deep_review_wrong_stage_fails_closed_to_stay() -> None:
     client = FakeAgentCoreRuntime(
-        payload=_output(recommendation=StageDecision.ADVANCE),
-        judge_payload={"recommendation": "maybe"},
-    )
-    result = _provider(client).assess(_request())
-    assert result.assessment.recommendation is StageDecision.STAY
-    assert result.response_text.startswith("What trade-off")
-
-
-def test_deep_review_timeout_fails_closed_to_stay() -> None:
-    client = FakeAgentCoreRuntime(
-        payload=_output(recommendation=StageDecision.ADVANCE),
-        judge_error=TimeoutError("judge-timeout"),
-    )
-    result = _provider(client).assess(_request())
-    assert result.assessment.recommendation is StageDecision.STAY
-
-
-def test_deep_review_wrong_stage_fails_closed_to_stay() -> None:
-    client = FakeAgentCoreRuntime(
-        payload=_output(recommendation=StageDecision.ADVANCE),
-        judge_payload={
+        payload={
             "response_text": "Ready.",
             "strengths": ["Looks ready"],
             "areas_to_develop": [],
@@ -348,28 +280,27 @@ def test_deep_review_wrong_stage_fails_closed_to_stay() -> None:
             "readiness_evidence": ["Looks ready"],
             "missing_requirements": [],
             "rationale_summary": "Ready.",
-        },
+        }
     )
-    result = _provider(client).assess(_request())
+    result = _provider(client).assess(_request(specialist="review"))
     assert result.assessment.recommendation is StageDecision.STAY
 
 
 def test_deep_review_payload_omits_research_coding() -> None:
-    envelope = ProviderCoachOutput(
-        response_text="What trade-off still needs evidence?",
-        assessment=_assessment(recommendation=StageDecision.ADVANCE),
-        research_coding=None,
-    ).model_dump(mode="json")
-    client = FakeAgentCoreRuntime(payload=envelope)
-    _provider(client).assess(_request())
-    deep_payload = _decoded(
-        next(
-            call
-            for call in client.calls
-            if _decoded(call).get("phase") == "review"
-            and _decoded(call).get("review_mode") == "deep"
-        )
+    client = FakeAgentCoreRuntime(
+        payload={
+            "response_text": "Formative deep review of progress.",
+            "strengths": ["The contribution named a concrete constraint."],
+            "areas_to_develop": ["Name who is affected at night."],
+            "synthesis": "Stay.",
+            "current_stage": "problem_identification",
+            "recommendation": "stay",
+            "rationale_summary": "Stay.",
+        }
     )
+    _provider(client).assess(_request(specialist="review"))
+    deep_payload = _decoded(client.calls[0])
+    assert deep_payload["phase"] == "review"
     assert "dominant_clear" not in json.dumps(deep_payload)
     assert deep_payload["runtime_context"]["current_stage"] == "problem_identification"
 
@@ -384,28 +315,24 @@ def test_explicit_review_does_not_run_coaching() -> None:
             "current_stage": "problem_identification",
             "recommendation": "stay",
             "rationale_summary": "Stay.",
-        },
-        router_payload={
-            "specialist": "review",
-            "confidence": 0.9,
-            "rationale_category": "formative_review",
-        },
+        }
     )
     result = _provider(client).assess(
-        _request(student_message="How strong is what I've done so far?")
+        _request(student_message="How strong is what I've done so far?", specialist="review")
     )
     assert result.assessment.recommendation is StageDecision.STAY
+    assert "fast_chat" not in _phases(client)
     assert "coaching" not in _phases(client)
 
 
-def test_router_logs_omit_student_text(caplog: pytest.LogCaptureFixture) -> None:
+def test_fast_chat_logs_omit_student_text(caplog: pytest.LogCaptureFixture) -> None:
     client = FakeAgentCoreRuntime(payload=_output())
     with caplog.at_level(logging.INFO):
         _provider(client).assess(_request())
     joined = " ".join(record.getMessage() for record in caplog.records)
     assert "elderly caregivers" not in joined
-    assert "role=router" in joined
-    assert "role=coaching" in joined
+    assert "role=fast_chat" in joined
+    assert "role=router" not in joined
 
 
 def test_select_specialist_surface_still_bypasses_semantic() -> None:
@@ -440,5 +367,5 @@ def test_idempotent_retry_does_not_duplicate_provider_after_persist(tmp_path) ->
     first = service.submit(request)
     second = service.submit(request)
     assert first.response_text == second.response_text
-    assert _phases(client).count("coaching") == 1
-    assert _phases(client).count("router") == 1
+    assert _phases(client).count("fast_chat") == 1
+    assert _phases(client).count("router") == 0

@@ -314,7 +314,12 @@ def test_unknown_citations_removed_at_application_boundary(tmp_path):
             response_text="Use the selected finding [S1] rather than an unknown label.",
         )
     )
-    turn = _service(store, _provider(client)).submit(_request(thread_id=thread_id))
+    turn = _service(store, _provider(client)).submit(
+        _request(
+            thread_id=thread_id,
+            student_message="What does the selected source say about thermal loss?",
+        )
+    )
     assert [item.source_id for item in turn.assessment.citations] == [source["id"]]
     assert turn.assessment.citations[0].label == "S1"
     assert all(item.source_id != "not-a-real-source" for item in turn.assessment.citations)

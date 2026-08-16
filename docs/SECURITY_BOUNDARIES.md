@@ -91,8 +91,10 @@ guardrail configuration fails production startup and the runtime loader.
 ## Conversation integrity
 
 - DSQL / SQLite is the only authoritative transcript.
-- The context planner is full-history-first. Compression affects model input
-  only and never deletes stored messages. `conversation_memory` is a derived
+- Fast-chat planning always sends derived `conversation_memory` plus a bounded
+  recent verbatim window (default 8). Deep Review may still use full-history
+  when it fits that broader budget. Compression affects model input only and
+  never deletes stored messages. `conversation_memory` is a derived
   cache/projection that is invalidated when `conversation_revision` changes.
 - AgentCore Memory is not a production transcript. Runtime sessions are
   `stateless-<uuid>`.

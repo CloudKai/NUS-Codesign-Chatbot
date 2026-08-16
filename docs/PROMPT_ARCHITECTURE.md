@@ -17,19 +17,16 @@ FastAPI (Cognito, notebook ownership, selected sources, RAG)
     ↓
 DSQL / SQLite  (authoritative transcript + persisted stage)
     ↓
-HistoryContextPlanner  (full DSQL history, or memory + recent)
+HistoryContextPlanner  (fast_chat: memory + last 8; Deep Review: broader)
     ↓
 runtime_context + runtime_instructions   ← application rules
-untrusted turn (project, evidence, student text)
+untrusted turn (project, optional evidence, student text)
     ↓
 ONE AgentCore Runtime
-    ├── Haiku 4.5 router (qa | coaching | review)
-    ├── Q&A specialist (Haiku 4.5)
-    ├── Coaching specialist + stage prompts (Haiku 4.5)
-    ├── Incremental Review (Haiku 4.5; after Coaching)
-    └── Deep Review (Sonnet 4.6; periodic / event / explicit)
+    ├── fast_chat (Haiku 4.5; one call chooses coaching | qa)
+    └── Deep Review (Sonnet 4.6; explicit specialist=review only)
     ↓
-structured output  (router_turn | coach_turn | qa_turn | review_turn)
+structured output  (fast_chat_turn | review_turn)
     ↓
 FastAPI validates → workflow → atomic DSQL persist
 ```
@@ -37,10 +34,11 @@ FastAPI validates → workflow → atomic DSQL persist
 Integrate-Bedrock is the production shell. AgentCore is the pedagogical
 brain. DSQL is transcript/state authority. AgentCore Memory is not used.
 
-Periodic Deep Review means every N newly executed, successful Coaching
-turns since the previous successfully persisted Deep Review. It is
-turn-based rather than time-based because it represents new learning
-evidence, not elapsed time. The Review tab is display-only.
+Deep Review is an explicit FastAPI operation (`specialist=review`), not a
+follow-up after normal chat. Unlock still requires 3 successful Coaching
+replies; opening the Review tab is display-only and makes zero model calls.
+Legacy router / Q&A / Coaching / Incremental Review payloads remain in the
+runtime for compatibility and are unused on the active FastAPI path.
 
 ## Framework preservation matrix
 
@@ -104,7 +102,7 @@ changes.
 | Query | Current student message has the strongest weight. The last two student messages, project context, and learning summary provide lower-weight continuity. |
 | Chunking | `LocalChunkRetriever` creates sentence-aware ~1,800-character chunks with 220-character overlap at query time. No new database migration is needed. |
 | Ranking | Deterministic weighted lexical/BM25-style scoring uses term rarity, phrase overlap, title matches, and source diversity. Generic queries receive bounded representative excerpts. |
-| Budget | At most 8 chunks, at most 2 per source, and at most 16,000 retrieved characters enter the composer. The composer retains its independent 24,000-character retrieval ceiling. |
+| Budget | Fast chat: deterministic retrieval gate, then at most `FAST_CHAT_RETRIEVAL_MAX_CHUNKS` (default 4) chunks and `FAST_CHAT_RETRIEVAL_MAX_CHARS` (default 8,000) characters. Deep Review may use the larger composer ceiling. |
 | Images | Selected images travel as model image inputs; a text marker preserves their stable `[S#]` mapping. |
 | Citations | `[S#]` is stable for the selected-source order. Internal chunk IDs such as `S1-C2` are audit metadata only and are never student-facing citation syntax. |
 | Audit | The assistant message records `retrieval_refs` containing source ID, stable label, chunk ID, focused excerpt, and score. `source_refs` remains reserved for sources actually cited in the response. |

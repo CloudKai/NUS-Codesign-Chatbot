@@ -333,6 +333,8 @@ def test_unknown_phase_falls_closed_to_coaching_not_qa() -> None:
     assert payload_phase({"phase": "coach"}) == "coaching"
     assert payload_phase({"phase": "scoring"}) == "review"
     assert invoke_kind({"output_contract": "router_turn"}) == "router"
+    assert invoke_kind({"phase": "fast_chat"}) == "fast_chat"
+    assert invoke_kind({"output_contract": "fast_chat_turn"}) == "fast_chat"
     assert invoke_kind({"phase": "stage_judge"}) == "specialist"
     assert invoke_kind({"phase": "qa"}) == "specialist"
     system = specialist_system_prompt({"phase": "unknown", "topic": "problem_identification"})
@@ -492,7 +494,7 @@ def test_router_and_specialists_share_structured_role_invoke() -> None:
     for node in ast.walk(tree):
         if not isinstance(node, ast.AsyncFunctionDef):
             continue
-        if node.name not in {"router_invoke", "specialist_invoke"}:
+        if node.name not in {"router_invoke", "specialist_invoke", "fast_chat_invoke"}:
             continue
         for child in ast.walk(node):
             if (
@@ -501,7 +503,7 @@ def test_router_and_specialists_share_structured_role_invoke() -> None:
                 and child.func.id == "_structured_role_invoke"
             ):
                 callers.add(node.name)
-    assert callers == {"router_invoke", "specialist_invoke"}
+    assert callers == {"router_invoke", "specialist_invoke", "fast_chat_invoke"}
 
 
 def test_all_structured_roles_use_shared_output_contracts() -> None:
@@ -509,12 +511,15 @@ def test_all_structured_roles_use_shared_output_contracts() -> None:
     from agentcore_runtime.main import _output_model_for, _role_for_payload
     from agentcore_runtime.model import (
         MODEL_ROLE_COACHING,
+        MODEL_ROLE_FAST_CHAT,
         MODEL_ROLE_QA,
         MODEL_ROLE_REVIEW_DEEP,
         MODEL_ROLE_REVIEW_INCREMENTAL,
         MODEL_ROLE_ROUTER,
     )
+    from agentcore_runtime.models import FastChatTurnOutput
 
+    assert _role_for_payload({"phase": "fast_chat"}) == MODEL_ROLE_FAST_CHAT
     assert _role_for_payload({"phase": "qa"}) == MODEL_ROLE_QA
     assert _role_for_payload({"phase": "coaching"}) == MODEL_ROLE_COACHING
     assert (
@@ -526,6 +531,7 @@ def test_all_structured_roles_use_shared_output_contracts() -> None:
         == MODEL_ROLE_REVIEW_DEEP
     )
     assert _output_model_for("qa", "qa_turn") is QATurnOutput
+    assert _output_model_for("fast_chat", "fast_chat_turn") is FastChatTurnOutput
     assert _output_model_for("coaching", "coach_turn") is CoachTurnOutput
     assert _output_model_for("review", "review_turn") is ReviewTurnOutput
     assert MODEL_ROLE_ROUTER == "router"

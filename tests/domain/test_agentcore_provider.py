@@ -26,6 +26,7 @@ from backend.domain import (
     ProvisionalResearchCoding,
     ResearchCodingStatus,
     ResearchEvidence,
+    RetrievalChunkReference,
     StageDecision,
 )
 from backend.learning_service import LearningProgressService
@@ -121,6 +122,7 @@ def _output(
         research_coding=research if not isinstance(research, dict) else None,
     )
     dumped = envelope.model_dump(mode="json")
+    dumped["mode"] = "coaching"
     if isinstance(research, dict):
         dumped["research_coding"] = research
     return dumped
@@ -241,7 +243,7 @@ def test_valid_structured_coaching_and_research_coding():
     assert result.assessment.current_stage == "problem_identification"
     assert result.research_coding is not None
     assert result.research_coding.coding_status is ResearchCodingStatus.CODED
-    assert len(_router_calls(client)) == 1
+    assert len(_router_calls(client)) == 0
     assert len(_deep_review_calls(client)) == 0
     call = _specialist_call(client)
     assert call["agentRuntimeArn"] == _RUNTIME_ARN
@@ -249,11 +251,13 @@ def test_valid_structured_coaching_and_research_coding():
     assert str(call["runtimeSessionId"]).startswith("stateless-")
     assert len(str(call["runtimeSessionId"])) >= 33
     payload = _decoded_payload(call)
-    assert payload["phase"] == "coaching"
+    assert payload["phase"] == "fast_chat"
     assert payload["topic"] == "problem_identification"
-    assert payload["output_contract"] == "coach_turn"
+    assert payload["output_contract"] == "fast_chat_turn"
     assert "prompt" not in payload
-    prepared = compose_coach_prompt(_request(), include_recent_messages=False)
+    prepared = compose_coach_prompt(
+        _request(), include_recent_messages=False, context_policy="fast_chat"
+    )
     assert payload["trusted_instructions"] == prepared.runtime_instructions
     assert _current_turn_text(payload) == prepared.untrusted_turn_text
     assert _STAGE_MARKERS["problem_identification"] not in payload["trusted_instructions"]
@@ -325,8 +329,8 @@ def test_runtime_session_is_never_notebook_memory_or_history():
     assert "student_id" not in payload
 
 
-def test_agentcore_payload_sends_full_history_and_owner_student_id():
-    """DSQL history is Converse messages; student_id is the store owner, not the notebook."""
+def test_agentcore_payload_sends_bounded_history_and_owner_student_id():
+    """DSQL history is bounded Converse messages; student_id is the store owner."""
     client = FakeAgentCoreRuntime(payload=_output())
     history = [
         {"role": "user", "content": f"Earlier student turn {index}."}
@@ -349,11 +353,11 @@ def test_agentcore_payload_sends_full_history_and_owner_student_id():
     assert _STAGE_MARKERS["problem_identification"] not in payload["trusted_instructions"]
     assert _STAGE_MARKERS["problem_identification"] not in messages[-1]["content"][0]["text"]
     prior = messages[:-1]
-    assert len(prior) == 9
-    assert prior[0]["content"][0]["text"] == "Earlier student turn 0."
+    assert len(prior) == 8
+    assert prior[0]["content"][0]["text"] == "Earlier student turn 1."
     assert prior[-1]["role"] == "assistant"
     current_text = messages[-1]["content"][0]["text"]
-    assert "Earlier student turn 0." not in current_text
+    assert all("Earlier student turn 0." not in item["content"][0]["text"] for item in prior)
     assert "Earlier coach reply." not in current_text
     assert "<recent_messages>" in current_text
     assert "supplied separately as message history" in current_text
@@ -486,7 +490,19 @@ def test_selected_source_citations_pass_through_the_adapter():
         )
     ]
     client = FakeAgentCoreRuntime(payload=_output(citations=citations))
-    result = _provider(client).assess(_request())
+    result = _provider(client).assess(
+        _request(
+            retrieved_chunks=[
+                RetrievalChunkReference(
+                    source_id="src-1",
+                    label="S1",
+                    title="Lecture",
+                    chunk_id="S1-C1",
+                    excerpt="Crossing evidence.",
+                )
+            ]
+        )
+    )
     assert result.assessment.citations[0].label == "S1"
     assert result.assessment.citations[0].source_id == "src-1"
 
@@ -505,6 +521,7 @@ def test_images_are_mapped_into_runtime_messages():
     assert content[0]["text"] == compose_coach_prompt(
         _request(image_inputs=[image]),
         include_recent_messages=False,
+        context_policy="fast_chat",
     ).untrusted_turn_text
     assert content[1]["image"]["format"] == "png"
     assert content[1]["image"]["source"]["bytes"] == _TINY_PNG
@@ -741,7 +758,9 @@ def test_blocked_turn_is_rejected_without_persistence(tmp_path):
 def test_harness_patch_appends_trusted_instructions_and_uses_untrusted_user():
     from agentcore_runtime.structured_coach import coaching_invoke_prompts
 
-    prepared = compose_coach_prompt(_request(), include_recent_messages=False)
+    prepared = compose_coach_prompt(
+        _request(), include_recent_messages=False, context_policy="fast_chat"
+    )
     payload = {
         "output_contract": "coach_turn",
         "trusted_instructions": prepared.trusted_instructions,
@@ -838,7 +857,7 @@ def test_large_history_and_evidence_keep_current_street_contribution_once():
     assert result.response_text
     encoded = _specialist_call(client)["payload"]
     size = len(encoded if isinstance(encoded, (bytes, bytearray)) else str(encoded))
-    assert 30_000 <= size <= 150_000
+    assert 5_000 <= size <= 80_000
     payload = _decoded_payload(_specialist_call(client))
     current = _current_turn_text(payload)
     assert current.count(_STREET) == 1
@@ -995,7 +1014,7 @@ class _GatedAgentCoreRuntime:
         else:
             incoming = json.loads(str(raw or "{}"))
         blob = json.dumps(incoming)
-        if _payload_kind(incoming) == "specialist":
+        if _payload_kind(incoming) in {"specialist", "fast_chat"}:
             a_only = _NOTEBOOK_A_MARKER in blob and _NOTEBOOK_B_MARKER not in blob
             b_only = _NOTEBOOK_B_MARKER in blob and _NOTEBOOK_A_MARKER not in blob
             if a_only:
@@ -1078,7 +1097,7 @@ def test_same_agentcore_provider_accepts_two_notebooks_concurrently():
                 incoming = json.loads(bytes(raw).decode("utf-8"))
             else:
                 incoming = json.loads(str(raw or "{}"))
-            if _payload_kind(incoming) == "specialist":
+            if _payload_kind(incoming) in {"specialist", "fast_chat"}:
                 with lock:
                     entered["count"] += 1
                 barrier.wait(timeout=3)

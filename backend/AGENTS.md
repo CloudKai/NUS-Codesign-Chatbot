@@ -50,15 +50,17 @@ FastAPI (`api.py` façade → `http/app.py`)
 | `providers.py` | OpenAI, mock selection, Bedrock and AgentCore factory wiring |
 | `bedrock_provider.py` | Amazon Bedrock Converse coach adapter (injected client; no AWS in tests) |
 | `agentcore_provider.py` | AgentCore Runtime coach adapter (injected client; no AWS in tests). Live parsing lives in `agentcore_runtime/`. Runtime model/guardrail env is fail-closed in `agentcore_runtime/model.py`. |
-| `specialists/` | Server-owned `qa` / `coaching` / `review` routing. The browser cannot pick a privileged specialist. |
+| `specialists/` | Legacy server-owned `qa` / `coaching` / `review` helpers. Active AgentCore chat uses one `fast_chat` invoke; the browser cannot pick a privileged specialist. |
 | `prompts/` | Application composer for mock/OpenAI/Bedrock. Canonical AgentCore pedagogy is `agentcore_runtime/prompts/`. |
 | `agentcore_harness_provider.py` | Isolated InvokeHarness Luna eval adapter (not production DEFAULT) |
-| `context_planner.py` | Full-history-first token-aware model-context planner |
+| `context_planner.py` | Token-aware model-context planner (`fast_chat` vs Deep Review `full_history`) |
 | `live_eval_config.py` | Trusted Luna override assertions for live evaluation |
 | `bedrock_retrieve.py` | Bedrock Knowledge Base `Retrieve` adapter for selected locked course sources |
 | `mock_provider.py` | Deterministic provider for tests and offline demo |
 | `source_library.py` / `sources/` | Compatibility import plus ingestion, course sync, bounded context, and image/storage projection |
 | `retrieval.py` | Provider-neutral retrieval port, local chunk retriever, and composite KB/local splitter |
+| `retrieval_gate.py` | Deterministic, non-LLM gate for whether a normal chat turn retrieves |
+| `turn_perf.py` | Privacy-safe per-request latency/context instrumentation (`coach_turn_perf`) |
 | `file_processing.py` | Upload storage, text extraction, safe paths |
 | `settings.py` | Environment-driven configuration (`Settings`) |
 | `models.py` | Model registry and allowed model IDs |

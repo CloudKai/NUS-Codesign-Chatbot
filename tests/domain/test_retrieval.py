@@ -564,6 +564,74 @@ def test_citation_preview_uses_retrieved_excerpt_not_document_beginning(
     assert "[S1]" in turn.response_text
 
 
+def test_project_reasoning_skips_selected_source_retrieval(tmp_path):
+    class _CountingRetriever:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
+            del query
+            self.calls += 1
+            return RetrievalResult(context="", chunks=())
+
+    store = StudentStore(tmp_path / "skip-retriever.sqlite3")
+    notebook = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    add_text_source(store, notebook, "Owned", "Owned selected source content")
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    counting = _CountingRetriever()
+    service = CoachApplicationService(
+        store,
+        notebooks,
+        CoachWorkflow(DeterministicCoachProvider(), transitions),
+        LearningProgressService(store, notebooks, transitions),
+        retriever=counting,
+    )
+    service.submit(
+        CoachRequest(
+            thread_id=notebook,
+            student_message="I think option B is stronger.",
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    )
+    assert counting.calls == 0
+
+
+def test_course_question_uses_selected_source_retrieval(tmp_path):
+    class _CountingRetriever:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
+            del query
+            self.calls += 1
+            return RetrievalResult(context="", chunks=())
+
+    store = StudentStore(tmp_path / "use-retriever.sqlite3")
+    notebook = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    add_text_source(store, notebook, "Owned", "Owned selected lecture content")
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    counting = _CountingRetriever()
+    service = CoachApplicationService(
+        store,
+        notebooks,
+        CoachWorkflow(DeterministicCoachProvider(), transitions),
+        LearningProgressService(store, notebooks, transitions),
+        retriever=counting,
+    )
+    service.submit(
+        CoachRequest(
+            thread_id=notebook,
+            student_message="What does the selected lecture say about accessibility?",
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    )
+    assert counting.calls == 1
+
+
 def test_application_rejects_out_of_scope_retriever_result(tmp_path):
     class _BadRetriever:
         def retrieve(self, query: RetrievalQuery) -> RetrievalResult:

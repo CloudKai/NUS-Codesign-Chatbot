@@ -1,24 +1,18 @@
 """Amazon Bedrock AgentCore Runtime adapter for one structured specialist turn.
 
-The adapter may invoke ``InvokeAgentRuntime`` more than once per student turn
-on the same runtime ARN:
+Normal student chat makes exactly one ``InvokeAgentRuntime`` call:
 
-1. Haiku router (unless the specialist is already server-owned)
-2. The selected specialist (Q&A, Coaching, or explicit Deep Review)
-3. Incremental Haiku Review after a successful Coaching turn
-4. Deep Sonnet Review on periodic or event triggers
+``phase=fast_chat`` / Claude Haiku 4.5
 
-It does not own phase progression, citations, persistence, retrieval, or IAM.
-Tests inject a fake client so automated runs never contact AWS. Planner
-output is request-local so one cached provider instance may coach two
-notebooks for the same owner without cross-notebook memory contamination.
+That call both classifies Coaching vs Q&A and generates the student reply.
+Incremental Review and the Haiku router are not on the active path.
+Deep Sonnet Review remains an explicit ``specialist=review`` operation.
 
-FastAPI remains the authority for authentication, source ownership, and DSQL
-writes. Thinking Path stages stay in DSQL; only the runtime *topic* key maps
-``deep_analysis`` to the POC ``ethics_critical`` label. Invokes are stateless
-(a fresh ``runtimeSessionId`` per invoke) so the runtime LRU cache is not a
-second transcript. Guardrail blocks are category-only failures and never
-persist refusal text.
+The adapter does not own phase progression, citations, persistence,
+retrieval, or IAM. Tests inject a fake client so automated runs never
+contact AWS. Planner output is request-local so one cached provider
+instance may coach two notebooks for the same owner without cross-notebook
+memory contamination.
 """
 
 from __future__ import annotations
@@ -36,9 +30,11 @@ from typing import Any
 from pydantic import ValidationError
 
 from agentcore_runtime.model import HAIKU_4_5_MODEL_ID, SONNET_4_6_MODEL_ID
-from agentcore_runtime.models import ReviewTurnOutput, RouterOutput
+from agentcore_runtime.models import FastChatTurnOutput, ReviewTurnOutput, RouterOutput
 
 from .context_planner import (
+    CONTEXT_POLICY_FAST_CHAT,
+    CONTEXT_POLICY_FULL_HISTORY,
     ContextBudget,
     ContextBudgetError,
     HistoryContextPlanner,
@@ -58,13 +54,20 @@ from .domain import (
 from .prompts import compose_coach_prompt
 from .providers import ProviderUnavailableError
 from .settings import settings
+from .turn_perf import (
+    begin_coach_turn_perf,
+    current_perf,
+    elapsed_ms,
+    emit_coach_turn_perf,
+    record_failure,
+    record_field,
+    record_success,
+)
 from .specialists.review_orchestration import (
     REVIEW_DEPTH_DEEP,
     REVIEW_DEPTH_INCREMENTAL,
     REVIEW_TRIGGER_INCREMENTAL,
     bound_deep_review_interval,
-    resolve_deep_review_trigger,
-    should_run_deep_review,
 )
 from .specialists.routing import (
     ALLOWED_SPECIALISTS,
@@ -84,6 +87,8 @@ _MALFORMED_FAILURE = "The coach reply could not be completed"
 _BLOCKED_FAILURE = "AgentCore blocked this turn"
 _IMAGE_FAILURE = "AgentCore does not support this image type"
 _OUTPUT_CONTRACT = "coach_turn"
+_FAST_CHAT_CONTRACT = "fast_chat_turn"
+_FAST_CHAT_PHASE = "fast_chat"
 _CONTRACT_BY_SPECIALIST = {
     SPECIALIST_QA: "qa_turn",
     SPECIALIST_COACHING: "coach_turn",
@@ -721,6 +726,98 @@ def _validated_result(
     )
 
 
+def _allowed_citation_labels(request: CoachRequest) -> set[str]:
+    """Return FastAPI-supplied [S#] labels that Haiku may cite."""
+    return {
+        str(chunk.label).strip()
+        for chunk in request.retrieved_chunks
+        if str(chunk.label or "").strip()
+    }
+
+
+def _validated_fast_chat(
+    payload: dict[str, Any], request: CoachRequest
+) -> ProviderAssessmentResult:
+    """Validate one-call fast-chat output and fail closed on a bad contract."""
+    try:
+        output = FastChatTurnOutput.model_validate(payload)
+    except Exception as error:
+        raise _malformed_error() from error
+    allowed = _allowed_citation_labels(request)
+    citations = [
+        item
+        for item in _citations_from_items(
+            [item.model_dump(mode="json") for item in output.citations]
+        )
+        if item.label in allowed
+    ]
+    if output.needs_source_retrieval:
+        record_field("fast_chat_needs_source_retrieval", True)
+    record_field("mode_returned", output.mode)
+    if output.mode == SPECIALIST_QA:
+        assessment_citations = citations
+        if output.assessment is not None:
+            assessment_citations = [
+                item
+                for item in _citations_from_items(
+                    [item.model_dump(mode="json") for item in output.assessment.citations]
+                )
+                if item.label in allowed
+            ] or citations
+        return ProviderAssessmentResult(
+            response_text=output.response_text,
+            assessment=_stay_assessment(
+                request,
+                contribution_summary=request.student_message,
+                stage_assessment=(
+                    "Course-information question; Thinking Path stage unchanged."
+                ),
+                recommendation_rationale=(
+                    "Q&A mode does not recommend Thinking Path changes."
+                ),
+                learning_summary="The student asked a course-information question.",
+                citations=assessment_citations,
+            ),
+            research_coding=None,
+            specialist=SPECIALIST_QA,
+            qualifying_coaching_turn=False,
+            deep_review_succeeded=False,
+            review_trigger=None,
+        )
+    if output.assessment is None:
+        raise _malformed_error()
+    dumped = output.assessment.model_dump(mode="json")
+    dumped["citations"] = [
+        item.model_dump(mode="json")
+        for item in output.assessment.citations
+        if str(item.label or "").strip() in allowed
+    ]
+    try:
+        turn = ProviderCoachOutput.model_validate(
+            {
+                "response_text": output.response_text,
+                "assessment": dumped,
+                "research_coding": output.research_coding,
+            }
+        )
+    except Exception as error:
+        raise _malformed_error() from error
+    assessment = turn.assessment.model_copy(
+        update={"current_stage": request.current_stage}
+    )
+    if assessment.recommendation is StageDecision.ADVANCE:
+        assessment = assessment.model_copy(update={"readiness_candidate": True})
+    return ProviderAssessmentResult(
+        response_text=turn.response_text,
+        assessment=assessment,
+        research_coding=turn.research_coding,
+        specialist=SPECIALIST_COACHING,
+        qualifying_coaching_turn=True,
+        deep_review_succeeded=False,
+        review_trigger=None,
+    )
+
+
 def _stateless_session_id() -> str:
     """Return a unique runtime session id that is never notebook-derived.
 
@@ -740,17 +837,49 @@ def _current_turn_content(
     return content
 
 
-def _planner_from_settings() -> HistoryContextPlanner:
-    """Build the production planner from configured conservative token budgets."""
+def _deep_review_planner_from_settings() -> HistoryContextPlanner:
+    """Build the broader Deep Review planner from configured token budgets."""
     return HistoryContextPlanner(
         ContextBudget(
             model_context_limit_tokens=int(settings.model_context_limit_tokens),
-            max_input_tokens=int(settings.model_max_input_tokens),
+            max_input_tokens=int(
+                getattr(
+                    settings,
+                    "deep_review_max_input_tokens",
+                    settings.model_max_input_tokens,
+                )
+            ),
             output_reserve_tokens=int(settings.model_output_reserve_tokens),
             safety_margin_tokens=int(settings.model_context_safety_margin_tokens),
-            recent_verbatim_messages=int(settings.history_recent_verbatim_messages),
-        )
+            recent_verbatim_messages=int(
+                getattr(
+                    settings,
+                    "deep_review_recent_verbatim_messages",
+                    settings.history_recent_verbatim_messages,
+                )
+            ),
+        ),
+        policy=CONTEXT_POLICY_FULL_HISTORY,
     )
+
+
+def _fast_chat_planner_from_settings() -> HistoryContextPlanner:
+    """Build the latency-oriented fast-chat planner."""
+    return HistoryContextPlanner(
+        ContextBudget(
+            model_context_limit_tokens=int(settings.model_context_limit_tokens),
+            max_input_tokens=int(settings.fast_chat_max_input_tokens),
+            output_reserve_tokens=4_000,
+            safety_margin_tokens=1_000,
+            recent_verbatim_messages=int(settings.fast_chat_recent_verbatim_messages),
+        ),
+        policy=CONTEXT_POLICY_FAST_CHAT,
+    )
+
+
+def _planner_from_settings() -> HistoryContextPlanner:
+    """Compatibility alias for the fast-chat planner used by injected tests."""
+    return _fast_chat_planner_from_settings()
 
 
 def _compact_text(value: Any, limit: int) -> str:
@@ -963,6 +1092,7 @@ class AgentCoreCoachProvider:
         max_retries: int = 0,
         client: Any | None = None,
         planner: HistoryContextPlanner | None = None,
+        deep_planner: HistoryContextPlanner | None = None,
     ) -> None:
         """Create the adapter with an injected or lazily constructed client.
 
@@ -973,8 +1103,8 @@ class AgentCoreCoachProvider:
             timeout_seconds: boto read timeout; retries stay application-owned.
             max_retries: Extra SDK attempts after the first call (0 disables).
             client: Optional injected ``bedrock-agentcore`` client for tests.
-            planner: Optional history planner. Defaults to full-history-first
-                with extractive compression only (no extra model call).
+            planner: Optional fast-chat history planner.
+            deep_planner: Optional Deep Review history planner.
 
         Raises:
             ProviderUnavailableError: When ``AGENTCORE_RUNTIME_ARN`` is empty.
@@ -988,7 +1118,8 @@ class AgentCoreCoachProvider:
         self._timeout_seconds = float(timeout_seconds)
         self._max_retries = int(max_retries)
         self._client = client
-        self._planner = planner or _planner_from_settings()
+        self._planner = planner or _fast_chat_planner_from_settings()
+        self._deep_planner = deep_planner or _deep_review_planner_from_settings()
 
     def model_id_for(self, request: CoachRequest) -> str:
         """Return the configured AgentCore runtime ARN."""
@@ -1024,39 +1155,73 @@ class AgentCoreCoachProvider:
         *,
         review_mode: str | None = None,
         review_trigger: str | None = None,
+        context_policy: str = CONTEXT_POLICY_FAST_CHAT,
+        phase: str | None = None,
+        output_contract: str | None = None,
     ) -> tuple[dict[str, Any], ModelContextPlan]:
         """Build the JSON payload and request-local context plan for one invoke.
 
-        Always sends Converse ``messages``: planner-selected DSQL history plus
-        the untrusted current-turn content. Canonical pedagogy lives in the
-        AgentCore runtime. This adapter sends application runtime rules in
-        ``trusted_instructions`` and ``runtime_context``. The untrusted brief
-        omits duplicated ``<recent_messages>``. Derived memory appears only in
-        ``<conversation_memory>`` when compression was required. A top-level
-        ``prompt`` string is never used. Token budgeting still uses the full
-        ordered ``composed_text`` so the split cannot overflow the window.
-
-        The plan is returned to the caller so two notebooks sharing this
-        provider instance cannot overwrite each other's conversation memory.
+        Fast chat sends bounded recent Converse ``messages`` plus compact
+        untrusted turn text. Deep Review may use the broader history policy.
+        Canonical pedagogy lives in the AgentCore runtime.
         """
         existing = memory_from_metadata(
             {"conversation_memory": request.conversation_memory},
             conversation_revision=int(request.conversation_revision or 0),
         )
         seed_request = request.model_copy(update={"conversation_memory": None})
+        compose_policy = (
+            "fast_chat"
+            if context_policy == CONTEXT_POLICY_FAST_CHAT
+            else "deep_review"
+        )
+        planner = (
+            self._planner
+            if context_policy == CONTEXT_POLICY_FAST_CHAT
+            else self._deep_planner
+        )
+        compose_started = time.perf_counter()
         preliminary = compose_coach_prompt(
-            seed_request, include_recent_messages=False
+            seed_request,
+            include_recent_messages=False,
+            context_policy=compose_policy,
         ).composed_text
+        record_field("prompt_compose_ms", elapsed_ms(compose_started))
+        plan_started = time.perf_counter()
         try:
-            plan = self._planner.plan(
+            plan = planner.plan(
                 seed_request,
                 prompt_text=preliminary,
                 existing_memory=existing,
+                policy=context_policy,
             )
         except ContextBudgetError as error:
             raise ProviderUnavailableError(
                 "AgentCore context exceeds the safe token budget"
             ) from error
+        record_field("context_planner_ms", elapsed_ms(plan_started))
+        record_field("estimated_input_tokens", int(plan.estimated_input_tokens))
+        record_field("history_tokens", int(plan.history_tokens))
+        record_field("evidence_tokens", int(plan.evidence_tokens))
+        record_field("prompt_tokens", int(plan.prompt_tokens))
+        record_field("original_message_count", int(plan.original_message_count))
+        record_field("verbatim_message_count", int(plan.verbatim_message_count))
+        record_field("compressed_message_count", int(plan.compressed_message_count))
+        record_field("compression_used", bool(plan.compression_used))
+        record_field("context_policy", context_policy)
+        soft_ceiling = int(getattr(settings, "fast_chat_soft_input_tokens", 15_000))
+        if (
+            context_policy == CONTEXT_POLICY_FAST_CHAT
+            and int(plan.estimated_input_tokens) > soft_ceiling
+        ):
+            record_field("input_over_soft_budget", True)
+            logger.info(
+                "fast_chat_input_over_soft_budget estimated_input_tokens=%s "
+                "soft_ceiling=%s verbatim_messages=%s",
+                int(plan.estimated_input_tokens),
+                soft_ceiling,
+                int(plan.verbatim_message_count),
+            )
         planned_request = request
         if plan.compressed_memory is not None:
             planned_request = request.model_copy(
@@ -1065,7 +1230,9 @@ class AgentCoreCoachProvider:
                 }
             )
         prepared = compose_coach_prompt(
-            planned_request, include_recent_messages=False
+            planned_request,
+            include_recent_messages=False,
+            context_policy=compose_policy,
         )
         messages = list(plan.messages)
         messages.append(
@@ -1077,17 +1244,23 @@ class AgentCoreCoachProvider:
             }
         )
         specialist = str(specialist or "").strip().lower()
-        if specialist not in ALLOWED_SPECIALISTS:
+        if specialist not in ALLOWED_SPECIALISTS and specialist != _FAST_CHAT_PHASE:
             specialist = SPECIALIST_COACHING
+        resolved_phase = str(phase or specialist).strip().lower()
+        resolved_contract = str(
+            output_contract
+            or _CONTRACT_BY_SPECIALIST.get(specialist, _OUTPUT_CONTRACT)
+        ).strip()
+        runtime_specialist = (
+            SPECIALIST_COACHING if specialist == _FAST_CHAT_PHASE else specialist
+        )
         payload: dict[str, Any] = {
-            "phase": specialist,
+            "phase": resolved_phase,
             "topic": agentcore_topic_for_stage(request.current_stage),
-            "output_contract": _CONTRACT_BY_SPECIALIST.get(
-                specialist, _OUTPUT_CONTRACT
-            ),
+            "output_contract": resolved_contract,
             "runtime_context": _runtime_context(
                 request,
-                specialist,
+                runtime_specialist,
                 review_mode=review_mode,
                 review_trigger=review_trigger,
             ),
@@ -1123,6 +1296,10 @@ class AgentCoreCoachProvider:
             contentType="application/json",
             accept="application/json",
         )
+        perf = current_perf()
+        if perf is not None:
+            current = int(perf.fields.get("agentcore_call_count") or 0)
+            perf.set("agentcore_call_count", current + 1)
         if not isinstance(response, Mapping):
             raise _malformed_error()
         return _payload_from_runtime_response(response)
@@ -1133,6 +1310,10 @@ class AgentCoreCoachProvider:
             "router": (settings.router_model_provider, settings.router_model_id),
             "qa": (settings.qa_model_provider, settings.qa_model_id),
             "coaching": (
+                settings.coaching_model_provider,
+                settings.coaching_model_id,
+            ),
+            "fast_chat": (
                 settings.coaching_model_provider,
                 settings.coaching_model_id,
             ),
@@ -1431,6 +1612,10 @@ class AgentCoreCoachProvider:
     def assess(self, request: CoachRequest) -> ProviderAssessmentResult:
         """Request one structured coaching turn from AgentCore Runtime.
 
+        Normal chat is one Haiku ``fast_chat`` invoke. Explicit Review remains
+        a separate Deep Review operation. The Haiku router and Incremental
+        Review are not invoked on this path.
+
         Args:
             request: Server-built coaching input, including the persisted phase.
 
@@ -1442,127 +1627,134 @@ class AgentCoreCoachProvider:
         """
         for image in request.image_inputs:
             _payload_image_block(image)
-        specialist = self._resolve_specialist(request)
-        routed = request.model_copy(update={"specialist": specialist})
-        interval = bound_deep_review_interval(request.deep_review_interval_turns)
-        if specialist == SPECIALIST_QA:
-            result, plan = self._invoke_specialist(routed, SPECIALIST_QA)
-            return self._with_memory(
-                request,
-                result.model_copy(
-                    update={
-                        "specialist": SPECIALIST_QA,
-                        "qualifying_coaching_turn": False,
-                        "deep_review_succeeded": False,
-                        "review_trigger": None,
-                    }
-                ),
-                plan,
-            )
-        if specialist == SPECIALIST_REVIEW:
-            started = time.monotonic()
-            try:
-                payload, plan = self._invoke_payload(
-                    routed,
-                    SPECIALIST_REVIEW,
-                    review_mode=REVIEW_DEPTH_DEEP,
-                    review_trigger="explicit",
-                )
-                parsed = self._call_runtime(payload)
-                result = _validated_result(parsed, routed)
-                self._log_role_precise(
-                    role="review",
-                    started=started,
-                    success=True,
-                    extra=" review_depth=deep review_trigger=explicit",
-                    model_role="review_deep",
-                )
-            except ProviderUnavailableError as error:
-                self._log_role_precise(
-                    role="review",
-                    started=started,
-                    success=False,
-                    failure_category=error.category,
-                    extra=" review_depth=deep review_trigger=explicit",
-                    model_role="review_deep",
-                )
-                raise
-            except Exception as error:
-                translated = _translate_agentcore_error(error)
-                self._log_role_precise(
-                    role="review",
-                    started=started,
-                    success=False,
-                    failure_category=translated.category,
-                    extra=" review_depth=deep review_trigger=explicit",
-                    model_role="review_deep",
-                )
-                raise translated from error
-            review = self._parse_review_turn(parsed)
-            model_id = self._role_provider_model("review_deep")[1]
-            merged, succeeded = _merge_deep_review(
-                routed,
-                result,
-                review,
-                review_model=model_id or SONNET_4_6_MODEL_ID,
-                review_trigger="explicit",
-            )
-            if not succeeded:
-                merged = _stay_after_deep_review_failure(merged)
-            text = str(review.response_text or "").strip()
-            if text:
-                merged = merged.model_copy(update={"response_text": text})
-            return self._with_memory(
-                request,
-                merged.model_copy(
-                    update={
-                        "specialist": SPECIALIST_REVIEW,
-                        "qualifying_coaching_turn": False,
-                        "deep_review_succeeded": succeeded,
-                        "review_trigger": "explicit",
-                    }
-                ),
-                plan,
-            )
+        requested = str(request.specialist or "").strip().lower()
+        if requested == SPECIALIST_REVIEW:
+            return self._assess_explicit_review(request)
+        return self._assess_fast_chat(request)
 
-        result, plan = self._invoke_specialist(routed, SPECIALIST_COACHING)
-        result, readiness = _coaching_without_advancement(result)
-        result = self._apply_incremental_review(routed, result)
-        readiness = bool(result.assessment.readiness_candidate)
-        trigger = resolve_deep_review_trigger(
-            specialist=SPECIALIST_COACHING,
-            current_stage=routed.current_stage,
-            readiness_candidate=readiness,
-            coaching_turns_since_deep_review=int(
-                routed.coaching_turns_since_deep_review
-            ),
-            interval=interval,
-            qualifying_coaching_turn=True,
+    def _assess_fast_chat(self, request: CoachRequest) -> ProviderAssessmentResult:
+        """Run one Haiku fast-chat invoke and validate Coaching or Q&A output."""
+        owns_perf = current_perf() is None
+        if owns_perf:
+            begin_coach_turn_perf()
+        record_field("model_role", "fast_chat")
+        record_field("model_id", self._role_provider_model("fast_chat")[1] or HAIKU_4_5_MODEL_ID)
+        payload, plan = self._invoke_payload(
+            request,
+            _FAST_CHAT_PHASE,
+            context_policy=CONTEXT_POLICY_FAST_CHAT,
+            phase=_FAST_CHAT_PHASE,
+            output_contract=_FAST_CHAT_CONTRACT,
         )
-        logger.info(
-            "agentcore_invoke role=review review_depth=incremental "
-            "review_trigger=incremental coaching_turns_since_deep_review=%s "
-            "deep_review_interval=%s deep_review_triggered=%s",
-            int(routed.coaching_turns_since_deep_review),
-            interval,
-            "true" if should_run_deep_review(trigger) else "false",
-        )
-        deep_succeeded = False
-        if should_run_deep_review(trigger):
-            result, deep_succeeded = self._apply_deep_review(
-                routed,
-                result,
-                review_trigger=str(trigger),
-                replace_response_text=False,
+        started = time.monotonic()
+        try:
+            parsed = self._call_runtime(payload)
+            result = _validated_fast_chat(parsed, request)
+            self._log_role_precise(
+                role="fast_chat",
+                started=started,
+                success=True,
+                model_role="fast_chat",
             )
+            record_field("agentcore_invoke_ms", max(0, int((time.monotonic() - started) * 1000)))
+            record_success()
+            return self._with_memory(request, result, plan)
+        except ProviderUnavailableError as error:
+            self._log_role_precise(
+                role="fast_chat",
+                started=started,
+                success=False,
+                failure_category=error.category,
+                model_role="fast_chat",
+            )
+            record_field("agentcore_invoke_ms", max(0, int((time.monotonic() - started) * 1000)))
+            record_failure(error.category)
+            raise
+        except Exception as error:
+            translated = _translate_agentcore_error(error)
+            self._log_role_precise(
+                role="fast_chat",
+                started=started,
+                success=False,
+                failure_category=translated.category,
+                model_role="fast_chat",
+            )
+            record_field("agentcore_invoke_ms", max(0, int((time.monotonic() - started) * 1000)))
+            record_failure(translated.category)
+            raise translated from error
+        finally:
+            if owns_perf:
+                emit_coach_turn_perf()
+
+    def _assess_explicit_review(self, request: CoachRequest) -> ProviderAssessmentResult:
+        """Run one explicit Deep Review invoke. Never used for normal chat."""
+        routed = request.model_copy(update={"specialist": SPECIALIST_REVIEW})
+        started = time.monotonic()
+        try:
+            payload, plan = self._invoke_payload(
+                routed,
+                SPECIALIST_REVIEW,
+                review_mode=REVIEW_DEPTH_DEEP,
+                review_trigger="explicit",
+                context_policy=CONTEXT_POLICY_FULL_HISTORY,
+            )
+            parsed = self._call_runtime(payload)
+            result = _validated_result(parsed, routed)
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=True,
+                extra=" review_depth=deep review_trigger=explicit",
+                model_role="review_deep",
+            )
+            record_field("agentcore_invoke_ms", max(0, int((time.monotonic() - started) * 1000)))
+        except ProviderUnavailableError as error:
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=False,
+                failure_category=error.category,
+                extra=" review_depth=deep review_trigger=explicit",
+                model_role="review_deep",
+            )
+            record_field("agentcore_invoke_ms", max(0, int((time.monotonic() - started) * 1000)))
+            record_failure(error.category)
+            raise
+        except Exception as error:
+            translated = _translate_agentcore_error(error)
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=False,
+                failure_category=translated.category,
+                extra=" review_depth=deep review_trigger=explicit",
+                model_role="review_deep",
+            )
+            record_field("agentcore_invoke_ms", max(0, int((time.monotonic() - started) * 1000)))
+            record_failure(translated.category)
+            raise translated from error
+        review = self._parse_review_turn(parsed)
+        model_id = self._role_provider_model("review_deep")[1]
+        merged, succeeded = _merge_deep_review(
+            routed,
+            result,
+            review,
+            review_model=model_id or SONNET_4_6_MODEL_ID,
+            review_trigger="explicit",
+        )
+        if not succeeded:
+            merged = _stay_after_deep_review_failure(merged)
+        text = str(review.response_text or "").strip()
+        if text:
+            merged = merged.model_copy(update={"response_text": text})
         return self._with_memory(
             request,
-            result.model_copy(
+            merged.model_copy(
                 update={
-                    "specialist": SPECIALIST_COACHING,
-                    "qualifying_coaching_turn": True,
-                    "deep_review_succeeded": deep_succeeded,
-                    "review_trigger": trigger,
+                    "specialist": SPECIALIST_REVIEW,
+                    "qualifying_coaching_turn": False,
+                    "deep_review_succeeded": succeeded,
+                    "review_trigger": "explicit",
                 }
             ),
             plan,

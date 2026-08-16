@@ -43,9 +43,11 @@ def _review_mode(payload: dict[str, Any]) -> str:
 
 
 def _payload_kind(payload: dict[str, Any]) -> str:
-    """Return router, review mode, or specialist for one invoke payload."""
+    """Return router, review mode, fast_chat, or specialist for one invoke payload."""
     contract = str(payload.get("output_contract") or "").strip().lower()
     phase = str(payload.get("phase") or "").strip().lower()
+    if contract == "fast_chat_turn" or phase == "fast_chat":
+        return "fast_chat"
     if contract == "router_turn" or phase == "router":
         return "router"
     if contract == "stage_judge_turn" or phase == "stage_judge":
@@ -118,6 +120,29 @@ def _default_deep_body(payload: dict[str, Any]) -> bytes:
             "working_conclusion": "Elderly caregivers are scarce in Singapore.",
         }
     ).encode("utf-8")
+
+
+def _with_fast_chat_mode(body: bytes) -> bytes:
+    """Default missing mode so legacy coach_turn fixtures keep working."""
+    try:
+        parsed = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return body
+    if not isinstance(parsed, dict):
+        return body
+    target = parsed
+    nested = parsed.get("result")
+    if isinstance(nested, dict) and not parsed.get("mode"):
+        target = nested
+    if target.get("mode"):
+        return body
+    if isinstance(target.get("assessment"), dict):
+        target["mode"] = "coaching"
+    elif target.get("response_text"):
+        target["mode"] = "qa"
+    else:
+        return body
+    return json.dumps(parsed).encode("utf-8")
 
 
 def _encode_item(item: Any) -> bytes:
@@ -259,11 +284,17 @@ class FakeAgentCoreRuntime:
                 body = item
             else:
                 body = json.dumps(item).encode("utf-8")
-            return {"contentType": self._content_type, "response": FakeBody(body)}
+            return {
+                "contentType": self._content_type,
+                "response": FakeBody(_with_fast_chat_mode(body)),
+            }
         if self._error is not None:
             raise self._error
         if self._raw is not None:
             body = self._raw
         else:
             body = json.dumps(self._payload or {}).encode("utf-8")
-        return {"contentType": self._content_type, "response": FakeBody(body)}
+        return {
+            "contentType": self._content_type,
+            "response": FakeBody(_with_fast_chat_mode(body)),
+        }

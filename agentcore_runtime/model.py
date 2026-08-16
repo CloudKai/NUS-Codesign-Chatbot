@@ -31,25 +31,39 @@ DEFAULT_MODEL_REGION = "us-west-2"
 MODEL_ROLE_ROUTER = "router"
 MODEL_ROLE_QA = "qa"
 MODEL_ROLE_COACHING = "coaching"
+MODEL_ROLE_FAST_CHAT = "fast_chat"
 MODEL_ROLE_REVIEW_INCREMENTAL = "review_incremental"
 MODEL_ROLE_REVIEW_DEEP = "review_deep"
 MODEL_ROLES = (
     MODEL_ROLE_ROUTER,
     MODEL_ROLE_QA,
     MODEL_ROLE_COACHING,
+    MODEL_ROLE_FAST_CHAT,
     MODEL_ROLE_REVIEW_INCREMENTAL,
     MODEL_ROLE_REVIEW_DEEP,
+)
+REQUIRED_MODEL_ROLES = (
+    MODEL_ROLE_COACHING,
+    MODEL_ROLE_FAST_CHAT,
+    MODEL_ROLE_REVIEW_DEEP,
+)
+OPTIONAL_LEGACY_MODEL_ROLES = (
+    MODEL_ROLE_ROUTER,
+    MODEL_ROLE_QA,
+    MODEL_ROLE_REVIEW_INCREMENTAL,
 )
 LIGHTWEIGHT_MODEL_ROLES = (
     MODEL_ROLE_ROUTER,
     MODEL_ROLE_QA,
     MODEL_ROLE_COACHING,
+    MODEL_ROLE_FAST_CHAT,
     MODEL_ROLE_REVIEW_INCREMENTAL,
 )
 ROLE_ENV_KEYS: dict[str, tuple[str, str]] = {
     MODEL_ROLE_ROUTER: ("ROUTER_MODEL_PROVIDER", "ROUTER_MODEL_ID"),
     MODEL_ROLE_QA: ("QA_MODEL_PROVIDER", "QA_MODEL_ID"),
     MODEL_ROLE_COACHING: ("COACHING_MODEL_PROVIDER", "COACHING_MODEL_ID"),
+    MODEL_ROLE_FAST_CHAT: ("COACHING_MODEL_PROVIDER", "COACHING_MODEL_ID"),
     MODEL_ROLE_REVIEW_INCREMENTAL: (
         "REVIEW_INCREMENTAL_MODEL_PROVIDER",
         "REVIEW_INCREMENTAL_MODEL_ID",
@@ -276,9 +290,11 @@ def role_model_config_from_mapping(
     """Build one role's model config from environment-style keys.
 
     When no per-role keys are present, every role reuses the legacy
-    ``AGENTCORE_MODEL_*`` pair. When any role key is present, all five roles
-    must be complete. Partial role configuration fails closed instead of
-    substituting Haiku for Sonnet, Sonnet for Haiku, or Luna for Claude.
+    ``AGENTCORE_MODEL_*`` pair. When any role key is present, required
+    active roles (Q&A optional, Coaching/fast_chat, Deep Review) must be
+    complete. Legacy router and Incremental Review are validated only when
+    their environment keys are set. Partial required configuration fails
+    closed instead of substituting Haiku for Sonnet.
 
     Args:
         values: Typically ``os.environ``.
@@ -323,10 +339,20 @@ def role_model_config_from_environ(role: str) -> RuntimeModelConfig:
     return role_model_config_from_mapping(os.environ, role)
 
 
+def _role_env_configured(values: Mapping[str, Any] | None, role: str) -> bool:
+    """Return whether provider or model env keys are set for one role."""
+    cleaned = _clean(role).lower()
+    keys = ROLE_ENV_KEYS.get(cleaned)
+    if not keys:
+        return False
+    data = values or {}
+    return bool(_clean(data.get(keys[0])) or _clean(data.get(keys[1])))
+
+
 def validate_all_role_configs(
     values: Mapping[str, Any] | None = None,
 ) -> dict[str, RuntimeModelConfig]:
-    """Validate every model role. Fail closed on the first unsafe pair.
+    """Validate required model roles. Optional legacy roles load when configured.
 
     Args:
         values: Optional mapping. Defaults to ``os.environ``.
@@ -335,10 +361,18 @@ def validate_all_role_configs(
         Mapping of role name to validated config.
 
     Raises:
-        RuntimeModelError: When any role cannot be loaded.
+        RuntimeModelError: When a required role cannot be loaded.
     """
     data = values if values is not None else os.environ
-    return {role: role_model_config_from_mapping(data, role) for role in MODEL_ROLES}
+    if not role_env_keys_present(data):
+        return {role: role_model_config_from_mapping(data, role) for role in MODEL_ROLES}
+    roles: dict[str, RuntimeModelConfig] = {}
+    for role in REQUIRED_MODEL_ROLES:
+        roles[role] = role_model_config_from_mapping(data, role)
+    for role in OPTIONAL_LEGACY_MODEL_ROLES:
+        if _role_env_configured(data, role):
+            roles[role] = role_model_config_from_mapping(data, role)
+    return roles
 
 
 def runtime_model_config_from_environ() -> RuntimeModelConfig:

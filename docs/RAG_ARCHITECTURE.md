@@ -21,25 +21,25 @@ the Knowledge Base or student S3.
                             │
                    selected sources only
                             │
+              deterministic retrieval gate
+                            │
                 ┌───────────┴───────────┐
-                │                       │
+                │ skip                  │ retrieve
                 ▼                       ▼
-        Course materials          Student uploads
-                │                       │
-                ▼                       ▼
-       Bedrock KB Retrieve       S3 extracted text
-       + metadata filter         scoped retrieval
-       + object-key validation          │
-                │                       │
-                └───────────┬───────────┘
-                            ▼
-                  Unified [S#] evidence
+        conversation memory     Course materials
+        + recent turns                  │
+                                Bedrock KB Retrieve
+                                + student-source retrieve
+                                + ownership / selected-source checks
+                                        │
+                                        ▼
+                              Unified [S#] excerpts (2–4)
                             │
                             ▼
               FastAPI runtime rules + untrusted evidence
                             │
                             ▼
-         AgentCore Q&A / Coaching / Review specialists
+              AgentCore fast_chat (one Haiku call)
 ```
 
 ## Authority
@@ -51,7 +51,7 @@ the Knowledge Base or student S3.
 | S3 | File bytes (canonical course objects and owner-scoped student objects) |
 | Bedrock Knowledge Base | Semantic retrieve over official course material only |
 | Local student retriever | Notebook-scoped chunks of extracted student text |
-| AgentCore / Strands | Pedagogical reasoning over authorized `[S#]` evidence. No KB or S3 tools. |
+| AgentCore / Strands | Pedagogical reasoning over authorized `[S#]` evidence. No KB or S3 tools. One Haiku `fast_chat` generation for normal chat. |
 
 The coach cannot choose sources. Prompt instructions are not authorization.
 
@@ -159,9 +159,9 @@ users/<user-id>/notebooks/<notebook-id>/sources/<source-id>/raw|derived
 
 `LocalChunkRetriever` searches only authenticated user + current notebook +
 currently selected source IDs. There is no global student vector namespace.
-Chunking is deterministic (~1,800 characters, overlap, per-source diversity,
-bounded context). Student uploads keep extracted text; they do not use the
-shared course Knowledge Base.
+Chunking is deterministic (~1,800 characters, overlap, per-source diversity).
+Normal fast chat then keeps at most 4 chunks / 8,000 characters. Student
+uploads keep extracted text; they do not use the shared course Knowledge Base.
 
 ## Unified evidence
 

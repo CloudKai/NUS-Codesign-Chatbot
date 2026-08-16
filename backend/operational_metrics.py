@@ -92,3 +92,18 @@ def record_coach_rate_limit(*, category: str) -> None:
 def record_stage_transition(*, outcome: str) -> None:
     """Record an anonymous accepted/rejected stage-decision outcome."""
     _emit("stage_transition", outcome=outcome)
+
+
+def record_coach_turn_perf(fields: dict[str, Any]) -> None:
+    """Record one privacy-safe coaching latency/context breakdown.
+
+    Callers must already strip student text, prompts, excerpts, tokens, and
+    identifiers. This helper only emits the supplied numeric/categorical
+    fields under a stable event name.
+    """
+    cleaned = {
+        key: value
+        for key, value in dict(fields or {}).items()
+        if str(key).strip() and value is not None
+    }
+    _emit("coach_turn_perf", **cleaned)

@@ -611,7 +611,7 @@ def test_operational_metrics_are_aggregate_and_do_not_log_student_content(
             "/api/v1/coach/turn",
             json={
                 "thread_id": thread_id,
-                "student_message": sensitive_prompt,
+                "student_message": "PRIVATE_STUDENT_PROMPT_DO_NOT_LOG What does the selected source say?",
                 "current_stage": "problem_identification",
                 "source_ids": [source["id"]],
                 "response_detail": "short",
