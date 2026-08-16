@@ -27,7 +27,8 @@ Students
 Persistent state lives in **Aurora DSQL** and **S3**. Replacing the app
 container must not destroy conversations, progress, or uploads.
 Production coaching uses `MODEL_PROVIDER=agentcore` against runtime
-`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` (qualifier `DEFAULT`).
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` (qualifier `19`,
+currently also `DEFAULT` liveVersion 19).
 Invokes are stateless; Aurora DSQL `messages` is the only durable transcript.
 The published runtime source of truth is `agentcore_runtime/` in this
 repository (Q&A, Coaching, and Formative Review specialists). Do not treat
@@ -434,7 +435,7 @@ Required production `.env` keys (host-only):
 - `COURSE_MATERIALS_PREFIX=course/`
 - `MODEL_PROVIDER=agentcore`
 - `AGENTCORE_RUNTIME_ARN=arn:aws:bedrock-agentcore:us-west-2:355604674280:runtime/NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`
-- `AGENTCORE_QUALIFIER=DEFAULT`
+- `AGENTCORE_QUALIFIER=19`
 - `AGENTCORE_MODEL_PROVIDER=bedrock`
 - `AGENTCORE_MODEL_ID=global.anthropic.claude-haiku-4-5-20251001-v1:0`
 - `AGENTCORE_MODEL_REGION=us-west-2`

@@ -106,6 +106,7 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert 'CO_DESIGN_UI_URL: "${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}"' in app
     assert 'MODEL_PROVIDER: "agentcore"' in app
     assert 'MOCK_OPENAI: "false"' in app
+    assert 'AGENTCORE_QUALIFIER: "19"' in app
     assert 'AGENTCORE_MODEL_PROVIDER: "bedrock"' in app
     assert 'AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
     assert 'ROUTER_MODEL_PROVIDER: "bedrock"' in app
@@ -147,6 +148,7 @@ def test_production_compose_keeps_host_env_knowledge_base_contract():
     assert 'COURSE_MATERIAL_SYNC_ENABLED: "true"' in app
     assert 'MODEL_PROVIDER: "agentcore"' in app
     assert 'MOCK_OPENAI: "false"' in app
+    assert 'AGENTCORE_QUALIFIER: "19"' in app
     assert 'AGENTCORE_MODEL_PROVIDER: "bedrock"' in app
     assert 'AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
     assert 'ROUTER_MODEL_PROVIDER: "bedrock"' in app
@@ -175,6 +177,7 @@ def test_production_compose_keeps_host_env_knowledge_base_contract():
         "KNOWLEDGE_BASE_TYPE=",
         "COURSE_MATERIALS_BUCKET=",
         "AGENTCORE_RUNTIME_ARN=",
+        "AGENTCORE_QUALIFIER=",
         "GUARDRAIL_ID=",
         "GUARDRAIL_VERSION=",
         "PUBLIC_ORIGIN=",

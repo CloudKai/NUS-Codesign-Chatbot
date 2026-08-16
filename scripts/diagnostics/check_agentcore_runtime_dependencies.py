@@ -75,6 +75,7 @@ def _check_strands_api() -> dict[str, str]:
         _fail("Agent.invoke_async is missing")
     invoke_sig = inspect.signature(invoke)
     _require_param(invoke_sig, "structured_output_model", "Agent.invoke_async")
+    _require_param(invoke_sig, "structured_output_prompt", "Agent.invoke_async")
 
     annotations = getattr(AgentResult, "__annotations__", {})
     if "structured_output" not in annotations and not hasattr(AgentResult, "structured_output"):
@@ -201,14 +202,24 @@ def _check_runtime_contracts() -> None:
         _fail("model kwargs include a fallback")
 
     import agentcore_runtime.main as runtime_main
+    import agentcore_runtime.model as runtime_model
     import agentcore_runtime.structured_coach as structured_coach
 
     if not hasattr(runtime_main, "specialist_invoke"):
         _fail("agentcore_runtime.main.specialist_invoke is missing")
-    if "json.loads(str(" in Path(runtime_main.__file__).read_text(encoding="utf-8"):
+    main_text = Path(runtime_main.__file__).read_text(encoding="utf-8")
+    if "json.loads(str(" in main_text:
         _fail("main.py still parses str(result) as JSON")
     if not hasattr(structured_coach, "coach_turn_from_agent_result"):
         _fail("structured_coach.coach_turn_from_agent_result is missing")
+    repair = getattr(structured_coach, "STRUCTURED_OUTPUT_REPAIR_PROMPT", "")
+    if repair != "Please use the output tool now.":
+        _fail("STRUCTURED_OUTPUT_REPAIR_PROMPT is missing or incorrect")
+    if "structured_output_prompt=STRUCTURED_OUTPUT_REPAIR_PROMPT" not in main_text:
+        _fail("main.py does not pass structured_output_prompt on invoke_async")
+    loader_text = Path(runtime_model.__file__).read_text(encoding="utf-8")
+    if "structured_output_prompt" in loader_text:
+        _fail("model.py must not set structured_output_prompt on BedrockModel")
 
 
 def main() -> int:
@@ -243,6 +254,7 @@ def main() -> int:
     print(f"bedrock_model={strands_api['bedrock_model']}")
     print(f"bedrock_agentcore_app={agentcore_app}")
     print("structured_output_model=present")
+    print("structured_output_prompt=present")
     print("agent_result.structured_output=present")
     print("guardrail_latest_message=present")
     print(f"haiku_model_id={HAIKU_4_5_MODEL_ID}")

@@ -8,10 +8,10 @@ student-facing runtime.
 One runtime hosts the Haiku router, Q&A, Coaching, Incremental Review, and
 Deep Review. The caller sends ``phase`` / ``output_contract`` and
 ``review_mode`` for Review. Specialists use ``tools=[]`` plus Strands
-``structured_output_model``. The harness never parses ``str(AgentResult)``
-as JSON. DSQL history is passed as Strands ``messages``; AgentCore Memory
-is not the transcript. Models are loaded per role from explicit environment
-configuration.
+``structured_output_model`` and a shared ``structured_output_prompt``. The
+harness never parses ``str(AgentResult)`` as JSON. DSQL history is passed
+as Strands ``messages``; AgentCore Memory is not the transcript. Models are
+loaded per role from explicit environment configuration.
 """
 
 from __future__ import annotations
@@ -51,6 +51,7 @@ try:
         payload_review_mode,
     )
     from structured_coach import (
+        STRUCTURED_OUTPUT_REPAIR_PROMPT,
         CoachTurnExtractionError,
         conversation_for_invoke,
         coach_turn_from_agent_result,
@@ -101,6 +102,7 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
         payload_review_mode,
     )
     from agentcore_runtime.structured_coach import (
+        STRUCTURED_OUTPUT_REPAIR_PROMPT,
         CoachTurnExtractionError,
         conversation_for_invoke,
         coach_turn_from_agent_result,
@@ -213,7 +215,11 @@ async def _structured_role_invoke(
     output_text: Callable[[Any], str],
     include_history: bool,
 ) -> dict[str, Any]:
-    """Run one tools-free structured invoke for a named model role."""
+    """Run one tools-free structured invoke for a named model role.
+
+    Every Bedrock role passes ``STRUCTURED_OUTPUT_REPAIR_PROMPT`` so Strands'
+    structured-output recovery turn is not classified as PROMPT_ATTACK.
+    """
     from strands import Agent
 
     started = time.monotonic()
@@ -306,6 +312,7 @@ async def _structured_role_invoke(
         result = await agent.invoke_async(
             user_prompt,
             structured_output_model=output_model,
+            structured_output_prompt=STRUCTURED_OUTPUT_REPAIR_PROMPT,
         )
         output = parse(result)
         enforce_mantle_guardrail(

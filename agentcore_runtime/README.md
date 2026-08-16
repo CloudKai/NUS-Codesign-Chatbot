@@ -17,8 +17,10 @@ implementation.
 3. Canonical pedagogy lives in `prompts/`. FastAPI sends runtime rules only.
    The router prompt is classification-only and must not receive full RAG.
 4. DSQL history is Strands `messages`. AgentCore Memory is not the transcript.
-5. `invoke_async(..., structured_output_model=...)` then
-   `result.structured_output`. Text-block JSON is a fallback.
+5. `invoke_async(..., structured_output_model=..., structured_output_prompt=...)`
+   then `result.structured_output`. Text-block JSON is a fallback. The custom
+   repair prompt is `Please use the output tool now.` so Guardrail v3 does not
+   classify the Strands structured-output recovery turn as PROMPT_ATTACK.
 6. Never `json.loads(str(result))`.
 7. Failures return `{ok: false, error: true, category: ...}`.
 8. Per-role `load_runtime_model()` via `ROUTER_*` / `QA_*` / `COACHING_*` /
