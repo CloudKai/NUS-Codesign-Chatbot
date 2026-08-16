@@ -22,7 +22,7 @@ from backend.student_store import (
 
 from .dsql_connection import (
     DsqlConnectionProxy,
-    connect_dsql,
+    pooled_connect_dsql,
     run_dsql_transaction,
 )
 from .dsql_schema import RUNTIME_ROLE_NAME
@@ -166,14 +166,20 @@ class DsqlStudentStore(StudentStore):
             setattr(self, name, _make(unbound, name))
 
     def _connect(self) -> DsqlConnectionProxy:
-        """Open one DSQL connection (or the injected test factory)."""
+        """Check out one pooled DSQL connection (or the injected test factory)."""
         if self._connection_factory is not None:
             return self._connection_factory()
-        return connect_dsql(
+        from backend.settings import settings
+
+        return pooled_connect_dsql(
             endpoint=self._endpoint,
             region=self._region,
             database=self._database,
             user=self._user,
+            min_size=settings.dsql_pool_min_size,
+            max_size=settings.dsql_pool_max_size,
+            max_lifetime_seconds=settings.dsql_pool_max_lifetime_seconds,
+            max_idle_seconds=settings.dsql_pool_max_idle_seconds,
         )
 
     def delete_thread(self, thread_id: str) -> None:

@@ -13,6 +13,7 @@ import logging
 import os
 import random
 import re
+import threading
 import time
 from contextlib import contextmanager
 from typing import Any, Callable, Iterator, Sequence, TypeVar
@@ -195,8 +196,13 @@ class DsqlConnectionProxy:
     ``StudentStore`` can share query text with the DSQL dialect.
     """
 
-    def __init__(self, raw: Any):
+    def __init__(self, raw: Any, *, release: Callable[[], None] | None = None):
+        """Wrap *raw*. If *release* is given, ``close()`` calls it instead of
+        closing the socket — used to return a pooled connection to its pool
+        rather than tearing it down.
+        """
         self._raw = raw
+        self._release = release
 
     def execute(self, sql: str, params: Sequence[Any] | None = None) -> DsqlCursorResult:
         """Execute one adapted statement and return a fetchable result."""
@@ -233,8 +239,11 @@ class DsqlConnectionProxy:
         self._raw.rollback()
 
     def close(self) -> None:
-        """Close the underlying connection."""
-        self._raw.close()
+        """Release the underlying connection: return it to its pool, or close it."""
+        if self._release is not None:
+            self._release()
+        else:
+            self._raw.close()
 
     def __enter__(self) -> DsqlConnectionProxy:
         return self
@@ -437,3 +446,168 @@ def dsql_connection(**kwargs: Any) -> Iterator[DsqlConnectionProxy]:
         raise
     finally:
         connection.close()
+
+
+# --- Connection pooling ----------------------------------------------------
+#
+# connect_dsql() above pays a fresh TLS handshake plus a live AWS API call
+# (IAM DbConnect token mint) on every single call. Under concurrent load that
+# is the dominant cost, not the query itself. A pooled connection reuses an
+# already-authenticated socket across many checkouts; the IAM token is only
+# needed again when the pool opens a brand-new physical connection (at
+# startup, on growth, or when a connection is recycled), so pooling is safe
+# as long as connections are recycled well before the token's ExpiresIn.
+
+_pool_registry: dict[tuple[str, str, str, str, int], Any] = {}
+_pool_registry_lock = threading.Lock()
+
+
+def _pool_key(*, endpoint: str, region: str, database: str, user: str, port: int) -> tuple[str, str, str, str, int]:
+    return (endpoint, region, database, user, port)
+
+
+def _make_token_connection_class(token_provider: Callable[[], str]) -> type:
+    """Build a psycopg Connection subclass that injects a fresh token per connect.
+
+    The pool calls ``connection_class.connect(conninfo, **kwargs)`` every time
+    it opens a *new* physical connection (not on every checkout). Overriding
+    ``connect`` here is the documented way to supply a credential that must be
+    re-fetched per physical connection rather than baked into a static conninfo.
+    """
+    import psycopg
+
+    class _TokenConnection(psycopg.Connection):
+        @classmethod
+        def connect(cls, conninfo: str = "", **kwargs: Any) -> Any:
+            kwargs = dict(kwargs)
+            kwargs["password"] = token_provider()
+            return super().connect(conninfo, **kwargs)
+
+    return _TokenConnection
+
+
+def get_dsql_pool(
+    *,
+    endpoint: str,
+    region: str,
+    database: str = "postgres",
+    user: str = "co_design_app",
+    port: int = 5432,
+    token_provider: Callable[[], str] | None = None,
+    min_size: int = 2,
+    max_size: int = 10,
+    max_lifetime_seconds: float = 600,
+    max_idle_seconds: float = 300,
+) -> Any:
+    """Return the process-wide pool for one (endpoint, database, user), opening it if needed.
+
+    One pool is shared across every ``DsqlStudentStore`` instance in the
+    process (they all connect as the same ``co_design_app`` role; per-student
+    isolation is enforced by application-level ownership checks, not by
+    per-student connections), so pooling is process-wide, not per-store.
+    """
+    key = _pool_key(endpoint=endpoint, region=region, database=database, user=user, port=port)
+    existing = _pool_registry.get(key)
+    if existing is not None:
+        return existing
+    with _pool_registry_lock:
+        existing = _pool_registry.get(key)
+        if existing is not None:
+            return existing
+        try:
+            from psycopg_pool import ConnectionPool
+        except ImportError as error:  # pragma: no cover - production dependency
+            raise RuntimeError(
+                "psycopg-pool is required for pooled DSQL connections "
+                "(pip install 'psycopg[binary,pool]')"
+            ) from error
+
+        def _default_token() -> str:
+            return generate_dsql_auth_token(endpoint=endpoint, region=region)
+
+        provider = token_provider or _default_token
+        connection_class = _make_token_connection_class(provider)
+        pool = ConnectionPool(
+            conninfo="",
+            connection_class=connection_class,
+            kwargs={
+                "host": endpoint,
+                "port": port,
+                "dbname": database,
+                "user": user,
+                "sslmode": "verify-full",
+                "sslrootcert": os.getenv("DSQL_SSLROOTCERT", "system"),
+            },
+            min_size=min_size,
+            max_size=max_size,
+            max_lifetime=max_lifetime_seconds,
+            max_idle=max_idle_seconds,
+            open=True,
+        )
+        _pool_registry[key] = pool
+        logger.info(
+            "Opened DSQL connection pool for %s (min=%s max=%s max_lifetime=%ss)",
+            endpoint,
+            min_size,
+            max_size,
+            max_lifetime_seconds,
+        )
+        return pool
+
+
+def close_all_dsql_pools() -> None:
+    """Close every pool opened via ``get_dsql_pool``. Call on process shutdown."""
+    with _pool_registry_lock:
+        for pool in _pool_registry.values():
+            try:
+                pool.close()
+            except Exception:  # noqa: BLE001
+                logger.warning("Error closing a DSQL connection pool", exc_info=True)
+        _pool_registry.clear()
+
+
+def pooled_connect_dsql(
+    *,
+    endpoint: str,
+    region: str,
+    database: str = "postgres",
+    user: str = "co_design_app",
+    port: int = 5432,
+    token_provider: Callable[[], str] | None = None,
+    min_size: int = 2,
+    max_size: int = 10,
+    max_lifetime_seconds: float = 600,
+    max_idle_seconds: float = 300,
+) -> DsqlConnectionProxy:
+    """Check out one connection from the process-wide pool.
+
+    Same validation and call shape as ``connect_dsql``, so it's a drop-in
+    replacement at call sites. ``close()`` on the returned proxy returns the
+    connection to the pool instead of closing the socket.
+    """
+    if not endpoint.strip():
+        raise ValueError("DSQL_ENDPOINT is required when DATABASE_PROVIDER=dsql")
+    if not region.strip():
+        raise ValueError("AWS_REGION is required when DATABASE_PROVIDER=dsql")
+    role = (user or "").strip()
+    if not role:
+        raise ValueError("DSQL_USER is required when DATABASE_PROVIDER=dsql")
+    if role.lower() == "admin":
+        raise ValueError(
+            "DSQL_USER=admin is not allowed for application runtime; "
+            "use co_design_app (admin is for scripts/init_dsql.py only)"
+        )
+    pool = get_dsql_pool(
+        endpoint=endpoint,
+        region=region,
+        database=database,
+        user=role,
+        port=port,
+        token_provider=token_provider,
+        min_size=min_size,
+        max_size=max_size,
+        max_lifetime_seconds=max_lifetime_seconds,
+        max_idle_seconds=max_idle_seconds,
+    )
+    raw = pool.getconn()
+    return DsqlConnectionProxy(raw, release=lambda: pool.putconn(raw))

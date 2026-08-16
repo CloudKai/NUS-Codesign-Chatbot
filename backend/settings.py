@@ -82,6 +82,18 @@ class Settings:
         ).strip()
         or "system"
     )
+    # Pooled connections avoid paying a fresh TLS handshake + IAM DbConnect
+    # token mint (a live AWS API call) on every single DB call. max_lifetime
+    # must stay well under the token's 900s ExpiresIn so connections recycle
+    # (and re-authenticate) before the token that opened them could expire.
+    dsql_pool_min_size: int = int(os.getenv("DSQL_POOL_MIN_SIZE", "2"))
+    dsql_pool_max_size: int = int(os.getenv("DSQL_POOL_MAX_SIZE", "10"))
+    dsql_pool_max_lifetime_seconds: float = float(
+        os.getenv("DSQL_POOL_MAX_LIFETIME_SECONDS", "600")
+    )
+    dsql_pool_max_idle_seconds: float = float(
+        os.getenv("DSQL_POOL_MAX_IDLE_SECONDS", "300")
+    )
     user_uploads_bucket: str = field(
         default_factory=lambda: os.getenv("USER_UPLOADS_BUCKET", "").strip()
     )

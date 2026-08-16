@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from backend.context_planner import memory_from_metadata
 from backend.domain import (
@@ -399,8 +402,10 @@ class CoachApplicationService:
             raise ValueError(
                 "Research workflow contract is not ready; use explicit reset/bootstrap"
             )
+        _timing_start = time.monotonic()
         prepared_request = self._authoritative_request(request)
         initial_thread = self._notebooks.get_thread(prepared_request.thread_id)
+        _db_read_ms = (time.monotonic() - _timing_start) * 1000
         if not initial_thread:
             raise ValueError("Notebook not found")
         should_generate_title = str(initial_thread.get("name") or "") in {
@@ -410,7 +415,9 @@ class CoachApplicationService:
         } and not any(
             message.get("role") == "user" for message in prepared_request.history
         )
+        _model_call_start = time.monotonic()
         turn = self._workflow.run(prepared_request)
+        _model_call_ms = (time.monotonic() - _model_call_start) * 1000
         research_observation = _research_observation_from_coding(
             self._workflow.take_provisional_research_coding(
                 prepared_request.thread_id
@@ -480,6 +487,7 @@ class CoachApplicationService:
                     "auto_advanced_to": pending.to_stage,
                 }
             )
+        _db_write_start = time.monotonic()
         self._store.persist_coach_turn(
             prepared_request.thread_id,
             expected_stage=prepared_request.current_stage,
@@ -566,6 +574,18 @@ class CoachApplicationService:
             idempotency_fingerprint=idempotency_fingerprint,
             research_observation=research_observation,
             auto_advance=auto_advance,
+        )
+        _db_write_ms = (time.monotonic() - _db_write_start) * 1000
+        _total_ms = (time.monotonic() - _timing_start) * 1000
+        logger.info(
+            "coach_turn_timing thread_id=%s db_read_ms=%.1f model_call_ms=%.1f "
+            "db_write_ms=%.1f total_ms=%.1f history_len=%d",
+            prepared_request.thread_id,
+            _db_read_ms,
+            _model_call_ms,
+            _db_write_ms,
+            _total_ms,
+            len(prepared_request.history),
         )
         return turn
 
