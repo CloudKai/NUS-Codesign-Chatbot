@@ -492,6 +492,87 @@
         opacity:.9;
     }
 
+    .st-key-deep_review_control {
+        margin:0 0 .55rem;
+        gap:10px !important;
+    }
+
+    .st-key-deep_review_control [data-testid="stVerticalBlock"] {
+        gap:10px !important;
+    }
+
+    .st-key-deep_review_control [data-testid="stElementContainer"] {
+        margin-top:0 !important;
+        margin-bottom:0 !important;
+    }
+
+    .st-key-studio_scroll [data-testid="stElementContainer"]:has(
+        + .st-key-start_deep_review
+    ) {
+        margin-bottom:0 !important;
+    }
+
+    .st-key-studio_scroll .st-key-start_deep_review {
+        margin-top:calc(10px - 1rem) !important;
+    }
+
+    .st-key-deep_review_control .st-key-start_deep_review {
+        margin-top:0 !important;
+    }
+
+    .st-key-start_deep_review,
+    .st-key-start_deep_review [data-testid="stButton"],
+    .st-key-start_deep_review button {
+        width:100% !important;
+    }
+
+    .st-key-start_deep_review button {
+        min-height:2.5rem !important;
+        border:1.5px solid color-mix(
+            in srgb,var(--cd-muted) 45%,var(--cd-border)
+        ) !important;
+        border-radius:.7rem !important;
+        background:var(--cd-subtle) !important;
+        color:var(--cd-muted) !important;
+        font-weight:700 !important;
+        opacity:1 !important;
+        box-shadow:none !important;
+    }
+
+    .st-key-start_deep_review button p,
+    .st-key-start_deep_review button span {
+        color:inherit !important;
+        -webkit-text-fill-color:currentColor !important;
+        font-weight:700 !important;
+    }
+
+    .st-key-start_deep_review [data-testid="stBaseButton-primary"]:not(:disabled) {
+        background:var(--cd-accent) !important;
+        border-color:var(--cd-accent) !important;
+        color:#fff !important;
+    }
+
+    .st-key-start_deep_review [data-testid="stBaseButton-primary"]:not(:disabled) p,
+    .st-key-start_deep_review [data-testid="stBaseButton-primary"]:not(:disabled) span {
+        color:#fff !important;
+        -webkit-text-fill-color:#fff !important;
+    }
+
+    .st-key-start_deep_review [data-testid="stBaseButton-primary"]:not(:disabled):hover {
+        background:var(--cd-accent-hover) !important;
+        border-color:var(--cd-accent-hover) !important;
+    }
+
+    .st-key-start_deep_review button:disabled {
+        cursor:not-allowed !important;
+        border-color:color-mix(
+            in srgb,var(--cd-muted) 45%,var(--cd-border)
+        ) !important;
+        color:var(--cd-muted) !important;
+        background:var(--cd-subtle) !important;
+        opacity:1 !important;
+    }
+
     /* Current Thinking Path stage in Review — stronger outline on the
        rounded details card only (not the sharp outer expander wrapper). */
     .st-key-studio_scroll [class*="st-key-review_"][class*="_current"]

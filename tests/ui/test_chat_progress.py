@@ -198,19 +198,23 @@ def test_citation_buttons_render_from_done_payload_without_get_source(
     )
 
 
-def test_deep_review_button_appears_after_qualifying_turn(monkeypatch) -> None:
-    """Deep Review availability is reconciled from notebook metadata after done."""
+def _deep_review_button(app: AppTest) -> Any:
+    """Return the always-visible Start Deep Review control."""
+    return next(
+        button for button in app.button if button.label == "Start Deep Review"
+    )
+
+
+def _caption_text(app: AppTest) -> str:
+    """Join Streamlit captions for Deep Review progress assertions."""
+    return "\n".join(caption.value or "" for caption in app.caption)
+
+
+def _force_qualifying_coaching(monkeypatch: Any) -> None:
+    """Make mock coaching turns count toward the persisted Deep Review counter."""
     from backend.domain import ProviderAssessmentResult
     from backend.mock_provider import DeterministicCoachProvider
-    from backend.settings import settings
-    from backend.student_store import StudentStore
-    from backend.specialists.review_orchestration import (
-        COUNTER_SETTINGS_KEY,
-        parse_coaching_turns_since_deep_review,
-    )
-    from ui import chat
 
-    monkeypatch.setattr(settings, "deep_review_interval_turns", 1)
     real_assess = DeterministicCoachProvider.assess
 
     def qualifying_assess(self, request: Any) -> ProviderAssessmentResult:
@@ -220,6 +224,29 @@ def test_deep_review_button_appears_after_qualifying_turn(monkeypatch) -> None:
         return result
 
     monkeypatch.setattr(DeterministicCoachProvider, "assess", qualifying_assess)
+
+
+def _notebook_deep_review_counter(thread_id: str) -> int:
+    """Read the persisted Deep Review counter for ``thread_id``."""
+    from backend.student_store import StudentStore
+    from backend.specialists.review_orchestration import (
+        COUNTER_SETTINGS_KEY,
+        parse_coaching_turns_since_deep_review,
+    )
+
+    thread = StudentStore().get_thread(thread_id) or {}
+    return parse_coaching_turns_since_deep_review(
+        (thread.get("metadata") or {}).get(COUNTER_SETTINGS_KEY)
+    )
+
+
+def test_deep_review_button_appears_after_qualifying_turn(monkeypatch) -> None:
+    """Deep Review stays visible; the qualifying turn unlocks the existing button."""
+    from backend.settings import settings
+    from ui import chat
+
+    monkeypatch.setattr(settings, "deep_review_interval_turns", 1)
+    _force_qualifying_coaching(monkeypatch)
 
     reruns: list[str] = []
     real_rerun = chat.rerun_app
@@ -231,15 +258,99 @@ def test_deep_review_button_appears_after_qualifying_turn(monkeypatch) -> None:
     monkeypatch.setattr(chat, "rerun_app", spy_rerun)
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    assert not any(button.label == "Start Deep Review" for button in app.button)
+    button = _deep_review_button(app)
+    assert button.disabled is True
     app.chat_input[0].set_value(
         "I want to evaluate a crossing design for older pedestrians."
     ).run()
     assert not app.exception
-    thread = StudentStore().get_thread(app.session_state["thread_id"]) or {}
-    counter = parse_coaching_turns_since_deep_review(
-        (thread.get("metadata") or {}).get(COUNTER_SETTINGS_KEY)
-    )
-    assert counter >= 1
+    assert _notebook_deep_review_counter(app.session_state["thread_id"]) >= 1
     assert reruns == ["app"]
-    assert any(button.label == "Start Deep Review" for button in app.button)
+    button = _deep_review_button(app)
+    assert button.disabled is False
+
+
+def test_deep_review_progress_caption_refreshes_after_qualifying_turn(
+    monkeypatch,
+) -> None:
+    """Studio reruns when the persisted counter changes, not only when unlocked."""
+    from backend.settings import settings
+    from ui import chat
+
+    monkeypatch.setattr(settings, "deep_review_interval_turns", 3)
+    _force_qualifying_coaching(monkeypatch)
+
+    reruns: list[str] = []
+    real_rerun = chat.rerun_app
+
+    def spy_rerun() -> None:
+        reruns.append("app")
+        real_rerun()
+
+    monkeypatch.setattr(chat, "rerun_app", spy_rerun)
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    button = _deep_review_button(app)
+    assert button.disabled is True
+    assert "0/3 completed" in _caption_text(app)
+    app.chat_input[0].set_value(
+        "I want to evaluate a crossing design for older pedestrians."
+    ).run()
+    assert not app.exception
+    assert _notebook_deep_review_counter(app.session_state["thread_id"]) == 1
+    assert reruns == ["app"]
+    button = _deep_review_button(app)
+    assert button.disabled is True
+    captions = _caption_text(app)
+    assert "1/3 completed" in captions
+    assert "Deep Review is ready." not in captions
+
+
+def test_ineligible_deep_review_click_does_not_start(monkeypatch) -> None:
+    """A locked Start Deep Review control must not call the Deep Review route."""
+    from ui.panels import studio as studio_panel
+
+    calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+
+    def spy_start(*args: Any, **kwargs: Any) -> None:
+        calls.append((args, kwargs))
+
+    monkeypatch.setattr(studio_panel, "start_deep_review", spy_start)
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    button = _deep_review_button(app)
+    assert button.disabled is True
+    button.click().run()
+    assert not app.exception
+    assert calls == []
+
+
+def test_deep_review_failure_keeps_counter_and_safe_error(monkeypatch) -> None:
+    """Failed Deep Review leaves eligibility intact and hides provider text."""
+    from backend.settings import settings
+    from ui.panels import studio as studio_panel
+
+    monkeypatch.setattr(settings, "deep_review_interval_turns", 1)
+    _force_qualifying_coaching(monkeypatch)
+
+    def boom(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("AgentCore timeout in us-west-2")
+
+    monkeypatch.setattr(studio_panel, "start_deep_review", boom)
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app.chat_input[0].set_value(
+        "I want to evaluate a crossing design for older pedestrians."
+    ).run()
+    assert not app.exception
+    button = _deep_review_button(app)
+    assert button.disabled is False
+    before = _notebook_deep_review_counter(app.session_state["thread_id"])
+    button.click().run()
+    assert not app.exception
+    errors = "\n".join(error.value or "" for error in app.error)
+    assert "Deep Review could not be completed. Try again." in errors
+    assert "AgentCore" not in errors
+    assert "us-west-2" not in errors
+    assert _notebook_deep_review_counter(app.session_state["thread_id"]) == before
+    assert _deep_review_button(app).disabled is False

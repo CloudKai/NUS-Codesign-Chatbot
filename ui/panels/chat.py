@@ -505,12 +505,17 @@ def assistant_message_from_turn(
     }
 
 
+def _deep_review_counter(metadata: dict[str, Any]) -> int:
+    """Return the persisted Deep Review coaching-turn counter."""
+    return parse_coaching_turns_since_deep_review(
+        metadata.get(COUNTER_SETTINGS_KEY)
+    )
+
+
 def _deep_review_is_available(metadata: dict[str, Any]) -> bool:
     """Return whether notebook metadata currently unlocks Deep Review."""
     return explicit_deep_review_available(
-        coaching_turns_since_deep_review=parse_coaching_turns_since_deep_review(
-            metadata.get(COUNTER_SETTINGS_KEY)
-        ),
+        coaching_turns_since_deep_review=_deep_review_counter(metadata),
         interval=settings.deep_review_interval_turns,
     )
 
@@ -521,21 +526,20 @@ def apply_completed_turn_to_session(
     thread_id: str,
     pre_stage: str,
     pre_deep_review_available: bool,
+    pre_deep_review_counter: int,
 ) -> bool:
     """Update session journey from the completed turn and decide a studio rerun.
-
-    Renders stay on the ``done`` payload.     store.forget_turn_reads(thread_id)
-    updated_thread = store.get_thread(thread_id) or {}
 
     Args:
         turn: Validated ``done`` payload.
         thread_id: Active notebook id.
         pre_stage: Thinking Path stage captured before the stream started.
         pre_deep_review_available: Deep Review entitlement before the stream.
+        pre_deep_review_counter: Persisted coaching-turn counter before the stream.
 
     Returns:
-        True when Thinking Path, pending Next, or Deep Review must rerun after
-        the reply is already visible.
+        True when Thinking Path, pending Next, or Deep Review progress must
+        rerun after the reply is already visible.
     """
     store.forget_turn_reads(thread_id)
     updated_thread = store.get_thread(thread_id) or {}
@@ -550,11 +554,13 @@ def apply_completed_turn_to_session(
     st.session_state.learning_journey = updated_journey
     st.session_state.response_detail = updated_journey["response_detail"]
     post_available = _deep_review_is_available(updated_meta)
+    post_counter = _deep_review_counter(updated_meta)
     return bool(
         turn.auto_advanced_to
         or turn.pending_transition is not None
         or updated_journey["current_stage"] != pre_stage
         or post_available != pre_deep_review_available
+        or post_counter != pre_deep_review_counter
     )
 
 
@@ -575,7 +581,7 @@ def handle_prompt(
     progress events and then the final validated reply. On ``done``, the
     assistant message is rendered from that payload in this run. A full
     ``st.rerun()`` runs only when Thinking Path, a pending stage transition,
-    or Deep Review availability changed — and only after the reply is drawn.
+    or Deep Review progress changed — and only after the reply is drawn.
     """
     journey = normalize_journey(st.session_state.learning_journey)
     sources = store.list_sources(st.session_state.thread_id)
@@ -587,10 +593,10 @@ def handle_prompt(
     allow_model_knowledge = not selected_sources and not uploads
     st.session_state.allow_model_knowledge = allow_model_knowledge
     pre_thread = store.get_thread(st.session_state.thread_id) or {}
+    pre_meta = dict(pre_thread.get("metadata") or {})
     pre_stage = str(journey.get("current_stage") or DEFAULT_STAGE)
-    pre_deep_review_available = _deep_review_is_available(
-        dict(pre_thread.get("metadata") or {})
-    )
+    pre_deep_review_available = _deep_review_is_available(pre_meta)
+    pre_deep_review_counter = _deep_review_counter(pre_meta)
     with target:
         if existing_user_message_id is None:
             with st.chat_message("user", avatar=":material/person:"):
@@ -731,6 +737,7 @@ def handle_prompt(
                 thread_id=st.session_state.thread_id,
                 pre_stage=pre_stage,
                 pre_deep_review_available=pre_deep_review_available,
+                pre_deep_review_counter=pre_deep_review_counter,
             )
             if needs_reconcile:
                 st.session_state.composer_nonce += 1

@@ -297,7 +297,7 @@ Required sections:
 
 Avoid:
 
-- Repeating a phase counter or progress history inside Review.
+- Repeating a phase counter or progress history inside Review. A single Deep Review eligibility caption beside Start Deep Review is not a Journey counter.
 - Generic praise without evidence or a next action.
 - Duplicate summaries with different labels.
 - Charts, dashboards, or analytics beyond the Facione icon table.

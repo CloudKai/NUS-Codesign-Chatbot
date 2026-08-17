@@ -3,10 +3,12 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock`  
-**HEAD:** `b81a5b09ce622889f60fdcd743c23d7845eb9ee8` (`b81a5b0`)  
+**HEAD:** `a853b4c15dd3f26a6b1c835d685c7a2f62f3a205` (`a853b4c`)  
 **Origin:** this SHA is `origin/Integrate-Bedrock`. `origin/main` is `2386d65`.
 
 **Live cutover 2026-08-17:** same AgentCore ARN, new version **21** on DEFAULT; EC2 app image `cde2300-chatbot:b81a5b0`; Compose / host pin `AGENTCORE_SESSION_GENERATION=2`.
+
+**Always-visible Deep Review button:** Review always shows **Start Deep Review**. Locked/unlocked state and the `{n}/{interval}` caption are derived from persisted `coaching_turns_since_deep_review` and `DEEP_REVIEW_INTERVAL_TURNS`. Eligibility remains FastAPI/DSQL (`explicit_deep_review_available`); Streamlit does not keep a second counter. Ineligible `POST /api/v1/threads/{id}/deep-review` still returns 400. This UI change is not in the live EC2 image.
 
 **Divergence vs `main`:** history-only ancestry. `git log --no-merges origin/Integrate-Bedrock..origin/main` is empty, and no file exists on `main` that is missing from this branch. `main`’s extra commits are merge commits of PRs #7–#12. This branch is strictly ahead in content.
 
@@ -154,7 +156,82 @@ rather than timing-dependent (`tests/persistence/test_message_ordering.py`).
 > For current HEAD, CI, and deploy impact, use **CURRENT STATUS** above and
 > [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md).
 
-### Current phase — Fast Chat first-pass structured output, retry bounds, Deep Review cap
+### Current phase — Always-visible Deep Review button (server-owned eligibility)
+
+**Committed on `Integrate-Bedrock`.** No AgentCore publish, EC2 deploy, or live
+AWS inference was performed. Fast Chat, RAG, stage advancement, Sonnet, and
+the Deep Review HTTP contract are unchanged. Live app image remains
+`cde2300-chatbot:b81a5b0`.
+
+#### What this phase changed
+
+1. **Always-visible control.** Review always renders `Start Deep Review`.
+   Locked = Streamlit `disabled=True` with
+   `Deep Review unlocks after {interval} coaching turns — {n}/{interval} completed.`
+   Unlocked idle = `type="primary"` plus wait copy. Full-width control with a
+   10px caption gap. Locked uses a muted outlined shade; ready uses a solid
+   `--cd-accent` fill (`20-studio.css`).
+2. **Server-owned eligibility.** Presentation uses
+   `deep_review_control_view(counter, interval, running=...)` over
+   `parse_coaching_turns_since_deep_review` and
+   `settings.deep_review_interval_turns` (bounded). No Streamlit counter.
+   FastAPI still rejects ineligible calls with 400.
+3. **Click / loading.** Eligible click sets session
+   `_deep_review_running_thread_id` and reuses one
+   `_deep_review_idempotency_key`, shows compact `st.status`, and calls
+   existing `start_deep_review()` → `POST /deep-review`. Success clears the
+   guard and reruns (backend resets the counter to 0). Failure clears the
+   guard, shows `Deep Review could not be completed. Try again.`, and keeps
+   eligibility.
+4. **Caption refresh.** Chat reruns studio when the persisted counter
+   changes, not only when the boolean entitlement flips, so 1/3 and 2/3
+   update after qualifying coaching turns.
+5. **DESIGN.md.** One-sentence clarification that a single eligibility
+   caption is not a Journey counter.
+
+#### Files
+
+- `ui/panels/studio.py` — view helper, always-visible button, status, guard
+- `ui/panels/chat.py` — studio rerun on counter change
+- `ui/assets/styles/20-studio.css` — full-width button, 10px gap, locked vs ready shades
+- `tests/ui/test_deep_review_control.py` — helper views at 0/1/2/3 + running
+- `tests/ui/test_chat_progress.py` — always present; disabled then enabled;
+  ineligible click spy; failure keeps counter and safe error
+- `DESIGN.md` — eligibility caption is not a second Journey counter
+- `docs/IMPLEMENTATION_STATUS.md` — this phase
+
+#### Validation
+
+- `ruff check` on touched Python files: passed.
+- `python -m compileall -q backend ui streamlit_app.py tests scripts`: passed.
+- Targeted: `tests/ui/test_deep_review_control.py`,
+  `tests/ui/test_chat_progress.py`, `tests/domain/test_deep_review_execution.py`,
+  `tests/domain/test_review_agent.py`, `tests/http/test_deep_review.py`:
+  57 passed.
+- Full mock pytest: 1305 passed.
+- No live AWS, AgentCore, Bedrock, DSQL, S3, or KB calls.
+
+#### Migration / compatibility / rollback
+
+No schema, API, or counting-rule change. Rollback is a code-only revert of
+the Streamlit presentation. Existing notebooks keep
+`coaching_turns_since_deep_review`. Failed Deep Review still does not reset
+the counter.
+
+#### Risks / blockers
+
+Leaving the Review **tab** still does not cancel an in-flight Deep Review
+(`st.tabs` is client-side). A full Streamlit rerun (Chat send, notebook
+switch) can show a UI error while FastAPI finishes; notebook lease remains 1
+in-flight request.
+
+#### Next exact action
+
+Do **not** publish AgentCore or rebuild the EC2 image for this
+presentation-only patch unless a new app image is requested. Live image
+remains `cde2300-chatbot:b81a5b0`.
+
+### Previous phase — Fast Chat first-pass structured output, retry bounds, Deep Review cap
 
 **Code is local on a worktree of `Integrate-Bedrock` at `e88393d` and is not
 committed or deployed.** No AgentCore publish, EC2 deploy, or live AWS
