@@ -56,6 +56,7 @@ from backend.providers import (
 from backend.rate_limit import RateLimitExceeded
 from backend.settings import settings, validate_production_configuration
 from backend.source_library import CourseMaterialSyncCoordinator, list_visible_sources
+from backend.turn_perf import begin_coach_turn_perf, record_field
 from backend.student_store import (
     CoachIdempotencyConflictError,
     CoachRequestInProgressError,
@@ -1254,6 +1255,10 @@ def create_app(
         try:
             # Rate limits apply inside CoachApplicationService only when a new
             # provider execution is claimed, so same-key waiters can converge.
+            begin_coach_turn_perf()
+            auth_ms = getattr(http_request.state, "auth_context_ms", None)
+            if auth_ms is not None:
+                record_field("auth_context_ms", auth_ms)
             turn = owner.coach.submit(request)
         except RateLimitExceeded as error:
             _record_coach_rate_limit(
@@ -1480,6 +1485,10 @@ def create_app(
 
             def _worker() -> None:
                 try:
+                    begin_coach_turn_perf()
+                    auth_ms = getattr(http_request.state, "auth_context_ms", None)
+                    if auth_ms is not None:
+                        record_field("auth_context_ms", auth_ms)
                     completed = owner.coach.submit(request, progress=_progress)
                     bus.put({"event": "_complete", "turn": completed})
                 except BaseException as error:

@@ -6,6 +6,7 @@ import pytest
 
 from backend.application import CoachApplicationService
 from backend.chat_service import ChatOptions, StudentChatEngine
+from backend.coaching.mode_policy import QA_EVIDENCE_GAP_RESPONSE
 from backend.domain import (
     CitationReference,
     CoachRequest,
@@ -30,6 +31,7 @@ from backend.retrieval import (
     course_material_id_from_object_key,
     expand_session_query_text,
     focused_excerpt,
+    prefer_session_matching_sources,
     retrieval_sources_from_notebook,
 )
 from backend.source_library import add_file_sources, add_text_source, image_inputs_for_source_ids
@@ -207,6 +209,48 @@ def test_expand_session_query_text_aliases_lecture_and_week():
     assert "lecture 1" in expand_session_query_text("week1")
     assert "week 1" in expand_session_query_text("lecture01")
     assert "lecture 1" in expand_session_query_text("lecture01")
+
+
+def test_prefer_session_matching_sources_keeps_week_one_among_selected():
+    """Week 1 questions must not retrieve Week 9/10 merely because they are selected."""
+    week1 = RetrievalSource(
+        source_id="week-1",
+        label="S1",
+        title="Week 1 Introduction to innovation v3.pdf",
+        text="Innovation-driven economy",
+        object_key="course/lectureNotes/Week 1 Introduction to innovation v3.pdf",
+        virtual_course_source=True,
+    )
+    week10 = RetrievalSource(
+        source_id="week-10",
+        label="S2",
+        title="Week 10 Storytelling.pdf",
+        text="Storytelling and course schedule",
+        object_key="course/lectureNotes/Week 10 Storytelling.pdf",
+        virtual_course_source=True,
+    )
+    matched = prefer_session_matching_sources(
+        (week1, week10),
+        "what does week 1 material cover",
+    )
+    assert [source.source_id for source in matched] == ["week-1"]
+
+
+def test_prefer_session_matching_sources_fail_open_when_no_title_match():
+    """Unmatched session cues keep the selected set; they never search unselected files."""
+    week10 = RetrievalSource(
+        source_id="week-10",
+        label="S1",
+        title="Week 10 Storytelling.pdf",
+        text="Storytelling",
+        object_key="course/lectureNotes/Week 10 Storytelling.pdf",
+        virtual_course_source=True,
+    )
+    matched = prefer_session_matching_sources(
+        (week10,),
+        "what does week 1 material cover",
+    )
+    assert [source.source_id for source in matched] == ["week-10"]
 
 
 def test_local_retriever_lecture_one_prefers_week_one_title():
@@ -443,7 +487,7 @@ def test_application_virtual_course_gap_is_not_placeholder_evidence(tmp_path):
             local=LocalChunkRetriever(),
         ),
     )
-    service.submit(
+    turn = service.submit(
         CoachRequest(
             thread_id=notebook,
             student_message="what are the week 1 contents talking about?",
@@ -451,12 +495,16 @@ def test_application_virtual_course_gap_is_not_placeholder_evidence(tmp_path):
             response_detail="short",
         )
     )
-    assert provider.last_prepared_prompt is not None
-    prompt = provider.last_prepared_prompt.composed_text
-    assert UNANALYZABLE_SOURCE_PLACEHOLDER not in prompt
-    assert "could not retrieve a validated excerpt" in prompt
-    assert "no readable text" in prompt
-    assert "Do not invent a summary" in prompt
+    assert provider.last_prepared_prompt is None
+    assert turn.response_text == QA_EVIDENCE_GAP_RESPONSE
+    assert UNANALYZABLE_SOURCE_PLACEHOLDER not in turn.response_text
+    assert "[S1]" not in turn.response_text
+    assistants = [
+        message
+        for message in store.get_messages(notebook)
+        if message.get("role") == "assistant"
+    ]
+    assert assistants[-1]["content"] == QA_EVIDENCE_GAP_RESPONSE
 
 
 def test_application_retrieval_is_selected_notebook_scoped_and_audited(tmp_path):

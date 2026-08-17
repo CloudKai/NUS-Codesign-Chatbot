@@ -113,6 +113,15 @@ SAFE_PERF_FIELDS = frozenset(
         "kb_validated_hit_count",
         "kb_timeout",
         "kb_failure_category",
+        "kb_sdk_ms",
+        "kb_validate_ms",
+        "kb_drop_bucket_mismatch",
+        "kb_drop_key_mismatch",
+        "kb_drop_empty_text",
+        "kb_session_narrowed",
+        "kb_session_narrowed_count",
+        "hydrate_total_ms",
+        "qa_evidence_gap_authored",
         "event_loop_cycle_count",
         "runtime_model_role",
         "runtime_model_provider",
@@ -404,6 +413,10 @@ def _log_service_timings(payload: Mapping[str, Any]) -> None:
     ``coach_turn_perf`` event. Values are numeric only.
     """
     logger.info(
+        "TIMING auth %.3fs",
+        _ms_to_seconds(payload.get("auth_context_ms")),
+    )
+    logger.info(
         "TIMING student_state %.3fs",
         _ms_to_seconds(payload.get("student_state_ms")),
     )
@@ -414,6 +427,14 @@ def _log_service_timings(payload: Mapping[str, Any]) -> None:
     logger.info(
         "TIMING retrieval %.3fs",
         _ms_to_seconds(payload.get("retrieval_total_ms")),
+    )
+    logger.info(
+        "TIMING kb_sdk %.3fs",
+        _ms_to_seconds(payload.get("kb_sdk_ms")),
+    )
+    logger.info(
+        "TIMING kb_validate %.3fs",
+        _ms_to_seconds(payload.get("kb_validate_ms")),
     )
     logger.info(
         "TIMING context_build %.3fs",

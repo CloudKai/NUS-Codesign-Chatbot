@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -81,22 +82,28 @@ class OwnerResolver:
         # Defense in depth: never consult spoofable identity inputs.
         _ignore_client_identity(request)
 
-        id_token = str(
-            request.cookies.get(settings.cognito_id_token_cookie_name) or ""
-        ).strip()
-        if id_token:
-            try:
-                identity = self._oidc.verify_id_token(id_token)
-            except CognitoOIDCError as error:
-                logger.info("Rejected application request with invalid ID token")
-                raise HTTPException(
-                    status_code=401, detail="Not authenticated"
-                ) from error
-            return self._services_for_identity(identity)
+        started = time.perf_counter()
+        try:
+            id_token = str(
+                request.cookies.get(settings.cognito_id_token_cookie_name) or ""
+            ).strip()
+            if id_token:
+                try:
+                    identity = self._oidc.verify_id_token(id_token)
+                except CognitoOIDCError as error:
+                    logger.info("Rejected application request with invalid ID token")
+                    raise HTTPException(
+                        status_code=401, detail="Not authenticated"
+                    ) from error
+                return self._services_for_identity(identity)
 
-        if self.requires_authenticated_owner():
-            raise HTTPException(status_code=401, detail="Not authenticated")
-        return self._cached(self._default_store.identifier)
+            if self.requires_authenticated_owner():
+                raise HTTPException(status_code=401, detail="Not authenticated")
+            return self._cached(self._default_store.identifier)
+        finally:
+            request.state.auth_context_ms = round(
+                max(0.0, (time.perf_counter() - started) * 1000.0), 1
+            )
 
     def requires_authenticated_owner(self) -> bool:
         """Return whether anonymous ``local-student`` fallback is forbidden.

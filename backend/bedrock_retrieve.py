@@ -369,6 +369,38 @@ def _keys_match(result_key: str, source_keys: set[str]) -> bool:
     return candidate in canonical_sources
 
 
+def _hit_drop_reason(
+    item: Mapping[str, Any],
+    sources: tuple[RetrievalSource, ...],
+    *,
+    course_bucket: str,
+) -> str:
+    """Return a secret-safe reason when a Retrieve hit cannot be validated.
+
+    Args:
+        item: One ``retrievalResults`` element.
+        sources: Selected course sources for this turn.
+        course_bucket: Configured ``COURSE_MATERIALS_BUCKET``.
+
+    Returns:
+        ``bucket_mismatch``, ``key_mismatch``, or ``empty_text``. Empty when
+        the hit maps onto a selected source and has excerpt text.
+    """
+    uri = _location_uri(item)
+    bucket, key = _s3_uri_parts(uri)
+    expected_bucket = str(course_bucket or "").strip()
+    actual_bucket = str(bucket or "").strip()
+    if not expected_bucket or not actual_bucket or actual_bucket != expected_bucket:
+        return "bucket_mismatch"
+    if not key:
+        return "key_mismatch"
+    if not any(_keys_match(key, _source_keys(source)) for source in sources):
+        return "key_mismatch"
+    if not _excerpt_text(item):
+        return "empty_text"
+    return ""
+
+
 def _match_selected_source(
     item: Mapping[str, Any],
     sources: tuple[RetrievalSource, ...],
@@ -669,10 +701,18 @@ class BedrockKnowledgeBaseRetriever:
         except Exception:
             _release_slot()
             raise
+        sdk_started = time.perf_counter()
         try:
-            return future.result(timeout=timeout)
+            response = future.result(timeout=timeout)
         except FutureTimeoutError as exc:
+            _record_kb_perf(
+                kb_sdk_ms=round(max(0.0, (time.perf_counter() - sdk_started) * 1000.0), 1)
+            )
             raise TimeoutError("knowledge_base_retrieve_timeout") from exc
+        _record_kb_perf(
+            kb_sdk_ms=round(max(0.0, (time.perf_counter() - sdk_started) * 1000.0), 1)
+        )
+        return response
 
     def _unavailable_result(
         self, category: str, error: BaseException
@@ -876,6 +916,10 @@ class BedrockKnowledgeBaseRetriever:
             )
         chunks: list[RetrievedChunk] = []
         per_source: dict[str, int] = {}
+        drop_bucket = 0
+        drop_key = 0
+        drop_empty = 0
+        validate_started = time.perf_counter()
         for item in raw_hits:
             if not isinstance(item, Mapping):
                 continue
@@ -885,9 +929,21 @@ class BedrockKnowledgeBaseRetriever:
                 course_bucket=self._course_bucket,
             )
             if source is None:
+                reason = _hit_drop_reason(
+                    item,
+                    course_sources,
+                    course_bucket=self._course_bucket,
+                )
+                if reason == "bucket_mismatch":
+                    drop_bucket += 1
+                elif reason == "empty_text":
+                    drop_empty += 1
+                else:
+                    drop_key += 1
                 continue
             text = _excerpt_text(item)
             if not text:
+                drop_empty += 1
                 continue
             count = per_source.get(source.source_id, 0) + 1
             per_source[source.source_id] = count
@@ -914,18 +970,44 @@ class BedrockKnowledgeBaseRetriever:
                     retrieval_origin="knowledge_base",
                 )
             )
+        _record_kb_perf(
+            kb_validate_ms=round(
+                max(0.0, (time.perf_counter() - validate_started) * 1000.0), 1
+            ),
+            kb_raw_hit_count=len(raw_hits),
+            kb_validated_hit_count=len(chunks),
+            kb_drop_bucket_mismatch=drop_bucket,
+            kb_drop_key_mismatch=drop_key,
+            kb_drop_empty_text=drop_empty,
+        )
         logger.info(
             "course_retrieval_hit_count raw_hits=%s validated_count=%s "
-            "filter=%s filter_mode=%s",
+            "filter=%s filter_mode=%s drop_bucket=%s drop_key=%s drop_empty=%s",
             len(raw_hits),
             len(chunks),
             int(used_filter),
             self._metadata_filter_mode,
+            drop_bucket,
+            drop_key,
+            drop_empty,
         )
-        _record_kb_perf(
-            kb_raw_hit_count=len(raw_hits),
-            kb_validated_hit_count=len(chunks),
-        )
+        if settings.co_design_rag_debug:
+            titles = [str(source.title or "")[:80] for source in course_sources[:8]]
+            scores = [
+                round(_result_score(item), 4)
+                for item in raw_hits[:8]
+                if isinstance(item, Mapping)
+            ]
+            logger.info(
+                "rag_debug query_chars=%s selected_count=%s titles=%s "
+                "top_scores=%s raw=%s validated=%s",
+                len(query_text),
+                len(course_sources),
+                titles,
+                scores,
+                len(raw_hits),
+                len(chunks),
+            )
         formatted = bounded_retrieval_result(
             chunks, max_context_chars=self._max_context_chars
         )

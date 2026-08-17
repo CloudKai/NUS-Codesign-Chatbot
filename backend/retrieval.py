@@ -392,6 +392,22 @@ class CompositeContextRetriever:
             for source in query.sources
             if not requires_knowledge_base_retrieval(source)
         )
+        if kb_sources:
+            narrowed = prefer_session_matching_sources(
+                kb_sources, query.current_message
+            )
+            if len(narrowed) != len(kb_sources):
+                from backend.turn_perf import record_field
+
+                record_field("kb_session_narrowed", True)
+                record_field("kb_session_narrowed_count", len(narrowed))
+                logger.info(
+                    "course_retrieval_session_narrowed selected_course_count=%s "
+                    "narrowed_count=%s",
+                    len(kb_sources),
+                    len(narrowed),
+                )
+            kb_sources = narrowed
         chunks: list[RetrievedChunk] = []
         course_status = "ok"
         failure_category = ""
@@ -633,6 +649,42 @@ def expand_session_query_text(message: str) -> str:
     if not extras:
         return cleaned
     return f"{cleaned} {' '.join(extras)}"
+
+
+def prefer_session_matching_sources(
+    sources: Sequence[RetrievalSource],
+    message: str,
+) -> tuple[RetrievalSource, ...]:
+    """Prefer selected sources whose title or object key matches week/lecture N.
+
+    When the student names a session and at least one already-selected source
+    shares that session alias, return only those sources. Otherwise return the
+    original selected set (fail-open). Never expands beyond *sources* and never
+    matches on hardcoded filenames.
+
+    Args:
+        sources: Authorized, already-selected retrieval sources.
+        message: Current student contribution.
+
+    Returns:
+        A subset of *sources*, or *sources* unchanged when no session cue or
+        no title/key match exists.
+    """
+    selected = tuple(sources)
+    if not selected:
+        return selected
+    query_aliases = _session_alias_bigrams(message)
+    if not query_aliases:
+        return selected
+    matched = [
+        source
+        for source in selected
+        if query_aliases
+        & _session_alias_bigrams(
+            f"{source.title} {source.object_key or ''} {source.group or ''}"
+        )
+    ]
+    return tuple(matched) if matched else selected
 
 
 def _normalized_text(text: str) -> str:

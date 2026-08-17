@@ -3,7 +3,7 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock`  
-**HEAD:** `a853b4c15dd3f26a6b1c835d685c7a2f62f3a205` (`a853b4c`)  
+**HEAD:** `e7132ff` (`e7132ff`)  
 **Origin:** this SHA is `origin/Integrate-Bedrock`. `origin/main` is `2386d65`.
 
 **Live cutover 2026-08-17:** same AgentCore ARN, new version **21** on DEFAULT; EC2 app image `cde2300-chatbot:b81a5b0`; Compose / host pin `AGENTCORE_SESSION_GENERATION=2`.
@@ -15,6 +15,23 @@
 This file’s **CURRENT** sections are the operator runbook. Everything under **HISTORICAL INVESTIGATION** is a dated archive and is not current.
 
 Release steps: [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md). Architecture authority: [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md).
+
+### Week 1 RAG, Q&A stay, and latency
+
+On `Integrate-Bedrock` after `e7132ff`. **Not deployed.** Chat overlay/composer layout is in `e7132ff`. No AgentCore runtime republish (DEFAULT remains liveVersion **21**). Paid generation was not used. One capped live Retrieve was approved; this laptop could not execute it (`KNOWLEDGE_BASE_ID` empty). Do not flip production off `required` filters.
+
+**Live / local probe (2026-08-18).** Dry-run `scripts/diagnostics/test_course_retrieval.py --query "what does week 1 material cover" --source "Week 1 Introduction to innovation v3.pdf"`: `metadata_filter_mode=required`, `filter_kind=equals`, `course_material_id=lecture_week_1_introduction_to_innovation_v3`, object key `course/lectureNotes/Week 1 Introduction to innovation v3.pdf`, expanded query `what does week 1 material cover lecture 1`. Local `KNOWLEDGE_BASE_ID=(empty)` so Retrieve was not called (`config_missing` / unavailable). `check_course_kb_metadata.py --dry-run`: `sidecar_missing_count=10` / `local_sidecar_ok=false`, including the Week 1 sidecar. Operator path remains [`KB_REQUIRED_MODE_RUNBOOK.md`](KB_REQUIRED_MODE_RUNBOOK.md). Production student trace for this utterance was `COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT` (`course_retrieval_status=unavailable`), not empty-validated-hits.
+
+**Application changes in this worktree**
+
+- Session narrowing among **already-selected** course sources (`prefer_session_matching_sources`); fail-open if none match. KB query text stays the student question plus week/lecture alias.
+- Secret-safe KB perf: `kb_sdk_ms`, `kb_validate_ms`, drop counts (`bucket_mismatch` / `key_mismatch` / `empty_text`). Optional `CO_DESIGN_RAG_DEBUG` (default false) logs query length, selected titles, top scores — never excerpts.
+- Q&A: `RUNTIME_HINT_QA` takes precedence; composer omits Strict/stay-advance language on `expected_response_mode=qa`; prior assistant / memory are continuity only. Server-authored `QA_EVIDENCE_GAP_RESPONSE` skips AgentCore when Q&A + selected sources + no validated chunks (image-only Q&A still invokes). Fast Chat assembly: Q&A runtime rules override stage pedagogy (needs a **new AgentCore runtime version** for the success path).
+- Latency: `auth_context_ms` copied onto `/coach/turn`; TIMING now includes `auth`, `kb_sdk`, `kb_validate`; `get_messages` ∥ `list_visible_sources` after notebook load. No region/retry/threshold change. Duplicate notebook load in `_submit_body` vs `_prepare` was **not** removed.
+
+**Validation.** Full mock pytest **1323 passed**. `compileall` + ruff on touched files passed. No live Bedrock/AgentCore from pytest.
+
+**Next exact action.** Operator: upload Week 1 (and other) sidecars and run ingest per the runbook, then one capped live Retrieve on EC2/production credentials. Publish a new AgentCore runtime only after FastAPI lands, and bump `AGENTCORE_SESSION_GENERATION`. Measure one Week 1 coach TIMING line in production logs before any further DSQL pooling.
 
 ### What is committed on this SHA
 
@@ -97,7 +114,7 @@ auto-advances too.
 - Application RAG fallback: at most one extra retrieve + one extra Fast Chat invoke when the gate skipped retrieval and Haiku sets `needs_source_retrieval`. First result is not persisted. `FAST_CHAT_MAX_PROVIDER_INVOCATIONS_PER_TURN=2`.
 - Fast Chat event-loop: `FAST_CHAT_INVOKE_LIMITS={"turns": 2}`.
 
-**Cycle telemetry.** When Strands metrics expose it, the runtime copies `event_loop_cycle_count` onto the payload; FastAPI records it on privacy-safe `coach_turn_perf` JSON. Absent metrics stay unset (not invented). Grep-friendly `TIMING` lines (`student_state`, `memory`, `retrieval`, `context_build`, `agent`, `persistence`, `TOTAL`) are seconds on logger `co_design.turn_perf`.
+**Cycle telemetry.** When Strands metrics expose it, the runtime copies `event_loop_cycle_count` onto the payload; FastAPI records it on privacy-safe `coach_turn_perf` JSON. Absent metrics stay unset (not invented). Grep-friendly `TIMING` lines (`auth`, `student_state`, `memory`, `retrieval`, `kb_sdk`, `kb_validate`, `context_build`, `agent`, `persistence`, `TOTAL`) are seconds on logger `co_design.turn_perf`. The JSON event also records `hydrate_total_ms` and `qa_evidence_gap_authored`.
 
 **KB Retrieve latency.** Default wall-clock timeout 10s (`KNOWLEDGE_BASE_RETRIEVE_TIMEOUT_SECONDS`); shared executor; excess calls fail closed (`capacity_exhausted`) rather than queueing.
 

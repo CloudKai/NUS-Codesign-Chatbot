@@ -78,6 +78,7 @@ def hydrate_selected_retrieval_sources(
         text. Other storage errors propagate from ``get_bytes``.
     """
     labeled = retrieval_sources_from_notebook(sources)
+    hydrate_started = time.perf_counter()
     originals = {
         str(source.get("id") or "").strip(): source
         for source in sources
@@ -108,6 +109,7 @@ def hydrate_selected_retrieval_sources(
             )
         )
     stats_after = cache.stats()
+    record_field("hydrate_total_ms", elapsed_ms(hydrate_started))
     record_field("student_source_selected_count", metrics.selected_count)
     record_count("student_source_precomputed_hit", metrics.precomputed_hit)
     record_count("student_source_precomputed_miss", metrics.precomputed_miss)

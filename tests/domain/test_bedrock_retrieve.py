@@ -578,6 +578,135 @@ def test_virtual_week1_kb_hit_reaches_context():
     assert "lecture 1" in query_text.casefold()
 
 
+def test_week_one_query_narrows_selected_lectures_before_kb_filter():
+    """Selected Week 10 must not enter the metadata filter for a Week 1 question."""
+    week10 = RetrievalSource(
+        source_id="virtual-week-10",
+        label="S2",
+        title="Week 10 Storytelling.pdf",
+        text="",
+        group="lectureNotes",
+        object_key="course/lectureNotes/Week 10 Storytelling.pdf",
+        course_material_id=course_material_id_from_object_key(
+            "course/lectureNotes/Week 10 Storytelling.pdf"
+        ),
+        virtual_course_source=True,
+        shared_course_object=True,
+    )
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                f"s3://cde2300-course-content-s3/{_WEEK1_KEY}",
+                "Week 1 covers an innovation-driven economy.",
+            )
+        ]
+    )
+    result = CompositeContextRetriever(
+        knowledge_base=BedrockKnowledgeBaseRetriever(
+            "JUQNP8AZAZ",
+            course_bucket="cde2300-course-content-s3",
+            client=client,
+        ),
+        local=LocalChunkRetriever(),
+    ).retrieve(
+        RetrievalQuery(
+            current_message="what does week 1 material cover",
+            current_stage="problem_identification",
+            sources=(_virtual_week1_source(), week10),
+        )
+    )
+    assert result.chunks
+    assert result.chunks[0].source_id == "virtual-week-1"
+    vector = client.calls[0]["retrievalConfiguration"]["vectorSearchConfiguration"]
+    assert vector["filter"] == {
+        "equals": {
+            "key": "course_material_id",
+            "value": "lecture_week_1_introduction_to_innovation_v3",
+        }
+    }
+
+
+def test_unselected_week1_is_never_searched_when_only_week10_is_selected() -> None:
+    """Unselected Week 1 never enters the metadata filter, even for a Week 1 question."""
+    week10_key = "course/lectureNotes/Week 10 Storytelling.pdf"
+    week10 = RetrievalSource(
+        source_id="virtual-week-10",
+        label="S1",
+        title="Week 10 Storytelling.pdf",
+        text="",
+        group="lectureNotes",
+        object_key=week10_key,
+        course_material_id=course_material_id_from_object_key(week10_key),
+        virtual_course_source=True,
+        shared_course_object=True,
+    )
+    client = FakeRetrieveClient(
+        results=[
+            _hit(
+                f"s3://cde2300-course-content-s3/{_WEEK1_KEY}",
+                "Week 1 covers an innovation-driven economy.",
+            )
+        ]
+    )
+    result = CompositeContextRetriever(
+        knowledge_base=BedrockKnowledgeBaseRetriever(
+            "JUQNP8AZAZ",
+            course_bucket="cde2300-course-content-s3",
+            client=client,
+        ),
+        local=LocalChunkRetriever(),
+    ).retrieve(
+        RetrievalQuery(
+            current_message="what does week 1 material cover",
+            current_stage="problem_identification",
+            sources=(week10,),
+        )
+    )
+    vector = client.calls[0]["retrievalConfiguration"]["vectorSearchConfiguration"]
+    week10_id = course_material_id_from_object_key(week10_key)
+    assert vector["filter"] == {
+        "equals": {"key": "course_material_id", "value": week10_id}
+    }
+    assert "lecture_week_1_introduction_to_innovation_v3" not in str(vector["filter"])
+    assert result.chunks == ()
+    assert result.course_retrieval_status == "empty"
+
+
+def test_key_mismatch_records_drop_reason() -> None:
+    from backend.turn_perf import begin_coach_turn_perf, current_perf, reset_coach_turn_perf
+
+    begin_coach_turn_perf()
+    try:
+        client = FakeRetrieveClient(
+            results=[
+                _hit(
+                    "s3://cde2300-course-content-s3/course/lectureNotes/other.pdf",
+                    "Unrelated excerpt",
+                )
+            ]
+        )
+        result = BedrockKnowledgeBaseRetriever(
+            "JUQNP8AZAZ",
+            course_bucket="cde2300-course-content-s3",
+            client=client,
+        ).retrieve(
+            RetrievalQuery(
+                current_message="what does week 1 material cover",
+                current_stage="problem_identification",
+                sources=(_virtual_week1_source(),),
+            )
+        )
+        assert result.chunks == ()
+        perf = current_perf()
+        assert perf is not None
+        assert perf.fields.get("kb_drop_key_mismatch") == 1
+        assert perf.fields.get("kb_raw_hit_count") == 1
+        assert perf.fields.get("kb_validated_hit_count") == 0
+        assert "kb_validate_ms" in perf.fields
+    finally:
+        reset_coach_turn_perf()
+
+
 def test_virtual_week1_without_kb_is_evidence_gap():
     result = CompositeContextRetriever(
         knowledge_base=None,

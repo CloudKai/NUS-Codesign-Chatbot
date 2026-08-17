@@ -13,7 +13,11 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from backend.context_planner import memory_from_metadata
-from backend.coaching.mode_policy import resolve_mode_policy
+from backend.coaching.mode_policy import (
+    qa_evidence_gap_turn,
+    resolve_mode_policy,
+    should_author_qa_evidence_gap,
+)
 from backend.coaching.progress import (
     PROGRESS_RETRIEVING,
     PROGRESS_SAVING,
@@ -864,12 +868,21 @@ class CoachApplicationService:
         } and not any(
             message.get("role") == "user" for message in prepared_request.history
         )
-        emit_coach_progress(PROGRESS_THINKING)
-        with record_span("agent_ms"):
-            turn = self._workflow.run(prepared_request)
-        prepared_request, turn = self._maybe_rag_fallback(
-            prepared_request, turn, snapshot
-        )
+        if (
+            not owned_review
+            and should_author_qa_evidence_gap(prepared_request)
+        ):
+            record_field("qa_evidence_gap_authored", True)
+            record_field("agentcore_call_count", 0)
+            record_field("agent_ms", 0)
+            turn = qa_evidence_gap_turn(prepared_request)
+        else:
+            emit_coach_progress(PROGRESS_THINKING)
+            with record_span("agent_ms"):
+                turn = self._workflow.run(prepared_request)
+            prepared_request, turn = self._maybe_rag_fallback(
+                prepared_request, turn, snapshot
+            )
         if owned_review:
             should_generate_title = False
         research_observation = _research_observation_from_coding(
@@ -1362,27 +1375,24 @@ class CoachApplicationService:
                     "current_stage does not match the notebook Thinking Path stage"
                 )
 
-        history_started = time.perf_counter()
-        if frozen_history_revision is not None:
-            store_history = self._store.get_messages_at_revision(
-                request.thread_id, int(frozen_history_revision)
-            )
-            allowed_ids = {
-                str(item).strip()
-                for item in (frozen_message_ids or [])
-                if str(item).strip()
-            }
-            if allowed_ids:
-                store_history = [
-                    message
-                    for message in store_history
-                    if str(message.get("id") or "") in allowed_ids
-                ]
-        else:
+        def _load_history() -> list[dict[str, Any]]:
+            if frozen_history_revision is not None:
+                store_history = self._store.get_messages_at_revision(
+                    request.thread_id, int(frozen_history_revision)
+                )
+                allowed_ids = {
+                    str(item).strip()
+                    for item in (frozen_message_ids or [])
+                    if str(item).strip()
+                }
+                if allowed_ids:
+                    store_history = [
+                        message
+                        for message in store_history
+                        if str(message.get("id") or "") in allowed_ids
+                    ]
+                return store_history
             store_history = self._store.get_messages(request.thread_id)
-            # Append-only revise persists the replacement user row before the
-            # provider runs. Exclude that id so history is prefix-only; the revised
-            # student_message remains the active turn input to the provider.
             revise_message_id = str(request.revise_user_message_id or "").strip()
             if revise_message_id:
                 store_history = [
@@ -1390,30 +1400,42 @@ class CoachApplicationService:
                     for message in store_history
                     if str(message.get("id") or "") != revise_message_id
                 ]
+            return store_history
+
+        def _load_sources() -> list[dict[str, Any]]:
+            visible_sources = list_visible_sources(
+                self._store,
+                request.thread_id,
+                selected_only=False,
+                include_extracted_text=False,
+            )
+            if frozen_source_ids is not None:
+                frozen_set = {
+                    str(item).strip() for item in frozen_source_ids if str(item).strip()
+                }
+                visible_sources = [
+                    {**dict(source), "selected": str(source.get("id") or "") in frozen_set}
+                    for source in visible_sources
+                ]
+            return visible_sources
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        history_started = time.perf_counter()
+        source_started = history_started
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            history_future = pool.submit(_load_history)
+            source_future = pool.submit(_load_sources)
+            store_history = history_future.result()
+            visible_sources = source_future.result()
         record_field("history_load_ms", elapsed_ms(history_started))
+        record_field("source_load_ms", elapsed_ms(source_started))
         if (
             frozen_history_revision is None
             and request.history
             and _history_signature(request.history) != _history_signature(store_history)
         ):
             raise ValueError("history does not match the notebook conversation")
-
-        source_started = time.perf_counter()
-        visible_sources = list_visible_sources(
-            self._store,
-            request.thread_id,
-            selected_only=False,
-            include_extracted_text=False,
-        )
-        if frozen_source_ids is not None:
-            frozen_set = {
-                str(item).strip() for item in frozen_source_ids if str(item).strip()
-            }
-            visible_sources = [
-                {**dict(source), "selected": str(source.get("id") or "") in frozen_set}
-                for source in visible_sources
-            ]
-        record_field("source_load_ms", elapsed_ms(source_started))
         snapshot = TurnSnapshot.from_authoritative_state(
             thread=thread,
             current_stage=authoritative_stage,

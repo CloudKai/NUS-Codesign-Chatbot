@@ -94,6 +94,7 @@ modules.
 | `domain/test_prompt_cache.py` | SystemContentBlock prefix cache; no CacheConfig auto on student text |
 | `scripts/test_evaluate_fast_chat_regression.py` | Dry-run and mocked live-candidate regression CLI; no live Claude |
 | `domain/test_prompt_architecture.py` | Stage prompt files, composer ordering, authoritative stage selection |
+| `domain/test_qa_grounding.py` | Failed Q&A authors the evidence-gap copy with zero AgentCore invokes; successful Q&A cites retrieved excerpts without coaching |
 | `domain/test_bedrock_provider.py` | Bedrock Converse adapter contract with an injected fake client |
 | `domain/test_learning_service.py` | Phase transition confirmation, resolution, atomic rollback |
 | `persistence/test_student_store.py` | Notebook, folder, message, source persistence |

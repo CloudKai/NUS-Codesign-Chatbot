@@ -166,7 +166,9 @@ Decide Coaching versus Q&A internally; this turn is Fast Chat, not a locked Coac
 - recommendation_rationale: optional short string for coaching; omit for qa
 - citations: only supplied [S#] labels; empty when unused
 - needs_source_retrieval: true only when selected-source evidence was
-  required for this turn and was not supplied; otherwise false
+  required for this turn and was not supplied because retrieval was skipped;
+  otherwise false. After FastAPI already retrieved for this turn, this must
+  stay false.
 
 Do not return Facione scores, review fields, research coding, or an
 assessment object. Do not use application, retrieval, browsing, database,

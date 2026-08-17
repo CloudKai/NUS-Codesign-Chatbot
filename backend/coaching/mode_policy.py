@@ -59,8 +59,12 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
+from backend.retrieval import (
+    COURSE_RETRIEVAL_EMPTY_CONTEXT,
+    COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT,
+)
 from backend.retrieval_gate import (
     INTENT_AMBIGUOUS,
     INTENT_HIGH_CONFIDENCE_PERSONAL,
@@ -73,12 +77,20 @@ from backend.retrieval_gate import (
 ExpectedResponseMode = Literal["qa", "coaching"]
 
 RUNTIME_HINT_QA = (
-    "This turn is a source or factual question: answer from retrieved excerpts "
-    "and do not recommend stay or advance."
+    "This turn is source Q&A: Q&A rules take precedence over Coaching. "
+    "Answer from current retrieved excerpts only, or state the evidence gap. "
+    "Do not ask a Socratic or project question. Do not connect the answer to "
+    "the student's project unless they asked. Do not recommend stay or advance."
 )
 RUNTIME_HINT_COACHING = (
     "This turn is the student's own project reasoning: coach Socratically and "
     "include a stay or advance recommendation."
+)
+
+QA_EVIDENCE_GAP_RESPONSE = (
+    "I couldn't retrieve a validated excerpt from the selected course material "
+    "for this turn, so I can't reliably summarise it from the course sources "
+    "right now."
 )
 
 # Project deliberation used only to *demote* source→ambiguous, so a turn is
@@ -375,4 +387,63 @@ def policy_from_request(request: object) -> ModePolicy:
         expected_mode=expected_mode,
         retrieve=bool(getattr(request, "retrieval_required", False)),
         retrieval_intent=stamped,
+    )
+
+
+def should_author_qa_evidence_gap(request: object) -> bool:
+    """Return whether FastAPI should author a Q&A evidence-gap reply.
+
+    High-confidence source Q&A with selected sources and no validated chunks
+    must not invoke the model, so prior assistant text cannot become course
+    facts. Mixed/unconstrained turns still go to the provider.
+
+    Args:
+        request: Prepared :class:`~backend.domain.CoachRequest`.
+
+    Returns:
+        True when the server should persist ``QA_EVIDENCE_GAP_RESPONSE``
+        without an AgentCore invoke.
+    """
+    if str(getattr(request, "expected_response_mode", "") or "").strip().lower() != "qa":
+        return False
+    if bool(getattr(request, "allow_model_knowledge", False)):
+        return False
+    if getattr(request, "retrieved_chunks", None):
+        return False
+    source_ids = getattr(request, "source_ids", None) or []
+    if not source_ids:
+        return False
+    retrieved_context = str(getattr(request, "retrieved_course_context", "") or "")
+    gap_note = (
+        COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT in retrieved_context
+        or COURSE_RETRIEVAL_EMPTY_CONTEXT in retrieved_context
+    )
+    if gap_note:
+        return True
+    # Image-only Q&A has selected sources but no textual retrieve. The model
+    # still needs the vision turn; do not author a course-material gap.
+    if getattr(request, "image_inputs", None) and not retrieved_context.strip():
+        return False
+    return True
+
+
+def qa_evidence_gap_turn(request: object) -> Any:
+    """Return a Q&A CoachTurn that states the current evidence gap.
+
+    Args:
+        request: Prepared request whose stage is copied onto the assessment.
+
+    Returns:
+        A ``CoachTurn`` with ``response_mode=qa``, no recommendation, and no
+        citations. Does not invoke a model.
+    """
+    from backend.domain import CoachTurn, EducationalAssessment
+
+    stage = str(getattr(request, "current_stage", "") or "problem_identification")
+    return CoachTurn(
+        response_text=QA_EVIDENCE_GAP_RESPONSE,
+        assessment=EducationalAssessment(
+            current_stage=stage,
+            response_mode="qa",
+        ),
     )

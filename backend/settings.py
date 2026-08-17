@@ -301,6 +301,7 @@ class Settings:
     knowledge_base_retrieve_executor_workers: int = _bounded_int(
         "KNOWLEDGE_BASE_RETRIEVE_EXECUTOR_WORKERS", 4, 1, 16
     )
+    co_design_rag_debug: bool = _boolean("CO_DESIGN_RAG_DEBUG", False)
     model_context_limit_tokens: int = int(
         os.getenv("MODEL_CONTEXT_LIMIT_TOKENS", "272000")
     )

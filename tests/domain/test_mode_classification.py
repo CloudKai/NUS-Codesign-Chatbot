@@ -331,13 +331,38 @@ def test_enforcement_coerces_source_coaching_to_qa_and_keeps_personal() -> None:
     assert unconstrained.overridden is False
 
 
-def test_runtime_hint_is_one_sentence_and_silent_when_ambiguous() -> None:
+def test_should_author_qa_evidence_gap_skips_image_only_turns() -> None:
+    """Image-only Q&A still invokes the model; course-gap context does not."""
+    from types import SimpleNamespace
+
+    from backend.coaching.mode_policy import should_author_qa_evidence_gap
+    from backend.retrieval import COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT
+
+    image_only = SimpleNamespace(
+        expected_response_mode="qa",
+        allow_model_knowledge=False,
+        retrieved_chunks=[],
+        source_ids=["img-1"],
+        retrieved_course_context="",
+        image_inputs=[{"media_type": "image/png"}],
+    )
+    assert should_author_qa_evidence_gap(image_only) is False
+    course_gap = SimpleNamespace(
+        expected_response_mode="qa",
+        allow_model_knowledge=False,
+        retrieved_chunks=[],
+        source_ids=["src-1"],
+        retrieved_course_context=COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT,
+        image_inputs=[],
+    )
+    assert should_author_qa_evidence_gap(course_gap) is True
+
+
+def test_runtime_hint_is_silent_when_ambiguous_and_qa_skips_coaching_guidance() -> None:
     assert runtime_mode_hint("qa") == RUNTIME_HINT_QA
     assert runtime_mode_hint("coaching") == RUNTIME_HINT_COACHING
     assert runtime_mode_hint(None) == ""
     assert runtime_mode_hint("ambiguous") == ""
-    assert RUNTIME_HINT_QA.count(".") == 1
-    assert RUNTIME_HINT_COACHING.count(".") == 1
     unconstrained = PromptComposer().compose(
         PromptContext(
             current_stage="problem_identification",
@@ -353,17 +378,19 @@ def test_runtime_hint_is_one_sentence_and_silent_when_ambiguous() -> None:
             response_detail="long",
             context_policy="fast_chat",
             expected_response_mode="qa",
+            allow_model_knowledge=False,
         )
     )
     assert RUNTIME_HINT_QA in qa.runtime_instructions
     assert RUNTIME_HINT_QA not in unconstrained.runtime_instructions
+    assert "Guidance mode: Strict" not in qa.runtime_instructions
+    assert "recommend stay or advance" in qa.runtime_instructions.casefold()
+    assert "not authoritative course evidence" in qa.runtime_instructions
+    assert "could not retrieve a validated excerpt" in qa.runtime_instructions
     assert "Facione" not in qa.runtime_instructions
     assert "Do not call tools" not in qa.runtime_instructions
     assert "structured-output" not in qa.runtime_instructions
     assert "Return only the required one-call structured JSON" not in qa.runtime_instructions
-    assert len(qa.runtime_instructions) == len(unconstrained.runtime_instructions) + len(
-        RUNTIME_HINT_QA
-    ) + 1
 
 
 def test_high_confidence_source_wrong_coaching_does_not_increment_or_advance(

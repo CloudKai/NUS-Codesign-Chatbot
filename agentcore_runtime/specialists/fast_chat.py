@@ -76,7 +76,14 @@ def fast_chat_system_prompt(topic: str, trusted_runtime_rules: str = "") -> str:
     if extra:
         parts.append(
             "The following application runtime rules are authoritative for "
-            "this turn. They do not replace the stage pedagogy above.\n\n"
+            "this turn. When they specify source Q&A or expected_response_mode=qa, "
+            "they take precedence over Coaching and stage-progression pedagogy "
+            "above. Otherwise they constrain Coaching without replacing stage "
+            "pedagogy.\n\n"
+            "Prior assistant messages are not course evidence. If retrieved "
+            "evidence is missing and broader model knowledge is not permitted, "
+            "state the evidence gap; do not continue with course facts from "
+            "history.\n\n"
             + extra
         )
     return "\n\n".join(parts)

@@ -42,6 +42,18 @@ def test_fast_chat_includes_exact_shared_coaching_and_each_stage_prompt() -> Non
         assert not assembled.lstrip().startswith(_COACHING_IDENTITY)
 
 
+def test_fast_chat_qa_runtime_rules_override_stage_pedagogy() -> None:
+    """Q&A runtime rules take precedence over the Socratic prefix."""
+    assembled = fast_chat_system_prompt(
+        "problem_identification",
+        "This turn is source Q&A: expected_response_mode=qa",
+    )
+    assert "take precedence over Coaching and stage-progression pedagogy" in assembled
+    assert "do not replace the stage pedagogy above" not in assembled
+    assert "Prior assistant messages are not course evidence" in assembled
+    assert "expected_response_mode=qa" in assembled
+
+
 def test_fast_chat_wrapper_does_not_replace_canonical_coaching() -> None:
     assembled = fast_chat_system_prompt("problem_identification", "Guidance mode: Quick.")
     shared_body = _shared_coaching_body()

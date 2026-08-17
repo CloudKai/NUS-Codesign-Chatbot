@@ -88,9 +88,12 @@ def test_success_perf_log_has_no_student_text_or_secrets(caplog) -> None:
     assert payload["success"] is True
     timings = _timing_values(caplog)
     assert set(timings) == {
+        "auth",
         "student_state",
         "memory",
         "retrieval",
+        "kb_sdk",
+        "kb_validate",
         "context_build",
         "agent",
         "persistence",

@@ -300,6 +300,32 @@ def test_composer_includes_source_context_and_bounds_history():
     )
 
 
+def test_composer_qa_omits_strict_guidance_and_history_is_not_evidence():
+    """Q&A runtime instructions skip Strict/advance language and history-as-facts."""
+    prepared = PromptComposer().compose(
+        PromptContext(
+            current_stage="problem_identification",
+            retrieved_course_context="",
+            student_message="what does week 1 material cover",
+            response_detail="long",
+            allow_model_knowledge=False,
+            expected_response_mode="qa",
+            context_policy="fast_chat",
+            recent_messages=[
+                {
+                    "role": "assistant",
+                    "content": "Week 1 covers Innovation-driven economy.",
+                }
+            ],
+        )
+    )
+    text = prepared.runtime_instructions
+    assert "Guidance mode: Strict" not in text
+    assert "automatically move" not in text
+    assert "not authoritative course evidence" in text
+    assert "could not retrieve a validated excerpt" in text
+
+
 def test_composer_course_evidence_gap_does_not_claim_unreadable_pdf():
     from backend.retrieval import COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT
 
