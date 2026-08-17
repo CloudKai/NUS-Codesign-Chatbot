@@ -564,6 +564,26 @@ def apply_completed_turn_to_session(
     )
 
 
+def _render_inflight_user_prompt(prompt: str, uploads: list[Any]) -> None:
+    """Paint the in-flight student prompt with history bubble markup.
+
+    The pending row has no persisted message id, so it omits edit/copy
+    actions. Uploads are named only; they are not source ids.
+    """
+    with st.chat_message("user", avatar=":material/person:"):
+        escaped = html.escape(prompt).replace("\n", "<br />")
+        with st.container(key="inflight_user_message_row"):
+            st.markdown(
+                f'<div class="cd-user-bubble-text">{escaped}</div>',
+                unsafe_allow_html=True,
+            )
+            if uploads:
+                st.caption(
+                    "Adding to Sources · "
+                    + ", ".join(upload.name for upload in uploads)
+                )
+
+
 def handle_prompt(
     prompt: str,
     uploads: list[Any],
@@ -578,10 +598,13 @@ def handle_prompt(
 
     Uploads become sources first. The coach path always uses ``CoachRequest``
     via the local API or in-process ``CoachApplicationService``, streaming
-    progress events and then the final validated reply. On ``done``, the
-    assistant message is rendered from that payload in this run. A full
-    ``st.rerun()`` runs only when Thinking Path, a pending stage transition,
-    or Deep Review progress changed — and only after the reply is drawn.
+    progress events and then the final validated reply. On ``done``, a stay
+    turn renders the assistant from that payload in this run. When Thinking
+    Path, a pending stage transition, or Deep Review progress changed, this
+    helper remounts without painting ``done`` into the in-flight slot so
+    history owns the single bubble. ``target`` must be the in-flight
+    sibling, never ``chat_log``: re-entering that keyed history container
+    reuses the last assistant ``st.chat_message``.
     """
     journey = normalize_journey(st.session_state.learning_journey)
     sources = store.list_sources(st.session_state.thread_id)
@@ -599,13 +622,7 @@ def handle_prompt(
     pre_deep_review_counter = _deep_review_counter(pre_meta)
     with target:
         if existing_user_message_id is None:
-            with st.chat_message("user", avatar=":material/person:"):
-                st.write(prompt)
-                if uploads:
-                    st.caption(
-                        "Adding to Sources · "
-                        + ", ".join(upload.name for upload in uploads)
-                    )
+            _render_inflight_user_prompt(prompt, uploads)
         if uploads:
             try:
                 store.upload_sources(
@@ -713,15 +730,7 @@ def handle_prompt(
                 if turn.pending_transition is not None
                 else f"done-{idempotency_key}"
             )
-            render_message(
-                assistant_message_from_turn(
-                    turn,
-                    thinking_stage=thinking_stage,
-                    message_id=message_id,
-                ),
-                visible_source_ids=visible_source_ids,
-            )
-            # Drop the retry key only after the reply is on screen. The
+            # Drop the retry key only after the reply is complete. The
             # composer is a trigger widget, so this run's submitted value
             # cannot fire again. Nonce bumps only when a reconciliation
             # rerun remounts the composer; bumping without a rerun would
@@ -740,8 +749,20 @@ def handle_prompt(
                 pre_deep_review_counter=pre_deep_review_counter,
             )
             if needs_reconcile:
+                # History on the next run owns the assistant bubble. Painting
+                # ``done`` into the in-flight slot and then remounting history
+                # from get_messages would show the reply twice.
                 st.session_state.composer_nonce += 1
                 rerun_app()
+                return
+            render_message(
+                assistant_message_from_turn(
+                    turn,
+                    thinking_stage=thinking_stage,
+                    message_id=message_id,
+                ),
+                visible_source_ids=visible_source_ids,
+            )
             return
         except CoachTurnStreamError as error:
             try:
@@ -906,7 +927,7 @@ def _submit_pending_edit(
 
 
 def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
-    """Render the discussion log, coach welcome history, and chat composer.
+    """Render the discussion log, in-flight turn slot, and chat composer.
 
     Args:
         model_id: Selected coaching model id for the next turn.
@@ -938,6 +959,7 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
             ).strip():
                 continue
             render_message(message, visible_source_ids=visible_source_ids)
+    chat_inflight = st.container(key="chat_inflight")
 
     if st.session_state.get("edit_confirm_message_id"):
         _confirm_edit_earlier_message_dialog()
@@ -960,7 +982,7 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
             uploads,
             model_id,
             reasoning_effort,
-            chat_log,
+            chat_inflight,
             existing_user_message_id=None,
             visible_source_ids=visible_source_ids,
         )

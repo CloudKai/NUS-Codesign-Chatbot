@@ -22,6 +22,14 @@ def test_style_partials_exist_in_fixed_manifest_order() -> None:
         assert path.is_file(), f"missing stylesheet partial: {path}"
 
 
+def _css_rule_body(css: str, marker: str) -> str:
+    """Return the first declaration block that follows ``marker``."""
+    start = css.index(marker)
+    open_brace = css.index("{", start)
+    close_brace = css.index("}", open_brace)
+    return css[open_brace + 1 : close_brace]
+
+
 def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     """Concatenation keeps one injection block and markers from each partial."""
     css = _template_stylesheet()
@@ -57,7 +65,25 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     sources_css = Path(_STYLES_DIR / "40-sources.css").read_text(encoding="utf-8")
     assert "content:attr(data-tooltip)" in sources_css
 
+    workspace_css = Path(_STYLES_DIR / "10-workspace.css").read_text(encoding="utf-8")
+    assert ".st-key-chat_inflight" in workspace_css
+    assert "flex:1 1 0%" in _css_rule_body(workspace_css, ":has(.st-key-chat_log)")
+    assert "margin-top:auto" not in _css_rule_body(
+        workspace_css, ":has(.st-key-chat_composer)"
+    )
+    inflight_wrap = _css_rule_body(workspace_css, ":has(.st-key-chat_inflight)")
+    assert "overflow:hidden" in inflight_wrap
+    assert "overflow:visible" not in inflight_wrap
+
     chat_css = Path(_STYLES_DIR / "30-chat.css").read_text(encoding="utf-8")
+    assert ".st-key-chat_inflight" in chat_css
+    composer_card = _css_rule_body(chat_css, ".st-key-chat_composer {")
+    assert "flex:0 0 auto" in composer_card
+    assert "margin-top:auto" not in composer_card
+    assert (
+        '.st-key-chat_inflight [data-testid="stChatMessage"]:last-of-type'
+        in chat_css
+    )
     assert ".cd-attach-tooltip" in chat_css
     assert "body[data-cd-attach-hover=\"1\"]" in chat_css
     assert "stChatInputStopButton" in chat_css

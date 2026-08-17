@@ -27,6 +27,10 @@ def test_chat_panel_consumes_status_events_and_skips_fake_tokens() -> None:
     assert "Coach reply ready" in chat
     assert "assistant_message_from_turn" in chat
     assert "needs_reconcile" in chat
+    assert 'st.container(key="chat_inflight")' in chat
+    assert "_render_inflight_user_prompt" in chat
+    assert "chat_inflight," in chat
+    assert "cd-user-bubble-text" in chat
 
 
 def _reply_visible(app: AppTest, text: str) -> bool:
@@ -98,28 +102,123 @@ def test_successful_send_does_not_duplicate_submit_on_next_run(monkeypatch) -> N
     assert submissions == [prompt, prompt]
 
 
+def _reply_message_count(app: AppTest, text: str) -> int:
+    """Count chat-message widgets whose body contains ``text``."""
+    hits = 0
+    for message in app.chat_message:
+        body = "\n".join(str(getattr(block, "value", "") or "") for block in message)
+        markdowns = getattr(message, "markdown", None) or []
+        markdown_text = "\n".join(
+            str(getattr(item, "value", "") or "") for item in markdowns
+        )
+        if text in body or text in markdown_text:
+            hits += 1
+    return hits
+
+
+def _chat_message_bodies(app: AppTest) -> list[str]:
+    """Return concatenated AppTest text for each ``st.chat_message`` widget."""
+    bodies: list[str] = []
+    for message in app.chat_message:
+        parts = [str(getattr(block, "value", "") or "") for block in message]
+        markdowns = getattr(message, "markdown", None) or []
+        parts.extend(str(getattr(item, "value", "") or "") for item in markdowns)
+        bodies.append("\n".join(parts))
+    return bodies
+
+
+def test_submitted_prompt_does_not_share_widget_with_previous_assistant(
+    monkeypatch,
+) -> None:
+    """Reopening chat_log reused the last assistant bubble; inflight keeps them apart."""
+    from ui import chat
+    from ui.coach_welcome import COACH_WELCOME_TITLE
+
+    reruns: list[str] = []
+    monkeypatch.setattr(chat, "rerun_app", lambda: reruns.append("app"))
+
+    first_prompt = "What is a design problem I could explore?"
+    second_prompt = "How should I book a library study room?"
+    previous_reply = "That's an interesting direction"
+
+    submissions: list[str] = []
+    real_stream = chat.stream_coach_turn_events
+
+    def counting_stream(request: Any) -> Iterator[dict[str, Any]]:
+        submissions.append(request.student_message)
+        yield from real_stream(request)
+
+    monkeypatch.setattr(chat, "stream_coach_turn_events", counting_stream)
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app.chat_input[0].set_value(first_prompt).run()
+    assert not app.exception
+    assert submissions == [first_prompt]
+    assert reruns == []
+    assert _reply_visible(app, previous_reply)
+    first_bodies = _chat_message_bodies(app)
+    assert any(first_prompt in body for body in first_bodies)
+    assert any(COACH_WELCOME_TITLE in body for body in first_bodies)
+    assert not any(
+        first_prompt in body and COACH_WELCOME_TITLE in body for body in first_bodies
+    )
+
+    app.chat_input[0].set_value(second_prompt).run()
+    assert not app.exception
+    assert submissions == [first_prompt, second_prompt]
+    assert reruns == []
+    second_bodies = _chat_message_bodies(app)
+    assert any(second_prompt in body for body in second_bodies)
+    assert any(previous_reply in body for body in second_bodies)
+    assert not any(
+        second_prompt in body and previous_reply in body for body in second_bodies
+    )
+    assert _reply_message_count(app, previous_reply) == 2
+    app.run()
+    assert submissions == [first_prompt, second_prompt]
+    assert _reply_message_count(app, previous_reply) == 2
+    assert not any(
+        second_prompt in body and previous_reply in body
+        for body in _chat_message_bodies(app)
+    )
+
+
 def test_auto_advance_reconciles_thinking_path_after_reply_is_visible(
     monkeypatch,
 ) -> None:
-    """Stage changes still remount studio after the assistant reply is drawn."""
+    """Reconcile remounts from history so the assistant bubble is painted once."""
+    from backend.student_journey import normalize_journey
+    from backend.student_store import StudentStore
     from ui import chat
 
     reruns: list[str] = []
+    real_rerun = chat.rerun_app
 
     def spy_rerun() -> None:
         reruns.append("app")
-        # Delay the remount. AppTest cannot snapshot widgets if ``st.rerun()``
-        # replaces the tree in the same script. Production still bumps the
-        # composer nonce before calling ``rerun_app()``.
+        real_rerun()
 
     monkeypatch.setattr(chat, "rerun_app", spy_rerun)
+    reply = "You named a concrete user group. Let's generate concepts next."
 
-    def fake_stream(_request: Any) -> Iterator[dict[str, Any]]:
+    def fake_stream(request: Any) -> Iterator[dict[str, Any]]:
         yield {"event": "status", "phase": "thinking", "label": "Coach is thinking…"}
+        local_store = StudentStore()
+        local_store.add_message(request.thread_id, "user", request.student_message)
+        local_store.add_message(request.thread_id, "assistant", reply)
+        thread = local_store.get_thread(request.thread_id) or {}
+        metadata = dict(thread.get("metadata") or {})
+        journey = normalize_journey(metadata.get("learning_journey"))
+        journey["current_stage"] = "concept_generation"
+        completed = list(journey.get("completed_stages") or [])
+        if "problem_identification" not in completed:
+            completed.append("problem_identification")
+        journey["completed_stages"] = completed
+        local_store.update_thread(
+            request.thread_id, metadata={"learning_journey": journey}
+        )
         turn = CoachTurn(
-            response_text=(
-                "You named a concrete user group. Let's generate concepts next."
-            ),
+            response_text=reply,
             assessment=EducationalAssessment(
                 current_stage="problem_identification",
                 recommendation="advance",
@@ -132,12 +231,21 @@ def test_auto_advance_reconciles_thinking_path_after_reply_is_visible(
     monkeypatch.setattr(chat, "stream_coach_turn_events", fake_stream)
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    thread_id = app.session_state["thread_id"]
     app.chat_input[0].set_value("Older pedestrians need more crossing time.").run()
     assert not app.exception
     assert reruns == ["app"]
+    persisted = [
+        message
+        for message in StudentStore().get_messages(thread_id)
+        if message.get("role") == "assistant" and reply in str(message.get("content") or "")
+    ]
+    assert len(persisted) == 1
+    assert _reply_message_count(app, reply) == 1
     assert _reply_visible(app, "You named a concrete user group")
     assert app.session_state["learning_journey"]["current_stage"] == "concept_generation"
     app.run()
+    assert _reply_message_count(app, reply) == 1
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Generate and compare plausible concepts that respond to the problem." in rendered
 

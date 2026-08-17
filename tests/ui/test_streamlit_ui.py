@@ -219,6 +219,8 @@ def test_streamlit_notebook_workspace_smoke():
         'class="message-meta coach-welcome"'
     ) < rendered.index('<span class="pane-title">Sources</span>')
     assert ".st-key-chat_log" in rendered
+    assert ".st-key-chat_inflight" in rendered
+    assert "flex:1 1 0%" in rendered
     assert "overflow-y:auto" in rendered
     assert "scrollbar-color:var(--cd-scrollbar) transparent" in rendered
     assert "max-height:calc(1em * 1.45 * 5)" in rendered

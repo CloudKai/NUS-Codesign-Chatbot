@@ -730,7 +730,23 @@
     .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(.st-key-chat_composer),
     .st-key-chat_panel > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(.st-key-chat_composer) {
         flex:0 0 auto !important;
-        margin-top:auto !important;
+    }
+
+    /* In-flight prompt/status/done sit under the scrolling log, not inside it. */
+    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(.st-key-chat_inflight),
+    .st-key-chat_panel > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(.st-key-chat_inflight) {
+        flex:0 0 auto !important;
+        min-height:0 !important;
+        overflow:hidden !important;
+    }
+
+    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(.st-key-chat_inflight):not(:has(.st-key-chat_inflight [data-testid="stChatMessage"])):not(:has(.st-key-chat_inflight [data-testid="stStatusWidget"])):not(:has(.st-key-chat_inflight [data-testid="stExpander"])):not(:has(.st-key-chat_inflight [data-testid="stAlert"])),
+    .st-key-chat_panel > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(.st-key-chat_inflight):not(:has(.st-key-chat_inflight [data-testid="stChatMessage"])):not(:has(.st-key-chat_inflight [data-testid="stStatusWidget"])):not(:has(.st-key-chat_inflight [data-testid="stExpander"])):not(:has(.st-key-chat_inflight [data-testid="stAlert"])) {
+        flex:0 0 0 !important;
+        max-height:0 !important;
+        overflow:hidden !important;
+        margin:0 !important;
+        padding:0 !important;
     }
 
     .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
@@ -867,10 +883,17 @@
     }
 
     .st-key-sources_panel > [data-testid="stLayoutWrapper"]:has(.st-key-sources_scroll),
-    .st-key-studio_panel > [data-testid="stLayoutWrapper"]:has(.st-key-studio_scroll),
-    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(.st-key-chat_log) {
+    .st-key-studio_panel > [data-testid="stLayoutWrapper"]:has(.st-key-studio_scroll) {
         min-height:0;
         flex:1 1 auto;
+        overflow:hidden;
+    }
+
+    /* 0% basis so the log shrinks for inflight + composer instead of covering them. */
+    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(.st-key-chat_log),
+    .st-key-chat_panel > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(.st-key-chat_log) {
+        min-height:0;
+        flex:1 1 0%;
         overflow:hidden;
     }
 

@@ -45,6 +45,22 @@
         margin-bottom:.35rem;
     }
 
+    .st-key-chat_inflight {
+        padding:0 .25rem 0 0;
+    }
+
+    .st-key-chat_inflight > [data-testid="stVerticalBlock"],
+    .st-key-chat_inflight > [data-testid="stLayoutWrapper"] {
+        gap:0 !important;
+        row-gap:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-chat_inflight [data-testid="stChatMessage"]:last-of-type {
+        margin-bottom:.35rem;
+    }
+
     [data-testid="stChatMessage"] {
         margin-bottom:.72rem;
         padding:.8rem .2rem;
@@ -366,7 +382,6 @@
     .st-key-chat_composer {
         position:relative;
         flex:0 0 auto;
-        margin-top:auto;
         padding-top:0;
         overflow:visible;
     }
@@ -1111,7 +1126,8 @@
     }
 
     /* Thinking status is an expander; hide the compact chevron so it is not a second box. */
-    .st-key-chat_log [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"]) {
+    .st-key-chat_log [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"]),
+    .st-key-chat_inflight [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"]) {
         border:0 !important;
         background:transparent !important;
         box-shadow:none !important;
@@ -1119,7 +1135,9 @@
     }
 
     .st-key-chat_log [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"]) details,
-    .st-key-chat_log [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"]) summary {
+    .st-key-chat_log [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"]) summary,
+    .st-key-chat_inflight [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"]) details,
+    .st-key-chat_inflight [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"]) summary {
         border:0 !important;
         background:transparent !important;
         box-shadow:none !important;
@@ -1132,12 +1150,18 @@
     .st-key-chat_log [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"])
     summary::-webkit-details-marker,
     .st-key-chat_log [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"])
+    summary::marker,
+    .st-key-chat_inflight [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"])
+    summary::-webkit-details-marker,
+    .st-key-chat_inflight [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"])
     summary::marker {
         display:none !important;
         content:none !important;
     }
 
     .st-key-chat_log [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"])
+    summary [data-testid="stIconMaterial"],
+    .st-key-chat_inflight [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"])
     summary [data-testid="stIconMaterial"] {
         display:none !important;
     }
