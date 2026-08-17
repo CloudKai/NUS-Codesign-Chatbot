@@ -121,6 +121,7 @@ def test_compose_persists_data_and_mounts_private_secrets_read_only():
     assert 'FAST_CHAT_MAX_INPUT_TOKENS: "16000"' in app
     assert 'FAST_CHAT_PROMPT_CACHE_ENABLED: "false"' in app
     assert 'AGENTCORE_QUALIFIER: "DEFAULT"' in app
+    assert 'AGENTCORE_SESSION_GENERATION: "2"' in app
     assert 'GUARDRAIL_VERSION: "3"' in app
     assert "source: ./lecture_notes" in app
     assert "target: /app/lecture_notes" in app
@@ -169,6 +170,7 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert 'MODEL_PROVIDER: "agentcore"' in app
     assert 'MOCK_OPENAI: "false"' in app
     assert 'AGENTCORE_QUALIFIER: "DEFAULT"' in app
+    assert 'AGENTCORE_SESSION_GENERATION: "2"' in app
     assert 'AGENTCORE_MODEL_PROVIDER: "bedrock"' in app
     assert 'AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
     assert 'ROUTER_MODEL_PROVIDER: "bedrock"' in app
@@ -222,6 +224,7 @@ def test_production_compose_keeps_host_env_knowledge_base_contract():
     assert 'MODEL_PROVIDER: "agentcore"' in app
     assert 'MOCK_OPENAI: "false"' in app
     assert 'AGENTCORE_QUALIFIER: "DEFAULT"' in app
+    assert 'AGENTCORE_SESSION_GENERATION: "2"' in app
     assert 'AGENTCORE_MODEL_PROVIDER: "bedrock"' in app
     assert 'AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
     assert 'ROUTER_MODEL_PROVIDER: "bedrock"' in app
@@ -257,6 +260,7 @@ def test_production_compose_keeps_host_env_knowledge_base_contract():
         "COURSE_MATERIALS_BUCKET=",
         "AGENTCORE_RUNTIME_ARN=",
         "AGENTCORE_QUALIFIER=",
+        "AGENTCORE_SESSION_GENERATION=",
         "GUARDRAIL_ID=",
         "GUARDRAIL_VERSION=",
         "PUBLIC_ORIGIN=",

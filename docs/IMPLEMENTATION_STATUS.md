@@ -3,10 +3,12 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock`  
-**HEAD:** `a4d04d9021c210dbc46c7abce62ceb7287eebb53` (`a4d04d9`)  
+**HEAD:** `b81a5b09ce622889f60fdcd743c23d7845eb9ee8` (`b81a5b0`)  
 **Origin:** this SHA is `origin/Integrate-Bedrock`. `origin/main` is `2386d65`.
 
-**Divergence vs `main`:** history-only ancestry. `git log --no-merges origin/Integrate-Bedrock..origin/main` is empty, and no file exists on `main` that is missing from this branch. `main`’s extra commits are merge commits of PRs #7–#12. This branch is strictly ahead in content (12 non-merge commits).
+**Live cutover 2026-08-17:** same AgentCore ARN, new version **21** on DEFAULT; EC2 app image `cde2300-chatbot:b81a5b0`; Compose / host pin `AGENTCORE_SESSION_GENERATION=2`.
+
+**Divergence vs `main`:** history-only ancestry. `git log --no-merges origin/Integrate-Bedrock..origin/main` is empty, and no file exists on `main` that is missing from this branch. `main`’s extra commits are merge commits of PRs #7–#12. This branch is strictly ahead in content.
 
 This file’s **CURRENT** sections are the operator runbook. Everything under **HISTORICAL INVESTIGATION** is a dated archive and is not current.
 
@@ -22,7 +24,7 @@ Committed application/runtime (not an uncommitted worktree):
 - Student-source hydration: precomputed `derived/chunks.v1.json` plus an in-process LRU; missing/invalid artifacts fall back to chunking extracted text.
 - Auth/persistence: Cognito owner isolation; Aurora DSQL is the only durable transcript; S3 for objects; atomic persist; append-only conversation revisions; durable idempotency lease.
 - Month-1 production pilot in [`../compose.prod.yaml`](../compose.prod.yaml): `AUTO_ADVANCE_STAGES=true`, `STUDENT_STAGE_SELECTION=false` (coach ADVANCE auto-applies; no student Next; no Journey stage picker). Intentional. Note the three stage-config sources disagree on purpose, so quote the right one: the **code** default is confirmation-gated (`backend/settings.py` `AUTO_ADVANCE_STAGES` → `False`), while **both** `.env.example` (`AUTO_ADVANCE_STAGES=true`) and production Compose auto-apply. A local demo that copies `.env.example` therefore auto-advances; only a run with no `.env` value is confirmation-gated.
-- Production runtime pin (Compose): `MODEL_PROVIDER=agentcore`, `AGENTCORE_QUALIFIER=DEFAULT` (currently liveVersion 20, `fast_chat`), `GUARDRAIL_VERSION=3`, `KNOWLEDGE_BASE_TYPE=MANAGED`, `DATABASE_PROVIDER=dsql`, `FILE_STORAGE_PROVIDER=s3`. Topology: one EC2, one container, one Uvicorn worker, Caddy behind CloudFront.
+- Production runtime pin (Compose): `MODEL_PROVIDER=agentcore`, `AGENTCORE_QUALIFIER=DEFAULT` (currently liveVersion **21**, slim `fast_chat`), `AGENTCORE_SESSION_GENERATION=2`, `GUARDRAIL_VERSION=3`, `KNOWLEDGE_BASE_TYPE=MANAGED`, `DATABASE_PROVIDER=dsql`, `FILE_STORAGE_PROVIDER=s3`. Topology: one EC2, one container, one Uvicorn worker, Caddy behind CloudFront.
 
 ### What CI actually proves
 
@@ -47,13 +49,15 @@ opens grouped weekly pip / actions / docker PRs.
 
 CI is **mock-only**. It does not prove live AgentCore, Bedrock Converse, Knowledge Base `Retrieve`, DSQL, S3, Cognito, or CloudFront. Passing mock pytest is not a production smoke.
 
+A capped isolated Fast Chat invoke (`student_message=testing`, no DSQL write) on DEFAULT **v21** was run in this session. Deep Review, Cognito login, and RAG were not re-run here.
+
 ### Deployment impact of this tip
 
-Treat `a4d04d9` as a **new app image** unless the host already runs this SHA (image label `org.opencontainers.image.revision` / `APP_GIT_SHA`). FastAPI-side TIMING logs, Guardrail-safe memory rendering, and student-source hydration are in this tree.
+`b81a5b0` **is** the live EC2 app image (`cde2300-chatbot:b81a5b0`, label/revision `b81a5b09ce622889f60fdcd743c23d7845eb9ee8`, healthy). Host `.env` has `AGENTCORE_SESSION_GENERATION=2`. Rollback image `cde2300-chatbot:2386d65` remains on the host.
 
-- **EC2 / container:** rebuild and redeploy an immutable `APP_IMAGE` tagged with this SHA. Do not use `latest`.
-- **AgentCore:** republish DEFAULT only when operators intend the committed `agentcore_runtime/` assets (first-pass structured-output instruction, `FAST_CHAT_INVOKE_LIMITS={"turns": 2}`, Bedrock Converse `total_max_attempts=1`, `event_loop_cycle_count`) to replace whatever liveVersion 20 currently serves. After any runtime publish, change `AGENTCORE_SESSION_GENERATION` and redeploy FastAPI (see the release checklist).
-- **Console:** no new Cognito callback, bucket, or Guardrail version (stay on version **3** on both FastAPI Compose and the runtime). Confirm DEFAULT still points at the intended liveVersion.
+- **EC2 / container:** already rebuilt. Recreate only if the host image/revision no longer matches this SHA. Do not use `latest`.
+- **AgentCore:** DEFAULT liveVersion **21** READY on the same ARN `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. Artifact `s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-fast-chat-slim-v21-20260817T125807Z.zip`. Env copied from v20 (Haiku 4.5 Fast Chat, Sonnet 4.6 Deep Review, Guardrail v3). Isolated `"testing"` invoke: `schema_id=fast_chat_turn_v1`, `event_loop_cycle_count=1`, no `assessment` / Facione / `research_coding` on the wire. Rollback: pin `AGENTCORE_QUALIFIER=20` **and** bump session generation again, or `update-agent-runtime-endpoint` DEFAULT → 20, then recreate FastAPI.
+- **Console:** no new Cognito callback, bucket, or Guardrail version (stay on version **3** on both FastAPI Compose and the runtime).
 - **DSQL:** no new DDL in this SHA beyond the additive revision/idempotency schema already owned by `scripts/init_dsql.py`. Confirm the cluster already has those columns. Never run `init_dsql.py` at app startup or as `co_design_app`.
 - **S3:** no new bucket. User objects under `users/`; course objects under `course/` only.
 

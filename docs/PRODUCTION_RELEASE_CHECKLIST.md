@@ -34,7 +34,7 @@ Month-1 production (`compose.prod.yaml`) keeps `AUTO_ADVANCE_STAGES=true` and
 | | |
 |---|---|
 | **How** | AWS console: Bedrock AgentCore → this environment’s runtime (ARN from host `.env`) → **DEFAULT** endpoint. CLI used in prior publishes: control-plane `get-agent-runtime` / DEFAULT endpoint for the runtime id parsed from `AGENTCORE_RUNTIME_ARN` (do not paste ARNs into tickets). |
-| **Expected** | Qualifier `DEFAULT`; currently liveVersion **20** (`fast_chat`) unless this release includes an authorised republish. FastAPI Compose: `MODEL_PROVIDER=agentcore`, `AGENTCORE_QUALIFIER=DEFAULT`. |
+| **Expected** | Qualifier `DEFAULT`; currently liveVersion **21** (slim `fast_chat`) unless this release includes an authorised republish. FastAPI Compose: `MODEL_PROVIDER=agentcore`, `AGENTCORE_QUALIFIER=DEFAULT`. |
 | **Pass** | Endpoint **READY**; DEFAULT liveVersion is the version you intend to serve. FastAPI host env qualifier is `DEFAULT`. |
 
 ## 4. `AGENTCORE_SESSION_GENERATION` (required on republish)

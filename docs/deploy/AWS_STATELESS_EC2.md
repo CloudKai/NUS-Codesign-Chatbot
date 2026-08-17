@@ -28,7 +28,7 @@ Persistent state lives in **Aurora DSQL** and **S3**. Replacing the app
 container must not destroy conversations, progress, or uploads.
 Production coaching uses `MODEL_PROVIDER=agentcore` against runtime
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` (qualifier `DEFAULT`,
-currently liveVersion 20).
+currently liveVersion 21).
 Invokes are stateless; Aurora DSQL `messages` is the only durable transcript.
 `AGENTCORE_SESSION_AFFINITY_ENABLED` defaults to `false`, which keeps a fresh
 runtime session id per invoke. If you ever enable it, it is a **compute**
@@ -444,6 +444,7 @@ Required production `.env` keys (host-only):
 - `MODEL_PROVIDER=agentcore`
 - `AGENTCORE_RUNTIME_ARN=arn:aws:bedrock-agentcore:us-west-2:355604674280:runtime/NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`
 - `AGENTCORE_QUALIFIER=DEFAULT`
+- `AGENTCORE_SESSION_GENERATION=2`
 - `AGENTCORE_MODEL_PROVIDER=bedrock`
 - `AGENTCORE_MODEL_ID=global.anthropic.claude-haiku-4-5-20251001-v1:0`
 - `AGENTCORE_MODEL_REGION=us-west-2`
