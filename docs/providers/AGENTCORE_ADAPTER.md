@@ -29,6 +29,13 @@ The browser cannot select Sonnet by sending `specialist=review` on
 `POST /api/v1/coach/turn`. Opening Journey / Review / Summary performs zero
 model calls.
 
+The published runtime still dispatches leftover `phase` values. A principal
+with `bedrock-agentcore:InvokeAgentRuntime` on this ARN can request
+`phase=review` or `phase=router` directly and bypass FastAPI. That is an
+IAM boundary, not a browser bug. Documented in
+[`SECURITY_BOUNDARIES.md`](../SECURITY_BOUNDARIES.md). Do not try to close
+it in Streamlit.
+
 Q&A never advances the Thinking Path. Coaching may recommend stay or
 advance; the recommendation is advisory. FastAPI still validates and
 persists. AgentCore never writes DSQL.

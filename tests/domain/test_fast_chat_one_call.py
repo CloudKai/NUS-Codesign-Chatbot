@@ -12,7 +12,6 @@ from backend.domain import (
     CoachRequest,
     EducationalAssessment,
     FacioneDimensionScores,
-    ProviderCoachOutput,
     StageDecision,
 )
 from backend.providers import ProviderUnavailableError
@@ -50,14 +49,19 @@ def _assessment(
 def _coaching_output(
     *, recommendation: StageDecision = StageDecision.STAY
 ) -> dict[str, Any]:
-    """Return a fast-chat coaching payload."""
-    payload = ProviderCoachOutput(
-        response_text="What trade-off still needs evidence?",
-        assessment=_assessment(recommendation=recommendation),
-        research_coding=None,
-    ).model_dump(mode="json")
-    payload["mode"] = "coaching"
-    return payload
+    """Return a lightweight fast-chat coaching payload."""
+    return {
+        "mode": "coaching",
+        "response_text": "What trade-off still needs evidence?",
+        "recommendation": recommendation.value,
+        "recommendation_rationale": (
+            "More evidence is still needed."
+            if recommendation is StageDecision.STAY
+            else "The stage readiness bar is met."
+        ),
+        "citations": [],
+        "needs_source_retrieval": False,
+    }
 
 
 def _provider(client: FakeAgentCoreRuntime) -> AgentCoreCoachProvider:
@@ -122,7 +126,7 @@ def test_normal_qa_invokes_agentcore_once() -> None:
     assert len(client.calls) == 1
     assert _phases(client) == ["fast_chat"]
     assert result.specialist == "qa"
-    assert result.assessment.recommendation is StageDecision.STAY
+    assert result.assessment.recommendation is None
     assert result.qualifying_coaching_turn is False
 
 
@@ -150,9 +154,9 @@ def test_malformed_mode_fails_closed() -> None:
         _provider(client).assess(_request())
 
 
-def test_malformed_coaching_assessment_fails_closed() -> None:
+def test_malformed_coaching_without_recommendation_fails_closed() -> None:
     client = FakeAgentCoreRuntime(
-        payload={"mode": "coaching", "response_text": "Hello", "assessment": None}
+        payload={"mode": "coaching", "response_text": "Hello"}
     )
     with pytest.raises(ProviderUnavailableError):
         _provider(client).assess(_request())
@@ -169,7 +173,7 @@ def test_qa_cannot_mutate_stage() -> None:
         }
     )
     result = _provider(client).assess(_request())
-    assert result.assessment.recommendation is StageDecision.STAY
+    assert result.assessment.recommendation is None
     assert result.assessment.current_stage == "problem_identification"
 
 
@@ -268,7 +272,7 @@ def test_qa_foreign_citations_are_dropped() -> None:
     )
     result = _provider(client).assess(_request())
     assert result.assessment.citations == []
-    assert result.assessment.recommendation is StageDecision.STAY
+    assert result.assessment.recommendation is None
 
 
 def test_explicit_deep_review_is_one_sonnet_call() -> None:

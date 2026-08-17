@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
 import re
+import threading
 from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -36,6 +38,7 @@ from backend.domain import (
     SourceUpdateRequest,
 )
 from backend.owner_context import OwnerResolver, OwnerServices
+from backend.coaching.progress import PROGRESS_LABELS
 from backend.operational_metrics import (
     configure_operational_loggers,
     record_coach_rate_limit,
@@ -401,6 +404,17 @@ def create_app(
         except Exception:
             return 0
 
+    def _recommendation_metric_value(turn: CoachTurn) -> str:
+        """Return a privacy-safe recommendation label for operational metrics.
+
+        Q&A turns persist ``recommendation=None``. Metrics must not assume a
+        stay/advance enum.
+        """
+        decision = turn.assessment.recommendation
+        if decision is None:
+            return "none"
+        return str(decision.value)
+
     def _emit_coach_metric(
         *,
         outcome: str,
@@ -420,7 +434,7 @@ def create_app(
             outcome=outcome,
             selected_source_count=selected_source_count,
             citation_count=len(turn.assessment.citations),
-            recommendation=turn.assessment.recommendation.value,
+            recommendation=_recommendation_metric_value(turn),
             transition_outcome=(
                 "auto_advanced"
                 if turn.auto_advanced_to
@@ -1289,7 +1303,7 @@ def create_app(
         logger.info(
             "coach_turn ok request_id=%s recommendation=%s auto_advanced=%s",
             request_id,
-            turn.assessment.recommendation.value,
+            _recommendation_metric_value(turn),
             bool(turn.auto_advanced_to),
         )
         _emit_coach_metric(
@@ -1398,12 +1412,49 @@ def create_app(
         http_request: Request,
         owner: OwnerServices = Depends(current_owner),
     ) -> StreamingResponse:
-        """Stream one coaching turn as NDJSON progress + token events."""
+        """Stream one coaching turn as NDJSON progress events, then the final turn.
+
+        Progress phases correspond to execution boundaries. This endpoint does
+        not emit fake token slices of a completed reply.
+        """
 
         request = _with_idempotency_header(request, http_request)
         if not owner.store.get_thread(request.thread_id):
             raise HTTPException(status_code=404, detail="Notebook not found")
         selected_source_count = _selected_source_count(owner, request.thread_id)
+
+        stream_request_id = str(
+            getattr(http_request.state, "request_id", None) or "-"
+        )
+
+        def _log_stream_failure(outcome: str, error: BaseException) -> None:
+            """Log one terminal streaming failure without student content.
+
+            The streaming route is the only path the UI uses, so a failure
+            that is reported solely as an NDJSON ``error`` event would other-
+            wise leave no server-side trace to diagnose. Provider errors wrap
+            an operator-actionable root cause (expired credentials, throttling,
+            timeouts) in a generic student-facing message, so the chained cause
+            types are logged as well. Only exception type names are recorded.
+
+            Args:
+                outcome: Privacy-safe outcome label already sent to metrics.
+                error: Terminal exception raised by the worker thread.
+            """
+            causes: list[str] = []
+            cause = error.__cause__
+            while cause is not None and len(causes) < 4:
+                causes.append(type(cause).__name__)
+                cause = cause.__cause__
+            logger.warning(
+                "coach_turn_stream failed request_id=%s outcome=%s "
+                "category=%s exception=%s caused_by=%s",
+                stream_request_id,
+                outcome,
+                str(getattr(error, "category", "") or "-"),
+                type(error).__name__,
+                "<-".join(causes) or "-",
+            )
 
         def events():
             yield json.dumps(
@@ -1412,87 +1463,136 @@ def create_app(
                     "stage": request.current_stage,
                 }
             ) + "\n"
-            # Signal UI before the long provider submit so students see a
-            # thinking state instead of a blank assistant bubble.
-            yield json.dumps(
-                {"event": "status", "phase": "thinking"}
-            ) + "\n"
-            try:
-                turn = owner.coach.submit(request)
-            except RateLimitExceeded as error:
-                _record_coach_rate_limit(
-                    error,
-                    selected_source_count=selected_source_count,
-                    request_id=str(
-                        getattr(http_request.state, "request_id", None) or "-"
-                    ),
-                )
-                yield json.dumps(
+            bus: queue.SimpleQueue[dict[str, Any] | BaseException | None] = (
+                queue.SimpleQueue()
+            )
+
+            def _progress(phase: str) -> None:
+                label = PROGRESS_LABELS.get(phase, "")
+                bus.put(
                     {
-                        "event": "error",
-                        "detail": error.detail,
-                        "status": 429,
-                        "category": str(getattr(error, "category", "") or "throttled"),
-                        "retry_after": max(1, int(error.retry_after_seconds)),
+                        "event": "status",
+                        "phase": phase,
+                        "label": label,
                     }
-                ) + "\n"
-                return
-            except CoachIdempotencyConflictError as error:
-                _emit_coach_metric(
-                    outcome="idempotency_conflict",
-                    selected_source_count=selected_source_count,
                 )
-                yield json.dumps(
-                    {"event": "error", "detail": str(error), "status": 409}
-                ) + "\n"
+
+            def _worker() -> None:
+                try:
+                    completed = owner.coach.submit(request, progress=_progress)
+                    bus.put({"event": "_complete", "turn": completed})
+                except BaseException as error:
+                    bus.put(error)
+                finally:
+                    bus.put(None)
+
+            worker = threading.Thread(
+                target=_worker,
+                name="coach-turn-stream",
+                daemon=True,
+            )
+            worker.start()
+            turn = None
+            while True:
+                item = bus.get()
+                if item is None:
+                    break
+                if isinstance(item, BaseException):
+                    error = item
+                    if isinstance(error, RateLimitExceeded):
+                        _record_coach_rate_limit(
+                            error,
+                            selected_source_count=selected_source_count,
+                            request_id=str(
+                                getattr(http_request.state, "request_id", None)
+                                or "-"
+                            ),
+                        )
+                        yield json.dumps(
+                            {
+                                "event": "error",
+                                "detail": error.detail,
+                                "status": 429,
+                                "category": str(
+                                    getattr(error, "category", "") or "throttled"
+                                ),
+                                "retry_after": max(1, int(error.retry_after_seconds)),
+                            }
+                        ) + "\n"
+                        return
+                    if isinstance(error, CoachIdempotencyConflictError):
+                        _emit_coach_metric(
+                            outcome="idempotency_conflict",
+                            selected_source_count=selected_source_count,
+                        )
+                        yield json.dumps(
+                            {"event": "error", "detail": str(error), "status": 409}
+                        ) + "\n"
+                        return
+                    if isinstance(error, ConversationRevisionConflictError):
+                        _emit_coach_metric(
+                            outcome="revision_conflict",
+                            selected_source_count=selected_source_count,
+                        )
+                        yield json.dumps(
+                            {"event": "error", "detail": str(error), "status": 409}
+                        ) + "\n"
+                        return
+                    if isinstance(
+                        error,
+                        (CoachRequestInProgressError, CoachRequestLeaseLostError),
+                    ):
+                        _emit_coach_metric(
+                            outcome="idempotency_in_progress",
+                            selected_source_count=selected_source_count,
+                        )
+                        yield json.dumps(
+                            {"event": "error", "detail": str(error), "status": 409}
+                        ) + "\n"
+                        return
+                    if isinstance(error, ProviderUnavailableError):
+                        _log_stream_failure(
+                            provider_unavailable_outcome(error), error
+                        )
+                        _emit_coach_metric(
+                            outcome=provider_unavailable_outcome(error),
+                            selected_source_count=selected_source_count,
+                        )
+                        yield json.dumps(
+                            {
+                                "event": "error",
+                                "detail": str(error),
+                                "status": 503,
+                                "category": provider_error_category(error),
+                            }
+                        ) + "\n"
+                        return
+                    if isinstance(error, ValueError):
+                        _log_stream_failure("rejected", error)
+                        _emit_coach_metric(
+                            outcome="rejected",
+                            selected_source_count=selected_source_count,
+                        )
+                        yield json.dumps(
+                            {"event": "error", "detail": str(error), "status": 400}
+                        ) + "\n"
+                        return
+                    logger.exception(
+                        "coach_turn_stream unhandled request_id=%s",
+                        stream_request_id,
+                    )
+                    _emit_coach_metric(
+                        outcome="failed",
+                        selected_source_count=selected_source_count,
+                    )
+                    raise error
+                if item.get("event") == "_complete":
+                    turn = item["turn"]
+                    continue
+                yield json.dumps(item) + "\n"
+            worker.join(timeout=1.0)
+            if turn is None:
                 return
-            except ConversationRevisionConflictError as error:
-                _emit_coach_metric(
-                    outcome="revision_conflict",
-                    selected_source_count=selected_source_count,
-                )
-                yield json.dumps(
-                    {"event": "error", "detail": str(error), "status": 409}
-                ) + "\n"
-                return
-            except (CoachRequestInProgressError, CoachRequestLeaseLostError) as error:
-                _emit_coach_metric(
-                    outcome="idempotency_in_progress",
-                    selected_source_count=selected_source_count,
-                )
-                yield json.dumps(
-                    {"event": "error", "detail": str(error), "status": 409}
-                ) + "\n"
-                return
-            except ProviderUnavailableError as error:
-                _emit_coach_metric(
-                    outcome=provider_unavailable_outcome(error),
-                    selected_source_count=selected_source_count,
-                )
-                yield json.dumps(
-                    {
-                        "event": "error",
-                        "detail": str(error),
-                        "status": 503,
-                        "category": provider_error_category(error),
-                    }
-                ) + "\n"
-                return
-            except ValueError as error:
-                _emit_coach_metric(
-                    outcome="rejected",
-                    selected_source_count=selected_source_count,
-                )
-                yield json.dumps(
-                    {"event": "error", "detail": str(error), "status": 400}
-                ) + "\n"
-                return
-            except Exception:
-                _emit_coach_metric(
-                    outcome="failed",
-                    selected_source_count=selected_source_count,
-                )
-                raise
             _emit_coach_metric(
                 outcome="ok",
                 selected_source_count=selected_source_count,
@@ -1506,15 +1606,6 @@ def create_app(
                     "mode": graph.get("mode"),
                 }
             ) + "\n"
-            text = turn.response_text
-            chunk_size = 32
-            for index in range(0, len(text), chunk_size):
-                yield json.dumps(
-                    {
-                        "event": "token",
-                        "text": text[index : index + chunk_size],
-                    }
-                ) + "\n"
             yield json.dumps(
                 {"event": "done", "turn": turn.model_dump(mode="json")}
             ) + "\n"

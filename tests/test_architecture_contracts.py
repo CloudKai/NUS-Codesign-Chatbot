@@ -432,3 +432,40 @@ def test_fastapi_does_not_publish_openapi_docs(tmp_path: Path) -> None:
     client = TestClient(app)
     for path in ("/docs", "/docs/", "/redoc", "/redoc/", "/openapi.json"):
         assert client.get(path).status_code == 404
+
+
+def test_coaching_execution_does_not_import_automatic_deep_review() -> None:
+    """Live execution must not re-attach automatic Sonnet Deep Review helpers."""
+    tree = ast.parse(
+        (PROJECT_ROOT / "backend" / "coaching" / "execution.py").read_text(
+            encoding="utf-8"
+        ),
+        filename="backend/coaching/execution.py",
+    )
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+    assert "explicit_deep_review_available" in imported
+    assert "resolve_deep_review_trigger" not in imported
+    assert "should_run_deep_review" not in imported
+
+
+def test_ui_never_imports_student_chat_engine() -> None:
+    """Presentation must keep using the typed coach path, not StudentChatEngine."""
+    offenders: list[str] = []
+    for path in (PROJECT_ROOT / "ui").rglob("*.py"):
+        for target, _level in _top_level_imports(path):
+            if target in {"backend.chat_service", "chat_service"} or target.endswith(
+                ".chat_service"
+            ):
+                offenders.append(str(path.relative_to(PROJECT_ROOT)))
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.name == "StudentChatEngine":
+                        offenders.append(str(path.relative_to(PROJECT_ROOT)))
+    assert offenders == []

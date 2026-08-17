@@ -217,7 +217,19 @@ def _sources_expander_widget_key(section: str) -> str:
     return f"sources_expander_{slug}"
 
 
-def _ensure_sources_expander_state(section: str, *, default: bool = True) -> str:
+def _sources_expander_prefs() -> dict[str, Any]:
+    """Return persisted expander open/closed flags for this student."""
+    prefs = store.get_user_preferences() or {}
+    saved = prefs.get("sources_expander_state")
+    return dict(saved) if isinstance(saved, dict) else {}
+
+
+def _ensure_sources_expander_state(
+    section: str,
+    *,
+    default: bool = True,
+    saved: dict[str, Any] | None = None,
+) -> str:
     """Seed expander open/closed state from preferences after a browser refresh.
 
     Returns:
@@ -225,10 +237,9 @@ def _ensure_sources_expander_state(section: str, *, default: bool = True) -> str
     """
     widget_key = _sources_expander_widget_key(section)
     if widget_key not in st.session_state:
-        prefs = store.get_user_preferences() or {}
-        saved = prefs.get("sources_expander_state")
-        if isinstance(saved, dict) and section in saved:
-            st.session_state[widget_key] = bool(saved[section])
+        stored = _sources_expander_prefs() if saved is None else saved
+        if section in stored:
+            st.session_state[widget_key] = bool(stored[section])
         else:
             st.session_state[widget_key] = default
     return widget_key
@@ -237,13 +248,31 @@ def _ensure_sources_expander_state(section: str, *, default: bool = True) -> str
 def _persist_sources_expander_state(section: str, widget_key: str) -> None:
     """Remember expander open/closed state across refreshes when it changes."""
     expanded = bool(st.session_state.get(widget_key, True))
-    prefs = store.get_user_preferences() or {}
-    saved_raw = prefs.get("sources_expander_state")
-    saved = dict(saved_raw) if isinstance(saved_raw, dict) else {}
+    saved = _sources_expander_prefs()
     if saved.get(section) is expanded:
         return
     saved[section] = expanded
     store.update_user_preferences({"sources_expander_state": saved})
+
+
+def _persist_sources_expander_states(
+    sections: list[tuple[str, str]],
+) -> None:
+    """Write every listed expander flag in one preference update.
+
+    Args:
+        sections: ``(section title, widget key)`` pairs rendered this run.
+    """
+    saved = _sources_expander_prefs()
+    changed = False
+    for section, widget_key in sections:
+        expanded = bool(st.session_state.get(widget_key, True))
+        if saved.get(section) is expanded:
+            continue
+        saved[section] = expanded
+        changed = True
+    if changed:
+        store.update_user_preferences({"sources_expander_state": saved})
 
 
 def _sources_expander_changed(section: str, widget_key: str) -> None:
@@ -730,7 +759,10 @@ def _render_sources_panel_body() -> None:
             for source in visible_sources
             if not is_locked_course_source(source)
         ]
-        my_sources_key = _ensure_sources_expander_state("My Sources", default=True)
+        expander_prefs = _sources_expander_prefs()
+        expander_sections: list[tuple[str, str]] = []
+        my_sources_key = _ensure_sources_expander_state("My Sources", default=True, saved=expander_prefs)
+        expander_sections.append(("My Sources", my_sources_key))
         with st.expander(
             f"My Sources · {len(personal_sources)}",
             expanded=bool(st.session_state.get(my_sources_key, True)),
@@ -754,7 +786,6 @@ def _render_sources_panel_body() -> None:
                 )
             else:
                 st.caption("No matching personal sources.")
-        _persist_sources_expander_state("My Sources", my_sources_key)
         for group in COURSE_MATERIAL_GROUPS:
             # Keep empty course expanders visible when not filtering away the group.
             group_all = [
@@ -765,7 +796,8 @@ def _render_sources_panel_body() -> None:
             ]
             group_sources = _sort_course_sources_by_name(grouped_course_sources[group])
             # Collapsed by default; students open Lecture Notes / Readings as needed.
-            group_key = _ensure_sources_expander_state(group, default=False)
+            group_key = _ensure_sources_expander_state(group, default=False, saved=expander_prefs)
+            expander_sections.append((group, group_key))
             with st.expander(
                 f"{group} · {len(group_all)}",
                 expanded=bool(st.session_state.get(group_key, False)),
@@ -783,4 +815,4 @@ def _render_sources_panel_body() -> None:
                     st.caption("No materials available yet.")
                 else:
                     st.caption("No matching materials in this group.")
-            _persist_sources_expander_state(group, group_key)
+        _persist_sources_expander_states(expander_sections)

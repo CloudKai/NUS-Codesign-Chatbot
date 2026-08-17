@@ -51,6 +51,10 @@ _REVIEW_PATTERNS = (
 def looks_like_course_question(student_message: str) -> bool:
     """Return whether the message is a conservative course-information question.
 
+    These patterns stay narrow on purpose: :func:`select_specialist` uses them
+    for mock/offline ``qa`` routing. Retrieval recall is owned by
+    ``backend.retrieval_gate`` and must not widen this helper.
+
     Args:
         student_message: The current student contribution.
 

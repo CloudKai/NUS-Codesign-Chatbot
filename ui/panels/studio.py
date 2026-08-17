@@ -486,12 +486,15 @@ def render_learning_review(journey: dict[str, Any]) -> None:
     )
 
 
-def render_pending_transition() -> None:
+def render_pending_transition(
+    pending: Any | None = None,
+) -> None:
     """Show a coach recommendation banner when confirmation mode is active.
 
     Advancement actions live in the Thinking Path footer (Next + confirm dialog).
     """
-    pending = _fetch_pending_transition()
+    if pending is None:
+        pending = _fetch_pending_transition()
     if not pending:
         return
     st.info(
@@ -564,12 +567,13 @@ def _confirm_next_stage_dialog() -> None:
             rerun_app()
 
 
-def render_thinking_path_footer() -> None:
+def render_thinking_path_footer(pending: Any | None = None) -> None:
     """Render the confirmation-gated Next control for Thinking Path."""
     if settings.effective_auto_advance_stages:
         return
 
-    pending = _fetch_pending_transition()
+    if pending is None:
+        pending = _fetch_pending_transition()
     _, next_column = st.columns([0.72, 0.28], gap="small")
     next_disabled = pending is None
     next_help = (
@@ -614,11 +618,14 @@ def render_studio_panel() -> None:
         unsafe_allow_html=True,
     )
     with st.container(key="studio_scroll", height="stretch"):
-        # Streamlit tabs always render both; preferred tab is selected via CSS/state cue.
+        # Streamlit tabs always render both bodies (client-side tab switch
+        # does not rerun). Duplicate get_messages/get_thread work is avoided
+        # by the page-run memo, not by skipping Review.
         journey_tab, review_tab = st.tabs(["Journey", "Review"])
+        pending = _fetch_pending_transition()
         with journey_tab:
             render_journey_track()
-            render_pending_transition()
+            render_pending_transition(pending)
         with review_tab:
             if preferred == "Review":
                 st.caption("Current focus")
@@ -627,6 +634,6 @@ def render_studio_panel() -> None:
                 )
             render_learning_review(journey)
     with st.container(key="thinking_path_footer"):
-        render_thinking_path_footer()
+        render_thinking_path_footer(pending)
     if st.session_state.get("confirm_next_transition_id"):
         _confirm_next_stage_dialog()

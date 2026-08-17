@@ -210,20 +210,26 @@ def _stage_assessment_as_text(value: Any) -> Any:
 
 
 class EducationalAssessment(BaseModel):
-    """Validated coaching assessment produced for one student contribution."""
+    """Validated coaching assessment produced for one student contribution.
+
+    New Fast Chat turns persist a slim subset (stage, optional stay/advance,
+    citations). Historical rows may still contain Facione and review fields.
+    Missing strings default empty so old full payloads and new slim payloads
+    both parse.
+    """
 
     current_stage: str
-    contribution_summary: str = Field(min_length=1, max_length=2_000)
-    stage_assessment: str = Field(min_length=1, max_length=4_000)
+    contribution_summary: str = Field(default="", max_length=2_000)
+    stage_assessment: str = Field(default="", max_length=4_000)
     evidence_identified: list[str] = Field(default_factory=list)
     assumptions_identified: list[str] = Field(default_factory=list)
     missing_reasoning_elements: list[str] = Field(default_factory=list)
-    critical_understanding_level: str = Field(min_length=1, max_length=120)
-    confidence: float = Field(ge=0.0, le=1.0)
-    recommendation: StageDecision
-    recommendation_rationale: str = Field(min_length=1, max_length=4_000)
+    critical_understanding_level: str = Field(default="", max_length=120)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    recommendation: StageDecision | None = None
+    recommendation_rationale: str = Field(default="", max_length=4_000)
     guidance_questions: list[str] = Field(default_factory=list, max_length=3)
-    learning_summary: str = Field(min_length=1, max_length=4_000)
+    learning_summary: str = Field(default="", max_length=4_000)
     working_conclusion: str = Field(default="", max_length=4_000)
     understanding_change: str = Field(default="", max_length=4_000)
     citations: list[CitationReference] = Field(default_factory=list)
@@ -236,6 +242,7 @@ class EducationalAssessment(BaseModel):
     review_depth: str | None = Field(default=None, max_length=32)
     review_model: str | None = Field(default=None, max_length=128)
     review_trigger: str | None = Field(default=None, max_length=64)
+    response_mode: str = Field(default="", max_length=32)
 
     @model_validator(mode="before")
     @classmethod
@@ -261,7 +268,8 @@ class EducationalAssessment(BaseModel):
             data["stage_assessment"] = _stage_assessment_as_text(stage)
         recommendation = data.get("recommendation")
         if isinstance(recommendation, str):
-            data["recommendation"] = recommendation.strip().lower()
+            cleaned = recommendation.strip().lower()
+            data["recommendation"] = cleaned or None
         return data
 
     @field_validator("guidance_questions")
@@ -289,6 +297,32 @@ class EducationalAssessment(BaseModel):
             seen.add(key)
             cleaned.append(item[:400])
         return cleaned[:4]
+
+    def persisted_mapping(self) -> dict[str, Any]:
+        """Return the JSON object stored on one assistant message.
+
+        Fast Chat persists a slim subset so new Coaching/Q&A rows do not look
+        like Deep Review assessments. Historical full objects still parse.
+        """
+        data = self.model_dump(mode="json")
+        mode = str(self.response_mode or "").strip().lower()
+        if mode not in {"qa", "coaching"}:
+            return data
+        slim: dict[str, Any] = {
+            "current_stage": data.get("current_stage"),
+            "response_mode": mode,
+            "citations": list(data.get("citations") or []),
+        }
+        recommendation = data.get("recommendation")
+        if recommendation in {"stay", "advance"}:
+            slim["recommendation"] = recommendation
+            rationale = str(data.get("recommendation_rationale") or "").strip()
+            if rationale:
+                slim["recommendation_rationale"] = rationale
+        if data.get("readiness_candidate"):
+            slim["readiness_candidate"] = True
+        return slim
+
 
 class PendingPhaseTransition(BaseModel):
     """A student-visible stage transition that awaits an explicit decision."""
@@ -377,6 +411,11 @@ class CoachRequest(BaseModel):
     deep_review_interval_turns: int = Field(default=3, ge=1, le=50)
     # Server-filled retrieval decision. Clients cannot make this authoritative.
     retrieval_required: bool = False
+    # Server-filled Q&A/coaching mode policy. Clients cannot make these
+    # authoritative; ``_authoritative_request`` overwrites both from the
+    # student message and selected-source metadata.
+    expected_response_mode: str | None = Field(default=None, max_length=16)
+    mode_policy_intent: str = Field(default="", max_length=64)
 
     @field_validator("current_stage")
     @classmethod
@@ -406,6 +445,30 @@ class CoachRequest(BaseModel):
         if cleaned in {"qa", "coaching", "review"}:
             return cleaned
         return None
+
+    @field_validator("expected_response_mode")
+    @classmethod
+    def expected_response_mode_must_be_qa_or_coaching(
+        cls, value: str | None
+    ) -> str | None:
+        """Keep only server-owned qa/coaching hints. Unknown values become None."""
+        cleaned = str(value or "").strip().lower()
+        if cleaned in {"qa", "coaching"}:
+            return cleaned
+        return None
+
+    @field_validator("mode_policy_intent")
+    @classmethod
+    def mode_policy_intent_must_be_known(cls, value: str) -> str:
+        """Keep only graded intent tokens. Unknown values become empty."""
+        cleaned = str(value or "").strip().lower()
+        if cleaned in {
+            "high_confidence_source",
+            "high_confidence_personal",
+            "ambiguous",
+        }:
+            return cleaned
+        return ""
 
 
 class DeepReviewRequest(BaseModel):

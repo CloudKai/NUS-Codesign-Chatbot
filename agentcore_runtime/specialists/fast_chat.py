@@ -23,14 +23,14 @@ def fast_chat_static_prefix(topic: str) -> str:
         topic: AgentCore coaching topic, including ``ethics_critical``.
 
     Returns:
-        ``fast_chat.md``, shared coaching, and the current stage prompt.
+        ``shared_coaching.md``, the current stage prompt, and ``fast_chat.md``.
         Runtime rules, student text, and retrieved evidence are excluded.
     """
     return "\n\n".join(
         [
-            load_fast_chat_prompt(),
             load_shared_coaching(),
             load_stage_prompt(topic),
+            load_fast_chat_prompt(),
         ]
     )
 
@@ -43,8 +43,9 @@ def fast_chat_system_prompt(topic: str, trusted_runtime_rules: str = "") -> str:
         trusted_runtime_rules: Application-owned constraints from FastAPI.
 
     Returns:
-        Combined identity, shared pedagogy, current-stage instructions, and
-        runtime rules. Does not instruct a multi-role chain.
+        Combined shared pedagogy, current-stage instructions, Fast Chat
+        coaching-versus-Q&A rules, and runtime constraints. Does not instruct
+        a multi-role chain.
     """
     parts = [fast_chat_static_prefix(topic)]
     extra = str(trusted_runtime_rules or "").strip()

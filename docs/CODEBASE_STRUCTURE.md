@@ -17,7 +17,7 @@ backend/
   http/app.py                 FastAPI composition, routes and HTTP errors
   api_client.py               typed client used by Streamlit
   application.py              coaching compatibility facade
-  coaching/                   durable coach-turn execution
+  coaching/                   execution, mode policy, progress-field merge, turn snapshot
   workspace_service.py        notebook/message/source/preference use cases; transcript export
   learning_service.py         transition confirmation and stage selection
   domain.py                   Pydantic API/workflow contracts
@@ -30,7 +30,9 @@ backend/
   source_library.py           source compatibility alias
   sources/                    ingestion, course sync, context, image projection
   retrieval.py                retrieval port, local chunk retriever, composite splitter
+  retrieval_gate.py           deterministic non-LLM retrieve / skip classifier
   bedrock_retrieve.py         Bedrock Knowledge Base Retrieve adapter
+  sources/kb_metadata.py      canonical course_material_id + sidecar payload
   repositories.py             narrow store-backed repository adapters
   student_store.py            stable persistence facade and remaining operations
   persistence/store/          contracts, schema/migrations, extracted operations
@@ -38,7 +40,7 @@ backend/
   providers.py                OpenAI adapter and provider selection
   bedrock_provider.py         Amazon Bedrock Converse coach adapter
   agentcore_provider.py       Amazon Bedrock AgentCore Runtime coach adapter
-  specialists/                server-owned qa / coaching / review routing
+  specialists/                legacy qa/coaching/review helpers; explicit Deep Review route helpers
   mock_provider.py            deterministic offline coach
   agentcore_harness_provider.py isolated Luna InvokeHarness eval adapter
   auth_*.py / cognito_*.py    Cognito/OIDC boundary and cookie behavior

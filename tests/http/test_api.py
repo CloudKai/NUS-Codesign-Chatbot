@@ -6,6 +6,8 @@ from uuid import UUID
 from fastapi.testclient import TestClient
 
 from backend.api import create_app
+from backend.application import CoachApplicationService
+from backend.domain import CoachTurn, EducationalAssessment
 from backend.settings import settings
 from backend.source_library import add_text_source
 from backend.student_store import StudentStore
@@ -179,6 +181,52 @@ def test_local_api_can_retain_confirmation_mode(tmp_path, caplog):
     assert transition_id not in json.dumps(stage_event)
     advanced = client.get(f"/api/v1/threads/{thread_id}/learning-state").json()
     assert (advanced.get("learning_journey") or {}).get("current_stage") == "concept_generation"
+
+
+def test_confirm_advance_api_does_not_blank_existing_progress(tmp_path):
+    store = StudentStore(tmp_path / "confirm-keep-progress.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    store.update_thread(
+        thread_id,
+        metadata={
+            "learning_summary": "previous summary",
+            "working_conclusion": "previous conclusion",
+            "understanding_change": "previous change",
+            "critical_understanding": "Developing",
+        },
+    )
+    created = store.create_phase_transition(
+        {
+            "thread_id": thread_id,
+            "from_stage": "problem_identification",
+            "to_stage": "concept_generation",
+            "assessment": {
+                "current_stage": "problem_identification",
+                "contribution_summary": "The student named a focused question.",
+                "recommendation": "advance",
+                "learning_summary": "",
+                "working_conclusion": "",
+                "understanding_change": "",
+                "critical_understanding_level": "",
+            },
+        }
+    )
+    client = TestClient(create_app(store, auto_advance_stages=False))
+
+    resolved = client.post(
+        f"/api/v1/threads/{thread_id}/phase-transitions/{created['id']}/resolve",
+        json={"accepted": True},
+    )
+
+    assert resolved.status_code == 200
+    state = client.get(f"/api/v1/threads/{thread_id}/learning-state").json()
+    assert (state.get("learning_journey") or {}).get("current_stage") == (
+        "concept_generation"
+    )
+    assert state.get("learning_summary") == "previous summary"
+    assert state.get("working_conclusion") == "previous conclusion"
+    assert state.get("understanding_change") == "previous change"
+    assert state.get("critical_understanding") == "Developing"
 
 
 def test_select_stage_api_requires_flag_and_valid_stage(tmp_path, monkeypatch, caplog):
@@ -900,7 +948,8 @@ def test_local_api_ready_request_id_stream_and_graph(tmp_path):
     assert kinds[0] == "started"
     assert kinds[1] == "status"
     assert events[1].get("phase") == "thinking"
-    assert "token" in kinds
+    assert "token" not in kinds
+    assert "saving" in [event.get("phase") for event in events if event.get("event") == "status"]
     assert kinds[-1] == "done"
     assert events[-1]["turn"]["response_text"]
 
@@ -1006,3 +1055,38 @@ def test_production_readiness_reports_cognito_configured_without_discovery(
     assert response.json()["mode"] == "production"
     assert response.json()["cognito_configured"] == "true"
     assert calls == [True]
+
+
+def test_qa_null_recommendation_does_not_crash_coach_metrics(tmp_path, monkeypatch):
+    """Q&A turns persist recommendation=None and must still emit done."""
+    store = StudentStore(tmp_path / "qa-metric.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    turn = CoachTurn(
+        response_text="Week 1 covers the course framing [S1].",
+        assessment=EducationalAssessment(
+            current_stage="problem_identification",
+            recommendation=None,
+            response_mode="qa",
+        ),
+    )
+
+    def _qa_submit(self, request, **_kwargs):
+        del self, request
+        return turn
+
+    monkeypatch.setattr(CoachApplicationService, "submit", _qa_submit)
+    client = TestClient(create_app(store, auto_advance_stages=False))
+    payload = {
+        "thread_id": thread_id,
+        "student_message": "What is in Week 1 lecture?",
+        "current_stage": "problem_identification",
+        "response_detail": "short",
+        "idempotency_key": "qa-metric-key",
+    }
+    regular = client.post("/api/v1/coach/turn", json=payload)
+    streamed = client.post("/api/v1/coach/turn/stream", json=payload)
+    assert regular.status_code == 200
+    assert regular.json()["assessment"]["recommendation"] is None
+    events = [json.loads(line) for line in streamed.text.splitlines() if line.strip()]
+    assert events[-1]["event"] == "done"
+    assert events[-1]["turn"]["assessment"]["recommendation"] is None

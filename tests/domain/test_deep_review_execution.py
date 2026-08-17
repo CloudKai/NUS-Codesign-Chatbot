@@ -13,7 +13,6 @@ from backend.domain import (
     CoachRequest,
     EducationalAssessment,
     FacioneDimensionScores,
-    ProviderCoachOutput,
     StageDecision,
 )
 from backend.learning_service import LearningProgressService
@@ -56,14 +55,15 @@ def _assessment() -> EducationalAssessment:
 
 
 def _coaching_payload() -> dict[str, Any]:
-    """Return one fast-chat coaching body."""
-    payload = ProviderCoachOutput(
-        response_text="What assumption is carrying this preference?",
-        assessment=_assessment(),
-        research_coding=None,
-    ).model_dump(mode="json")
-    payload["mode"] = "coaching"
-    return payload
+    """Return one lightweight fast-chat coaching body."""
+    return {
+        "mode": "coaching",
+        "response_text": "What assumption is carrying this preference?",
+        "recommendation": "stay",
+        "recommendation_rationale": "More evidence is still needed.",
+        "citations": [],
+        "needs_source_retrieval": False,
+    }
 
 
 def _deep_payload(*, synthesis: str = "Formative Deep Review A.") -> dict[str, Any]:

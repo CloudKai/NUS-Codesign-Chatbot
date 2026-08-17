@@ -332,6 +332,25 @@ def test_production_script_validates_provider_config_without_requiring_data_for_
     assert 'DATABASE_PROVIDER" = "sqlite"' in script
     assert 'FILE_STORAGE_PROVIDER" = "local"' in script
     assert "Application data directory must exist and be writable" in script
+    assert "--workers" not in script
+    assert "python -m uvicorn backend.api:app" in script
+
+
+def test_caddy_documents_loopback_fastapi_and_does_not_time_out_coach_turns():
+    """Caddy fronts Streamlit; coaching HTTP stays on container loopback."""
+    caddyfile = (ROOT / "Caddyfile").read_text(encoding="utf-8")
+    compose_prod = (ROOT / "compose.prod.yaml").read_text(encoding="utf-8")
+    env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+
+    assert "Caddy does not proxy" in caddyfile
+    assert "/api/v1/coach" in caddyfile
+    assert "unlimited read timeout" in caddyfile
+    assert "transport http" not in caddyfile
+    assert "read_timeout" not in caddyfile
+    assert "start_prod.sh has no --workers" in compose_prod
+    assert "durable mutex" in compose_prod
+    assert "There is no separate COACH_IDEMPOTENCY_LEASE_SECONDS knob" in env_example
+    assert "DERIVED from this value" in env_example
 
 
 def test_cloudfront_is_the_only_documented_production_edge():

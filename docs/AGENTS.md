@@ -22,6 +22,7 @@ Do not create parallel architecture documents. Extend or amend the files here.
 | [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) | Living handoff log: current phase, completed work, validation evidence, risks, next action | At session start to resume; at phase end to record evidence |
 | [`PROMPT_ARCHITECTURE.md`](PROMPT_ARCHITECTURE.md) | Local stage-prompt package, composer seam, local vs Knowledge Base Retrieve | Before editing `backend/prompts/` or provider prompt wiring |
 | [`RAG_ARCHITECTURE.md`](RAG_ARCHITECTURE.md) | Course KB Retrieve, student extract retrieval, unified `[S#]` evidence | Before changing retrieval, Bedrock KB filters, or source scope |
+| [`KB_REQUIRED_MODE_RUNBOOK.md`](KB_REQUIRED_MODE_RUNBOOK.md) | Operator checklist to enable `required` metadata filters | Before sidecar upload, KB sync, or setting `KNOWLEDGE_BASE_METADATA_FILTER_MODE=required` |
 | [`SECURITY_BOUNDARIES.md`](SECURITY_BOUNDARIES.md) | Identity, retrieval authorization, citations, prompt injection, transcript authority | Before changing auth, retrieval, or provider adapters |
 | [`providers/AGENTCORE_ADAPTER.md`](providers/AGENTCORE_ADAPTER.md) | AgentCore Runtime generation adapter (FastAPI stays the app) | Before changing `MODEL_PROVIDER=agentcore` or the harness patch |
 | [`deploy/AWS_STATELESS_EC2.md`](deploy/AWS_STATELESS_EC2.md) | Production CloudFront + Caddy origin + ECR + DSQL + S3 topology; CloudShell `init_dsql.py` SSL/IPv4 checklist | Before AWS/EC2 cutover or re-running admin DSQL bootstrap |

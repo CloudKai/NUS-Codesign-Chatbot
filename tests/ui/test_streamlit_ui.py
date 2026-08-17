@@ -185,8 +185,8 @@ def test_streamlit_notebook_workspace_smoke():
     my_sources_at = sources_py.index('f"My Sources · {len(personal_sources)}"')
     lecture_at = sources_py.index('f"{group} · {len(group_all)}"')
     assert my_sources_at < lecture_at
-    assert '_ensure_sources_expander_state(group, default=False)' in sources_py
-    assert '_ensure_sources_expander_state("My Sources", default=True)' in sources_py
+    assert '_ensure_sources_expander_state(group, default=False' in sources_py
+    assert '_ensure_sources_expander_state("My Sources", default=True' in sources_py
     assert "source_card_locked_" in sources_py
     assert "disabled=locked" not in sources_py
     assert 'key="sources_filters"' in sources_py

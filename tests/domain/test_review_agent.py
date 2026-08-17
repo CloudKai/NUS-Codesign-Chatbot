@@ -16,7 +16,6 @@ from backend.domain import (
     CoachRequest,
     EducationalAssessment,
     FacioneDimensionScores,
-    ProviderCoachOutput,
     StageDecision,
 )
 from backend.student_journey import learning_review
@@ -79,16 +78,16 @@ def _output(
     recommendation: StageDecision = StageDecision.STAY,
     readiness_candidate: bool = False,
 ) -> dict[str, Any]:
-    """Return a coach_turn payload."""
-    dumped = ProviderCoachOutput(
-        response_text="What trade-off still needs evidence?",
-        assessment=_assessment(
-            recommendation=recommendation, readiness_candidate=readiness_candidate
-        ),
-        research_coding=None,
-    ).model_dump(mode="json")
-    dumped["mode"] = "coaching"
-    return dumped
+    """Return a lightweight fast-chat coaching payload."""
+    del readiness_candidate
+    return {
+        "mode": "coaching",
+        "response_text": "What trade-off still needs evidence?",
+        "recommendation": recommendation.value,
+        "recommendation_rationale": "More evidence is still needed.",
+        "citations": [],
+        "needs_source_retrieval": False,
+    }
 
 
 def _provider(client: FakeAgentCoreRuntime) -> AgentCoreCoachProvider:
@@ -276,7 +275,7 @@ def test_qa_does_not_call_incremental_or_deep_review() -> None:
     result = _provider(client).assess(_request(student_message="What is Week 2 about?"))
     assert _phases(client) == ["fast_chat"]
     assert _review_modes(client) == []
-    assert result.assessment.recommendation is StageDecision.STAY
+    assert result.assessment.recommendation is None
     assert result.qualifying_coaching_turn is False
 
 

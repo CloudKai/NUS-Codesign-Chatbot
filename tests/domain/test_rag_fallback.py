@@ -12,7 +12,6 @@ from backend.domain import (
     CoachRequest,
     EducationalAssessment,
     FacioneDimensionScores,
-    ProviderCoachOutput,
     StageDecision,
 )
 from backend.learning_service import LearningProgressService
@@ -69,16 +68,19 @@ def _coaching_payload(
     recommendation: StageDecision = StageDecision.STAY,
     research_quote: str | None = None,
 ) -> dict[str, Any]:
-    """Return one fast-chat coaching body."""
-    payload = ProviderCoachOutput(
-        response_text=response_text,
-        assessment=_assessment(
-            recommendation=recommendation, contribution=response_text
+    """Return one lightweight fast-chat coaching body."""
+    payload = {
+        "mode": "coaching",
+        "response_text": response_text,
+        "recommendation": recommendation.value,
+        "recommendation_rationale": (
+            "More evidence is still needed."
+            if recommendation is StageDecision.STAY
+            else "The stage readiness bar is met."
         ),
-        research_coding=None,
-    ).model_dump(mode="json")
-    payload["mode"] = "coaching"
-    payload["needs_source_retrieval"] = needs_source_retrieval
+        "citations": [],
+        "needs_source_retrieval": needs_source_retrieval,
+    }
     if research_quote:
         payload["research_coding"] = {
             "coding_status": "coded",
@@ -342,7 +344,7 @@ def test_research_and_counter_and_stage_use_final_result_only(tmp_path) -> None:
     assert turn.pending_transition is None
     assert turn.assessment.current_stage == "problem_identification"
     observations = store.list_research_observations(notebook_id=thread_id)
-    assert len(observations) == 1
+    assert observations == []
     metadata = store.get_thread(thread_id)["metadata"]
     assert int(metadata.get(COUNTER_SETTINGS_KEY) or 0) == 1
     assistants = [item for item in store.get_messages(thread_id) if item["role"] == "assistant"]

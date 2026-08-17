@@ -149,7 +149,10 @@ def test_api_client_ready_stream_and_graph(tmp_path):
         assert kinds[0] == "started"
         assert kinds[1] == "status"
         assert events[1].get("phase") == "thinking"
-        assert "token" in kinds
+        assert "token" not in kinds
+        assert "saving" in [
+            event.get("phase") for event in events if event.get("event") == "status"
+        ]
         assert "done" in kinds
         done = next(event for event in events if event.get("event") == "done")
         assert done["turn"]["response_text"]

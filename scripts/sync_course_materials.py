@@ -41,6 +41,8 @@ def course_object_pairs(root: Path, prefix: str) -> list[tuple[Path, str]]:
                 continue
             if path.suffix.lower() not in SUPPORTED_SUFFIXES:
                 continue
+            if path.name.endswith(".metadata.json"):
+                continue
             relative = path.relative_to(root).as_posix()
             pairs.append((path, f"{normalized}{relative}"))
     return pairs

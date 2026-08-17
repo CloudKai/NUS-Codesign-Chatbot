@@ -188,6 +188,11 @@ def configured_coach_provider():
     if settings.model_provider == "agentcore":
         from backend.agentcore_provider import AgentCoreCoachProvider
 
+        # boto max_attempts = max_retries + 1. Keep AGENTCORE_MAX_RETRIES=0 so
+        # one Fast Chat invoke is one read-timeout window. Rare RAG fallback
+        # can invoke twice in one claimed turn; the DSQL idempotency lease in
+        # settings.coach_idempotency_lease_seconds is derived from
+        # 2 × timeout × attempts so those windows cannot outlive the lease.
         return AgentCoreCoachProvider(
             settings.resolved_agentcore_runtime_arn,
             region=settings.aws_region,

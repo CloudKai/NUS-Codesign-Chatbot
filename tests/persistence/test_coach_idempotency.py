@@ -193,7 +193,7 @@ def test_api_maps_an_active_duplicate_to_retryable_conflict(tmp_path, monkeypatc
     store = StudentStore(tmp_path / "idempotent-in-progress-api.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
 
-    def in_progress(self, request):
+    def in_progress(self, request, **_kwargs):
         raise CoachRequestInProgressError("Retry this request with the same key")
 
     monkeypatch.setattr(CoachApplicationService, "submit", in_progress)

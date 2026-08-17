@@ -10,10 +10,6 @@ import pytest
 from backend.agentcore_provider import AgentCoreCoachProvider
 from backend.domain import (
     CoachRequest,
-    EducationalAssessment,
-    FacioneDimensionScores,
-    ProviderCoachOutput,
-    StageDecision,
 )
 from backend.providers import ProviderUnavailableError
 from backend.turn_perf import SAFE_PERF_FIELDS, assert_payload_is_safe, begin_coach_turn_perf
@@ -25,26 +21,15 @@ _RUNTIME_ARN = (
 
 
 def _output() -> dict:
-    """Return a coaching fast-chat payload."""
-    payload = ProviderCoachOutput(
-        response_text="What trade-off still needs evidence?",
-        assessment=EducationalAssessment(
-            current_stage="problem_identification",
-            contribution_summary="The student compared two design constraints.",
-            stage_assessment="The contribution is usable.",
-            critical_understanding_level="Developing",
-            confidence=0.7,
-            recommendation=StageDecision.STAY,
-            recommendation_rationale="More evidence is still needed.",
-            guidance_questions=["What trade-off still needs evidence?"],
-            learning_summary="The student is developing the problem.",
-            citations=[],
-            facione_scores=FacioneDimensionScores(),
-        ),
-        research_coding=None,
-    ).model_dump(mode="json")
-    payload["mode"] = "coaching"
-    return payload
+    """Return a lightweight coaching fast-chat payload."""
+    return {
+        "mode": "coaching",
+        "response_text": "What trade-off still needs evidence?",
+        "recommendation": "stay",
+        "recommendation_rationale": "More evidence is still needed.",
+        "citations": [],
+        "needs_source_retrieval": False,
+    }
 
 
 def test_success_perf_log_has_no_student_text_or_secrets(caplog) -> None:
@@ -201,20 +186,26 @@ def test_configure_operational_loggers_enables_info_without_root_debug():
     root = logging.getLogger()
     previous_root = root.level
     retrieve_logger = logging.getLogger("backend.bedrock_retrieve")
+    agentcore_logger = logging.getLogger("backend.agentcore_provider")
     perf_logger = logging.getLogger("co_design.turn_perf")
     previous_retrieve = retrieve_logger.level
+    previous_agentcore = agentcore_logger.level
     previous_perf = perf_logger.level
     try:
         root.setLevel(logging.WARNING)
         retrieve_logger.setLevel(logging.NOTSET)
+        agentcore_logger.setLevel(logging.NOTSET)
         perf_logger.setLevel(logging.NOTSET)
         configure_operational_loggers()
         assert retrieve_logger.level == logging.INFO
+        assert agentcore_logger.level == logging.INFO
         assert perf_logger.level == logging.INFO
         assert retrieve_logger.isEnabledFor(logging.INFO)
+        assert agentcore_logger.isEnabledFor(logging.INFO)
         assert perf_logger.isEnabledFor(logging.INFO)
         assert root.level == logging.WARNING
     finally:
         root.setLevel(previous_root)
         retrieve_logger.setLevel(previous_retrieve)
+        agentcore_logger.setLevel(previous_agentcore)
         perf_logger.setLevel(previous_perf)

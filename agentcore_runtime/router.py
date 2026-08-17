@@ -1,4 +1,10 @@
-"""Haiku router helpers. Classification only; FastAPI owns authorization."""
+"""Haiku router helpers. Classification only; FastAPI owns authorization.
+
+FastAPI no longer sends ``phase=router``. These helpers remain because the
+published AgentCore entrypoint still dispatches that phase for a caller
+holding ``bedrock-agentcore:InvokeAgentRuntime``. Do not treat UI or
+browser code as a fix for that IAM boundary.
+"""
 
 from __future__ import annotations
 

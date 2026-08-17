@@ -6,8 +6,8 @@ cache point on the last user message and would cache student text, so this
 module never uses it.
 
 The supported mechanism is a Strands ``SystemContentBlock`` ``cachePoint``
-after the static pedagogical prefix (fast_chat + shared coaching + current
-stage). Dynamic runtime rules stay after that point.
+after the static pedagogical prefix (shared coaching + current stage +
+fast-chat overlay). Dynamic runtime rules stay after that point.
 
 Default behaviour is cache-disabled and string-identical to the uncached
 prompt. This module never pads prompts to force eligibility.

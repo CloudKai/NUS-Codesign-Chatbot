@@ -22,7 +22,6 @@ from backend.domain import (
     EducationalAssessment,
     FacioneBehavior,
     FacioneDimensionScores,
-    ProviderCoachOutput,
     ProvisionalResearchCoding,
     ResearchCodingStatus,
     ResearchEvidence,
@@ -113,18 +112,18 @@ def _output(
     response_text: str = "What trade-off still needs evidence [S1]?",
     recommendation: StageDecision = StageDecision.STAY,
 ) -> dict[str, Any]:
-    """Return a JSON-ready provider envelope, including optional research."""
-    envelope = ProviderCoachOutput(
-        response_text=response_text,
-        assessment=_assessment(
-            stage=stage, citations=citations, recommendation=recommendation
-        ),
-        research_coding=research if not isinstance(research, dict) else None,
-    )
-    dumped = envelope.model_dump(mode="json")
-    dumped["mode"] = "coaching"
-    if isinstance(research, dict):
-        dumped["research_coding"] = research
+    """Return a JSON-ready lightweight fast-chat payload."""
+    del stage, research
+    dumped = {
+        "mode": "coaching",
+        "response_text": response_text,
+        "recommendation": recommendation.value,
+        "recommendation_rationale": "More evidence is still needed.",
+        "citations": [
+            item.model_dump(mode="json") for item in (citations or [])
+        ],
+        "needs_source_retrieval": False,
+    }
     return dumped
 
 
@@ -241,8 +240,7 @@ def test_valid_structured_coaching_and_research_coding():
     result = _provider(client).assess(_request())
     assert result.response_text.startswith("What trade-off")
     assert result.assessment.current_stage == "problem_identification"
-    assert result.research_coding is not None
-    assert result.research_coding.coding_status is ResearchCodingStatus.CODED
+    assert result.research_coding is None
     assert len(_router_calls(client)) == 0
     assert len(_deep_review_calls(client)) == 0
     call = _specialist_call(client)
@@ -269,16 +267,11 @@ def test_valid_structured_coaching_and_research_coding():
     assert "RetrieveAndGenerate" not in json.dumps(payload)
 
 
-def test_live_uppercase_recommendation_and_object_stage_assessment_are_accepted():
+def test_live_uppercase_recommendation_is_accepted():
     payload = _output()
-    payload["assessment"]["recommendation"] = "STAY"
-    payload["assessment"]["stage_assessment"] = {
-        "strengths": [],
-        "improvements": ["Trade-offs can be identified."],
-    }
+    payload["recommendation"] = "STAY"
     result = _provider(FakeAgentCoreRuntime(payload=payload)).assess(_request())
     assert result.assessment.recommendation is StageDecision.STAY
-    assert "Trade-offs can be identified." in result.assessment.stage_assessment
 
 
 def test_deep_analysis_maps_only_to_agentcore_ethics_critical_topic():
@@ -820,6 +813,69 @@ def test_harness_safety_envelope_stays_safety_blocked():
     with pytest.raises(ProviderUnavailableError, match="blocked this turn") as raised:
         _provider(client).assess(_request())
     assert raised.value.category == "safety_blocked"
+
+
+def _legacy_nested_coach_turn(*, recommendation: str = "stay") -> dict[str, Any]:
+    """Return the immediately-previous nested coach_turn runtime JSON."""
+    return {
+        "response_text": "What trade-off still needs evidence?",
+        "assessment": {
+            "current_stage": "problem_identification",
+            "contribution_summary": "The student compared two design constraints.",
+            "stage_assessment": "The contribution is usable but can be developed further.",
+            "critical_understanding_level": "Developing",
+            "confidence": 0.7,
+            "recommendation": recommendation,
+            "recommendation_rationale": "The stage readiness bar is met.",
+            "guidance_questions": ["What trade-off still needs evidence?"],
+            "learning_summary": "The student is developing the problem.",
+            "citations": [],
+        },
+        "research_coding": None,
+    }
+
+
+def test_legacy_nested_coach_turn_maps_advance_recommendation():
+    result = _provider(
+        FakeAgentCoreRuntime(payload=_legacy_nested_coach_turn(recommendation="advance"))
+    ).assess(_request())
+    assert result.assessment.recommendation is StageDecision.ADVANCE
+    assert result.specialist == "coaching"
+
+
+def test_legacy_qa_turn_maps_without_inventing_recommendation():
+    result = _provider(
+        FakeAgentCoreRuntime(
+            payload={
+                "response_text": "Week 1 covers the course introduction [S1].",
+                "citations": [{"label": "S1", "title": "Week 1"}],
+            }
+        )
+    ).assess(_request())
+    assert result.specialist == "qa"
+    assert result.assessment.recommendation is None
+
+
+def test_malformed_fast_chat_payload_fails_closed(caplog):
+    client = FakeAgentCoreRuntime(payload={"mode": "coaching"})
+    with pytest.raises(ProviderUnavailableError, match="could not be completed") as raised:
+        _provider(client).assess(_request())
+    assert raised.value.category == "structured_output_failure"
+    joined = "\n".join(record.getMessage() for record in caplog.records)
+    assert "fast_chat_contract_mismatch" in joined
+    assert "expected=fast_chat_turn_v1" in joined
+    assert "What trade-off" not in joined
+    assert _STUDENT_MESSAGE not in joined
+
+
+def test_conflicting_slim_and_nested_recommendations_fail_closed():
+    payload = _legacy_nested_coach_turn(recommendation="advance")
+    payload["mode"] = "coaching"
+    payload["recommendation"] = "stay"
+    client = FakeAgentCoreRuntime(payload=payload)
+    with pytest.raises(ProviderUnavailableError) as raised:
+        _provider(client).assess(_request())
+    assert raised.value.category == "structured_output_failure"
 
 
 def test_short_street_contribution_is_invoked_and_not_treated_as_empty():

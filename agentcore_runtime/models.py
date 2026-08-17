@@ -166,16 +166,217 @@ class QATurnOutput(BaseModel):
     citations: list[CitationOutput] = Field(default_factory=list)
 
 
+# Wire marker stamped on slim Fast Chat JSON. Unknown values are ignored.
+FAST_CHAT_SCHEMA_ID = "fast_chat_turn_v1"
+
+_FAST_CHAT_REVIEW_HINT_KEYS = frozenset(
+    {
+        "synthesis",
+        "strengths",
+        "areas_to_develop",
+        "readiness_candidate",
+        "facione_profile",
+        "readiness_evidence",
+        "missing_requirements",
+    }
+)
+_FAST_CHAT_ROUTER_HINT_KEYS = frozenset({"specialist", "rationale_category"})
+
+
+class FastChatContractError(ValueError):
+    """Raised when a Fast Chat wire payload cannot be adapted safely.
+
+    ``reason`` is a stable token for logs. It must never include payload
+    values, student text, or prompt content.
+    """
+
+    def __init__(self, reason: str) -> None:
+        cleaned = str(reason or "unrecognized").strip() or "unrecognized"
+        self.reason = cleaned[:80]
+        super().__init__(self.reason)
+
+
+def fast_chat_payload_shape_log(payload: Mapping[str, Any]) -> str:
+    """Return a key-only Fast Chat shape diagnostic with no payload values.
+
+    Args:
+        payload: Runtime JSON object.
+
+    Returns:
+        A single log fragment naming expected schema vs received keys.
+    """
+    keys = sorted(str(key) for key in payload)
+    schema_raw = payload.get("schema_id")
+    schema_token = "absent"
+    if "schema_id" in payload:
+        candidate = str(schema_raw or "").strip()
+        compact = candidate.replace("_", "").replace("-", "")
+        if candidate and len(candidate) <= 64 and compact.isalnum() and candidate.isascii():
+            schema_token = candidate
+        else:
+            schema_token = "present_untrusted"
+    return (
+        f"expected={FAST_CHAT_SCHEMA_ID} received_keys={keys} "
+        f"has_mode={('mode' in payload)} has_assessment={('assessment' in payload)} "
+        f"has_top_recommendation={('recommendation' in payload)} "
+        f"schema_id={schema_token}"
+    )
+
+
+def _recommendation_token(value: Any) -> str | None:
+    """Return stay/advance or None. Blank and unknown tokens stay distinct."""
+    cleaned = str(value or "").strip().lower()
+    if cleaned in {"", "none", "null"}:
+        return None
+    if cleaned in {"stay", "advance"}:
+        return cleaned
+    return cleaned
+
+
+def adapt_fast_chat_turn_payload(value: Any) -> FastChatTurnOutput:
+    """Parse slim Fast Chat JSON, or map the immediately-previous rich shape.
+
+    The previous normal-chat wire object was nested ``CoachTurnOutput``
+    (``response_text`` + ``assessment.recommendation``) or ``QATurnOutput``
+    (``response_text`` + citations, no recommendation). This adapter exists so
+    FastAPI can be published before the runtime without a same-millisecond
+    cutover.
+
+    A rich coaching object is mapped only when ``assessment.recommendation`` is
+    exactly stay or advance. This function never invents a recommendation.
+    When ``mode`` is present, the slim schema wins and extra nested
+    ``assessment`` is ignored unless coaching is missing a top-level
+    recommendation. Conflicting stay/advance values fail closed. Review and
+    router objects without ``mode`` fail closed.
+
+    Args:
+        value: Runtime JSON object, Pydantic model, or mapping.
+
+    Returns:
+        A validated :class:`FastChatTurnOutput`.
+
+    Raises:
+        FastChatContractError: When the payload is the wrong contract or would
+            require fabricating stage semantics.
+        ValidationError: When the slim object is present but invalid.
+    """
+    if isinstance(value, FastChatTurnOutput):
+        return value
+    if hasattr(value, "model_dump") and callable(value.model_dump):
+        try:
+            value = value.model_dump(mode="json")
+        except (TypeError, ValueError):
+            value = value
+    if not isinstance(value, Mapping):
+        raise FastChatContractError("unrecognized")
+    payload = dict(value)
+    has_mode = "mode" in payload
+    assessment = payload.get("assessment")
+    has_assessment = isinstance(assessment, Mapping)
+    if not has_mode and (
+        _FAST_CHAT_REVIEW_HINT_KEYS.intersection(payload)
+        or _FAST_CHAT_ROUTER_HINT_KEYS.intersection(payload)
+    ):
+        raise FastChatContractError("wrong_contract")
+    if has_mode:
+        mode = str(payload.get("mode") or "").strip().lower()
+        if mode == "coaching" and has_assessment:
+            top_rec = _recommendation_token(payload.get("recommendation"))
+            nested_rec = _recommendation_token(assessment.get("recommendation"))
+            if (
+                top_rec in {"stay", "advance"}
+                and nested_rec in {"stay", "advance"}
+                and top_rec != nested_rec
+            ):
+                raise FastChatContractError("recommendation_conflict")
+        try:
+            return parse_fast_chat_turn_output(payload)
+        except (ValidationError, TypeError, ValueError) as error:
+            if mode != "coaching" or not has_assessment:
+                raise FastChatContractError("slim_invalid") from error
+            nested_rec = _recommendation_token(assessment.get("recommendation"))
+            if nested_rec not in {"stay", "advance"}:
+                raise FastChatContractError("legacy_recommendation_missing")
+            text = payload.get("response_text")
+            if not isinstance(text, str) or not text.strip():
+                raise FastChatContractError("legacy_missing_text")
+            citations = assessment.get("citations")
+            if not isinstance(citations, list):
+                citations = payload.get("citations")
+            if not isinstance(citations, list):
+                citations = []
+            return parse_fast_chat_turn_output(
+                {
+                    "mode": "coaching",
+                    "response_text": text,
+                    "recommendation": nested_rec,
+                    "recommendation_rationale": assessment.get(
+                        "recommendation_rationale"
+                    ),
+                    "citations": citations,
+                    "needs_source_retrieval": bool(
+                        payload.get("needs_source_retrieval")
+                    ),
+                }
+            )
+    if has_assessment:
+        rec = _recommendation_token(assessment.get("recommendation"))
+        if rec not in {"stay", "advance"}:
+            raise FastChatContractError("legacy_recommendation_missing")
+        top = payload.get("recommendation")
+        if top is not None and str(top).strip().lower() not in {"", "none", "null"}:
+            top_rec = _recommendation_token(top)
+            if top_rec != rec:
+                raise FastChatContractError("recommendation_conflict")
+        text = payload.get("response_text")
+        if not isinstance(text, str) or not text.strip():
+            raise FastChatContractError("legacy_missing_text")
+        citations = assessment.get("citations")
+        if not isinstance(citations, list):
+            citations = payload.get("citations")
+        if not isinstance(citations, list):
+            citations = []
+        return parse_fast_chat_turn_output(
+            {
+                "mode": "coaching",
+                "response_text": text,
+                "recommendation": rec,
+                "recommendation_rationale": assessment.get("recommendation_rationale"),
+                "citations": citations,
+                "needs_source_retrieval": bool(payload.get("needs_source_retrieval")),
+            }
+        )
+    text = payload.get("response_text")
+    if not isinstance(text, str) or not text.strip():
+        raise FastChatContractError("unrecognized")
+    top_rec = _recommendation_token(payload.get("recommendation"))
+    if top_rec is not None:
+        raise FastChatContractError("recommendation_without_mode")
+    citations = payload.get("citations")
+    if citations is None:
+        citations = []
+    if not isinstance(citations, list):
+        raise FastChatContractError("unrecognized")
+    return parse_fast_chat_turn_output(
+        {
+            "mode": "qa",
+            "response_text": text,
+            "citations": citations,
+            "needs_source_retrieval": bool(payload.get("needs_source_retrieval")),
+        }
+    )
+
+
 class FastChatTurnOutput(BaseModel):
-    """One-call normal-chat result: Coaching or Q&A in the same inference."""
+    """Lightweight one-call Coaching or Q&A result. Deep Review is separate."""
 
     model_config = ConfigDict(extra="ignore")
 
     mode: str
     response_text: str = Field(min_length=1)
-    assessment: AssessmentOutput | None = None
+    recommendation: str | None = None
+    recommendation_rationale: str | None = Field(default=None, max_length=4_000)
     citations: list[CitationOutput] = Field(default_factory=list)
-    research_coding: dict[str, Any] | None = None
     needs_source_retrieval: bool = False
 
     @field_validator("mode")
@@ -187,24 +388,34 @@ class FastChatTurnOutput(BaseModel):
             raise ValueError("mode must be coaching or qa")
         return cleaned
 
-    @field_validator("research_coding", mode="before")
+    @field_validator("recommendation")
     @classmethod
-    def invalid_research_coding_becomes_absent(cls, value: Any) -> Any:
-        """Drop invalid optional research data without losing the student reply."""
-        if value is None:
+    def recommendation_stay_advance_or_empty(cls, value: str | None) -> str | None:
+        """Accept stay/advance; treat blank as absent."""
+        cleaned = str(value or "").strip().lower()
+        if cleaned in {"", "none", "null"}:
             return None
-        if not isinstance(value, dict):
-            return None
-        if "coding_status" not in value and "dominant_clear" not in value:
-            return None
-        return value
+        if cleaned not in {"stay", "advance"}:
+            raise ValueError("recommendation must be stay or advance")
+        return cleaned
+
+    @field_validator("recommendation_rationale", mode="before")
+    @classmethod
+    def compact_rationale(cls, value: Any) -> str | None:
+        """Keep a short rationale or drop blanks."""
+        cleaned = " ".join(str(value or "").split()).strip()
+        return cleaned[:4_000] if cleaned else None
 
     @model_validator(mode="after")
-    def coaching_requires_assessment(self) -> "FastChatTurnOutput":
-        """Fail closed when Coaching omits the educational assessment."""
-        if self.mode == "coaching" and self.assessment is None:
-            raise ValueError("coaching mode requires assessment")
-        return self
+    def coaching_requires_recommendation(self) -> "FastChatTurnOutput":
+        """Coaching must recommend stay or advance; Q&A must not."""
+        if self.mode == "coaching":
+            if self.recommendation not in {"stay", "advance"}:
+                raise ValueError("coaching mode requires recommendation stay or advance")
+            return self
+        return self.model_copy(
+            update={"recommendation": None, "recommendation_rationale": None}
+        )
 
 
 class ReviewTurnOutput(BaseModel):

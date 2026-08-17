@@ -21,6 +21,7 @@ try:
         QATurnOutput,
         ReviewTurnOutput,
         parse_coach_turn_output,
+        FAST_CHAT_SCHEMA_ID,
         parse_fast_chat_turn_output,
         parse_qa_turn_output,
         parse_review_turn_output,
@@ -44,6 +45,7 @@ except ImportError:  # pragma: no cover - flat runtime copy next to main.py
         QATurnOutput,
         ReviewTurnOutput,
         parse_coach_turn_output,
+        FAST_CHAT_SCHEMA_ID,
         parse_fast_chat_turn_output,
         parse_qa_turn_output,
         parse_review_turn_output,
@@ -69,6 +71,25 @@ logger = logging.getLogger("agentcore_runtime.structured_coach")
 # documented safe repair text and is shared by every Bedrock specialist role.
 STRUCTURED_OUTPUT_REPAIR_PROMPT = "Please use the output tool now."
 
+# Verified against extracted strands-agents 1.52.0 (strands/types/agent.py
+# Limits TypedDict; strands/event_loop/event_loop.py ``_check_limits`` and
+# ``event_loop_cycle``). ``limits`` is a TypedDict with optional positive-int
+# keys ``turns``, ``output_tokens``, and ``total_tokens``. One turn is one
+# model call plus any following tool execution, counted as
+# ``len(metrics.latest_agent_invocation.cycles)``. Caps are checked at the
+# START of each cycle, after ``start_cycle`` of the previous cycle has
+# appended, so ``turns=2`` allows the initial generation plus at most one
+# recovery recurse; a third cycle stops with ``stop_reason="limit_turns"``
+# and no exception. Distinct from ``ModelRetryStrategy`` throttling retries
+# inside one model call (default ``max_attempts=6``).
+FAST_CHAT_INVOKE_LIMITS: dict[str, int] = {"turns": 2}
+_BOUNDED_STRUCTURED_OUTPUT_ROLES = frozenset(
+    {"fast_chat", "router", "qa", "coaching"}
+)
+_LIMIT_STOP_REASONS = frozenset(
+    {"limit_turns", "limit_output_tokens", "limit_total_tokens"}
+)
+
 STRUCTURED_COACH_TURN_PROMPT = """Return one JSON object that matches the
 coach_turn contract used by the companion application. Required top-level keys:
 
@@ -81,8 +102,11 @@ coach_turn contract used by the companion application. Required top-level keys:
 - research_coding (object or null)
 
 Rules:
-1. Reply with JSON only. Do not wrap it in markdown fences.
-2. Do not call tools. Do not use the knowledge-base gateway. Do not fetch S3.
+1. Return the final response using the framework-provided structured-output
+   mechanism. Match the required schema exactly.
+2. Do not use application, retrieval, browsing, database, S3, Knowledge Base,
+   or user-accessible tools. The framework-provided structured-output
+   mechanism may be used only to return this schema.
 3. Do not invent sources. Cite only the [S#] labels supplied in the untrusted
    user content or retrieved evidence.
 4. Keep current_stage aligned with the application runtime current_stage.
@@ -95,28 +119,40 @@ Rules:
    recommendation.
 """
 
-_QA_JSON_CONTRACT = """Return JSON with response_text and optional citations.
-Do not wrap the JSON in markdown fences. Do not call tools.
+_QA_JSON_CONTRACT = """Return the final response using the
+framework-provided structured-output mechanism. Include response_text and
+optional citations. Do not use application, retrieval, browsing, database,
+S3, Knowledge Base, or user-accessible tools.
 """
 
-_FAST_CHAT_JSON_CONTRACT = """Return one JSON object with:
+_FAST_CHAT_JSON_CONTRACT = """FAST CHAT OUTPUT CONTRACT
+
+Return the final response using the framework-provided structured-output
+mechanism. Match this schema:
+
 - mode: exactly "coaching" or "qa"
 - response_text
-- assessment: required when mode is coaching; omit or null for qa
+- recommendation: required stay or advance when mode is coaching; omit or
+  null for qa
+- recommendation_rationale: optional short string for coaching; omit for qa
 - citations: only supplied [S#] labels; empty when unused
-- research_coding: optional and observational; omit for qa unless required
 - needs_source_retrieval: true only when selected-source evidence was
   required for this turn and was not supplied; otherwise false
 
-Do not wrap the JSON in markdown fences. Do not call tools. Do not claim to
-mutate the Thinking Path stage.
+Do not return Facione scores, review fields, research coding, or an
+assessment object. Do not use application, retrieval, browsing, database,
+S3, Knowledge Base, or user-accessible tools. The framework-provided
+structured-output mechanism may be used only to return this schema.
+Do not claim to mutate the Thinking Path stage.
 """
 
-_REVIEW_JSON_CONTRACT = """Return JSON with response_text, strengths,
-areas_to_develop, synthesis, and readiness_candidate. Deep Review also
-returns current_stage, recommendation (stay or advance), confidence,
-readiness_evidence, missing_requirements, and rationale_summary. Do not
-wrap the JSON in markdown fences. Do not call tools. Do not assign a grade.
+_REVIEW_JSON_CONTRACT = """Return the final response using the
+framework-provided structured-output mechanism. Include response_text,
+strengths, areas_to_develop, synthesis, and readiness_candidate. Deep Review
+also returns current_stage, recommendation (stay or advance), confidence,
+readiness_evidence, missing_requirements, and rationale_summary.
+Do not use application, retrieval, browsing, database, S3, Knowledge Base,
+or user-accessible tools. Do not assign a grade.
 """
 
 _SAFETY_STOP_REASONS = frozenset({"guardrail_intervened", "content_filtered"})
@@ -130,6 +166,27 @@ _KNOWN_ERROR_CATEGORIES = frozenset(
         "unavailable",
     }
 )
+
+
+def structured_output_limits_for_role(role: str) -> dict[str, int] | None:
+    """Return per-role Strands ``limits`` for one structured invoke.
+
+    Fast Chat, the Haiku router, and legacy Q&A/Coaching use ``turns=2`` so
+    the common path is one generation plus at most one structured-output
+    recovery. Deep Review and Incremental Review pass ``None`` (no cap):
+    ``ReviewTurnOutput`` is richer and not latency-critical in the same way.
+    A missing cap must not be confused with ``ModelRetryStrategy``.
+
+    Args:
+        role: Runtime model role id such as ``fast_chat`` or ``review_deep``.
+
+    Returns:
+        A ``Limits``-shaped dict, or ``None`` for no event-loop cap.
+    """
+    cleaned = str(role or "").strip().lower()
+    if cleaned in _BOUNDED_STRUCTURED_OUTPUT_ROLES:
+        return dict(FAST_CHAT_INVOKE_LIMITS)
+    return None
 
 
 def invoke_failure_category(error: BaseException) -> str:
@@ -158,6 +215,8 @@ def invoke_failure_category(error: BaseException) -> str:
         return "throttled"
     if name in {"TimeoutError", "APITimeoutError", "ReadTimeoutError"}:
         return "timeout"
+    if name == "StructuredOutputException":
+        return "structured_output_failure"
     return "structured_output_failure"
 
 
@@ -473,7 +532,7 @@ def inspect_agent_result(result: Any) -> dict[str, Any]:
     structured = _attr(result, "structured_output")
     stop_reason = str(_attr(result, "stop_reason") or "").strip()
     text_blocks, tool_blocks, other_blocks = _block_counts(message)
-    return {
+    shape: dict[str, Any] = {
         "result_type": type(result).__name__,
         "structured_output_present": structured is not None,
         "message_present": message is not None,
@@ -482,6 +541,36 @@ def inspect_agent_result(result: Any) -> dict[str, Any]:
         "other_blocks": other_blocks,
         "stop_reason": stop_reason or "unknown",
     }
+    cycle_count = event_loop_cycle_count_from_agent_result(result)
+    if cycle_count is not None:
+        shape["event_loop_cycle_count"] = cycle_count
+    return shape
+
+
+def event_loop_cycle_count_from_agent_result(result: Any) -> int | None:
+    """Return the Strands per-invocation cycle count when metrics expose it.
+
+    Pinned 1.52.0 records cycles on ``EventLoopMetrics.latest_agent_invocation``
+    and ``EventLoopMetrics.cycle_count``. There is no
+    ``structured_output_repair_count`` field; this helper does not invent one.
+
+    Args:
+        result: A Strands ``AgentResult`` or a test double.
+
+    Returns:
+        A non-negative cycle count, or ``None`` when metrics are absent.
+    """
+    metrics = _attr(result, "metrics")
+    if metrics is None:
+        return None
+    invocation = _attr(metrics, "latest_agent_invocation")
+    cycles = _attr(invocation, "cycles") if invocation is not None else None
+    if isinstance(cycles, list):
+        return len(cycles)
+    count = _attr(metrics, "cycle_count")
+    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+        return None
+    return count
 
 
 def _content_blocks(message: Any) -> list[Any]:
@@ -585,7 +674,8 @@ def log_coach_turn_outcome(
     event = "coach_turn_output_ok" if ok else "coach_turn_output_invalid"
     logger.info(
         "%s stage=%s structured_output_present=%s message_present=%s "
-        "text_blocks=%s tool_blocks=%s stop_reason=%s elapsed_ms=%s category=%s",
+        "text_blocks=%s tool_blocks=%s stop_reason=%s elapsed_ms=%s "
+        "category=%s event_loop_cycle_count=%s",
         event,
         stage or "unknown",
         str(shape.get("structured_output_present", "")).lower() or "unknown",
@@ -595,6 +685,7 @@ def log_coach_turn_outcome(
         shape.get("stop_reason", "unknown"),
         elapsed_ms if elapsed_ms is not None else "unknown",
         category or ("ok" if ok else "structured_output_failure"),
+        shape.get("event_loop_cycle_count", "unknown"),
     )
 
 
@@ -661,6 +752,8 @@ def structured_from_agent_result(result: Any, parser: Any) -> BaseModel:
         raise CoachTurnExtractionError("safety_blocked")
     if stop_reason in {"timeout", "timeout_exceeded"}:
         raise CoachTurnExtractionError("timeout")
+    if stop_reason in _LIMIT_STOP_REASONS:
+        raise CoachTurnExtractionError("structured_output_failure")
 
     structured = _attr(result, "structured_output")
     if structured is not None:
@@ -716,7 +809,10 @@ def review_turn_from_agent_result(result: Any) -> ReviewTurnOutput:
 
 def structured_wire_payload(output: BaseModel) -> dict[str, Any]:
     """Return JSON-ready fields for InvokeAgentRuntime."""
-    return output.model_dump(mode="json")
+    payload = output.model_dump(mode="json")
+    if isinstance(output, FastChatTurnOutput):
+        payload["schema_id"] = FAST_CHAT_SCHEMA_ID
+    return payload
 
 
 def coach_turn_wire_payload(output: CoachTurnOutput) -> dict[str, Any]:

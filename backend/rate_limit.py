@@ -1,10 +1,22 @@
 """In-process coach and auth-login rate limiting for a single EC2 instance.
 
 This limiter is intentionally process-local. It is acceptable for the current
-single-container production topology, but correctness must never depend on it:
-durable coach idempotency remains DB-backed in ``StudentStore``. A future
-Redis/distributed adapter can replace this module without changing API call
-sites.
+single-container, single-Uvicorn-worker production topology, but correctness
+must never depend on it: durable coach idempotency remains DB-backed in
+``StudentStore.claim_coach_request``. That DSQL/SQLite lease is the real
+mutex. This limiter only sheds load and improves UX inside one process.
+
+What breaks if Uvicorn ``--workers`` (or extra app containers) are added:
+each process has its own in-memory counters, so two workers can both pass
+the per-notebook slot. Duplicate provider execution is then prevented only
+while the durable lease is still valid. If that lease is shorter than
+bounded Fast Chat execution, a retry can reclaim the expired marker, run a
+second model call, and the original worker fails with
+``CoachRequestLeaseLostError`` after a successful generation. Do not add
+workers without treating the derived lease as the cross-process lock.
+
+A future Redis/distributed adapter can replace this module without changing
+API call sites.
 
 ``CoachRateLimiter`` tracks active provider-backed coaching *workflows* (one
 claimed ``submit`` execution), not the internal Haiku/Sonnet invokes inside

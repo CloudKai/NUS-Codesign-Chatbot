@@ -31,6 +31,25 @@ def test_fast_chat_wrapper_does_not_replace_canonical_coaching() -> None:
     assert assembled.index(shared) < assembled.index("Guidance mode: Quick.")
 
 
+def test_fast_chat_prompt_allows_framework_structured_output() -> None:
+    from agentcore_runtime.structured_coach import specialist_system_prompt
+    from pathlib import Path
+
+    text = Path("agentcore_runtime/prompts/fast_chat.md").read_text(encoding="utf-8")
+    assert "Do not call tools." not in text
+    assert "Return JSON only" not in text
+    assert "Do not say the contribution is strong, weak, or ready" in text
+    assembled = specialist_system_prompt(
+        {
+            "phase": "fast_chat",
+            "topic": "problem_identification",
+            "output_contract": "fast_chat_turn",
+        }
+    )
+    assert assembled.count("framework-provided structured-output") == 1
+    assert "FAST CHAT OUTPUT CONTRACT" in assembled
+
+
 def test_facione_schema_still_has_six_dimensions() -> None:
     fields = set(FacioneDimensionScores.model_fields)
     assert fields == {

@@ -8,6 +8,11 @@ That call both classifies Coaching vs Q&A and generates the student reply.
 Incremental Review and the Haiku router are not on the active path.
 Deep Sonnet Review remains an explicit ``specialist=review`` operation.
 
+The published runtime still dispatches leftover ``phase`` values for any
+principal with ``bedrock-agentcore:InvokeAgentRuntime``. This adapter must
+not send those phases. FastAPI authorization does not apply to that IAM
+call. See ``docs/SECURITY_BOUNDARIES.md``.
+
 The adapter does not own phase progression, citations, persistence,
 retrieval, or IAM. Tests inject a fake client so automated runs never
 contact AWS. Planner output is request-local so one cached provider
@@ -30,8 +35,15 @@ from typing import Any
 from pydantic import ValidationError
 
 from agentcore_runtime.model import HAIKU_4_5_MODEL_ID, SONNET_4_6_MODEL_ID
-from agentcore_runtime.models import FastChatTurnOutput, ReviewTurnOutput, RouterOutput
+from agentcore_runtime.models import (
+    FastChatContractError,
+    ReviewTurnOutput,
+    RouterOutput,
+    adapt_fast_chat_turn_payload,
+    fast_chat_payload_shape_log,
+)
 
+from .coaching.mode_policy import enforce_model_mode, policy_from_request
 from .context_planner import (
     CONTEXT_POLICY_FAST_CHAT,
     CONTEXT_POLICY_FULL_HISTORY,
@@ -295,7 +307,10 @@ def _raise_if_runtime_blocked(events: list[Any]) -> None:
     """
     for event in events:
         if isinstance(event, Mapping) and _mapping_indicates_runtime_block(event):
-            logger.warning("agentcore_turn_blocked")
+            logger.warning(
+                "agentcore_turn_blocked source=runtime_event %s",
+                fast_chat_payload_shape_log(event),
+            )
             raise _blocked_error()
 
 
@@ -310,6 +325,11 @@ def _raise_if_harness_error_envelope(payload: Mapping[str, Any]) -> None:
     if "response_text" in payload and "assessment" in payload:
         return
     category = str(payload.get("category") or "").strip()
+    logger.warning(
+        "agentcore_turn_blocked source=envelope category=%s %s",
+        category or "-",
+        fast_chat_payload_shape_log(payload),
+    )
     if category == "safety_blocked":
         raise _blocked_error()
     if category == "timeout":
@@ -345,7 +365,9 @@ def _unwrap_runtime_object(payload: dict[str, Any]) -> dict[str, Any]:
     """Unwrap common AgentCore envelopes until a coach_turn object remains."""
     current = payload
     for _ in range(4):
-        if "response_text" in current and "assessment" in current:
+        if "response_text" in current and (
+            "assessment" in current or "mode" in current
+        ):
             return current
         nested = current.get("result")
         if nested is None:
@@ -579,6 +601,29 @@ def _citations_from_items(items: Any) -> list[CitationReference]:
     return citations
 
 
+def _fast_chat_assessment(
+    request: CoachRequest,
+    *,
+    mode: str,
+    recommendation: StageDecision | None,
+    recommendation_rationale: str,
+    citations: list[CitationReference] | None = None,
+) -> EducationalAssessment:
+    """Build the slim persisted assessment for one Fast Chat turn.
+
+    Facione, review lists, and research coding are omitted. Historical rows
+    may still contain those fields; new turns do not invent them.
+    """
+    return EducationalAssessment(
+        current_stage=request.current_stage,
+        recommendation=recommendation,
+        recommendation_rationale=str(recommendation_rationale or ""),
+        citations=citations or [],
+        response_mode=mode,
+        readiness_candidate=recommendation is StageDecision.ADVANCE,
+    )
+
+
 def _stay_assessment(
     request: CoachRequest,
     *,
@@ -753,16 +798,39 @@ def _record_runtime_cache_metrics(payload: dict[str, Any]) -> None:
         record_field("prompt_cache_hit", read_tokens > 0)
     if isinstance(write_raw, (int, float)):
         record_field("cache_write_input_tokens", int(write_raw))
+    cycle_raw = payload.get("event_loop_cycle_count")
+    if isinstance(cycle_raw, bool):
+        return
+    if isinstance(cycle_raw, int) and cycle_raw >= 0:
+        record_field("event_loop_cycle_count", cycle_raw)
 
 
 def _validated_fast_chat(
     payload: dict[str, Any], request: CoachRequest
 ) -> ProviderAssessmentResult:
-    """Validate one-call fast-chat output and fail closed on a bad contract."""
+    """Validate one-call fast-chat output and fail closed on a bad contract.
+
+    Accepts the current slim ``fast_chat_turn_v1`` object. The immediately
+    previous nested ``CoachTurnOutput`` is mapped only when
+    ``assessment.recommendation`` is stay or advance. A previous Q&A object
+    (response_text, no recommendation) maps to mode=qa. Conflicting or
+    malformed shapes fail closed with a key-only log line.
+    """
     _record_runtime_cache_metrics(payload)
     try:
-        output = FastChatTurnOutput.model_validate(payload)
-    except Exception as error:
+        output = adapt_fast_chat_turn_payload(payload)
+    except FastChatContractError as error:
+        logger.warning(
+            "fast_chat_contract_mismatch reason=%s %s",
+            error.reason,
+            fast_chat_payload_shape_log(payload),
+        )
+        raise _malformed_error() from error
+    except (ValidationError, TypeError, ValueError) as error:
+        logger.warning(
+            "fast_chat_contract_mismatch reason=slim_invalid %s",
+            fast_chat_payload_shape_log(payload),
+        )
         raise _malformed_error() from error
     allowed = _allowed_citation_labels(request)
     citations = [
@@ -775,29 +843,26 @@ def _validated_fast_chat(
     if output.needs_source_retrieval:
         record_field("fast_chat_needs_source_retrieval", True)
     record_field("mode_returned", output.mode)
-    if output.mode == SPECIALIST_QA:
-        assessment_citations = citations
-        if output.assessment is not None:
-            assessment_citations = [
-                item
-                for item in _citations_from_items(
-                    [item.model_dump(mode="json") for item in output.assessment.citations]
-                )
-                if item.label in allowed
-            ] or citations
+    policy = policy_from_request(request)
+    enforcement = enforce_model_mode(policy.expected_mode, output.mode)
+    record_field("mode_policy_intent", policy.intent)
+    record_field("mode_policy_enforced", enforcement.overridden)
+    logger.info(
+        "mode_policy intent=%s expected=%s returned=%s enforced=%s",
+        policy.intent,
+        policy.expected_mode or "none",
+        output.mode,
+        str(enforcement.overridden).lower(),
+    )
+    if enforcement.effective_mode == SPECIALIST_QA:
         return ProviderAssessmentResult(
             response_text=output.response_text,
-            assessment=_stay_assessment(
+            assessment=_fast_chat_assessment(
                 request,
-                contribution_summary=request.student_message,
-                stage_assessment=(
-                    "Course-information question; Thinking Path stage unchanged."
-                ),
-                recommendation_rationale=(
-                    "Q&A mode does not recommend Thinking Path changes."
-                ),
-                learning_summary="The student asked a course-information question.",
-                citations=assessment_citations,
+                mode="qa",
+                recommendation=None,
+                recommendation_rationale="",
+                citations=citations,
             ),
             research_coding=None,
             specialist=SPECIALIST_QA,
@@ -806,33 +871,21 @@ def _validated_fast_chat(
             review_trigger=None,
             needs_source_retrieval=bool(output.needs_source_retrieval),
         )
-    if output.assessment is None:
+    if output.recommendation not in {StageDecision.STAY.value, StageDecision.ADVANCE.value}:
         raise _malformed_error()
-    dumped = output.assessment.model_dump(mode="json")
-    dumped["citations"] = [
-        item.model_dump(mode="json")
-        for item in output.assessment.citations
-        if str(item.label or "").strip() in allowed
-    ]
-    try:
-        turn = ProviderCoachOutput.model_validate(
-            {
-                "response_text": output.response_text,
-                "assessment": dumped,
-                "research_coding": output.research_coding,
-            }
-        )
-    except Exception as error:
-        raise _malformed_error() from error
-    assessment = turn.assessment.model_copy(
-        update={"current_stage": request.current_stage}
+    assessment = _fast_chat_assessment(
+        request,
+        mode="coaching",
+        recommendation=StageDecision(output.recommendation),
+        recommendation_rationale=str(output.recommendation_rationale or ""),
+        citations=citations,
     )
     if assessment.recommendation is StageDecision.ADVANCE:
         assessment = assessment.model_copy(update={"readiness_candidate": True})
     return ProviderAssessmentResult(
-        response_text=turn.response_text,
+        response_text=output.response_text,
         assessment=assessment,
-        research_coding=turn.research_coding,
+        research_coding=None,
         specialist=SPECIALIST_COACHING,
         qualifying_coaching_turn=True,
         deep_review_succeeded=False,
@@ -930,7 +983,11 @@ def _compact_string_list(values: Any, *, item_limit: int, max_items: int) -> lis
 
 
 def _router_payload(request: CoachRequest) -> dict[str, Any]:
-    """Build a small Haiku router payload. Never includes RAG or pedagogy."""
+    """Build a small Haiku router payload. Never includes RAG or pedagogy.
+
+    ``assess()`` does not call this. Kept for the retired
+    :meth:`AgentCoreCoachProvider._resolve_specialist` helper.
+    """
     return {
         "phase": "router",
         "output_contract": "router_turn",
@@ -1744,7 +1801,11 @@ class AgentCoreCoachProvider:
     def _invoke_specialist(
         self, request: CoachRequest, specialist: str
     ) -> tuple[ProviderAssessmentResult, ModelContextPlan]:
-        """Invoke one Q&A or Coaching specialist and validate the result."""
+        """Invoke one Q&A or Coaching specialist and validate the result.
+
+        ``assess()`` does not call this. Normal chat uses ``_assess_fast_chat``;
+        explicit Deep Review uses ``_assess_explicit_review``.
+        """
         payload, plan = self._invoke_payload(request, specialist)
         started = time.monotonic()
         try:

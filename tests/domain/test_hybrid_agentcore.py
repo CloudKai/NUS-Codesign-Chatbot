@@ -14,7 +14,6 @@ from backend.domain import (
     CoachRequest,
     EducationalAssessment,
     FacioneDimensionScores,
-    ProviderCoachOutput,
     StageDecision,
 )
 from backend.learning_service import LearningProgressService
@@ -67,14 +66,19 @@ def _assessment(
 
 
 def _output(*, recommendation: StageDecision = StageDecision.STAY) -> dict[str, Any]:
-    """Return a coach_turn payload."""
-    dumped = ProviderCoachOutput(
-        response_text="What trade-off still needs evidence?",
-        assessment=_assessment(recommendation=recommendation),
-        research_coding=None,
-    ).model_dump(mode="json")
-    dumped["mode"] = "coaching"
-    return dumped
+    """Return a lightweight fast-chat coaching payload."""
+    return {
+        "mode": "coaching",
+        "response_text": "What trade-off still needs evidence?",
+        "recommendation": recommendation.value,
+        "recommendation_rationale": (
+            "More evidence is still needed."
+            if recommendation is StageDecision.STAY
+            else "The stage readiness bar is met."
+        ),
+        "citations": [],
+        "needs_source_retrieval": False,
+    }
 
 
 def _provider(client: FakeAgentCoreRuntime) -> AgentCoreCoachProvider:
@@ -137,8 +141,8 @@ def test_fast_chat_qa_mode_is_one_call() -> None:
     result = _provider(client).assess(_request(student_message="What is Week 2 about?"))
     assert _phases(client) == ["fast_chat"]
     assert result.specialist == SPECIALIST_QA
-    assert result.assessment.recommendation is StageDecision.STAY
-    assert "does not recommend" in result.assessment.recommendation_rationale
+    assert result.assessment.recommendation is None
+    assert result.assessment.response_mode == "qa"
 
 
 def test_project_discussion_is_one_fast_chat_call() -> None:

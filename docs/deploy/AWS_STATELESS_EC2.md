@@ -633,7 +633,12 @@ Grant least privilege for:
 - Optional CloudWatch logs
 - When `MODEL_PROVIDER=agentcore`: `bedrock-agentcore:InvokeAgentRuntime` on
   runtime `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` (and its
-  `DEFAULT` endpoint)
+  `DEFAULT` endpoint). Grant this only to the FastAPI/EC2 role. The
+  published runtime still dispatches on request `phase`, so that IAM
+  action is a privileged bypass of FastAPI authorization (including
+  `phase=review` / Sonnet). It is not a browser-reachable hole. See
+  [`SECURITY_BOUNDARIES.md`](../SECURITY_BOUNDARIES.md). Do not attempt to
+  close it in UI code.
 - Bedrock Knowledge Base **Retrieve only** (never `RetrieveAndGenerate`) as
   documented below
 - When `MODEL_PROVIDER=bedrock`: `bedrock:InvokeModel` and

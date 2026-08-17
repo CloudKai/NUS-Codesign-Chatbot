@@ -19,6 +19,7 @@ logger = logging.getLogger("co_design.operational")
 
 _OPERATIONAL_LOGGERS = (
     "backend.api",
+    "backend.agentcore_provider",
     "backend.bedrock_retrieve",
     "backend.retrieval",
     "co_design.operational",

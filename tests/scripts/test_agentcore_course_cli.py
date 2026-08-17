@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -136,5 +137,49 @@ def test_knowledge_base_retrieve_diagnostic_dry_run_skips_aws(capsys):
     assert code == 2
     assert "dry_run" in captured.out
     assert "kb_configured" in captured.out
+    assert "metadata_filter_mode" in captured.out
+    assert "filter_preview" in captured.out
+    assert "production-equivalent" in captured.err
     assert "AKIA" not in captured.out
     assert "aws_secret" not in captured.out.casefold()
+
+
+def test_course_retrieval_dry_run_does_not_require_live_approval(capsys):
+    args = _COURSE_RETRIEVE.parse_args(["--dry-run"])
+    assert _COURSE_RETRIEVE.refuse_reason(args) is None
+    code = _COURSE_RETRIEVE.main(["--dry-run"])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "dry_run" in captured.out
+    assert "metadata_filter_mode" in captured.out
+    assert "production-equivalent" in captured.err
+
+
+def test_retrieve_diagnostics_do_not_construct_deprecated_strict_boolean():
+    kb_text = (
+        _ROOT / "scripts" / "diagnostics" / "check_knowledge_base_retrieve.py"
+    ).read_text(encoding="utf-8")
+    course_text = (
+        _ROOT / "scripts" / "diagnostics" / "test_course_retrieval.py"
+    ).read_text(encoding="utf-8")
+    assert "strict_metadata_filter=" not in kb_text
+    assert "strict_metadata_filter=" not in course_text
+    assert "metadata_filter_mode=" in kb_text
+    assert "metadata_filter_mode=" in course_text
+
+
+def test_knowledge_base_retrieve_dry_run_in_filter_preview(capsys):
+    code = _KB_CHECK.main(
+        [
+            "--dry-run",
+            "--source",
+            "Week 1 Introduction to innovation v3.pdf",
+            "--second-source",
+            "readings/week1.pdf",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert code == 2
+    payload = json.loads(captured.out)
+    assert payload["filter_preview"]["kind"] == "in"
+    assert len(payload["course_material_ids"]) == 2

@@ -50,6 +50,8 @@ SAFE_PERF_FIELDS = frozenset(
         "model_role",
         "model_id",
         "mode_returned",
+        "mode_policy_intent",
+        "mode_policy_enforced",
         "idempotency_claim_ms",
         "persist_turn_ms",
         "idempotency_complete_ms",
@@ -85,6 +87,20 @@ SAFE_PERF_FIELDS = frozenset(
         "prompt_cache_hit",
         "cache_write_input_tokens",
         "cache_read_input_tokens",
+        "kb_filter_mode",
+        "kb_filtered",
+        "kb_requested_material_count",
+        "kb_raw_hit_count",
+        "kb_validated_hit_count",
+        "kb_timeout",
+        "kb_failure_category",
+        "event_loop_cycle_count",
+        "model_input_tokens",
+        "model_output_tokens",
+        "notebook_load_count",
+        "source_catalog_load_count",
+        "citation_source_resolution_count",
+        "retrieval_count",
     }
 )
 
@@ -244,6 +260,30 @@ def record_field(name: str, value: Any) -> None:
     perf = current_perf()
     if perf is not None:
         perf.set(name, value)
+
+
+def record_count(name: str, delta: int = 1) -> None:
+    """Add *delta* onto an existing integer count field.
+
+    Args:
+        name: Allowlisted count field.
+        delta: Amount to add. Negative values are ignored.
+
+    Returns:
+        None. No-op when no request accumulator is bound.
+    """
+    perf = current_perf()
+    if perf is None:
+        return
+    amount = int(delta)
+    if amount <= 0:
+        return
+    current = perf.fields.get(name, 0)
+    try:
+        total = int(current) + amount
+    except (TypeError, ValueError):
+        total = amount
+    perf.set(name, total)
 
 
 def record_failure(category: str) -> None:

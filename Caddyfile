@@ -50,6 +50,12 @@
 		respond "Not Found" 404
 	}
 
+	# Streamlit UI only. Production Streamlit calls FastAPI on loopback
+	# (CO_DESIGN_API_URL=http://127.0.0.1:8000); Caddy does not proxy
+	# /api/v1/coach/*. reverse_proxy timeouts here therefore cannot cut a
+	# legitimate FastAPI coach turn. A browser or CloudFront timeout before
+	# FastAPI finishes is acceptable; the same idempotency key recovers the
+	# durable result. Leave Caddy's default unlimited read timeout.
 	handle {
 		reverse_proxy app:8501
 	}

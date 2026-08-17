@@ -45,7 +45,10 @@ class LearningProgressService:
 
         Journey metadata and transition status are updated in one SQLite
         transaction so a mid-flight failure cannot leave a confirmed transition
-        without the matching Thinking Path stage (or the reverse).
+        without the matching Thinking Path stage (or the reverse). Empty
+        progress strings from a slim Fast Chat assessment are omitted so they
+        cannot blank previously stored notebook progress. ``learning_journey``
+        and ``thinking_stage`` are always written on ADVANCE.
         """
         pending = self._transitions.get_pending(thread_id)
         if not pending or pending.id != transition_id:
@@ -60,6 +63,8 @@ class LearningProgressService:
 
         metadata_patch: dict | None = None
         if accepted:
+            from backend.coaching.progress_fields import overlay_progress_fields
+
             next_journey = complete_and_advance(
                 journey,
                 note=pending.assessment.contribution_summary,
@@ -68,13 +73,38 @@ class LearningProgressService:
                 raise ValueError(
                     "Confirmed transition does not match the learning journey"
                 )
+            progress_update = overlay_progress_fields(
+                {
+                    "learning_summary": metadata.get("learning_summary")
+                    or (metadata.get("learning_journey") or {}).get(
+                        "learning_summary"
+                    ),
+                    "working_conclusion": metadata.get("working_conclusion")
+                    or journey.get("working_conclusion"),
+                    "understanding_change": metadata.get("understanding_change")
+                    or (metadata.get("learning_journey") or {}).get(
+                        "understanding_change"
+                    ),
+                    "critical_understanding": metadata.get("critical_understanding")
+                    or (metadata.get("learning_journey") or {}).get(
+                        "critical_understanding"
+                    ),
+                },
+                {
+                    "learning_summary": pending.assessment.learning_summary,
+                    "working_conclusion": pending.assessment.working_conclusion,
+                    "understanding_change": pending.assessment.understanding_change,
+                    "critical_understanding": (
+                        pending.assessment.critical_understanding_level
+                    ),
+                },
+            )
+            if progress_update:
+                next_journey = {**next_journey, **progress_update}
             metadata_patch = {
                 "learning_journey": next_journey,
                 "thinking_stage": pending.to_stage,
-                "learning_summary": pending.assessment.learning_summary,
-                "working_conclusion": pending.assessment.working_conclusion,
-                "understanding_change": pending.assessment.understanding_change,
-                "critical_understanding": pending.assessment.critical_understanding_level,
+                **progress_update,
             }
 
         resolved = self._store.apply_phase_transition_decision(

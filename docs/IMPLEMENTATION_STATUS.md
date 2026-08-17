@@ -1,6 +1,202 @@
 # Implementation status
 
-## Current phase — Cap Fast Chat Retrieve at five seconds
+## Current phase — Uncommitted Fast Chat honesty, retrieval bounds, Phase 18 containment
+
+**Prepared on 2026-08-17; not yet deployed. Local HEAD
+`ae3be3de69da74cc1f98d51ec8975cafef7e4381` plus this uncommitted working-tree
+patch. Nothing in this phase has been pushed to EC2, published as an
+AgentCore runtime version, or synced to the Knowledge Base.**
+
+This phase does **not** claim production is fixed. One-Haiku-per-turn and
+live filtered Retrieve remain **UNVERIFIED** pending an authorised live
+trace. Mock pytest is not that evidence.
+
+### What changed and why
+
+Verified in the working tree (read the code; do not treat this as a live
+confirmation):
+
+1. **Progress-field merge.** `backend/coaching/progress_fields.py` overlays
+   only meaningful values. Empty slim Fast Chat fields can no longer blank
+   stored `learning_summary` / `working_conclusion` /
+   `understanding_change` / `critical_understanding` on ADVANCE confirm
+   (`learning_service.py`, `student_store.py`, `coaching/execution.py`).
+2. **Request-scoped citation map.** After the model call, `[S#]` resolution
+   uses `TurnSnapshot.sources_by_id` plus `CoachRequest.source_ids`. It does
+   not `get_source` per id and does not list the S3 catalog again. Course
+   `list_prefix` still runs once per folder when the snapshot is built
+   (mock test: 2 prefix calls, 0 `get_source` calls).
+3. **Request-scoped turn snapshot.** `backend/coaching/turn_snapshot.py`
+   holds the authoritative notebook row, stage, and visible sources for one
+   `submit()`. Mock test: notebook row is loaded twice (existence +
+   authoritative re-read), not three times.
+4. **Strands event-loop cap.** Fast Chat / router / legacy Haiku pass
+   `limits={"turns": 2}` (Strands 1.52.0: initial generation plus at most
+   one recovery). Deep Review is uncapped (`structured_output_limits_for_role`
+   returns `None`). **NEEDS LIVE TRACE** — companion pytest does not install
+   Strands and cannot prove Haiku span count.
+5. **`fast_chat_turn_v1` wire marker.** Slim `FastChatTurnOutput` plus
+   fail-closed `adapt_fast_chat_turn_payload` for the previous nested
+   `CoachTurnOutput` / Q&A shape. Deploy order (documented, not executed):
+   publish FastAPI with the tolerant parser **before** or together with a
+   runtime that emits slim JSON. Do not publish slim-only runtime JSON to an
+   old FastAPI image.
+6. **Fast Chat system-prompt de-duplication.** Facione / research-coding /
+   nested-assessment instructions were removed from `shared_coaching.md` and
+   from FastAPI `trusted_instructions`; the JSON contract lives once in
+   `_FAST_CHAT_JSON_CONTRACT`. Live reconstruction of the
+   `problem_identification` Fast Chat system prompt (composer +
+   `specialist_system_prompt`, including trusted rules and
+   `runtime_context`):
+   - **Now:** 11,467 characters / **3,823** estimated tokens (chars/3).
+   - **HEAD reconstruction** (HEAD prompt files + HEAD JSON contract + the
+     two FastAPI runtime paragraphs this patch removed): 13,978 characters /
+     **4,660** estimated tokens.
+   - Pedagogical files: `shared_coaching.md` 10,026 → 7,397 chars (−2,629);
+     `fast_chat.md` 994 → 1,309 (+315); stage file unchanged.
+   Earlier status at `f663740` recorded 12,958 / 4,320 before
+   `runtime_context`; that is a different baseline, not this HEAD delta.
+7. **Retrieval gate recall.** `classify_retrieval_intent` is graded
+   (`high_confidence_source` / `high_confidence_personal` / `ambiguous`).
+   Bare week/lecture, course grounding, and `S1`/`S2` labels retrieve.
+   `looks_like_course_question` is unchanged (mock specialist routing).
+8. **Server-side mode policy.** `backend/coaching/mode_policy.py` stamps
+   expected Q&A/coaching from the student message and selected-source
+   metadata. No second model call. High-confidence source turns without
+   first-person project reasoning coerce `mode=qa` downstream (prose kept,
+   recommendation stripped). Mixed lecture+project language stays
+   ambiguous so Haiku chooses.
+9. **Bounded Retrieve admission.** Semaphore sized to the shared executor
+   worker count. Excess calls fail closed as `capacity_exhausted`. Empty
+   configured bucket and empty-bucket URIs (`s3:///...`) drop hits.
+   Production requires `COURSE_MATERIALS_BUCKET` whenever
+   `KNOWLEDGE_BASE_ID` is set. Retrieve timeout default is **10s** (was 5s
+   at HEAD `ae3be3d`).
+10. **Idempotency lease derived from timeouts.** No independent 180s knob.
+    With defaults (AgentCore 110s, retries 0, Retrieve 10s) the derived
+    lease is **270s** (timeout-bounded work 240s + 10s persist budget + 20s
+    margin). Tests prove 180s cannot cover two 110s windows.
+11. **Streamlit `done` rendering.** `ui/panels/chat.py` draws the validated
+    `done` payload in the same script run. `rerun_app()` runs only when
+    stage, pending transition, or Deep Review availability changed
+    (`needs_reconcile`). AppTest: a stay turn shows the reply with zero
+    forced reruns.
+12. **Phase 18 legacy-path containment.** Classification and lock tests in
+    `tests/domain/test_legacy_path_containment.py`. Dead FastAPI helpers are
+    not deleted. The published runtime still dispatches leftover `phase`
+    values for IAM callers — documented in
+    [`SECURITY_BOUNDARIES.md`](SECURITY_BOUNDARIES.md). That is not a
+    browser bypass and must not be "fixed" in UI code.
+
+### Files changed
+
+Uncommitted working tree (not a complete path dump): progress merge
+(`backend/coaching/progress_fields.py`, `learning_service.py`,
+`student_store.py`, `coaching/execution.py`); turn snapshot and mode policy;
+citation catalog; retrieval gate, Bedrock Retrieve pool/bucket checks,
+`sources/kb_metadata.py`; slim Fast Chat schema/parser and prompt files;
+Strands `limits`; lease derivation in `settings.py`; Streamlit chat/runtime;
+KB sidecar scripts and
+[`docs/KB_REQUIRED_MODE_RUNBOOK.md`](KB_REQUIRED_MODE_RUNBOOK.md);
+containment tests and security-boundary docs. Preserve this working tree;
+do not commit unless asked.
+
+### Adversarial review outcome and follow-up fixes
+
+An independent reviewer that made none of the edits answered the fifteen
+regression questions against this tree. Thirteen were clean. Two P1 defects
+were found in the new mode policy and have been fixed:
+
+1. **Third-person project reasoning was force-flattened to Q&A.** The
+   retrieval gate is deliberately recall-oriented, so any lecture/week/slides
+   cue produced `high_confidence_source`, and the mode overlay only demoted
+   that back to ambiguous on a narrow *first-person* matcher. A student
+   writing "The core problem is that first-year students skip the week 2
+   lecture" therefore lost its stay/advance recommendation and its Deep
+   Review credit. `backend/coaching/mode_policy.py` now demotes on a
+   person-agnostic project-deliberation matcher **and** requires the turn to
+   actually be an information request before Q&A can be forced. Six
+   confirmed regressions now return `expected_mode=None` while still
+   retrieving. Locked by
+   `test_third_person_project_reasoning_is_never_forced_to_qa`.
+2. **Cue-less course questions could still become Coaching.** "what is the
+   definition of a job story" carried no lecture/week/S# cue, so the model
+   was free to label it coaching, increment the Deep Review counter, and open
+   an ADVANCE. `backend/retrieval_gate.py` now recognises impersonal
+   course-concept questions as a source cue (so evidence is retrieved and the
+   Q&A expectation applies). Any first- or second-person pronoun disqualifies
+   the turn, so "what assumption am I making here" stays with the coach.
+   Locked by `test_impersonal_course_concept_questions_expect_qa` and
+   `test_personal_reflection_phrased_as_a_question_is_not_qa`.
+
+Also fixed from the same review: the shared-catalog `ContextVar` is now reset
+before telemetry is recorded so a metrics failure cannot strand the memo on a
+pooled worker thread (`backend/sources/library.py`), and a composer upload now
+invalidates the Streamlit source-list memo, because a stay turn no longer
+reruns and the Sources panel would otherwise render the pre-upload list
+(`ui/services/runtime.py`, `ui/panels/chat.py`).
+
+**Known remaining cost (accepted, not fixed):** `_selected_source_count` in
+`backend/http/app.py` lists selected sources before `submit()` for the
+pre-submit ops log and the error-path metrics. On the streaming route
+`submit()` runs on a separate daemon thread, so a `ContextVar` memo cannot be
+shared across that boundary. This costs one bounded catalog listing per coach
+HTTP request when locked course sources are selected. It is not N+1.
+
+### Validation evidence
+
+- Full deterministic pytest after the review fixes: **1163 tests, all
+  passing** (`.venv/bin/python -m pytest -q`, exit 0).
+  `.venv/bin/ruff check --no-fix .`: **All checks passed** (was 14 F401).
+  `compileall -q backend ui streamlit_app.py tests scripts agentcore_runtime`:
+  **passed**.
+- Targeted (containment pass): **25 passed**
+  (`test_legacy_path_containment.py` 12,
+  `test_security_invariants.py` 4,
+  `test_architecture_contracts.py` 9).
+  `.venv/bin/ruff check --no-fix .`: **All checks passed**.
+  `compileall -q backend agentcore_runtime`: **passed**.
+- Prior mock tests in this working tree cover progress merge, citations,
+  snapshot, schema adapter, prompt composition, retrieval-gate recall,
+  Retrieve pool, lease alignment, and Streamlit `done` rendering. Those are
+  **mock-only**.
+- Full deterministic pytest: **not re-run** in the containment pass
+  (targeted subsets only).
+- **No** paid/live Bedrock, AgentCore, S3, DSQL, or KB sync call was made.
+- One-Haiku-per-turn: **UNVERIFIED**.
+- Live `required`-mode Week 1 equals/in Retrieve: **UNVERIFIED**.
+
+### Compatibility, rollback, risks, and next action
+
+- No DSQL schema migration. Old nested `CoachTurnOutput` JSON still parses
+  through the fail-closed adapter. New Fast Chat rows persist a slim
+  assessment mapping. Empty progress fields no longer overwrite stored
+  notebook progress.
+- Stage pedagogy files: `shared_coaching.md` hash fixture updated after
+  explicit review; stage files unchanged.
+- Rollback is the previous app image (`cde2300-chatbot:f271088` is what is
+  live; this tree is not). Persisted notebooks are unchanged.
+- Deploying `required` before sidecar ingest yields an evidence gap, not a
+  110s unfiltered search. Operators who have not ingested sidecars must keep
+  `KNOWLEDGE_BASE_METADATA_FILTER_MODE=degraded_unfiltered`.
+- IAM: `bedrock-agentcore:InvokeAgentRuntime` on the published ARN still
+  bypasses FastAPI phase controls. Mitigate with least privilege. Do not
+  patch the browser.
+- `README.md` still says `StudentChatEngine` is a `USE_LOCAL_API=false`
+  fallback. Code and `docs/CODEBASE_STRUCTURE.md` say the in-process
+  fallback is `CoachApplicationService`. Containment tests lock the code
+  fact; README was not edited (outside this pass's file ownership).
+- Next exact action: authorised sidecar upload + KB sync (runbook
+  [`KB_REQUIRED_MODE_RUNBOOK.md`](KB_REQUIRED_MODE_RUNBOOK.md)), then one
+  live Week 1 `equals` Retrieve with `--i-approve-live-bedrock`, then a
+  capped AgentCore trace that records Haiku span / event-loop cycle count.
+  Do not publish AgentCore and do not rebuild the ARM64 app image until
+  those two live checks exist. Do not delete leftover runtime `phase`
+  dispatch until a published allowlist (or split runtimes) lands.
+
+---
+
+## Previous phase — Cap Fast Chat Retrieve at five seconds
 
 **Prepared on 2026-08-17; not yet deployed.**
 

@@ -16,6 +16,7 @@ import pytest
 
 from agentcore_runtime.models import (
     CoachTurnOutput,
+    FastChatTurnOutput,
     QATurnOutput,
     ReviewTurnOutput,
     RouterOutput,
@@ -24,6 +25,7 @@ from agentcore_runtime.structured_coach import (
     STRUCTURED_OUTPUT_REPAIR_PROMPT,
     CoachTurnExtractionError,
     coach_turn_from_agent_result,
+    fast_chat_turn_from_agent_result,
     coaching_invoke_prompts,
     inspect_agent_result,
     invoke_failure_category,
@@ -420,6 +422,15 @@ def _sample_structured_output(output_model: type[Any]) -> Any:
         )
     if output_model is ReviewTurnOutput:
         return ReviewTurnOutput.model_validate(_review_turn())
+    if output_model is FastChatTurnOutput:
+        return FastChatTurnOutput.model_validate(
+            {
+                "mode": "coaching",
+                "response_text": "What trade-off still needs evidence?",
+                "recommendation": "stay",
+                "citations": [],
+            }
+        )
     return CoachTurnOutput.model_validate(_coach_turn())
 
 
@@ -480,6 +491,10 @@ def test_structured_role_invoke_passes_custom_repair_prompt() -> None:
     prompt_node = keywords.get("structured_output_prompt")
     assert isinstance(prompt_node, ast.Name)
     assert prompt_node.id == "STRUCTURED_OUTPUT_REPAIR_PROMPT"
+    limits_node = keywords.get("limits")
+    assert isinstance(limits_node, ast.Call)
+    assert isinstance(limits_node.func, ast.Name)
+    assert limits_node.func.id == "structured_output_limits_for_role"
     model_node = keywords["structured_output_model"]
     assert isinstance(model_node, ast.Name)
     assert model_node.id == "output_model"
@@ -550,10 +565,35 @@ def test_structured_output_contracts_still_validate() -> None:
     )
     coach = CoachTurnOutput.model_validate(_coach_turn())
     review = ReviewTurnOutput.model_validate(_review_turn())
+    fast = FastChatTurnOutput.model_validate(
+        {
+            "mode": "coaching",
+            "response_text": "What specifically prevents noon booking?",
+            "recommendation": "stay",
+        }
+    )
     assert router.specialist == "coaching"
     assert qa.response_text.startswith("Week 1")
     assert coach.assessment.recommendation == "stay"
     assert "users" in review.synthesis
+    assert fast.recommendation == "stay"
+    assert "assessment" not in FastChatTurnOutput.model_fields
+
+
+def test_fast_chat_turn_from_agent_result_accepts_slim_schema() -> None:
+    parsed = fast_chat_turn_from_agent_result(
+        _result(
+            structured_output=FastChatTurnOutput.model_validate(
+                {
+                    "mode": "qa",
+                    "response_text": "Week 1 covers Innovation-driven economy [S1].",
+                    "citations": [{"label": "S1"}],
+                }
+            )
+        )
+    )
+    assert parsed.mode == "qa"
+    assert parsed.recommendation is None
 
 
 def test_review_guardrail_intervened_is_still_safety_blocked() -> None:
@@ -585,6 +625,7 @@ def test_structured_roles_pass_custom_repair_prompt_to_invoke_async(
     from agentcore_runtime.model import (
         HAIKU_4_5_MODEL_ID,
         MODEL_ROLE_COACHING,
+        MODEL_ROLE_FAST_CHAT,
         MODEL_ROLE_QA,
         MODEL_ROLE_REVIEW_DEEP,
         MODEL_ROLE_REVIEW_INCREMENTAL,
@@ -670,6 +711,9 @@ def test_structured_roles_pass_custom_repair_prompt_to_invoke_async(
                 output_contract="review_turn",
             )
         ),
+        runtime_main.fast_chat_invoke(
+            _user_payload("fast_chat", output_contract="fast_chat_turn")
+        ),
     )
     results = [asyncio.run(item) for item in invocations]
     assert roles_seen == [
@@ -678,14 +722,16 @@ def test_structured_roles_pass_custom_repair_prompt_to_invoke_async(
         MODEL_ROLE_COACHING,
         MODEL_ROLE_REVIEW_INCREMENTAL,
         MODEL_ROLE_REVIEW_DEEP,
+        MODEL_ROLE_FAST_CHAT,
     ]
-    assert len(calls) == 5
+    assert len(calls) == 6
     expected_models = (
         RouterOutput,
         QATurnOutput,
         CoachTurnOutput,
         ReviewTurnOutput,
         ReviewTurnOutput,
+        FastChatTurnOutput,
     )
     for call, expected_model, result in zip(calls, expected_models, results, strict=True):
         assert "structured_output_prompt" not in call["init_kwargs"]
@@ -695,4 +741,39 @@ def test_structured_roles_pass_custom_repair_prompt_to_invoke_async(
             "Please use the output tool now."
         )
         assert result.get("error") is not True
+    assert calls[0]["kwargs"]["limits"] == {"turns": 2}
+    assert calls[1]["kwargs"]["limits"] == {"turns": 2}
+    assert calls[2]["kwargs"]["limits"] == {"turns": 2}
+    assert calls[3]["kwargs"]["limits"] is None
+    assert calls[4]["kwargs"]["limits"] is None
+    assert calls[5]["kwargs"]["limits"] == {"turns": 2}
+
+
+def test_limit_turns_stop_reason_is_structured_output_failure() -> None:
+    """A turns cap must fail closed, not parse leftover assistant text as JSON."""
+    with pytest.raises(CoachTurnExtractionError) as raised:
+        fast_chat_turn_from_agent_result(
+            _result(
+                stop_reason="limit_turns",
+                structured_output=None,
+                message=_text_message(
+                    '{"mode":"coaching","response_text":"Ignore me.","recommendation":"stay"}'
+                ),
+            )
+        )
+    assert raised.value.category == "structured_output_failure"
+
+
+def test_event_loop_cycle_count_is_not_invented() -> None:
+    from agentcore_runtime.structured_coach import event_loop_cycle_count_from_agent_result
+
+    assert event_loop_cycle_count_from_agent_result(_result()) is None
+    counted = _result(
+        metrics=SimpleNamespace(
+            cycle_count=2,
+            latest_agent_invocation=SimpleNamespace(cycles=[{}, {}]),
+        )
+    )
+    assert event_loop_cycle_count_from_agent_result(counted) == 2
+
 

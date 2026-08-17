@@ -13,6 +13,11 @@ import streamlit.components.v1 as components
 
 from backend.domain import CoachRequest, CoachTurn
 from backend.settings import settings
+from backend.specialists.review_orchestration import (
+    COUNTER_SETTINGS_KEY,
+    explicit_deep_review_available,
+    parse_coaching_turns_since_deep_review,
+)
 from backend.student_journey import (
     DEFAULT_RESPONSE_DETAIL,
     DEFAULT_STAGE,
@@ -105,13 +110,23 @@ def render_media(raw_paths: list[str]) -> None:
             st.audio(path.read_bytes(), format=mime)
 
 
-def render_citations(message: dict[str, Any]) -> None:
+def render_citations(
+    message: dict[str, Any],
+    *,
+    visible_source_ids: set[str] | None = None,
+) -> None:
     """Render cited sources: one or two inline, three or more in a dropdown."""
     references = (message.get("metadata") or {}).get("source_refs") or []
+    allowed_ids = visible_source_ids
+    if allowed_ids is None:
+        allowed_ids = {
+            str(source.get("id") or "")
+            for source in store.list_sources(st.session_state.thread_id)
+        }
     valid_references = [
         reference
         for reference in references
-        if store.get_source(st.session_state.thread_id, str(reference.get("id") or ""))
+        if str(reference.get("id") or "") in allowed_ids
     ]
     if not valid_references:
         return
@@ -277,7 +292,11 @@ def _render_copy_control(text: str) -> None:
     )
 
 
-def render_message(message: dict[str, Any]) -> None:
+def render_message(
+    message: dict[str, Any],
+    *,
+    visible_source_ids: set[str] | None = None,
+) -> None:
     role = message["role"]
     with st.chat_message(
         role,
@@ -413,7 +432,7 @@ def render_message(message: dict[str, Any]) -> None:
                 questions,
             )
         st.markdown(concise_coach_response(display_content))
-        render_citations(message)
+        render_citations(message, visible_source_ids=visible_source_ids)
         web_sources = metadata.get("sources") or []
         if web_sources:
             with st.expander(f"Web sources ({len(web_sources)})"):
@@ -435,6 +454,110 @@ def normalize_composer_value(value: Any) -> tuple[str, list[Any]]:
     return prompt, uploads
 
 
+def assistant_message_from_turn(
+    turn: CoachTurn,
+    *,
+    thinking_stage: str,
+    message_id: str,
+) -> dict[str, Any]:
+    """Project a validated ``CoachTurn`` into the chat-message render shape.
+
+    The ``done`` payload is authoritative server output. This mapping only
+    copies fields the chat renderer already understands; it does not invent
+    transcript rows.
+
+    Args:
+        turn: Validated coaching result from the stream ``done`` event.
+        thinking_stage: Stage to show on the assistant bubble metadata.
+        message_id: Stable id for citation widget keys in this script run.
+
+    Returns:
+        A message dict compatible with ``render_message``.
+    """
+    citations = list(turn.assessment.citations or [])
+    source_refs = [
+        {
+            "id": citation.source_id,
+            "label": citation.label,
+            "title": citation.title,
+        }
+        for citation in citations
+    ]
+    metadata: dict[str, Any] = {
+        "thinking_stage": thinking_stage,
+        "assessment": turn.assessment.model_dump(mode="json"),
+        "source_refs": source_refs,
+        "source_ids": [citation.source_id for citation in citations],
+        "workflow": "langgraph",
+    }
+    if turn.auto_advanced_to:
+        metadata["auto_advanced_to"] = turn.auto_advanced_to
+    if turn.pending_transition is not None:
+        metadata["pending_transition_id"] = turn.pending_transition.id
+        metadata["proposed_stage"] = turn.pending_transition.to_stage
+        metadata["from_stage"] = turn.pending_transition.from_stage
+        metadata["decision_status"] = "pending"
+    return {
+        "id": message_id,
+        "role": "assistant",
+        "content": turn.response_text,
+        "metadata": metadata,
+    }
+
+
+def _deep_review_is_available(metadata: dict[str, Any]) -> bool:
+    """Return whether notebook metadata currently unlocks Deep Review."""
+    return explicit_deep_review_available(
+        coaching_turns_since_deep_review=parse_coaching_turns_since_deep_review(
+            metadata.get(COUNTER_SETTINGS_KEY)
+        ),
+        interval=settings.deep_review_interval_turns,
+    )
+
+
+def apply_completed_turn_to_session(
+    turn: CoachTurn,
+    *,
+    thread_id: str,
+    pre_stage: str,
+    pre_deep_review_available: bool,
+) -> bool:
+    """Update session journey from the completed turn and decide a studio rerun.
+
+    Renders stay on the ``done`` payload.     store.forget_turn_reads(thread_id)
+    updated_thread = store.get_thread(thread_id) or {}
+
+    Args:
+        turn: Validated ``done`` payload.
+        thread_id: Active notebook id.
+        pre_stage: Thinking Path stage captured before the stream started.
+        pre_deep_review_available: Deep Review entitlement before the stream.
+
+    Returns:
+        True when Thinking Path, pending Next, or Deep Review must rerun after
+        the reply is already visible.
+    """
+    store.forget_turn_reads(thread_id)
+    updated_thread = store.get_thread(thread_id) or {}
+    updated_meta = dict(updated_thread.get("metadata") or {})
+    updated_journey = normalize_journey(updated_meta.get("learning_journey"))
+    if turn.auto_advanced_to:
+        updated_journey["current_stage"] = turn.auto_advanced_to
+        completed = list(updated_journey.get("completed_stages") or [])
+        if pre_stage not in completed and pre_stage != turn.auto_advanced_to:
+            updated_journey["completed_stages"] = [*completed, pre_stage]
+        updated_journey = normalize_journey(updated_journey)
+    st.session_state.learning_journey = updated_journey
+    st.session_state.response_detail = updated_journey["response_detail"]
+    post_available = _deep_review_is_available(updated_meta)
+    return bool(
+        turn.auto_advanced_to
+        or turn.pending_transition is not None
+        or updated_journey["current_stage"] != pre_stage
+        or post_available != pre_deep_review_available
+    )
+
+
 def handle_prompt(
     prompt: str,
     uploads: list[Any],
@@ -442,20 +565,32 @@ def handle_prompt(
     reasoning_effort: str | None,
     target: Any,
     existing_user_message_id: str | None = None,
+    *,
+    visible_source_ids: set[str] | None = None,
 ) -> None:
     """Submit one student turn through the typed coaching workflow.
 
     Uploads become sources first. The coach path always uses ``CoachRequest``
     via the local API or in-process ``CoachApplicationService``, streaming
-    token events into the assistant bubble.
+    progress events and then the final validated reply. On ``done``, the
+    assistant message is rendered from that payload in this run. A full
+    ``st.rerun()`` runs only when Thinking Path, a pending stage transition,
+    or Deep Review availability changed — and only after the reply is drawn.
     """
     journey = normalize_journey(st.session_state.learning_journey)
-    selected_sources = store.list_sources(
-        st.session_state.thread_id,
-        selected_only=True,
-    )
+    sources = store.list_sources(st.session_state.thread_id)
+    selected_sources = [source for source in sources if source.get("selected")]
+    if visible_source_ids is None:
+        visible_source_ids = {
+            str(source.get("id") or "") for source in sources
+        }
     allow_model_knowledge = not selected_sources and not uploads
     st.session_state.allow_model_knowledge = allow_model_knowledge
+    pre_thread = store.get_thread(st.session_state.thread_id) or {}
+    pre_stage = str(journey.get("current_stage") or DEFAULT_STAGE)
+    pre_deep_review_available = _deep_review_is_available(
+        dict(pre_thread.get("metadata") or {})
+    )
     with target:
         if existing_user_message_id is None:
             with st.chat_message("user", avatar=":material/person:"):
@@ -486,6 +621,13 @@ def handle_prompt(
                 st.error("The attachment could not be added, so no message was sent.")
                 st.caption("Remove or replace the attachment and try again.")
                 return
+            # A stay turn does not rerun, so the Sources panel would otherwise
+            # render this run against the pre-upload memo.
+            store.forget_source_reads(st.session_state.thread_id)
+            sources = store.list_sources(st.session_state.thread_id)
+            visible_source_ids = {
+                str(source.get("id") or "") for source in sources
+            }
         # Preserve this key only while the same submitted text is unresolved.
         # The session helper stores a SHA-256 scope, never the prompt itself.
         idempotency_key = get_retry_key(
@@ -525,7 +667,19 @@ def handle_prompt(
 
             for event in stream_coach_turn_events(request):
                 kind = event.get("event")
-                if kind in {"started", "status", "graph"}:
+                if kind == "started" or kind == "graph":
+                    continue
+                if kind == "status":
+                    phase = str(event.get("phase") or "").strip()
+                    label = str(event.get("label") or "").strip()
+                    if phase == "retrieving":
+                        thinking.update(
+                            label=label or "Searching course materials…"
+                        )
+                    elif phase == "thinking":
+                        thinking.update(label=label or "Coach is thinking…")
+                    elif phase == "saving":
+                        thinking.update(label=label or "Saving response…")
                     continue
                 if kind == "token":
                     continue
@@ -545,12 +699,43 @@ def handle_prompt(
                     category="structured_output_failure",
                 )
             _close_thinking(label="Coach reply ready", state="complete")
+            thinking_stage = str(
+                turn.auto_advanced_to or journey["current_stage"] or DEFAULT_STAGE
+            )
+            message_id = (
+                turn.pending_transition.id
+                if turn.pending_transition is not None
+                else f"done-{idempotency_key}"
+            )
+            render_message(
+                assistant_message_from_turn(
+                    turn,
+                    thinking_stage=thinking_stage,
+                    message_id=message_id,
+                ),
+                visible_source_ids=visible_source_ids,
+            )
+            # Drop the retry key only after the reply is on screen. The
+            # composer is a trigger widget, so this run's submitted value
+            # cannot fire again. Nonce bumps only when a reconciliation
+            # rerun remounts the composer; bumping without a rerun would
+            # desync the on-screen widget key from session state.
             remove_retry_key(
                 st.session_state,
                 thread_id=st.session_state.thread_id,
                 stage=journey["current_stage"],
                 prompt=prompt,
             )
+            needs_reconcile = apply_completed_turn_to_session(
+                turn,
+                thread_id=st.session_state.thread_id,
+                pre_stage=pre_stage,
+                pre_deep_review_available=pre_deep_review_available,
+            )
+            if needs_reconcile:
+                st.session_state.composer_nonce += 1
+                rerun_app()
+            return
         except CoachTurnStreamError as error:
             try:
                 thinking.update(label="Coaching failed", state="error")
@@ -575,13 +760,6 @@ def handle_prompt(
                 "may already be present if the connection ended late."
             )
             return
-    updated_thread = store.get_thread(st.session_state.thread_id) or {}
-    updated_metadata = updated_thread.get("metadata") or {}
-    updated_journey = normalize_journey(updated_metadata.get("learning_journey"))
-    st.session_state.learning_journey = updated_journey
-    st.session_state.response_detail = updated_journey["response_detail"]
-    st.session_state.composer_nonce += 1
-    rerun_app()
 
 
 @st.dialog("Edit this message?")
@@ -736,14 +914,15 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
         ):
             return
 
-    selected_sources = store.list_sources(
-        st.session_state.thread_id,
-        selected_only=True,
-    )
+    sources = store.list_sources(st.session_state.thread_id)
+    selected_sources = [source for source in sources if source.get("selected")]
     allow_model_knowledge = not selected_sources
     st.session_state.allow_model_knowledge = allow_model_knowledge
     seed_coach_welcome(store, st.session_state.thread_id)
     messages = store.get_messages(st.session_state.thread_id)
+    visible_source_ids = {
+        str(source.get("id") or "") for source in sources
+    }
     chat_log = st.container(key="chat_log")
     with chat_log:
         for message in messages:
@@ -751,7 +930,7 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
                 message.get("content") or ""
             ).strip():
                 continue
-            render_message(message)
+            render_message(message, visible_source_ids=visible_source_ids)
 
     if st.session_state.get("edit_confirm_message_id"):
         _confirm_edit_earlier_message_dialog()
@@ -776,4 +955,5 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
             reasoning_effort,
             chat_log,
             existing_user_message_id=None,
+            visible_source_ids=visible_source_ids,
         )

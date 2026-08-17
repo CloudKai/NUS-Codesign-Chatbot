@@ -69,6 +69,15 @@ RESEARCH_WORKFLOW_CONTRACT_KEY = _workflow_contract.WORKFLOW_CONTRACT_KEY
 RESEARCH_WORKFLOW_CONTRACT_VERSION = _workflow_contract.WORKFLOW_CONTRACT_VERSION
 
 
+def _utc_now_datetime() -> datetime:
+    """Return timezone-aware UTC now for lease expiry.
+
+    Tests monkeypatch this function to control reclaim timing without sleeps.
+    Message ``created_at`` stamps still use :func:`utc_now`.
+    """
+    return datetime.now(timezone.utc)
+
+
 class StudentStore:
     """Framework-neutral store for notebooks, messages, sources, and auth users."""
 
@@ -1388,7 +1397,7 @@ class StudentStore:
             return True
         if expiry.tzinfo is None:
             return True
-        return expiry <= datetime.now(timezone.utc)
+        return expiry <= _utc_now_datetime()
 
     def _recorded_coach_turn(
         self,
@@ -1535,7 +1544,7 @@ class StudentStore:
         *,
         idempotency_key: str,
         request_fingerprint: str,
-        lease_seconds: int = 180,
+        lease_seconds: int | None = None,
     ) -> CoachRequestReservation:
         """Reserve or replay an owned coach request without running a provider.
 
@@ -1544,11 +1553,31 @@ class StudentStore:
         reservation unique for the owner, notebook, and caller-provided key on
         both SQLite and Aurora DSQL.  Leases make a request recoverable after a
         worker or container restart; they never represent a completed turn.
+
+        ``lease_seconds`` defaults to
+        :attr:`backend.settings.Settings.coach_idempotency_lease_seconds`,
+        which is derived from AgentCore and Retrieve timeouts so the
+        reservation outlives the timeout-bounded Fast Chat path (two
+        Retrieves + two AgentCore invokes). A shorter hard-coded lease can
+        be reclaimed while the original worker is still running, which
+        discards a successful generation (``CoachRequestLeaseLostError``).
+
+        This DSQL/SQLite lease is the durable mutex. ``CoachRateLimiter`` is
+        process-local and must not be the only guard. Single-process
+        assumption: production starts one Uvicorn worker. If workers are
+        added, each process has its own in-memory limiter, so two workers
+        can both pass the notebook slot. Duplicate provider execution is
+        then prevented only while this lease is still valid. Keep the
+        derived lease above bounded execution; do not add workers without
+        treating this marker as the cross-process lock.
         """
         key = str(idempotency_key or "").strip()
         fingerprint = str(request_fingerprint or "").strip()
         if not key or not fingerprint:
             raise ValueError("Coach idempotency key and fingerprint are required")
+        if lease_seconds is None:
+            lease_seconds = int(settings.coach_idempotency_lease_seconds)
+        lease_seconds = int(lease_seconds)
         if lease_seconds < 1:
             raise ValueError("Coach idempotency lease must be positive")
         marker_id = self._coach_marker_id(thread_id, key)
@@ -1584,7 +1613,7 @@ class StudentStore:
                     "status": "pending",
                     "lease_token": lease_token,
                     "lease_expires_at": (
-                        datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
+                        _utc_now_datetime() + timedelta(seconds=lease_seconds)
                     ).isoformat(),
                 }
                 connection.execute(
@@ -1669,7 +1698,7 @@ class StudentStore:
                     "status": "pending",
                     "lease_token": lease_token,
                     "lease_expires_at": (
-                        datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
+                        _utc_now_datetime() + timedelta(seconds=lease_seconds)
                     ).isoformat(),
                 }
             )
@@ -3297,6 +3326,8 @@ class StudentStore:
                 (status, resolved_at, transition_id),
             )
             if accepted and metadata_patch:
+                from backend.coaching.progress_fields import overlay_progress_fields
+
                 progress = _load(notebook["progress_text"], {})
                 if not isinstance(progress, dict):
                     progress = {}
@@ -3313,7 +3344,19 @@ class StudentStore:
                 }
                 next_meta = {**current_meta, **metadata_patch}
                 if isinstance(metadata_patch.get("learning_journey"), dict):
-                    next_meta["learning_journey"] = metadata_patch["learning_journey"]
+                    next_meta["learning_journey"] = dict(
+                        metadata_patch["learning_journey"]
+                    )
+                journey_blob = next_meta.get("learning_journey")
+                preserved = overlay_progress_fields(
+                    progress,
+                    journey_blob if isinstance(journey_blob, dict) else {},
+                    metadata_patch,
+                )
+                if isinstance(journey_blob, dict):
+                    journey_blob.update(preserved)
+                    next_meta["learning_journey"] = journey_blob
+                next_meta.update(preserved)
                 stage, progress_text, settings_text = self._split_notebook_metadata(
                     next_meta
                 )

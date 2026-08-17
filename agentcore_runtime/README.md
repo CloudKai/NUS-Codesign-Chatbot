@@ -18,13 +18,22 @@ Coaching, Incremental Review, and Deep Review. Do not treat
 3. Canonical pedagogy lives in `prompts/`. FastAPI sends runtime rules only.
    The combined `fast_chat` prompt must not role-play router → coach → reviewer.
 4. DSQL history is Strands `messages`. AgentCore Memory is not the transcript.
-5. `invoke_async(..., structured_output_model=..., structured_output_prompt=...)`
+5. `invoke_async(..., structured_output_model=..., structured_output_prompt=..., limits=...)`
    then `result.structured_output`. Text-block JSON is a fallback. The custom
    repair prompt is `Please use the output tool now.` so Guardrail v3 does not
    classify the Strands structured-output recovery turn as PROMPT_ATTACK.
+   Fast Chat / router / legacy Haiku pass `limits={"turns": 2}` (Strands 1.52.0:
+   initial generation plus at most one recovery). Deep Review is uncapped.
 6. Never `json.loads(str(result))`.
 7. Failures return `{ok: false, error: true, category: ...}`.
-8. Per-role `load_runtime_model()` via `COACHING_*` (fast_chat/Haiku) /
+8. Slim Fast Chat JSON is `fast_chat_turn_v1` (`schema_id` on the wire). FastAPI
+   also accepts the immediately-previous nested `CoachTurnOutput` when
+   `assessment.recommendation` is stay or advance, and previous Q&A
+   (`response_text` without a recommendation). Conflicting or malformed
+   shapes fail closed. **Publish FastAPI first** (tolerant parser), then this
+   runtime. An old FastAPI image that requires nested `assessment` will not
+   accept slim JSON.
+9. Per-role `load_runtime_model()` via `COACHING_*` (fast_chat/Haiku) /
    `REVIEW_DEEP_*` plus shared `AGENTCORE_MODEL_REGION`, `GUARDRAIL_ID`,
    `GUARDRAIL_VERSION`. Router / Q&A / Incremental Review keys are optional
    legacy. `AGENTCORE_MODEL_PROVIDER` / `AGENTCORE_MODEL_ID` are a local
@@ -84,6 +93,11 @@ do not create a second runtime.
 
 Rollback is the previous READY qualifier. Do not point DEFAULT at an untested
 version.
+
+Publish the FastAPI image that contains the tolerant Fast Chat parser **before**
+or together with a runtime that emits slim `fast_chat_turn_v1`. Do not publish
+slim-only runtime JSON to an old FastAPI image that still requires nested
+`assessment`.
 
 ```sh
 .venv/bin/python scripts/agentcore_smoke.py \

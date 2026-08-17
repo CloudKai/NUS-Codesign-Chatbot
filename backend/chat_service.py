@@ -1,3 +1,10 @@
+"""Legacy direct chat engine retained for compatibility tests.
+
+Streamlit and FastAPI use ``CoachApplicationService`` (API or in-process).
+This engine does not mutate Thinking Path stages and must not be wired back
+into the student UI.
+"""
+
 from __future__ import annotations
 
 import asyncio

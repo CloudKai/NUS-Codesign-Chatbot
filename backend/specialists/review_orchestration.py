@@ -16,6 +16,10 @@ FastAPI and DSQL remain authoritative. Review assessments never mutate the
 Thinking Path stage directly. Research coding is observational and must not
 influence routing, the periodic counter, Deep Review eligibility, or
 advancement.
+
+``resolve_deep_review_trigger`` and ``should_run_deep_review`` are not imported
+by ``backend.coaching.execution``. Automatic Sonnet is off the live path.
+Explicit Deep Review is ``POST /api/v1/threads/{thread_id}/deep-review``.
 """
 
 from __future__ import annotations

@@ -1,10 +1,10 @@
 {
   "baseline_commit": "a6d163668902beae4938fe552cced7ba92b15e88",
-  "note": "Updating these hashes requires explicit pedagogical review.",
+  "note": "Updating these hashes requires explicit pedagogical review. 2026-08-17: shared_coaching.md dropped the assumptions_identified schema sentence and the Fast Chat structured-output section (contract now lives once in the runtime JSON block). RESEARCH CODING, Socratic, V&V, and assumption-check pedagogy are unchanged. Stage files unchanged.",
   "files": [
     {
       "path": "agentcore_runtime/prompts/shared_coaching.md",
-      "sha256": "3e7ddb569931799b34222aeec2cf2236e882655b3dba7026f9091c249935f02e"
+      "sha256": "bfb5b7f96a2117d2a10ad547d9a78623d4400456f91674e5bf108f9fc9b9a0fa"
     },
     {
       "path": "agentcore_runtime/prompts/stages/problem_identification.md",

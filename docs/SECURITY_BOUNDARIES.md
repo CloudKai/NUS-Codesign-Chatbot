@@ -35,14 +35,57 @@ Student → Streamlit → FastAPI
   owner, notebook, stage, history, sources, and eligibility from server
   state and stamps `specialist=review` only after that sanitization.
 
+## AgentCore `InvokeAgentRuntime` IAM boundary
+
+FastAPI authorization (Cognito cookie, notebook ownership, specialist
+sanitization) applies to the student browser path:
+
+```text
+Student → Streamlit → FastAPI → InvokeAgentRuntime(phase=fast_chat)
+```
+
+It does **not** apply to a principal that can call
+`bedrock-agentcore:InvokeAgentRuntime` on the published runtime ARN
+directly. The published entrypoint (`agentcore_runtime/main.py`) still
+dispatches on the request `phase`. A caller holding that IAM permission
+can send `phase=review` (Sonnet Deep Review), `phase=router`, `phase=qa`,
+`phase=coaching`, or `review_mode=incremental` and bypass every FastAPI
+check, including Deep Review eligibility.
+
+This is **not** a browser-reachable bypass. Streamlit and
+`POST /api/v1/coach/turn` cannot reach those phases: the server clears
+`specialist` and always invokes `fast_chat`. Do not "solve" this in
+browser or UI code. A Streamlit change cannot constrain an IAM caller.
+
+What actually mitigates it today:
+
+- IAM least privilege: only the FastAPI / EC2 instance role should have
+  `bedrock-agentcore:InvokeAgentRuntime` on this runtime ARN (and its
+  `DEFAULT` endpoint).
+- Do not grant that action to students, lecturers, CI users, or a broad
+  `bedrock-agentcore:*` policy.
+
+What would remove the dispatch hole (not implemented, not deployed):
+
+- Runtime-side allowlisting so the published entrypoint accepts only
+  `phase=fast_chat` and explicit `phase=review` + `review_mode=deep`, or
+- Separate runtimes per model role (Haiku Fast Chat vs Sonnet Deep Review).
+
+Until one of those is published, treat `InvokeAgentRuntime` as a privileged
+generation backdoor, equivalent to holding the model invocation keys for
+this runtime.
+
 ## Retrieval authorization
 
 - Retrieval runs only after selected sources are loaded for the authenticated
   notebook.
 - Course Retrieve results are mapped onto locked `object_key` values using
   exact canonical equality after URL decoding, slash normalization, and S3 URI
-  extraction. Foreign buckets and unselected keys are dropped. Suffix overlap
-  is not a match.
+  extraction. The hit bucket must be present and equal
+  `COURSE_MATERIALS_BUCKET`. Empty configured buckets, empty-bucket URIs
+  (`s3:///...`), foreign buckets, and unselected keys are dropped. Suffix
+  overlap is not a match. Production startup fails if a Knowledge Base is
+  configured without `COURSE_MATERIALS_BUCKET`.
 - Student retrieval is local to extracted text of selected sources in the
   current notebook.
 - Virtual shared course sources have empty extracted text. They must not be

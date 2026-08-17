@@ -14,6 +14,7 @@ import threading
 import uuid
 import zlib
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
@@ -50,6 +51,9 @@ SHARED_COURSE_FOLDERS = ("lectureNotes", "readings")
 _SHARED_CATALOG_UNAVAILABLE = (("__course_catalog_unavailable__", 0, 0),)
 _COURSE_MATERIAL_SYNC_LOCK = threading.RLock()
 _VIRTUAL_COURSE_NAMESPACE = uuid.UUID("6b1c9e20-4d8a-5f31-8c47-2e9a0b7d15c3")
+_catalog_memo: ContextVar["_SharedCatalogMemo | None"] = ContextVar(
+    "shared_course_catalog_memo", default=None
+)
 
 
 class SourceImportError(ValueError):
@@ -79,6 +83,45 @@ class SharedCourseItem:
     signature: str
     material_group: str
     fingerprint_token: int
+
+
+@dataclass
+class _SharedCatalogMemo:
+    """Mutable request-local memo for one shared-catalog listing."""
+
+    items: list[SharedCourseItem] | None = None
+    error: BaseException | None = None
+    loaded: bool = False
+    load_count: int = 0
+
+
+class shared_course_catalog_scope:
+    """Memoize shared course-catalog listings for the current request.
+
+    The memo does not outlive the ``with`` block and is not process-global.
+    Listing failures are remembered for the same request only so a catalog
+    outage is not retried once per source id.
+    """
+
+    def __init__(self) -> None:
+        self._token: Token[_SharedCatalogMemo | None] | None = None
+
+    def __enter__(self) -> "shared_course_catalog_scope":
+        self._token = _catalog_memo.set(_SharedCatalogMemo())
+        return self
+
+    def __exit__(self, *_exc: object) -> bool:
+        scope = _catalog_memo.get()
+        # Reset before recording so a telemetry failure cannot strand the memo
+        # on a pooled worker thread and leak it into the next request.
+        if self._token is not None:
+            _catalog_memo.reset(self._token)
+            self._token = None
+        if scope is not None:
+            from backend.turn_perf import record_field
+
+            record_field("source_catalog_load_count", int(scope.load_count))
+        return False
 
 
 def course_material_fingerprint() -> tuple[tuple[str, int, int], ...]:
@@ -241,8 +284,8 @@ def course_material_group(relative_path: str) -> str:
     return "Lecture Notes"
 
 
-def _iter_shared_course_items() -> list[SharedCourseItem]:
-    """List shared Lecture Notes and Readings objects for locked source sync.
+def _list_shared_course_items_from_storage() -> list[SharedCourseItem]:
+    """List shared Lecture Notes and Readings objects without request memoisation.
 
     Raises:
         Exception: Listing failures propagate so callers can avoid treating an
@@ -280,6 +323,40 @@ def _iter_shared_course_items() -> list[SharedCourseItem]:
             )
             if len(items) >= settings.max_lecture_notes:
                 return items
+    return items
+
+
+def _iter_shared_course_items() -> list[SharedCourseItem]:
+    """List shared Lecture Notes and Readings objects for locked source sync.
+
+    When a :class:`shared_course_catalog_scope` is active, the listing result
+    or failure is reused for the rest of the request.
+
+    Raises:
+        Exception: Listing failures propagate so callers can avoid treating an
+            outage as an empty catalog (which would delete locked sources).
+    """
+    scope = _catalog_memo.get()
+    if scope is not None and scope.loaded:
+        if scope.error is not None:
+            raise scope.error
+        return list(scope.items or [])
+    try:
+        items = _list_shared_course_items_from_storage()
+    except Exception as error:
+        if scope is not None:
+            scope.loaded = True
+            scope.error = error
+            scope.load_count += 1
+        raise
+    if scope is not None:
+        scope.loaded = True
+        scope.items = list(items)
+        scope.load_count += 1
+    else:
+        from backend.turn_perf import record_count
+
+        record_count("source_catalog_load_count")
     return items
 
 

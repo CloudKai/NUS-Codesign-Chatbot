@@ -65,6 +65,9 @@ services:
       # Process-local coach workflow capacity for ~100 concurrent students.
       # MAX_CONCURRENT_MODEL_CALLS is the historical name for active workflows,
       # not internal Haiku/Sonnet invokes inside one coaching turn.
+      # FastAPI is a single Uvicorn worker (start_prod.sh has no --workers).
+      # The DSQL coach idempotency lease is the durable mutex; this limiter
+      # is not sufficient if workers are added.
       MAX_ACTIVE_COACH_REQUESTS_PER_NOTEBOOK: "1"
       MAX_ACTIVE_COACH_REQUESTS_PER_USER: "2"
       COACH_REQUESTS_PER_MINUTE: "8"

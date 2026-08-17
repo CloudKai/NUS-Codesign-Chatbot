@@ -8,11 +8,7 @@ from typing import Any
 
 from backend.agentcore_provider import AgentCoreCoachProvider
 from backend.domain import (
-    CitationReference,
     CoachRequest,
-    EducationalAssessment,
-    FacioneDimensionScores,
-    ProviderCoachOutput,
     StageDecision,
 )
 from fake_agentcore_runtime import FakeAgentCoreRuntime
@@ -24,28 +20,16 @@ _RUNTIME_ARN = (
 
 
 def _output(*, recommendation: StageDecision = StageDecision.STAY) -> dict[str, Any]:
-    envelope = ProviderCoachOutput(
-        response_text="What still needs evidence?",
-        assessment=EducationalAssessment(
-            current_stage="problem_identification",
-            contribution_summary="The student named a street.",
-            stage_assessment="The contribution is a starting point.",
-            critical_understanding_level="Developing",
-            confidence=0.6,
-            recommendation=recommendation,
-            recommendation_rationale="More specificity is needed.",
-            guidance_questions=["Who is affected at night?"],
-            learning_summary="The student is locating the problem.",
-            citations=[
-                CitationReference(
-                    source_id="s1", label="S1", title="Notes", excerpt=""
-                )
-            ],
-            facione_scores=FacioneDimensionScores(analysis=2),
-        ),
-        research_coding=None,
-    )
-    return envelope.model_dump(mode="json")
+    return {
+        "mode": "coaching",
+        "response_text": "What still needs evidence?",
+        "recommendation": recommendation.value,
+        "recommendation_rationale": "More specificity is needed.",
+        "citations": [
+            {"source_id": "s1", "label": "S1", "title": "Notes", "excerpt": ""}
+        ],
+        "needs_source_retrieval": False,
+    }
 
 
 def test_j_agentcore_memory_is_not_authoritative_transcript() -> None:
@@ -99,3 +83,31 @@ def test_f_agent_recommendation_does_not_write_stage_inside_adapter() -> None:
     assert result.assessment.recommendation is StageDecision.ADVANCE
     assert result.assessment.current_stage == "problem_identification"
     assert not hasattr(provider, "persist_stage")
+
+
+def test_normal_assess_never_invokes_router_or_review_phase() -> None:
+    """A normal AgentCore assess() must not send router or Review payloads.
+
+    Catch: re-wiring ``assess()`` through ``_resolve_specialist`` or
+    ``_invoke_specialist`` would put ``phase=router`` / ``phase=review`` back
+    on the student path. This does not close the IAM InvokeAgentRuntime hole
+    on the published runtime; it only locks the FastAPI adapter.
+    """
+    client = FakeAgentCoreRuntime(payload=_output())
+    AgentCoreCoachProvider(_RUNTIME_ARN, client=client).assess(
+        CoachRequest(
+            thread_id="thread-demo",
+            student_message="A quiet residential street",
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    )
+    phases = [
+        str(json.loads(call["payload"].decode("utf-8")).get("phase") or "")
+        for call in client.calls
+    ]
+    assert phases == ["fast_chat"]
+    assert "router" not in phases
+    assert "review" not in phases
+    assert "qa" not in phases
+    assert "coaching" not in phases

@@ -64,6 +64,7 @@ try:
         conversation_for_invoke,
         coach_turn_from_agent_result,
         elapsed_ms_since,
+        event_loop_cycle_count_from_agent_result,
         fast_chat_turn_from_agent_result,
         harness_error_payload,
         invoke_failure_category,
@@ -74,6 +75,7 @@ try:
         qa_turn_from_agent_result,
         review_turn_from_agent_result,
         agent_system_prompt,
+        structured_output_limits_for_role,
         structured_wire_payload,
     )
 except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
@@ -119,6 +121,7 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
         conversation_for_invoke,
         coach_turn_from_agent_result,
         elapsed_ms_since,
+        event_loop_cycle_count_from_agent_result,
         fast_chat_turn_from_agent_result,
         harness_error_payload,
         invoke_failure_category,
@@ -129,6 +132,7 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
         qa_turn_from_agent_result,
         review_turn_from_agent_result,
         agent_system_prompt,
+        structured_output_limits_for_role,
         structured_wire_payload,
     )
 
@@ -149,11 +153,12 @@ def _with_cache_telemetry(
     result: Any,
     system_prompt: str | list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Attach numeric cache telemetry without student text or prompt content.
+    """Attach numeric cache and cycle telemetry without student text.
 
     ``prompt_cache_enabled`` is true only when this invoke actually sent a
-    SystemContentBlock cachePoint. Cache token counts are copied only when
-    AgentResult metrics expose them.
+    SystemContentBlock cachePoint. Cache token counts and event-loop cycle
+    count are copied only when AgentResult metrics expose them. Repair count
+    is not stamped: 1.52.0 has no such field.
     """
     enabled = isinstance(system_prompt, list) and any(
         isinstance(block, Mapping) and "cachePoint" in block for block in system_prompt
@@ -164,6 +169,9 @@ def _with_cache_telemetry(
     except ImportError:  # pragma: no cover - companion package import
         from agentcore_runtime.prompt_cache import cache_usage_from_agent_result
     payload.update(cache_usage_from_agent_result(result))
+    cycle_count = event_loop_cycle_count_from_agent_result(result)
+    if cycle_count is not None:
+        payload["event_loop_cycle_count"] = cycle_count
     if enabled:
         logger.info(
             "prompt_cache_enabled=true cache_read_input_tokens=%s "
@@ -274,6 +282,9 @@ async def _structured_role_invoke(
 
     Every Bedrock role passes ``STRUCTURED_OUTPUT_REPAIR_PROMPT`` so Strands'
     structured-output recovery turn is not classified as PROMPT_ATTACK.
+    Fast Chat / router / legacy Haiku roles pass ``limits={"turns": 2}``
+    (verified 1.52.0: initial generation plus at most one recovery). Deep
+    Review is uncapped so a legitimate Sonnet repair is not cut short.
     """
     from strands import Agent
 
@@ -368,6 +379,7 @@ async def _structured_role_invoke(
             user_prompt,
             structured_output_model=output_model,
             structured_output_prompt=STRUCTURED_OUTPUT_REPAIR_PROMPT,
+            limits=structured_output_limits_for_role(role),
         )
         output = parse(result)
         enforce_mantle_guardrail(
@@ -449,8 +461,9 @@ async def specialist_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]
 async def fast_chat_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     """Invoke one Haiku fast-chat generation for Coaching or Q&A.
 
-    The runtime must not call another AgentCore phase internally. One Strands
-    Agent and one foundation-model generation serve the request.
+    The runtime must not call another AgentCore phase internally. Application
+    code issues one ``invoke_agent``. Whether Strands performs one event-loop
+    cycle is a live-trace concern, not a unit-test invariant.
     """
     return await _structured_role_invoke(
         role=MODEL_ROLE_FAST_CHAT,
