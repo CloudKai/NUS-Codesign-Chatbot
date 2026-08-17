@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -44,7 +45,6 @@ from backend.retrieval import (
     RetrievalSource,
     bounded_retrieval_result,
     focused_excerpt,
-    retrieval_sources_from_notebook,
     with_course_evidence_gap,
 )
 from backend.settings import settings as runtime_settings
@@ -64,6 +64,7 @@ from backend.source_library import (
     selected_source_context,
     shared_course_catalog_scope,
 )
+from backend.sources.chunk_load import hydrate_selected_retrieval_sources
 from backend.student_journey import (
     DEFAULT_RESPONSE_DETAIL,
     advanced_stage_response,
@@ -980,6 +981,33 @@ class CoachApplicationService:
             )
         return retrieved_chunks, retrieval_result.context
 
+    def _hydrate_retrieval_sources(self, snapshot: TurnSnapshot) -> TurnSnapshot:
+        """Load selected student chunk artifacts once for this request.
+
+        Idle first passes skip this so selected files do not pay ``get_bytes``.
+        RAG fallback calls it when the first pass left ``retrieval_sources``
+        empty. Cache and storage I/O happen only here; this method does not
+        authorize sources.
+
+        Args:
+            snapshot: Authoritative notebook snapshot after source
+                authorization.
+
+        Returns:
+            The same snapshot when retrieval sources are already attached,
+            otherwise a copy with hydrated selected student sources.
+        """
+        if snapshot.retrieval_sources:
+            return snapshot
+        return replace(
+            snapshot,
+            retrieval_sources=hydrate_selected_retrieval_sources(
+                snapshot.selected_sources,
+                owner_id=self._store.owner_id,
+                notebook_id=snapshot.thread_id,
+            ),
+        )
+
     def _maybe_rag_fallback(
         self,
         request: CoachRequest,
@@ -991,8 +1019,9 @@ class CoachApplicationService:
         The first model result is not persisted. The retry stays inside the
         same notebook execution lease and idempotency claim. A second
         ``needs_source_retrieval`` flag cannot trigger another retrieve.
-        Selected sources come from the request-scoped snapshot rather than a
-        second catalog listing.
+        Hydrated retrieval sources come from the request-scoped snapshot
+        when the first pass already retrieved. Idle first passes skip
+        hydration, so this retry hydrates selected student sources once.
         """
         record_field("rag_fallback_used", False)
         record_field("rag_fallback_model_calls", 1)
@@ -1006,7 +1035,8 @@ class CoachApplicationService:
             return request, turn
         if not self._workflow.peek_needs_source_retrieval(request.thread_id):
             return request, turn
-        retrieval_sources = retrieval_sources_from_notebook(snapshot.selected_sources)
+        snapshot = self._hydrate_retrieval_sources(snapshot)
+        retrieval_sources = snapshot.retrieval_sources
         if not retrieval_sources:
             return request, turn
         record_field("rag_fallback_used", True)
@@ -1101,7 +1131,10 @@ class CoachApplicationService:
 
         source_started = time.perf_counter()
         visible_sources = list_visible_sources(
-            self._store, request.thread_id, selected_only=False
+            self._store,
+            request.thread_id,
+            selected_only=False,
+            include_extracted_text=False,
         )
         record_field("source_load_ms", elapsed_ms(source_started))
         snapshot = TurnSnapshot.from_authoritative_state(
@@ -1132,12 +1165,17 @@ class CoachApplicationService:
                     "source_ids must match the notebook's currently selected sources"
                 )
 
-        # Preserve compatibility with older clients that sent the full selected-
-        # source snapshot only as an integrity hint. The query-aware context used
-        # by the provider is always generated server-side below.
+        # Metadata-only listings leave extractedText empty, so they cannot
+        # reproduce the historical full-text snapshot. The server still
+        # overwrites source_context with query-ranked evidence below.
+        listed_has_extracted = any(
+            str(source.get("extractedText") or "").strip()
+            for source in selected_sources
+        )
         legacy_source_context, _ = selected_source_context(selected_sources)
         if (
             request.source_context
+            and listed_has_extracted
             and request.source_context.strip() != legacy_source_context
         ):
             raise ValueError("source_context does not match the selected notebook sources")
@@ -1177,7 +1215,6 @@ class CoachApplicationService:
         conversation_summary = " ".join(
             str(metadata.get("learning_summary") or "").split()
         ).strip()
-        retrieval_sources = retrieval_sources_from_notebook(selected_sources)
         gate_started = time.perf_counter()
         mode_policy = resolve_mode_policy(
             request.student_message,
@@ -1188,16 +1225,19 @@ class CoachApplicationService:
                 str(source.get("filename") or source.get("name") or "")
                 for source in selected_sources
             ],
-            has_selected_sources=bool(retrieval_sources),
+            has_selected_sources=bool(selected_sources),
         )
         needs_retrieval = bool(mode_policy.retrieve)
-        if force_retrieval and retrieval_sources:
+        if force_retrieval and selected_sources:
             needs_retrieval = True
         record_field("retrieval_gate_ms", elapsed_ms(gate_started))
         record_field("retrieval_required", bool(needs_retrieval))
         record_field("mode_policy_intent", mode_policy.intent)
         retrieved_chunks: list[RetrievalChunkReference] = []
         retrieval_result_context = ""
+        if needs_retrieval:
+            snapshot = self._hydrate_retrieval_sources(snapshot)
+        retrieval_sources = snapshot.retrieval_sources
         if needs_retrieval and retrieval_sources:
             emit_coach_progress(PROGRESS_RETRIEVING)
             retrieved_chunks, retrieval_result_context = self._retrieve_for_turn(

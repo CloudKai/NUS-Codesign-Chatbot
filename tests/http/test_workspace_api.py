@@ -196,6 +196,9 @@ def test_workspace_service_redacts_paths(tmp_path):
     assert "path" not in public
     assert public["has_file"] is False
     assert public["title"] == "Paste"
+    assert public["extractedText"] == "Text body"
+    listed = service.list_sources(thread_id)
+    assert listed[0]["extractedText"] == "Text body"
 
 
 def test_workspace_api_transcript_download_uses_persisted_messages(tmp_path):

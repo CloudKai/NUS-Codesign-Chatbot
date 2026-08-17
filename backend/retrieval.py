@@ -120,6 +120,8 @@ class RetrievalSource:
     course_material_id: str | None = None
     virtual_course_source: bool = False
     shared_course_object: bool = False
+    chunks: tuple[str, ...] | None = None
+    """Precomputed chunk texts. ``None`` means chunk from ``text`` at query time."""
 
 
 @dataclass(frozen=True)
@@ -639,7 +641,7 @@ def _normalized_text(text: str) -> str:
     return _BLANK_LINES.sub("\n\n", "\n".join(lines)).strip()
 
 
-def _chunk_text(text: str, *, chunk_chars: int, overlap_chars: int) -> list[str]:
+def canonical_chunk_text(text: str, *, chunk_chars: int, overlap_chars: int) -> list[str]:
     """Split source text at nearby whitespace with bounded character overlap."""
     cleaned = _normalized_text(text)
     if not cleaned:
@@ -671,6 +673,9 @@ def _chunk_text(text: str, *, chunk_chars: int, overlap_chars: int) -> list[str]
             next_start += 1
         start = min(end, next_start + 1)
     return chunks
+
+
+_chunk_text = canonical_chunk_text
 
 
 def _query_weights(query: RetrievalQuery) -> Counter[str]:
@@ -876,16 +881,19 @@ class LocalChunkRetriever:
         """Create deterministic overlapping candidates from all selected sources."""
         candidates: list[_Candidate] = []
         for source_index, source in enumerate(sources, start=1):
-            if is_placeholder_retrieval_text(source.text) or not str(
-                source.text or ""
-            ).strip():
-                continue
-            chunks = _chunk_text(
-                source.text,
-                chunk_chars=self.chunk_chars,
-                overlap_chars=self.overlap_chars,
-            )
-            for chunk_index, text in enumerate(chunks, start=1):
+            if source.chunks is not None:
+                chunk_texts = list(source.chunks)
+            else:
+                if is_placeholder_retrieval_text(source.text) or not str(
+                    source.text or ""
+                ).strip():
+                    continue
+                chunk_texts = canonical_chunk_text(
+                    source.text,
+                    chunk_chars=self.chunk_chars,
+                    overlap_chars=self.overlap_chars,
+                )
+            for chunk_index, text in enumerate(chunk_texts, start=1):
                 candidates.append(
                     _Candidate(
                         source=source,

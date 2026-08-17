@@ -147,7 +147,7 @@ def test_harness_never_constructs_empty_bedrock_model() -> None:
     assert "retry_strategy" in main
     assert "structured_output_prompt=" not in loader
     assert "boto_client_config" in loader
-    assert 'retries={"max_attempts": 1, "mode": "standard"}' in loader
+    assert 'retries={"total_max_attempts": 1, "mode": "standard"}' in loader
 
 
 class _FakeGuardrail:

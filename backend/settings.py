@@ -326,6 +326,9 @@ class Settings:
     fast_chat_project_context_chars: int = _bounded_int(
         "FAST_CHAT_PROJECT_CONTEXT_CHARS", 2_000, 200, 8_000
     )
+    student_source_chunk_cache_max_bytes: int = _bounded_int(
+        "STUDENT_SOURCE_CHUNK_CACHE_MAX_BYTES", 33_554_432, 0, 268_435_456
+    )
     deep_review_max_input_tokens: int = int(
         os.getenv("DEEP_REVIEW_MAX_INPUT_TOKENS", os.getenv("MODEL_MAX_INPUT_TOKENS", "210000"))
     )

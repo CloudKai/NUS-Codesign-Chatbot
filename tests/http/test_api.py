@@ -362,7 +362,6 @@ def test_local_api_grounds_mock_reply_in_retrieved_selected_source(tmp_path):
             "current_stage": "problem_identification",
             "response_detail": "short",
             "source_ids": [source["id"]],
-            "source_context": "--- [S1] Week 1 lecture ---\nOlder pedestrians may require longer crossing intervals.",
         },
     )
 
@@ -405,7 +404,6 @@ def test_local_api_persists_mock_response_citations(tmp_path):
             "current_stage": "problem_identification",
             "response_detail": "short",
             "source_ids": [source["id"]],
-            "source_context": "--- [S1] Week 1 lecture ---\nOlder pedestrians may require longer crossing intervals.",
         },
     )
 
@@ -452,10 +450,6 @@ def test_local_api_resolves_selected_images_into_coach_turn(tmp_path, monkeypatc
             "current_stage": "problem_identification",
             "response_detail": "short",
             "source_ids": [created[0]["id"]],
-            "source_context": (
-                "--- [S1] crossing.png ---\n"
-                "[Image source. Inspect the accompanying image input.]"
-            ),
         },
     )
 

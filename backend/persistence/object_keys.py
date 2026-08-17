@@ -96,3 +96,24 @@ def build_extracted_text_object_key(
         f"users/{safe_user}/notebooks/{safe_notebook}/sources/{safe_source}/"
         "derived/extracted.txt"
     )
+
+
+def build_source_chunks_object_key(
+    *,
+    user_id: str,
+    notebook_id: str,
+    source_id: str,
+) -> str:
+    """Build a deterministic object key for derived source chunk artifacts.
+
+    Example:
+        ``users/<user-id>/notebooks/<notebook-id>/sources/<source-id>/derived/chunks.v1.json``
+
+    The key sits under :func:`source_prefix`, so ``delete_prefix(source_prefix(...))``
+    already removes it. Callers must pass the authenticated owner id — never a
+    metadata-supplied user.
+    """
+    return (
+        f"{source_prefix(user_id=user_id, notebook_id=notebook_id, source_id=source_id)}"
+        "derived/chunks.v1.json"
+    )

@@ -440,13 +440,30 @@ def list_visible_sources(
     thread_id: str,
     *,
     selected_only: bool = False,
+    include_extracted_text: bool = True,
 ) -> list[dict[str, Any]]:
     """List personal notebook sources plus the shared Lecture Notes catalog.
 
     Shared ``course/`` objects are not inserted per notebook. Notebooks that
     already persisted locked course rows keep those rows and skip duplicates.
+
+    Args:
+        store: Owner-scoped student store.
+        thread_id: Notebook id whose personal sources are listed.
+        selected_only: When True, filter the merged catalog to selected rows
+            after listing every visible source. The store query stays
+            unfiltered so shared-catalog merge can run.
+        include_extracted_text: When False, skip object-storage reads of
+            extracted text on persisted rows.
+
+    Returns:
+        Merged personal and shared-catalog source dictionaries.
     """
-    persisted = store.list_sources(thread_id, selected_only=False)
+    persisted = store.list_sources(
+        thread_id,
+        selected_only=False,
+        include_extracted_text=include_extracted_text,
+    )
     persisted_course_paths = {
         str((source.get("metadata") or {}).get("lecture_note_relative_path") or "")
         for source in persisted
@@ -468,9 +485,25 @@ def get_visible_source(
     store: StudentStore,
     thread_id: str,
     source_id: str,
+    *,
+    include_extracted_text: bool = True,
 ) -> dict[str, Any] | None:
-    """Return a persisted source or a shared-catalog course source."""
-    found = store.get_source(thread_id, source_id)
+    """Return a persisted source or a shared-catalog course source.
+
+    Args:
+        store: Owner-scoped student store.
+        thread_id: Notebook id used for the persisted lookup.
+        source_id: Source id to load.
+        include_extracted_text: When False, skip object-storage reads of
+            extracted text on persisted rows. Shared-catalog rows never
+            carry extracted text.
+
+    Returns:
+        The visible source dictionary, or ``None`` when unknown.
+    """
+    found = store.get_source(
+        thread_id, source_id, include_extracted_text=include_extracted_text
+    )
     if found:
         return found
     wanted = str(source_id or "").strip()
@@ -664,8 +697,8 @@ def _add_source_with_extracted_text(
     """Store extracted text before the retryable source-metadata DB write.
 
     Object storage is deliberately outside ``StudentStore.add_source`` so an
-    Aurora DSQL OCC retry never repeats S3 writes. On metadata failure, both the
-    raw upload key and extracted-text key are cleaned up.
+    Aurora DSQL OCC retry never repeats S3 writes. On metadata failure, the raw
+    upload key, extracted-text key, and chunk-artifact key are cleaned up.
     """
     source_id = str(source_values.pop("source_id", "") or uuid.uuid4())
     cleaned = (extracted_text or "")[:MAX_SOURCE_TEXT]
@@ -675,10 +708,14 @@ def _add_source_with_extracted_text(
         metadata_dict.get("object_key") or source_values.get("path")
     )
     extracted_text_key: str | None = None
-    storage = None
+    chunks_key: str | None = None
     if cleaned:
         from backend.persistence.factory import get_file_storage
-        from backend.persistence.object_keys import build_extracted_text_object_key
+        from backend.persistence.object_keys import (
+            build_extracted_text_object_key,
+            build_source_chunks_object_key,
+        )
+        from backend.sources import chunk_artifacts
 
         storage = get_file_storage()
         extracted_text_key = build_extracted_text_object_key(
@@ -691,6 +728,22 @@ def _add_source_with_extracted_text(
             data=cleaned.encode("utf-8"),
             content_type="text/plain; charset=utf-8",
         )
+        digest = chunk_artifacts.extracted_text_digest(cleaned)
+        metadata_dict["extracted_text_sha256"] = digest
+        source_values["metadata"] = metadata_dict
+        chunks_key = build_source_chunks_object_key(
+            user_id=store.owner_id,
+            notebook_id=notebook_id,
+            source_id=source_id,
+        )
+        chunk_artifacts.write_chunk_artifact_best_effort(
+            storage=storage,
+            user_id=store.owner_id,
+            notebook_id=notebook_id,
+            source_id=source_id,
+            text=cleaned,
+            digest=digest,
+        )
     try:
         return store.add_source(
             notebook_id,
@@ -700,7 +753,7 @@ def _add_source_with_extracted_text(
         )
     except Exception as database_error:
         try:
-            _cleanup_object_keys(extracted_text_key, raw_object_key)
+            _cleanup_object_keys(extracted_text_key, chunks_key, raw_object_key)
         except Exception as cleanup_error:
             raise cleanup_error from database_error
         raise

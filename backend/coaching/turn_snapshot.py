@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from backend.retrieval import RetrievalSource
+
 
 def _freeze_mapping(value: Mapping[str, Any]) -> Mapping[str, Any]:
     """Return a shallow immutable view of *value*."""
@@ -30,6 +32,10 @@ class TurnSnapshot:
         visible_sources: Personal plus shared-catalog sources visible now.
         selected_sources: Visible sources selected for grounding.
         sources_by_id: Id-keyed view of ``visible_sources``.
+        retrieval_sources: Hydrated selected retrieval sources. Empty until
+            the application service attaches them after authorization and
+            the retrieval gate (or RAG fallback) requires evidence.
+            This class never performs storage I/O.
     """
 
     thread_id: str
@@ -40,6 +46,7 @@ class TurnSnapshot:
     visible_sources: tuple[Mapping[str, Any], ...]
     selected_sources: tuple[Mapping[str, Any], ...]
     sources_by_id: Mapping[str, Mapping[str, Any]]
+    retrieval_sources: tuple[RetrievalSource, ...] = ()
 
     @classmethod
     def from_authoritative_state(

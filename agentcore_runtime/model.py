@@ -473,12 +473,14 @@ def load_runtime_model(config: RuntimeModelConfig | None = None) -> Any:
         except ImportError as error:  # pragma: no cover - companion tests skip Strands
             raise RuntimeModelError("strands-agents is not installed") from error
         # Botocore's default retry budget would multiply Strands Agent
-        # throttling retries. Keep SDK attempts at 1 so the Agent-level
-        # ModelRetryStrategy is the only Converse retry layer.
+        # throttling retries. ``total_max_attempts`` counts the initial call,
+        # so 1 means a single Converse attempt and the Agent-level
+        # ModelRetryStrategy stays the only Converse retry layer. The legacy
+        # ``max_attempts`` key would instead be normalised to two attempts.
         return BedrockModel(
             **bedrock_model_kwargs(resolved),
             boto_client_config=BotocoreConfig(
-                retries={"max_attempts": 1, "mode": "standard"},
+                retries={"total_max_attempts": 1, "mode": "standard"},
             ),
         )
     try:

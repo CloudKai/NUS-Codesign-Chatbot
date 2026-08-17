@@ -112,9 +112,22 @@ class SourceOperations:
         thread_id: str,
         *,
         selected_only: bool = False,
+        include_extracted_text: bool = True,
         normalize: Callable[[Any], dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
-        """List owned sources for one notebook."""
+        """List owned sources for one notebook.
+
+        Args:
+            thread_id: Owned notebook id.
+            selected_only: When True, only selected rows are returned.
+            include_extracted_text: When False and *normalize* is omitted,
+                skip object-storage reads of extracted text.
+            normalize: Optional row mapper. Callers that supply one must bind
+                ``include_extracted_text`` themselves.
+
+        Returns:
+            Normalized source dictionaries.
+        """
         if not self._store.get_thread(thread_id):
             return []
         selected_clause = " AND selected=1" if selected_only else ""
@@ -128,7 +141,10 @@ class SourceOperations:
                 """,
                 (thread_id, self._store.owner_id),
             ).fetchall()
-        mapper = normalize or self.as_dict
+        def _as_dict(row: Any) -> dict[str, Any]:
+            return self.as_dict(row, include_extracted_text=include_extracted_text)
+
+        mapper = normalize or _as_dict
         return [mapper(row) for row in rows]
 
     def get(
@@ -183,18 +199,35 @@ class SourceOperations:
         *,
         deserialize: Callable[[str | None, Any], Any] = load_json,
         load_extracted: Callable[[str | None], str] | None = None,
+        include_extracted_text: bool = True,
     ) -> dict[str, Any]:
-        """Normalize one source row while preserving legacy response keys."""
+        """Normalize one source row while preserving legacy response keys.
+
+        Args:
+            row: One ``sources`` database row.
+            deserialize: JSON loader for ``metadata_text``.
+            load_extracted: Optional extracted-text loader. Unused when
+                *include_extracted_text* is False.
+            include_extracted_text: When False, do not call object storage.
+                ``extractedText`` stays the in-row ``_legacy_extracted_text``
+                value, or empty.
+
+        Returns:
+            A source dictionary with legacy response keys preserved.
+        """
         metadata = deserialize(row["metadata_text"], {})
         if not isinstance(metadata, dict):
             metadata = {}
         legacy_extracted = str(metadata.pop("_legacy_extracted_text", "") or "")
         object_key = row["object_key"]
         local_path = metadata.get("local_path")
-        extracted = (load_extracted or self.load_extracted_text)(
-            row["extracted_text_key"]
-        )
-        if not extracted:
+        if include_extracted_text:
+            extracted = (load_extracted or self.load_extracted_text)(
+                row["extracted_text_key"]
+            )
+            if not extracted:
+                extracted = legacy_extracted
+        else:
             extracted = legacy_extracted
         path_value = object_key or local_path
         if object_key and metadata.get("storage_provider") not in {"s3", "memory"}:
@@ -362,17 +395,23 @@ class SourceOperations:
         (cleanup_prefix or self.cleanup_object_prefix)(thread_id, source_id)
 
     def cleanup_object_prefix(self, thread_id: str, source_id: str) -> None:
-        """Delete keys derived only from the authenticated owner's source prefix."""
+        """Delete keys derived only from the authenticated owner's source prefix.
+
+        Also drops matching in-process chunk-cache entries. Authorization is
+        already gone because the source row is deleted first. An empty prefix
+        is a no-op in the cache.
+        """
         from backend.persistence.factory import get_file_storage
         from backend.persistence.object_keys import source_prefix
+        from backend.sources.chunk_cache import student_source_chunk_cache
 
-        get_file_storage().delete_prefix(
-            source_prefix(
-                user_id=self._store.owner_id,
-                notebook_id=thread_id,
-                source_id=source_id,
-            )
+        prefix = source_prefix(
+            user_id=self._store.owner_id,
+            notebook_id=thread_id,
+            source_id=source_id,
         )
+        get_file_storage().delete_prefix(prefix)
+        student_source_chunk_cache().invalidate_prefix(prefix)
 
     def cleanup_local_file(
         self,

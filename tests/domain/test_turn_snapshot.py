@@ -33,11 +33,19 @@ class CountingStudentStore:
         return self._inner.get_thread(thread_id)
 
     def list_sources(
-        self, thread_id: str, *, selected_only: bool = False
+        self,
+        thread_id: str,
+        *,
+        selected_only: bool = False,
+        include_extracted_text: bool = True,
     ) -> list[dict[str, Any]]:
         """Count one notebook source listing."""
         self.list_sources_calls += 1
-        return self._inner.list_sources(thread_id, selected_only=selected_only)
+        return self._inner.list_sources(
+            thread_id,
+            selected_only=selected_only,
+            include_extracted_text=include_extracted_text,
+        )
 
     def research_workflow_contract_ready(self) -> bool:
         """Count the per-turn workflow-contract check."""

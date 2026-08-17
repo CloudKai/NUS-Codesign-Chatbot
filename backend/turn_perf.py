@@ -38,6 +38,19 @@ SAFE_PERF_FIELDS = frozenset(
         "retrieval_required",
         "course_kb_retrieval_ms",
         "student_source_retrieval_ms",
+        "student_source_selected_count",
+        "student_source_precomputed_hit",
+        "student_source_precomputed_miss",
+        "student_source_dynamic_fallback",
+        "student_source_chunk_cache_hit",
+        "student_source_chunk_cache_miss",
+        "student_source_chunk_cache_eviction",
+        "student_source_chunk_artifact_load_ms",
+        "student_source_chunk_parse_ms",
+        "student_source_chunk_build_ms",
+        "student_source_chunk_rank_ms",
+        "student_source_candidate_chunk_count",
+        "student_source_returned_chunk_count",
         "retrieval_total_ms",
         "retrieved_chunk_count",
         "retrieved_context_chars",
@@ -308,6 +321,28 @@ def record_count(name: str, delta: int = 1) -> None:
     except (TypeError, ValueError):
         total = amount
     perf.set(name, total)
+
+
+def record_student_source_chunk_cache_counters(
+    *,
+    hits: int = 0,
+    misses: int = 0,
+    evictions: int = 0,
+) -> None:
+    """Add per-turn student-source chunk-cache counters.
+
+    Args:
+        hits: Cache hits observed during this turn.
+        misses: Cache misses observed during this turn.
+        evictions: LRU evictions observed during this turn.
+
+    Returns:
+        None. No-op when no request accumulator is bound. Non-positive
+        deltas are ignored by :func:`record_count`.
+    """
+    record_count("student_source_chunk_cache_hit", hits)
+    record_count("student_source_chunk_cache_miss", misses)
+    record_count("student_source_chunk_cache_eviction", evictions)
 
 
 def record_failure(category: str) -> None:

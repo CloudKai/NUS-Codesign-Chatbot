@@ -1202,17 +1202,16 @@ class StudentStore:
         """Remove local and object-storage files owned by a deleted notebook."""
         from backend.persistence.factory import get_file_storage
         from backend.persistence.object_keys import notebook_prefix
+        from backend.sources.chunk_cache import student_source_chunk_cache
 
+        prefix = notebook_prefix(user_id=self.owner_id, notebook_id=notebook_id)
+        student_source_chunk_cache().invalidate_prefix(prefix)
         if settings.file_storage_provider != "local":
-            get_file_storage().delete_prefix(
-                notebook_prefix(user_id=self.owner_id, notebook_id=notebook_id)
-            )
+            get_file_storage().delete_prefix(prefix)
             return
         # Local provider: remove both object-key tree (if used) and legacy dirs.
         try:
-            get_file_storage().delete_prefix(
-                notebook_prefix(user_id=self.owner_id, notebook_id=notebook_id)
-            )
+            get_file_storage().delete_prefix(prefix)
         except Exception:  # noqa: BLE001 - best-effort local cleanup
             pass
         for root, allowed in (
@@ -3449,20 +3448,53 @@ class StudentStore:
         thread_id: str,
         *,
         selected_only: bool = False,
+        include_extracted_text: bool = True,
     ) -> list[dict[str, Any]]:
-        """List owned sources for a notebook."""
+        """List owned sources for a notebook.
+
+        Args:
+            thread_id: Owned notebook id.
+            selected_only: When True, only selected rows are returned.
+            include_extracted_text: When False, skip object-storage reads of
+                ``extracted.txt``. SQLite legacy extracted text is still
+                returned when present.
+
+        Returns:
+            Normalized source dictionaries.
+        """
         return self._bound_operations().sources.list(
             thread_id,
             selected_only=selected_only,
-            normalize=self._source_dict,
+            include_extracted_text=include_extracted_text,
+            normalize=lambda row: self._source_dict(
+                row, include_extracted_text=include_extracted_text
+            ),
         )
 
-    def get_source(self, thread_id: str, source_id: str) -> dict[str, Any] | None:
-        """Return one owned source or ``None``."""
+    def get_source(
+        self,
+        thread_id: str,
+        source_id: str,
+        *,
+        include_extracted_text: bool = True,
+    ) -> dict[str, Any] | None:
+        """Return one owned source or ``None``.
+
+        Args:
+            thread_id: Owned notebook id.
+            source_id: Source id to load.
+            include_extracted_text: When False, skip object-storage reads of
+                ``extracted.txt``. UI callers keep the default True.
+
+        Returns:
+            The normalized source dictionary, or ``None`` when missing.
+        """
         return self._bound_operations().sources.get(
             thread_id,
             source_id,
-            normalize=self._source_dict,
+            normalize=lambda row: self._source_dict(
+                row, include_extracted_text=include_extracted_text
+            ),
         )
 
     def find_source_by_path(
@@ -3477,12 +3509,23 @@ class StudentStore:
             normalize=self._source_dict,
         )
 
-    def _source_dict(self, row: Any) -> dict[str, Any]:
-        """Normalize a sources row for callers (legacy keys preserved)."""
+    def _source_dict(
+        self, row: Any, *, include_extracted_text: bool = True
+    ) -> dict[str, Any]:
+        """Normalize a sources row for callers (legacy keys preserved).
+
+        Args:
+            row: One ``sources`` database row.
+            include_extracted_text: When False, skip object-storage hydration.
+
+        Returns:
+            A source dictionary with legacy response keys preserved.
+        """
         return self._bound_operations().sources.as_dict(
             row,
             deserialize=_load,
             load_extracted=self._load_extracted_text,
+            include_extracted_text=include_extracted_text,
         )
 
     def set_source_selected(

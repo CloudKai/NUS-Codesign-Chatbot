@@ -21,6 +21,8 @@ from backend.repositories import (
     SQLiteNotebookRepository,
     SQLitePhaseTransitionRepository,
 )
+from backend.source_library import add_text_source
+from backend.sources.chunk_cache import reset_student_source_chunk_cache
 from backend.specialists.review_orchestration import (
     COUNTER_SETTINGS_KEY,
     DEEP_REVIEW_SNAPSHOT_KEY,
@@ -30,6 +32,7 @@ from backend.specialists.review_orchestration import (
 from backend.student_journey import learning_review
 from backend.student_store import CoachIdempotencyConflictError, StudentStore
 from backend.workflow import CoachWorkflow
+from counting_file_storage import CountingFileStorage, install_counting_storage
 from fake_agentcore_runtime import FakeAgentCoreRuntime
 
 _RUNTIME_ARN = (
@@ -325,3 +328,39 @@ def test_coach_turn_cannot_poison_deep_review_idempotency_key(tmp_path) -> None:
     assert "review" not in _phases(client)
     assert _snapshot(store, thread_id) is None
     assert _counter(store, thread_id) == 3
+
+
+def test_deep_review_selected_source_uses_chunk_artifact(
+    tmp_path, monkeypatch
+) -> None:
+    """Eligible Deep Review hydrates selected sources like Fast Chat (C<=1, E=0)."""
+    reset_student_source_chunk_cache()
+    storage = CountingFileStorage()
+    install_counting_storage(monkeypatch, storage)
+    store = StudentStore(tmp_path / "dr-chunks.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    add_text_source(
+        store,
+        thread_id,
+        "Lecture notes",
+        "Lecture notes on accessibility explain longer crossing times.",
+    )
+    _unlock(store, thread_id)
+    client = FakeAgentCoreRuntime(
+        payload=_coaching_payload(),
+        deep_payload=_deep_payload(),
+    )
+    service = _service(store, client)
+    storage.reset_counts()
+    turn = service.run_deep_review(thread_id, idempotency_key="deep-chunks")
+    assert turn.response_text
+    assert _phases(client) == ["review"]
+    snapshot = _snapshot(store, thread_id)
+    assert snapshot is not None
+    assert snapshot["review_depth"] == "deep"
+    assert snapshot["review_trigger"] == "explicit"
+    counts = storage.counts()
+    assert counts.extracted_gets == 0
+    assert counts.chunks_gets <= 1
+    assert _counter(store, thread_id) == 0
+    reset_student_source_chunk_cache()

@@ -20,15 +20,18 @@ from backend.repositories import (
     SQLitePhaseTransitionRepository,
 )
 from backend.retrieval import (
+    LocalChunkRetriever,
     RetrievedChunk,
     RetrievalQuery,
     RetrievalResult,
     retrieval_sources_from_notebook,
 )
 from backend.source_library import add_text_source, list_visible_sources
+from backend.sources.chunk_cache import reset_student_source_chunk_cache
 from backend.specialists.review_orchestration import COUNTER_SETTINGS_KEY
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
+from counting_file_storage import CountingFileStorage, install_counting_storage
 from fake_agentcore_runtime import FakeAgentCoreRuntime
 
 _RUNTIME_ARN = (
@@ -351,3 +354,61 @@ def test_research_and_counter_and_stage_use_final_result_only(tmp_path) -> None:
     assert len(assistants) == 1
     proposed = assistants[0]["metadata"].get("proposed_stage")
     assert proposed in {None, ""}
+
+
+def test_gate_false_needs_retrieval_uses_one_artifact_get(
+    tmp_path, monkeypatch
+) -> None:
+    """Hydrate once from chunks.v1.json; fallback retrieve does not re-GET extracted."""
+    reset_student_source_chunk_cache()
+    storage = CountingFileStorage()
+    install_counting_storage(monkeypatch, storage)
+    store = StudentStore(tmp_path / "fallback-ops.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    add_text_source(
+        store,
+        thread_id,
+        "Lecture 3",
+        "Lecture notes on accessibility explain longer crossing times.",
+    )
+    inner = LocalChunkRetriever()
+    retriever = RecordingRetriever()
+
+    def _retrieve(query: RetrievalQuery) -> RetrievalResult:
+        retriever.calls.append(query)
+        return inner.retrieve(query)
+
+    retriever.retrieve = _retrieve  # type: ignore[method-assign]
+    client = FakeAgentCoreRuntime(
+        payloads=[
+            _coaching_payload(
+                response_text="I would need the lecture excerpt first.",
+                needs_source_retrieval=True,
+                recommendation=StageDecision.ADVANCE,
+                research_quote=_PROJECT_MESSAGE,
+            ),
+            _coaching_payload(
+                response_text="What does that crossing-time figure change about option B?",
+                needs_source_retrieval=True,
+            ),
+        ]
+    )
+    service = _service(store, client, retriever)
+    storage.reset_counts()
+    turn = _submit(service, thread_id, _PROJECT_MESSAGE, key="ops-retry")
+    assert len(client.calls) == 2
+    assert len(retriever.calls) == 1
+    assert retriever.calls[0].sources
+    assert retriever.calls[0].sources[0].chunks
+    counts = storage.counts()
+    assert counts.chunks_gets <= 1
+    assert counts.extracted_gets == 0
+    assert turn.pending_transition is None
+    observations = store.list_research_observations(notebook_id=thread_id)
+    assert observations == []
+    assistants = [
+        item for item in store.get_messages(thread_id) if item["role"] == "assistant"
+    ]
+    assert len(assistants) == 1
+    assert "lecture excerpt first" not in assistants[0]["content"]
+    reset_student_source_chunk_cache()

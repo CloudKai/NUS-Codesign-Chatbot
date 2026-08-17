@@ -54,7 +54,7 @@ from backend.providers import (
 )
 from backend.rate_limit import RateLimitExceeded
 from backend.settings import settings, validate_production_configuration
-from backend.source_library import CourseMaterialSyncCoordinator
+from backend.source_library import CourseMaterialSyncCoordinator, list_visible_sources
 from backend.student_store import (
     CoachIdempotencyConflictError,
     CoachRequestInProgressError,
@@ -399,7 +399,12 @@ def create_app(
         """
         try:
             return len(
-                owner.workspace.list_sources(thread_id, selected_only=True)
+                list_visible_sources(
+                    owner.store,
+                    thread_id,
+                    selected_only=True,
+                    include_extracted_text=False,
+                )
             )
         except Exception:
             return 0

@@ -36,10 +36,20 @@ class CountingStudentStore:
         self.get_thread_calls = 0
         self.list_sources_calls = 0
 
-    def get_source(self, thread_id: str, source_id: str) -> dict[str, Any] | None:
+    def get_source(
+        self,
+        thread_id: str,
+        source_id: str,
+        *,
+        include_extracted_text: bool = True,
+    ) -> dict[str, Any] | None:
         """Count one owned-source lookup."""
         self.get_source_calls += 1
-        return self._inner.get_source(thread_id, source_id)
+        return self._inner.get_source(
+            thread_id,
+            source_id,
+            include_extracted_text=include_extracted_text,
+        )
 
     def get_thread(self, thread_id: str) -> dict[str, Any] | None:
         """Count one notebook-row lookup."""
@@ -47,11 +57,19 @@ class CountingStudentStore:
         return self._inner.get_thread(thread_id)
 
     def list_sources(
-        self, thread_id: str, *, selected_only: bool = False
+        self,
+        thread_id: str,
+        *,
+        selected_only: bool = False,
+        include_extracted_text: bool = True,
     ) -> list[dict[str, Any]]:
         """Count one notebook source listing."""
         self.list_sources_calls += 1
-        return self._inner.list_sources(thread_id, selected_only=selected_only)
+        return self._inner.list_sources(
+            thread_id,
+            selected_only=selected_only,
+            include_extracted_text=include_extracted_text,
+        )
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)

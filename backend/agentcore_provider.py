@@ -1230,8 +1230,11 @@ class AgentCoreCoachProvider:
         except ImportError as error:
             raise ProviderUnavailableError(_GENERIC_FAILURE) from error
         attempts = max(1, self._max_retries + 1)
+        # ``total_max_attempts`` includes the initial call. The legacy
+        # ``max_attempts`` key is normalised by botocore to ``value + 1``,
+        # which would silently double the configured invoke budget.
         config = Config(
-            retries={"max_attempts": attempts, "mode": "standard"},
+            retries={"total_max_attempts": attempts, "mode": "standard"},
             read_timeout=self._timeout_seconds,
             connect_timeout=min(10.0, self._timeout_seconds),
         )

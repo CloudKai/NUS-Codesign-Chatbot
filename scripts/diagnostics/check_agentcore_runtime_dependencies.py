@@ -259,8 +259,8 @@ def _check_runtime_contracts() -> None:
         _fail("model.py must not set structured_output_prompt on BedrockModel")
     if "retry_strategy" in loader_text:
         _fail("model.py must not set retry_strategy on BedrockModel")
-    if 'retries={"max_attempts": 1, "mode": "standard"}' not in loader_text:
-        _fail("model.py does not pin botocore Converse retries to one attempt")
+    if 'retries={"total_max_attempts": 1, "mode": "standard"}' not in loader_text:
+        _fail("model.py does not pin botocore Converse retries to one total attempt")
 
 
 def main() -> int:
