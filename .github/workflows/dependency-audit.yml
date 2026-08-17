@@ -1,0 +1,49 @@
+# pip-audit against the two install surfaces (app image and AgentCore runtime).
+# Fail-closed: known advisories fail the job. This is not a required PR gate.
+# Path filters keep it off ordinary feature PRs; weekly cron is the standing signal.
+name: Dependency audit
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  pull_request:
+    paths:
+      - requirements.txt
+      - requirements-dev.txt
+      - agentcore_runtime/requirements.txt
+      - .github/workflows/dependency-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pip-audit-app:
+    name: pip-audit (app)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Audit requirements.txt
+        uses: pypa/gh-action-pip-audit@v1.1.0
+        with:
+          inputs: requirements.txt
+
+  pip-audit-agentcore:
+    name: pip-audit (agentcore runtime)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Audit agentcore_runtime/requirements.txt
+        uses: pypa/gh-action-pip-audit@v1.1.0
+        with:
+          inputs: agentcore_runtime/requirements.txt

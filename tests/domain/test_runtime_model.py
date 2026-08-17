@@ -223,6 +223,25 @@ def test_runtime_requirement_pins_match_provenance_constants() -> None:
     assert provenance["pinned_pydantic"] == pins["pydantic"]
 
 
+def test_safe_response_provenance_is_student_safe_loaded_model() -> None:
+    config = role_model_config_from_mapping(_HYBRID_ENV, MODEL_ROLE_FAST_CHAT)
+    fields = config.safe_response_provenance()
+    assert fields["runtime_model_role"] == MODEL_ROLE_FAST_CHAT
+    assert fields["runtime_model_provider"] == "bedrock"
+    assert fields["runtime_model_id"] == HAIKU_4_5_MODEL_ID
+    assert fields["runtime_model_region"] == "us-west-2"
+    assert fields["runtime_strands_agents"] == PINNED_RUNTIME_PACKAGES["strands-agents"]
+    blob = " ".join(fields.values())
+    assert "GUARDRAIL_ID" not in blob
+    assert "gr-test" not in blob
+    assert "openai." not in blob
+    deep = role_model_config_from_mapping(_HYBRID_ENV, MODEL_ROLE_REVIEW_DEEP)
+    deep_fields = deep.safe_response_provenance()
+    assert deep_fields["runtime_model_role"] == MODEL_ROLE_REVIEW_DEEP
+    assert deep_fields["runtime_model_id"] == SONNET_4_6_MODEL_ID
+    assert deep_fields["runtime_model_id"] != fields["runtime_model_id"]
+
+
 def test_runtime_requirements_reject_version_ranges() -> None:
     with pytest.raises(ValueError, match="exact"):
         parse_runtime_requirement_pins("strands-agents>=1.52.0\n")

@@ -69,14 +69,19 @@ Prefer `pip` from the active venv (same as `pip3` inside `.venv`):
 
 ```bash
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
 ```
 
 Equivalent if the venv is already active:
 
 ```bash
-pip3 install -r requirements.txt
+pip3 install -r requirements-dev.txt
 ```
+
+`requirements-dev.txt` pulls in `requirements.txt` and adds pytest and Ruff, so
+use it for any checkout where you run the test suite or `scripts/build.sh`.
+`requirements.txt` on its own is the production image surface and deliberately
+ships no test tooling.
 
 ### 3. Create a local env file
 
@@ -490,4 +495,4 @@ commit those artifacts.
 | Provider / OpenAI errors on first run | `.env` set to `openai` without a key | Set `MODEL_PROVIDER=mock` |
 | Bedrock access denied / model unavailable | Model access, IAM, or `BEDROCK_MODEL_ID` | Enable the model in Bedrock, grant invoke on that ID, match `AWS_REGION` |
 | Port already in use | Another process on 8000 or 8501 | Stop the other process, then restart `start.sh` |
-| Imports missing | Wrong Python / no venv packages | `source .venv/bin/activate` then `python -m pip install -r requirements.txt` |
+| Imports missing | Wrong Python / no venv packages | `source .venv/bin/activate` then `python -m pip install -r requirements-dev.txt` |

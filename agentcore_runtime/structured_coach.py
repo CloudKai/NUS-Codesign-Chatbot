@@ -597,6 +597,44 @@ def inspect_agent_result(result: Any) -> dict[str, Any]:
     return shape
 
 
+_RUNTIME_MODEL_PROVENANCE_KEYS = (
+    "runtime_model_role",
+    "runtime_model_provider",
+    "runtime_model_id",
+    "runtime_model_region",
+    "runtime_strands_agents",
+)
+
+
+def runtime_model_provenance_fields(config: Any) -> dict[str, str]:
+    """Return safe loaded-model identifiers for the companion response.
+
+    Missing config is omitted. Values are copied only from
+    ``safe_response_provenance``. Env dumps, IAM, secrets, prompts,
+    guardrail identifiers, and student text are never included.
+
+    Args:
+        config: A runtime model config exposing ``safe_response_provenance``.
+
+    Returns:
+        Short identifier fields, or an empty dict when config is absent.
+    """
+    if config is None:
+        return {}
+    producer = getattr(config, "safe_response_provenance", None)
+    if not callable(producer):
+        return {}
+    raw = producer()
+    if not isinstance(raw, Mapping):
+        return {}
+    fields: dict[str, str] = {}
+    for key in _RUNTIME_MODEL_PROVENANCE_KEYS:
+        value = raw.get(key)
+        if isinstance(value, str) and value.strip():
+            fields[key] = value.strip()
+    return fields
+
+
 def event_loop_cycle_count_from_agent_result(result: Any) -> int | None:
     """Return the Strands per-invocation cycle count when metrics expose it.
 

@@ -188,6 +188,24 @@ class RuntimeModelConfig:
             "pinned_pydantic": _PINNED_PYDANTIC,
         }
 
+    def safe_response_provenance(self) -> dict[str, str]:
+        """Return student-safe loaded-model identifiers for the companion.
+
+        These fields travel on InvokeAgentRuntime JSON next to cache and
+        cycle telemetry. They never include env dumps, IAM, secrets, prompts,
+        guardrail identifiers, or student text.
+
+        Returns:
+            Short identifier strings keyed as ``runtime_model_*``.
+        """
+        return {
+            "runtime_model_role": self.role or "legacy",
+            "runtime_model_provider": self.provider,
+            "runtime_model_id": self.model_id,
+            "runtime_model_region": self.region,
+            "runtime_strands_agents": _PINNED_STRANDS,
+        }
+
 
 def _clean(value: Any) -> str:
     """Return a stripped string from an environment-like value."""

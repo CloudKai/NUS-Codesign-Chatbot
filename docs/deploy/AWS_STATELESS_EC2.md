@@ -30,6 +30,13 @@ Production coaching uses `MODEL_PROVIDER=agentcore` against runtime
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` (qualifier `DEFAULT`,
 currently liveVersion 20).
 Invokes are stateless; Aurora DSQL `messages` is the only durable transcript.
+`AGENTCORE_SESSION_AFFINITY_ENABLED` defaults to `false`, which keeps a fresh
+runtime session id per invoke. If you ever enable it, it is a **compute**
+optimization only — DSQL stays authoritative and the bounded history is still
+sent every turn — but you must then bump `AGENTCORE_SESSION_GENERATION`
+every time you publish new runtime code assets. Skipping that bump lets
+returning students keep landing on warm microVMs still running the previous
+build.
 The published runtime source of truth is `agentcore_runtime/` in this
 repository (Q&A, Coaching, and Formative Review specialists). Do not treat
 AgentCore session memory, DynamoDB, or a JSON file as chat history.
@@ -453,12 +460,12 @@ Required production `.env` keys (host-only):
 - `ROUTER_MIN_CONFIDENCE=0.60`
 - `DEEP_REVIEW_INTERVAL_TURNS=3`
 
-Periodic Deep Review means every N newly executed, successful Coaching
-turns since the previous successfully persisted Deep Review. It is
-turn-based rather than time-based because it represents new learning
-evidence, not elapsed time. Opening the Review tab does not invoke a
-model. FastAPI/DSQL remain authoritative; AgentCore never writes stage
-state.
+Deep Review is an explicit FastAPI route
+(`POST /api/v1/threads/{thread_id}/deep-review`), not an automatic Sonnet
+call on the Fast Chat path. `DEEP_REVIEW_INTERVAL_TURNS` still bounds the
+eligibility counter (successful Coaching turns since the last persisted Deep
+Review). Opening the Review tab does not invoke a model. FastAPI/DSQL remain
+authoritative; AgentCore never writes stage state.
 
 - `GUARDRAIL_ID=<configured guardrail>`
 - `GUARDRAIL_VERSION=3`
@@ -575,7 +582,7 @@ Performs no DDL/S3/Bedrock/provider-paid calls; removes disposable rows in
 2. Create notebook.
 3. Send message / generate coach turn.
 4. Upload source; preview source.
-5. Confirm stage transition (recommend → student confirm).
+5. Confirm stage transition. Month-1 production: coach ADVANCE auto-applies (no student confirm). Local-demo default: recommend → student Next/confirm.
 6. Restart/remove/recreate the application container (no `/app/data` mount).
 7. Log back in; confirm notebook, messages, progress, and source still exist.
 8. Delete source/notebook; confirm S3 cleanup under the owner prefix.
@@ -586,6 +593,10 @@ Performs no DDL/S3/Bedrock/provider-paid calls; removes disposable rows in
 
 Until this smoke sequence passes, the migration is **not** complete and the
 application remains **READY FOR CONTROLLED PILOT** at best.
+
+Month-1 production (`AUTO_ADVANCE_STAGES=true` in `compose.prod.yaml`): step 5
+must **not** require student Next/confirm. Coach ADVANCE auto-applies. The
+confirmation-gated Next path remains the local-demo / repository default.
 
 ## CloudFront distribution and Caddy origin
 

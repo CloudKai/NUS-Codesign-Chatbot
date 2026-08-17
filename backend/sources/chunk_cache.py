@@ -12,6 +12,7 @@ Do not log chunk text, object keys, owner ids, or notebook ids.
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -19,6 +20,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from backend.sources.chunk_artifacts import SourceChunkArtifact
+
+logger = logging.getLogger(__name__)
 
 # Must stay aligned with ``backend.sources.chunk_artifacts`` without importing it.
 CHUNKER_VERSION = "local_lexical_v1"
@@ -255,3 +258,21 @@ def reset_student_source_chunk_cache() -> None:
     global _CACHE
     with _CACHE_LOCK:
         _CACHE = None
+
+
+def invalidate_cached_chunks_for_prefix(object_key_prefix: str) -> None:
+    """Best-effort cache drop for a deleted source or notebook prefix.
+
+    Never authorizes access and never raises. Failures are logged without
+    object keys, owner ids, or notebook ids so a storage cleanup error
+    remains the propagated exception.
+
+    Args:
+        object_key_prefix: Server-built source or notebook object-key prefix.
+            Empty prefixes are a no-op, matching
+            :meth:`StudentSourceChunkCache.invalidate_prefix`.
+    """
+    try:
+        student_source_chunk_cache().invalidate_prefix(object_key_prefix)
+    except Exception:  # noqa: BLE001 - never mask storage cleanup errors
+        logger.exception("Student source chunk cache invalidation failed")

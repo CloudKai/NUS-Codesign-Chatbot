@@ -59,7 +59,7 @@ from backend.specialists.review_orchestration import (
     parse_coaching_turns_since_deep_review,
 )
 from backend.source_library import (
-    image_inputs_for_source_ids,
+    image_inputs_for_sources,
     list_visible_sources,
     selected_source_context,
     shared_course_catalog_scope,
@@ -1184,23 +1184,19 @@ class CoachApplicationService:
         if request.image_inputs:
             raise ValueError("image_inputs must be resolved server-side from source_ids")
 
-        selected_image_ids = [
-            str(source["id"])
+        selected_image_sources = [
+            source
             for source in selected_sources
             if str(source.get("kind") or "").lower() == "image"
             or str(source.get("mime") or "").lower().startswith("image/")
         ]
-        if len(selected_image_ids) > 5:
+        if len(selected_image_sources) > 5:
             raise ValueError(
                 "Select at most 5 image sources for one coaching turn"
             )
         image_inputs = [
             CoachImageInput.model_validate(item)
-            for item in image_inputs_for_source_ids(
-                self._store,
-                request.thread_id,
-                selected_image_ids,
-            )
+            for item in image_inputs_for_sources(selected_image_sources)
         ]
         selected_model = get_model(
             str(metadata.get("selected_model") or request.model_id or DEFAULT_CHAT_MODEL_ID)

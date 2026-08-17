@@ -19,7 +19,8 @@ Do not create parallel architecture documents. Extend or amend the files here.
 |---|---|---|
 | [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md) | Architecture authority: layers, ports, workflow, providers, verification phases, implemented package ownership | Before any backend, API, persistence, workflow, or migration task |
 | [`CODEBASE_STRUCTURE.md`](CODEBASE_STRUCTURE.md) | Placement map for implemented packages and compatibility façades | When choosing where new code belongs |
-| [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) | Living handoff log: current phase, completed work, validation evidence, risks, next action | At session start to resume; at phase end to record evidence |
+| [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) | Living handoff log: **CURRENT STATUS / ARCHITECTURE / PERFORMANCE WORK**, then archived phase entries | At session start to resume; at phase end to record evidence |
+| [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md) | Operator release/rollback checklist (SHA, image tag, AgentCore, DSQL, S3, KB, Cognito, smoke) | Before an EC2/ECR or AgentCore production cutover |
 | [`PROMPT_ARCHITECTURE.md`](PROMPT_ARCHITECTURE.md) | Local stage-prompt package, composer seam, local vs Knowledge Base Retrieve | Before editing `backend/prompts/` or provider prompt wiring |
 | [`RAG_ARCHITECTURE.md`](RAG_ARCHITECTURE.md) | Course KB Retrieve, student extract retrieval, unified `[S#]` evidence | Before changing retrieval, Bedrock KB filters, or source scope |
 | [`KB_REQUIRED_MODE_RUNBOOK.md`](KB_REQUIRED_MODE_RUNBOOK.md) | Operator checklist to enable `required` metadata filters | Before sidecar upload, KB sync, or setting `KNOWLEDGE_BASE_METADATA_FILTER_MODE=required` |
@@ -60,8 +61,9 @@ Read `LOCAL_DEMO_IMPLEMENTATION.md` → confirm current state in
 
 **Finishing any phase**
 
-Append to `IMPLEMENTATION_STATUS.md` under Completed / Validation evidence /
-Next exact action. Keep the "Current phase" header accurate.
+Append to `IMPLEMENTATION_STATUS.md` under **CURRENT STATUS** (or a dated
+historical entry if the work is closed). Keep **CURRENT STATUS** accurate;
+do not leave a stale "Current phase" banner above the archive.
 
 **UI-only polish**
 

@@ -180,8 +180,10 @@ Changing model environment variables requires a new AgentCore Runtime
 DEFAULT Haiku and Sonnet use
 `BedrockModel(model_id=..., region_name=..., guardrail_id=...,
 guardrail_version=..., guardrail_latest_message=True,
-boto_client_config=BotocoreConfig(retries={"max_attempts": 1, "mode": "standard"}))`
-(`GUARDRAIL_VERSION=3`). Botocore is pinned to one attempt so Strands
+boto_client_config=BotocoreConfig(retries={"total_max_attempts": 1, "mode": "standard"}))`
+(`GUARDRAIL_VERSION=3`). Botocore `total_max_attempts` counts the initial
+call, so `1` is a single Converse attempt. The legacy `max_attempts` key is
+normalised to `value + 1` and must not be used. Strands
 `ModelRetryStrategy` is the only Converse retry layer. Do not pass
 `openai.gpt-5.6-luna` into `BedrockModel`. Do not pass Haiku into Mantle. Historical Luna runtimes
 used `OpenAIResponsesModel(stateful=False, bedrock_mantle_config={"region": ...})`
@@ -246,6 +248,7 @@ Keep these off the Thinking Path unless a later phase explicitly adds them:
    stay aligned.
 2. Do not attach unrestricted KB/MCP tools to Q&A. Pre-retrieved `[S#]`
    evidence is the production path. Do not call `RetrieveAndGenerate`.
-3. Periodic Deep Review is already the N-turn checkpoint (not a grade).
-   Do **not** restore scoring-as-grade, a sixth `ethics_critical`
-   application stage, AgentCore Memory as transcript, or the CDK student UI.
+3. Deep Review is an explicit FastAPI route (not automatic Sonnet on Fast Chat).
+   `DEEP_REVIEW_INTERVAL_TURNS` still bounds eligibility. Do **not** restore
+   scoring-as-grade, a sixth `ethics_critical` application stage, AgentCore
+   Memory as transcript, or the CDK student UI.

@@ -211,6 +211,8 @@ users/<user-id>/notebooks/<notebook-id>/sources/<source-id>/raw|derived
 `LocalChunkRetriever` searches only authenticated user + current notebook +
 currently selected source IDs. There is no global student vector namespace.
 Chunking is deterministic (~1,800 characters, overlap, per-source diversity).
+Selected student sources are hydrated from `derived/chunks.v1.json` when that
+artifact is valid; otherwise extracted text is chunked at query time.
 Normal fast chat then keeps at most 4 chunks / 8,000 characters. Student
 uploads keep extracted text; they do not use the shared course Knowledge Base.
 

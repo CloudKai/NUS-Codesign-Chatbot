@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from backend.agentcore_provider import AgentCoreCoachProvider
 from backend.domain import (
     CoachRequest,
@@ -32,7 +34,12 @@ def _output(*, recommendation: StageDecision = StageDecision.STAY) -> dict[str, 
     }
 
 
-def test_j_agentcore_memory_is_not_authoritative_transcript() -> None:
+def test_j_agentcore_memory_is_not_authoritative_transcript(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from backend.settings import settings
+
+    monkeypatch.setattr(settings, "agentcore_session_affinity_enabled", False)
     client = FakeAgentCoreRuntime(payload=_output())
     provider = AgentCoreCoachProvider(
         _RUNTIME_ARN, client=client, region="us-west-2", qualifier="DEFAULT"

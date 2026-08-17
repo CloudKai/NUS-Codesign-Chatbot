@@ -2,10 +2,65 @@
 
 from __future__ import annotations
 
+import ast
+import re
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _bounded_int_bounds(env_name: str) -> tuple[int, int, int]:
+    """Return the ``(default, minimum, maximum)`` literals for one setting.
+
+    Reads the ``_bounded_int`` call in ``backend/settings.py`` with the AST so
+    this test cannot drift from the real parser bounds.
+
+    Args:
+        env_name: Environment variable name passed to ``_bounded_int``.
+
+    Returns:
+        The default, minimum, and maximum integer literals for that setting.
+
+    Raises:
+        AssertionError: If no matching ``_bounded_int`` call is found.
+    """
+    tree = ast.parse((ROOT / "backend" / "settings.py").read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Name) or node.func.id != "_bounded_int":
+            continue
+        if len(node.args) != 4:
+            continue
+        first = node.args[0]
+        if not isinstance(first, ast.Constant) or first.value != env_name:
+            continue
+        default, minimum, maximum = (
+            ast.literal_eval(node.args[1]),
+            ast.literal_eval(node.args[2]),
+            ast.literal_eval(node.args[3]),
+        )
+        return int(default), int(minimum), int(maximum)
+    raise AssertionError(f"no _bounded_int call for {env_name} in backend/settings.py")
+
+
+def _compose_env_int(compose: str, env_name: str) -> int:
+    """Return one integer value from the production Compose environment block.
+
+    Args:
+        compose: Raw ``compose.prod.yaml`` text.
+        env_name: Environment key to read.
+
+    Returns:
+        The configured integer value.
+
+    Raises:
+        AssertionError: If the key is absent or not an integer literal.
+    """
+    match = re.search(rf'^\s*{re.escape(env_name)}:\s*"?(-?\d+)"?\s*$', compose, re.M)
+    assert match is not None, f"{env_name} is not set in compose.prod.yaml"
+    return int(match.group(1))
 
 
 def _service_block(compose: str, service: str) -> str:
@@ -409,3 +464,73 @@ def test_student_stage_selection_boolean_and_effective_auto_advance(monkeypatch)
     # Settings dataclass fields are import-time; ensure the property still
     # reflects mutual exclusion on a freshly constructed instance shape.
     assert hasattr(Settings, "effective_auto_advance_stages")
+
+
+def test_production_sync_threadpool_covers_the_admitted_workflow_cap():
+    """Production Compose must not admit more workflows than it has threads.
+
+    ``POST /api/v1/coach/turn`` is a sync ``def`` route, so every admitted
+    coaching workflow occupies one AnyIO worker thread for the whole AgentCore
+    call. ``SYNC_THREADPOOL_TOKENS`` below ``MAX_CONCURRENT_MODEL_CALLS`` would
+    let the limiter admit turns that then queue behind the thread ceiling,
+    starving ``/api/v1/ready`` and the container healthcheck.
+    """
+    compose = (ROOT / "compose.prod.yaml").read_text(encoding="utf-8")
+    threadpool = _compose_env_int(compose, "SYNC_THREADPOOL_TOKENS")
+    workflows = _compose_env_int(compose, "MAX_CONCURRENT_MODEL_CALLS")
+
+    assert threadpool >= workflows, (
+        "SYNC_THREADPOOL_TOKENS must cover MAX_CONCURRENT_MODEL_CALLS; "
+        "lower it only with an explicit documented reason"
+    )
+
+    # _bounded_int falls back to its default outside the accepted range, so an
+    # out-of-range Compose value would silently drop the threadpool to 40 while
+    # the workflow cap stayed high. Both values must survive parsing verbatim.
+    for env_name, configured in (
+        ("SYNC_THREADPOOL_TOKENS", threadpool),
+        ("MAX_CONCURRENT_MODEL_CALLS", workflows),
+    ):
+        default, minimum, maximum = _bounded_int_bounds(env_name)
+        assert minimum <= configured <= maximum, (
+            f"{env_name}={configured} is outside [{minimum}, {maximum}] and would "
+            f"silently fall back to {default}"
+        )
+
+
+def test_production_requirements_ship_no_test_or_lint_tooling():
+    """The image installs requirements.txt, so test tooling must not live there.
+
+    ``requirements-dev.txt`` re-exports the runtime pins and adds pytest/Ruff,
+    which keeps CI unchanged while dropping the test framework from the EC2
+    image and out of its vulnerability surface.
+    """
+    runtime = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    dev = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8")
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "python -m pip install -r requirements.txt" in dockerfile
+    assert "requirements-dev.txt" not in dockerfile
+
+    runtime_names = {
+        re.split(r"[=<>\[;]", line.strip(), maxsplit=1)[0].lower()
+        for line in runtime.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    for tool in ("pytest", "ruff"):
+        assert tool not in runtime_names, f"{tool} must live in requirements-dev.txt"
+        assert tool in dev, f"{tool} must stay installed for CI via requirements-dev.txt"
+
+    assert "-r requirements.txt" in dev
+
+
+def test_bounded_int_rejects_out_of_range_values_by_falling_back(monkeypatch):
+    """Document the silent-fallback behaviour the Compose guard protects."""
+    from backend.settings import _bounded_int
+
+    monkeypatch.setenv("SYNC_THREADPOOL_TOKENS", "99999")
+    assert _bounded_int("SYNC_THREADPOOL_TOKENS", 40, 8, 500) == 40
+    monkeypatch.setenv("SYNC_THREADPOOL_TOKENS", "not-a-number")
+    assert _bounded_int("SYNC_THREADPOOL_TOKENS", 40, 8, 500) == 40
+    monkeypatch.setenv("SYNC_THREADPOOL_TOKENS", "120")
+    assert _bounded_int("SYNC_THREADPOOL_TOKENS", 40, 8, 500) == 120

@@ -76,3 +76,9 @@ def test_invoke_async_passes_role_limits_argument() -> None:
     assert limits_node.func.id == "structured_output_limits_for_role"
     assert isinstance(limits_node.args[0], ast.Name)
     assert limits_node.args[0].id == "role"
+
+
+def test_one_cycle_rate_is_live_trace_required() -> None:
+    """Mocks cannot prove Haiku uses one event-loop cycle. LIVE TRACE REQUIRED."""
+    assert FAST_CHAT_INVOKE_LIMITS == {"turns": 2}
+    assert DEEP_REVIEW_INVOKE_LIMITS == {"turns": 3}

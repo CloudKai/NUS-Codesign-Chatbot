@@ -235,7 +235,10 @@ def test_agentcore_provider_rejects_missing_runtime_arn():
         AgentCoreCoachProvider("  ", client=FakeAgentCoreRuntime(payload=_output()))
 
 
-def test_valid_structured_coaching_and_research_coding():
+def test_valid_structured_coaching_and_research_coding(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(settings, "agentcore_session_affinity_enabled", False)
     client = FakeAgentCoreRuntime(payload=_output())
     result = _provider(client).assess(_request())
     assert result.response_text.startswith("What trade-off")
@@ -289,7 +292,8 @@ def test_deep_analysis_maps_only_to_agentcore_ethics_critical_topic():
     assert payload["runtime_context"]["agentcore_topic"] == "ethics_critical"
 
 
-def test_stateless_session_ids_are_unique_per_invoke():
+def test_stateless_session_ids_are_unique_per_invoke(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(settings, "agentcore_session_affinity_enabled", False)
     client = FakeAgentCoreRuntime(payload=_output())
     provider = _provider(client)
     provider.assess(_request())

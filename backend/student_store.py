@@ -43,6 +43,7 @@ from .persistence.store.contracts import (
     dump_json as _dump,
     load_json as _load,
     utc_now,
+    utc_now_after,
 )
 from .persistence.store.sqlite_schema import (
     NOTEBOOK_CHILD_DELETE_PLAN,
@@ -1202,25 +1203,27 @@ class StudentStore:
         """Remove local and object-storage files owned by a deleted notebook."""
         from backend.persistence.factory import get_file_storage
         from backend.persistence.object_keys import notebook_prefix
-        from backend.sources.chunk_cache import student_source_chunk_cache
+        from backend.sources.chunk_cache import invalidate_cached_chunks_for_prefix
 
         prefix = notebook_prefix(user_id=self.owner_id, notebook_id=notebook_id)
-        student_source_chunk_cache().invalidate_prefix(prefix)
-        if settings.file_storage_provider != "local":
-            get_file_storage().delete_prefix(prefix)
-            return
-        # Local provider: remove both object-key tree (if used) and legacy dirs.
         try:
-            get_file_storage().delete_prefix(prefix)
-        except Exception:  # noqa: BLE001 - best-effort local cleanup
-            pass
-        for root, allowed in (
-            (settings.files_dir / "threads" / notebook_id, settings.files_dir),
-            (settings.workspaces_dir / notebook_id, settings.workspaces_dir),
-        ):
-            resolved = root.resolve()
-            if resolved.exists() and allowed in resolved.parents:
-                shutil.rmtree(resolved, ignore_errors=True)
+            if settings.file_storage_provider != "local":
+                get_file_storage().delete_prefix(prefix)
+                return
+            # Local provider: remove both object-key tree (if used) and legacy dirs.
+            try:
+                get_file_storage().delete_prefix(prefix)
+            except Exception:  # noqa: BLE001 - best-effort local cleanup
+                pass
+            for root, allowed in (
+                (settings.files_dir / "threads" / notebook_id, settings.files_dir),
+                (settings.workspaces_dir / notebook_id, settings.workspaces_dir),
+            ):
+                resolved = root.resolve()
+                if resolved.exists() and allowed in resolved.parents:
+                    shutil.rmtree(resolved, ignore_errors=True)
+        finally:
+            invalidate_cached_chunks_for_prefix(prefix)
 
     def add_message(
         self,
@@ -1275,8 +1278,19 @@ class StudentStore:
             ).fetchone()
             if existing:
                 # Bump created_at when materializing a pending-transition skeleton
-                # so the assistant reply sorts after the user turn. Preserve any
-                # existing revision stamp / predecessor / superseded markers.
+                # so the assistant reply sorts after the user turn. Anchor on the
+                # newest sibling: a bare utc_now() can tie with a user row written
+                # in the same microsecond, and the id tiebreaker is a random UUID.
+                # Preserve any existing revision stamp / predecessor / superseded
+                # markers.
+                newest = connection.execute(
+                    "SELECT MAX(created_at) AS newest FROM messages "
+                    "WHERE notebook_id=? AND id<>?",
+                    (thread_id, message_id),
+                ).fetchone()
+                skeleton_stamp = utc_now_after(
+                    str(newest["newest"]) if newest and newest["newest"] else ""
+                )
                 connection.execute(
                     """
                     UPDATE messages
@@ -1303,7 +1317,7 @@ class StudentStore:
                         decision_at,
                         _dump(meta),
                         content,
-                        now,
+                        skeleton_stamp,
                         message_id,
                         thread_id,
                     ),
@@ -1963,7 +1977,7 @@ class StudentStore:
                     )
 
             user_created_at = utc_now()
-            assistant_created_at = utc_now()
+            assistant_created_at = utc_now_after(user_created_at)
             if existing_user_message_id:
                 owned_user = connection.execute(
                     """

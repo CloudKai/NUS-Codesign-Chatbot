@@ -103,7 +103,7 @@ changes.
 | Ingestion | Existing upload/text/URL/course-sync code extracts bounded text. Raw bytes and derived text remain separate objects under S3 in production. |
 | Source authority | `sources.selected` plus notebook ownership determines the only documents eligible for a turn. Unselected and other-notebook sources never reach retrieval. |
 | Query | Current student message has the strongest weight. The last two student messages, project context, and learning summary provide lower-weight continuity. |
-| Chunking | `LocalChunkRetriever` creates sentence-aware ~1,800-character chunks with 220-character overlap at query time. No new database migration is needed. |
+| Chunking | `LocalChunkRetriever` uses sentence-aware ~1,800-character chunks with 220-character overlap. FastAPI hydrates selected student sources from disposable `derived/chunks.v1.json` when valid (in-process LRU); missing or invalid artifacts fall back to chunking extracted text at query time. No new database migration is needed. |
 | Ranking | Deterministic weighted lexical/BM25-style scoring uses term rarity, phrase overlap, title matches, and source diversity. Generic queries receive bounded representative excerpts. |
 | Budget | Fast chat: deterministic retrieval gate, then at most `FAST_CHAT_RETRIEVAL_MAX_CHUNKS` (default 4) chunks and `FAST_CHAT_RETRIEVAL_MAX_CHARS` (default 8,000) characters. Deep Review may use the larger composer ceiling. |
 | Images | Selected images travel as model image inputs; a text marker preserves their stable `[S#]` mapping. |

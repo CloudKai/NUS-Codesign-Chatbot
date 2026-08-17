@@ -43,6 +43,17 @@ Coaching, Incremental Review, and Deep Review. Do not treat
    legacy. `AGENTCORE_MODEL_PROVIDER` / `AGENTCORE_MODEL_ID` are a local
    fallback only when no role keys are set. No bare `BedrockModel()`. No
    Haiku↔Sonnet fallback.
+10. Successful JSON may include `runtime_model_role`, `runtime_model_provider`,
+    `runtime_model_id`, `runtime_model_region`, and `runtime_strands_agents`
+    next to `event_loop_cycle_count`. These prove which model this process
+    actually loaded. Older DEFAULT runtimes omit them; FastAPI must tolerate
+    absence and must not pretend the configured FastAPI model is the runtime
+    model. Republish this runtime for provenance to appear in production.
+11. FastAPI may optionally reuse `runtimeSessionId` for warm-microVM compute
+    affinity (`AGENTCORE_SESSION_AFFINITY_ENABLED`). That is a FastAPI-only
+    change. This runtime still receives bounded DSQL history on every turn
+    and does not own the transcript. After publishing a new runtime version,
+    operators must change `AGENTCORE_SESSION_GENERATION` and redeploy FastAPI.
 
 Roles:
 

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import logging
 import re
@@ -816,6 +817,49 @@ def _record_runtime_cache_metrics(payload: dict[str, Any]) -> None:
         record_field("event_loop_cycle_count", cycle_raw)
 
 
+_RUNTIME_PROVENANCE_MAX_LEN = 80
+_RUNTIME_PROVENANCE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:+/=-]{0,79}$")
+_RUNTIME_PROVENANCE_FIELDS = (
+    "runtime_model_role",
+    "runtime_model_provider",
+    "runtime_model_id",
+    "runtime_model_region",
+    "runtime_strands_agents",
+)
+
+
+def _safe_runtime_identifier(value: Any) -> str | None:
+    """Return a short plain identifier, or None when the value is unsafe.
+
+    Args:
+        value: Runtime-supplied provenance candidate.
+
+    Returns:
+        The stripped identifier, or ``None`` when missing, non-string,
+        oversized, or not a short plain token.
+    """
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip()
+    if not cleaned or len(cleaned) > _RUNTIME_PROVENANCE_MAX_LEN:
+        return None
+    if _RUNTIME_PROVENANCE_RE.fullmatch(cleaned) is None:
+        return None
+    return cleaned
+
+
+def _record_runtime_model_provenance(payload: dict[str, Any]) -> None:
+    """Copy safe runtime-loaded model identifiers onto coach_turn_perf.
+
+    Missing, malformed, oversized, or non-string values are omitted. This
+    never falls back to the FastAPI-configured model fields.
+    """
+    for key in _RUNTIME_PROVENANCE_FIELDS:
+        identifier = _safe_runtime_identifier(payload.get(key))
+        if identifier is not None:
+            record_field(key, identifier)
+
+
 def _validated_fast_chat(
     payload: dict[str, Any], request: CoachRequest
 ) -> ProviderAssessmentResult:
@@ -912,6 +956,72 @@ def _stateless_session_id() -> str:
     only durable transcript.
     """
     return f"stateless-{uuid.uuid4().hex}"
+
+
+_SESSION_AFFINITY_PREFIX = "codesign-"
+_SESSION_AFFINITY_ROLES = frozenset({"fast_chat", "review_deep"})
+
+
+def _collapsed_identity(value: Any) -> str:
+    """Return a stripped identity string with collapsed whitespace."""
+    return " ".join(str(value or "").split()).strip()
+
+
+def _affinity_session_id(
+    owner_id: str, notebook_id: str, role: str, generation: str
+) -> str:
+    """Return an opaque AgentCore session id for one owner, notebook, and role.
+
+    Args:
+        owner_id: Server-authoritative store identifier. Never logged.
+        notebook_id: Server-authoritative notebook/thread id. Never logged.
+        role: ``fast_chat`` or ``review_deep``.
+        generation: Operator-controlled deployment salt.
+
+    Returns:
+        ``codesign-`` plus a SHA-256 hex digest (73 characters). The digest
+        does not contain owner, notebook, email, or student text.
+    """
+    # Length-prefix each field so a separator byte inside one value cannot be
+    # re-read as a field boundary and alias a different (owner, notebook, role)
+    # tuple onto the same compute session.
+    parts = (owner_id, notebook_id, role, generation)
+    material = "\0".join(f"{len(part)}:{part}" for part in parts)
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
+    return _SESSION_AFFINITY_PREFIX + digest
+
+
+def _runtime_session_id(request: CoachRequest, role: str) -> str:
+    """Return a compute-affinity session id or a fresh stateless id.
+
+    Affinity is optional and FastAPI-owned. Disabled, missing owner or
+    notebook identity, or an unsupported role fail open to a unique
+    ``stateless-`` id. The returned value is never logged.
+
+    Args:
+        request: Server-built coaching input with ``student_id`` and
+            ``thread_id``.
+        role: Invoke role used for session isolation.
+
+    Returns:
+        An AgentCore ``runtimeSessionId`` of at least 33 characters.
+    """
+    if not bool(getattr(settings, "agentcore_session_affinity_enabled", False)):
+        return _stateless_session_id()
+    owner_id = _collapsed_identity(request.student_id)
+    notebook_id = _collapsed_identity(request.thread_id)
+    cleaned_role = str(role or "").strip().lower()
+    if (
+        not owner_id
+        or not notebook_id
+        or cleaned_role not in _SESSION_AFFINITY_ROLES
+    ):
+        return _stateless_session_id()
+    generation = (
+        str(getattr(settings, "agentcore_session_generation", "") or "").strip()
+        or "1"
+    )
+    return _affinity_session_id(owner_id, notebook_id, cleaned_role, generation)
 
 
 def _current_turn_content(
@@ -1461,11 +1571,20 @@ class AgentCoreCoachProvider:
             payload["student_id"] = student_id[:128]
         return payload, plan
 
-    def _call_runtime(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def _call_runtime(
+        self,
+        payload: dict[str, Any],
+        *,
+        request: CoachRequest,
+        role: str,
+    ) -> dict[str, Any]:
         """Invoke AgentCore once and return the parsed JSON object.
 
         Args:
             payload: Companion InvokeAgentRuntime JSON.
+            request: Server-built coaching input used only for optional
+                session affinity. Identity values are never logged.
+            role: ``fast_chat`` or ``review_deep`` for affinity isolation.
 
         Returns:
             Unwrapped runtime JSON. Harness error envelopes raise.
@@ -1478,7 +1597,7 @@ class AgentCoreCoachProvider:
         response = self._runtime_client().invoke_agent_runtime(
             agentRuntimeArn=self._runtime_arn,
             qualifier=self._qualifier,
-            runtimeSessionId=_stateless_session_id(),
+            runtimeSessionId=_runtime_session_id(request, role),
             payload=encoded,
             contentType="application/json",
             accept="application/json",
@@ -1489,7 +1608,13 @@ class AgentCoreCoachProvider:
             perf.set("agentcore_call_count", current + 1)
         if not isinstance(response, Mapping):
             raise _malformed_error()
-        return _payload_from_runtime_response(response)
+        parsed = _payload_from_runtime_response(response)
+        _record_runtime_model_provenance(parsed)
+        # Recorded here so Deep Review reports cycle/cache telemetry too; the
+        # Fast Chat validator repeats it with the same payload, which is a
+        # no-op rewrite of identical values.
+        _record_runtime_cache_metrics(parsed)
+        return parsed
 
     def _role_provider_model(self, role: str) -> tuple[str, str]:
         """Return configured provider/model ids for one role without secrets."""
@@ -1567,7 +1692,9 @@ class AgentCoreCoachProvider:
         started = time.monotonic()
         min_confidence = bound_router_min_confidence(settings.router_min_confidence)
         try:
-            parsed = self._call_runtime(_router_payload(request))
+            parsed = self._call_runtime(
+                _router_payload(request), request=request, role="router"
+            )
             routed = RouterOutput.model_validate(parsed)
             specialist = apply_semantic_route(
                 routed.specialist,
@@ -1693,7 +1820,9 @@ class AgentCoreCoachProvider:
         )
         started = time.monotonic()
         try:
-            parsed = self._call_runtime(payload)
+            parsed = self._call_runtime(
+                payload, request=request, role="fast_chat"
+            )
             result = _validated_fast_chat(parsed, request)
             self._log_role_precise(
                 role="fast_chat",
@@ -1743,7 +1872,9 @@ class AgentCoreCoachProvider:
                 review_trigger="explicit",
                 context_policy=CONTEXT_POLICY_FULL_HISTORY,
             )
-            parsed = self._call_runtime(payload)
+            parsed = self._call_runtime(
+                payload, request=routed, role="review_deep"
+            )
             result = _validated_result(parsed, routed)
             self._log_role_precise(
                 role="review",
@@ -1816,7 +1947,12 @@ class AgentCoreCoachProvider:
         payload, plan = self._invoke_payload(request, specialist)
         started = time.monotonic()
         try:
-            parsed = self._call_runtime(payload)
+            affinity_role = (
+                "review_deep" if specialist == SPECIALIST_REVIEW else specialist
+            )
+            parsed = self._call_runtime(
+                payload, request=request, role=affinity_role
+            )
             result = _validated_result(parsed, request)
             self._log_role_precise(role=specialist, started=started, success=True)
             return result, plan

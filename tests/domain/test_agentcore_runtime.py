@@ -21,6 +21,10 @@ from agentcore_runtime.models import (
     ReviewTurnOutput,
     RouterOutput,
 )
+from agentcore_runtime.model import (
+    HAIKU_4_5_MODEL_ID,
+    RuntimeModelConfig,
+)
 from agentcore_runtime.structured_coach import (
     STRUCTURED_OUTPUT_REPAIR_PROMPT,
     CoachTurnExtractionError,
@@ -33,6 +37,7 @@ from agentcore_runtime.structured_coach import (
     log_coach_turn_outcome,
     qa_turn_from_agent_result,
     review_turn_from_agent_result,
+    runtime_model_provenance_fields,
 )
 
 _STREET = "A quiet residential street"
@@ -630,6 +635,7 @@ def test_structured_roles_pass_custom_repair_prompt_to_invoke_async(
         MODEL_ROLE_REVIEW_DEEP,
         MODEL_ROLE_REVIEW_INCREMENTAL,
         MODEL_ROLE_ROUTER,
+        PINNED_RUNTIME_PACKAGES,
         SONNET_4_6_MODEL_ID,
         RuntimeModelConfig,
     )
@@ -759,6 +765,21 @@ def test_structured_roles_pass_custom_repair_prompt_to_invoke_async(
     assert calls[2]["init_kwargs"]["retry_strategy"].kwargs["max_attempts"] == 2
     assert calls[4]["init_kwargs"]["retry_strategy"].kwargs["max_attempts"] == 3
     assert calls[5]["init_kwargs"]["retry_strategy"].kwargs["max_attempts"] == 2
+    fast_chat_result = results[5]
+    assert fast_chat_result["runtime_model_role"] == MODEL_ROLE_FAST_CHAT
+    assert fast_chat_result["runtime_model_provider"] == "bedrock"
+    assert fast_chat_result["runtime_model_id"] == HAIKU_4_5_MODEL_ID
+    assert fast_chat_result["runtime_model_region"] == "us-west-2"
+    assert (
+        fast_chat_result["runtime_strands_agents"]
+        == PINNED_RUNTIME_PACKAGES["strands-agents"]
+    )
+    assert "guardrail_id" not in fast_chat_result
+    assert "o8aipba8m129" not in json.dumps(fast_chat_result)
+    deep_result = results[4]
+    assert deep_result["runtime_model_role"] == MODEL_ROLE_REVIEW_DEEP
+    assert deep_result["runtime_model_id"] == SONNET_4_6_MODEL_ID
+    assert deep_result["runtime_model_provider"] == "bedrock"
 
 
 def test_limit_turns_stop_reason_is_structured_output_failure() -> None:
@@ -787,5 +808,23 @@ def test_event_loop_cycle_count_is_not_invented() -> None:
         )
     )
     assert event_loop_cycle_count_from_agent_result(counted) == 2
+
+
+def test_runtime_model_provenance_fields_omit_secrets_and_missing_config() -> None:
+    assert runtime_model_provenance_fields(None) == {}
+    config = RuntimeModelConfig(
+        provider="bedrock",
+        model_id=HAIKU_4_5_MODEL_ID,
+        region="us-west-2",
+        guardrail_id="gr-secret",
+        guardrail_version="3",
+        role="fast_chat",
+    )
+    fields = runtime_model_provenance_fields(config)
+    assert fields["runtime_model_role"] == "fast_chat"
+    assert fields["runtime_model_id"] == HAIKU_4_5_MODEL_ID
+    assert "gr-secret" not in json.dumps(fields)
+    assert "guardrail" not in json.dumps(fields)
+    assert _STREET not in json.dumps(fields)
 
 

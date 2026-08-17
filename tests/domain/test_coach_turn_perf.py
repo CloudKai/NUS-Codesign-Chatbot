@@ -347,3 +347,208 @@ def test_submit_records_service_latency_breakdown(caplog, tmp_path) -> None:
     assert timings["TOTAL"] >= 0
     assert "I think option B" not in json.dumps(payload)
     assert all("I think option B" not in record.message for record in caplog.records)
+
+
+def _perf_event(caplog) -> dict:
+    """Return the last coach_turn_perf JSON object from captured logs."""
+    events = [
+        json.loads(record.message)
+        for record in caplog.records
+        if record.message.startswith("{") and "coach_turn_perf" in record.message
+    ]
+    assert events
+    return events[-1]
+
+
+def test_runtime_model_provenance_is_recorded_distinct_from_configured(
+    caplog,
+) -> None:
+    caplog.set_level(logging.INFO)
+    payload = _output()
+    payload["runtime_model_role"] = "fast_chat"
+    payload["runtime_model_provider"] = "bedrock"
+    payload["runtime_model_id"] = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    payload["runtime_model_region"] = "us-west-2"
+    payload["runtime_strands_agents"] = "1.52.0"
+    client = FakeAgentCoreRuntime(payload=payload)
+    provider = AgentCoreCoachProvider(
+        _RUNTIME_ARN,
+        region="us-west-2",
+        qualifier="DEFAULT",
+        timeout_seconds=110.0,
+        max_retries=0,
+        client=client,
+    )
+    provider.assess(
+        CoachRequest(
+            thread_id="notebook-secret-id",
+            student_message="I think option B is better because of privacy.",
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    )
+    recorded = _perf_event(caplog)
+    assert recorded["runtime_model_role"] == "fast_chat"
+    assert recorded["runtime_model_provider"] == "bedrock"
+    assert (
+        recorded["runtime_model_id"]
+        == "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    )
+    assert recorded["runtime_model_region"] == "us-west-2"
+    assert recorded["runtime_strands_agents"] == "1.52.0"
+    assert "model_id" in recorded
+    assert "runtime_model_id" in recorded
+    blob = json.dumps(recorded)
+    assert "I think option B" not in blob
+    assert "notebook-secret-id" not in blob
+
+
+def test_absent_runtime_provenance_is_tolerated(caplog) -> None:
+    caplog.set_level(logging.INFO)
+    client = FakeAgentCoreRuntime(payload=_output())
+    provider = AgentCoreCoachProvider(
+        _RUNTIME_ARN,
+        region="us-west-2",
+        qualifier="DEFAULT",
+        timeout_seconds=110.0,
+        max_retries=0,
+        client=client,
+    )
+    provider.assess(
+        CoachRequest(
+            thread_id="thread-demo",
+            student_message="I think option B is better.",
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    )
+    recorded = _perf_event(caplog)
+    assert "runtime_model_id" not in recorded
+    assert "runtime_model_provider" not in recorded
+    assert "runtime_model_role" not in recorded
+    assert "runtime_model_region" not in recorded
+    assert "runtime_strands_agents" not in recorded
+    assert recorded["success"] is True
+    assert recorded["agentcore_call_count"] == 1
+
+
+def test_malformed_runtime_provenance_is_ignored(caplog) -> None:
+    caplog.set_level(logging.INFO)
+    payload = _output()
+    payload["runtime_model_id"] = "I think option B is better because of privacy."
+    payload["runtime_model_role"] = {"nested": "fast_chat"}
+    payload["runtime_model_provider"] = 12345
+    payload["runtime_model_region"] = "x" * 200
+    payload["runtime_strands_agents"] = "1.52.0; student said secrets"
+    client = FakeAgentCoreRuntime(payload=payload)
+    provider = AgentCoreCoachProvider(
+        _RUNTIME_ARN,
+        region="us-west-2",
+        qualifier="DEFAULT",
+        timeout_seconds=110.0,
+        max_retries=0,
+        client=client,
+    )
+    provider.assess(
+        CoachRequest(
+            thread_id="thread-demo",
+            student_message="I think option B is better because of privacy.",
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    )
+    recorded = _perf_event(caplog)
+    assert "runtime_model_id" not in recorded
+    assert "runtime_model_role" not in recorded
+    assert "runtime_model_provider" not in recorded
+    assert "runtime_model_region" not in recorded
+    assert "runtime_strands_agents" not in recorded
+    assert "I think option B" not in json.dumps(recorded)
+
+
+def test_event_loop_cycle_count_is_recorded_when_runtime_sends_it(caplog) -> None:
+    """FastAPI copies cycle count when present. LIVE TRACE REQUIRED for rate."""
+    caplog.set_level(logging.INFO)
+    payload = _output()
+    payload["event_loop_cycle_count"] = 2
+    client = FakeAgentCoreRuntime(payload=payload)
+    provider = AgentCoreCoachProvider(
+        _RUNTIME_ARN,
+        region="us-west-2",
+        qualifier="DEFAULT",
+        timeout_seconds=110.0,
+        max_retries=0,
+        client=client,
+    )
+    provider.assess(
+        CoachRequest(
+            thread_id="thread-demo",
+            student_message="I think option B is better.",
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    )
+    recorded = _perf_event(caplog)
+    assert recorded["event_loop_cycle_count"] == 2
+    assert recorded["agentcore_call_count"] == 1
+
+
+def test_deep_review_runtime_provenance_is_recorded(caplog) -> None:
+    caplog.set_level(logging.INFO)
+    review_payload = {
+        "response_text": "Formative deep review of progress.",
+        "strengths": ["The contribution named a concrete constraint."],
+        "areas_to_develop": ["Name who is affected at night."],
+        "synthesis": "The work is ready to advance.",
+        "readiness_candidate": True,
+        "review_depth": "deep",
+        "current_stage": "problem_identification",
+        "recommendation": "advance",
+        "confidence": 0.9,
+        "readiness_evidence": ["The candidate met the current-stage bar."],
+        "missing_requirements": [],
+        "rationale_summary": "The contribution is ready to advance.",
+        "working_conclusion": "Elderly caregivers are scarce in Singapore.",
+        "runtime_model_role": "review_deep",
+        "runtime_model_provider": "bedrock",
+        "runtime_model_id": "global.anthropic.claude-sonnet-4-6",
+        "runtime_model_region": "us-west-2",
+    }
+    client = FakeAgentCoreRuntime(deep_payload=review_payload)
+    provider = AgentCoreCoachProvider(
+        _RUNTIME_ARN,
+        region="us-west-2",
+        qualifier="DEFAULT",
+        timeout_seconds=110.0,
+        max_retries=0,
+        client=client,
+    )
+    begin_coach_turn_perf()
+    try:
+        provider.assess(
+            CoachRequest(
+                thread_id="thread-demo",
+                student_message="I think option B is better.",
+                current_stage="problem_identification",
+                response_detail="short",
+                specialist="review",
+            )
+        )
+    finally:
+        recorded = emit_coach_turn_perf()
+        reset_coach_turn_perf()
+    assert recorded is not None
+    assert recorded["runtime_model_role"] == "review_deep"
+    assert recorded["runtime_model_id"] == "global.anthropic.claude-sonnet-4-6"
+    assert recorded["runtime_model_provider"] == "bedrock"
+    blob = json.dumps(recorded)
+    assert "I think option B" not in blob
+
+
+def test_runtime_model_fields_are_on_the_privacy_allow_list() -> None:
+    assert "runtime_model_role" in SAFE_PERF_FIELDS
+    assert "runtime_model_provider" in SAFE_PERF_FIELDS
+    assert "runtime_model_id" in SAFE_PERF_FIELDS
+    assert "runtime_model_region" in SAFE_PERF_FIELDS
+    assert "runtime_strands_agents" in SAFE_PERF_FIELDS
+    assert "event_loop_cycle_count" in SAFE_PERF_FIELDS

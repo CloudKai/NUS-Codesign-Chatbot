@@ -76,6 +76,7 @@ try:
         review_turn_from_agent_result,
         agent_system_prompt,
         model_retry_policy_for_role,
+        runtime_model_provenance_fields,
         structured_output_limits_for_role,
         structured_wire_payload,
     )
@@ -134,6 +135,7 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
         review_turn_from_agent_result,
         agent_system_prompt,
         model_retry_policy_for_role,
+        runtime_model_provenance_fields,
         structured_output_limits_for_role,
         structured_wire_payload,
     )
@@ -154,13 +156,15 @@ def _with_cache_telemetry(
     payload: dict[str, Any],
     result: Any,
     system_prompt: str | list[dict[str, Any]],
+    model_config: Any = None,
 ) -> dict[str, Any]:
-    """Attach numeric cache and cycle telemetry without student text.
+    """Attach numeric cache, cycle, and safe model provenance without student text.
 
     ``prompt_cache_enabled`` is true only when this invoke actually sent a
     SystemContentBlock cachePoint. Cache token counts and event-loop cycle
     count are copied only when AgentResult metrics expose them. Repair count
-    is not stamped: 1.52.0 has no such field.
+    is not stamped: 1.52.0 has no such field. Loaded-model identifiers come
+    from the already-resolved runtime config and omit secrets.
     """
     enabled = isinstance(system_prompt, list) and any(
         isinstance(block, Mapping) and "cachePoint" in block for block in system_prompt
@@ -174,6 +178,7 @@ def _with_cache_telemetry(
     cycle_count = event_loop_cycle_count_from_agent_result(result)
     if cycle_count is not None:
         payload["event_loop_cycle_count"] = cycle_count
+    payload.update(runtime_model_provenance_fields(model_config))
     if enabled:
         logger.info(
             "prompt_cache_enabled=true cache_read_input_tokens=%s "
@@ -428,7 +433,9 @@ async def _structured_role_invoke(
             elapsed_ms=elapsed_ms_since(started),
         )
         payload_out = structured_wire_payload(output)
-        return _with_cache_telemetry(payload_out, result, system_prompt)
+        return _with_cache_telemetry(
+            payload_out, result, system_prompt, model_config
+        )
     except CoachTurnExtractionError as error:
         _log_role(
             role=role,

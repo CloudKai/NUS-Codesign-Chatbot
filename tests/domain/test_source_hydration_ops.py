@@ -33,7 +33,12 @@ from backend.retrieval import (
     canonical_chunk_text,
 )
 from backend.settings import settings
-from backend.source_library import add_file_sources, add_text_source, list_visible_sources
+from backend.source_library import (
+    add_file_sources,
+    add_text_source,
+    image_inputs_for_source_ids,
+    list_visible_sources,
+)
 from backend.sources.chunk_artifacts import (
     CHUNK_ARTIFACT_SCHEMA_VERSION,
     build_chunk_artifact,
@@ -646,6 +651,86 @@ def test_png_upload_skips_chunk_gets_and_supplies_image_inputs(
         else ""
     )
     assert UNANALYZABLE_SOURCE_PLACEHOLDER not in ranked
+
+
+def test_coach_turn_does_not_get_source_per_selected_image(
+    tmp_path: Path, counting_storage: CountingFileStorage
+) -> None:
+    """Authorized snapshot images skip per-image metadata lookups."""
+    store, thread_id = _notebook(tmp_path)
+    created = add_file_sources(
+        store,
+        thread_id,
+        [
+            ("diagram.png", _PNG, "image/png"),
+            ("notes.txt", b"Accessibility notes.", "text/plain"),
+            ("sketch.png", _PNG, "image/png"),
+        ],
+    )
+    image_ids = [
+        str(source["id"])
+        for source in created
+        if str(source.get("kind") or "").lower() == "image"
+        or str(source.get("mime") or "").lower().startswith("image/")
+    ]
+    expected = image_inputs_for_source_ids(store, thread_id, image_ids)
+    assert [item["source_id"] for item in expected] == image_ids
+
+    calls = {"get_source": 0}
+    original = store.get_source
+
+    def _count(
+        thread_id: str,
+        source_id: str,
+        *,
+        include_extracted_text: bool = True,
+    ) -> dict[str, Any] | None:
+        calls["get_source"] += 1
+        return original(
+            thread_id,
+            source_id,
+            include_extracted_text=include_extracted_text,
+        )
+
+    store.get_source = _count  # type: ignore[method-assign]
+    counting_storage.reset_counts()
+    service, _recorder = _service(store)
+    captured = _capture_prepared(service)
+    turn = _submit(service, thread_id, key="image-no-nplus1")
+    assert turn.response_text
+    assert calls["get_source"] == 0
+    prepared = captured["request"]
+    actual = [
+        {
+            "source_id": item.source_id,
+            "mime": item.mime,
+            "data_url": item.data_url,
+        }
+        for item in prepared.image_inputs
+    ]
+    assert actual == expected
+
+
+def test_more_than_five_selected_images_are_rejected(
+    tmp_path: Path, counting_storage: CountingFileStorage
+) -> None:
+    """The max-5 selected-image rule still runs before image bytes are read."""
+    store, thread_id = _notebook(tmp_path)
+    add_file_sources(
+        store,
+        thread_id,
+        [(f"img{index}.png", _PNG, "image/png") for index in range(5)],
+    )
+    add_file_sources(
+        store,
+        thread_id,
+        [("img5.png", _PNG, "image/png")],
+    )
+    counting_storage.reset_counts()
+    service, _recorder = _service(store)
+    with pytest.raises(ValueError, match="Select at most 5 image sources"):
+        _submit(service, thread_id, key="too-many-images")
+    assert counting_storage.gets(kind="raw") == []
 
 
 def test_empty_extract_is_placeholder_and_not_ranked(

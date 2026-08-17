@@ -11,6 +11,7 @@ from backend.sources.chunk_cache import (
     CHUNKER_VERSION,
     ChunkCacheKey,
     StudentSourceChunkCache,
+    invalidate_cached_chunks_for_prefix,
     reset_student_source_chunk_cache,
     student_source_chunk_cache,
 )
@@ -202,6 +203,19 @@ def test_invalidate_prefix_removes_only_matching_entries() -> None:
     assert cache.get(bob) is artifact
     assert cache.invalidate_prefix("") == 0
     assert cache.stats().entries == 2
+
+
+def test_invalidate_cached_chunks_for_prefix_never_raises(monkeypatch) -> None:
+    """Best-effort invalidation must not raise to storage-cleanup callers."""
+    reset_student_source_chunk_cache()
+    cache = student_source_chunk_cache()
+
+    def _boom(_prefix: str) -> int:
+        raise RuntimeError("cache boom")
+
+    monkeypatch.setattr(cache, "invalidate_prefix", _boom)
+    invalidate_cached_chunks_for_prefix("users/alice/notebooks/n1/")
+    reset_student_source_chunk_cache()
 
 
 def test_different_owners_do_not_collide() -> None:

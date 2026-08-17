@@ -521,6 +521,130 @@ def test_source_delete_removes_chunk_artifact_and_blocks_coach(tmp_path, monkeyp
     reset_student_source_chunk_cache()
 
 
+def test_source_delete_invalidates_chunk_cache_when_storage_cleanup_fails(
+    tmp_path, monkeypatch
+):
+    """Metadata delete plus cache drop still happen when prefix cleanup raises."""
+
+    class _FlakyPrefixStorage(MemoryFileStorage):
+        def __init__(self) -> None:
+            super().__init__()
+            self.prefix_calls: list[str] = []
+            self._failures_left = 1
+
+        def delete_prefix(self, prefix: str) -> int:
+            self.prefix_calls.append(prefix)
+            if self._failures_left > 0:
+                self._failures_left -= 1
+                raise PermissionError(f"transient AccessDenied: {prefix}")
+            return super().delete_prefix(prefix)
+
+    reset_student_source_chunk_cache()
+    memory = _FlakyPrefixStorage()
+    _install_memory_storage(monkeypatch, memory)
+    store = StudentStore(tmp_path / "cache-survive.sqlite3", identifier="owner-a")
+    notebook_id = store.create_thread(model_id="mock", support_mode="guided")
+    source = add_text_source(
+        store,
+        notebook_id,
+        "notes.txt",
+        "Accessibility notes for older pedestrians.",
+    )
+    source_id = source["id"]
+    chunks_key = build_source_chunks_object_key(
+        user_id=store.owner_id,
+        notebook_id=notebook_id,
+        source_id=source_id,
+    )
+    expected_prefix = source_prefix(
+        user_id=store.owner_id,
+        notebook_id=notebook_id,
+        source_id=source_id,
+    )
+    digest = str((source.get("metadata") or {}).get("extracted_text_sha256") or "")
+    parsed = parse_chunk_artifact(
+        memory.get_bytes(chunks_key),
+        expected_source_id=source_id,
+        expected_digest=digest,
+    )
+    assert parsed is not None
+    cache = student_source_chunk_cache()
+    cache.put(ChunkCacheKey.current(chunks_key, digest), parsed)
+    assert cache.get(ChunkCacheKey.current(chunks_key, digest)) is not None
+
+    with pytest.raises(PermissionError, match="transient AccessDenied"):
+        store.delete_source(notebook_id, source_id)
+
+    assert store.get_source(notebook_id, source_id) is None
+    assert memory.exists(chunks_key)
+    assert memory.prefix_calls == [expected_prefix]
+    assert cache.get(ChunkCacheKey.current(chunks_key, digest)) is None
+
+    service = _coach_service(store)
+    with pytest.raises(ValueError, match="unknown"):
+        service.submit(
+            CoachRequest(
+                thread_id=notebook_id,
+                student_message="What does the lecture say about accessibility?",
+                current_stage="problem_identification",
+                response_detail="short",
+                source_ids=[source_id],
+                idempotency_key="after-failed-cleanup",
+            )
+        )
+
+    store.delete_source(notebook_id, source_id)
+    assert not memory.exists(chunks_key)
+    assert memory.prefix_calls == [expected_prefix, expected_prefix]
+    reset_student_source_chunk_cache()
+
+
+def test_chunk_cache_invalidation_failure_does_not_mask_storage_error(
+    tmp_path, monkeypatch
+):
+    """A raising cache drop must not replace the original storage exception."""
+
+    class _FlakyPrefixStorage(MemoryFileStorage):
+        def __init__(self) -> None:
+            super().__init__()
+            self.prefix_calls: list[str] = []
+
+        def delete_prefix(self, prefix: str) -> int:
+            self.prefix_calls.append(prefix)
+            raise PermissionError(f"transient AccessDenied: {prefix}")
+
+    reset_student_source_chunk_cache()
+    memory = _FlakyPrefixStorage()
+    _install_memory_storage(monkeypatch, memory)
+    cache = student_source_chunk_cache()
+
+    def _boom(_prefix: str) -> int:
+        raise RuntimeError("cache boom")
+
+    monkeypatch.setattr(cache, "invalidate_prefix", _boom)
+    store = StudentStore(tmp_path / "cache-mask.sqlite3", identifier="owner-a")
+    notebook_id = store.create_thread(model_id="mock", support_mode="guided")
+    source = add_text_source(
+        store,
+        notebook_id,
+        "notes.txt",
+        "Accessibility notes for older pedestrians.",
+    )
+    source_id = source["id"]
+    expected_prefix = source_prefix(
+        user_id=store.owner_id,
+        notebook_id=notebook_id,
+        source_id=source_id,
+    )
+
+    with pytest.raises(PermissionError, match="transient AccessDenied"):
+        store.delete_source(notebook_id, source_id)
+
+    assert store.get_source(notebook_id, source_id) is None
+    assert memory.prefix_calls == [expected_prefix]
+    reset_student_source_chunk_cache()
+
+
 def test_notebook_delete_removes_chunk_artifacts_and_sources(tmp_path, monkeypatch):
     reset_student_source_chunk_cache()
     memory = MemoryFileStorage()

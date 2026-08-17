@@ -1,12 +1,162 @@
 # Implementation status
 
-## Current phase — Fast Chat first-pass structured output, retry bounds, Deep Review cap
+## CURRENT STATUS
+
+**Branch:** `Integrate-Bedrock`  
+**HEAD:** `a4d04d9021c210dbc46c7abce62ceb7287eebb53` (`a4d04d9`)  
+**Origin:** this SHA is `origin/Integrate-Bedrock`. `origin/main` is `2386d65`.
+
+**Divergence vs `main`:** history-only ancestry. `git log --no-merges origin/Integrate-Bedrock..origin/main` is empty, and no file exists on `main` that is missing from this branch. `main`’s extra commits are merge commits of PRs #7–#12. This branch is strictly ahead in content (12 non-merge commits).
+
+This file’s **CURRENT** sections are the operator runbook. Everything under **HISTORICAL INVESTIGATION** is a dated archive and is not current.
+
+Release steps: [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md). Architecture authority: [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md).
+
+### What is committed on this SHA
+
+Committed application/runtime (not an uncommitted worktree):
+
+- Fast Chat: one FastAPI `InvokeAgentRuntime` per normal turn; slim `FastChatTurnOutput` (`fast_chat_turn_v1`); Haiku 4.5; `runtime_context.specialist=fast_chat`.
+- Deep Review: explicit `POST /api/v1/threads/{thread_id}/deep-review` (Sonnet 4.6). The browser cannot pick a privileged specialist on `/coach/turn`.
+- Course RAG: shared `course/` objects → Bedrock **MANAGED** Knowledge Base → validated `Retrieve` mapped to `[S#]`. Student uploads stay on local lexical retrieval.
+- Student-source hydration: precomputed `derived/chunks.v1.json` plus an in-process LRU; missing/invalid artifacts fall back to chunking extracted text.
+- Auth/persistence: Cognito owner isolation; Aurora DSQL is the only durable transcript; S3 for objects; atomic persist; append-only conversation revisions; durable idempotency lease.
+- Month-1 production pilot in [`../compose.prod.yaml`](../compose.prod.yaml): `AUTO_ADVANCE_STAGES=true`, `STUDENT_STAGE_SELECTION=false` (coach ADVANCE auto-applies; no student Next; no Journey stage picker). Intentional. Note the three stage-config sources disagree on purpose, so quote the right one: the **code** default is confirmation-gated (`backend/settings.py` `AUTO_ADVANCE_STAGES` → `False`), while **both** `.env.example` (`AUTO_ADVANCE_STAGES=true`) and production Compose auto-apply. A local demo that copies `.env.example` therefore auto-advances; only a run with no `.env` value is confirmation-gated.
+- Production runtime pin (Compose): `MODEL_PROVIDER=agentcore`, `AGENTCORE_QUALIFIER=DEFAULT` (currently liveVersion 20, `fast_chat`), `GUARDRAIL_VERSION=3`, `KNOWLEDGE_BASE_TYPE=MANAGED`, `DATABASE_PROVIDER=dsql`, `FILE_STORAGE_PROVIDER=s3`. Topology: one EC2, one container, one Uvicorn worker, Caddy behind CloudFront.
+
+### What CI actually proves
+
+Three workflows. [`../.github/workflows/mock-ci.yml`](../.github/workflows/mock-ci.yml)
+is the correctness gate and the only one that should be a required check:
+
+| Job | Gates |
+|---|---|
+| `mock-suite` | `ruff check`; shell syntax (`start.sh`, `build.sh`, `start_prod.sh`, `deploy_ecr.sh`, `browser_e2e_smoke.sh`); `docker compose` + `compose.prod.yaml` + Caddy validate; `compileall` (`backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`, `agentcore_runtime`); production-config tests; idempotency + ownership + production-critical-path tests; **complete mock pytest**; Docker image build **on push only** (`co-design:ci-<12-char-sha>`). |
+| `agentcore-runtime-compatibility` | `pip install -r agentcore_runtime/requirements.txt`; `scripts/diagnostics/check_agentcore_runtime_dependencies.py`; compile `agentcore_runtime`. Companion pytest does **not** install Strands. |
+
+Two supply-chain workflows report but must **not** become required checks:
+[`dependency-audit.yml`](../.github/workflows/dependency-audit.yml) (pip-audit,
+path-filtered to requirements files, fail-closed) and
+[`codeql.yml`](../.github/workflows/codeql.yml) (Python, `main` only). Both are
+filtered, so on a branch or PR that does not touch their paths they are skipped
+rather than passing. A required check that is skipped blocks merges in GitHub,
+so mark only `mock-ci` jobs required. [`dependabot.yml`](../.github/dependabot.yml)
+opens grouped weekly pip / actions / docker PRs.
+
+### What is not live-validated
+
+CI is **mock-only**. It does not prove live AgentCore, Bedrock Converse, Knowledge Base `Retrieve`, DSQL, S3, Cognito, or CloudFront. Passing mock pytest is not a production smoke.
+
+### Deployment impact of this tip
+
+Treat `a4d04d9` as a **new app image** unless the host already runs this SHA (image label `org.opencontainers.image.revision` / `APP_GIT_SHA`). FastAPI-side TIMING logs, Guardrail-safe memory rendering, and student-source hydration are in this tree.
+
+- **EC2 / container:** rebuild and redeploy an immutable `APP_IMAGE` tagged with this SHA. Do not use `latest`.
+- **AgentCore:** republish DEFAULT only when operators intend the committed `agentcore_runtime/` assets (first-pass structured-output instruction, `FAST_CHAT_INVOKE_LIMITS={"turns": 2}`, Bedrock Converse `total_max_attempts=1`, `event_loop_cycle_count`) to replace whatever liveVersion 20 currently serves. After any runtime publish, change `AGENTCORE_SESSION_GENERATION` and redeploy FastAPI (see the release checklist).
+- **Console:** no new Cognito callback, bucket, or Guardrail version (stay on version **3** on both FastAPI Compose and the runtime). Confirm DEFAULT still points at the intended liveVersion.
+- **DSQL:** no new DDL in this SHA beyond the additive revision/idempotency schema already owned by `scripts/init_dsql.py`. Confirm the cluster already has those columns. Never run `init_dsql.py` at app startup or as `co_design_app`.
+- **S3:** no new bucket. User objects under `users/`; course objects under `course/` only.
+
+## CURRENT ARCHITECTURE
+
+Authoritative layering remains [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md). Production generation is AgentCore; FastAPI still owns identity, RAG authorization, transcript, and stage mutation.
+
+**Fast Chat.** One AgentCore invoke per normal student turn. Haiku returns slim `FastChatTurnOutput`: `mode` (`coaching` \| `qa`), `response_text`, optional stay/advance `recommendation`, citations, `needs_source_retrieval`. No per-turn router, incremental review, or automatic Sonnet. Event-loop recovery inside that one invoke is capped at `FAST_CHAT_INVOKE_LIMITS={"turns": 2}` (initial generation plus at most one structured-output recovery cycle).
+
+**Deep Review.** Separate HTTP route `POST /api/v1/threads/{thread_id}/deep-review`. Server-owned eligibility, Sonnet 4.6, counter, snapshot, idempotency. Event-loop cap `{"turns": 3}`. Not on `/coach/turn`.
+
+**Course RAG.** Locked Lecture Notes/Readings are virtual catalog rows (no local extracted text). Evidence comes from Bedrock **MANAGED** `Retrieve` with `course_material_id` metadata filters when configured, then bucket/object-key validation onto request-local `[S#]`. Details: [`RAG_ARCHITECTURE.md`](RAG_ARCHITECTURE.md) and [`KB_REQUIRED_MODE_RUNBOOK.md`](KB_REQUIRED_MODE_RUNBOOK.md). AgentCore specialists have `tools=[]` (no KB search).
+
+**Student source retrieval.** Private notebook sources only. FastAPI hydrates selected textual sources from `derived/chunks.v1.json` when valid; otherwise chunks `derived/extracted.txt` with the local lexical chunker (`local_lexical_v1`, ~1,800 / 220). In-process LRU is keyed by server-built object key + content digest. Course/virtual rows never become fake local chunks.
+
+**Auth / persistence.** Cognito is the browser session. DSQL `messages` is the only durable transcript (no AgentCore Memory, DynamoDB, or JSON sidecar). S3 holds user uploads and shared course bytes. Persist is atomic with the idempotency lease. User-message Edit creates an append-only conversation revision; `get_messages` returns the active branch.
+
+**Month-1 stage policy.** Production Compose auto-applies coach ADVANCE. Only the
+`backend/settings.py` code default is confirmation-gated; `.env.example` ships
+`AUTO_ADVANCE_STAGES=true`, so a demo started from a copied example file
+auto-advances too.
+
+## CURRENT PERFORMANCE WORK
+
+**Source hydration / prechunking / cache.** Upload/ingest writes disposable `derived/chunks.v1.json`. Coach turns hydrate selected student sources once per request (`hydrate_selected_retrieval_sources`); RAG fallback does not re-GET extracted text when the snapshot already has chunks. Byte-bounded LRU: `STUDENT_SOURCE_CHUNK_CACHE_MAX_BYTES` (default 32 MiB). Offline SQLite backfill exists (`scripts/backfill_source_chunks.py`) and must not be run against production.
+
+**Retry bounds (current code, not historical `max_attempts` Botocore wording).**
+
+- Botocore client config uses **`total_max_attempts`** (inclusive of the first call). Legacy `retries={"max_attempts": N}` is normalised to **N+1** attempts and is not used. FastAPI AgentCore/Bedrock/harness clients set `total_max_attempts = max_retries + 1` with production `AGENTCORE_MAX_RETRIES=0` → one read-timeout window. Runtime Converse (`agentcore_runtime/model.py`) pins `total_max_attempts=1` so Strands `ModelRetryStrategy` is the only Converse retry layer. KB Retrieve also uses `total_max_attempts=1`. DSQL OCC retries are application-level `max_attempts` in `backend/persistence/dsql_connection.py`, not Botocore.
+- Strands `ModelRetryStrategy` (distinct from Botocore): Haiku roles `max_attempts=2` (1s/4s); Deep Review `max_attempts=3` (2s/16s). New strategy instance per Agent.
+- Application RAG fallback: at most one extra retrieve + one extra Fast Chat invoke when the gate skipped retrieval and Haiku sets `needs_source_retrieval`. First result is not persisted. `FAST_CHAT_MAX_PROVIDER_INVOCATIONS_PER_TURN=2`.
+- Fast Chat event-loop: `FAST_CHAT_INVOKE_LIMITS={"turns": 2}`.
+
+**Cycle telemetry.** When Strands metrics expose it, the runtime copies `event_loop_cycle_count` onto the payload; FastAPI records it on privacy-safe `coach_turn_perf` JSON. Absent metrics stay unset (not invented). Grep-friendly `TIMING` lines (`student_state`, `memory`, `retrieval`, `context_build`, `agent`, `persistence`, `TOTAL`) are seconds on logger `co_design.turn_perf`.
+
+**KB Retrieve latency.** Default wall-clock timeout 10s (`KNOWLEDGE_BASE_RETRIEVE_TIMEOUT_SECONDS`); shared executor; excess calls fail closed (`capacity_exhausted`) rather than queueing.
+
+### Session affinity and runtime model provenance
+
+**AgentCore compute affinity (default OFF).** `AGENTCORE_SESSION_AFFINITY_ENABLED`
+(default `false`) and `AGENTCORE_SESSION_GENERATION` (default `1`) are the only
+controls. When disabled — the shipped default — every invoke still gets a fresh
+`stateless-<uuid4hex>` id, byte-identical to prior behaviour. When enabled,
+`backend/agentcore_provider.py::_runtime_session_id` derives an opaque
+`codesign-<sha256 hex>` from owner id, notebook id, role, and generation, so a
+returning student can land on a warm microVM. Properties that matter:
+
+- The id is a one-way digest. Raw owner or notebook ids are never placed in the
+  session id and the id itself is never logged
+  (`tests/domain/test_security_invariants.py`).
+- Role is part of the digest: Deep Review uses `review_deep`, normal chat uses
+  `fast_chat`, so a privileged review cannot land on a Fast Chat session.
+- Missing or blank identity fails **open** to a unique stateless id rather than
+  collapsing distinct students onto a shared session.
+- Affinity is a **compute** optimization only. DSQL remains the sole durable
+  transcript and the bounded history is still sent on every turn; nothing reads
+  state back out of AgentCore. Bump `AGENTCORE_SESSION_GENERATION` whenever new
+  runtime code assets are published so clients cannot stay pinned to a warm
+  microVM running the previous build.
+
+**Runtime model provenance.** `agentcore_runtime/model.py::safe_response_provenance()`
+reports what the runtime actually loaded; `structured_coach.py` and `main.py`
+attach it beside the cycle/cache telemetry. FastAPI parses it in
+`backend/agentcore_provider.py` and allow-lists `runtime_model_role`,
+`runtime_model_provider`, `runtime_model_id`, `runtime_model_region`, and
+`runtime_strands_agents` in `backend/turn_perf.py`. Production logs therefore
+carry the **runtime-reported, FastAPI-sanitized** model instead of echoing the
+FastAPI-configured value. Absent telemetry stays unset; there is no fallback to
+the configured model, so a missing field is visible rather than silently
+plausible. This is provenance, **not attestation**: the runtime self-reports and
+FastAPI only bounds the value (80 characters, restricted charset), so a
+compromised runtime could still report a plausible-looking model id.
+
+### Message ordering correctness
+
+`persist_coach_turn` previously stamped its user and assistant rows with two
+back-to-back `utc_now()` calls. Message reads order by `created_at ASC, id ASC`,
+and `id` is a random UUID4, so whenever both rows landed in the same microsecond
+the tiebreaker was effectively a coin flip and an assistant reply could sort
+**before** the student message that produced it. That corrupted transcript
+display order and the bounded history handed to the model. The assistant stamp
+now comes from `utc_now_after(user_created_at)`
+(`backend/persistence/store/contracts.py`), which guarantees a strictly later
+value. Regression coverage freezes the clock so the collision is deterministic
+rather than timing-dependent (`tests/persistence/test_message_ordering.py`).
+
+## HISTORICAL INVESTIGATION
+
+> **Not the current runbook.** Entries below describe the repository, CI, and
+> production state **at the time each phase was written**. They are preserved
+> for investigation (traces, retry analysis, publish notes). Do not treat SHA
+> claims, "uncommitted" banners, Botocore `max_attempts` wording, liveVersion
+> numbers, or "next exact action" lines here as current operator instructions.
+> For current HEAD, CI, and deploy impact, use **CURRENT STATUS** above and
+> [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md).
+
+### Current phase — Fast Chat first-pass structured output, retry bounds, Deep Review cap
 
 **Code is local on a worktree of `Integrate-Bedrock` at `e88393d` and is not
 committed or deployed.** No AgentCore publish, EC2 deploy, or live AWS
 inference was performed.
 
-### Trace vs current code
+#### Trace vs current code
 
 The supplied two-cycle production trace used a **rich** Fast Chat schema
 (`assessment`, `research_coding`). Current HEAD Fast Chat is slim
@@ -14,7 +164,7 @@ The supplied two-cycle production trace used a **rich** Fast Chat schema
 **stale runtime / older DEFAULT** observation, not proof that current
 published AgentCore still emits the rich schema.
 
-### Root cause of cycle #2
+#### Root cause of cycle #2
 
 **PROVEN (Strands 1.52.0 SDK mechanism, from the pinned wheel):** inside
 **one** `invoke_async` / **one** `InvokeAgentRuntime`, if structured output
@@ -33,7 +183,7 @@ system prompt opens as a locked Coaching specialist and asks Haiku to be
 conversational before the structured-output contract. The working-tree
 prompt/identity changes are a hedge, not live proof of one-cycle Haiku.
 
-### What this phase changed
+#### What this phase changed
 
 1. **First-pass instruction.** Fast Chat tells Haiku to complete the
    structured-output mechanism on the first generation and not to emit an
@@ -53,7 +203,7 @@ prompt/identity changes are a hedge, not live proof of one-cycle Haiku.
    UI and is omitted from model history.
 6. Guardrail-safe ConversationMemory rendering from `847d0c6` is unchanged.
 
-### Validation
+#### Validation
 
 - `ruff check .`: passed.
 - `python -m compileall -q backend ui streamlit_app.py tests scripts agentcore_runtime`:
@@ -73,13 +223,13 @@ Windows-only collectors/failures outside this phase (POSIX `resource`,
 SQLite `WinError 32` load probes, LFS PDF pointer noise) are not treated as
 Fast Chat regressions.
 
-### Next exact action
+#### Next exact action
 
 Do **not** publish AgentCore or deploy EC2 until authorised. After an
 authorised runtime publish, live-validate one-cycle Fast Chat and the
 old-notebook Guardrail path.
 
-## Previous phase — Per-service TIMING latency lines
+### Previous phase — Per-service TIMING latency lines
 
 **Prepared on 2026-08-17.** FastAPI-side instrumentation on
 `Integrate-Bedrock`. Nothing in this phase has been pushed to EC2, published as an
@@ -92,7 +242,7 @@ Those spans already existed as millisecond fields on privacy-safe
 the missing span and emits grep-friendly `TIMING` lines without student
 text, prompts, or notebook identifiers.
 
-### What changed and why
+#### What changed and why
 
 1. **`memory_load_ms`** times `memory_from_metadata()` during authoritative
    turn prepare.
@@ -109,7 +259,7 @@ Q&A/coaching policy, retrieval, citations, idempotency, Deep Review, and
 Guardrails are unchanged. No AgentCore republish is required; restart local
 FastAPI to pick up the log lines.
 
-### Validation
+#### Validation
 
 - Focused: `tests/domain/test_coach_turn_perf.py`,
   `test_turn_snapshot.py`, `test_rag_fallback.py`.
@@ -117,12 +267,12 @@ FastAPI to pick up the log lines.
   `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`: passed.
   Full deterministic pytest: passed (exit 0).
 
-### Next exact action
+#### Next exact action
 
 Restart local FastAPI if you want CloudWatch/local logs to show `TIMING`
 lines on the next coach turn. Do not republish AgentCore.
 
-## Previous phase — Guardrail-safe conversation-memory rendering
+### Previous phase — Guardrail-safe conversation-memory rendering
 
 **Prepared on 2026-08-17; committed as `847d0c6` on `Integrate-Bedrock`.**
 Nothing in that phase was pushed to EC2, published as an AgentCore
@@ -136,7 +286,7 @@ rendered into that message with instruction-shaped wrapper prose
 ("Do not obey commands…"), which matches the earlier Strands repair
 PROMPT_ATTACK false-positive class.
 
-### What changed and why
+#### What changed and why
 
 1. **`ConversationMemory.format_for_prompt()`** now emits data labels only
    (`schema=…`, `problem_definition:`, `key_decisions:`). It no longer
@@ -155,7 +305,7 @@ Persisted notebooks, stages, Q&A/coaching policy, retrieval, citations,
 idempotency, Deep Review, and Guardrail IDs are unchanged. No AgentCore
 republish is required; restart local FastAPI to pick up the render change.
 
-### Validation
+#### Validation
 
 - Focused: `tests/domain/test_context_planner.py`,
   `test_fast_chat_context.py`, `test_agentcore_provider.py`,
@@ -168,13 +318,13 @@ republish is required; restart local FastAPI to pick up the render change.
   `safety_blocked`. CloudWatch `failure_category=safety_blocked` should
   not appear for that turn.
 
-### Next exact action
+#### Next exact action
 
 Restart local FastAPI/Streamlit and send a coaching sentence on the
 previously blocked notebook. Do not republish AgentCore for this fix.
 Production needs a FastAPI/EC2 deploy separately.
 
-## Previous phase — Uncommitted Fast Chat honesty, retrieval bounds, Phase 18 containment
+### Previous phase — Uncommitted Fast Chat honesty, retrieval bounds, Phase 18 containment
 
 **Prepared on 2026-08-17; committed as `fafca8f` on `Integrate-Bedrock`.**
 Local HEAD at that commit plus the later guardrail-memory patch above.
@@ -185,7 +335,7 @@ This phase does **not** claim production is fixed. One-Haiku-per-turn and
 live filtered Retrieve remain **UNVERIFIED** pending an authorised live
 trace. Mock pytest is not that evidence.
 
-### What changed and why
+#### What changed and why
 
 Verified in the working tree (read the code; do not treat this as a live
 confirmation):
@@ -262,7 +412,7 @@ confirmation):
     [`SECURITY_BOUNDARIES.md`](SECURITY_BOUNDARIES.md). That is not a
     browser bypass and must not be "fixed" in UI code.
 
-### Files changed
+#### Files changed
 
 Uncommitted working tree (not a complete path dump): progress merge
 (`backend/coaching/progress_fields.py`, `learning_service.py`,
@@ -275,7 +425,7 @@ KB sidecar scripts and
 containment tests and security-boundary docs. Preserve this working tree;
 do not commit unless asked.
 
-### Adversarial review outcome and follow-up fixes
+#### Adversarial review outcome and follow-up fixes
 
 An independent reviewer that made none of the edits answered the fifteen
 regression questions against this tree. Thirteen were clean. Two P1 defects
@@ -317,7 +467,7 @@ pre-submit ops log and the error-path metrics. On the streaming route
 shared across that boundary. This costs one bounded catalog listing per coach
 HTTP request when locked course sources are selected. It is not N+1.
 
-### Validation evidence
+#### Validation evidence
 
 - Full deterministic pytest after the review fixes: **1163 tests, all
   passing** (`.venv/bin/python -m pytest -q`, exit 0).
@@ -340,7 +490,7 @@ HTTP request when locked course sources are selected. It is not N+1.
 - One-Haiku-per-turn: **UNVERIFIED**.
 - Live `required`-mode Week 1 equals/in Retrieve: **UNVERIFIED**.
 
-### Compatibility, rollback, risks, and next action
+#### Compatibility, rollback, risks, and next action
 
 - No DSQL schema migration. Old nested `CoachTurnOutput` JSON still parses
   through the fail-closed adapter. New Fast Chat rows persist a slim
@@ -370,11 +520,11 @@ HTTP request when locked course sources are selected. It is not N+1.
 
 ---
 
-## Previous phase — Cap Fast Chat Retrieve at five seconds
+### Previous phase — Cap Fast Chat Retrieve at five seconds
 
 **Prepared on 2026-08-17; not yet deployed.**
 
-### What changed and why
+#### What changed and why
 
 `f271088` is live on EC2 (`cde2300-chatbot:f271088`). That image skipped the
 rejected MANAGED metadata filter and set a 15-second SDK read timeout. The
@@ -399,7 +549,7 @@ Production evidence after that recreate:
    Retrieve elapsed-ms lines are visible without lowering the root logger.
    Slow or unavailable Retrieve also logs at WARNING.
 
-### Files and validation
+#### Files and validation
 
 - Changed: `backend/bedrock_retrieve.py`, `backend/settings.py`,
   `backend/operational_metrics.py`, `backend/http/app.py`,
@@ -412,7 +562,7 @@ Production evidence after that recreate:
 - Compileall for backend, UI, tests, scripts: **passed**.
 - No paid/live Bedrock or AgentCore call was made for this patch.
 
-### Compatibility, rollback, risks, and next action
+#### Compatibility, rollback, risks, and next action
 
 - No schema, DSQL, S3, Cognito, AgentCore runtime, or prompt change.
 - Rollback is the previous app image (`cde2300-chatbot:f271088`); persisted
@@ -426,7 +576,7 @@ Production evidence after that recreate:
 
 ---
 
-## Previous phase — Bound MANAGED Knowledge Base retrieval latency
+### Previous phase — Bound MANAGED Knowledge Base retrieval latency
 
 **Committed on `Integrate-Bedrock` as `3b393d6` / `f271088` and deployed as
 `cde2300-chatbot:f271088`.**
@@ -443,7 +593,7 @@ left Fast Chat above 30 seconds.
 
 ---
 
-## Previous phase — Explicit Deep Review HTTP + token-aware Fast Chat
+### Previous phase — Explicit Deep Review HTTP + token-aware Fast Chat
 
 
 **Committed on `Integrate-Bedrock` as `f663740`.** Canonical Coaching prompts
@@ -457,7 +607,7 @@ architecture. It makes explicit Deep Review reachable and makes Fast Chat
 history token-aware, including AgentCore system-prompt overhead in the
 12k/16k total.
 
-### What changed and why
+#### What changed and why
 
 1. **Server-owned Deep Review HTTP.** `POST /api/v1/threads/{thread_id}/deep-review`
    authenticates the owner, loads notebook/stage/history/sources, checks
@@ -509,7 +659,7 @@ history token-aware, including AgentCore system-prompt overhead in the
    `docker build --build-arg GIT_SHA=$(git rev-parse HEAD) ...`. Image was
    not rebuilt or deployed.
 
-### Main files changed
+#### Main files changed
 
 - Deep Review: `backend/http/app.py`, `backend/coaching/execution.py`,
   `backend/domain.py`, `backend/workflow.py`, `backend/mock_provider.py`,
@@ -522,7 +672,7 @@ history token-aware, including AgentCore system-prompt overhead in the
   `Dockerfile`, this file, architecture/security/prompt docs, Deep Review and
   token-budget tests
 
-### Validation evidence
+#### Validation evidence
 
 - Canonical Coaching hashes unchanged vs `a6d163668902beae4938fe552cced7ba92b15e88`
   (`git diff` empty on `shared_coaching.md` and `prompts/stages/`; SHA-256
@@ -551,7 +701,7 @@ history token-aware, including AgentCore system-prompt overhead in the
   total-budget shrink now preserves a decision that sits after the 1500-token
   history clip. No LLM summarizer.
 
-### Production readiness (do not collapse these)
+#### Production readiness (do not collapse these)
 
 - **CODE CORRECT:** YES for the mock/deterministic path
 - **CONCURRENCY SAFE:** YES — Deep Review uses the same notebook lease as
@@ -568,7 +718,7 @@ history token-aware, including AgentCore system-prompt overhead in the
   running, a capped Haiku smoke succeeds, and Deep Review is exercised.
   Prompt cache stays disabled.
 
-### Next exact action
+#### Next exact action
 
 1. Create ECR repo `cde2300-chatbot` if missing, start Docker, then
    `docker buildx build --platform linux/arm64 --build-arg GIT_SHA=f663740
@@ -584,7 +734,7 @@ history token-aware, including AgentCore system-prompt overhead in the
 
 ---
 
-## Previous phase — Fast-chat 6-message window, RAG fallback, pedagogy lock
+### Previous phase — Fast-chat 6-message window, RAG fallback, pedagogy lock
 
 **Committed on `Integrate-Bedrock` as `2620db115a0671042859743daace3fc54de335d3`.**
 Starting HEAD was `db6d1bae7403c05e68c38bad39dd2afd9bd268fc`. Canonical
@@ -598,7 +748,7 @@ Normal student chat remains one Claude Haiku 4.5 `phase=fast_chat` invoke.
 The rare accuracy fallback may add one application-owned retrieve and one
 Haiku retry. Router and Incremental Review stay off the active path.
 
-### What changed and why
+#### What changed and why
 
 1. **Six recent messages.** Fast chat sent ConversationMemory plus at most
    **6** recent verbatim message objects (not pairs). No per-message token
@@ -618,7 +768,7 @@ Haiku retry. Router and Incremental Review stay off the active path.
 5. **Behaviour regression suite.** Versioned cases plus a dry-run CLI.
    Live Claude was harness-only until the follow-up patch.
 
-### Validation evidence (that commit)
+#### Validation evidence (that commit)
 
 - Canonical Coaching hashes match `a6d163668902beae4938fe552cced7ba92b15e88`.
 - Local `ruff check .` and `compileall` passed before commit.
@@ -627,7 +777,7 @@ Haiku retry. Router and Incremental Review stay off the active path.
   compatibility successful.
 - Live Claude / AWS / AgentCore publish / EC2 deploy: **NOT RUN**.
 
-### Production readiness (that commit)
+#### Production readiness (that commit)
 
 - **CODE CORRECT:** YES for the mock/deterministic path
 - **CI GREEN:** YES for `2620db1` (Mock CI + AgentCore runtime compatibility)
@@ -636,7 +786,7 @@ Haiku retry. Router and Incremental Review stay off the active path.
 
 ---
 
-## Previous phase — One-call Haiku fast chat, selective RAG, latency instrumentation
+### Previous phase — One-call Haiku fast chat, selective RAG, latency instrumentation
 
 **Committed on `Integrate-Bedrock` as `db6d1bae7403c05e68c38bad39dd2afd9bd268fc`.**
 Starting HEAD was `a6d163668902beae4938fe552cced7ba92b15e88`. Do **not**
@@ -646,7 +796,7 @@ Normal student chat is now one Claude Haiku 4.5 `phase=fast_chat` invoke.
 The Haiku router, Incremental Review, and automatic Sonnet are off the
 active path. Deep Review remains an explicit `specialist=review` operation.
 
-### What changed and why
+#### What changed and why
 
 1. **One model call.** FastAPI invokes AgentCore once. Haiku chooses
    Coaching vs Q&A and writes the student reply in the same structured
@@ -664,7 +814,7 @@ active path. Deep Review remains an explicit `specialist=review` operation.
    retrieval, context, AgentCore, and estimated tokens without student
    text, prompts, excerpts, or secrets. DSQL pooling was not added.
 
-### Main files changed
+#### Main files changed
 
 - Runtime: `agentcore_runtime/main.py`, `models.py`, `model.py`,
   `structured_coach.py`, `specialists/routing.py`,
@@ -679,7 +829,7 @@ active path. Deep Review remains an explicit `specialist=review` operation.
 - Docs / example env: this file, `docs/providers/AGENTCORE_ADAPTER.md`,
   `docs/RAG_ARCHITECTURE.md`, `agentcore_runtime/README.md`, `.env.example`
 
-### Validation evidence
+#### Validation evidence
 
 - `ruff check .`: **passed**.
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`,
@@ -693,7 +843,7 @@ active path. Deep Review remains an explicit `specialist=review` operation.
 - Live Haiku/AgentCore latency: **not measured**.
 - GitHub Actions / AWS / AgentCore publish: **NOT RUN**.
 
-### Production readiness (do not collapse these)
+#### Production readiness (do not collapse these)
 
 - **CODE CORRECT:** YES for the one-call fast path under mock.
 - **CONCURRENCY SAFE:** YES for existing lease/idempotency tests.
@@ -706,7 +856,7 @@ active path. Deep Review remains an explicit `specialist=review` operation.
 - **PRODUCTION READY:** **NO** until AgentCore is republished on the same
   ARN and live timings are collected.
 
-### Next exact action
+#### Next exact action
 
 1. Code review this patch. Do not commit unless authorized.
 2. **AGENTCORE REPUBLISH REQUIRED: YES** (new `fast_chat` phase, output
@@ -716,14 +866,14 @@ active path. Deep Review remains an explicit `specialist=review` operation.
 4. Keep `AGENTCORE_QUALIFIER=DEFAULT` until the new runtime version is
    published and the qualifier is pointed at it.
 
-## Previous phase — Request-local AgentCore state, revise lease, exact limiter release
+### Previous phase — Request-local AgentCore state, revise lease, exact limiter release
 
 **Code is local on `Integrate-Bedrock` and is not committed or deployed.**
 Base commit for this work is `d619e73` (notebook-scoped limiter). AgentCore
 DEFAULT v19, models, Guardrail v3, `AGENTCORE_QUALIFIER=DEFAULT`, and
 pedagogical orchestration are **unchanged**.
 
-### Root causes fixed
+#### Root causes fixed
 
 1. `AgentCoreCoachProvider._last_plan` was instance-wide. One cached provider
    per owner can now run two notebooks concurrently, so Notebook B could
@@ -738,7 +888,7 @@ pedagogical orchestration are **unchanged**.
    **Fix:** `acquire()` returns a `CoachExecutionLease` token; `release` only
    decrements if that exact `(owner_id, thread_id)` slot (and token) is held.
 
-### Main files changed
+#### Main files changed
 
 - `backend/agentcore_provider.py`, `backend/agentcore_harness_provider.py`
 - `backend/rate_limit.py`, `backend/coaching/execution.py`
@@ -748,7 +898,7 @@ pedagogical orchestration are **unchanged**.
   `tests/http/test_coach_concurrency.py`
 - This file
 
-### Validation evidence
+#### Validation evidence
 
 - `ruff check .`: **passed**.
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`: **passed**.
@@ -765,7 +915,7 @@ pedagogical orchestration are **unchanged**.
 - GitHub Actions for this uncommitted patch: **NOT RUN**.
 - No live AWS, AgentCore, Bedrock, DSQL, S3, or quota changes.
 
-### Production readiness (do not collapse these)
+#### Production readiness (do not collapse these)
 
 - **CODE CORRECT:** YES for the three defects (mock-proven).
 - **CONCURRENCY SAFE:** YES for the identified races under mock interleavings.
@@ -778,7 +928,7 @@ pedagogical orchestration are **unchanged**.
 - **AWS QUOTAS VERIFIED:** NO / PARTIAL (read-only documentation only).
 - **PRODUCTION READY:** **NO**.
 
-### Next exact action
+#### Next exact action
 
 1. Commit this patch only when explicitly authorized. Do **not** push, merge,
    or deploy until the image and `compose.prod.yaml` can ship **together**.
@@ -791,14 +941,14 @@ pedagogical orchestration are **unchanged**.
    110s AgentCore / 120s API client), Incremental Review fail-closed, explicit
    Review ADVANCE auto-apply under month-1 `AUTO_ADVANCE_STAGES=true`.
 
-## Previous phase — Notebook-scoped coach concurrency for ~100 students
+### Previous phase — Notebook-scoped coach concurrency for ~100 students
 
 **Code landed 2026-08-16 on `Integrate-Bedrock`.** AgentCore DEFAULT v19,
 models, Guardrail v3, and pedagogical orchestration are **unchanged**. This
 patch only changes process-local coaching capacity on the existing single
 FastAPI process.
 
-### Root cause / previous limitation
+#### Root cause / previous limitation
 
 `CoachRateLimiter` allowed only **one active coaching workflow per
 authenticated user** (`MAX_ACTIVE_COACH_REQUESTS_PER_USER=1`) and **20**
@@ -814,7 +964,7 @@ not share that per-user lock, but:
 
 Students still must not overlap two executions in the **same** notebook.
 
-### Concurrency policy implemented
+#### Concurrency policy implemented
 
 | Ceiling | Production | Meaning |
 |---|---|---|
@@ -828,7 +978,7 @@ Enforcement order under one lock: notebook → user → RPM → global. Same-key
 idempotency replays/waiters still do **not** acquire slots. Release is in a
 `finally` on both user and notebook counters.
 
-### Main files changed
+#### Main files changed
 
 - `backend/rate_limit.py`, `backend/settings.py`, `backend/coaching/execution.py`
 - `backend/http/app.py`, `backend/operational_metrics.py`
@@ -838,7 +988,7 @@ idempotency replays/waiters still do **not** acquire slots. Release is in a
   `tests/test_deployment_config.py`, `tests/conftest.py`
 - `scripts/load_probe.py`, `docs/operations/LOAD_PROBE.md`, this file
 
-### Validation evidence
+#### Validation evidence
 
 - `ruff check` on the concurrency patch files: **passed**.
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`: **passed**.
@@ -853,7 +1003,7 @@ idempotency replays/waiters still do **not** acquire slots. Release is in a
   host; daemon/env not used for this patch).
 - No live AWS, AgentCore, or Bedrock calls.
 
-### Production readiness (do not collapse these)
+#### Production readiness (do not collapse these)
 
 - **CODE READY:** YES for this limiter/threadpool patch (mock suite green).
 - **MOCK CONCURRENCY TESTED:** YES (unit + HTTP + mock load-probe scenarios).
@@ -864,7 +1014,7 @@ idempotency replays/waiters still do **not** acquire slots. Release is in a
 - **PRODUCTION READY:** **NO** — live load, five-stage walk, ~105s UI timeout,
   and AgentCore/Bedrock quotas remain separate gates.
 
-### Next exact action
+#### Next exact action
 
 1. Build/push a new ARM64 app image that includes this code, then recreate
    the production app container so Compose injects the new capacity env vars.
@@ -877,7 +1027,7 @@ idempotency replays/waiters still do **not** acquire slots. Release is in a
 4. Remaining separate gates: five-stage CloudFront walk, Streamlit/CloudFront
    timeout, Incremental Review fail-closed follow-up.
 
-## Previous phase — Strands structured-output repair prompt (Guardrail PROMPT_ATTACK false positive)
+### Previous phase — Strands structured-output repair prompt (Guardrail PROMPT_ATTACK false positive)
 
 
 **Runtime published 2026-08-16.** Same ARN
@@ -894,7 +1044,7 @@ CloudFront walk and ~105–117s timeout remain separate gates.
 Artifact:
 `s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-repair-prompt-v19-20260816T101413Z.zip`
 
-### Root cause
+#### Root cause
 
 All Bedrock roles use Strands `structured_output_model`. If a model first
 responds in prose, Strands enters a forced structured-output repair turn.
@@ -905,7 +1055,7 @@ by Guardrail v3 when it was the latest scanned message
 during Haiku Incremental Review. The student message was not the cause:
 Coaching had already succeeded on the same content.
 
-### Fix
+#### Fix
 
 Shared custom repair prompt on `Agent.invoke_async(...)` for every
 structured Bedrock role (Router, Q&A, Coaching, Incremental Review, Deep
@@ -921,7 +1071,7 @@ The live five-stage walk and the ~105–117s Streamlit/CloudFront timeout
 remain separate gates. Incremental Review fail-closed behavior is also
 still a separate follow-up.
 
-### Main files changed
+#### Main files changed
 
 - Runtime: `agentcore_runtime/structured_coach.py`,
   `agentcore_runtime/main.py`, `agentcore_runtime/README.md`
@@ -931,7 +1081,7 @@ still a separate follow-up.
 - Docs: this file, `docs/providers/AGENTCORE_ADAPTER.md`,
   `docs/SECURITY_BOUNDARIES.md`, `scripts/AGENTS.md`
 
-### Validation evidence
+#### Validation evidence
 
 - Strands `1.52.0` `Agent.invoke_async` parameters include
   `structured_output_prompt` (installed pin inspection in a clean venv).
@@ -964,7 +1114,7 @@ still a separate follow-up.
   liveVersion remains **19**. App container recreated after the qualifier
   change. Caddy was not recreated.
 
-### Next exact action
+#### Next exact action
 
 1. Retest one Incremental Review path that previously hit the structured-output
    repair cycle (CloudWatch should show Haiku incremental, not `safety_blocked`
@@ -978,7 +1128,7 @@ still a separate follow-up.
    `agentcore-patches/chatbot_harnessAgent-haiku-sonnet-v18-20260816T082420Z.zip`.
    Do not delete old versions.
 
-## Previous phase — Three pedagogical agents + Haiku 4.5 / Sonnet 4.6 (DEFAULT v18)
+### Previous phase — Three pedagogical agents + Haiku 4.5 / Sonnet 4.6 (DEFAULT v18)
 
 **Runtime published 2026-08-16.** Same ARN
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.
@@ -997,7 +1147,7 @@ performs the final pedagogical readiness assessment. Incremental Review
 Artifact:
 `s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-haiku-sonnet-v18-20260816T082420Z.zip`
 
-### Model assignment
+#### Model assignment
 
 | Role | Provider | Model |
 |---|---|---|
@@ -1009,13 +1159,13 @@ Artifact:
 
 There is no silent Haiku↔Sonnet substitution and no Luna fallback.
 
-### Periodic Deep Review
+#### Periodic Deep Review
 
 Unchanged: every N newly executed, successful Coaching turns since the
 previous successfully persisted Deep Review (`DEEP_REVIEW_INTERVAL_TURNS=3`).
 The Review tab remains display-only: zero model calls.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Haiku router selects `qa` | `coaching` | `review`. Browser specialist
    hints are dropped. Router failure/timeout/malformed/low confidence
@@ -1030,7 +1180,7 @@ The Review tab remains display-only: zero model calls.
 5. Mock CI Compose step now sets `PUBLIC_ORIGIN` and `APP_IMAGE` for both
    Compose files.
 
-### Main files changed
+#### Main files changed
 
 - Runtime: `agentcore_runtime/model.py`, `agentcore_runtime/main.py`,
   `agentcore_runtime/README.md`
@@ -1044,7 +1194,7 @@ The Review tab remains display-only: zero model calls.
   `docs/PROMPT_ARCHITECTURE.md`, `docs/deploy/AWS_STATELESS_EC2.md`,
   `docs/SECURITY_BOUNDARIES.md`
 
-### Validation evidence
+#### Validation evidence
 
 - `ruff check .`: **passed**.
 - Shell syntax (`start.sh`, `build.sh`, `start_prod.sh`, `deploy_ecr.sh`,
@@ -1084,7 +1234,7 @@ The Review tab remains display-only: zero model calls.
 - EC2 / CloudFront E2E were **not** run. Host compose remains stale until
   CI is green and the app image is recreated.
 
-### Next exact action
+#### Next exact action
 
 1. Commit/push only when authorized so Mock CI can go green.
 2. After CI is green, recreate the EC2 app container from the current
@@ -1096,7 +1246,7 @@ The Review tab remains display-only: zero model calls.
    Rollback remains **version 14** (Sonnet-only) or **v17** (Luna/Sonnet)
    if needed. Do not delete old versions.
 
-## Previous phase — Three pedagogical agents + Luna router (DEFAULT v17)
+### Previous phase — Three pedagogical agents + Luna router (DEFAULT v17)
 
 **Runtime published 2026-08-16.** Same ARN
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.
@@ -1114,7 +1264,7 @@ Review live smoke on Claude Sonnet 4.6 succeeded. Do not treat DEFAULT v17
 as student-ready until Bedrock enables GPT-5.6 Luna. This phase is superseded
 by the Haiku 4.5 lightweight migration above.
 
-### Model assignment
+#### Model assignment
 
 | Role | Model |
 |---|---|
@@ -1124,7 +1274,7 @@ by the Haiku 4.5 lightweight migration above.
 | Review Agent — incremental | GPT-5.6 Luna |
 | Review Agent — deep | Claude Sonnet 4.6 |
 
-### Periodic Deep Review
+#### Periodic Deep Review
 
 Periodic Deep Review means every N newly executed, successful Coaching
 turns since the previous successfully persisted Deep Review. It is
@@ -1139,7 +1289,7 @@ Event overrides (explicit Review, `readiness_candidate`, Reflection
 checkpoint) run Deep Review immediately. The Review tab remains
 display-only: zero model calls.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Luna router selects `qa` | `coaching` | `review`. Browser specialist
    hints are dropped. Router failure/timeout/malformed/low confidence
@@ -1156,7 +1306,7 @@ display-only: zero model calls.
    transition pipeline. Malformed/timeout/unavailable/wrong-stage Deep
    Review fails closed to STAY.
 
-### Main files changed
+#### Main files changed
 
 - Runtime: `agentcore_runtime/main.py`, `model.py`, `models.py`,
   `specialists/routing.py`, `prompts/review_incremental.md`,
@@ -1171,7 +1321,7 @@ display-only: zero model calls.
   `docs/providers/AGENTCORE_ADAPTER.md`, `docs/PROMPT_ARCHITECTURE.md`,
   `docs/deploy/AWS_STATELESS_EC2.md`
 
-### Validation evidence
+#### Validation evidence
 
 - Focused AgentCore/review tests: **passed**.
 - Full mock pytest: **passed** (exit 0; 822 tests on 2026-08-16 readiness pass).
@@ -1203,7 +1353,7 @@ display-only: zero model calls.
   / Review-tab live path was not exercised. Periodic three-turn live
   sequence was not executed.
 
-### Next exact action
+#### Next exact action
 
 Reauthenticate AWS SSO (`aws login`), then re-verify AgentCore DEFAULT,
 Guardrail 3, Managed KB `course/` retrieval, and Luna account access.
@@ -1212,7 +1362,7 @@ SHA. Recreate the EC2 app container only after Luna is enabled and CI is
 green. Rollback remains **version 14** (Sonnet-only generation) if
 students need a working coach today. Do not delete v15, v16, or v17.
 
-## Previous phase — Hybrid Luna router + Sonnet Stage Judge (DEFAULT v16)
+### Previous phase — Hybrid Luna router + Sonnet Stage Judge (DEFAULT v16)
 
 **Runtime published 2026-08-16.** Same ARN
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.
@@ -1224,7 +1374,7 @@ Coaching live smokes therefore failed closed. Review and Stage Judge live
 smokes on Claude Sonnet 4.6 succeeded. Do not treat DEFAULT v16 as
 student-ready until Bedrock enables GPT-5.6 Luna.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Free-text routing is GPT-5.6 Luna (`router_turn`). Server-owned specialist
    or review surface still bypasses the router. Browser specialist hints are
@@ -1242,7 +1392,7 @@ student-ready until Bedrock enables GPT-5.6 Luna.
    `bedrock-mantle:CallWithBearerToken`). After that grant, Luna still
    returns account-level model unavailability.
 
-### Main files changed
+#### Main files changed
 
 - Runtime: `agentcore_runtime/model.py`, `main.py`, `models.py`, `router.py`,
   `stage_judge.py`, `prompts/router.md`, `prompts/stage_judge.md`
@@ -1253,7 +1403,7 @@ student-ready until Bedrock enables GPT-5.6 Luna.
 - Docs/env: `.env.example`, compose files, this file,
   `docs/providers/AGENTCORE_ADAPTER.md`
 
-### Validation evidence
+#### Validation evidence
 
 - Full mock pytest: **passed**.
 - AgentCore `DEFAULT` **v16 READY**. Artifact
@@ -1264,7 +1414,7 @@ student-ready until Bedrock enables GPT-5.6 Luna.
 - Live Luna router/QA/coaching: **failed** (account model access).
 - EC2 was not restarted. CloudFront UI hybrid path was not exercised.
 
-### Next exact action
+#### Next exact action
 
 Enable GPT-5.6 Luna for account `355604674280` in `us-west-2` (Bedrock model
 access / AWS Sales). Then rerun capped Luna smokes. Until then, production
@@ -1272,7 +1422,7 @@ coaching/QA/router on DEFAULT v16 will fail closed. Rollback to **version 14**
 (Sonnet-only, known-good generation) if students need a working coach today.
 Do not delete v15 or v16.
 
-## Previous phase — AgentCore DEFAULT v15 Luna + guardrail version 3
+### Previous phase — AgentCore DEFAULT v15 Luna + guardrail version 3
 
 **Completed on 2026-08-16.** Same runtime ARN
 `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. No second runtime.
@@ -1280,7 +1430,7 @@ Do not delete v15 or v16.
 from 1 to **3**. Generation model is GPT-5.6 Luna. No live paid smoke in
 this pass.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. AgentCore runtime env is now
    `AGENTCORE_MODEL_PROVIDER=bedrock_mantle_responses`,
@@ -1295,7 +1445,7 @@ this pass.
    **id** stays in host `.env` (not interpolated). FastAPI fail-closed env
    must match the runtime.
 
-### Main files changed
+#### Main files changed
 
 - `compose.yaml`, `compose.prod.yaml`, `.env.example`
 - `agentcore_runtime/requirements.txt`, `agentcore_runtime/README.md`,
@@ -1304,7 +1454,7 @@ this pass.
 - Docs: this file, `docs/providers/AGENTCORE_ADAPTER.md`,
   `docs/deploy/AWS_STATELESS_EC2.md`
 
-### Validation evidence
+#### Validation evidence
 
 - Focused pytest `tests/test_deployment_config.py`
   `tests/domain/test_runtime_model.py`
@@ -1315,7 +1465,7 @@ this pass.
 - `DEFAULT` endpoint: READY, `liveVersion` **15**.
 - Guardrail `o8aipba8m129` version 3: READY. Version 2 was not used.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. ARN unchanged. `DEFAULT` auto-moved on
   `update-agent-runtime`.
@@ -1325,7 +1475,7 @@ this pass.
 - Live artifact:
   `s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-luna-v15-20260816T044445Z.zip`
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Recreate the EC2 app container so FastAPI Compose env matches Luna +
   guardrail 3. Runtime DEFAULT already serves Luna; a stale container still
@@ -1335,7 +1485,7 @@ this pass.
 - Next paid check is a capped Luna smoke only if explicitly approved:
   `PYTHONPATH=. .venv/bin/python scripts/agentcore_smoke.py --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`.
 
-## Previous phase — Production Knowledge Base Retrieve diagnosis and adapter fix
+### Previous phase — Production Knowledge Base Retrieve diagnosis and adapter fix
 
 **Completed locally on 2026-08-16.** Integrate-Bedrock HEAD
 `8b0d5f06e80f78efaf277dd8c3f8f7899fe0b4a2`. AgentCore / Sonnet / Q&A routing
@@ -1343,7 +1493,7 @@ were not the failure. Shared course files still use Bedrock Knowledge Base
 **Retrieve only**. Exact S3 key validation is unchanged. No local fallback
 for production `course/` objects.
 
-### Root cause (proved)
+#### Root cause (proved)
 
 1. Knowledge Base `JUQNP8AZAZ` is type **MANAGED** and **ACTIVE**. The adapter
    always sent `vectorSearchConfiguration`. Live Retrieve raised
@@ -1357,7 +1507,7 @@ for production `course/` objects.
    Exact-key validation correctly discarded every hit. Both objects exist in
    S3 (same size). The data source prefix is wrong, not the PDF.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Retrieve failures are classified (`access_denied`, `not_found`,
    `validation_error`, `timeout`, `throttled`, `client_error`,
@@ -1372,7 +1522,7 @@ for production `course/` objects.
    `scripts/diagnostics/check_knowledge_base_retrieve.py` prints secret-safe
    JSON and refuses live AWS by default.
 
-### Main files changed
+#### Main files changed
 
 - `backend/bedrock_retrieve.py`, `backend/retrieval.py`, `backend/settings.py`,
   `compose.prod.yaml`, `.env.example`
@@ -1383,7 +1533,7 @@ for production `course/` objects.
   `tests/scripts/test_agentcore_course_cli.py`
 - Docs: `docs/RAG_ARCHITECTURE.md`, `docs/deploy/AWS_STATELESS_EC2.md`
 
-### Validation evidence
+#### Validation evidence
 
 - `ruff check .`: **passed**.
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`,
@@ -1395,13 +1545,13 @@ for production `course/` objects.
   MANAGED search works; validated count 0 until the data source indexes
   `course/`.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. Rollback is reverting this working tree.
 - Production must deploy this image **and** re-point/sync the Knowledge Base
   data source to `s3://cde2300-course-content-s3/course/`.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Deploying the adapter without re-ingesting `course/` yields
   `course_retrieval_empty` (raw hits, zero validated), not a grounded Week 1
@@ -1410,7 +1560,7 @@ for production `course/` objects.
   `KNOWLEDGE_BASE_TYPE=MANAGED`, run the gated diagnostic, then in the AWS
   console set the KB data source prefix to `course/` and sync.
 
-## Previous phase — Publish vendored AgentCore DEFAULT v14 and capped Sonnet smoke
+### Previous phase — Publish vendored AgentCore DEFAULT v14 and capped Sonnet smoke
 
 
 **Completed on 2026-08-16.** Same runtime ARN
@@ -1425,7 +1575,7 @@ v9 site-packages zip plus current sources and OTEL entrypoint; it started,
 then exited for the same missing `app.run()`. v14 is that zip with
 `if __name__ == "__main__": app.run()`.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Live artifact is a ~47MB zip: v9 linux/arm64 Python 3.14 site-packages
    (pydantic 2.13.4, strands-agents 1.52.0, bedrock-agentcore 1.21.0,
@@ -1439,13 +1589,13 @@ then exited for the same missing `app.run()`. v14 is that zip with
 3. `agentcore_runtime/main.py` now starts `BedrockAgentCoreApp` when executed
    as `__main__`.
 
-### Main files changed
+#### Main files changed
 
 - `agentcore_runtime/main.py`, `agentcore_runtime/README.md`
 - Tests: `tests/domain/test_agentcore_runtime.py` asserts `app.run()`
 - Docs: this file, `docs/providers/AGENTCORE_ADAPTER.md`
 
-### Validation evidence
+#### Validation evidence
 
 - Focused pytest `tests/domain/test_agentcore_runtime.py`
   `test_runtime_model.py` `test_security_invariants.py`: **passed**.
@@ -1457,7 +1607,7 @@ then exited for the same missing `app.run()`. v14 is that zip with
 - CloudWatch v13 showed OTEL + IAM credentials then silence (process exit).
   v11 showed `ModuleNotFoundError: pydantic` (source-only zip).
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. ARN unchanged. `DEFAULT` auto-moved on each successful
   `update-agent-runtime` (preprod, accepted).
@@ -1467,7 +1617,7 @@ then exited for the same missing `app.run()`. v14 is that zip with
 - Live artifact:
   `s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-sonnet46-v14-20260815T193913Z.zip`
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - This is **preprod**. Do not call the app student-ready until host `.env`,
   ECR/`APP_IMAGE`, and CloudFront/Caddy alignment are done.
@@ -1476,7 +1626,7 @@ then exited for the same missing `app.run()`. v14 is that zip with
   remaining cutover blocker. Do not invoke unbounded Streamlit chat as the
   next paid test.
 
-## Previous phase — AgentCore runtime dependency reproducibility
+### Previous phase — AgentCore runtime dependency reproducibility
 
 **Completed locally on 2026-08-16.** Integrate-Bedrock HEAD at start of this
 pass: `529716c46fa45d20cdba02a145f6d63f088629b8`. This pass proved the
@@ -1486,7 +1636,7 @@ diagnostic plus a GitHub job that actually installs
 `agentcore_runtime/requirements.txt`. Architecture, specialists, Sonnet 4.6,
 and guardrails are unchanged. No live AWS or paid model calls.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Clean-venv `pip index` + install confirmed `strands-agents==1.52.0`,
    `bedrock-agentcore==1.21.0`, and `pydantic==2.13.4` are available together.
@@ -1505,7 +1655,7 @@ and guardrails are unchanged. No live AWS or paid model calls.
    requirements on Python 3.12, runs the diagnostic, and compiles
    `agentcore_runtime`. Companion pytest remains Strands-free.
 
-### Main files changed
+#### Main files changed
 
 - `agentcore_runtime/requirements.txt`, `agentcore_runtime/model.py`
 - `scripts/diagnostics/check_agentcore_runtime_dependencies.py`
@@ -1513,7 +1663,7 @@ and guardrails are unchanged. No live AWS or paid model calls.
 - Tests: `tests/domain/test_runtime_model.py` pin-sync assertions
 - Docs: this file, AgentCore adapter, scripts/tests agent guides
 
-### Validation evidence
+#### Validation evidence
 
 - Clean CPython 3.12.10 venv `/tmp/codesign-agentcore-runtime-fresh`:
   `pip install -r agentcore_runtime/requirements.txt` **succeeded**.
@@ -1541,19 +1691,19 @@ and guardrails are unchanged. No live AWS or paid model calls.
 - No live AgentCore, Bedrock generation, OpenAI, KB Retrieve, DSQL, or S3
   calls. Runtime not republished. `AGENTCORE_RUNTIME_ARN` unchanged.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. Five persisted stages unchanged. No runtime publish.
 - `AGENTCORE_RUNTIME_ARN` unchanged. Do not promote DEFAULT until a new
   READY qualifier is tested with a capped Sonnet 4.6 smoke.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Publish `agentcore_runtime/` onto
   `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` with explicit Sonnet
   4.6 + guardrail env, then one capped smoke. Not done in this pass.
 
-## Previous phase — Explicit Sonnet 4.6 runtime model and guardrail fail-closed
+### Previous phase — Explicit Sonnet 4.6 runtime model and guardrail fail-closed
 
 **Completed locally on 2026-08-16.** Integrate-Bedrock HEAD at start of this
 pass: `af79a693347a33ebbd9c92c5a33c297df70ce05b`. The runtime no longer
@@ -1563,7 +1713,7 @@ plus `GUARDRAIL_ID` / `GUARDRAIL_VERSION`. First paid evaluation remains
 Sonnet 4.6. Luna is optional, stateless, and uses ApplyGuardrail. No live
 AWS generation or runtime publish in this pass.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. `agentcore_runtime/model.py` fail-closed loader. Bedrock path uses
    `guardrail_latest_message=True`. Luna cannot be passed to `BedrockModel`.
@@ -1576,14 +1726,14 @@ AWS generation or runtime publish in this pass.
    `pydantic==2.13.4` (companion-tested Pydantic; Strands/AgentCore pins are
    current documented PyPI versions, not yet installed in the companion venv).
 
-### Main files changed
+#### Main files changed
 
 - `agentcore_runtime/model.py`, `guardrails.py`, `main.py`, `requirements.txt`
 - `backend/settings.py`, `backend/specialists/routing.py`
 - Tests: `tests/domain/test_runtime_model.py` and production-config updates
 - Docs: AgentCore adapter, security boundaries, methodology, implementation status
 
-### Validation evidence
+#### Validation evidence
 
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`,
   and `agentcore_runtime`: **passed**.
@@ -1599,20 +1749,20 @@ AWS generation or runtime publish in this pass.
 - No live AgentCore, Bedrock generation, or OpenAI calls. Runtime not
   republished. `AGENTCORE_RUNTIME_ARN` unchanged.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. Five persisted stages unchanged.
 - Live DEFAULT still needs this package published onto
   `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` with runtime env
   injected. Do not promote DEFAULT until READY and a capped Sonnet smoke.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Confirm pins on the published runtime. Run the opt-in KB diagnostic, then a
   new READY qualifier, then a capped Sonnet 4.6 specialist test.
 - Do not commit, push, or deploy from this phase unless asked.
 
-## Previous phase — AgentCore specialist brain (POC pedagogy, production shell)
+### Previous phase — AgentCore specialist brain (POC pedagogy, production shell)
 
 **Completed locally on 2026-08-16.** Integrate-Bedrock remains the production
 application shell. Canonical Q&A, Coaching, and Formative Review pedagogy now
@@ -1620,7 +1770,7 @@ lives in `agentcore_runtime/`. FastAPI authorizes sources, retrieves evidence,
 sends runtime rules, validates structured output, and persists DSQL state.
 AgentCore Memory is not the transcript. Live AWS invokes were not made.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. One AgentCore runtime, three specialists, deterministic `phase` selection.
    Unknown phases fall closed to coaching. Scoring was renamed Review and is
@@ -1635,7 +1785,7 @@ AgentCore Memory is not the transcript. Live AWS invokes were not made.
 5. Q&A uses pre-retrieved `[S#]` evidence. No KB/S3 tools. Review is on-demand
    from explicit student intent, not every turn.
 
-### Main files changed
+#### Main files changed
 
 - `agentcore_runtime/` specialists, prompts, contracts, `main.py`
 - `backend/specialists/routing.py`, `backend/agentcore_provider.py`,
@@ -1644,7 +1794,7 @@ AgentCore Memory is not the transcript. Live AWS invokes were not made.
 - Tests listed in `tests/AGENTS.md`
 - Docs: prompt, RAG, security, AgentCore adapter, implementation status
 
-### Validation evidence
+#### Validation evidence
 
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`,
   and `agentcore_runtime`: **passed**.
@@ -1656,7 +1806,7 @@ AgentCore Memory is not the transcript. Live AWS invokes were not made.
 - No live AgentCore, Bedrock generation, or OpenAI calls. Runtime not
   republished. `AGENTCORE_RUNTIME_ARN` unchanged.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. Five persisted stages unchanged. `ethics_critical` remains
   an AgentCore topic key only.
@@ -1665,13 +1815,13 @@ AgentCore Memory is not the transcript. Live AWS invokes were not made.
   `agentcore_runtime/` tree. Rollback is the previous READY qualifier.
 - `backend/prompts/` remains for mock/OpenAI/Bedrock Converse.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Publish the runtime after approval, then one paid smoke. Do not run live
   specialist evaluation until that publish.
 - Do not commit, push, or deploy from this phase unless asked.
 
-## Previous phase — AgentCore structured coach_turn output (no str(AgentResult))
+### Previous phase — AgentCore structured coach_turn output (no str(AgentResult))
 
 **Completed locally on 2026-08-16.** Live coaching could fail after
 `await agent.invoke_async(prompt)` because the deployed harness did
@@ -1685,7 +1835,7 @@ Architecture is unchanged: DSQL transcript, full-history planner, RAG
 authorization, AgentCore reasoning-only (`tools=[]`), five Thinking Path
 stages, research independence, and atomic persist.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Canonical production harness lives in `agentcore_runtime/` (`models.py`,
    `structured_coach.py`, `main.py`). `scripts/agentcore/harness_patch/` is a
@@ -1703,7 +1853,7 @@ stages, research independence, and atomic persist.
    text such as "A quiet residential street" is not treated as empty and is
    not hardcoded to ADVANCE.
 
-### Main files changed
+#### Main files changed
 
 - `agentcore_runtime/` (new canonical harness)
 - `backend/agentcore_provider.py`, `backend/providers.py`
@@ -1717,7 +1867,7 @@ stages, research independence, and atomic persist.
 - Docs: `docs/providers/AGENTCORE_ADAPTER.md`, `docs/CODEBASE_STRUCTURE.md`,
   `tests/AGENTS.md`, `scripts/AGENTS.md`, `backend/AGENTS.md`
 
-### Validation evidence
+#### Validation evidence
 
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`,
   and `agentcore_runtime`: **passed**.
@@ -1730,7 +1880,7 @@ stages, research independence, and atomic persist.
 - No live AgentCore invoke. Runtime not republished. `AGENTCORE_RUNTIME_ARN`
   unchanged.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. Companion still accepts a raw coach_turn JSON body.
 - Live DEFAULT still runs the old `str(result)` harness until operators copy
@@ -1740,7 +1890,7 @@ stages, research independence, and atomic persist.
 - Rollback is reverting this working tree; live runtime rollback is the
   previous READY qualifier.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Production blocker: publish the new harness version, then one approved
   smoke: `scripts/agentcore_smoke.py --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`,
@@ -1748,7 +1898,7 @@ stages, research independence, and atomic persist.
 - Do not change `AGENTCORE_RUNTIME_ARN`. Do not create another student runtime.
 - Do not commit, push, or deploy from this phase unless asked.
 
-## Previous phase — Virtual course sources must not become fake local evidence
+### Previous phase — Virtual course sources must not become fake local evidence
 
 **Completed locally on 2026-08-16.** Shared Week 1 catalog rows have empty
 `extractedText` on purpose. When `KNOWLEDGE_BASE_ID` was missing, mock, or
@@ -1761,7 +1911,7 @@ Architecture is unchanged: one shared S3 `course/` copy, virtual catalog
 sources, Bedrock KB Retrieve only, student uploads local, FastAPI source
 scope, DSQL transcript, AgentCore reasoning only.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Virtual/shared `course/` sources keep `text=""` for retrieval. The
    unanalyzable placeholder is display-only for real empty student files.
@@ -1778,7 +1928,7 @@ scope, DSQL transcript, AgentCore reasoning only.
    Retrieve only with `--i-approve-live-bedrock`. Pytest never runs it.
    No generation call.
 
-### Main files changed
+#### Main files changed
 
 - `backend/retrieval.py`, `backend/bedrock_retrieve.py`,
   `backend/coaching/execution.py`, `backend/sources/context.py`,
@@ -1795,7 +1945,7 @@ scope, DSQL transcript, AgentCore reasoning only.
   `docs/LOCAL_DEMO_IMPLEMENTATION.md`, `.env.example`, `README.md`,
   `compose.prod.yaml`, `tests/AGENTS.md`
 
-### Validation evidence
+#### Validation evidence
 
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`:
   **passed**.
@@ -1809,7 +1959,7 @@ scope, DSQL transcript, AgentCore reasoning only.
   `APP_IMAGE` set (blank `APP_IMAGE` is invalid by design).
 - No live Bedrock Retrieve call. No paid AgentCore/OpenAI generation call.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. Shared course files stay virtual; student uploads stay
   notebook-scoped. Rollback is reverting this working tree.
@@ -1817,7 +1967,7 @@ scope, DSQL transcript, AgentCore reasoning only.
   is re-ingested with that attribute. Unfiltered retry plus exact-key
   post-validation stays.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Live Knowledge Base Retrieve is not yet proven from this tree. Do not mark
   strict metadata mode as working until re-ingestion is verified.
@@ -1826,7 +1976,7 @@ scope, DSQL transcript, AgentCore reasoning only.
 - Do not run a paid AgentCore generation turn until Retrieve returns actual
   Week 1 text. Do not commit, push, or deploy from this phase unless asked.
 
-## Previous completed phase — Live AgentCore DEFAULT coaching (harness patch + smoke)
+### Previous completed phase — Live AgentCore DEFAULT coaching (harness patch + smoke)
 
 **Completed on 2026-08-15.** `Integrate-Bedrock` is merged into `main`.
 Production still uses `MODEL_PROVIDER=agentcore` against existing runtime
@@ -1841,7 +1991,7 @@ streaming into separate functions. Live JSON then failed validation on
 `recommendation: "STAY"` and object-shaped `stage_assessment`; the domain
 contract now coerces those live-model variants.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Existing DEFAULT runtime updated in place to **version 9**, READY.
 2. `coach_turn` invokes return unfenced JSON (no tools, no AgentCore Memory as
@@ -1852,7 +2002,7 @@ contract now coerces those live-model variants.
 4. Runtime instructions tell the model `stage_assessment` is a string and
    `recommendation` is lowercase `stay` or `advance`.
 
-### Main files changed
+#### Main files changed
 
 - Live harness (POC worktree, not this git tree): `chatbot_harnessAgent/main.py`
   split `_coach_turn_invoke` / `_stream_specialist_invoke`
@@ -1863,7 +2013,7 @@ contract now coerces those live-model variants.
 - Tests: `tests/domain/test_models_and_support.py`,
   `tests/domain/test_agentcore_provider.py`
 
-### Validation evidence
+#### Validation evidence
 
 - Focused deterministic tests for the coercion and AgentCore/prompt/harness
   contracts: **passed** (Starlette/httpx deprecation warnings only).
@@ -1874,7 +2024,7 @@ contract now coerces those live-model variants.
 - Local `/api/v1/ready` was `provider: agentcore` before restart; stack restarted
   after the domain coercion so UI turns use the same parser.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No database migration. Runtime ARN and `AGENTCORE_QUALIFIER=DEFAULT` unchanged.
 - Rollback of the live runtime is pointing DEFAULT at version 7 (pre-patch) or
@@ -1882,7 +2032,7 @@ contract now coerces those live-model variants.
 - Companion rollback is reverting this working tree; uppercase `STAY` would
   again fail closed as malformed.
 
-### Localhost UI follow-up (2026-08-15)
+#### Localhost UI follow-up (2026-08-15)
 
 Profile settings on http://127.0.0.1:8501/ : display name Kai Ming, appearance
 System, language English, coaching style **Strict** (`response_detail=long`).
@@ -1900,7 +2050,7 @@ persisted. No mock fallback. No Claude.
 Additional files: `backend/retrieval.py`, `tests/domain/test_retrieval.py`.
 Focused retrieval tests: **17 passed**.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Empty assistant rows from earlier failed streams remain in this notebook;
   they are not used as transcript history for the successful turn.
@@ -1912,7 +2062,7 @@ Focused retrieval tests: **17 passed**.
   CloudFront as the only public hostname and Caddy `:80` with `/api/v1/auth/me`
   on the auth allow-list.
 
-## Previous completed phase — AgentCore coaching availability, guardrail handling, trust split
+### Previous completed phase — AgentCore coaching availability, guardrail handling, trust split
 
 **Completed locally on 2026-08-15.** Integrate-Bedrock remains the product.
 Production `MODEL_PROVIDER=agentcore` still uses `InvokeAgentRuntime` and does
@@ -1922,7 +2072,7 @@ user payload, including a literal attack example in shared instructions. This
 phase unblocks that path without disabling safety controls, then splits trusted
 instructions from untrusted turn content.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Shared coaching no longer contains a literal prompt-attack example.
    Quoted/retrieved override attempts remain untrusted evidence.
@@ -1943,7 +2093,7 @@ instructions from untrusted turn content.
 6. `requirements.txt` pins `boto3==1.43.35` and `botocore[crt]==1.43.35` so
    clean installs include AgentCore and `aws login` CRT credentials.
 
-### Main files changed
+#### Main files changed
 
 - Prompts/adapters: `backend/prompts/shared/coaching.md`,
   `backend/prompts/composer.py`, `backend/providers.py`,
@@ -1955,14 +2105,14 @@ instructions from untrusted turn content.
   security, AgentCore, and this status file
 - Dependencies: `requirements.txt`
 
-### Validation evidence
+#### Validation evidence
 
 - Full deterministic suite: **591 passed, 0 failed** (Starlette/httpx
   deprecation warnings only; classified as harmless test-client debt).
   `compileall` passed. `git diff --check` passed. No live AWS or paid OpenAI
   call from pytest.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No database migration. Production runtime ARN and `AGENTCORE_QUALIFIER=DEFAULT`
   are unchanged. No experimental student runtime.
@@ -1970,7 +2120,7 @@ instructions from untrusted turn content.
   of a bare string. Stream error events add `category`.
 - Rollback is reverting this working tree.
 
-## Previous completed phase — Full-history-first planner, exact RAG keys, isolated Luna eval path
+### Previous completed phase — Full-history-first planner, exact RAG keys, isolated Luna eval path
 
 **Completed locally on 2026-08-15.** Integrate-Bedrock remains the product.
 Production `MODEL_PROVIDER=agentcore` still uses `InvokeAgentRuntime` and
@@ -1979,7 +2129,7 @@ full-history-first token-aware planner. Compression is derived model context
 only. Object-key matching is exact. Live pedagogical evaluation, when
 approved, uses isolated InvokeHarness + GPT-5.6 Luna with zero Claude calls.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. `HistoryContextPlanner` sends the entire active DSQL transcript when it
    fits; otherwise extractive (production) or Luna (eval) compression plus a
@@ -1993,7 +2143,7 @@ approved, uses isolated InvokeHarness + GPT-5.6 Luna with zero Claude calls.
    `openai.gpt-5.6-luna` / `responses` before every eval invoke. Production
    factory is unchanged.
 
-### Main files changed
+#### Main files changed
 
 - Planner/eval: `backend/context_planner.py`, `backend/live_eval_config.py`,
   `backend/agentcore_harness_provider.py`, `backend/agentcore_provider.py`,
@@ -2002,19 +2152,19 @@ approved, uses isolated InvokeHarness + GPT-5.6 Luna with zero Claude calls.
 - Retrieval: `backend/retrieval.py`, `backend/bedrock_retrieve.py`
 - Docs: prompt, AgentCore, RAG, security, this status file
 
-### Validation evidence
+#### Validation evidence
 
 - Full deterministic suite: **579 passed, 0 failed** (Starlette/httpx deprecation
   warnings only; classified as harmless test-client debt). `compileall` passed.
   `git diff --check` passed. No live AWS or paid OpenAI call from pytest.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No database migration. `conversation_memory` is an additive settings key.
 - Production DEFAULT and InvokeAgentRuntime ARN are unchanged.
 - Rollback is reverting this working tree.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Live KB `course_material_id` metadata may still be absent; filter fallback
   remains. Local venv boto3 1.35.99 lacks `InvokeHarness` (need 1.43+ in the
@@ -2024,7 +2174,7 @@ approved, uses isolated InvokeHarness + GPT-5.6 Luna with zero Claude calls.
   `.venv/bin/python scripts/evals/evaluate_live_coach.py --i-approve-live-luna --quick`.
   Do not commit/push or switch production DEFAULT unless asked.
 
-## Previous completed phase — Ethics & CT integration, KB metadata filter, history de-dup
+### Previous completed phase — Ethics & CT integration, KB metadata filter, history de-dup
 
 **Completed locally on 2026-08-15.** Integrate-Bedrock remains the product.
 AgentCore is still a stateless reasoning adapter. Course Retrieve can send a
@@ -2035,7 +2185,7 @@ student-facing fourth stage is **Ethics & Critical Thinking** (persisted id
 Assumption Check, and V&V lens. Co-occurrence is professor-only post-hoc
 analytics.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. `compose_coach_prompt(..., include_recent_messages=False)` for AgentCore.
    Bounded DSQL turns travel as Converse `messages` only.
@@ -2048,7 +2198,7 @@ analytics.
 5. Professor research summary includes read-only co-occurrence / co-absence.
    Research codes still do not advance stages or drive coaching.
 
-### Main files changed
+#### Main files changed
 
 - Prompts/journey: `backend/prompts/shared/coaching.md`,
   `backend/prompts/stages/deep_analysis.md`, `backend/learning/stages.py`,
@@ -2061,14 +2211,14 @@ analytics.
   `docs/PROMPT_ARCHITECTURE.md`, `docs/providers/AGENTCORE_ADAPTER.md`,
   `docs/research/METHODOLOGY.md`
 
-### Validation evidence
+#### Validation evidence
 
 - Full deterministic suite: **558 passed, 0 failed**. Existing Starlette/httpx
   deprecation warnings. No live AWS or paid OpenAI call from pytest.
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
   passed.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No database migration. Internal stage id remains `deep_analysis`.
 - Knowledge Base metadata `course_material_id` is recommended; without it the
@@ -2076,7 +2226,7 @@ analytics.
 - Harness patch system prompt changed; redeploy DEFAULT if that overlay is
   used. Rollback is reverting this working tree.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Live AgentCore still streams prose until the harness patch is on DEFAULT
   READY. KB metadata filter is ineffective until course objects are
@@ -2084,7 +2234,7 @@ analytics.
 - Next: optional approved live smoke after harness JSON cutover. Do not
   commit/push/deploy from this phase unless asked.
 
-## Previous completed phase — POC-style DSQL history messages + selected-source KB Retrieve
+### Previous completed phase — POC-style DSQL history messages + selected-source KB Retrieve
 
 **Completed locally on 2026-08-15.** AgentCore invokes send bounded DSQL
 history as Converse `messages` (POC Memory equivalent) while remaining
@@ -2092,7 +2242,7 @@ stateless. Locked Lecture Notes/Readings can use Bedrock Knowledge Base
 `Retrieve` mapped onto selected `[S#]` labels. FastAPI/Streamlit/DSQL stay.
 The coaching specialist still has zero KB tools.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. `AgentCoreCoachProvider` always sends `messages`: last six DSQL turns plus
    the composed current turn (and images). `student_id` is the store owner
@@ -2105,7 +2255,7 @@ The coaching specialist still has zero KB tools.
    `KNOWLEDGE_BASE_ID` is set and the provider is not mock. Pytest keeps the
    local retriever.
 
-### Main files changed
+#### Main files changed
 
 - `backend/agentcore_provider.py`, `backend/domain.py`,
   `backend/coaching/execution.py`, `backend/retrieval.py`,
@@ -2118,19 +2268,19 @@ The coaching specialist still has zero KB tools.
   `docs/PROMPT_ARCHITECTURE.md`, `docs/LOCAL_DEMO_IMPLEMENTATION.md`,
   `.env.example`
 
-### Validation evidence
+#### Validation evidence
 
 - Full deterministic suite: **544 passed, 0 failed**. Existing Starlette/httpx
   deprecation warnings. No live AWS or paid OpenAI call from pytest.
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
   passed. `git diff --check` passed.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. Empty `KNOWLEDGE_BASE_ID` keeps local retrieval. Rollback
   is reverting this working tree.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Live AgentCore still streams prose until
   `scripts/agentcore/harness_patch/README.md` is applied and `DEFAULT` is
@@ -2139,13 +2289,13 @@ The coaching specialist still has zero KB tools.
   `scripts/agentcore_smoke.py --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`.
   Never restore six stages.
 
-## Previous completed phase — Strict coaching style by default
+### Previous completed phase — Strict coaching style by default
 
 **Completed locally on 2026-08-15.** New notebooks and empty progress blobs
 default to Strict coaching (`response_detail=long`). Students can still choose
 Quick. Notebooks that already persisted Quick stay Quick.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Canonical default is `DEFAULT_RESPONSE_DETAIL = "long"` in
    `backend/learning/journey.py`. Session, composer, store fallbacks, and the
@@ -2159,7 +2309,7 @@ Quick. Notebooks that already persisted Quick stay Quick.
    so a previous Quick choice cannot leak onto the new notebook. The selected
    chip uses the filled accent highlight.
 
-### Main files changed
+#### Main files changed
 
 - Domain/UI: `backend/learning/journey.py`, `backend/student_store.py`,
   `backend/coaching/execution.py`, `backend/chat_service.py`,
@@ -2172,7 +2322,7 @@ Quick. Notebooks that already persisted Quick stay Quick.
 - Docs: `README.md`, `DESIGN.md`, `backend/AGENTS.md`, `ui/AGENTS.md`,
   `docs/IMPLEMENTATION_STATUS.md`
 
-### Validation evidence
+#### Validation evidence
 
 - Targeted journey, Streamlit, primary-path, and HTTP confirmation tests passed.
 - Full deterministic suite: **536 passed, 0 failed**. Existing Starlette/httpx
@@ -2180,13 +2330,13 @@ Quick. Notebooks that already persisted Quick stay Quick.
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
   passed. `git diff --check` passed.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No schema change. Empty `progress_text` now reads as Strict. Explicit
   `response_detail=short` notebooks are unchanged. Rollback is reverting this
   working tree.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Live AgentCore still streams prose until
   `scripts/agentcore/harness_patch/README.md` is applied and `DEFAULT` is
@@ -2195,7 +2345,7 @@ Quick. Notebooks that already persisted Quick stay Quick.
   `scripts/agentcore_smoke.py --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`.
   Never restore six stages.
 
-## Previous completed phase — DSQL-only transcript + student download
+### Previous completed phase — DSQL-only transcript + student download
 
 **Completed locally on 2026-08-15.** Aurora DSQL / SQLite `messages` remain the
 only durable chat transcript. AgentCore stays generation-only (stateless
@@ -2203,7 +2353,7 @@ invokes). Students can download a `.txt` projection of persisted messages from
 Notebook Actions. POC JSON, DynamoDB, and AgentCore session memory are not
 used as chat history. A sixth Thinking Path stage is not added.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Documented and tested that `AgentCoreCoachProvider` never reuses a notebook
    id as `runtimeSessionId`, never sends AgentCore Memory/history fields, and
@@ -2218,7 +2368,7 @@ used as chat history. A sixth Thinking Path stage is not added.
    sources. Explicitly out of scope: scoring specialist replacement, critique
    every Nth turn, `ethics_critical` as a sixth stage, CDK student UI merge.
 
-### Main files changed
+#### Main files changed
 
 - Export: `backend/workspace_service.py`, `backend/http/app.py`,
   `backend/api_client.py`, `ui/services/runtime.py`, `ui/notebooks.py`,
@@ -2230,7 +2380,7 @@ used as chat history. A sixth Thinking Path stage is not added.
   `docs/providers/AGENTCORE_ADAPTER.md`, `docs/deploy/AWS_STATELESS_EC2.md`,
   nested `AGENTS.md`
 
-### Validation evidence
+#### Validation evidence
 
 - Targeted: `tests/domain/test_agentcore_provider.py`,
   `tests/http/test_workspace_api.py`, `tests/http/test_multiuser_ownership.py`,
@@ -2242,12 +2392,12 @@ used as chat history. A sixth Thinking Path stage is not added.
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
   passed. `git diff --check` passed.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No database schema change. Transcript download is a read of existing
   `messages`. Rollback is reverting this working tree.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Live AgentCore still streams prose until
   `scripts/agentcore/harness_patch/README.md` is applied and `DEFAULT` is
@@ -2257,7 +2407,7 @@ used as chat history. A sixth Thinking Path stage is not added.
   Do not add course Q&A or a scoring specialist until that cutover is done.
   Never restore six stages.
 
-## Previous completed phase — AgentCore generation + shared course S3 keys
+### Previous completed phase — AgentCore generation + shared course S3 keys
 
 **Completed locally on 2026-08-14.** FastAPI/Streamlit remain the student
 product. Production generation is `MODEL_PROVIDER=agentcore` (one
@@ -2265,7 +2415,7 @@ product. Production generation is `MODEL_PROVIDER=agentcore` (one
 `course/` objects instead of copying PDFs into `users/`. Automated tests inject
 fake clients and never call AWS.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. `AgentCoreCoachProvider` sends `phase=coaching`, composed CDE2300 prompt,
    and `output_contract=coach_turn`. `deep_analysis` maps to AgentCore topic
@@ -2288,7 +2438,7 @@ fake clients and never call AWS.
    `CDE2300ChatbotEC2Role` inline policy `AgentCore-Course-Materials`
    (invoke, Retrieve, course Get/List, no course delete).
 
-### Main files changed
+#### Main files changed
 
 - New: `backend/agentcore_provider.py`, `tests/domain/test_agentcore_provider.py`,
   `scripts/agentcore/harness_patch/`, `scripts/agentcore_smoke.py`,
@@ -2298,7 +2448,7 @@ fake clients and never call AWS.
 - Config/docs: `.env.example`, `compose.prod.yaml`, `docs/deploy/AWS_STATELESS_EC2.md`,
   `docs/PROMPT_ARCHITECTURE.md`
 
-### Validation evidence
+#### Validation evidence
 
 - Targeted: `tests/domain/test_agentcore_provider.py`,
   `tests/domain/test_source_library.py`,
@@ -2310,7 +2460,7 @@ fake clients and never call AWS.
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
   passed. `git diff --check` passed.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No database schema change. Default local provider remains `mock`.
 - Host `.env` should set `MODEL_PROVIDER=agentcore`,
@@ -2319,7 +2469,7 @@ fake clients and never call AWS.
 - Rollback: leave `.env` on `openai` or `bedrock` and set
   `COURSE_MATERIAL_SYNC_ENABLED=false`.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Live runtime still streams prose until
   `scripts/agentcore/harness_patch/README.md` is applied and `DEFAULT` is
@@ -2327,14 +2477,14 @@ fake clients and never call AWS.
 - Next: deploy that harness patch, then one approved
   `scripts/agentcore_smoke.py --i-approve-live-agentcore --cost-cap 1.00 --max-requests 1`.
 
-## Previous completed phase — Amazon Bedrock coach adapter
+### Previous completed phase — Amazon Bedrock coach adapter
 
 **Completed locally on 2026-08-14.** The coach provider contract now includes a
 Bedrock Converse adapter. Phase progression, citations, persistence, and
 selected-source retrieval stay in the application. Automated tests inject a
 fake client and never call AWS.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. `BedrockCoachProvider` makes one Converse call per turn with a required
    `coach_turn` tool whose schema is the provider-neutral
@@ -2352,7 +2502,7 @@ fake client and never call AWS.
    `BEDROCK_MODEL_ID` and timeout/retry bounds and does not require
    `OPENAI_API_KEY`. Credentials stay on the AWS chain / EC2 role.
 
-### Main files changed
+#### Main files changed
 
 - New: `backend/bedrock_provider.py`, `tests/domain/test_bedrock_provider.py`
 - Wiring: `backend/providers.py`, `backend/settings.py`, `backend/http/app.py`
@@ -2360,7 +2510,7 @@ fake client and never call AWS.
   `docs/LOCAL_DEMO_IMPLEMENTATION.md`, `docs/deploy/AWS_STATELESS_EC2.md`,
   nested `AGENTS.md` maps
 
-### Validation evidence
+#### Validation evidence
 
 - Targeted: `tests/domain/test_bedrock_provider.py`,
   `tests/http/test_production_config.py`,
@@ -2371,14 +2521,14 @@ fake client and never call AWS.
 - `compileall` for `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
   passed. `git diff --check` passed.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No database schema change. Default local provider remains `mock`.
 - Production can keep `MODEL_PROVIDER=openai` until Bedrock model access and
   IAM invoke are granted. Rollback is reverting this working tree and leaving
   `.env` on `openai` or `mock`.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - The pinned boto3 Converse path uses strict tool use, not
   `outputConfig.textFormat`. Confirm the chosen model/inference profile
@@ -2390,7 +2540,7 @@ fake client and never call AWS.
   `MODEL_PROVIDER=bedrock` and remove `OPENAI_API_KEY` from the host `.env` if
   OpenAI is no longer used. Do not add a Bedrock Knowledge Base for coaching.
 
-## Previous completed phase — port architecture package splits onto this branch
+### Previous completed phase — port architecture package splits onto this branch
 
 **Completed locally on 2026-08-14.** Package ownership on
 `professor-analytics-ui` now matches the architecture-refactor *structure*
@@ -2398,7 +2548,7 @@ fake client and never call AWS.
 research-aligned phases, professor analytics/Research, CSS, widget keys, and
 routes are unchanged.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. **Contracts locked first.** `tests/test_architecture_contracts.py` snapshots
    this branch’s façade signatures, `StudentStore` public methods including
@@ -2428,7 +2578,7 @@ routes are unchanged.
    `context.py` and `projection.py` own bounded context and image/storage
    projection. `backend/source_library.py` is a `sys.modules` alias.
 
-### Main files changed
+#### Main files changed
 
 - New packages: `backend/http/`, `backend/learning/`, `backend/coaching/`,
   `backend/persistence/store/`, `backend/sources/`, `ui/panels/`,
@@ -2443,7 +2593,7 @@ routes are unchanged.
   `docs/CODEBASE_STRUCTURE.md`, `docs/TESTING.md`, nested `AGENTS.md`,
   `.github/workflows/mock-ci.yml`, `scripts/build.sh`.
 
-### Validation evidence
+#### Validation evidence
 
 - Architecture contract tests passed before and after each move.
 - Complete deterministic suite: **462 passed, 0 failed** (456 prior tests plus
@@ -2456,7 +2606,7 @@ routes are unchanged.
   mock suite. An isolated `scripts/start.sh` browser session was not repeated
   in this pass.
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No product, route, schema, authentication, provider/prompt, CSS, copy, or
   widget-key change. Historical import paths and monkeypatch targets remain.
@@ -2466,7 +2616,7 @@ routes are unchanged.
 - No database write, migration, or learning-data reset. Rollback is reverting
   this working tree.
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Aliases must keep replacing the module object (`sys.modules[__name__] = …`)
   or re-exporting the same function objects; rebinding names breaks patches.
@@ -2476,7 +2626,7 @@ routes are unchanged.
   `StudentStore` notebook/message operations or one closure-complete HTTP route
   registrar. Preserve the existing compatibility/OCC/route inventories first.
 
-## Previous completed phase — research-aligned five-phase coach and lecturer validation
+### Previous completed phase — research-aligned five-phase coach and lecturer validation
 
 **Implemented on 2026-08-14.** The original Replit workflow, supplied system
 architecture/V&V materials, and the cited research have been translated into a
@@ -2485,7 +2635,7 @@ SQLite/DSQL ownership, S3/local files, notebook history, Quick/Strict profiles,
 source grounding, revisions, and the current student workspace remain the
 application infrastructure; they were not reverted to the Replit architecture.
 
-### Behavior delivered
+#### Behavior delivered
 
 1. Thinking Path now uses five research-aligned phases: Problem identification,
   Concept generation, Design specification, Deep analysis, and Reflection.
@@ -2544,7 +2694,7 @@ application infrastructure; they were not reverted to the Replit architecture.
 
 
 
-### Main files changed
+#### Main files changed
 
 - Domain/workflow/provider/prompt: `backend/domain.py`, `workflow.py`,
 `application.py`, `providers.py`, `mock_provider.py`, `student_journey.py`,
@@ -2562,7 +2712,7 @@ persistence, API, UI, transaction-race, and reset tests.
 
 
 
-### Validation evidence
+#### Validation evidence
 
 - Complete deterministic suite: **456 passed, 0 failed**; 65 framework
 deprecation warnings; no live AWS/Cognito/DSQL/S3/provider or paid call.
@@ -2593,7 +2743,7 @@ as a completed human visual sign-off.
 
 
 
-### Compatibility, migration, and rollback
+#### Compatibility, migration, and rollback
 
 - No Cognito, public student API, source, notebook, model-provider, or external
 request/response contract was removed. Research routes/tables/metadata are
@@ -2608,7 +2758,7 @@ approved retention/recovery plan. No migration/reset has been applied here.
 
 
 
-### Known risks and next exact action
+#### Known risks and next exact action
 
 - Automated CLEAR/Facione/ethics codes are provisional research observations,
 not validated measures. Before a formal study, train human coders, sample and
@@ -2625,7 +2775,7 @@ smoke needs an explicit model, request/token ceiling, and cost cap.
 
 
 
-## Previous completed phase (historical)
+### Previous completed phase (historical)
 
 **Production-grade repository audit and focused hardening.** The full layered
 application, state ownership, persistence, Cognito boundary, provider adapters,
@@ -2634,7 +2784,7 @@ configuration, tests, and canonical documentation were reviewed. No broad
 folder move, schema migration, data rewrite, dependency addition, or product
 redesign was justified.
 
-### Changes in this phase
+#### Changes in this phase
 
 1. The public login-start limiter no longer creates an in-memory client entry
   for every rotated key after the global limit is full, and stale client
@@ -2660,7 +2810,7 @@ redesign was justified.
 
 
 
-### Validation evidence
+#### Validation evidence
 
 - Focused API, configuration, provider, limiter, legacy-provider, professor UI,
 and Streamlit suites → **111 passed**.
@@ -2680,7 +2830,7 @@ claimed as executed.
 
 
 
-### Compatibility, rollback, and remaining risk
+#### Compatibility, rollback, and remaining risk
 
 - No database or file migration. Existing notebooks, revisions, messages,
 sources, assessments, and Cognito identities are untouched. Rollback is a
@@ -2698,14 +2848,14 @@ replicas. Move them to a shared limiter before horizontal scaling.
 
 
 
-### Next exact action
+#### Next exact action
 
 Complete the existing Aurora DSQL revision-schema cutover and the guarded live
 idempotency smoke described below. Then run a read-only professor analytics
 latency/contract check and authenticated desktop/mobile browser QA against the
 deployed lecturer account. Do not open class traffic before those checks pass.
 
-### Prior auth phase (still true)
+#### Prior auth phase (still true)
 
 **Production edge: CloudFront viewer TLS → Caddy HTTP origin.** CloudFront at
 ``d1sxfuoybzedj5.cloudfront.net`` is now the sole production hostname. Caddy
@@ -2714,7 +2864,7 @@ retired dynamic-DNS updater are removed. Both Compose contracts, CI deployment
 tests, Cognito callback examples, operational docs, and manual QA now use the
 CloudFront topology.
 
-### CloudFront/Caddy edge alignment (completed)
+#### CloudFront/Caddy edge alignment (completed)
 
 1. CloudFront owns viewer HTTPS; Caddy accepts origin HTTP on ``:80`` and keeps
    the auth/health allow-list plus the catch-all ``/api/*`` 404 boundary.
@@ -2740,7 +2890,7 @@ uses caching disabled plus full cookie/query/WebSocket forwarding, then run
 ``docs/security/CADDY_PUBLIC_BOUNDARY.md`` and the authenticated production
 smoke. Do not open host TCP 443.
 
-### Prior auth phase (still true)
+#### Prior auth phase (still true)
 
 **Auth: restore Cognito refresh after 1-hour ID cookie expiry.** The
 non-sensitive Path=/ ``co_design_session`` hint now limits refresh attempts to
@@ -2748,7 +2898,7 @@ browsers with an established session. Cold visitors go directly to Sign in;
 expired sessions see the app skeleton and centered loader while the refresh
 bridge runs once; a Sign in launch cannot be intercepted by that bridge.
 
-### Prior UI phase (still true)
+#### Prior UI phase (still true)
 
 **UI: fragment-scoped Streamlit reruns (local interactions).** Explicit
 `rerun_app()` / `rerun_fragment()` helpers replaced the ambiguous
@@ -2759,7 +2909,7 @@ remain full-app. Debug counters: `_app_runs`, `_sources_fragment_runs`,
 `_studio_fragment_runs`, `_topbar_guidance_fragment_runs`,
 `_topbar_profile_fragment_runs`.
 
-### Full-app actions that remain intentional
+#### Full-app actions that remain intentional
 
 - Notebook create / switch / rename / delete
 - Auth / sign-in cooldown / logout
@@ -2773,7 +2923,7 @@ remain full-app. Debug counters: `_app_runs`, `_sources_fragment_runs`,
 
 
 
-### Auth refresh fix (this pass)
+#### Auth refresh fix (this pass)
 
 1. `should_attempt_session_refresh` no longer requires a live `co_design_id`
   cookie before redirecting to `/api/v1/auth/refresh`.
@@ -2783,7 +2933,7 @@ remain full-app. Debug counters: `_app_runs`, `_sources_fragment_runs`,
 
 
 
-### Prior UI hardening
+#### Prior UI hardening
 
 1. **Explicit edit retry.** On revise failure, clear `pending_edit` so the next
   rerun does not auto-resubmit; keep the stable `get_retry_key` UUID; restore
@@ -2794,13 +2944,13 @@ remain full-app. Debug counters: `_app_runs`, `_sources_fragment_runs`,
 
 
 
-### Prior production-hardening (still true)
+#### Prior production-hardening (still true)
 
 Append-only edit remains (no DELETE truncate). DSQL revision migration is
 resumable/idempotent (DEFAULT + batched NULL backfill). Ownership stays
 `messages.notebook_id → notebooks.user_id → users.id`.
 
-### Hardening behavior changes (revision pass)
+#### Hardening behavior changes (revision pass)
 
 1. **DSQL revision migration.** `scripts/init_dsql.py` inspects
   `information_schema` name **and** `column_default`, repairs missing
@@ -2819,7 +2969,7 @@ resumable/idempotent (DEFAULT + batched NULL backfill). Ownership stays
 
 
 
-### Prior append-only phase (still true)
+#### Prior append-only phase (still true)
 
 1. **Active-branch chat.** Discussion renders only active messages for the
   notebook's current `conversation_revision`; superseded turns stay durable
@@ -2841,7 +2991,7 @@ resumable/idempotent (DEFAULT + batched NULL backfill). Ownership stays
 
 
 
-### PART 1 root-cause evidence (“only welcome” on DSQL) — code inspection
+#### PART 1 root-cause evidence (“only welcome” on DSQL) — code inspection
 
 No live DSQL verification was run for this writeup.
 
@@ -2869,7 +3019,7 @@ database name, runtime role/owner (`DSQL_USER` not `co_design_app`), or
 `.env`/Compose config mismatch can produce empty or partial notebooks and
 should be checked after confirming schema columns exist.
 
-### Owner reporting JOIN (do not denormalize messages)
+#### Owner reporting JOIN (do not denormalize messages)
 
 ```sql
 SELECT
@@ -2894,7 +3044,7 @@ ORDER BY m.created_at, m.id;
 
 
 
-### Files changed (this append-only phase)
+#### Files changed (this append-only phase)
 
 - `backend/student_store.py`, `backend/application.py`,
 `backend/chat_service.py`, `backend/repositories.py`, and
@@ -2918,7 +3068,7 @@ deployment steps.
 failure retention, stale CAS, revoked keys, pending supersede, API ownership,
 DSQL message columns, `assessment_text` on assessed assistants only).
 
-### Validation evidence
+#### Validation evidence
 
 - Integrated revision/storage/UI selection:
 `.venv/bin/python -m pytest -q tests/test_conversation_revision.py tests/test_init_dsql.py tests/test_coach_idempotency.py tests/test_streamlit_ui.py tests/test_student_store.py tests/test_storage_providers.py tests/test_learning_service.py` → **115
@@ -2932,7 +3082,7 @@ passed** (deterministic mocks; 2026-08-10).
 
 
 
-### Compatibility / migration / rollback
+#### Compatibility / migration / rollback
 
 - Additive only: existing message rows backfill to revision `0` with
 `superseded_at_revision` NULL; display stays Conversation 01 until an edit.
@@ -2945,7 +3095,7 @@ rollback is required. SQLite migrations are additive on open.
 
 
 
-### Known risks / blockers
+#### Known risks / blockers
 
 - Existing DSQL clusters must receive the additive notebook/message revision
 migration before this application version is deployed. Runtime cannot repair
@@ -2955,7 +3105,7 @@ DSQL write. No live browser/upload/RAG QA is claimed in this phase.
 
 
 
-### Next exact action
+#### Next exact action
 
 **Stop architecture/feature edits.** Proceed only with live AWS / DSQL cutover:
 
@@ -2972,7 +3122,7 @@ DSQL write. No live browser/upload/RAG QA is claimed in this phase.
 
 
 
-### Prior pilot context (Phases 1–14)
+#### Prior pilot context (Phases 1–14)
 
 **Phases 1–13 complete on** `Production-RemoveData`**; Phase 14 verdict:
 READY FOR CONTROLLED PILOT.** Live manual production QA documented in
@@ -2993,7 +3143,7 @@ server-authoritative `POST .../messages/{id}/revise` with
 replaced by append-only revision history on this branch. Regenerate remains
 unavailable.
 
-### Behavior changes (Phases 1–13)
+#### Behavior changes (Phases 1–13)
 
 1. Concurrent identical coach idempotency keys converge to one provider
   execution; completed markers replay without false lease-lost errors.
@@ -3022,7 +3172,7 @@ unavailable.
 
 
 
-### Behavior changes
+#### Behavior changes
 
 1. Public notebook/message payloads are typed and reject stage, progress, and
   transition metadata. Only the internal learning workflow can write
@@ -3164,7 +3314,7 @@ unavailable.
 
 
 
-### Validation evidence
+#### Validation evidence
 
 **Local (Phases 4–8 — this phase):**
 
@@ -3241,7 +3391,7 @@ SQLite backup. It is local data and must never be committed.
 
 
 
-### Compatibility, rollback, and known risks
+#### Compatibility, rollback, and known risks
 
 - New S3 objects use `raw/` and `derived/` subpaths. Existing rows retain
 their full historical keys, remain readable, and stay within the same
@@ -3326,7 +3476,7 @@ files, or uploaded content. No live AWS resource was created or modified.
 
 
 
-### Next exact action
+#### Next exact action
 
 Authoritative next steps for append-only revision are under **Current phase →
 Next exact action** above. Continuing AWS cutover after that:
@@ -3360,11 +3510,11 @@ Next exact action** above. Continuing AWS cutover after that:
 
 
 
-## Previous completed work
+### Previous completed work
 
 **Professor Learning Analytics Dashboard (implementation; local deterministic validation)**
 
-### What changed
+#### What changed
 
 - Added a read-only `backend/professor_analytics` layer with typed API
 contracts, one batch active-branch repository query per analytics snapshot,
@@ -3401,7 +3551,7 @@ not evidence that a student read or understood a source.
 
 
 
-### Calculation definitions
+#### Calculation definitions
 
 - `Active this week` means at least one active-branch student message in the
 previous seven days. Current stage is the most recently active notebook's
@@ -3421,7 +3571,7 @@ judgement of ability.
 
 
 
-### Validation evidence
+#### Validation evidence
 
 - `.venv/bin/python -m pytest -q tests/test_professor_analytics.py tests/test_professor_ui.py tests/test_auth_gate.py tests/test_streamlit_ui.py` → **64 passed**
 (deterministic SQLite/Fake Cognito only; no network or model calls).
@@ -3456,7 +3606,7 @@ mutation from analytics routes.
 
 
 
-### Compatibility / known limits / next action
+#### Compatibility / known limits / next action
 
 - No existing student data changes. Rollback is a code-only revert; analytics
 endpoints have no mutation path. DSQL production deployment remains gated by

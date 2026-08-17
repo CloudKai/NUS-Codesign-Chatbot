@@ -236,6 +236,17 @@ class Settings:
         os.getenv("AGENTCORE_TIMEOUT_SECONDS", "110")
     )
     agentcore_max_retries: int = int(os.getenv("AGENTCORE_MAX_RETRIES", "0"))
+    # FastAPI-owned compute affinity only. Default false keeps a fresh
+    # ``stateless-<uuid>`` runtimeSessionId per InvokeAgentRuntime. When true,
+    # FastAPI reuses an opaque id per owner+notebook+role so AgentCore can
+    # keep a warm microVM. DSQL remains the transcript. Not derived from
+    # notebook data or from AGENTCORE_QUALIFIER.
+    agentcore_session_affinity_enabled: bool = _boolean(
+        "AGENTCORE_SESSION_AFFINITY_ENABLED", False
+    )
+    agentcore_session_generation: str = (
+        os.getenv("AGENTCORE_SESSION_GENERATION", "1").strip() or "1"
+    )
     # Runtime process env (also required on the published AgentCore runtime).
     # Empty in local mock/dev; production AgentCore fail-closes when unset.
     agentcore_model_provider: str = os.getenv("AGENTCORE_MODEL_PROVIDER", "").strip().lower()

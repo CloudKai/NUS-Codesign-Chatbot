@@ -399,19 +399,22 @@ class SourceOperations:
 
         Also drops matching in-process chunk-cache entries. Authorization is
         already gone because the source row is deleted first. An empty prefix
-        is a no-op in the cache.
+        is a no-op in the cache. Cache invalidation always runs, including
+        when storage cleanup raises, and never replaces a storage error.
         """
         from backend.persistence.factory import get_file_storage
         from backend.persistence.object_keys import source_prefix
-        from backend.sources.chunk_cache import student_source_chunk_cache
+        from backend.sources.chunk_cache import invalidate_cached_chunks_for_prefix
 
         prefix = source_prefix(
             user_id=self._store.owner_id,
             notebook_id=thread_id,
             source_id=source_id,
         )
-        get_file_storage().delete_prefix(prefix)
-        student_source_chunk_cache().invalidate_prefix(prefix)
+        try:
+            get_file_storage().delete_prefix(prefix)
+        finally:
+            invalidate_cached_chunks_for_prefix(prefix)
 
     def cleanup_local_file(
         self,

@@ -246,9 +246,11 @@ class DsqlStudentStore(StudentStore):
         """
         from backend.persistence.factory import get_file_storage
         from backend.persistence.object_keys import notebook_prefix
-        from backend.sources.chunk_cache import student_source_chunk_cache
+        from backend.sources.chunk_cache import invalidate_cached_chunks_for_prefix
 
         prefix = notebook_prefix(user_id=self.owner_id, notebook_id=notebook_id)
-        student_source_chunk_cache().invalidate_prefix(prefix)
         storage = get_file_storage()
-        storage.delete_prefix(prefix)
+        try:
+            storage.delete_prefix(prefix)
+        finally:
+            invalidate_cached_chunks_for_prefix(prefix)
