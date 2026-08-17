@@ -61,7 +61,7 @@ Normal payloads look like:
     "language": "English",
     "allowed_citations": ["S1"],
     "allow_model_knowledge": false,
-    "specialist": "coaching"
+    "specialist": "fast_chat"
   },
   "trusted_instructions": "<application runtime rules only>",
   "messages": [
@@ -115,7 +115,11 @@ The live DEFAULT harness source of truth is
 Strands `structured_output_model` plus a shared
 `structured_output_prompt` (`Please use the output tool now.`) so Guardrail v3
 does not classify the Strands structured-output recovery turn as
-`PROMPT_ATTACK`. Guardrail ID, version, and PROMPT_ATTACK policy stay
+`PROMPT_ATTACK`. Fast Chat event-loop recovery is `limits={"turns": 2}`;
+Deep Review is `limits={"turns": 3}`. Transient Converse retries use a
+per-invoke `ModelRetryStrategy` (`max_attempts=2` Haiku / `3` Deep Review),
+which is not the event-loop cap. Fast Chat `runtime_context.specialist` is
+`fast_chat`, never `coaching`. Guardrail ID, version, and PROMPT_ATTACK policy stay
 unchanged. The harness returns validated JSON or a category-only error
 envelope. Publish a zip with `main.py` at the
 root, vendored linux/arm64 Python 3.14 site-packages (AgentCore does not
@@ -175,9 +179,11 @@ Changing model environment variables requires a new AgentCore Runtime
 
 DEFAULT Haiku and Sonnet use
 `BedrockModel(model_id=..., region_name=..., guardrail_id=...,
-guardrail_version=..., guardrail_latest_message=True)`
-(`GUARDRAIL_VERSION=3`). Do not pass `openai.gpt-5.6-luna` into
-`BedrockModel`. Do not pass Haiku into Mantle. Historical Luna runtimes
+guardrail_version=..., guardrail_latest_message=True,
+boto_client_config=BotocoreConfig(retries={"max_attempts": 1, "mode": "standard"}))`
+(`GUARDRAIL_VERSION=3`). Botocore is pinned to one attempt so Strands
+`ModelRetryStrategy` is the only Converse retry layer. Do not pass
+`openai.gpt-5.6-luna` into `BedrockModel`. Do not pass Haiku into Mantle. Historical Luna runtimes
 used `OpenAIResponsesModel(stateful=False, bedrock_mantle_config={"region": ...})`
 plus Bedrock `ApplyGuardrail` on untrusted input and model output.
 

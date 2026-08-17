@@ -1,6 +1,85 @@
 # Implementation status
 
-## Current phase — Per-service TIMING latency lines
+## Current phase — Fast Chat first-pass structured output, retry bounds, Deep Review cap
+
+**Code is local on a worktree of `Integrate-Bedrock` at `e88393d` and is not
+committed or deployed.** No AgentCore publish, EC2 deploy, or live AWS
+inference was performed.
+
+### Trace vs current code
+
+The supplied two-cycle production trace used a **rich** Fast Chat schema
+(`assessment`, `research_coding`). Current HEAD Fast Chat is slim
+`FastChatTurnOutput` (`fast_chat_turn_v1`). That trace is therefore a
+**stale runtime / older DEFAULT** observation, not proof that current
+published AgentCore still emits the rich schema.
+
+### Root cause of cycle #2
+
+**PROVEN (Strands 1.52.0 SDK mechanism, from the pinned wheel):** inside
+**one** `invoke_async` / **one** `InvokeAgentRuntime`, if structured output
+is enabled and the first generation returns `stop_reason=end_turn` without
+the output tool, Strands appends `structured_output_prompt`
+(`Please use the output tool now.`), `set_forced_mode()`, and
+`recurse_event_loop`. That is a second **event-loop cycle**, not a second
+application AgentCore invoke.
+
+**UNPROVEN:** that the supplied live trace's cycle #2 was this recovery on
+**current slim** Fast Chat. No live AWS call was made here, and that trace's
+schema does not match `fast_chat_turn_v1`.
+
+**INFERENCE:** first-pass conversational prose is more likely when the
+system prompt opens as a locked Coaching specialist and asks Haiku to be
+conversational before the structured-output contract. The working-tree
+prompt/identity changes are a hedge, not live proof of one-cycle Haiku.
+
+### What this phase changed
+
+1. **First-pass instruction.** Fast Chat tells Haiku to complete the
+   structured-output mechanism on the first generation and not to emit an
+   intermediate conversational answer. Fast Chat identity is no longer a
+   locked Coaching specialist: `shared_coaching.md` is unchanged for legacy
+   Coaching, but Fast Chat replaces only the opening identity sentence.
+2. **`runtime_context.specialist=fast_chat`.** Fast Chat no longer stamps
+   `specialist=coaching`. Optional `expected_response_mode` is included when
+   the server policy is qa or coaching.
+3. **Model retries.** Per-invoke `ModelRetryStrategy`: Haiku roles
+   `max_attempts=2` (1s/4s backoff); Deep Review `max_attempts=3` (2s/16s).
+   Distinct from event-loop turns. New strategy instance per Agent.
+   Botocore Converse retries are pinned to `max_attempts=1` so they do not
+   multiply the Agent retry budget.
+4. **Deep Review event-loop cap.** `limits={"turns": 3}` (was uncapped).
+5. **Welcome exclusion.** Static `coach_welcome` stays in the transcript for
+   UI and is omitted from model history.
+6. Guardrail-safe ConversationMemory rendering from `847d0c6` is unchanged.
+
+### Validation
+
+- `ruff check .`: passed.
+- `python -m compileall -q backend ui streamlit_app.py tests scripts agentcore_runtime`:
+  passed.
+- Focused Fast Chat / AgentCore / mode / memory / RAG fallback / Deep Review
+  tests: passed.
+- `tests/domain` excluding three POSIX-`resource` collectors
+  (`test_files_and_engine.py`, `test_retrieval.py`, `test_source_library.py`):
+  passed after LF-normalizing the coaching prompt hash lock (Windows CRLF).
+- Companion pytest does not install `strands-agents`. Cycle-#2 semantics were
+  proven by reading the downloaded `strands-agents==1.52.0` wheel
+  (`event_loop.py` `end_turn` recurse + `_retry.py` `ModelRetryStrategy`).
+  The GitHub `agentcore-runtime-compatibility` job remains the CI install path.
+- No live AWS, AgentCore, Bedrock, DSQL, S3, or KB calls.
+
+Windows-only collectors/failures outside this phase (POSIX `resource`,
+SQLite `WinError 32` load probes, LFS PDF pointer noise) are not treated as
+Fast Chat regressions.
+
+### Next exact action
+
+Do **not** publish AgentCore or deploy EC2 until authorised. After an
+authorised runtime publish, live-validate one-cycle Fast Chat and the
+old-notebook Guardrail path.
+
+## Previous phase — Per-service TIMING latency lines
 
 **Prepared on 2026-08-17.** FastAPI-side instrumentation on
 `Integrate-Bedrock`. Nothing in this phase has been pushed to EC2, published as an

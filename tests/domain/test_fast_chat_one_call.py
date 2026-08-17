@@ -12,6 +12,7 @@ from backend.domain import (
     CoachRequest,
     EducationalAssessment,
     FacioneDimensionScores,
+    RetrievalChunkReference,
     StageDecision,
 )
 from backend.providers import ProviderUnavailableError
@@ -107,9 +108,23 @@ def test_normal_coaching_invokes_agentcore_once() -> None:
     assert len(client.calls) == 1
     assert _phases(client) == ["fast_chat"]
     assert _decoded(client.calls[0])["output_contract"] == "fast_chat_turn"
+    assert _decoded(client.calls[0])["runtime_context"]["specialist"] == "fast_chat"
+    assert _decoded(client.calls[0])["runtime_context"].get("specialist") != "coaching"
     assert result.specialist == "coaching"
     assert result.assessment.recommendation is StageDecision.STAY
     assert result.qualifying_coaching_turn is True
+
+
+def test_testing_input_is_one_fast_chat_call_without_router() -> None:
+    client = FakeAgentCoreRuntime(payload=_coaching_output())
+    result = _provider(client).assess(_request(student_message="testing"))
+    assert len(client.calls) == 1
+    assert _phases(client) == ["fast_chat"]
+    assert "router" not in _phases(client)
+    assert result.assessment.review_depth is None
+    payload = _decoded(client.calls[0])
+    assert payload["runtime_context"]["specialist"] == "fast_chat"
+    assert "expected_response_mode" not in payload["runtime_context"]
 
 
 def test_normal_qa_invokes_agentcore_once() -> None:
@@ -273,6 +288,46 @@ def test_qa_foreign_citations_are_dropped() -> None:
     result = _provider(client).assess(_request())
     assert result.assessment.citations == []
     assert result.assessment.recommendation is None
+
+
+def test_qa_keeps_supplied_s1_and_drops_foreign_s9() -> None:
+    """Allowed [S1] survives; an invented [S9] does not, even in the same payload."""
+    client = FakeAgentCoreRuntime(
+        payload={
+            "mode": "qa",
+            "response_text": "Validation is checking the chosen concept against needs [S1].",
+            "citations": [
+                {
+                    "source_id": "src-week1",
+                    "label": "S1",
+                    "title": "Week 1",
+                    "excerpt": "Validation checks the concept against needs.",
+                },
+                {
+                    "source_id": "foreign",
+                    "label": "S9",
+                    "title": "Other notebook",
+                    "excerpt": "secret",
+                },
+            ],
+        }
+    )
+    result = _provider(client).assess(
+        _request(
+            retrieved_chunks=[
+                RetrievalChunkReference(
+                    source_id="src-week1",
+                    label="S1",
+                    title="Week 1",
+                    chunk_id="S1-C1",
+                    excerpt="Validation checks the concept against needs.",
+                )
+            ]
+        )
+    )
+    labels = [citation.label for citation in result.assessment.citations]
+    assert labels == ["S1"]
+    assert result.assessment.citations[0].source_id == "src-week1"
 
 
 def test_explicit_deep_review_is_one_sonnet_call() -> None:

@@ -15,6 +15,29 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.*
         load_stage_prompt,
     )
 
+# Legacy Coaching still uses this identity. Fast Chat must not open as a
+# locked Coaching specialist while it is deciding Coaching versus Q&A.
+_COACHING_SPECIALIST_IDENTITY = (
+    "You are the Coaching specialist in a Socratic design-thinking coach for CDE2300."
+)
+_FAST_CHAT_IDENTITY = (
+    "This turn is Fast Chat in a Socratic design-thinking coach for CDE2300. "
+    "Decide Coaching versus Q&A internally; you are not locked to the Coaching specialist."
+)
+
+
+def shared_coaching_for_fast_chat() -> str:
+    """Return shared coaching pedagogy with Fast Chat identity, not specialist lock.
+
+    Returns:
+        Canonical ``shared_coaching.md`` with only the opening identity sentence
+        replaced. Stage files and the rest of the Socratic baseline are unchanged.
+    """
+    text = load_shared_coaching()
+    if text.startswith(_COACHING_SPECIALIST_IDENTITY):
+        return _FAST_CHAT_IDENTITY + text[len(_COACHING_SPECIALIST_IDENTITY) :]
+    return text
+
 
 def fast_chat_static_prefix(topic: str) -> str:
     """Return the cacheable pedagogical prefix for one fast-chat topic.
@@ -23,12 +46,13 @@ def fast_chat_static_prefix(topic: str) -> str:
         topic: AgentCore coaching topic, including ``ethics_critical``.
 
     Returns:
-        ``shared_coaching.md``, the current stage prompt, and ``fast_chat.md``.
-        Runtime rules, student text, and retrieved evidence are excluded.
+        Shared coaching pedagogy with Fast Chat identity, the current stage
+        prompt, and ``fast_chat.md``. Runtime rules, student text, and
+        retrieved evidence are excluded.
     """
     return "\n\n".join(
         [
-            load_shared_coaching(),
+            shared_coaching_for_fast_chat(),
             load_stage_prompt(topic),
             load_fast_chat_prompt(),
         ]

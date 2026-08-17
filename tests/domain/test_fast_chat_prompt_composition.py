@@ -34,7 +34,7 @@ def _composed_fast_chat_system_prompt() -> str:
             "trusted_instructions": prepared.runtime_instructions,
             "runtime_context": {
                 "current_stage": "problem_identification",
-                "specialist": "coaching",
+                "specialist": "fast_chat",
             },
         }
     )
@@ -47,6 +47,13 @@ def test_fast_chat_markers_occur_exactly_once() -> None:
     assert system.count("Do not use application, retrieval, browsing") == 1
     assert system.count("FAST CHAT OUTPUT CONTRACT") == 1
     assert system.count("You are a university educational coach") == 1
+    assert '"specialist": "coaching"' not in system
+    assert '"specialist": "fast_chat"' in system
+    assert "locked Coaching specialist" in system
+    assert system.startswith("This turn is Fast Chat")
+    assert not system.startswith("You are the Coaching specialist")
+    assert "Do not emit an intermediate conversational answer first" in system
+    assert "You are not the normal student-facing course assistant" not in system
     assert "You are the normal student-facing course assistant" not in system
     assert "assumptions_identified" not in system
     assert "structured assessment may record" not in system

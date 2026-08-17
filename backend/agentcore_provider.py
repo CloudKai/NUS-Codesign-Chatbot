@@ -551,7 +551,12 @@ def _runtime_context(
     review_mode: str | None = None,
     review_trigger: str | None = None,
 ) -> dict[str, Any]:
-    """Return application-owned runtime constraints for the AgentCore specialist."""
+    """Return application-owned runtime constraints for the AgentCore specialist.
+
+    Fast Chat stamps ``specialist=fast_chat`` plus an optional
+    ``expected_response_mode``. It must not claim ``specialist=coaching``
+    while asking Haiku to choose Coaching versus Q&A.
+    """
     labels = sorted(
         {
             str(chunk.label).strip()
@@ -560,9 +565,7 @@ def _runtime_context(
         }
     )
     cleaned = str(specialist or "").strip().lower()
-    if cleaned not in ALLOWED_SPECIALISTS:
-        cleaned = SPECIALIST_COACHING
-    context = {
+    context: dict[str, Any] = {
         "current_stage": request.current_stage,
         "agentcore_topic": agentcore_topic_for_stage(request.current_stage),
         "response_detail": "quick" if request.response_detail == "short" else "strict",
@@ -570,8 +573,16 @@ def _runtime_context(
         "allowed_citations": labels,
         "allow_model_knowledge": bool(request.allow_model_knowledge),
         "conversation_revision": request.conversation_revision,
-        "specialist": cleaned,
     }
+    if cleaned == _FAST_CHAT_PHASE:
+        context["specialist"] = _FAST_CHAT_PHASE
+        expected = str(request.expected_response_mode or "").strip().lower()
+        if expected in {"qa", "coaching"}:
+            context["expected_response_mode"] = expected
+    elif cleaned in ALLOWED_SPECIALISTS:
+        context["specialist"] = cleaned
+    else:
+        context["specialist"] = SPECIALIST_COACHING
     if review_mode in {REVIEW_DEPTH_INCREMENTAL, REVIEW_DEPTH_DEEP}:
         context["review_mode"] = review_mode
     if review_trigger:
@@ -1302,17 +1313,12 @@ class AgentCoreCoachProvider:
                 and estimate_specialist != _FAST_CHAT_PHASE
             ):
                 estimate_specialist = SPECIALIST_COACHING
-            runtime_specialist = (
-                SPECIALIST_COACHING
-                if estimate_specialist == _FAST_CHAT_PHASE
-                else estimate_specialist
-            )
             system_text = fast_chat_system_prompt_for_estimate(
                 topic=agentcore_topic_for_stage(request.current_stage),
                 trusted_runtime_rules=preliminary.runtime_instructions,
                 runtime_context=_runtime_context(
                     request,
-                    runtime_specialist,
+                    estimate_specialist,
                     review_mode=review_mode,
                     review_trigger=review_trigger,
                 ),
@@ -1431,9 +1437,7 @@ class AgentCoreCoachProvider:
             output_contract
             or _CONTRACT_BY_SPECIALIST.get(specialist, _OUTPUT_CONTRACT)
         ).strip()
-        runtime_specialist = (
-            SPECIALIST_COACHING if specialist == _FAST_CHAT_PHASE else specialist
-        )
+        runtime_specialist = specialist
         payload: dict[str, Any] = {
             "phase": resolved_phase,
             "topic": agentcore_topic_for_stage(request.current_stage),

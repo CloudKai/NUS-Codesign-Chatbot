@@ -23,7 +23,11 @@ Coaching, Incremental Review, and Deep Review. Do not treat
    repair prompt is `Please use the output tool now.` so Guardrail v3 does not
    classify the Strands structured-output recovery turn as PROMPT_ATTACK.
    Fast Chat / router / legacy Haiku pass `limits={"turns": 2}` (Strands 1.52.0:
-   initial generation plus at most one recovery). Deep Review is uncapped.
+   initial generation plus at most one recovery). Deep Review passes
+   `limits={"turns": 3}`. Model retries use a per-invoke `ModelRetryStrategy`
+   (`max_attempts=2` for Haiku roles, `max_attempts=3` for Deep Review),
+   which is separate from event-loop turns. Bedrock Converse botocore retries
+   are pinned to one attempt so they do not multiply the Agent retry budget.
 6. Never `json.loads(str(result))`.
 7. Failures return `{ok: false, error: true, category: ...}`.
 8. Slim Fast Chat JSON is `fast_chat_turn_v1` (`schema_id` on the wire). FastAPI

@@ -144,7 +144,10 @@ def test_harness_never_constructs_empty_bedrock_model() -> None:
     assert "get_role_model" in main
     assert "tools=[]" in main
     assert "structured_output_prompt=STRUCTURED_OUTPUT_REPAIR_PROMPT" in main
+    assert "retry_strategy" in main
     assert "structured_output_prompt=" not in loader
+    assert "boto_client_config" in loader
+    assert 'retries={"max_attempts": 1, "mode": "standard"}' in loader
 
 
 class _FakeGuardrail:

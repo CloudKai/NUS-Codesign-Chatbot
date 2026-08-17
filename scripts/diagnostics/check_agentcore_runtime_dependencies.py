@@ -69,6 +69,7 @@ def _check_strands_api() -> dict[str, str]:
     _require_param(agent_init, "tools", "Agent.__init__")
     _require_param(agent_init, "messages", "Agent.__init__")
     _require_param(agent_init, "system_prompt", "Agent.__init__")
+    _require_param(agent_init, "retry_strategy", "Agent.__init__")
 
     invoke = getattr(Agent, "invoke_async", None)
     if invoke is None or not callable(invoke):
@@ -76,6 +77,19 @@ def _check_strands_api() -> dict[str, str]:
     invoke_sig = inspect.signature(invoke)
     _require_param(invoke_sig, "structured_output_model", "Agent.invoke_async")
     _require_param(invoke_sig, "structured_output_prompt", "Agent.invoke_async")
+    _require_param(invoke_sig, "limits", "Agent.invoke_async")
+
+    try:
+        from strands import ModelRetryStrategy
+    except ImportError:
+        try:
+            from strands.event_loop._retry import ModelRetryStrategy
+        except ImportError as error:
+            _fail(f"ModelRetryStrategy import failed: {error.__class__.__name__}")
+    retry_init = inspect.signature(ModelRetryStrategy.__init__)
+    _require_param(retry_init, "max_attempts", "ModelRetryStrategy.__init__")
+    _require_param(retry_init, "initial_delay", "ModelRetryStrategy.__init__")
+    _require_param(retry_init, "max_delay", "ModelRetryStrategy.__init__")
 
     annotations = getattr(AgentResult, "__annotations__", {})
     if "structured_output" not in annotations and not hasattr(AgentResult, "structured_output"):
@@ -226,9 +240,27 @@ def _check_runtime_contracts() -> None:
         _fail("STRUCTURED_OUTPUT_REPAIR_PROMPT is missing or incorrect")
     if "structured_output_prompt=STRUCTURED_OUTPUT_REPAIR_PROMPT" not in main_text:
         _fail("main.py does not pass structured_output_prompt on invoke_async")
+    if "limits=structured_output_limits_for_role(role)" not in main_text:
+        _fail("main.py does not pass role-specific event-loop limits")
+    if "retry_strategy" not in main_text:
+        _fail("main.py does not pass a ModelRetryStrategy to Agent")
+    if getattr(structured_coach, "FAST_CHAT_INVOKE_LIMITS", None) != {"turns": 2}:
+        _fail("FAST_CHAT_INVOKE_LIMITS is not turns=2")
+    if getattr(structured_coach, "DEEP_REVIEW_INVOKE_LIMITS", None) != {"turns": 3}:
+        _fail("DEEP_REVIEW_INVOKE_LIMITS is not turns=3")
+    haiku_retry = structured_coach.model_retry_policy_for_role("fast_chat")
+    if haiku_retry.max_attempts != 2:
+        _fail("Fast Chat model retry max_attempts is not 2")
+    deep_retry = structured_coach.model_retry_policy_for_role("review_deep")
+    if deep_retry.max_attempts != 3:
+        _fail("Deep Review model retry max_attempts is not 3")
     loader_text = Path(runtime_model.__file__).read_text(encoding="utf-8")
     if "structured_output_prompt" in loader_text:
         _fail("model.py must not set structured_output_prompt on BedrockModel")
+    if "retry_strategy" in loader_text:
+        _fail("model.py must not set retry_strategy on BedrockModel")
+    if 'retries={"max_attempts": 1, "mode": "standard"}' not in loader_text:
+        _fail("model.py does not pin botocore Converse retries to one attempt")
 
 
 def main() -> int:
@@ -264,6 +296,9 @@ def main() -> int:
     print(f"bedrock_agentcore_app={agentcore_app}")
     print("structured_output_model=present")
     print("structured_output_prompt=present")
+    print("invoke_async_limits=present")
+    print("agent_retry_strategy=present")
+    print("model_retry_strategy=present")
     print("agent_result.structured_output=present")
     print("guardrail_latest_message=present")
     print(f"haiku_model_id={HAIKU_4_5_MODEL_ID}")

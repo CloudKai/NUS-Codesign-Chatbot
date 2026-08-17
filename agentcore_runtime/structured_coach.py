@@ -10,7 +10,7 @@ import json
 import logging
 import time
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, NamedTuple
 
 from pydantic import BaseModel, ValidationError
 
@@ -71,20 +71,48 @@ logger = logging.getLogger("agentcore_runtime.structured_coach")
 # documented safe repair text and is shared by every Bedrock specialist role.
 STRUCTURED_OUTPUT_REPAIR_PROMPT = "Please use the output tool now."
 
-# Verified against extracted strands-agents 1.52.0 (strands/types/agent.py
-# Limits TypedDict; strands/event_loop/event_loop.py ``_check_limits`` and
-# ``event_loop_cycle``). ``limits`` is a TypedDict with optional positive-int
-# keys ``turns``, ``output_tokens``, and ``total_tokens``. One turn is one
-# model call plus any following tool execution, counted as
+# Verified against strands-agents 1.52.0 (strands/types/agent.py Limits
+# TypedDict; strands/event_loop/event_loop.py ``_check_limits``,
+# ``event_loop_cycle``, and the structured-output ``end_turn`` recurse).
+# ``limits`` is a TypedDict with optional positive-int keys ``turns``,
+# ``output_tokens``, and ``total_tokens``. One turn is one model call plus
+# any following tool execution, counted as
 # ``len(metrics.latest_agent_invocation.cycles)``. Caps are checked at the
 # START of each cycle, after ``start_cycle`` of the previous cycle has
 # appended, so ``turns=2`` allows the initial generation plus at most one
 # recovery recurse; a third cycle stops with ``stop_reason="limit_turns"``
 # and no exception. Distinct from ``ModelRetryStrategy`` throttling retries
-# inside one model call (default ``max_attempts=6``).
+# inside one model call (SDK default ``max_attempts=6``).
 FAST_CHAT_INVOKE_LIMITS: dict[str, int] = {"turns": 2}
+DEEP_REVIEW_INVOKE_LIMITS: dict[str, int] = {"turns": 3}
 _BOUNDED_STRUCTURED_OUTPUT_ROLES = frozenset(
     {"fast_chat", "router", "qa", "coaching"}
+)
+_REVIEW_STRUCTURED_OUTPUT_ROLES = frozenset(
+    {"review_deep", "review_incremental", "review"}
+)
+
+
+class ModelRetryPolicy(NamedTuple):
+    """Finite Strands ``ModelRetryStrategy`` parameters for one Agent invoke.
+
+    ``max_attempts`` is the inclusive attempt cap (1 = no retry). Construct a
+    new ``ModelRetryStrategy`` per Agent; the SDK object is stateful.
+    """
+
+    max_attempts: int
+    initial_delay: int
+    max_delay: int
+
+
+# Fast Chat / legacy Haiku: initial Converse attempt plus at most one
+# throttle retry. Short delays so a 429 cannot stall the student for minutes.
+FAST_CHAT_MODEL_RETRY = ModelRetryPolicy(
+    max_attempts=2, initial_delay=1, max_delay=4
+)
+# Deep Review: one extra throttle retry and slightly longer backoff.
+DEEP_REVIEW_MODEL_RETRY = ModelRetryPolicy(
+    max_attempts=3, initial_delay=2, max_delay=16
 )
 _LIMIT_STOP_REASONS = frozenset(
     {"limit_turns", "limit_output_tokens", "limit_total_tokens"}
@@ -127,8 +155,9 @@ S3, Knowledge Base, or user-accessible tools.
 
 _FAST_CHAT_JSON_CONTRACT = """FAST CHAT OUTPUT CONTRACT
 
-Return the final response using the framework-provided structured-output
-mechanism. Match this schema:
+Complete the framework-provided structured-output mechanism on the first
+generation. Do not emit an intermediate conversational answer first.
+Decide Coaching versus Q&A internally; this turn is Fast Chat, not a locked Coaching specialist. Match this schema:
 
 - mode: exactly "coaching" or "qa"
 - response_text
@@ -141,8 +170,8 @@ mechanism. Match this schema:
 
 Do not return Facione scores, review fields, research coding, or an
 assessment object. Do not use application, retrieval, browsing, database,
-S3, Knowledge Base, or user-accessible tools. The framework-provided
-structured-output mechanism may be used only to return this schema.
+S3, Knowledge Base, or user-accessible tools. The structured-output
+mechanism may be used only to return this schema.
 Do not claim to mutate the Thinking Path stage.
 """
 
@@ -173,20 +202,41 @@ def structured_output_limits_for_role(role: str) -> dict[str, int] | None:
 
     Fast Chat, the Haiku router, and legacy Q&A/Coaching use ``turns=2`` so
     the common path is one generation plus at most one structured-output
-    recovery. Deep Review and Incremental Review pass ``None`` (no cap):
-    ``ReviewTurnOutput`` is richer and not latency-critical in the same way.
-    A missing cap must not be confused with ``ModelRetryStrategy``.
+    recovery. Deep Review and Incremental Review use ``turns=3`` (initial
+    plus up to two repairs). A missing cap must not be confused with
+    ``ModelRetryStrategy``.
 
     Args:
         role: Runtime model role id such as ``fast_chat`` or ``review_deep``.
 
     Returns:
-        A ``Limits``-shaped dict, or ``None`` for no event-loop cap.
+        A ``Limits``-shaped dict, or ``None`` when the role is unknown.
     """
     cleaned = str(role or "").strip().lower()
     if cleaned in _BOUNDED_STRUCTURED_OUTPUT_ROLES:
         return dict(FAST_CHAT_INVOKE_LIMITS)
+    if cleaned in _REVIEW_STRUCTURED_OUTPUT_ROLES:
+        return dict(DEEP_REVIEW_INVOKE_LIMITS)
     return None
+
+
+def model_retry_policy_for_role(role: str) -> ModelRetryPolicy:
+    """Return the finite model-retry policy for one structured invoke.
+
+    This is not the event-loop ``turns`` cap. ``ModelRetryStrategy`` retries
+    transient Converse failures inside one cycle. Construct a new strategy
+    instance per Agent; do not share it across requests.
+
+    Args:
+        role: Runtime model role id such as ``fast_chat`` or ``review_deep``.
+
+    Returns:
+        Inclusive ``max_attempts`` plus bounded backoff delays in seconds.
+    """
+    cleaned = str(role or "").strip().lower()
+    if cleaned in {"review_deep", "review"}:
+        return DEEP_REVIEW_MODEL_RETRY
+    return FAST_CHAT_MODEL_RETRY
 
 
 def invoke_failure_category(error: BaseException) -> str:
@@ -698,21 +748,26 @@ def log_role_invocation(
     success: bool,
     failure_category: str = "",
     guardrail_configured: bool = False,
+    event_loop_limit_turns: int | None = None,
+    model_retry_max_attempts: int | None = None,
 ) -> None:
     """Write category-only model provenance. Never logs prompts or student text.
 
     Args:
-        role: ``router``, ``qa``, ``coaching``, or ``review``.
+        role: ``router``, ``qa``, ``coaching``, ``fast_chat``, or ``review``.
         provider: Model provider id.
         model_id: Foundation model id.
         latency_ms: Invoke duration in milliseconds.
         success: Whether structured output was produced.
         failure_category: Stable failure category when ``success`` is false.
         guardrail_configured: Whether a guardrail id and version were set.
+        event_loop_limit_turns: Configured Strands ``limits.turns`` cap.
+        model_retry_max_attempts: Configured ``ModelRetryStrategy.max_attempts``.
     """
     logger.info(
         "role=%s provider=%s model_id=%s latency_ms=%s success=%s "
-        "failure_category=%s guardrail_configured=%s",
+        "failure_category=%s guardrail_configured=%s "
+        "configured_event_loop_limit=%s configured_model_attempt_cap=%s",
         str(role or "unknown").strip() or "unknown",
         str(provider or "unknown").strip() or "unknown",
         str(model_id or "unknown").strip() or "unknown",
@@ -720,6 +775,8 @@ def log_role_invocation(
         "true" if success else "false",
         (failure_category or ("ok" if success else "structured_output_failure")),
         "true" if guardrail_configured else "false",
+        event_loop_limit_turns if event_loop_limit_turns is not None else "unknown",
+        model_retry_max_attempts if model_retry_max_attempts is not None else "unknown",
     )
 
 

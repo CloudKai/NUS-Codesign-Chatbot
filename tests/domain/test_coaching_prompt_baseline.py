@@ -21,5 +21,5 @@ def test_canonical_coaching_prompts_match_pedagogical_baseline() -> None:
     assert len(files) == 6
     for item in files:
         path = Path(item["path"])
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        digest = hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
         assert digest == item["sha256"], path.as_posix()

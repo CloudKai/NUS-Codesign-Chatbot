@@ -468,10 +468,19 @@ def load_runtime_model(config: RuntimeModelConfig | None = None) -> Any:
     log_runtime_model_config(resolved)
     if resolved.uses_bedrock_model:
         try:
+            from botocore.config import Config as BotocoreConfig
             from strands.models import BedrockModel
         except ImportError as error:  # pragma: no cover - companion tests skip Strands
             raise RuntimeModelError("strands-agents is not installed") from error
-        return BedrockModel(**bedrock_model_kwargs(resolved))
+        # Botocore's default retry budget would multiply Strands Agent
+        # throttling retries. Keep SDK attempts at 1 so the Agent-level
+        # ModelRetryStrategy is the only Converse retry layer.
+        return BedrockModel(
+            **bedrock_model_kwargs(resolved),
+            boto_client_config=BotocoreConfig(
+                retries={"max_attempts": 1, "mode": "standard"},
+            ),
+        )
     try:
         from strands.models.openai_responses import OpenAIResponsesModel
     except ImportError as error:  # pragma: no cover - optional Luna extra

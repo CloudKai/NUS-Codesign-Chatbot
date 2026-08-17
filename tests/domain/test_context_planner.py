@@ -315,3 +315,30 @@ def test_estimate_tokens_is_conservative_versus_character_count():
     tokens = estimate_tokens(text)
     assert tokens >= len(text) / 3.0
     assert tokens > len(text) / 8
+
+
+def test_seeded_coach_welcome_is_excluded_from_model_history():
+    """Static UI welcome stays in the transcript but is not model history."""
+    welcome = {
+        "role": "assistant",
+        "content": (
+            "**Welcome to your critical-thinking coach**\n\n"
+            "I'm here to help you think through a design or research challenge."
+        ),
+        "metadata": {"kind": "coach_welcome", "workflow": "welcome"},
+    }
+    later = {"role": "assistant", "content": "What problem are you working on?"}
+    history = [welcome, {"role": "user", "content": "testing"}, later]
+    planner = HistoryContextPlanner()
+    plan = planner.plan(
+        _request(history=history, student_message="hello again"),
+        prompt_text="hello again",
+        policy="fast_chat",
+    )
+    texts = [item["content"][0]["text"] for item in plan.messages]
+    assert "Welcome to your critical-thinking coach" not in " ".join(texts)
+    assert "What problem are you working on?" in texts
+    assert welcome["content"] == (
+        "**Welcome to your critical-thinking coach**\n\n"
+        "I'm here to help you think through a design or research challenge."
+    )

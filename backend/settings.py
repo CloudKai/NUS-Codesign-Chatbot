@@ -69,8 +69,9 @@ def _default_app_env() -> str:
 
 # Fast Chat can Retrieve twice (initial gate hit + rare RAG fallback) and
 # invoke AgentCore twice inside one claimed notebook execution. Strands
-# ``limits={"turns": 2}`` only bounds recovery cycles *inside* one invoke;
-# it does not add a third client-timeout window.
+# ``limits={"turns": 2}`` bounds structured-output recovery *inside* one
+# invoke; Deep Review uses ``turns=3``. ``ModelRetryStrategy`` is a separate
+# inner Converse retry cap and does not add a third client-timeout window.
 FAST_CHAT_MAX_PROVIDER_INVOCATIONS_PER_TURN = 2
 FAST_CHAT_MAX_RETRIEVALS_PER_TURN = 2
 # Auth/notebook/history/catalog loads, citation resolution, boto connect

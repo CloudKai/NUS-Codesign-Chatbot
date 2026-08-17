@@ -32,6 +32,11 @@ DEFAULT_FAST_CHAT_RECENT_HISTORY_MAX_TOKENS = 3_000
 DEFAULT_FAST_CHAT_HISTORY_MESSAGE_MAX_TOKENS = 1_500
 CONTEXT_POLICY_FULL_HISTORY = "full_history"
 CONTEXT_POLICY_FAST_CHAT = "fast_chat"
+# Static UI welcome seeded into new notebooks. Keep it in the transcript for
+# display, but do not send it back as model history (it biases trivial
+# inputs such as "testing" into another greeting).
+_COACH_WELCOME_KIND = "coach_welcome"
+_COACH_WELCOME_TITLE = "Welcome to your critical-thinking coach"
 # Conservative: under-use the window rather than overflow it.
 DEFAULT_CHARS_PER_TOKEN = 3.0
 DEFAULT_IMAGE_TOKENS = 2_000
@@ -411,6 +416,18 @@ def pack_fast_chat_recent_turns(
     return packed, dropped, telemetry
 
 
+def _is_seeded_coach_welcome(item: dict[str, Any]) -> bool:
+    """Return True when *item* is the static UI welcome, not a model turn."""
+    metadata = item.get("metadata")
+    if isinstance(metadata, dict):
+        kind = str(metadata.get("kind") or "").strip().lower()
+        workflow = str(metadata.get("workflow") or "").strip().lower()
+        if kind == _COACH_WELCOME_KIND or workflow == "welcome":
+            return True
+    text = " ".join(str(item.get("content") or "").split())
+    return _COACH_WELCOME_TITLE in text
+
+
 def active_history_turns(
     history: list[dict[str, Any]],
     *,
@@ -421,6 +438,8 @@ def active_history_turns(
     turns: list[dict[str, str]] = []
     for item in history or []:
         if not isinstance(item, dict):
+            continue
+        if _is_seeded_coach_welcome(item):
             continue
         role = str(item.get("role") or "").strip().lower()
         if role not in {"user", "assistant"}:

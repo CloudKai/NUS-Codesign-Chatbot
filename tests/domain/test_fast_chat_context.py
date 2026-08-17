@@ -421,7 +421,7 @@ def test_system_prompt_estimate_includes_runtime_context() -> None:
 
     runtime_context = {
         "current_stage": "problem_identification",
-        "specialist": "coaching",
+        "specialist": "fast_chat",
         "allowed_citations": ["S1"],
     }
     without_ctx = fast_chat_system_prompt_for_estimate(

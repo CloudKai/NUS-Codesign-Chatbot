@@ -75,6 +75,7 @@ try:
         qa_turn_from_agent_result,
         review_turn_from_agent_result,
         agent_system_prompt,
+        model_retry_policy_for_role,
         structured_output_limits_for_role,
         structured_wire_payload,
     )
@@ -132,6 +133,7 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
         qa_turn_from_agent_result,
         review_turn_from_agent_result,
         agent_system_prompt,
+        model_retry_policy_for_role,
         structured_output_limits_for_role,
         structured_wire_payload,
     )
@@ -235,6 +237,30 @@ def _parse_result(phase: str, output_contract: str, result: Any) -> Any:
     return coach_turn_from_agent_result(result)
 
 
+def _retry_strategy_for_role(role: str) -> Any:
+    """Return a new Strands ``ModelRetryStrategy`` for one invoke.
+
+    The SDK object is stateful. Never reuse it across Agent instances.
+
+    Args:
+        role: Runtime model role id.
+
+    Returns:
+        A ``ModelRetryStrategy`` constructed from
+        :func:`model_retry_policy_for_role`.
+    """
+    policy = model_retry_policy_for_role(role)
+    try:
+        from strands import ModelRetryStrategy
+    except ImportError:  # pragma: no cover - 1.52.0 fallback path
+        from strands.event_loop._retry import ModelRetryStrategy
+    return ModelRetryStrategy(
+        max_attempts=policy.max_attempts,
+        initial_delay=policy.initial_delay,
+        max_delay=policy.max_delay,
+    )
+
+
 def _log_role(
     *,
     role: str,
@@ -243,6 +269,9 @@ def _log_role(
     failure_category: str = "",
 ) -> None:
     """Emit safe per-role provenance without reading student content."""
+    limits = structured_output_limits_for_role(role)
+    retry = model_retry_policy_for_role(role)
+    event_loop_limit_turns = None if limits is None else int(limits.get("turns") or 0) or None
     try:
         config = get_role_config(role)
     except RuntimeModelError:
@@ -254,6 +283,8 @@ def _log_role(
             success=success,
             failure_category=failure_category or "unavailable",
             guardrail_configured=False,
+            event_loop_limit_turns=event_loop_limit_turns,
+            model_retry_max_attempts=retry.max_attempts,
         )
         return
     log_role_invocation(
@@ -264,6 +295,8 @@ def _log_role(
         success=success,
         failure_category=failure_category,
         guardrail_configured=bool(config.guardrail_id and config.guardrail_version),
+        event_loop_limit_turns=event_loop_limit_turns,
+        model_retry_max_attempts=retry.max_attempts,
     )
 
 
@@ -284,7 +317,8 @@ async def _structured_role_invoke(
     structured-output recovery turn is not classified as PROMPT_ATTACK.
     Fast Chat / router / legacy Haiku roles pass ``limits={"turns": 2}``
     (verified 1.52.0: initial generation plus at most one recovery). Deep
-    Review is uncapped so a legitimate Sonnet repair is not cut short.
+    Review passes ``limits={"turns": 3}``. Model retries are a separate
+    ``ModelRetryStrategy`` on the Agent, not the event-loop cap.
     """
     from strands import Agent
 
@@ -367,6 +401,7 @@ async def _structured_role_invoke(
         "system_prompt": system_prompt,
         "tools": [],
         "callback_handler": None,
+        "retry_strategy": _retry_strategy_for_role(role),
     }
     if include_history:
         prior, _current = conversation_for_invoke(payload)

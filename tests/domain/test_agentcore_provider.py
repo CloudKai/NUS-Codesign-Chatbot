@@ -261,7 +261,9 @@ def test_valid_structured_coaching_and_research_coding():
     assert _STAGE_MARKERS["problem_identification"] not in payload["trusted_instructions"]
     assert _STAGE_MARKERS["problem_identification"] not in _current_turn_text(payload)
     assert payload["runtime_context"]["current_stage"] == "problem_identification"
-    assert payload["runtime_context"]["specialist"] == "coaching"
+    assert payload["runtime_context"]["specialist"] == "fast_chat"
+    assert "expected_response_mode" not in payload["runtime_context"]
+    assert payload["runtime_context"].get("specialist") != "coaching"
     assert _STUDENT_MESSAGE in _current_turn_text(payload)
     assert _STUDENT_MESSAGE not in payload["trusted_instructions"]
     assert "RetrieveAndGenerate" not in json.dumps(payload)

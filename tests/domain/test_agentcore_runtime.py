@@ -636,6 +636,12 @@ def test_structured_roles_pass_custom_repair_prompt_to_invoke_async(
 
     calls: list[dict[str, Any]] = []
 
+    class FakeModelRetryStrategy:
+        """Record constructor kwargs without importing Strands."""
+
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
     class FakeAgent:
         """Record invoke_async kwargs without importing Strands."""
 
@@ -659,6 +665,7 @@ def test_structured_roles_pass_custom_repair_prompt_to_invoke_async(
 
     fake_strands = types.ModuleType("strands")
     fake_strands.Agent = FakeAgent  # type: ignore[attr-defined]
+    fake_strands.ModelRetryStrategy = FakeModelRetryStrategy  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "strands", fake_strands)
     monkeypatch.setattr(runtime_main, "_ensure_role_configs", lambda: None)
 
@@ -736,6 +743,7 @@ def test_structured_roles_pass_custom_repair_prompt_to_invoke_async(
     for call, expected_model, result in zip(calls, expected_models, results, strict=True):
         assert "structured_output_prompt" not in call["init_kwargs"]
         assert call["init_kwargs"]["tools"] == []
+        assert "retry_strategy" in call["init_kwargs"]
         assert call["kwargs"]["structured_output_model"] is expected_model
         assert call["kwargs"]["structured_output_prompt"] == (
             "Please use the output tool now."
@@ -744,9 +752,13 @@ def test_structured_roles_pass_custom_repair_prompt_to_invoke_async(
     assert calls[0]["kwargs"]["limits"] == {"turns": 2}
     assert calls[1]["kwargs"]["limits"] == {"turns": 2}
     assert calls[2]["kwargs"]["limits"] == {"turns": 2}
-    assert calls[3]["kwargs"]["limits"] is None
-    assert calls[4]["kwargs"]["limits"] is None
+    assert calls[3]["kwargs"]["limits"] == {"turns": 3}
+    assert calls[4]["kwargs"]["limits"] == {"turns": 3}
     assert calls[5]["kwargs"]["limits"] == {"turns": 2}
+    assert calls[0]["init_kwargs"]["retry_strategy"].kwargs["max_attempts"] == 2
+    assert calls[2]["init_kwargs"]["retry_strategy"].kwargs["max_attempts"] == 2
+    assert calls[4]["init_kwargs"]["retry_strategy"].kwargs["max_attempts"] == 3
+    assert calls[5]["init_kwargs"]["retry_strategy"].kwargs["max_attempts"] == 2
 
 
 def test_limit_turns_stop_reason_is_structured_output_failure() -> None:

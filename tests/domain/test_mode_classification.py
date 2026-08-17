@@ -421,6 +421,9 @@ def test_high_confidence_personal_keeps_coaching_recommendation(tmp_path) -> Non
     persisted = _persisted_assessment(store, thread_id)
     assert persisted.get("recommendation") == "stay"
     assert RUNTIME_HINT_COACHING in _trusted_instructions(client)
+    context = _decoded_payload(client.calls[0]).get("runtime_context") or {}
+    assert context.get("specialist") == "fast_chat"
+    assert context.get("expected_response_mode") == "coaching"
 
 
 def test_ambiguous_respects_model_qa_and_coaching(tmp_path) -> None:
@@ -516,3 +519,15 @@ def test_coaching_mode_requires_stay_or_advance_on_provider() -> None:
             )
         )
     assert len(client.calls) == 1
+
+
+def test_idle_inputs_stay_unconstrained_and_skip_retrieve() -> None:
+    """Trivial acknowledgements must not become Q&A or start a router."""
+    for message in ("testing", "hello", "?", "ok", "thanks"):
+        policy = _policy(message)
+        assert policy.expected_mode != "qa", message
+        assert policy.retrieve is False, message
+        assert policy.intent in {
+            INTENT_AMBIGUOUS,
+            INTENT_HIGH_CONFIDENCE_PERSONAL,
+        }, message
