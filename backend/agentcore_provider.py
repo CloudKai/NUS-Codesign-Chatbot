@@ -1021,7 +1021,12 @@ def _runtime_session_id(request: CoachRequest, role: str) -> str:
         str(getattr(settings, "agentcore_session_generation", "") or "").strip()
         or "1"
     )
-    return _affinity_session_id(owner_id, notebook_id, cleaned_role, generation)
+    role_material = cleaned_role
+    if cleaned_role == "review_deep":
+        review_id = _collapsed_identity(getattr(request, "review_id", None))
+        if review_id:
+            role_material = f"{cleaned_role}:{review_id}"
+    return _affinity_session_id(owner_id, notebook_id, role_material, generation)
 
 
 def _current_turn_content(

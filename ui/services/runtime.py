@@ -24,6 +24,7 @@ from backend.coaching.progress import PROGRESS_LABELS
 from backend.domain import (
     CoachRequest,
     CoachTurn,
+    DeepReviewJob,
     MessageCreateRequest,
     NotebookCreateRequest,
     NotebookUpdateRequest,
@@ -197,14 +198,32 @@ def submit_coach_turn(request: CoachRequest) -> CoachTurn:
     return coach.submit(request)
 
 
-def start_deep_review(thread_id: str, *, idempotency_key: str | None = None) -> CoachTurn:
-    """Run one server-owned explicit Deep Review via API or in-process service."""
+def start_deep_review(
+    thread_id: str, *, idempotency_key: str | None = None
+) -> DeepReviewJob:
+    """Enqueue one server-owned explicit Deep Review via API or in-process service."""
     if local_api_enabled():
         return local_api_client().start_deep_review(
             thread_id, idempotency_key=idempotency_key
         )
     _, _, coach, _ = _resolve_resources()
-    return coach.run_deep_review(thread_id, idempotency_key=idempotency_key)
+    return coach.enqueue_deep_review(thread_id, idempotency_key=idempotency_key)
+
+
+def get_deep_review_job(thread_id: str) -> DeepReviewJob | None:
+    """Return the owner-scoped Deep Review job, or ``None`` when none exists."""
+    if local_api_enabled():
+        try:
+            return local_api_client().get_deep_review(thread_id)
+        except httpx.HTTPStatusError as error:
+            if error.response is not None and error.response.status_code == 404:
+                return None
+            raise
+    _, _, coach, _ = _resolve_resources()
+    try:
+        return coach.get_deep_review_job(thread_id)
+    except ValueError:
+        return None
 
 
 def stream_coach_turn_events(request: CoachRequest) -> Iterator[dict[str, Any]]:

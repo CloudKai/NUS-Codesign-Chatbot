@@ -103,11 +103,15 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     from backend import settings as settings_module
     from backend.persistence.factory import reset_file_storage_cache
     from backend.rate_limit import reset_coach_rate_limiter_for_tests
+    from backend.rate_limit import reset_deep_review_limiter_for_tests
+    from backend.coaching.deep_review_jobs import reset_deep_review_jobs_for_tests
 
     reset_file_storage_cache()
     # Drop process-local limiter state between tests so burst windows do not
     # bleed across cases. Rate-limit tests inject their own ceilings.
     reset_coach_rate_limiter_for_tests()
+    reset_deep_review_limiter_for_tests()
+    reset_deep_review_jobs_for_tests()
     monkeypatch.setattr(settings_module.settings, "app_env", "development")
     monkeypatch.setattr(settings_module.settings, "data_dir", root.resolve())
     monkeypatch.setattr(settings_module.settings, "database_path", database.resolve())

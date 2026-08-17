@@ -11,6 +11,7 @@ import httpx
 from .domain import (
     CoachRequest,
     CoachTurn,
+    DeepReviewJob,
     MessageCreateRequest,
     NotebookCreateRequest,
     NotebookUpdateRequest,
@@ -630,8 +631,8 @@ class LocalApiClient:
         thread_id: str,
         *,
         idempotency_key: str | None = None,
-    ) -> CoachTurn:
-        """Start a server-owned explicit Deep Review for one owned notebook."""
+    ) -> DeepReviewJob:
+        """Enqueue a server-owned explicit Deep Review for one owned notebook."""
         payload: dict[str, Any] = {}
         if idempotency_key:
             payload["idempotency_key"] = idempotency_key
@@ -643,7 +644,16 @@ class LocalApiClient:
             **kwargs,
         )
         response.raise_for_status()
-        return CoachTurn.model_validate(response.json())
+        return DeepReviewJob.model_validate(response.json())
+
+    def get_deep_review(self, thread_id: str) -> DeepReviewJob:
+        """Return the owner-scoped Deep Review job for one notebook."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/threads/{quote(thread_id, safe='')}/deep-review",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return DeepReviewJob.model_validate(response.json())
 
     @staticmethod
     def coaching_error_category(payload: Mapping[str, Any] | None) -> str:

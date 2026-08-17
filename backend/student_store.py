@@ -1069,6 +1069,302 @@ class StudentStore:
                 ),
             )
 
+    _SETTINGS_MERGE_ATTEMPTS = 8
+
+    def _update_settings_text_only(
+        self,
+        connection: Any,
+        thread_id: str,
+        row: Any,
+        metadata: dict[str, Any],
+    ) -> bool:
+        """Write ``settings_text`` without changing stage or conversation revision.
+
+        The live ``current_stage`` column is copied into the metadata blob so
+        ``_split_notebook_metadata`` cannot persist a stale journey stage. The
+        UPDATE predicate uses ``updated_at`` so a concurrent settings writer
+        forces a retry instead of last-write-wins.
+
+        Args:
+            connection: Open store connection.
+            thread_id: Owned notebook id.
+            row: Notebooks row selected in this transaction.
+            metadata: Merged metadata after the caller mutated settings keys.
+
+        Returns:
+            ``True`` when one owned row was updated.
+        """
+        live_stage = str(row["current_stage"] or DEFAULT_STAGE)
+        journey = dict(metadata.get("learning_journey") or {})
+        journey["current_stage"] = live_stage
+        metadata["learning_journey"] = journey
+        metadata["thinking_stage"] = live_stage
+        _, _, settings_text = self._split_notebook_metadata(metadata)
+        now = utc_now()
+        expected_updated_at = row["updated_at"]
+        if expected_updated_at:
+            updated = connection.execute(
+                """
+                UPDATE notebooks
+                SET settings_text=?, updated_at=?
+                WHERE id=? AND user_id=? AND updated_at=?
+                """,
+                (
+                    settings_text,
+                    now,
+                    thread_id,
+                    self.owner_id,
+                    expected_updated_at,
+                ),
+            )
+        else:
+            updated = connection.execute(
+                """
+                UPDATE notebooks
+                SET settings_text=?, updated_at=?
+                WHERE id=? AND user_id=?
+                """,
+                (settings_text, now, thread_id, self.owner_id),
+            )
+        return int(getattr(updated, "rowcount", 0) or 0) > 0
+
+    def start_or_get_deep_review_job(
+        self,
+        thread_id: str,
+        *,
+        review_id: str,
+        reviewed_revision: int,
+        stage_at_start: str,
+        source_ids: list[str],
+        message_ids: list[str],
+    ) -> tuple[dict[str, Any], bool]:
+        """Persist a queued Deep Review job, or return the in-flight job.
+
+        Does not insert transcript rows or change ``current_stage`` /
+        ``conversation_revision``. Duplicate starts while a job is queued or
+        running reuse that job.
+
+        Args:
+            thread_id: Owned notebook id.
+            review_id: Candidate id used only when this call creates a job.
+            reviewed_revision: Conversation revision frozen at enqueue.
+            stage_at_start: Thinking Path stage at enqueue.
+            source_ids: Selected source ids frozen at enqueue.
+            message_ids: Active message ids frozen at enqueue.
+
+        Returns:
+            ``(job, created)`` where *created* is ``True`` only for a new job.
+
+        Raises:
+            ValueError: When the notebook is missing.
+        """
+        from backend.specialists.review_orchestration import (
+            DEEP_REVIEW_JOB_KEY,
+            deep_review_job_is_active,
+            new_deep_review_job,
+            parse_deep_review_job,
+        )
+
+        cleaned_id = str(review_id or "").strip()
+        if not cleaned_id:
+            raise ValueError("review_id is required")
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                existing = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+                if deep_review_job_is_active(existing):
+                    return existing, False
+                job = new_deep_review_job(
+                    review_id=cleaned_id,
+                    reviewed_revision=reviewed_revision,
+                    stage_at_start=stage_at_start,
+                    source_ids=source_ids,
+                    message_ids=message_ids,
+                    started_at=utc_now(),
+                )
+                metadata[DEEP_REVIEW_JOB_KEY] = job
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return job, True
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before Deep Review could be queued"
+        )
+
+    def mark_deep_review_job_running(self, thread_id: str, review_id: str) -> bool:
+        """Mark a queued Deep Review job running for *review_id*.
+
+        Args:
+            thread_id: Owned notebook id.
+            review_id: Job id that must still own the in-flight slot.
+
+        Returns:
+            ``True`` when this worker claimed the running state.
+
+        Raises:
+            ValueError: When the notebook is missing.
+        """
+        from backend.specialists.review_orchestration import (
+            DEEP_REVIEW_JOB_KEY,
+            DEEP_REVIEW_JOB_QUEUED,
+            DEEP_REVIEW_JOB_RUNNING,
+            parse_deep_review_job,
+        )
+
+        cleaned_id = str(review_id or "").strip()
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+                if not job or str(job.get("review_id") or "") != cleaned_id:
+                    return False
+                status = str(job.get("status") or "")
+                if status == DEEP_REVIEW_JOB_RUNNING:
+                    return True
+                if status != DEEP_REVIEW_JOB_QUEUED:
+                    return False
+                job["status"] = DEEP_REVIEW_JOB_RUNNING
+                job["updated_at"] = utc_now()
+                metadata[DEEP_REVIEW_JOB_KEY] = job
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return True
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before Deep Review could start"
+        )
+
+    def complete_deep_review_job(
+        self,
+        thread_id: str,
+        *,
+        review_id: str,
+        snapshot: dict[str, Any],
+    ) -> None:
+        """Persist a Deep Review snapshot and mark the job completed.
+
+        Resets ``coaching_turns_since_deep_review`` to ``0``. Does not insert
+        messages, change ``current_stage``, or require a matching
+        ``conversation_revision``.
+
+        Args:
+            thread_id: Owned notebook id.
+            review_id: Job id that must still own the in-flight slot.
+            snapshot: Validated ``deep_review_snapshot`` payload.
+
+        Raises:
+            ValueError: When the notebook is missing.
+            ConversationRevisionConflictError: When settings could not be saved.
+        """
+        from backend.specialists.review_orchestration import (
+            COUNTER_SETTINGS_KEY,
+            DEEP_REVIEW_JOB_COMPLETED,
+            DEEP_REVIEW_JOB_FAILED,
+            DEEP_REVIEW_JOB_KEY,
+            DEEP_REVIEW_SNAPSHOT_KEY,
+            parse_deep_review_job,
+        )
+
+        cleaned_id = str(review_id or "").strip()
+        if not isinstance(snapshot, dict) or not snapshot:
+            raise ValueError("Deep Review snapshot is required")
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+                if not job or str(job.get("review_id") or "") != cleaned_id:
+                    return
+                if str(job.get("status") or "") in {
+                    DEEP_REVIEW_JOB_COMPLETED,
+                    DEEP_REVIEW_JOB_FAILED,
+                }:
+                    return
+                now = utc_now()
+                job["status"] = DEEP_REVIEW_JOB_COMPLETED
+                job["updated_at"] = now
+                job["error_code"] = None
+                metadata[DEEP_REVIEW_JOB_KEY] = job
+                metadata[DEEP_REVIEW_SNAPSHOT_KEY] = dict(snapshot)
+                metadata[COUNTER_SETTINGS_KEY] = 0
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before Deep Review could be saved"
+        )
+
+    def fail_deep_review_job(
+        self,
+        thread_id: str,
+        *,
+        review_id: str,
+        error_code: str,
+    ) -> None:
+        """Mark a Deep Review job failed without changing the counter or snapshot.
+
+        Args:
+            thread_id: Owned notebook id.
+            review_id: Job id that must still own the in-flight slot.
+            error_code: Privacy-safe failure code such as ``review_timeout``.
+
+        Raises:
+            ValueError: When the notebook is missing.
+            ConversationRevisionConflictError: When settings could not be saved.
+        """
+        from backend.specialists.review_orchestration import (
+            DEEP_REVIEW_JOB_COMPLETED,
+            DEEP_REVIEW_JOB_FAILED,
+            DEEP_REVIEW_JOB_KEY,
+            parse_deep_review_job,
+        )
+
+        cleaned_id = str(review_id or "").strip()
+        cleaned_error = str(error_code or "").strip() or "review_failed"
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+                if not job or str(job.get("review_id") or "") != cleaned_id:
+                    return
+                if str(job.get("status") or "") == DEEP_REVIEW_JOB_COMPLETED:
+                    return
+                job["status"] = DEEP_REVIEW_JOB_FAILED
+                job["updated_at"] = utc_now()
+                job["error_code"] = cleaned_error
+                metadata[DEEP_REVIEW_JOB_KEY] = job
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before Deep Review could be marked failed"
+        )
+
     def select_learning_stage(self, thread_id: str, stage_id: str) -> dict[str, Any]:
         """Set the notebook's current stage and reject active pending transitions.
 

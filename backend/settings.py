@@ -274,6 +274,12 @@ class Settings:
     deep_review_interval_turns: int = _bounded_int(
         "DEEP_REVIEW_INTERVAL_TURNS", 3, 1, 20
     )
+    deep_review_max_concurrent: int = _bounded_int(
+        "DEEP_REVIEW_MAX_CONCURRENT", 8, 1, 32
+    )
+    deep_review_job_timeout_seconds: int = _bounded_int(
+        "DEEP_REVIEW_JOB_TIMEOUT_SECONDS", 180, 30, 600
+    )
     guardrail_id: str = os.getenv("GUARDRAIL_ID", "").strip()
     guardrail_version: str = os.getenv("GUARDRAIL_VERSION", "").strip()
     knowledge_base_id: str = os.getenv("KNOWLEDGE_BASE_ID", "").strip()

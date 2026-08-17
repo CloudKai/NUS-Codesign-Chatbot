@@ -8,7 +8,7 @@
 
 **Live cutover 2026-08-17:** same AgentCore ARN, new version **21** on DEFAULT; EC2 app image `cde2300-chatbot:b81a5b0`; Compose / host pin `AGENTCORE_SESSION_GENERATION=2`.
 
-**Always-visible Deep Review button:** Review always shows **Start Deep Review**. Locked/unlocked state and the `{n}/{interval}` caption are derived from persisted `coaching_turns_since_deep_review` and `DEEP_REVIEW_INTERVAL_TURNS`. Eligibility remains FastAPI/DSQL (`explicit_deep_review_available`); Streamlit does not keep a second counter. Ineligible `POST /api/v1/threads/{id}/deep-review` still returns 400. This UI change is not in the live EC2 image.
+**Always-visible Deep Review button:** Review always shows **Start Deep Review**. Locked/unlocked state and the `{n}/{interval}` caption are derived from persisted `coaching_turns_since_deep_review` and `DEEP_REVIEW_INTERVAL_TURNS`. Eligibility remains FastAPI/DSQL (`explicit_deep_review_available`); Streamlit does not keep a second counter. Ineligible `POST /api/v1/threads/{id}/deep-review` still returns 400. The Review spinner follows persisted `deep_review_job` status via a 2s fragment poll, not a Streamlit session flag. This UI/API change is not in the live EC2 image.
 
 **Divergence vs `main`:** history-only ancestry. `git log --no-merges origin/Integrate-Bedrock..origin/main` is empty, and no file exists on `main` that is missing from this branch. `main`’s extra commits are merge commits of PRs #7–#12. This branch is strictly ahead in content.
 
@@ -21,7 +21,11 @@ Release steps: [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.
 Committed application/runtime (not an uncommitted worktree):
 
 - Fast Chat: one FastAPI `InvokeAgentRuntime` per normal turn; slim `FastChatTurnOutput` (`fast_chat_turn_v1`); Haiku 4.5; `runtime_context.specialist=fast_chat`.
-- Deep Review: explicit `POST /api/v1/threads/{thread_id}/deep-review` (Sonnet 4.6). The browser cannot pick a privileged specialist on `/coach/turn`.
+- Deep Review: explicit `POST /api/v1/threads/{thread_id}/deep-review` enqueues a
+  background Sonnet 4.6 job and returns `{ review_id, status, reviewed_revision }`
+  immediately. `GET` the same path for job status (snapshot when completed).
+  Coaching `/coach/turn` can overlap. The browser cannot pick a privileged
+  specialist on `/coach/turn`.
 - Course RAG: shared `course/` objects → Bedrock **MANAGED** Knowledge Base → validated `Retrieve` mapped to `[S#]`. Student uploads stay on local lexical retrieval.
 - Student-source hydration: precomputed `derived/chunks.v1.json` plus an in-process LRU; missing/invalid artifacts fall back to chunking extracted text.
 - Auth/persistence: Cognito owner isolation; Aurora DSQL is the only durable transcript; S3 for objects; atomic persist; append-only conversation revisions; durable idempotency lease.
@@ -156,7 +160,80 @@ rather than timing-dependent (`tests/persistence/test_message_ordering.py`).
 > For current HEAD, CI, and deploy impact, use **CURRENT STATUS** above and
 > [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md).
 
-### Current phase — Always-visible Deep Review button (server-owned eligibility)
+### Current phase — Background Deep Review jobs (non-blocking coaching + poll UI)
+
+**Code is local on `Integrate-Bedrock` and is not committed or deployed.** No
+AgentCore publish, EC2 deploy, or live AWS inference was performed. Fast Chat,
+RAG, STAY/ADVANCE, Facione, and CLEAR are unchanged. Live app image remains
+`cde2300-chatbot:b81a5b0`.
+
+#### What this phase changed
+
+1. **Non-blocking enqueue.** `POST /api/v1/threads/{thread_id}/deep-review`
+   persists `deep_review_job` on notebook `settings_text` and returns
+   `{ review_id, status, reviewed_revision }` immediately. A process-local
+   `ThreadPoolExecutor` (one Uvicorn worker) runs Sonnet against
+   `get_messages_at_revision` plus frozen message/source ids. Completion writes
+   `deep_review_snapshot`, job `completed`, and counter `0` without inserting
+   transcript rows or requiring a matching live stage/revision.
+2. **Coaching overlap.** Deep Review no longer takes
+   `MAX_ACTIVE_COACH_REQUESTS_PER_NOTEBOOK`. Chat keeps notebook=1.
+   `DEEP_REVIEW_MAX_CONCURRENT` (default 8) is a separate semaphore.
+3. **GET status + stale fail-closed.** `GET` the same path returns the job
+   (snapshot when completed). Queued/running jobs older than
+   `DEEP_REVIEW_JOB_TIMEOUT_SECONDS` (default 180) become `failed` /
+   `review_timeout`. Duplicate POST while queued/running reuses `review_id`.
+4. **Review UI poll.** Streamlit fragments poll GET every 2s only while
+   queued/running. The spinner follows backend job status. Chat stays enabled.
+   Browser refresh recovers from the job record. Failed jobs keep the counter
+   and show the existing safe error.
+
+#### Files
+
+- `backend/persistence/store/contracts.py` — `deep_review_job` settings key
+- `backend/specialists/review_orchestration.py` — job parse/stale helpers
+- `backend/student_store.py` — start/mark/complete/fail settings writers
+- `backend/persistence/dsql_student_store.py` — OCC coverage for those writers
+- `backend/domain.py`, `backend/settings.py`, `backend/rate_limit.py`
+- `backend/coaching/deep_review_jobs.py`, `backend/coaching/execution.py`
+- `backend/http/app.py`, `backend/api_client.py`, `ui/services/runtime.py`
+- `backend/agentcore_provider.py` — optional affinity salt with `review_id`
+- `ui/panels/studio.py` — stable vs 2s polling fragments
+- `tests/conftest.py` — reset in-process review executor between tests
+- `tests/http/test_deep_review.py`, `tests/domain/test_deep_review_execution.py`,
+  `tests/ui/test_deep_review_control.py`, `tests/ui/test_chat_progress.py`,
+  `tests/test_architecture_contracts.py`, `tests/domain/test_review_agent.py`
+- `docs/IMPLEMENTATION_STATUS.md` — this phase
+
+#### Validation
+
+- `ruff check` on touched Python files: passed.
+- `python -m compileall -q backend ui streamlit_app.py tests scripts`: passed.
+- Targeted: `tests/domain/test_deep_review_execution.py`,
+  `tests/http/test_deep_review.py`, `tests/ui/test_deep_review_control.py`,
+  `tests/ui/test_chat_progress.py`, `tests/test_architecture_contracts.py`,
+  `tests/domain/test_review_agent.py`: passed.
+- Full mock pytest: 1312 passed.
+- No live AWS, AgentCore, Bedrock, DSQL, S3, or KB calls.
+
+#### Migration / compatibility / rollback
+
+No DSQL DDL. New settings key is ignored by older code and dropped only if an
+old writer splits metadata without `deep_review_job` in `SETTINGS_KEYS`.
+Rollback is a code revert. In-flight jobs are not durable across process
+restart; the next GET fail-closes them.
+
+#### Risks / blockers
+
+Staging-ready for a pilot, not a 100-student soak. Remaining: in-process jobs
+die on container restart; AgentCore/Bedrock account concurrency; polling load
+is one GET / 2s / in-flight review only.
+
+#### Next exact action
+
+Do **not** commit, publish AgentCore, or rebuild the EC2 image unless asked.
+
+### Previous phase — Always-visible Deep Review button (server-owned eligibility)
 
 **Committed on `Integrate-Bedrock`.** No AgentCore publish, EC2 deploy, or live
 AWS inference was performed. Fast Chat, RAG, stage advancement, Sonnet, and

@@ -88,8 +88,8 @@ modules.
 | `domain/test_fast_chat_context.py` | Six-message window, 3000/1500 history budgets, 12k/16k totals, system-prompt estimate, RAG repack |
 | `domain/test_conversation_memory_continuity.py` | 20/50/100-message and chunky-history extractive memory; no LLM summarizer |
 | `domain/test_rag_fallback.py` | Application-owned needs_source_retrieval retry; persist-final-only |
-| `domain/test_deep_review_execution.py` | Server-owned Deep Review eligibility, Sonnet, counter, snapshot, idempotency |
-| `http/test_deep_review.py` | Dedicated Deep Review HTTP route, ownership, concurrency, specialist sanitization |
+| `domain/test_deep_review_execution.py` | Background Deep Review enqueue, frozen snapshot, counter, no transcript rows |
+| `http/test_deep_review.py` | Deep Review job POST/GET, coaching overlap, duplicate/stale/owner isolation |
 | `domain/test_coaching_prompt_baseline.py` | SHA-256 lock on canonical Coaching/stage prompt files |
 | `domain/test_prompt_cache.py` | SystemContentBlock prefix cache; no CacheConfig auto on student text |
 | `scripts/test_evaluate_fast_chat_regression.py` | Dry-run and mocked live-candidate regression CLI; no live Claude |

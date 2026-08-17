@@ -61,6 +61,10 @@ def test_deep_review_button_is_full_width_and_grouped_with_caption() -> None:
     assert "use_container_width=True" in button
     assert 'key="deep_review_control"' in studio
     assert "gap=10" in studio
+    assert '@st.fragment(run_every="2s")' in studio
+    assert "_deep_review_running_thread_id" not in studio
+    assert "get_deep_review_job" in studio
+    assert "This review reflects the conversation at the start of Deep Review" in studio
     css = Path("ui/assets/styles/20-studio.css").read_text(encoding="utf-8")
     assert ".st-key-deep_review_control" in css
     assert ".st-key-start_deep_review" in css

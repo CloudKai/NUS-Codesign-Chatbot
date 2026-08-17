@@ -354,3 +354,41 @@ def test_deep_review_failure_keeps_counter_and_safe_error(monkeypatch) -> None:
     assert "us-west-2" not in errors
     assert _notebook_deep_review_counter(app.session_state["thread_id"]) == before
     assert _deep_review_button(app).disabled is False
+
+
+def test_chat_stays_enabled_while_persisted_deep_review_job_is_running() -> None:
+    """Review spinner follows the backend job, not a Streamlit session flag."""
+    from backend.specialists.review_orchestration import (
+        COUNTER_SETTINGS_KEY,
+        DEEP_REVIEW_JOB_KEY,
+        DEEP_REVIEW_JOB_RUNNING,
+    )
+    from backend.student_store import StudentStore
+    from backend.persistence.store.contracts import utc_now
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    assert not app.exception
+    thread_id = str(app.session_state["thread_id"])
+    started = utc_now()
+    StudentStore().update_thread(
+        thread_id,
+        metadata={
+            COUNTER_SETTINGS_KEY: 3,
+            DEEP_REVIEW_JOB_KEY: {
+                "review_id": "ui-running",
+                "status": DEEP_REVIEW_JOB_RUNNING,
+                "reviewed_revision": 0,
+                "stage_at_start": "problem_identification",
+                "source_ids": [],
+                "message_ids": [],
+                "started_at": started,
+                "updated_at": started,
+                "error_code": None,
+            },
+        },
+    )
+    app.run()
+    assert not app.exception
+    assert app.chat_input
+    assert _deep_review_button(app).disabled is True
+    assert "_deep_review_running_thread_id" not in app.session_state

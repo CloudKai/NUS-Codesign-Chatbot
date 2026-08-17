@@ -24,6 +24,7 @@ Explicit Deep Review is ``POST /api/v1/threads/{thread_id}/deep-review``.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 DEFAULT_DEEP_REVIEW_INTERVAL_TURNS = 3
@@ -32,7 +33,26 @@ MAX_DEEP_REVIEW_INTERVAL_TURNS = 20
 
 COUNTER_SETTINGS_KEY = "coaching_turns_since_deep_review"
 DEEP_REVIEW_SNAPSHOT_KEY = "deep_review_snapshot"
+DEEP_REVIEW_JOB_KEY = "deep_review_job"
 DEEP_REVIEW_TURN_MESSAGE = "Start Deep Review"
+
+DEEP_REVIEW_JOB_QUEUED = "queued"
+DEEP_REVIEW_JOB_RUNNING = "running"
+DEEP_REVIEW_JOB_COMPLETED = "completed"
+DEEP_REVIEW_JOB_FAILED = "failed"
+DEEP_REVIEW_JOB_ACTIVE_STATUSES = frozenset(
+    {DEEP_REVIEW_JOB_QUEUED, DEEP_REVIEW_JOB_RUNNING}
+)
+DEEP_REVIEW_JOB_STATUSES = frozenset(
+    {
+        DEEP_REVIEW_JOB_QUEUED,
+        DEEP_REVIEW_JOB_RUNNING,
+        DEEP_REVIEW_JOB_COMPLETED,
+        DEEP_REVIEW_JOB_FAILED,
+    }
+)
+DEEP_REVIEW_ERROR_TIMEOUT = "review_timeout"
+DEEP_REVIEW_ERROR_FAILED = "review_failed"
 
 REVIEW_DEPTH_INCREMENTAL = "incremental"
 REVIEW_DEPTH_DEEP = "deep"
@@ -53,6 +73,130 @@ DEEP_REVIEW_TRIGGERS = frozenset(
         REVIEW_TRIGGER_REFLECTION_CHECKPOINT,
     }
 )
+
+
+def _parse_job_timestamp(value: Any) -> datetime | None:
+    """Parse one ISO-8601 job timestamp as aware UTC, or return ``None``."""
+    try:
+        parsed = datetime.fromisoformat(str(value or "").strip().replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def parse_deep_review_job(value: Any) -> dict[str, Any] | None:
+    """Return a normalized Deep Review job mapping, or ``None`` when absent.
+
+    Args:
+        value: Notebook ``settings_text`` job blob.
+
+    Returns:
+        A dictionary with the durable job fields, or ``None``.
+    """
+    if not isinstance(value, dict):
+        return None
+    review_id = str(value.get("review_id") or "").strip()
+    status = str(value.get("status") or "").strip().lower()
+    if not review_id or status not in DEEP_REVIEW_JOB_STATUSES:
+        return None
+    try:
+        reviewed_revision = int(value.get("reviewed_revision") or 0)
+    except (TypeError, ValueError):
+        reviewed_revision = 0
+    source_ids = [
+        str(item).strip()
+        for item in (value.get("source_ids") or [])
+        if str(item).strip()
+    ]
+    message_ids = [
+        str(item).strip()
+        for item in (value.get("message_ids") or [])
+        if str(item).strip()
+    ]
+    return {
+        "review_id": review_id,
+        "status": status,
+        "reviewed_revision": max(0, reviewed_revision),
+        "stage_at_start": str(value.get("stage_at_start") or "").strip() or None,
+        "source_ids": source_ids,
+        "message_ids": message_ids,
+        "started_at": str(value.get("started_at") or "").strip() or None,
+        "updated_at": str(value.get("updated_at") or "").strip() or None,
+        "error_code": str(value.get("error_code") or "").strip() or None,
+    }
+
+
+def deep_review_job_is_active(job: dict[str, Any] | None) -> bool:
+    """Return whether *job* is still queued or running."""
+    if not isinstance(job, dict):
+        return False
+    return str(job.get("status") or "").strip().lower() in DEEP_REVIEW_JOB_ACTIVE_STATUSES
+
+
+def deep_review_job_is_stale(
+    job: dict[str, Any] | None,
+    timeout_seconds: int,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """Return whether an in-flight job has exceeded the operator timeout.
+
+    Missing timestamps fail closed so a crashed worker cannot spin forever.
+
+    Args:
+        job: Parsed job mapping.
+        timeout_seconds: ``DEEP_REVIEW_JOB_TIMEOUT_SECONDS``.
+        now: Optional clock for tests.
+
+    Returns:
+        ``True`` when the job should be marked ``failed`` / ``review_timeout``.
+    """
+    if not deep_review_job_is_active(job):
+        return False
+    started = _parse_job_timestamp((job or {}).get("started_at")) or _parse_job_timestamp(
+        (job or {}).get("updated_at")
+    )
+    if started is None:
+        return True
+    current = now or datetime.now(timezone.utc)
+    return (current - started).total_seconds() > max(1, int(timeout_seconds))
+
+
+def new_deep_review_job(
+    *,
+    review_id: str,
+    reviewed_revision: int,
+    stage_at_start: str,
+    source_ids: list[str],
+    message_ids: list[str],
+    started_at: str,
+) -> dict[str, Any]:
+    """Return a queued Deep Review job payload for notebook settings.
+
+    Args:
+        review_id: New job id.
+        reviewed_revision: Conversation revision frozen at enqueue.
+        stage_at_start: Thinking Path stage at enqueue.
+        source_ids: Selected source ids frozen at enqueue.
+        message_ids: Active message ids frozen at enqueue.
+        started_at: UTC timestamp when the job was first persisted.
+
+    Returns:
+        JSON-serialisable job dictionary.
+    """
+    return {
+        "review_id": str(review_id).strip(),
+        "status": DEEP_REVIEW_JOB_QUEUED,
+        "reviewed_revision": max(0, int(reviewed_revision)),
+        "stage_at_start": str(stage_at_start or "").strip(),
+        "source_ids": [str(item).strip() for item in source_ids if str(item).strip()],
+        "message_ids": [str(item).strip() for item in message_ids if str(item).strip()],
+        "started_at": str(started_at or "").strip(),
+        "updated_at": str(started_at or "").strip(),
+        "error_code": None,
+    }
 
 
 def bound_deep_review_interval(value: Any) -> int:

@@ -409,6 +409,8 @@ class CoachRequest(BaseModel):
     # authoritative. Persisted on notebook settings_text.
     coaching_turns_since_deep_review: int = Field(default=0, ge=0)
     deep_review_interval_turns: int = Field(default=3, ge=1, le=50)
+    # Server-filled Deep Review job id. Clients cannot make this authoritative.
+    review_id: str | None = Field(default=None, max_length=64)
     # Server-filled retrieval decision. Clients cannot make this authoritative.
     retrieval_required: bool = False
     # Server-filled Q&A/coaching mode policy. Clients cannot make these
@@ -445,6 +447,17 @@ class CoachRequest(BaseModel):
         if cleaned in {"qa", "coaching", "review"}:
             return cleaned
         return None
+
+    @field_validator("review_id")
+    @classmethod
+    def review_id_must_be_token_or_empty(cls, value: str | None) -> str | None:
+        """Keep a short server-owned Deep Review job id. Unknown values become None."""
+        cleaned = str(value or "").strip()
+        if not cleaned:
+            return None
+        if len(cleaned) > 64:
+            return None
+        return cleaned
 
     @field_validator("expected_response_mode")
     @classmethod
@@ -487,6 +500,29 @@ class DeepReviewRequest(BaseModel):
         max_length=128,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
     )
+
+
+class DeepReviewJobStatus(StrEnum):
+    """Durable status of one background Deep Review job."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class DeepReviewJob(BaseModel):
+    """Enqueue and poll envelope for one owner-scoped Deep Review job."""
+
+    review_id: str = Field(min_length=1, max_length=64)
+    status: DeepReviewJobStatus
+    reviewed_revision: int = Field(ge=0)
+    stage_at_start: str | None = None
+    started_at: str | None = None
+    updated_at: str | None = None
+    error_code: str | None = Field(default=None, max_length=64)
+    snapshot: dict[str, Any] | None = None
+    conversation_revision: int | None = Field(default=None, ge=0)
 
 
 class CoachTurn(BaseModel):

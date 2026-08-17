@@ -10,7 +10,6 @@ with only the student's current stage open by default.
 from __future__ import annotations
 
 import logging
-import uuid
 from contextlib import nullcontext
 from dataclasses import dataclass
 from html import escape
@@ -21,10 +20,15 @@ import streamlit as st
 from backend.settings import settings
 from backend.specialists.review_orchestration import (
     COUNTER_SETTINGS_KEY,
+    DEEP_REVIEW_JOB_COMPLETED,
+    DEEP_REVIEW_JOB_FAILED,
+    DEEP_REVIEW_JOB_KEY,
     DEEP_REVIEW_SNAPSHOT_KEY,
     bound_deep_review_interval,
+    deep_review_job_is_active,
     explicit_deep_review_available,
     parse_coaching_turns_since_deep_review,
+    parse_deep_review_job,
 )
 from backend.student_journey import (
     THINKING_STAGES,
@@ -40,7 +44,13 @@ from ui.components import (
     review_card_html,
     review_feedback_items_html,
 )
-from ui.runtime import rerun_app, rerun_fragment, start_deep_review, store
+from ui.runtime import (
+    get_deep_review_job,
+    rerun_app,
+    rerun_fragment,
+    start_deep_review,
+    store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +58,6 @@ _STAGE_SELECT_ERROR = "The Thinking Path stage could not be updated. Try again."
 _TRANSITION_RESOLVE_ERROR = (
     "The stage recommendation could not be updated. Try again."
 )
-_DEEP_REVIEW_RUNNING_THREAD_KEY = "_deep_review_running_thread_id"
-_DEEP_REVIEW_IDEMPOTENCY_KEY = "_deep_review_idempotency_key"
 _DEEP_REVIEW_ERROR = "Deep Review could not be completed. Try again."
 _DEEP_REVIEW_STATUS_LABEL = (
     "Running Deep Review… This may take a few seconds to a couple of minutes."
@@ -57,6 +65,11 @@ _DEEP_REVIEW_STATUS_LABEL = (
 _DEEP_REVIEW_READY_DETAIL = (
     "Deep Review performs a more detailed analysis of your progress and may "
     "take from a few seconds to a couple of minutes."
+)
+_DEEP_REVIEW_COMPLETE_CAPTION = "Deep Review ready."
+_DEEP_REVIEW_NEWER_TURNS_CAPTION = (
+    "This review reflects the conversation at the start of Deep Review. "
+    "Newer turns are not included."
 )
 _FACIONE_ACTIVITY_LABELS = (
     ("analysis", "Analysis"),
@@ -139,65 +152,89 @@ def deep_review_control_view(
     )
 
 
-def _clear_deep_review_attempt() -> None:
-    """Drop the in-flight Deep Review session guard and retry key."""
-    st.session_state.pop(_DEEP_REVIEW_RUNNING_THREAD_KEY, None)
-    st.session_state.pop(_DEEP_REVIEW_IDEMPOTENCY_KEY, None)
-
-
-def _ensure_deep_review_attempt(thread_id: str) -> str:
-    """Mark this notebook's Deep Review as in-flight and reuse one retry key.
+def _render_deep_review_chrome(metadata: dict[str, Any]) -> None:
+    """Mount the stable or polling Deep Review control from persisted job status.
 
     Args:
-        thread_id: Active notebook id.
-
-    Returns:
-        Idempotency key for this attempt. A new UUID is minted only when no
-        in-flight key exists yet.
+        metadata: Notebook metadata already loaded for this Review render.
     """
-    st.session_state[_DEEP_REVIEW_RUNNING_THREAD_KEY] = thread_id
-    existing = str(st.session_state.get(_DEEP_REVIEW_IDEMPOTENCY_KEY) or "").strip()
-    if existing:
-        return existing
-    key = f"deep-review-{uuid.uuid4().hex[:16]}"
-    st.session_state[_DEEP_REVIEW_IDEMPOTENCY_KEY] = key
-    return key
-
-
-def _run_explicit_deep_review(thread_id: str) -> None:
-    """Call the existing Deep Review route and show a blocking status.
-
-    Args:
-        thread_id: Active notebook id.
-
-    Side effects:
-        On success, clears the in-flight guard and reruns so Review reloads
-        the snapshot and reset counter. On failure, clears the guard, shows
-        student-safe error copy, and leaves eligibility unchanged.
-    """
-    idempotency_key = _ensure_deep_review_attempt(thread_id)
-    status = st.status(
-        _DEEP_REVIEW_STATUS_LABEL,
-        expanded=False,
-        type="compact",
-    )
-    try:
-        start_deep_review(thread_id, idempotency_key=idempotency_key)
-    except Exception:
-        logger.exception("deep_review_ui_failed")
-        try:
-            status.update(label="Deep Review failed", state="error")
-        except Exception:
-            pass
-        _clear_deep_review_attempt()
-        st.error(_DEEP_REVIEW_ERROR)
+    if deep_review_job_is_active(parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))):
+        _render_deep_review_polling()
         return
-    try:
-        status.update(label="Deep Review complete", state="complete")
-    except Exception:
-        pass
-    _clear_deep_review_attempt()
-    rerun_app()
+    _render_deep_review_stable()
+
+
+@st.fragment
+def _render_deep_review_stable() -> None:
+    """Deep Review control without a client auto-refresh timer."""
+    thread_id = str(st.session_state.thread_id or "")
+    thread = store.get_thread(thread_id) or {}
+    metadata = dict(thread.get("metadata") or {})
+    job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+    if deep_review_job_is_active(job):
+        rerun_app()
+        return
+    view = deep_review_control_view(
+        parse_coaching_turns_since_deep_review(metadata.get(COUNTER_SETTINGS_KEY)),
+        settings.deep_review_interval_turns,
+        running=False,
+    )
+    with st.container(key="deep_review_control", gap=10):
+        if job and str(job.get("status") or "") == DEEP_REVIEW_JOB_COMPLETED:
+            st.caption(_DEEP_REVIEW_COMPLETE_CAPTION)
+            live_revision = int(thread.get("conversation_revision") or 0)
+            reviewed_revision = int(job.get("reviewed_revision") or 0)
+            if live_revision > reviewed_revision:
+                st.caption(_DEEP_REVIEW_NEWER_TURNS_CAPTION)
+        if view.caption:
+            st.caption(view.caption)
+        if view.detail_caption:
+            st.caption(view.detail_caption)
+        clicked = st.button(
+            "Start Deep Review",
+            key="start_deep_review",
+            type=view.button_type,
+            disabled=view.disabled,
+            use_container_width=True,
+        )
+        if job and str(job.get("status") or "") == DEEP_REVIEW_JOB_FAILED:
+            st.error(_DEEP_REVIEW_ERROR)
+        if clicked and not view.disabled:
+            try:
+                start_deep_review(thread_id)
+            except Exception:
+                logger.exception("deep_review_ui_failed")
+                st.error(_DEEP_REVIEW_ERROR)
+                return
+            rerun_app()
+
+
+@st.fragment(run_every="2s")
+def _render_deep_review_polling() -> None:
+    """Poll Deep Review job status until the backend job is terminal."""
+    thread_id = str(st.session_state.thread_id or "")
+    job = get_deep_review_job(thread_id)
+    status = str(getattr(job, "status", "") or "")
+    if job is None or status not in {"queued", "running"}:
+        rerun_app()
+        return
+    thread = store.get_thread(thread_id) or {}
+    metadata = dict(thread.get("metadata") or {})
+    view = deep_review_control_view(
+        parse_coaching_turns_since_deep_review(metadata.get(COUNTER_SETTINGS_KEY)),
+        settings.deep_review_interval_turns,
+        running=True,
+    )
+    with st.container(key="deep_review_control", gap=10):
+        st.button(
+            "Start Deep Review",
+            key="start_deep_review",
+            type=view.button_type,
+            disabled=True,
+            use_container_width=True,
+        )
+        if view.status_label:
+            st.status(view.status_label, expanded=False, type="compact")
 
 
 def _review_fingerprint(review: dict[str, Any]) -> str:
@@ -531,33 +568,7 @@ def render_learning_review(journey: dict[str, Any]) -> None:
     current_stage_id = str(
         journey.get("current_stage") or THINKING_STAGES[0].id
     )
-    thread_id = str(st.session_state.thread_id or "")
-    running = (
-        str(st.session_state.get(_DEEP_REVIEW_RUNNING_THREAD_KEY) or "")
-        == thread_id
-        and bool(thread_id)
-    )
-    view = deep_review_control_view(
-        parse_coaching_turns_since_deep_review(metadata.get(COUNTER_SETTINGS_KEY)),
-        settings.deep_review_interval_turns,
-        running=running,
-    )
-    with st.container(key="deep_review_control", gap=10):
-        if view.caption:
-            st.caption(view.caption)
-        if view.detail_caption:
-            st.caption(view.detail_caption)
-        clicked = st.button(
-            "Start Deep Review",
-            key="start_deep_review",
-            type=view.button_type,
-            disabled=view.disabled,
-            use_container_width=True,
-        )
-        if view.status_label and running and not clicked:
-            st.status(view.status_label, expanded=False, type="compact")
-        if clicked and not view.disabled:
-            _run_explicit_deep_review(thread_id)
+    _render_deep_review_chrome(metadata)
     st.markdown(
         review_card_html(
             label="Summary",

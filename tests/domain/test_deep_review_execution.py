@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import pytest
@@ -11,12 +12,12 @@ from backend.agentcore_provider import AgentCoreCoachProvider
 from backend.application import CoachApplicationService, _coach_request_fingerprint
 from backend.domain import (
     CoachRequest,
+    DeepReviewJobStatus,
     EducationalAssessment,
     FacioneDimensionScores,
     StageDecision,
 )
 from backend.learning_service import LearningProgressService
-from backend.providers import ProviderUnavailableError
 from backend.repositories import (
     SQLiteNotebookRepository,
     SQLitePhaseTransitionRepository,
@@ -30,7 +31,7 @@ from backend.specialists.review_orchestration import (
     explicit_deep_review_available,
 )
 from backend.student_journey import learning_review
-from backend.student_store import CoachIdempotencyConflictError, StudentStore
+from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
 from counting_file_storage import CountingFileStorage, install_counting_storage
 from fake_agentcore_runtime import FakeAgentCoreRuntime
@@ -162,6 +163,31 @@ def _coach(service: CoachApplicationService, thread_id: str, key: str, message: 
     )
 
 
+def _wait_job(
+    service: CoachApplicationService, thread_id: str, timeout: float = 5.0
+):
+    """Poll until the background Deep Review job is terminal."""
+    deadline = time.monotonic() + timeout
+    last = None
+    while time.monotonic() < deadline:
+        last = service.get_deep_review_job(thread_id)
+        if last is not None and last.status in {
+            DeepReviewJobStatus.COMPLETED,
+            DeepReviewJobStatus.FAILED,
+        }:
+            return last
+        time.sleep(0.05)
+    raise AssertionError(f"Deep Review job did not finish: {last}")
+
+
+def _assert_no_review_transcript(store: StudentStore, thread_id: str) -> None:
+    """Background Deep Review must not insert Start Deep Review transcript rows."""
+    assert all(
+        DEEP_REVIEW_TURN_MESSAGE not in str(item.get("content") or "")
+        for item in store.get_messages(thread_id)
+    )
+
+
 def test_eligibility_requires_persisted_interval() -> None:
     assert explicit_deep_review_available(
         coaching_turns_since_deep_review=2, interval=3
@@ -180,7 +206,7 @@ def test_locked_deep_review_is_rejected_without_sonnet(tmp_path) -> None:
     client = FakeAgentCoreRuntime(payload=_coaching_payload(), deep_payload=_deep_payload())
     service = _service(store, client)
     with pytest.raises(ValueError, match="not available"):
-        service.run_deep_review(thread_id, idempotency_key="locked")
+        service.enqueue_deep_review(thread_id, idempotency_key="locked")
     assert client.calls == []
     assert _counter(store, thread_id) == 0
 
@@ -191,11 +217,11 @@ def test_eligible_deep_review_is_one_sonnet_call_and_resets_counter(tmp_path) ->
     _unlock(store, thread_id)
     client = FakeAgentCoreRuntime(payload=_coaching_payload(), deep_payload=_deep_payload())
     service = _service(store, client)
-    turn = service.run_deep_review(thread_id, idempotency_key="deep-1")
+    job = service.enqueue_deep_review(thread_id, idempotency_key="deep-1")
+    assert job.status in {DeepReviewJobStatus.QUEUED, DeepReviewJobStatus.RUNNING}
+    finished = _wait_job(service, thread_id)
+    assert finished.status is DeepReviewJobStatus.COMPLETED
     assert _phases(client) == ["review"]
-    assert turn.assessment.recommendation is StageDecision.STAY
-    assert turn.pending_transition is None
-    assert turn.auto_advanced_to is None
     assert _counter(store, thread_id) == 0
     snapshot = _snapshot(store, thread_id)
     assert snapshot is not None
@@ -206,6 +232,7 @@ def test_eligible_deep_review_is_one_sonnet_call_and_resets_counter(tmp_path) ->
     thread = store.get_thread(thread_id) or {}
     journey = dict((thread.get("metadata") or {}).get("learning_journey") or {})
     assert journey.get("current_stage") == "problem_identification"
+    _assert_no_review_transcript(store, thread_id)
 
 
 def test_failed_deep_review_leaves_counter_and_snapshot_unchanged(tmp_path) -> None:
@@ -214,26 +241,29 @@ def test_failed_deep_review_leaves_counter_and_snapshot_unchanged(tmp_path) -> N
     _unlock(store, thread_id)
     client = FakeAgentCoreRuntime(deep_error=TimeoutError("deep-timeout"))
     service = _service(store, client)
-    with pytest.raises(ProviderUnavailableError):
-        service.run_deep_review(thread_id, idempotency_key="deep-fail")
+    job = service.enqueue_deep_review(thread_id, idempotency_key="deep-fail")
+    assert job.status in {DeepReviewJobStatus.QUEUED, DeepReviewJobStatus.RUNNING}
+    finished = _wait_job(service, thread_id)
+    assert finished.status is DeepReviewJobStatus.FAILED
     assert _counter(store, thread_id) == 3
     assert _snapshot(store, thread_id) is None
     assert all(item["role"] != "assistant" for item in store.get_messages(thread_id))
+    _assert_no_review_transcript(store, thread_id)
 
 
-def test_idempotent_replay_does_not_rerun_sonnet(tmp_path) -> None:
+def test_completed_deep_review_cannot_start_another_until_eligible(tmp_path) -> None:
     store = StudentStore(tmp_path / "dr-idem.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     _unlock(store, thread_id)
     client = FakeAgentCoreRuntime(deep_payload=_deep_payload())
     service = _service(store, client)
-    first = service.run_deep_review(thread_id, idempotency_key="same-deep")
+    service.enqueue_deep_review(thread_id, idempotency_key="same-deep")
+    assert _wait_job(service, thread_id).status is DeepReviewJobStatus.COMPLETED
     replay_client = FakeAgentCoreRuntime(deep_payload=_deep_payload(synthesis="Must not run."))
-    replay = _service(store, replay_client).run_deep_review(
-        thread_id, idempotency_key="same-deep"
-    )
+    replay_service = _service(store, replay_client)
+    with pytest.raises(ValueError, match="not available"):
+        replay_service.enqueue_deep_review(thread_id, idempotency_key="same-deep")
     assert replay_client.calls == []
-    assert replay.response_text == first.response_text
     assert _counter(store, thread_id) == 0
 
 
@@ -242,7 +272,9 @@ def test_normal_coaching_does_not_overwrite_snapshot(tmp_path) -> None:
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     _unlock(store, thread_id)
     deep_client = FakeAgentCoreRuntime(deep_payload=_deep_payload())
-    _service(store, deep_client).run_deep_review(thread_id, idempotency_key="deep-a")
+    deep_service = _service(store, deep_client)
+    deep_service.enqueue_deep_review(thread_id, idempotency_key="deep-a")
+    assert _wait_job(deep_service, thread_id).status is DeepReviewJobStatus.COMPLETED
     first = _snapshot(store, thread_id)
     assert first is not None
     coach_client = FakeAgentCoreRuntime(payload=_coaching_payload())
@@ -267,14 +299,16 @@ def test_next_successful_deep_review_replaces_snapshot(tmp_path) -> None:
     store = StudentStore(tmp_path / "dr-replace.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     _unlock(store, thread_id)
-    _service(store, FakeAgentCoreRuntime(deep_payload=_deep_payload())).run_deep_review(
-        thread_id, idempotency_key="deep-a"
-    )
+    first_service = _service(store, FakeAgentCoreRuntime(deep_payload=_deep_payload()))
+    first_service.enqueue_deep_review(thread_id, idempotency_key="deep-a")
+    assert _wait_job(first_service, thread_id).status is DeepReviewJobStatus.COMPLETED
     _unlock(store, thread_id)
-    _service(
+    second_service = _service(
         store,
         FakeAgentCoreRuntime(deep_payload=_deep_payload(synthesis="Formative Deep Review C.")),
-    ).run_deep_review(thread_id, idempotency_key="deep-c")
+    )
+    second_service.enqueue_deep_review(thread_id, idempotency_key="deep-c")
+    assert _wait_job(second_service, thread_id).status is DeepReviewJobStatus.COMPLETED
     snapshot = _snapshot(store, thread_id)
     assert snapshot is not None
     assert "Deep Review C" in snapshot["synthesis"]
@@ -315,7 +349,7 @@ def test_deep_review_fingerprint_differs_from_coach_turn() -> None:
     assert deep != coach
 
 
-def test_coach_turn_cannot_poison_deep_review_idempotency_key(tmp_path) -> None:
+def test_coach_turn_idempotency_key_does_not_block_deep_review_job(tmp_path) -> None:
     store = StudentStore(tmp_path / "dr-poison.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     client = FakeAgentCoreRuntime(payload=_coaching_payload(), deep_payload=_deep_payload())
@@ -323,11 +357,13 @@ def test_coach_turn_cannot_poison_deep_review_idempotency_key(tmp_path) -> None:
     _coach(service, thread_id, "shared-key", DEEP_REVIEW_TURN_MESSAGE)
     assert _phases(client) == ["fast_chat"]
     _unlock(store, thread_id)
-    with pytest.raises(CoachIdempotencyConflictError):
-        service.run_deep_review(thread_id, idempotency_key="shared-key")
-    assert "review" not in _phases(client)
-    assert _snapshot(store, thread_id) is None
-    assert _counter(store, thread_id) == 3
+    job = service.enqueue_deep_review(thread_id, idempotency_key="shared-key")
+    assert job.status in {DeepReviewJobStatus.QUEUED, DeepReviewJobStatus.RUNNING}
+    finished = _wait_job(service, thread_id)
+    assert finished.status is DeepReviewJobStatus.COMPLETED
+    assert "review" in _phases(client)
+    assert _snapshot(store, thread_id) is not None
+    assert _counter(store, thread_id) == 0
 
 
 def test_deep_review_selected_source_uses_chunk_artifact(
@@ -352,8 +388,10 @@ def test_deep_review_selected_source_uses_chunk_artifact(
     )
     service = _service(store, client)
     storage.reset_counts()
-    turn = service.run_deep_review(thread_id, idempotency_key="deep-chunks")
-    assert turn.response_text
+    job = service.enqueue_deep_review(thread_id, idempotency_key="deep-chunks")
+    assert job.status in {DeepReviewJobStatus.QUEUED, DeepReviewJobStatus.RUNNING}
+    finished = _wait_job(service, thread_id)
+    assert finished.status is DeepReviewJobStatus.COMPLETED
     assert _phases(client) == ["review"]
     snapshot = _snapshot(store, thread_id)
     assert snapshot is not None

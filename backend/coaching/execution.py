@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import time
+import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Mapping
@@ -27,6 +29,8 @@ from backend.domain import (
     CoachImageInput,
     CoachRequest,
     CoachTurn,
+    DeepReviewJob,
+    DeepReviewJobStatus,
     ProvisionalResearchCoding,
     RESEARCH_CODING_VERSION,
     ResearchCodingStatus,
@@ -51,12 +55,19 @@ from backend.settings import settings as runtime_settings
 from backend.providers import ProviderUnavailableError
 from backend.specialists.review_orchestration import (
     COUNTER_SETTINGS_KEY,
+    DEEP_REVIEW_ERROR_FAILED,
+    DEEP_REVIEW_ERROR_TIMEOUT,
+    DEEP_REVIEW_JOB_COMPLETED,
+    DEEP_REVIEW_JOB_FAILED,
+    DEEP_REVIEW_JOB_KEY,
     DEEP_REVIEW_SNAPSHOT_KEY,
     DEEP_REVIEW_TURN_MESSAGE,
     bound_deep_review_interval,
+    deep_review_job_is_stale,
     deep_review_snapshot_payload,
     explicit_deep_review_available,
     parse_coaching_turns_since_deep_review,
+    parse_deep_review_job,
 )
 from backend.source_library import (
     image_inputs_for_sources,
@@ -74,7 +85,6 @@ from backend.student_journey import (
 )
 from backend.student_store import (
     AtomicAutoAdvance,
-    CoachIdempotencyConflictError,
     CoachRequestInProgressError,
     StudentStore,
 )
@@ -95,6 +105,8 @@ from backend.workflow import CoachWorkflow
 _CITATION_LABEL = re.compile(r"\[(S\d+)\]")
 IDEMPOTENCY_SURFACE_COACH_TURN = "coach_turn"
 IDEMPOTENCY_SURFACE_DEEP_REVIEW = "deep_review"
+
+logger = logging.getLogger(__name__)
 
 
 def _quote_offsets(text: str, quote: str) -> tuple[int, int] | None:
@@ -221,11 +233,6 @@ def _coach_request_fingerprint(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
-
-
-def _is_persisted_deep_review_turn(turn: CoachTurn) -> bool:
-    """Return whether a recovered turn is an explicit Deep Review result."""
-    return str(turn.assessment.review_depth or "").strip().lower() == "deep"
 
 
 def _coach_turn_from_payload(payload: dict[str, Any] | None) -> CoachTurn | None:
@@ -415,7 +422,8 @@ class CoachApplicationService:
         When *execution_lease_held* is true, the caller already owns the
         notebook execution slot and this method must not acquire another.
         *server_owned_specialist* is never taken from the HTTP coach-turn
-        body; only ``run_deep_review`` may pass ``review``.
+        body; only ``enqueue_deep_review`` / the Deep Review worker may pass
+        ``review``.
         *progress* receives execution-boundary phase names for NDJSON status
         events. It must not receive student text.
         """
@@ -537,43 +545,42 @@ class CoachApplicationService:
         finally:
             emit_coach_turn_perf(perf)
 
-    def run_deep_review(
+    def enqueue_deep_review(
         self,
         thread_id: str,
         *,
         idempotency_key: str | None = None,
-    ) -> CoachTurn:
-        """Run one server-owned explicit Deep Review for an owned notebook.
+    ) -> DeepReviewJob:
+        """Queue one server-owned explicit Deep Review without blocking on Sonnet.
 
         Eligibility, stage, history, and sources come from persisted state.
         The browser cannot choose Sonnet through ``CoachRequest.specialist``.
-        A completed idempotency key is replayed even after the counter resets.
+        An in-flight queued/running job is reused instead of starting a second
+        worker. ``idempotency_key`` is accepted for HTTP compatibility and is
+        not used to replay a transcript turn.
 
         Args:
             thread_id: Authenticated owner's notebook id.
-            idempotency_key: Optional retry key; same key replays one result.
+            idempotency_key: Unused compatibility field from the HTTP body.
 
         Returns:
-            The persisted Deep Review turn. Stage is unchanged.
+            The queued, running, or reused Deep Review job. Stage is unchanged.
 
         Raises:
             ValueError: Missing notebook or Deep Review is not yet eligible.
-            CoachIdempotencyConflictError: The key already completed a
-                non-review coach turn.
-            ProviderUnavailableError: Validated Deep Review did not succeed.
         """
+        del idempotency_key
+        from backend.coaching.deep_review_jobs import submit_deep_review_job
+
+        existing = self.get_deep_review_job(thread_id)
+        if existing is not None and existing.status in {
+            DeepReviewJobStatus.QUEUED,
+            DeepReviewJobStatus.RUNNING,
+        }:
+            return existing
         thread = self._notebooks.get_thread(thread_id)
         if not thread:
             raise ValueError("Notebook not found")
-        cleaned_key = str(idempotency_key or "").strip() or None
-        if cleaned_key:
-            recovered = self._recover_durable_coach_turn(thread_id, cleaned_key)
-            if recovered is not None:
-                if _is_persisted_deep_review_turn(recovered):
-                    return recovered
-                raise CoachIdempotencyConflictError(
-                    "Idempotency key was already used for a different coach request"
-                )
         metadata = dict(thread.get("metadata") or {})
         journey = normalize_journey(metadata.get("learning_journey"))
         counter = parse_coaching_turns_since_deep_review(
@@ -589,15 +596,238 @@ class CoachApplicationService:
             raise ValueError(
                 "Deep Review is not available yet. Complete more Coaching turns first."
             )
-        request = CoachRequest(
-            thread_id=thread_id,
-            student_message=DEEP_REVIEW_TURN_MESSAGE,
-            current_stage=current_stage(journey).id,
-            response_detail=str(journey.get("response_detail") or DEFAULT_RESPONSE_DETAIL),
-            idempotency_key=cleaned_key,
-            specialist=None,
+        reviewed_revision = int(thread.get("conversation_revision") or 0)
+        messages = self._store.get_messages(thread_id)
+        message_ids = [
+            str(message.get("id") or "")
+            for message in messages
+            if str(message.get("id") or "").strip()
+        ]
+        visible_sources = list_visible_sources(
+            self._store,
+            thread_id,
+            selected_only=True,
+            include_extracted_text=False,
         )
-        return self.submit(request, server_owned_specialist="review")
+        source_ids = [
+            str(source.get("id") or "")
+            for source in visible_sources
+            if str(source.get("id") or "").strip()
+        ]
+        job_payload, created = self._store.start_or_get_deep_review_job(
+            thread_id,
+            review_id=str(uuid.uuid4()),
+            reviewed_revision=reviewed_revision,
+            stage_at_start=current_stage(journey).id,
+            source_ids=source_ids,
+            message_ids=message_ids,
+        )
+        if created:
+            submit_deep_review_job(self, thread_id, str(job_payload["review_id"]))
+        return self._deep_review_job_model(
+            job_payload,
+            metadata={**metadata, DEEP_REVIEW_JOB_KEY: job_payload},
+            conversation_revision=reviewed_revision,
+        )
+
+    def get_deep_review_job(self, thread_id: str) -> DeepReviewJob | None:
+        """Return the owner-scoped Deep Review job, failing stale in-flight work.
+
+        Args:
+            thread_id: Authenticated owner's notebook id.
+
+        Returns:
+            The job envelope, or ``None`` when this notebook has never queued
+            a Deep Review.
+
+        Raises:
+            ValueError: When the notebook is missing.
+        """
+        thread = self._notebooks.get_thread(thread_id)
+        if not thread:
+            raise ValueError("Notebook not found")
+        metadata = dict(thread.get("metadata") or {})
+        job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+        timeout = runtime_settings.deep_review_job_timeout_seconds
+        if job is not None and deep_review_job_is_stale(job, timeout):
+            try:
+                self._store.fail_deep_review_job(
+                    thread_id,
+                    review_id=str(job["review_id"]),
+                    error_code=DEEP_REVIEW_ERROR_TIMEOUT,
+                )
+            except Exception:
+                logger.exception(
+                    "deep_review_stale_fail_failed review_id=%s",
+                    job.get("review_id"),
+                )
+            thread = self._notebooks.get_thread(thread_id) or thread
+            metadata = dict(thread.get("metadata") or {})
+            job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+        if job is None:
+            return None
+        return self._deep_review_job_model(
+            job,
+            metadata=metadata,
+            conversation_revision=int(thread.get("conversation_revision") or 0),
+        )
+
+    def execute_deep_review_job(self, thread_id: str, review_id: str) -> None:
+        """Run one queued Deep Review against the frozen revision snapshot.
+
+        Skips the notebook coaching lease and does not insert transcript rows.
+        Completion writes the snapshot, job status, and counter only.
+
+        Args:
+            thread_id: Authenticated owner's notebook id.
+            review_id: Job id persisted at enqueue.
+        """
+        from backend.rate_limit import get_deep_review_limiter
+
+        cleaned_id = str(review_id or "").strip()
+        timeout = runtime_settings.deep_review_job_timeout_seconds
+        thread = self._notebooks.get_thread(thread_id)
+        if not thread:
+            return
+        metadata = dict(thread.get("metadata") or {})
+        job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+        if not job or str(job.get("review_id") or "") != cleaned_id:
+            return
+        if str(job.get("status") or "") in {
+            DEEP_REVIEW_JOB_COMPLETED,
+            DEEP_REVIEW_JOB_FAILED,
+        }:
+            return
+        if deep_review_job_is_stale(job, timeout):
+            self._store.fail_deep_review_job(
+                thread_id,
+                review_id=cleaned_id,
+                error_code=DEEP_REVIEW_ERROR_TIMEOUT,
+            )
+            return
+        if not self._store.mark_deep_review_job_running(thread_id, cleaned_id):
+            return
+        try:
+            with get_deep_review_limiter().slot():
+                thread = self._notebooks.get_thread(thread_id)
+                if not thread:
+                    return
+                metadata = dict(thread.get("metadata") or {})
+                job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+                if not job or str(job.get("review_id") or "") != cleaned_id:
+                    return
+                if deep_review_job_is_stale(job, timeout):
+                    self._store.fail_deep_review_job(
+                        thread_id,
+                        review_id=cleaned_id,
+                        error_code=DEEP_REVIEW_ERROR_TIMEOUT,
+                    )
+                    return
+                journey = normalize_journey(metadata.get("learning_journey"))
+                stage_id = str(job.get("stage_at_start") or "") or current_stage(
+                    journey
+                ).id
+                request = CoachRequest(
+                    thread_id=thread_id,
+                    student_message=DEEP_REVIEW_TURN_MESSAGE,
+                    current_stage=stage_id,
+                    response_detail=str(
+                        journey.get("response_detail") or DEFAULT_RESPONSE_DETAIL
+                    ),
+                    review_id=cleaned_id,
+                )
+                prepared, snapshot = self._prepare_authoritative_turn(
+                    request,
+                    force_retrieval=True,
+                    frozen_history_revision=int(job.get("reviewed_revision") or 0),
+                    frozen_stage=stage_id,
+                    frozen_source_ids=list(job.get("source_ids") or []),
+                    frozen_message_ids=list(job.get("message_ids") or []),
+                )
+                prepared = self._server_owned_deep_review_request(prepared)
+                prepared = prepared.model_copy(update={"review_id": cleaned_id})
+                turn = self._workflow.run(prepared)
+                prepared, turn = self._maybe_rag_fallback(prepared, turn, snapshot)
+                self._workflow.take_provisional_research_coding(thread_id)
+                self._workflow.take_conversation_memory(thread_id)
+                orchestration = self._workflow.take_review_orchestration(thread_id)
+                if not orchestration.get("deep_review_succeeded"):
+                    raise ProviderUnavailableError(
+                        "Deep Review could not be completed",
+                        category="malformed",
+                    )
+                snapshot_payload = deep_review_snapshot_payload(
+                    conversation_revision=int(job.get("reviewed_revision") or 0),
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                    synthesis=turn.assessment.learning_summary
+                    or turn.assessment.stage_assessment,
+                    summary=turn.assessment.learning_summary,
+                    strengths=list(turn.assessment.review_strengths),
+                    areas_to_develop=list(turn.assessment.review_improvements),
+                    facione_scores=turn.assessment.facione_scores.model_dump(
+                        mode="json"
+                    ),
+                    working_conclusion=turn.assessment.working_conclusion,
+                    readiness_candidate=bool(turn.assessment.readiness_candidate),
+                    readiness_evidence=list(turn.assessment.evidence_identified),
+                    missing_requirements=list(
+                        turn.assessment.missing_reasoning_elements
+                    ),
+                    model_id=str(turn.assessment.review_model or "").strip()
+                    or "global.anthropic.claude-sonnet-4-6",
+                )
+                self._store.complete_deep_review_job(
+                    thread_id,
+                    review_id=cleaned_id,
+                    snapshot=snapshot_payload,
+                )
+        except Exception:
+            logger.exception("deep_review_execute_failed review_id=%s", cleaned_id)
+            try:
+                self._store.fail_deep_review_job(
+                    thread_id,
+                    review_id=cleaned_id,
+                    error_code=DEEP_REVIEW_ERROR_FAILED,
+                )
+            except Exception:
+                logger.exception(
+                    "deep_review_fail_write_failed review_id=%s", cleaned_id
+                )
+
+    def run_deep_review(
+        self,
+        thread_id: str,
+        *,
+        idempotency_key: str | None = None,
+    ) -> DeepReviewJob:
+        """Compatibility alias for :meth:`enqueue_deep_review`."""
+        return self.enqueue_deep_review(
+            thread_id, idempotency_key=idempotency_key
+        )
+
+    @staticmethod
+    def _deep_review_job_model(
+        job: dict[str, Any],
+        *,
+        metadata: dict[str, Any],
+        conversation_revision: int,
+    ) -> DeepReviewJob:
+        """Build the API/UI job envelope from a persisted settings blob."""
+        snapshot = None
+        if str(job.get("status") or "") == DEEP_REVIEW_JOB_COMPLETED:
+            raw = metadata.get(DEEP_REVIEW_SNAPSHOT_KEY)
+            snapshot = raw if isinstance(raw, dict) else None
+        return DeepReviewJob(
+            review_id=str(job["review_id"]),
+            status=DeepReviewJobStatus(str(job["status"])),
+            reviewed_revision=int(job.get("reviewed_revision") or 0),
+            stage_at_start=job.get("stage_at_start"),
+            started_at=job.get("started_at"),
+            updated_at=job.get("updated_at"),
+            error_code=job.get("error_code"),
+            snapshot=snapshot,
+            conversation_revision=int(conversation_revision),
+        )
 
     def _submit_once(
         self,
@@ -1089,9 +1319,26 @@ class CoachApplicationService:
         return prepared
 
     def _prepare_authoritative_turn(
-        self, request: CoachRequest, *, force_retrieval: bool = False
+        self,
+        request: CoachRequest,
+        *,
+        force_retrieval: bool = False,
+        frozen_history_revision: int | None = None,
+        frozen_stage: str | None = None,
+        frozen_source_ids: list[str] | None = None,
+        frozen_message_ids: list[str] | None = None,
     ) -> tuple[CoachRequest, TurnSnapshot]:
         """Reload trusted coaching inputs and the request-scoped source snapshot.
+
+        Args:
+            request: Incoming coach request. Client history/stage hints are
+                checked against the store unless a frozen Deep Review snapshot
+                is supplied.
+            force_retrieval: When True, retrieve against selected sources.
+            frozen_history_revision: Deep Review revision to reconstruct.
+            frozen_stage: Thinking Path stage at Deep Review enqueue.
+            frozen_source_ids: Selected source ids at Deep Review enqueue.
+            frozen_message_ids: Active message ids at Deep Review enqueue.
 
         Raises:
             ValueError: When the notebook is missing or client hints disagree
@@ -1105,27 +1352,49 @@ class CoachApplicationService:
             raise ValueError("Notebook not found")
         metadata = dict(thread.get("metadata") or {})
         journey = normalize_journey(metadata.get("learning_journey"))
-        authoritative_stage = current_stage(journey).id
-        if request.current_stage != authoritative_stage:
-            raise ValueError(
-                "current_stage does not match the notebook Thinking Path stage"
-            )
+        live_stage = current_stage(journey).id
+        if frozen_stage:
+            authoritative_stage = str(frozen_stage).strip() or live_stage
+        else:
+            authoritative_stage = live_stage
+            if request.current_stage != authoritative_stage:
+                raise ValueError(
+                    "current_stage does not match the notebook Thinking Path stage"
+                )
 
         history_started = time.perf_counter()
-        store_history = self._store.get_messages(request.thread_id)
-        # Append-only revise persists the replacement user row before the
-        # provider runs. Exclude that id so history is prefix-only; the revised
-        # student_message remains the active turn input to the provider.
-        revise_message_id = str(request.revise_user_message_id or "").strip()
-        if revise_message_id:
-            store_history = [
-                message
-                for message in store_history
-                if str(message.get("id") or "") != revise_message_id
-            ]
+        if frozen_history_revision is not None:
+            store_history = self._store.get_messages_at_revision(
+                request.thread_id, int(frozen_history_revision)
+            )
+            allowed_ids = {
+                str(item).strip()
+                for item in (frozen_message_ids or [])
+                if str(item).strip()
+            }
+            if allowed_ids:
+                store_history = [
+                    message
+                    for message in store_history
+                    if str(message.get("id") or "") in allowed_ids
+                ]
+        else:
+            store_history = self._store.get_messages(request.thread_id)
+            # Append-only revise persists the replacement user row before the
+            # provider runs. Exclude that id so history is prefix-only; the revised
+            # student_message remains the active turn input to the provider.
+            revise_message_id = str(request.revise_user_message_id or "").strip()
+            if revise_message_id:
+                store_history = [
+                    message
+                    for message in store_history
+                    if str(message.get("id") or "") != revise_message_id
+                ]
         record_field("history_load_ms", elapsed_ms(history_started))
-        if request.history and _history_signature(request.history) != _history_signature(
-            store_history
+        if (
+            frozen_history_revision is None
+            and request.history
+            and _history_signature(request.history) != _history_signature(store_history)
         ):
             raise ValueError("history does not match the notebook conversation")
 
@@ -1136,6 +1405,14 @@ class CoachApplicationService:
             selected_only=False,
             include_extracted_text=False,
         )
+        if frozen_source_ids is not None:
+            frozen_set = {
+                str(item).strip() for item in frozen_source_ids if str(item).strip()
+            }
+            visible_sources = [
+                {**dict(source), "selected": str(source.get("id") or "") in frozen_set}
+                for source in visible_sources
+            ]
         record_field("source_load_ms", elapsed_ms(source_started))
         snapshot = TurnSnapshot.from_authoritative_state(
             thread=thread,
@@ -1145,7 +1422,7 @@ class CoachApplicationService:
         selected_sources = list(snapshot.selected_sources)
         authoritative_ids = [str(source["id"]) for source in selected_sources]
         authoritative_id_set = set(authoritative_ids)
-        if request.source_ids:
+        if frozen_source_ids is None and request.source_ids:
             unknown = [
                 source_id
                 for source_id in request.source_ids
@@ -1260,12 +1537,15 @@ class CoachApplicationService:
         # Conversely, a client cannot enable broader knowledge while any
         # selected source exists.
         allow_model_knowledge = not authoritative_ids
-        conversation_revision = int(
-            metadata.get("conversation_revision")
-            if metadata.get("conversation_revision") is not None
-            else thread.get("conversation_revision")
-            or 0
-        )
+        if frozen_history_revision is not None:
+            conversation_revision = max(0, int(frozen_history_revision))
+        else:
+            conversation_revision = int(
+                metadata.get("conversation_revision")
+                if metadata.get("conversation_revision") is not None
+                else thread.get("conversation_revision")
+                or 0
+            )
         memory_started = time.perf_counter()
         conversation_memory = memory_from_metadata(
             metadata, conversation_revision=conversation_revision
@@ -1306,6 +1586,9 @@ class CoachApplicationService:
                 ),
                 "deep_review_interval_turns": bound_deep_review_interval(
                     runtime_settings.deep_review_interval_turns
+                ),
+                "review_id": (
+                    request.review_id if frozen_history_revision is not None else None
                 ),
             }
         )

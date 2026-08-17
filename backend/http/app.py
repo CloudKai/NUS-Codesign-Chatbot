@@ -28,6 +28,7 @@ from backend.auth_routes import register_auth_routes
 from backend.domain import (
     CoachRequest,
     CoachTurn,
+    DeepReviewJob,
     DeepReviewRequest,
     MessageCreateRequest,
     NotebookCreateRequest,
@@ -1318,18 +1319,19 @@ def create_app(
         )
         return turn
 
-    @app.post("/api/v1/threads/{thread_id}/deep-review", response_model=CoachTurn)
+    @app.post("/api/v1/threads/{thread_id}/deep-review", response_model=DeepReviewJob)
     def start_deep_review(
         thread_id: str,
         http_request: Request,
         payload: DeepReviewRequest | None = None,
         owner: OwnerServices = Depends(current_owner),
-    ) -> CoachTurn:
-        """Run one server-owned explicit Deep Review for the owned notebook.
+    ) -> DeepReviewJob:
+        """Enqueue one server-owned explicit Deep Review for the owned notebook.
 
-        The browser cannot choose Sonnet by sending ``specialist=review`` on
-        ``POST /api/v1/coach/turn``. Eligibility, stage, history, and sources
-        are loaded from authenticated notebook state.
+        Returns immediately after the job is persisted. The browser cannot
+        choose Sonnet by sending ``specialist=review`` on
+        ``POST /api/v1/coach/turn``. Eligibility is loaded from authenticated
+        notebook state. Overlapping coaching turns are allowed.
         """
         body = payload or DeepReviewRequest()
         header_key = http_request.headers.get("idempotency-key")
@@ -1346,50 +1348,20 @@ def create_app(
         selected_source_count = _selected_source_count(owner, thread_id)
         request_id = str(getattr(http_request.state, "request_id", None) or "-")
         logger.info(
-            "deep_review request request_id=%s sources=%s",
+            "deep_review enqueue request_id=%s sources=%s",
             request_id,
             selected_source_count,
         )
         try:
-            turn = owner.coach.run_deep_review(
+            job = owner.coach.enqueue_deep_review(
                 thread_id, idempotency_key=idempotency_key
             )
-        except RateLimitExceeded as error:
-            _record_coach_rate_limit(
-                error,
-                selected_source_count=selected_source_count,
-                request_id=request_id,
-            )
-            raise _rate_limit_http_error(error) from error
-        except CoachIdempotencyConflictError as error:
-            _emit_coach_metric(
-                outcome="idempotency_conflict",
-                selected_source_count=selected_source_count,
-            )
-            raise HTTPException(status_code=409, detail=str(error)) from error
         except ConversationRevisionConflictError as error:
             _emit_coach_metric(
                 outcome="revision_conflict",
                 selected_source_count=selected_source_count,
             )
             raise HTTPException(status_code=409, detail=str(error)) from error
-        except (CoachRequestInProgressError, CoachRequestLeaseLostError) as error:
-            _emit_coach_metric(
-                outcome="idempotency_in_progress",
-                selected_source_count=selected_source_count,
-            )
-            raise HTTPException(status_code=409, detail=str(error)) from error
-        except ProviderUnavailableError as error:
-            _emit_coach_metric(
-                outcome=provider_unavailable_outcome(error),
-                selected_source_count=selected_source_count,
-            )
-            logger.warning(
-                "deep_review provider unavailable request_id=%s", request_id
-            )
-            raise HTTPException(
-                status_code=503, detail=_provider_unavailable_detail(error)
-            ) from error
         except ValueError as error:
             _emit_coach_metric(
                 outcome="rejected",
@@ -1403,13 +1375,37 @@ def create_app(
                 selected_source_count=selected_source_count,
             )
             raise
-        logger.info("deep_review ok request_id=%s", request_id)
-        _emit_coach_metric(
-            outcome="ok",
-            selected_source_count=selected_source_count,
-            turn=turn,
+        logger.info(
+            "deep_review enqueued request_id=%s review_id=%s status=%s",
+            request_id,
+            job.review_id,
+            job.status.value,
         )
-        return turn
+        _emit_coach_metric(
+            outcome="enqueued",
+            selected_source_count=selected_source_count,
+        )
+        return job
+
+    @app.get("/api/v1/threads/{thread_id}/deep-review", response_model=DeepReviewJob)
+    def get_deep_review(
+        thread_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> DeepReviewJob:
+        """Return the owner-scoped Deep Review job, including a completed snapshot.
+
+        Stale queued/running jobs are fail-closed to ``failed`` /
+        ``review_timeout``. Another student cannot read this notebook's job.
+        """
+        if not owner.store.get_thread(thread_id):
+            raise HTTPException(status_code=404, detail="Notebook not found")
+        try:
+            job = owner.coach.get_deep_review_job(thread_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        if job is None:
+            raise HTTPException(status_code=404, detail="Deep Review job not found")
+        return job
 
     @app.post("/api/v1/coach/turn/stream")
     def coach_turn_stream(
