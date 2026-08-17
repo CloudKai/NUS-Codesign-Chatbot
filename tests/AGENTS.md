@@ -78,6 +78,7 @@ modules.
 | `domain/test_kb_metadata.py` | Canonical `course_material_id` and Bedrock sidecar payload |
 | `scripts/test_sync_course_kb_metadata.py` | Sidecar dry-run, idempotent bytes, local verify |
 | `domain/test_fast_chat_schema.py` | Slim FastChatTurnOutput; legacy EducationalAssessment parse |
+| `domain/test_coach_turn_perf.py` | Privacy-safe `coach_turn_perf` JSON and `TIMING` service-latency lines |
 | `domain/test_coach_progress.py` | retrieving/thinking/saving execution-boundary events; slim persist |
 | `domain/test_primary_path.py` | All five phases, stale/reject, restart, notebook isolation, schema |
 | `domain/test_research_coding_domain.py` | Structured provisional CLEAR/Facione/ethics coding |

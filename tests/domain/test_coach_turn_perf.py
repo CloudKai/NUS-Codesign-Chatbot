@@ -12,12 +12,29 @@ from backend.domain import (
     CoachRequest,
 )
 from backend.providers import ProviderUnavailableError
-from backend.turn_perf import SAFE_PERF_FIELDS, assert_payload_is_safe, begin_coach_turn_perf
+from backend.turn_perf import (
+    SAFE_PERF_FIELDS,
+    assert_payload_is_safe,
+    begin_coach_turn_perf,
+    emit_coach_turn_perf,
+    reset_coach_turn_perf,
+)
 from fake_agentcore_runtime import FakeAgentCoreRuntime
 
 _RUNTIME_ARN = (
     "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/test-harness"
 )
+
+
+def _timing_values(caplog) -> dict[str, float]:
+    """Parse ``TIMING <span> <seconds>s`` lines from captured logs."""
+    values: dict[str, float] = {}
+    for record in caplog.records:
+        parts = str(record.message).split()
+        if len(parts) != 3 or parts[0] != "TIMING":
+            continue
+        values[parts[1]] = float(parts[2].rstrip("s"))
+    return values
 
 
 def _output() -> dict:
@@ -69,6 +86,19 @@ def test_success_perf_log_has_no_student_text_or_secrets(caplog) -> None:
     assert payload["agentcore_invoke_ms"] >= 0
     assert payload["agentcore_call_count"] == 1
     assert payload["success"] is True
+    timings = _timing_values(caplog)
+    assert set(timings) == {
+        "student_state",
+        "memory",
+        "retrieval",
+        "context_build",
+        "agent",
+        "persistence",
+        "TOTAL",
+    }
+    assert timings["agent"] >= 0
+    assert timings["TOTAL"] >= 0
+    assert all("I think option B" not in record.message for record in caplog.records)
 
 
 def test_timeout_still_emits_agentcore_and_total(caplog) -> None:
@@ -209,3 +239,111 @@ def test_configure_operational_loggers_enables_info_without_root_debug():
         retrieve_logger.setLevel(previous_retrieve)
         agentcore_logger.setLevel(previous_agentcore)
         perf_logger.setLevel(previous_perf)
+
+
+def test_snapshot_computes_service_latency_fields() -> None:
+    perf = begin_coach_turn_perf()
+    try:
+        perf.set("notebook_load_ms", 10)
+        perf.set("history_load_ms", 20)
+        perf.set("source_load_ms", 5)
+        perf.set("memory_load_ms", 3)
+        perf.set("prompt_compose_ms", 8)
+        perf.set("context_planner_ms", 2)
+        perf.set("agentcore_invoke_ms", 100)
+        perf.set("persist_turn_ms", 7)
+        perf.set("idempotency_complete_ms", 1)
+        snapshot = perf.snapshot()
+        assert snapshot["student_state_ms"] == 35.0
+        assert snapshot["memory_load_ms"] == 3
+        assert snapshot["context_build_ms"] == 10.0
+        assert snapshot["agent_ms"] == 100
+        assert snapshot["persistence_ms"] == 8.0
+    finally:
+        reset_coach_turn_perf()
+
+
+def test_emit_logs_timing_seconds_without_student_text(caplog) -> None:
+    caplog.set_level(logging.INFO)
+    perf = begin_coach_turn_perf()
+    perf.set("notebook_load_ms", 12)
+    perf.set("history_load_ms", 4)
+    perf.set("source_load_ms", 2)
+    perf.set("memory_load_ms", 1)
+    perf.set("retrieval_total_ms", 30)
+    perf.set("prompt_compose_ms", 9)
+    perf.set("agentcore_invoke_ms", 250)
+    perf.set("persist_turn_ms", 8)
+    perf.success = True
+    payload = emit_coach_turn_perf(perf)
+    assert payload["student_state_ms"] == 18.0
+    timings = _timing_values(caplog)
+    assert timings["student_state"] == pytest.approx(0.018, abs=0.0005)
+    assert timings["memory"] == pytest.approx(0.001, abs=0.0005)
+    assert timings["retrieval"] == pytest.approx(0.030, abs=0.0005)
+    assert timings["context_build"] == pytest.approx(0.009, abs=0.0005)
+    assert timings["agent"] == pytest.approx(0.250, abs=0.0005)
+    assert timings["persistence"] == pytest.approx(0.008, abs=0.0005)
+    assert timings["TOTAL"] >= 0
+    blob = " ".join(record.message for record in caplog.records)
+    assert "student_message" not in blob
+    assert "Bearer" not in blob
+
+
+def test_submit_records_service_latency_breakdown(caplog, tmp_path) -> None:
+    from backend.application import CoachApplicationService
+    from backend.learning_service import LearningProgressService
+    from backend.mock_provider import DeterministicCoachProvider
+    from backend.repositories import (
+        SQLiteNotebookRepository,
+        SQLitePhaseTransitionRepository,
+    )
+    from backend.student_store import StudentStore
+    from backend.workflow import CoachWorkflow
+
+    caplog.set_level(logging.INFO)
+    store = StudentStore(tmp_path / "perf-submit.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    service = CoachApplicationService(
+        store,
+        SQLiteNotebookRepository(store),
+        CoachWorkflow(
+            DeterministicCoachProvider(),
+            SQLitePhaseTransitionRepository(store),
+        ),
+        LearningProgressService(
+            store,
+            SQLiteNotebookRepository(store),
+            SQLitePhaseTransitionRepository(store),
+        ),
+    )
+    service.submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="I think option B is better because of privacy.",
+            current_stage="problem_identification",
+            response_detail="short",
+            idempotency_key="service-timing",
+        )
+    )
+    events = [
+        json.loads(record.message)
+        for record in caplog.records
+        if record.message.startswith("{") and "coach_turn_perf" in record.message
+    ]
+    assert events
+    payload = events[-1]
+    assert_payload_is_safe(
+        {key: value for key, value in payload.items() if key != "event"}
+    )
+    assert payload["memory_load_ms"] >= 0
+    assert payload["student_state_ms"] >= 0
+    assert payload["retrieval_total_ms"] >= 0
+    assert payload["context_build_ms"] >= 0
+    assert payload["agent_ms"] >= 0
+    assert payload["persistence_ms"] >= 0
+    assert payload["request_total_ms"] >= payload["agent_ms"]
+    timings = _timing_values(caplog)
+    assert timings["TOTAL"] >= 0
+    assert "I think option B" not in json.dumps(payload)
+    assert all("I think option B" not in record.message for record in caplog.records)

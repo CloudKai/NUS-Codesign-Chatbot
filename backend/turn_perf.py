@@ -3,7 +3,8 @@
 This module records numeric timings and bounded counts for one coaching turn.
 It never stores student text, prompts, retrieved excerpts, notebook identifiers,
 auth tokens, cookies, or AWS credentials. Callers must only pass approved
-field names from :data:`SAFE_PERF_FIELDS`.
+field names from :data:`SAFE_PERF_FIELDS`. Emit writes JSON ``coach_turn_perf``
+and grep-friendly ``TIMING`` lines in seconds.
 """
 
 from __future__ import annotations
@@ -28,6 +29,11 @@ SAFE_PERF_FIELDS = frozenset(
         "notebook_load_ms",
         "history_load_ms",
         "source_load_ms",
+        "memory_load_ms",
+        "student_state_ms",
+        "context_build_ms",
+        "agent_ms",
+        "persistence_ms",
         "retrieval_gate_ms",
         "retrieval_required",
         "course_kb_retrieval_ms",
@@ -218,6 +224,24 @@ class CoachTurnPerf:
             float(payload.get("idempotency_complete_ms") or 0.0),
         )
         payload["db_total_ms"] = round(sum(db_parts), 1)
+        payload["student_state_ms"] = round(
+            float(payload.get("notebook_load_ms") or 0.0)
+            + float(payload.get("history_load_ms") or 0.0)
+            + float(payload.get("source_load_ms") or 0.0),
+            1,
+        )
+        payload["context_build_ms"] = round(
+            float(payload.get("prompt_compose_ms") or 0.0)
+            + float(payload.get("context_planner_ms") or 0.0),
+            1,
+        )
+        payload["persistence_ms"] = round(
+            float(payload.get("persist_turn_ms") or 0.0)
+            + float(payload.get("idempotency_complete_ms") or 0.0),
+            1,
+        )
+        if "agent_ms" not in payload and payload.get("agentcore_invoke_ms") is not None:
+            payload["agent_ms"] = payload["agentcore_invoke_ms"]
         return {key: value for key, value in payload.items() if key in SAFE_PERF_FIELDS}
 
 
@@ -320,8 +344,53 @@ def emit_coach_turn_perf(perf: CoachTurnPerf | None = None) -> dict[str, Any]:
     payload = target.snapshot()
     target.emitted = True
     record_coach_turn_perf(payload)
+    _log_service_timings(payload)
     reset_coach_turn_perf()
     return payload
+
+
+def _ms_to_seconds(value: Any) -> float:
+    """Convert a millisecond timing field to non-negative seconds."""
+    try:
+        return max(0.0, float(value or 0.0) / 1000.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _log_service_timings(payload: Mapping[str, Any]) -> None:
+    """Write grep-friendly service-latency lines with no student content.
+
+    Seconds match operator timing snippets. Milliseconds remain on the JSON
+    ``coach_turn_perf`` event. Values are numeric only.
+    """
+    logger.info(
+        "TIMING student_state %.3fs",
+        _ms_to_seconds(payload.get("student_state_ms")),
+    )
+    logger.info(
+        "TIMING memory %.3fs",
+        _ms_to_seconds(payload.get("memory_load_ms")),
+    )
+    logger.info(
+        "TIMING retrieval %.3fs",
+        _ms_to_seconds(payload.get("retrieval_total_ms")),
+    )
+    logger.info(
+        "TIMING context_build %.3fs",
+        _ms_to_seconds(payload.get("context_build_ms")),
+    )
+    logger.info(
+        "TIMING agent %.3fs",
+        _ms_to_seconds(payload.get("agent_ms") or payload.get("agentcore_invoke_ms")),
+    )
+    logger.info(
+        "TIMING persistence %.3fs",
+        _ms_to_seconds(payload.get("persistence_ms")),
+    )
+    logger.info(
+        "TIMING TOTAL %.3fs",
+        _ms_to_seconds(payload.get("request_total_ms")),
+    )
 
 
 def assert_payload_is_safe(payload: Mapping[str, Any]) -> None:

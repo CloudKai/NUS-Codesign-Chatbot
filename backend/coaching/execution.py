@@ -86,6 +86,7 @@ from backend.turn_perf import (
     record_count,
     record_failure,
     record_field,
+    record_span,
     record_success,
 )
 from backend.workflow import CoachWorkflow
@@ -633,7 +634,8 @@ class CoachApplicationService:
             message.get("role") == "user" for message in prepared_request.history
         )
         emit_coach_progress(PROGRESS_THINKING)
-        turn = self._workflow.run(prepared_request)
+        with record_span("agent_ms"):
+            turn = self._workflow.run(prepared_request)
         prepared_request, turn = self._maybe_rag_fallback(
             prepared_request, turn, snapshot
         )
@@ -1026,7 +1028,11 @@ class CoachApplicationService:
             }
         )
         emit_coach_progress(PROGRESS_THINKING)
+        agent_started = time.perf_counter()
         turn = self._workflow.run(retried)
+        perf = current_perf()
+        if perf is not None:
+            perf.add_ms("agent_ms", elapsed_ms(agent_started))
         record_field("rag_fallback_model_calls", 2)
         record_field("retrieved_chunk_count", len(chunks))
         record_field("retrieved_context_chars", len(context))
@@ -1224,9 +1230,11 @@ class CoachApplicationService:
             else thread.get("conversation_revision")
             or 0
         )
+        memory_started = time.perf_counter()
         conversation_memory = memory_from_metadata(
             metadata, conversation_revision=conversation_revision
         )
+        record_field("memory_load_ms", elapsed_ms(memory_started))
         prepared = request.model_copy(
             update={
                 "current_stage": authoritative_stage,

@@ -1,9 +1,52 @@
 # Implementation status
 
-## Current phase — Guardrail-safe conversation-memory rendering
+## Current phase — Per-service TIMING latency lines
 
-**Prepared on 2026-08-17.** Local HEAD `fafca8f` plus this uncommitted patch.
-Nothing in this phase has been pushed to EC2, published as an AgentCore
+**Prepared on 2026-08-17.** FastAPI-side instrumentation on
+`Integrate-Bedrock`. Nothing in this phase has been pushed to EC2, published as an
+AgentCore runtime version, or synced to the Knowledge Base.
+
+Operators asked for per-service wall times (`student_state`, `memory`,
+`retrieval`, `context_build`, `agent`, `persistence`, `TOTAL`) in seconds.
+Those spans already existed as millisecond fields on privacy-safe
+`coach_turn_perf` JSON, except conversation-memory parse. This phase records
+the missing span and emits grep-friendly `TIMING` lines without student
+text, prompts, or notebook identifiers.
+
+### What changed and why
+
+1. **`memory_load_ms`** times `memory_from_metadata()` during authoritative
+   turn prepare.
+2. **`agent_ms`** times `_workflow.run` (RAG fallback adds a second invoke).
+3. **Snapshot rollups.** `student_state_ms` = notebook + history + source
+   loads; `context_build_ms` = prompt compose + context planner;
+   `persistence_ms` = persist + idempotency complete. Direct AgentCore
+   `assess()` copies `agent_ms` from `agentcore_invoke_ms` when the
+   application wrapper did not run.
+4. **`TIMING` log lines** on `co_design.turn_perf` in seconds, plus the
+   existing millisecond JSON event.
+
+Q&A/coaching policy, retrieval, citations, idempotency, Deep Review, and
+Guardrails are unchanged. No AgentCore republish is required; restart local
+FastAPI to pick up the log lines.
+
+### Validation
+
+- Focused: `tests/domain/test_coach_turn_perf.py`,
+  `test_turn_snapshot.py`, `test_rag_fallback.py`.
+- `ruff check` on changed Python files: passed. `compileall` for
+  `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`: passed.
+  Full deterministic pytest: passed (exit 0).
+
+### Next exact action
+
+Restart local FastAPI if you want CloudWatch/local logs to show `TIMING`
+lines on the next coach turn. Do not republish AgentCore.
+
+## Previous phase — Guardrail-safe conversation-memory rendering
+
+**Prepared on 2026-08-17; committed as `847d0c6` on `Integrate-Bedrock`.**
+Nothing in that phase was pushed to EC2, published as an AgentCore
 runtime version, or synced to the Knowledge Base.
 
 Old notebooks were failing live Fast Chat with
