@@ -23,12 +23,12 @@ Coaching, Incremental Review, and Deep Review. Do not treat
    repair prompt is `Please use the output tool now.` so Guardrail v3 does not
    classify the Strands structured-output recovery turn as PROMPT_ATTACK.
    Fast Chat / router / legacy Haiku pass `limits={"turns": 2}` (Strands 1.52.0:
-   initial generation plus at most one recovery). Cycle 1 also sets
-   `tool_choice={"any": {}}` through `InvokeModelStage.Input` so the
-   structured-output tool is required on the first generation. That is the
-   same constraint Strands already uses in forced-mode recovery. Deep Review
-   passes `limits={"turns": 3}`. Do not set `turns=1` while first-cycle
-   output can still fail. Model retries use a per-invoke `ModelRetryStrategy`
+   initial generation plus at most one recovery). Fast Chat cycle 1 also sets
+   `tool_choice={"any": {}}` through `InvokeModelStage.Input` when exactly one
+   structured-output tool is present. Deep Review is not modified by that
+   force. That is the same constraint Strands already uses in forced-mode
+   recovery. Deep Review passes `limits={"turns": 3}`. Do not set `turns=1`
+   while first-cycle output can still fail. Model retries use a per-invoke `ModelRetryStrategy`
    (`max_attempts=2` for Haiku roles, `max_attempts=3` for Deep Review),
    which is separate from event-loop turns. Bedrock Converse botocore retries
    are pinned to one attempt so they do not multiply the Agent retry budget.

@@ -26,7 +26,8 @@ def test_chat_panel_consumes_status_events_and_skips_fake_tokens() -> None:
     assert "not emit fake token slices" in http
     assert "Coach reply ready" in chat
     assert "assistant_message_from_turn" in chat
-    assert "needs_reconcile" in chat
+    assert "apply_completed_turn_to_session" in chat
+    assert "fragment_to_api_ms" in chat
     assert 'st.container(key="chat_inflight")' in chat
     assert "_render_inflight_user_prompt" in chat
     assert "chat_inflight," in chat
@@ -49,12 +50,18 @@ def _reply_visible(app: AppTest, text: str) -> bool:
     return text in str(app.chat_message)
 
 
-def test_done_payload_renders_reply_without_forced_rerun(monkeypatch) -> None:
-    """The validated done payload is shown in the same script run as Send."""
+def test_done_payload_reconciles_from_persisted_history(monkeypatch) -> None:
+    """A successful stay turn remounts so history owns the completed bubble."""
     from ui import chat
 
     reruns: list[str] = []
-    monkeypatch.setattr(chat, "rerun_app", lambda: reruns.append("app"))
+    real_rerun = chat.rerun_app
+
+    def spy_rerun() -> None:
+        reruns.append("app")
+        real_rerun()
+
+    monkeypatch.setattr(chat, "rerun_app", spy_rerun)
 
     submissions: list[str] = []
     real_stream = chat.stream_coach_turn_events
@@ -71,7 +78,7 @@ def test_done_payload_renders_reply_without_forced_rerun(monkeypatch) -> None:
     app.chat_input[0].set_value(prompt).run()
     assert not app.exception
     assert submissions == [prompt]
-    assert reruns == []
+    assert reruns == ["app"]
     assert app.session_state["_coach_turn_streaming"] is False
     assert len(app.chat_message) >= 3
     assert _reply_visible(app, "That's an interesting direction")
@@ -136,7 +143,13 @@ def test_submitted_prompt_does_not_share_widget_with_previous_assistant(
     from ui.coach_welcome import COACH_WELCOME_TITLE
 
     reruns: list[str] = []
-    monkeypatch.setattr(chat, "rerun_app", lambda: reruns.append("app"))
+    real_rerun = chat.rerun_app
+
+    def spy_rerun() -> None:
+        reruns.append("app")
+        real_rerun()
+
+    monkeypatch.setattr(chat, "rerun_app", spy_rerun)
 
     first_prompt = "What is a design problem I could explore?"
     second_prompt = "How should I book a library study room?"
@@ -155,7 +168,7 @@ def test_submitted_prompt_does_not_share_widget_with_previous_assistant(
     app.chat_input[0].set_value(first_prompt).run()
     assert not app.exception
     assert submissions == [first_prompt]
-    assert reruns == []
+    assert reruns == ["app"]
     assert _reply_visible(app, previous_reply)
     first_bodies = _chat_message_bodies(app)
     assert any(first_prompt in body for body in first_bodies)
@@ -167,7 +180,7 @@ def test_submitted_prompt_does_not_share_widget_with_previous_assistant(
     app.chat_input[0].set_value(second_prompt).run()
     assert not app.exception
     assert submissions == [first_prompt, second_prompt]
-    assert reruns == []
+    assert reruns == ["app", "app"]
     second_bodies = _chat_message_bodies(app)
     assert any(second_prompt in body for body in second_bodies)
     assert any(previous_reply in body for body in second_bodies)
@@ -182,6 +195,122 @@ def test_submitted_prompt_does_not_share_widget_with_previous_assistant(
         second_prompt in body and previous_reply in body
         for body in _chat_message_bodies(app)
     )
+
+
+def test_consecutive_qa_turns_keep_persisted_history(monkeypatch) -> None:
+    """Each Send remounts from DSQL/SQLite history so prior Q&A cannot vanish."""
+    from backend.student_store import StudentStore
+    from ui import chat
+
+    reruns: list[str] = []
+    real_rerun = chat.rerun_app
+
+    def spy_rerun() -> None:
+        reruns.append("app")
+        real_rerun()
+
+    monkeypatch.setattr(chat, "rerun_app", spy_rerun)
+
+    prompts = (
+        "What does week 1 say about stakeholders?",
+        "What does the same lecture say about innovation?",
+        "How is analogy used in that lecture?",
+    )
+    submissions: list[str] = []
+    real_stream = chat.stream_coach_turn_events
+
+    def counting_stream(request: Any, **_kwargs: Any) -> Iterator[dict[str, Any]]:
+        submissions.append(request.student_message)
+        yield from real_stream(request, **_kwargs)
+
+    monkeypatch.setattr(chat, "stream_coach_turn_events", counting_stream)
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    thread_id = str(app.session_state["thread_id"])
+    for prompt in prompts:
+        app.chat_input[0].set_value(prompt).run()
+        assert not app.exception
+    assert submissions == list(prompts)
+    assert reruns == ["app", "app", "app"]
+    persisted = StudentStore().get_messages(thread_id)
+    persisted_users = [
+        str(message.get("content") or "")
+        for message in persisted
+        if message.get("role") == "user"
+    ]
+    persisted_assistants = [
+        message
+        for message in persisted
+        if message.get("role") == "assistant"
+        and str(message.get("content") or "").strip()
+    ]
+    for prompt in prompts:
+        assert prompt in persisted_users
+        assert any(prompt in body for body in _chat_message_bodies(app))
+    assert len(persisted_assistants) == 1 + len(prompts)
+    app.run()
+    assert submissions == list(prompts)
+    assert len(
+        [
+            message
+            for message in StudentStore().get_messages(thread_id)
+            if message.get("role") == "assistant"
+            and str(message.get("content") or "").strip()
+        ]
+    ) == 1 + len(prompts)
+
+
+def test_coaching_qa_coaching_keeps_history_and_skips_qa_counter(
+    monkeypatch,
+) -> None:
+    """Coaching → Q&A → Coaching remounts from history; Q&A does not unlock Review."""
+    from backend.settings import settings
+    from backend.student_store import StudentStore
+    from ui import chat
+
+    monkeypatch.setattr(settings, "deep_review_interval_turns", 3)
+    _force_qualifying_coaching(monkeypatch)
+
+    reruns: list[str] = []
+    real_rerun = chat.rerun_app
+
+    def spy_rerun() -> None:
+        reruns.append("app")
+        real_rerun()
+
+    monkeypatch.setattr(chat, "rerun_app", spy_rerun)
+
+    coaching_one = "I want to evaluate a crossing design for older pedestrians."
+    qa_prompt = "What does week 1 say about stakeholders?"
+    coaching_two = "I assume older pedestrians always need more crossing time."
+    prompts = (coaching_one, qa_prompt, coaching_two)
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    thread_id = str(app.session_state["thread_id"])
+    counters: list[int] = []
+    for prompt in prompts:
+        app.chat_input[0].set_value(prompt).run()
+        assert not app.exception
+        counters.append(_notebook_deep_review_counter(thread_id))
+    assert counters == [1, 1, 2]
+    assert reruns == ["app", "app", "app"]
+    persisted = StudentStore().get_messages(thread_id)
+    persisted_users = [
+        str(message.get("content") or "")
+        for message in persisted
+        if message.get("role") == "user"
+    ]
+    for prompt in prompts:
+        assert prompt in persisted_users
+        assert any(prompt in body for body in _chat_message_bodies(app))
+    assert app.session_state["learning_journey"]["current_stage"] == (
+        "problem_identification"
+    )
+    app.run()
+    assert _notebook_deep_review_counter(thread_id) == 2
+    assert _reply_message_count(app, coaching_one) == 1
+    assert _reply_message_count(app, qa_prompt) == 1
+    assert _reply_message_count(app, coaching_two) == 1
 
 
 def test_auto_advance_reconciles_thinking_path_after_reply_is_visible(
@@ -268,7 +397,15 @@ def test_citation_buttons_render_from_done_payload_without_get_source(
         return original_get_source(thread_id, source_id)
 
     monkeypatch.setattr(runtime_store, "get_source", counting_get_source)
-    monkeypatch.setattr(chat, "rerun_app", lambda: None)
+
+    reruns: list[str] = []
+    real_rerun = chat.rerun_app
+
+    def spy_rerun() -> None:
+        reruns.append("app")
+        real_rerun()
+
+    monkeypatch.setattr(chat, "rerun_app", spy_rerun)
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     local_store = StudentStore()
@@ -281,7 +418,7 @@ def test_citation_buttons_render_from_done_payload_without_get_source(
     source_id = str(added["id"])
     app.run()
 
-    def fake_stream(_request: Any, **_kwargs: Any) -> Iterator[dict[str, Any]]:
+    def fake_stream(request: Any, **_kwargs: Any) -> Iterator[dict[str, Any]]:
         turn = CoachTurn(
             response_text="The lecture reports a comparison of two methods [S1].",
             assessment=EducationalAssessment(
@@ -295,11 +432,29 @@ def test_citation_buttons_render_from_done_payload_without_get_source(
                 ],
             ),
         )
+        store = StudentStore()
+        store.add_message(request.thread_id, "user", request.student_message)
+        store.add_message(
+            request.thread_id,
+            "assistant",
+            turn.response_text,
+            metadata={
+                "assessment": turn.assessment.model_dump(mode="json"),
+                "source_refs": [
+                    {
+                        "id": source_id,
+                        "label": "S1",
+                        "title": "Lecture evidence",
+                    }
+                ],
+            },
+        )
         yield {"event": "done", "turn": turn.model_dump(mode="json")}
 
     monkeypatch.setattr(chat, "stream_coach_turn_events", fake_stream)
     app.chat_input[0].set_value("What evidence does my source provide?").run()
     assert not app.exception
+    assert reruns == ["app"]
     assert source_fetches == []
     assert any(
         (button.label or "").startswith("[S1] Lecture evidence")

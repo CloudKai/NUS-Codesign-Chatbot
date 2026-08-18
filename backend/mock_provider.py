@@ -366,6 +366,8 @@ class DeterministicCoachProvider:
             response_text=response,
             assessment=assessment,
             research_coding=None,
+            specialist="qa",
+            qualifying_coaching_turn=False,
         )
 
     def _review_result(self, request: CoachRequest) -> ProviderAssessmentResult:

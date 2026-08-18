@@ -295,6 +295,8 @@ def test_emit_logs_timing_seconds_without_student_text(caplog) -> None:
     assert "student_message" not in blob
     assert "Bearer" not in blob
     assert "TIMING_MS request_id=" in blob
+    assert "retrieval_gate_ms=" in blob
+    assert "total_server_ms=" in blob
 
 
 def test_submit_records_service_latency_breakdown(caplog, tmp_path) -> None:
@@ -508,6 +510,7 @@ def test_structured_output_recovery_flags_are_recorded(caplog) -> None:
     payload["structured_output_recovery_used"] = True
     payload["structured_output_failure_category"] = "end_turn_without_output_tool"
     payload["first_cycle_stop_reason"] = "end_turn"
+    payload["first_cycle_tool_choice_installed"] = True
     client = FakeAgentCoreRuntime(payload=payload)
     provider = AgentCoreCoachProvider(
         _RUNTIME_ARN,
@@ -531,6 +534,7 @@ def test_structured_output_recovery_flags_are_recorded(caplog) -> None:
         "end_turn_without_output_tool"
     )
     assert recorded["first_cycle_stop_reason"] == "end_turn"
+    assert recorded["first_cycle_tool_choice_installed"] is True
     assert recorded["agentcore_call_count"] == 1
     assert "I think option B" not in json.dumps(recorded)
 
@@ -597,6 +601,7 @@ def test_runtime_model_fields_are_on_the_privacy_allow_list() -> None:
     assert "structured_output_recovery_used" in SAFE_PERF_FIELDS
     assert "structured_output_failure_category" in SAFE_PERF_FIELDS
     assert "first_cycle_stop_reason" in SAFE_PERF_FIELDS
+    assert "first_cycle_tool_choice_installed" in SAFE_PERF_FIELDS
     assert "request_id" in SAFE_PERF_FIELDS
     assert "submit_notebook_lookup_ms" in SAFE_PERF_FIELDS
     assert "history_source_join_ms" in SAFE_PERF_FIELDS

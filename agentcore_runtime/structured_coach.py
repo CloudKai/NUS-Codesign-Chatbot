@@ -86,13 +86,24 @@ STRUCTURED_OUTPUT_REPAIR_PROMPT = "Please use the output tool now."
 FAST_CHAT_INVOKE_LIMITS: dict[str, int] = {"turns": 2}
 DEEP_REVIEW_INVOKE_LIMITS: dict[str, int] = {"turns": 3}
 # Same default Strands 1.52.0 ``StructuredOutputContext.set_forced_mode()``
-# uses on the recovery cycle. Applied on cycle 1 via InvokeModelStage.Input
-# so Haiku must call a tool immediately. With ``tools=[]`` the only tool is
-# the structured-output tool. Do not drop ``turns=2``; recovery stays for
-# schema-invalid or ignored tool_choice results.
+# uses on the recovery cycle. Applied on Fast Chat cycle 1 via
+# InvokeModelStage.Input so Haiku must call a tool immediately. With
+# ``tools=[]`` the only tool is the structured-output tool. Do not drop
+# ``turns=2``; recovery stays for schema-invalid or ignored tool_choice.
+# Do not apply this force to Deep Review / Sonnet roles.
 FIRST_CYCLE_STRUCTURED_OUTPUT_TOOL_CHOICE: dict[str, dict[str, Any]] = {
     "any": {}
 }
+FIRST_CYCLE_FORCE_ROLES = frozenset({"fast_chat"})
+_FIRST_CYCLE_DECISION_CATEGORIES = frozenset(
+    {
+        "applied",
+        "existing_choice",
+        "no_tools",
+        "unexpected_tool_count",
+        "role_not_fast_chat",
+    }
+)
 _ALLOWED_STOP_REASONS = frozenset(
     {
         "end_turn",
@@ -228,26 +239,70 @@ _KNOWN_ERROR_CATEGORIES = frozenset(
 )
 
 
-def apply_first_cycle_tool_choice(existing: Any, tool_specs: Any) -> Any:
-    """Return the tool_choice for one structured Converse call.
+def first_cycle_tool_choice_decision(
+    existing: Any,
+    tool_specs: Any,
+    *,
+    role: str = "fast_chat",
+) -> tuple[Any, str]:
+    """Decide whether cycle 1 may force structured-output tool use.
 
-    When Strands has not entered forced mode, ``existing`` is ``None`` and
-    the first cycle would otherwise use voluntary tool use. If tool specs
-    are present, return ``{"any": {}}`` so the model must invoke a tool on
-    that call. Non-empty ``existing`` (recovery forced mode) is left unchanged.
+    ``{"any": {}}`` is safe only when exactly one tool spec is present
+    (the structured-output tool on a tools-free Fast Chat Agent). Multiple
+    unexpected specs must not be forced; recovery ``turns=2`` still applies.
 
     Args:
         existing: Current ``InvokeModelContext.tool_choice``.
         tool_specs: Tool specs already selected for this model call.
+        role: Runtime model role. Only ``fast_chat`` is eligible.
 
     Returns:
-        The existing choice, or the first-cycle ``any`` constraint.
+        ``(tool_choice, category)`` where category is one of
+        ``applied``, ``existing_choice``, ``no_tools``,
+        ``unexpected_tool_count``, or ``role_not_fast_chat``.
     """
+    cleaned_role = str(role or "").strip().lower()
+    if cleaned_role not in FIRST_CYCLE_FORCE_ROLES:
+        return existing, "role_not_fast_chat"
     if existing is not None:
+        return existing, "existing_choice"
+    specs = list(tool_specs or [])
+    if not specs:
+        return existing, "no_tools"
+    if len(specs) != 1:
+        return existing, "unexpected_tool_count"
+    return dict(FIRST_CYCLE_STRUCTURED_OUTPUT_TOOL_CHOICE), "applied"
+
+
+def apply_first_cycle_tool_choice(
+    existing: Any,
+    tool_specs: Any,
+    *,
+    role: str = "fast_chat",
+) -> Any:
+    """Return the tool_choice for one Fast Chat structured Converse call.
+
+    When Strands has not entered forced mode, ``existing`` is ``None`` and
+    the first cycle would otherwise use voluntary tool use. If exactly one
+    tool spec is present on a Fast Chat role, return ``{"any": {}}``.
+    Non-empty ``existing`` (recovery forced mode) is left unchanged.
+    Multiple unexpected tool specs are not forced.
+
+    Args:
+        existing: Current ``InvokeModelContext.tool_choice``.
+        tool_specs: Tool specs already selected for this model call.
+        role: Runtime model role. Only ``fast_chat`` is eligible.
+
+    Returns:
+        The existing choice, the first-cycle ``any`` constraint, or
+        ``existing`` when forcing is unsafe.
+    """
+    choice, category = first_cycle_tool_choice_decision(
+        existing, tool_specs, role=role
+    )
+    if category not in _FIRST_CYCLE_DECISION_CATEGORIES:
         return existing
-    if not tool_specs:
-        return existing
-    return dict(FIRST_CYCLE_STRUCTURED_OUTPUT_TOOL_CHOICE)
+    return choice
 
 
 def sanitize_stop_reason(value: Any) -> str:
@@ -313,6 +368,7 @@ def stamp_structured_output_telemetry(
     *,
     cycle_count: int | None,
     first_cycle_stop_reason: str = "",
+    first_cycle_tool_choice_installed: bool | None = None,
 ) -> dict[str, Any]:
     """Copy cycle/recovery flags onto a runtime JSON payload.
 
@@ -322,6 +378,8 @@ def stamp_structured_output_telemetry(
         payload: Mutable specialist JSON about to be returned.
         cycle_count: Optional event-loop cycle count.
         first_cycle_stop_reason: Optional cycle-1 stop_reason.
+        first_cycle_tool_choice_installed: Whether Fast Chat middleware
+            registered on this invoke. ``None`` omits the field.
 
     Returns:
         The same mapping, updated in place.
@@ -340,6 +398,10 @@ def stamp_structured_output_telemetry(
     )
     if category in _RECOVERY_CATEGORIES:
         payload["structured_output_failure_category"] = category
+    if first_cycle_tool_choice_installed is not None:
+        payload["first_cycle_tool_choice_installed"] = bool(
+            first_cycle_tool_choice_installed
+        )
     return payload
 
 

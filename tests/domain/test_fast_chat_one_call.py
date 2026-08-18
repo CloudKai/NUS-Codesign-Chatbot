@@ -120,6 +120,7 @@ def test_runtime_cycle_telemetry_is_copied_when_present() -> None:
     payload = _coaching_output()
     payload["event_loop_cycle_count"] = 1
     payload["structured_output_recovery_used"] = False
+    payload["first_cycle_tool_choice_installed"] = True
     client = FakeAgentCoreRuntime(payload=payload)
     _provider(client).assess(_request())
     assert len(client.calls) == 1

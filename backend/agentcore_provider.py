@@ -826,6 +826,11 @@ def _record_runtime_cache_metrics(payload: dict[str, Any]) -> None:
         cleaned_stop = first_stop.strip()[:40]
         if cleaned_stop.replace("_", "").isalnum():
             record_field("first_cycle_stop_reason", cleaned_stop)
+    if "first_cycle_tool_choice_installed" in payload:
+        record_field(
+            "first_cycle_tool_choice_installed",
+            bool(payload.get("first_cycle_tool_choice_installed")),
+        )
     for source, dest in (
         ("inputTokens", "model_input_tokens"),
         ("outputTokens", "model_output_tokens"),

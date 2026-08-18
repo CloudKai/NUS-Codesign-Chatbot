@@ -2,11 +2,14 @@
 
 ## CURRENT STATUS
 
-**Branch:** `Integrate-Bedrock-v2` (local; user expected `Integrate-Bedrock`)  
-**HEAD:** `18d02c8` plus **uncommitted** Fast Chat latency patches in this worktree.  
-**Do not assume** this SHA is deployed. Last measured production image in the
-latency investigation was `cde2300-chatbot:4f5953e` (older than this HEAD).
-AgentCore DEFAULT remains liveVersion **21** until an authorised republish.
+**Branch:** `Integrate-Bedrock-v2`  
+**HEAD:** inspect `git rev-parse HEAD` before operator action. This file is
+updated for the fragment-reconcile / Fast-Chat-scoped first-cycle work on
+top of `bf7bec5`. **Do not assume** this SHA is deployed.
+
+**Do not assume** the live image. Last measured production image in the
+latency investigation was `cde2300-chatbot:4f5953e`. AgentCore DEFAULT remains
+liveVersion **21** until an authorised republish.
 
 **Live cutover 2026-08-17 (historical):** same AgentCore ARN, version **21** on DEFAULT; EC2 app image `cde2300-chatbot:b81a5b0` was documented then. Re-verify image/tag before any operator action. Compose / host pin `AGENTCORE_SESSION_GENERATION=2`.
 
@@ -18,10 +21,26 @@ This file’s **CURRENT** sections are the operator runbook. Everything under **
 
 Release steps: [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md). Architecture authority: [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md).
 
-### Fast Chat latency: first-cycle structured output + Streamlit pre-API (uncommitted)
+### Fast Chat latency: fragment reconcile + Fast-Chat-only first-cycle force
 
-Prepared 2026-08-18 on `Integrate-Bedrock-v2` at `18d02c8` plus local patches.
-**Not committed. Not pushed. No AgentCore publish. No EC2 deploy. No IAM change.**
+Prepared on `Integrate-Bedrock-v2` after `bf7bec5`. **Not published to
+AgentCore. Not deployed to EC2.** Prompt cache remains disabled. Canonical
+stage/shared coaching prompts are unchanged. RAG filters/timeouts/chunk
+caps are unchanged.
+
+#### What this follow-up changes
+
+- Streamlit: keep the composer `@st.fragment` so Send starts FastAPI without
+  rebuilding Journey/Sources/history first. After a successful persist,
+  always `rerun_app()` so completed turns live in persisted `chat_log`,
+  not only inside the fragment (consecutive Q&A cannot vanish).
+- Runtime: first-cycle `tool_choice={"any": {}}` is Fast Chat only. Deep
+  Review is not modified. Unexpected multiple tool specs are not forced.
+  `first_cycle_tool_choice_installed` is stamped true/false. `turns=2` kept.
+- Observability: `fragment_to_api_ms` from fragment start to HTTP; runtime
+  flag copied onto `coach_turn_perf`.
+- Tests: Strands fake-model integration (skipped without strands); A–T
+  quality matrix inventory (no invented live scores).
 
 #### Production measurements that motivated this phase (heavy notebook)
 
@@ -42,26 +61,48 @@ Inside **one** `invoke_agent_runtime`, `Agent.invoke_async(..., structured_outpu
 
 `invoke_async` in 1.52.0 has **no** first-cycle `tool_choice` argument. The documented seam first-party plugins use is `InvokeModelStage.Input` on `agent._middleware_registry`.
 
-#### What this worktree changes
+#### Historical notes from the first latency patch
 
-- Runtime: apply `tool_choice={"any": {}}` on cycle 1 when tool specs exist (same constraint as forced-mode recovery). Keep `turns=2`. Log `structured_output_recovery_used`, `first_cycle_stop_reason`, `structured_output_failure_category` without student text.
-- FastAPI: copy those fields onto `coach_turn_perf`.
-- Streamlit 1.60: composer+submit is `@st.fragment` so Send does not rebuild Journey/Deep Review/Sources/history before FastAPI. Workspace executes the chat column before studio on full-script runs. Stay+upload remounts so Sources refresh. `UI TIMING pre_api_ms` / panel timings.
-- Prompt cache: still **disabled**. Pedagogy prompts **unchanged**. Duplicate notebook load **not** removed. DSQL pooling **not** implemented. Guardrails **unchanged**. Deep Review **unchanged**.
-- Mock harness: `scripts/benchmark_coach_turn_mock.py` (isolated SQLite; refuses `--i-approve-live-aws`).
+Cycle-2 cause and production timings are above. Prompt cache stays disabled.
+Duplicate notebook load and DSQL pooling were not changed. Guardrails, RAG
+validation, and Deep Review architecture were not changed.
 
-#### Validation (this phase)
+#### Validation (this follow-up)
 
-- `compileall` of `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`, `agentcore_runtime`: passed.
-- `ruff check` on touched files: passed.
-- Full mock pytest (` .venv/bin/python -m pytest -q `): passed (existing Starlette cookie deprecation warnings only).
-- Mock harness `scripts/benchmark_coach_turn_mock.py`: fresh/medium/heavy `submit_ms` ~344 / 12 / 11 (cold SQLite then warm mock; **not** AgentCore or user-perceived).
-- AppTest Send probe count is now **9** inner workspace reads because Chat persist runs before Journey (`tests/ui/test_probe_facade_counts.py`). Browser Send still uses the composer fragment.
-- Companion pytest does not install Strands. Cycle=1 on Haiku is **LIVE TRACE REQUIRED** after an authorised AgentCore republish. No production A–D timings in this worktree.
+Evidence from this worktree on top of `bf7bec5` (not committed):
+
+- `ruff check` passed (full repo).
+- `compileall` passed (`backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`, `agentcore_runtime`).
+- Companion `.venv` mock pytest: **1353 collected, exit 0**. The Strands
+  integration module is skipped here because companion pytest does not
+  install `strands-agents`.
+- Throwaway venv with `agentcore_runtime/requirements.txt`
+  (`strands-agents==1.52.0`): **19 passed**
+  (`test_strands_first_cycle_middleware.py` 5 +
+  `test_first_cycle_structured_output.py` 14). Diagnostic
+  `check_agentcore_runtime_dependencies.py` printed
+  `agentcore_runtime_dependency_check=ok`.
+- Targeted quality/RAG/stage/Deep Review run: **180 passed**
+  (`test_qa_grounding`, `test_bedrock_retrieve`, `test_citation_resolution`,
+  `test_deep_review_execution`, `http/test_deep_review`,
+  `test_fast_chat_one_call`, `test_coaching_prompt_baseline`,
+  `test_security_invariants`, `test_mode_classification`,
+  `test_structured_output_limits`, `test_review_agent`).
+- Informational mock benchmark only (not AgentCore): fresh submit_ms ~510
+  (cold SQLite), medium 13.3, heavy 11.0. `agentcore_invokes=0`.
+
+Cycle=1 on live Haiku Coaching remains **LIVE TRACE REQUIRED** after an
+authorised AgentCore republish. Fragment `pre_api_ms` improvement is
+architectural; production click-to-API is unproven. Live A–T quality
+scores were **not** invented.
 
 #### Next exact action
 
-Do **not** publish AgentCore or rebuild EC2 until authorised. After authorisation: publish a new runtime version that includes `agentcore_runtime/main.py` first-cycle middleware, bump `AGENTCORE_SESSION_GENERATION`, recreate the app container from a new image, then measure Fresh/Heavy Hello and Coaching with `event_loop_cycle_count` and `UI TIMING pre_api_ms`.
+Do **not** publish AgentCore or rebuild EC2 until authorised. After
+authorisation: publish runtime with Fast-Chat-only middleware, bump
+`AGENTCORE_SESSION_GENERATION`, recreate the app image, then measure Fresh
+and Heavy Hello/Coaching/Q&A with `event_loop_cycle_count`,
+`first_cycle_tool_choice_installed`, and `UI TIMING fragment_to_api_ms`.
 
 ### Week 1 RAG, Q&A stay, and latency
 
@@ -107,7 +148,7 @@ is the correctness gate and the only one that should be a required check:
 | Job | Gates |
 |---|---|
 | `mock-suite` | `ruff check`; shell syntax (`start.sh`, `build.sh`, `start_prod.sh`, `deploy_ecr.sh`, `browser_e2e_smoke.sh`); `docker compose` + `compose.prod.yaml` + Caddy validate; `compileall` (`backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`, `agentcore_runtime`); production-config tests; idempotency + ownership + production-critical-path tests; **complete mock pytest**; Docker image build **on push only** (`co-design:ci-<12-char-sha>`). |
-| `agentcore-runtime-compatibility` | `pip install -r agentcore_runtime/requirements.txt`; `scripts/diagnostics/check_agentcore_runtime_dependencies.py`; compile `agentcore_runtime`. Companion pytest does **not** install Strands. |
+| `agentcore-runtime-compatibility` | `pip install -r agentcore_runtime/requirements.txt`; `scripts/diagnostics/check_agentcore_runtime_dependencies.py`; compile `agentcore_runtime`; pytest `test_strands_first_cycle_middleware.py` + `test_first_cycle_structured_output.py` with the pinned Strands wheel. Companion pytest does **not** install Strands. |
 
 Two supply-chain workflows report but must **not** become required checks:
 [`dependency-audit.yml`](../.github/workflows/dependency-audit.yml) (pip-audit,
@@ -138,7 +179,7 @@ A capped isolated Fast Chat invoke (`student_message=testing`, no DSQL write) on
 
 Authoritative layering remains [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md). Production generation is AgentCore; FastAPI still owns identity, RAG authorization, transcript, and stage mutation.
 
-**Fast Chat.** One AgentCore invoke per normal student turn. Haiku returns slim `FastChatTurnOutput`: `mode` (`coaching` \| `qa`), `response_text`, optional stay/advance `recommendation`, citations, `needs_source_retrieval`. No per-turn router, incremental review, or automatic Sonnet. Cycle 1 sets `tool_choice={"any": {}}` via Strands 1.52.0 `InvokeModelStage.Input` so the structured-output tool is required on the first generation. Event-loop recovery inside that one invoke remains capped at `FAST_CHAT_INVOKE_LIMITS={"turns": 2}` (at most one recovery if cycle 1 still returns `end_turn` or invalid schema). Do not set `turns=1` while first-cycle output can fail.
+**Fast Chat.** One AgentCore invoke per normal student turn. Haiku returns slim `FastChatTurnOutput`: `mode` (`coaching` \| `qa`), `response_text`, optional stay/advance `recommendation`, citations, `needs_source_retrieval`. No per-turn router, incremental review, or automatic Sonnet. Fast Chat cycle 1 sets `tool_choice={"any": {}}` via Strands 1.52.0 `InvokeModelStage.Input` when exactly one structured-output tool is present. Deep Review is not modified by that force. Event-loop recovery inside that one Fast Chat invoke remains capped at `FAST_CHAT_INVOKE_LIMITS={"turns": 2}`. Do not set `turns=1` while first-cycle output can fail. `first_cycle_tool_choice_installed` is true only when the middleware registered.
 
 **Deep Review.** Separate HTTP route `POST /api/v1/threads/{thread_id}/deep-review`. Server-owned eligibility, Sonnet 4.6, counter, snapshot, idempotency. Event-loop cap `{"turns": 3}`. Not on `/coach/turn`.
 

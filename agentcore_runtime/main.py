@@ -75,7 +75,7 @@ try:
         qa_turn_from_agent_result,
         review_turn_from_agent_result,
         agent_system_prompt,
-        apply_first_cycle_tool_choice,
+        first_cycle_tool_choice_decision,
         model_retry_policy_for_role,
         runtime_model_provenance_fields,
         sanitize_stop_reason,
@@ -137,7 +137,7 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
         qa_turn_from_agent_result,
         review_turn_from_agent_result,
         agent_system_prompt,
-        apply_first_cycle_tool_choice,
+        first_cycle_tool_choice_decision,
         model_retry_policy_for_role,
         runtime_model_provenance_fields,
         sanitize_stop_reason,
@@ -164,6 +164,7 @@ def _with_cache_telemetry(
     system_prompt: str | list[dict[str, Any]],
     model_config: Any = None,
     first_cycle_stop_reason: str = "",
+    first_cycle_tool_choice_installed: bool | None = None,
 ) -> dict[str, Any]:
     """Attach numeric cache, cycle, and safe model provenance without student text.
 
@@ -186,6 +187,7 @@ def _with_cache_telemetry(
         payload,
         cycle_count=event_loop_cycle_count_from_agent_result(result),
         first_cycle_stop_reason=first_cycle_stop_reason,
+        first_cycle_tool_choice_installed=first_cycle_tool_choice_installed,
     )
     payload.update(runtime_model_provenance_fields(model_config))
     if enabled:
@@ -314,38 +316,59 @@ def _log_role(
     )
 
 
-def _install_first_cycle_structured_output(agent: Any) -> bool:
-    """Force a tool call on cycle 1 using Strands 1.52.0 InvokeModel middleware.
+def _install_first_cycle_structured_output(agent: Any, *, role: str = "") -> bool:
+    """Force Fast Chat cycle-1 tool use via Strands 1.52.0 InvokeModel middleware.
 
     First-party 1.52.0 plugins register on ``InvokeModelStage.Input``. This
     helper sets ``tool_choice={"any": {}}`` before the first Converse call
-    when Strands has not already entered forced mode. ``turns=2`` recovery
-    and ``STRUCTURED_OUTPUT_REPAIR_PROMPT`` remain for schema-invalid output.
+    when the role is ``fast_chat``, Strands has not already entered forced
+    mode, and exactly one tool spec is present. Deep Review is never
+    modified. ``turns=2`` recovery remains for schema-invalid output.
 
     Args:
         agent: A Strands ``Agent`` instance.
+        role: Runtime model role. Only ``fast_chat`` registers middleware.
 
     Returns:
-        True when middleware was registered. False when Strands middleware
-        is unavailable so invoke still proceeds with voluntary tool use.
+        True when middleware was registered. False when the role is not
+        Fast Chat or Strands middleware is unavailable. Invoke still
+        proceeds with voluntary tool use and bounded recovery.
     """
+    if str(role or "").strip().lower() != MODEL_ROLE_FAST_CHAT:
+        return False
     registry = getattr(agent, "_middleware_registry", None)
     adder = getattr(registry, "add_middleware", None)
     if not callable(adder):
+        logger.info("first_cycle_tool_choice_installed=false reason=middleware_unavailable")
         return False
     try:
         from strands._middleware.stages import InvokeModelStage
     except ImportError:
+        logger.info("first_cycle_tool_choice_installed=false reason=middleware_unavailable")
         return False
 
     def _apply_tool_choice(context: Any) -> Any:
-        context.tool_choice = apply_first_cycle_tool_choice(
-            getattr(context, "tool_choice", None),
-            getattr(context, "tool_specs", None),
-        )
+        try:
+            choice, category = first_cycle_tool_choice_decision(
+                getattr(context, "tool_choice", None),
+                getattr(context, "tool_specs", None),
+                role=MODEL_ROLE_FAST_CHAT,
+            )
+            if category == "unexpected_tool_count":
+                logger.info(
+                    "first_cycle_tool_choice_skipped reason=unexpected_tool_count"
+                )
+            context.tool_choice = choice
+        except Exception:
+            logger.info("first_cycle_tool_choice_apply_failed")
         return context
 
-    adder(InvokeModelStage.Input, _apply_tool_choice)
+    try:
+        adder(InvokeModelStage.Input, _apply_tool_choice)
+    except Exception:
+        logger.info("first_cycle_tool_choice_installed=false reason=middleware_unavailable")
+        return False
+    logger.info("first_cycle_tool_choice_installed=true")
     return True
 
 
@@ -398,10 +421,10 @@ async def _structured_role_invoke(
     structured-output recovery turn is not classified as PROMPT_ATTACK.
     Fast Chat / router / legacy Haiku roles pass ``limits={"turns": 2}``
     (verified 1.52.0: initial generation plus at most one recovery). Deep
-    Review passes ``limits={"turns": 3}``. Cycle 1 also sets
-    ``tool_choice={"any": {}}`` via ``InvokeModelStage.Input`` so the
-    structured-output tool is required on the first generation. Recovery
-    remains if that call still returns ``end_turn`` or invalid schema.
+    Review passes ``limits={"turns": 3}``. Fast Chat cycle 1 also sets
+    ``tool_choice={"any": {}}`` via ``InvokeModelStage.Input`` when exactly
+    one structured-output tool is present. Deep Review is not modified.
+    Recovery remains if that call still returns ``end_turn`` or invalid schema.
     Model retries are a separate ``ModelRetryStrategy`` on the Agent, not
     the event-loop cap.
     """
@@ -494,8 +517,14 @@ async def _structured_role_invoke(
             agent_kwargs["messages"] = prior
     agent = Agent(**agent_kwargs)
     first_cycle_stop: list[str] = []
-    _install_first_cycle_structured_output(agent)
-    _attach_first_cycle_stop_reason_hook(agent, first_cycle_stop)
+    first_cycle_installed = _install_first_cycle_structured_output(
+        agent, role=role
+    )
+    if first_cycle_installed:
+        try:
+            _attach_first_cycle_stop_reason_hook(agent, first_cycle_stop)
+        except Exception:
+            logger.info("first_cycle_stop_reason_hook_unavailable")
     result = None
     try:
         result = await agent.invoke_async(
@@ -524,6 +553,9 @@ async def _structured_role_invoke(
             system_prompt,
             model_config,
             first_cycle_stop_reason=first_stop,
+            first_cycle_tool_choice_installed=first_cycle_installed
+            if str(role).strip().lower() == MODEL_ROLE_FAST_CHAT
+            else None,
         )
     except CoachTurnExtractionError as error:
         first_stop = first_cycle_stop[0] if first_cycle_stop else ""
@@ -541,7 +573,12 @@ async def _structured_role_invoke(
             elapsed_ms=elapsed_ms_since(started),
             first_cycle_stop_reason=first_stop,
         )
-        return harness_error_payload(error.category)
+        error_payload = harness_error_payload(error.category)
+        if str(role).strip().lower() == MODEL_ROLE_FAST_CHAT:
+            error_payload["first_cycle_tool_choice_installed"] = (
+                first_cycle_installed
+            )
+        return error_payload
     except Exception as error:
         first_stop = first_cycle_stop[0] if first_cycle_stop else ""
         category = invoke_failure_category(error)
@@ -560,7 +597,12 @@ async def _structured_role_invoke(
             first_cycle_stop_reason=first_stop,
         )
         logger.exception("specialist_invoke_unhandled")
-        return harness_error_payload(category)
+        error_payload = harness_error_payload(category)
+        if str(role).strip().lower() == MODEL_ROLE_FAST_CHAT:
+            error_payload["first_cycle_tool_choice_installed"] = (
+                first_cycle_installed
+            )
+        return error_payload
 
 
 async def specialist_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]:

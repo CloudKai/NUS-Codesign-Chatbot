@@ -88,12 +88,13 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
   response language, display-name avatar). The chat composer lives in
   `_render_composer_submit_fragment` so a normal Send does not rebuild
   Journey, Deep Review, Sources, or chat history before FastAPI starts.
-  Use `rerun_app()` when application-wide state changed (notebook switch,
+  After a successful persisted turn, always ``rerun_app()`` so
+  authoritative history owns the completed bubbles. Use ``rerun_app()``
+  when application-wide state changed (notebook switch,
   auth, coach ADVANCE / pending transition / Deep Review progress, composer
   uploads, revise, layout collapse, course-sync fragment remount, stage
   selection, **Appearance theme** — `render_theme_css()` only runs on a
-  full script). Stay turns without uploads still paint the reply in the
-  in-flight slot without a full remount. Sources and Deep Review must not
+  full script). Sources and Deep Review must not
   call `rerun_app()` while `coach_turn_is_streaming()` is true (a remount
   during `handle_prompt` stacks a second workspace). Do not keep a generic
   `rerun()` helper.

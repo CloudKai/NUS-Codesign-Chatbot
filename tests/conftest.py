@@ -186,7 +186,11 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     # Default UI tests run as an authenticated Cognito student so existing
     # AppTest suites keep exercising the full application. Auth-gate tests
     # override ``is_logged_in`` / ``authenticated_user`` explicitly.
-    from ui import auth_gate as auth_gate_module
+    # Runtime-only jobs (Strands pin, no Streamlit) skip this overlay.
+    try:
+        from ui import auth_gate as auth_gate_module
+    except ModuleNotFoundError:
+        auth_gate_module = None
 
     _default_user = {
         "id": "test-user-id",
@@ -196,18 +200,21 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
         "role": "student",
     }
 
-    monkeypatch.setattr(auth_gate_module, "is_logged_in", lambda: True)
-    monkeypatch.setattr(auth_gate_module, "authenticated_user", lambda: dict(_default_user))
-    monkeypatch.setattr(
-        auth_gate_module,
-        "current_user_claims",
-        lambda _user=None: {
-            "sub": "test-cognito-sub",
-            "email": "test.student@example.edu",
-            "given_name": "Test",
-            "name": "Test Student",
-        },
-    )
+    if auth_gate_module is not None:
+        monkeypatch.setattr(auth_gate_module, "is_logged_in", lambda: True)
+        monkeypatch.setattr(
+            auth_gate_module, "authenticated_user", lambda: dict(_default_user)
+        )
+        monkeypatch.setattr(
+            auth_gate_module,
+            "current_user_claims",
+            lambda _user=None: {
+                "sub": "test-cognito-sub",
+                "email": "test.student@example.edu",
+                "given_name": "Test",
+                "name": "Test Student",
+            },
+        )
 
     # App data is scoped to cognito:{sub}; keep direct StudentStore() helpers
     # in tests on the same owner as the authenticated UI.

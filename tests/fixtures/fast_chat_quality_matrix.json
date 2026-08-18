@@ -1,0 +1,231 @@
+{
+  "note": "Quality regression matrix for Fast Chat. Mock-provable rows are gated by pytest. Live scores are never invented; they require an approved AgentCore run.",
+  "release_thresholds_unmeasured": {
+    "mode_correctness": 0.95,
+    "grounded_factual_correctness": 0.95,
+    "citation_support": 0.98,
+    "hallucinated_citations": 0.01,
+    "source_selection_compliance": 0.99,
+    "socratic_compliance": 0.95,
+    "assignment_completion_violations": 0.02,
+    "stage_decision_agreement": 0.90,
+    "structured_output_success": 0.99
+  },
+  "cases": [
+    {
+      "id": "A_simple_greeting",
+      "kind": "hello",
+      "mock_provable": true,
+      "pytest_anchors": [
+        "tests/domain/test_fast_chat_one_call.py"
+      ],
+      "expected": {
+        "agentcore_invokes": 1,
+        "sonnet_invokes": 0,
+        "mode": "coaching"
+      }
+    },
+    {
+      "id": "B_socratic_coaching",
+      "kind": "coaching",
+      "mock_provable": true,
+      "pytest_anchors": [
+        "tests/domain/test_fast_chat_pedagogy.py",
+        "tests/domain/test_coaching_prompt_baseline.py"
+      ],
+      "expected": {
+        "agentcore_invokes": 1,
+        "must_remain_socratic": true,
+        "should_not_complete_assignment": true
+      }
+    },
+    {
+      "id": "C_assumption_challenge",
+      "kind": "coaching",
+      "mock_provable": false,
+      "live_required": true
+    },
+    {
+      "id": "D_vv_challenge",
+      "kind": "coaching",
+      "mock_provable": false,
+      "live_required": true
+    },
+    {
+      "id": "E_stage_ready_coaching",
+      "kind": "coaching",
+      "mock_provable": true,
+      "pytest_anchors": [
+        "tests/domain/test_thinking_path_journey.py",
+        "tests/domain/test_fast_chat_one_call.py"
+      ],
+      "expected": {
+        "stay_or_advance": "advance_allowed"
+      }
+    },
+    {
+      "id": "F_not_ready_coaching",
+      "kind": "coaching",
+      "mock_provable": true,
+      "pytest_anchors": [
+        "tests/domain/test_thinking_path_journey.py",
+        "tests/domain/test_workflow.py"
+      ],
+      "expected": {
+        "stay_or_advance": "stay"
+      }
+    },
+    {
+      "id": "G_course_qa_one_source",
+      "kind": "qa",
+      "mock_provable": true,
+      "pytest_anchors": [
+        "tests/domain/test_qa_grounding.py",
+        "tests/domain/test_fast_chat_one_call.py"
+      ],
+      "expected": {
+        "mode": "qa",
+        "must_not_mutate_stage": true,
+        "citations_required": true
+      }
+    },
+    {
+      "id": "H_qa_multiple_sources",
+      "kind": "qa",
+      "mock_provable": false,
+      "live_required": true
+    },
+    {
+      "id": "I_evidence_absent",
+      "kind": "qa_evidence_gap",
+      "mock_provable": true,
+      "pytest_anchors": [
+        "tests/domain/test_qa_grounding.py"
+      ],
+      "expected": {
+        "agentcore_invokes": 0,
+        "mode": "qa"
+      }
+    },
+    {
+      "id": "J_ambiguous_question",
+      "kind": "mixed",
+      "mock_provable": true,
+      "pytest_anchors": [
+        "tests/domain/test_mode_classification.py"
+      ],
+      "expected": {
+        "must_not_force_qa": true
+      }
+    },
+    {
+      "id": "K_citation_heavy",
+      "kind": "qa",
+      "mock_provable": true,
+      "pytest_anchors": [
+        "tests/domain/test_citation_resolution.py"
+      ],
+      "expected": {
+        "unknown_citations_dropped": true
+      }
+    },
+    {
+      "id": "L_malicious_source_instruction",
+      "kind": "security",
+      "mock_provable": true,
+      "pytest_anchors": [
+        "tests/domain/test_security_invariants.py"
+      ],
+      "expected": {
+        "untrusted_source_text": true
+      }
+    },
+    {
+      "id": "M_source_contradicts_world_knowledge",
+      "kind": "qa",
+      "mock_provable": false,
+      "live_required": true
+    },
+    {
+      "id": "N_consecutive_qa",
+      "kind": "ui",
+      "mock_provable": true,
+      "pytest_anchors": [
+        "tests/ui/test_chat_progress.py"
+      ],
+      "expected": {
+        "history_retained": true
+      }
+    },
+    {
+      "id": "O_coaching_qa_coaching",
+      "kind": "mode",
+      "mock_provable": true,
+      "pytest_anchors": [
+        "tests/ui/test_chat_progress.py",
+        "tests/domain/test_review_agent.py"
+      ],
+      "expected": {
+        "qa_does_not_count_deep_review": true
+      }
+    },
+    {
+      "id": "P_long_conversation",
+      "kind": "context",
+      "mock_provable": true,
+      "pytest_anchors": [
+        "tests/domain/test_conversation_memory_continuity.py"
+      ],
+      "expected": {
+        "history_budgeted": true
+      }
+    },
+    {
+      "id": "Q_student_upload_pdf",
+      "kind": "student_rag",
+      "mock_provable": true,
+      "pytest_anchors": [
+        "tests/domain/test_retrieval.py"
+      ],
+      "expected": {
+        "lexical_retrieval": true
+      }
+    },
+    {
+      "id": "R_course_kb_document",
+      "kind": "course_rag",
+      "mock_provable": true,
+      "pytest_anchors": [
+        "tests/domain/test_bedrock_retrieve.py"
+      ],
+      "expected": {
+        "metadata_filter_required": true,
+        "object_key_validated": true
+      }
+    },
+    {
+      "id": "S_image_source",
+      "kind": "image",
+      "mock_provable": true,
+      "pytest_anchors": [
+        "tests/domain/test_mode_classification.py"
+      ],
+      "expected": {
+        "image_only_qa_invokes_model": true
+      }
+    },
+    {
+      "id": "T_deep_review_while_chat",
+      "kind": "deep_review",
+      "mock_provable": true,
+      "pytest_anchors": [
+        "tests/domain/test_deep_review_execution.py",
+        "tests/http/test_deep_review.py"
+      ],
+      "expected": {
+        "sonnet_only_on_review_route": true,
+        "normal_chat_independent": true
+      }
+    }
+  ]
+}

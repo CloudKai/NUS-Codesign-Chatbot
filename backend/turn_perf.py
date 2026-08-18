@@ -130,6 +130,7 @@ SAFE_PERF_FIELDS = frozenset(
         "structured_output_recovery_used",
         "structured_output_failure_category",
         "first_cycle_stop_reason",
+        "first_cycle_tool_choice_installed",
         "runtime_model_role",
         "runtime_model_provider",
         "runtime_model_id",
@@ -451,12 +452,13 @@ def _log_service_timings(payload: Mapping[str, Any]) -> None:
     logger.info(
         "TIMING_MS request_id=%s auth_ms=%.1f submit_notebook_ms=%.1f "
         "notebook_load_ms=%.1f history_load_ms=%.1f source_load_ms=%.1f "
-        "history_source_join_ms=%.1f memory_ms=%.1f retrieval_ms=%.1f "
-        "kb_sdk_ms=%.1f kb_validate_ms=%.1f context_build_ms=%.1f "
-        "agentcore_ms=%.1f persistence_ms=%.1f notebook_load_count=%s "
-        "agentcore_call_count=%s event_loop_cycle_count=%s "
-        "structured_output_recovery_used=%s first_cycle_stop_reason=%s "
-        "total_backend_ms=%.1f",
+        "history_source_join_ms=%.1f memory_ms=%.1f retrieval_gate_ms=%.1f "
+        "retrieval_ms=%.1f kb_sdk_ms=%.1f kb_validate_ms=%.1f "
+        "context_build_ms=%.1f agentcore_ms=%.1f persistence_ms=%.1f "
+        "notebook_load_count=%s agentcore_call_count=%s "
+        "event_loop_cycle_count=%s structured_output_recovery_used=%s "
+        "first_cycle_stop_reason=%s first_cycle_tool_choice_installed=%s "
+        "total_backend_ms=%.1f total_server_ms=%.1f",
         request_id,
         float(payload.get("auth_context_ms") or 0.0),
         float(payload.get("submit_notebook_lookup_ms") or 0.0),
@@ -465,6 +467,7 @@ def _log_service_timings(payload: Mapping[str, Any]) -> None:
         float(payload.get("source_load_ms") or 0.0),
         float(payload.get("history_source_join_ms") or 0.0),
         float(payload.get("memory_load_ms") or 0.0),
+        float(payload.get("retrieval_gate_ms") or 0.0),
         float(payload.get("retrieval_total_ms") or 0.0),
         float(payload.get("kb_sdk_ms") or 0.0),
         float(payload.get("kb_validate_ms") or 0.0),
@@ -476,6 +479,8 @@ def _log_service_timings(payload: Mapping[str, Any]) -> None:
         payload.get("event_loop_cycle_count", "-"),
         payload.get("structured_output_recovery_used", "-"),
         payload.get("first_cycle_stop_reason", "-"),
+        payload.get("first_cycle_tool_choice_installed", "-"),
+        float(payload.get("request_total_ms") or 0.0),
         float(payload.get("request_total_ms") or 0.0),
     )
 

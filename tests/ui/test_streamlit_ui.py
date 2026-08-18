@@ -409,8 +409,29 @@ def test_add_pasted_source_then_chat_with_citation():
 
     app.chat_input[0].set_value("What evidence does my source provide?").run()
     assert not app.exception
-    # Welcome + student turn + coach reply.
-    assert len(app.chat_message) == 3
+    thread_id = app.session_state["thread_id"]
+    persisted = [
+        message
+        for message in StudentStore().get_messages(thread_id)
+        if str(message.get("content") or "").strip()
+    ]
+    assert [message.get("role") for message in persisted] == [
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    app.run()
+    assert not app.exception
+    persisted_after = [
+        message
+        for message in StudentStore().get_messages(thread_id)
+        if str(message.get("content") or "").strip()
+    ]
+    assert [message.get("role") for message in persisted_after] == [
+        "assistant",
+        "user",
+        "assistant",
+    ]
     assert not any(
         (expander.label or "").startswith("Sources used (") for expander in app.expander
     )

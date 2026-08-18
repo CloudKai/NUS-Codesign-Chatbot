@@ -33,6 +33,7 @@ logic.
 | `diagnostics/check_course_kb_metadata.py` | Local sidecar identity preflight | Default never calls AWS; answers sidecar presence and canonical `course_material_id` match. `--i-approve-live-bedrock` is refused — ingestion and filtered Retrieve are documented in [`docs/KB_REQUIRED_MODE_RUNBOOK.md`](../docs/KB_REQUIRED_MODE_RUNBOOK.md) |
 | `evals/evaluate_live_coach.py` | Isolated GPT-5.6 Luna InvokeHarness quality evaluation | Requires `--i-approve-live-luna`; never changes production DEFAULT; no pytest AWS path |
 | `evals/evaluate_fast_chat_regression.py` | Fast-chat coaching behaviour regression | Safe by default; `--dry-run` inspects cases; live candidate execution requires `--i-approve-live-claude` plus `AGENTCORE_RUNTIME_ARN`; `--baseline-artifact` is optional and never invented; does not publish AgentCore |
+| `evals/fast_chat_quality_matrix.py` | Dry-run A–T quality matrix | Refuses AWS. Does not invent scores. |
 | `sync_course_materials.py` | Upload `lectureNotes/` and `readings/` to shared `course/` S3 keys | Requires `--confirm`; never writes `users/`; never deletes course objects |
 | `preview_prompt.py` | Demo-only composed stage-prompt preview | No DB, student data, tokens, or provider calls |
 | `reset_learning_data.py` | Dry-run inventory and explicit five-phase learning-data reset | Apply requires an unchanged signed manifest and exact phrase; preserves accounts/auth; creates SQLite backup and file quarantine |

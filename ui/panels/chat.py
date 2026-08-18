@@ -546,8 +546,9 @@ def apply_completed_turn_to_session(
         pre_deep_review_counter: Persisted coaching-turn counter before the stream.
 
     Returns:
-        True when Thinking Path, pending Next, or Deep Review progress must
-        rerun after the reply is already visible.
+        True when Thinking Path, pending Next, or Deep Review progress changed.
+        Callers always remount after a successful persist; the flag remains
+        for tests and session journey updates.
     """
     store.forget_turn_reads(thread_id)
     updated_thread = store.get_thread(thread_id) or {}
@@ -601,22 +602,25 @@ def handle_prompt(
     existing_user_message_id: str | None = None,
     *,
     visible_source_ids: set[str] | None = None,
+    request_id: str | None = None,
+    fragment_started: float | None = None,
 ) -> None:
     """Submit one student turn through the typed coaching workflow.
 
     Uploads become sources first. The coach path always uses ``CoachRequest``
     via the local API or in-process ``CoachApplicationService``, streaming
-    progress events and then the final validated reply. On ``done``, a stay
-    turn renders the assistant from that payload in this run. When Thinking
-    Path, a pending stage transition, or Deep Review progress changed, this
-    helper remounts without painting ``done`` into the in-flight slot so
-    history owns the single bubble. ``target`` must be the in-flight
-    sibling, never ``chat_log``: re-entering that keyed history container
-    reuses the last assistant ``st.chat_message``.
+    progress events and then the final validated reply. On ``done``, this
+    helper never keeps completed history only in the composer fragment:
+    it remounts once so ``chat_log`` reads persisted messages. ``target``
+    must be the in-flight sibling, never ``chat_log``: re-entering that
+    keyed history container reuses the last assistant ``st.chat_message``.
     """
     set_coach_turn_streaming(True)
     handle_started = time.perf_counter()
-    request_id = str(uuid.uuid4())
+    request_id = str(request_id or uuid.uuid4())
+    api_origin = (
+        fragment_started if fragment_started is not None else handle_started
+    )
     try:
         journey = normalize_journey(st.session_state.learning_journey)
         if uploads:
@@ -669,8 +673,8 @@ def handle_prompt(
                     st.error("The attachment could not be added, so no message was sent.")
                     st.caption("Remove or replace the attachment and try again.")
                     return
-                # A stay turn does not rerun, so the Sources panel would otherwise
-                # render this run against the pre-upload memo.
+                # Drop the pre-upload source memo before persist. The later
+                # remount reloads Sources from the post-upload catalog.
                 store.forget_source_reads(st.session_state.thread_id)
                 sources = store.list_sources(st.session_state.thread_id)
                 visible_source_ids = {
@@ -707,6 +711,10 @@ def handle_prompt(
                 thinking_closed = False
                 log_ui_timing(
                     request_id=request_id,
+                    fragment_to_api_ms=round(
+                        max(0.0, (time.perf_counter() - api_origin) * 1000.0),
+                        1,
+                    ),
                     pre_api_ms=round(
                         max(0.0, (time.perf_counter() - handle_started) * 1000.0),
                         1,
@@ -757,50 +765,28 @@ def handle_prompt(
                         category="structured_output_failure",
                     )
                 _close_thinking(label="Coach reply ready", state="complete")
-                thinking_stage = str(
-                    turn.auto_advanced_to or journey["current_stage"] or DEFAULT_STAGE
-                )
-                message_id = (
-                    turn.pending_transition.id
-                    if turn.pending_transition is not None
-                    else f"done-{idempotency_key}"
-                )
                 # Drop the retry key only after the reply is complete. The
                 # composer is a trigger widget, so this run's submitted value
-                # cannot fire again. Nonce bumps only when a reconciliation
-                # rerun remounts the composer; bumping without a rerun would
-                # desync the on-screen widget key from session state.
+                # cannot fire again.
                 remove_retry_key(
                     st.session_state,
                     thread_id=st.session_state.thread_id,
                     stage=journey["current_stage"],
                     prompt=prompt,
                 )
-                needs_reconcile = apply_completed_turn_to_session(
+                apply_completed_turn_to_session(
                     turn,
                     thread_id=st.session_state.thread_id,
                     pre_stage=pre_stage,
                     pre_deep_review_available=pre_deep_review_available,
                     pre_deep_review_counter=pre_deep_review_counter,
                 )
-                if needs_reconcile or uploads:
-                    # History on the next run owns the assistant bubble. Stay
-                    # turns without uploads keep painting into the in-flight
-                    # slot so a composer fragment need not remount Journey.
-                    # Uploads remount so Sources can refresh after this
-                    # fragment-only submit. Do not paint ``done`` here and
-                    # then remount history or the reply would show twice.
-                    st.session_state.composer_nonce += 1
-                    rerun_app()
-                    return
-                render_message(
-                    assistant_message_from_turn(
-                        turn,
-                        thinking_stage=thinking_stage,
-                        message_id=message_id,
-                    ),
-                    visible_source_ids=visible_source_ids,
-                )
+                # Always remount from persisted history. Painting completed
+                # turns only in this fragment would drop them on the next
+                # Send. Do not also render_message here or the remount would
+                # duplicate the bubble.
+                st.session_state.composer_nonce += 1
+                rerun_app()
                 return
             except CoachTurnStreamError as error:
                 try:
@@ -980,14 +966,17 @@ def _render_composer_submit_fragment(
 
     Streamlit 1.60 reruns only this fragment when ``st.chat_input`` submits,
     so Journey, Deep Review, Sources, and chat history are not rebuilt
-    before FastAPI starts. Full ``rerun_app()`` still runs for ADVANCE,
-    pending transitions, Deep Review progress, and composer uploads.
+    before FastAPI starts. After a successful persisted turn, one
+    ``rerun_app()`` reconciles the authoritative transcript, Thinking Path,
+    and Deep Review caption.
 
     Args:
         model_id: Selected coaching model id for the next turn.
         reasoning_effort: Compatible reasoning effort, or None.
         visible_source_ids: Source ids currently shown in this notebook.
     """
+    fragment_started = time.perf_counter()
+    request_id = str(uuid.uuid4())
     chat_inflight = st.container(key="chat_inflight")
     with st.container(key="chat_composer"):
         composer_value = st.chat_input(
@@ -1010,6 +999,8 @@ def _render_composer_submit_fragment(
             chat_inflight,
             existing_user_message_id=None,
             visible_source_ids=visible_source_ids,
+            request_id=request_id,
+            fragment_started=fragment_started,
         )
 
 

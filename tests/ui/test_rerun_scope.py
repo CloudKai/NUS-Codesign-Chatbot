@@ -148,6 +148,13 @@ def test_chat_marks_streaming_around_coach_send_and_revise() -> None:
     )
     assert "finally:" in send_block
     assert "pre_api_ms" in send_block
+    assert "fragment_to_api_ms" in send_block
+    assert "rerun_app()" in send_block
+    done_block = send_block.split("if turn is None", 1)[1].split(
+        "except CoachTurnStreamError", 1
+    )[0]
+    assert "rerun_app()" in done_block
+    assert "render_message(" not in done_block
     normalized = chat.replace("\r\n", "\n")
     assert "@st.fragment\ndef _render_composer_submit_fragment(" in normalized
     composer_block = chat.split("def _render_composer_submit_fragment(", 1)[1].split(
