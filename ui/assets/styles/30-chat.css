@@ -163,7 +163,9 @@
     }
 
     [class*="st-key-user_message_row_"],
-    [data-testid="stElementContainer"]:has(> [class*="st-key-user_message_row_"]) {
+    [data-testid="stElementContainer"]:has(> [class*="st-key-user_message_row_"]),
+    .st-key-inflight_user_message_row,
+    [data-testid="stElementContainer"]:has(> .st-key-inflight_user_message_row) {
         position:relative !important;
         display:block !important;
         width:fit-content !important;
@@ -191,6 +193,8 @@
 
     [class*="st-key-user_message_row_"] > [data-testid="stVerticalBlock"],
     [class*="st-key-user_message_row_"] > [data-testid="stLayoutWrapper"],
+    .st-key-inflight_user_message_row > [data-testid="stVerticalBlock"],
+    .st-key-inflight_user_message_row > [data-testid="stLayoutWrapper"],
     [class*="st-key-user_message_edit_"] > [data-testid="stVerticalBlock"],
     [class*="st-key-user_message_edit_"] > [data-testid="stLayoutWrapper"] {
         gap:.35rem !important;
@@ -218,7 +222,9 @@
     }
 
     [class*="st-key-user_message_row_"] [data-testid="stMarkdownContainer"],
-    [class*="st-key-user_message_row_"] [data-testid="stMarkdownContainer"] p {
+    [class*="st-key-user_message_row_"] [data-testid="stMarkdownContainer"] p,
+    .st-key-inflight_user_message_row [data-testid="stMarkdownContainer"],
+    .st-key-inflight_user_message_row [data-testid="stMarkdownContainer"] p {
         margin:0 !important;
         padding:0 !important;
     }
@@ -906,6 +912,7 @@
         max-width:100% !important;
         box-sizing:border-box !important;
         /* Grow with the draft; cap at 5 rows, then scroll. */
+        field-sizing:content;
         min-height:calc(1em * 1.45) !important;
         max-height:calc(1em * 1.45 * 5) !important;
         overflow-y:auto !important;

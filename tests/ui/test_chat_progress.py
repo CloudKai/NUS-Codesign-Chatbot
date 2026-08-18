@@ -72,6 +72,7 @@ def test_done_payload_renders_reply_without_forced_rerun(monkeypatch) -> None:
     assert not app.exception
     assert submissions == [prompt]
     assert reruns == []
+    assert app.session_state["_coach_turn_streaming"] is False
     assert len(app.chat_message) >= 3
     assert _reply_visible(app, "That's an interesting direction")
     assert app.session_state["learning_journey"]["current_stage"] == DEFAULT_STAGE

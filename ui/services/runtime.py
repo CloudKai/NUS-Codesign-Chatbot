@@ -9,13 +9,17 @@ Student turns go through ``submit_coach_turn`` / ``stream_coach_turn_events``
 
 from __future__ import annotations
 
+import logging
 import queue
 import threading
+import time
+import uuid
 from collections.abc import Callable
 from typing import Any, Iterator, TypeVar
 
 import httpx
 import streamlit as st
+from streamlit.runtime.scriptrunner import get_script_run_ctx
 
 from backend.api_client import LocalApiClient
 from ui.run_memo import invalidate_memo, memoized
@@ -42,6 +46,7 @@ from backend.workspace_service import SourceContent, TranscriptExport, Workspace
 
 
 _T = TypeVar("_T")
+_ui_perf_logger = logging.getLogger("co_design.ui_perf")
 
 
 class _NonPersistentCookies(httpx.Cookies):
@@ -232,47 +237,61 @@ def stream_coach_turn_events(request: CoachRequest) -> Iterator[dict[str, Any]]:
     Uses the NDJSON streaming API when ``USE_LOCAL_API`` is enabled; otherwise
     runs the in-process coach service and emits the same progress phases.
     This helper does not invent token slices from a completed reply.
+    A UUID ``X-Request-ID`` correlates Streamlit, FastAPI, and TIMING lines.
     """
-    if local_api_enabled():
-        yield from local_api_client().stream_coach_turn(request)
-        return
-    _, _, coach, _ = _resolve_resources()
-    yield {
-        "event": "started",
-        "thread_id": request.thread_id,
-        "stage": request.current_stage,
-    }
-    bus: queue.SimpleQueue[dict[str, Any] | BaseException | None] = queue.SimpleQueue()
+    request_id = str(uuid.uuid4())
+    started = time.perf_counter()
+    try:
+        if local_api_enabled():
+            yield from local_api_client().stream_coach_turn(
+                request, request_id=request_id
+            )
+            return
+        _, _, coach, _ = _resolve_resources()
+        yield {
+            "event": "started",
+            "thread_id": request.thread_id,
+            "stage": request.current_stage,
+        }
+        bus: queue.SimpleQueue[dict[str, Any] | BaseException | None] = queue.SimpleQueue()
 
-    def _progress(phase: str) -> None:
-        bus.put(
-            {
-                "event": "status",
-                "phase": phase,
-                "label": PROGRESS_LABELS.get(phase, ""),
-            }
-        )
+        def _progress(phase: str) -> None:
+            bus.put(
+                {
+                    "event": "status",
+                    "phase": phase,
+                    "label": PROGRESS_LABELS.get(phase, ""),
+                }
+            )
 
-    def _worker() -> None:
+        def _worker() -> None:
+            try:
+                completed = coach.submit(request, progress=_progress)
+                bus.put({"event": "done", "turn": completed.model_dump(mode="json")})
+            except BaseException as error:
+                bus.put(error)
+            finally:
+                bus.put(None)
+
+        worker = threading.Thread(target=_worker, name="in-process-coach-stream", daemon=True)
+        worker.start()
         try:
-            completed = coach.submit(request, progress=_progress)
-            bus.put({"event": "done", "turn": completed.model_dump(mode="json")})
-        except BaseException as error:
-            bus.put(error)
+            while True:
+                item = bus.get()
+                if item is None:
+                    break
+                if isinstance(item, BaseException):
+                    raise item
+                yield item
         finally:
-            bus.put(None)
-
-    worker = threading.Thread(target=_worker, name="in-process-coach-stream", daemon=True)
-    worker.start()
-    while True:
-        item = bus.get()
-        if item is None:
-            break
-        if isinstance(item, BaseException):
             worker.join(timeout=1.0)
-            raise item
-        yield item
-    worker.join(timeout=1.0)
+    finally:
+        elapsed_ms = round(max(0.0, (time.perf_counter() - started) * 1000.0), 1)
+        _ui_perf_logger.info(
+            "UI TIMING request_id=%s stream_ms=%.1f",
+            request_id,
+            elapsed_ms,
+        )
 
 
 class WorkspaceFacade:
@@ -693,6 +712,18 @@ class WorkspaceFacade:
 
 store = WorkspaceFacade()
 
+# Fragment ticks from a prior script may not see in-flight session_state.
+# Session ids let Sources/Deep Review skip ``rerun_app()`` in the same process.
+_streaming_session_ids: set[str] = set()
+
+
+def _script_session_id() -> str:
+    """Return the current Streamlit session id, or empty when no script context."""
+    ctx = get_script_run_ctx(suppress_warning=True)
+    if ctx is None:
+        return ""
+    return str(getattr(ctx, "session_id", "") or "")
+
 
 def rerun_app() -> None:
     """Request a full Streamlit script rerun (notebook/auth/coach/layout changes)."""
@@ -702,3 +733,37 @@ def rerun_app() -> None:
 def rerun_fragment() -> None:
     """Request a fragment-scoped rerun for panel-local UI updates."""
     st.rerun(scope="fragment")
+
+
+def set_coach_turn_streaming(active: bool) -> None:
+    """Record whether this session is blocked in a coach send or revise.
+
+    Writes ``_coach_turn_streaming`` and an in-process set keyed by Streamlit
+    session id so a Sources ``run_every`` fragment from a prior script can
+    still skip ``rerun_app()`` while ``handle_prompt`` holds the main run.
+
+    Args:
+        active: True while the send/revise call is in flight.
+    """
+    flagged = bool(active)
+    st.session_state["_coach_turn_streaming"] = flagged
+    session_id = _script_session_id()
+    if not session_id:
+        return
+    if flagged:
+        _streaming_session_ids.add(session_id)
+    else:
+        _streaming_session_ids.discard(session_id)
+
+
+def coach_turn_is_streaming() -> bool:
+    """Return whether a coach send or revise is blocking this script run.
+
+    Sources and Deep Review fragments must not call ``rerun_app()`` while this
+    is true; a full remount during ``handle_prompt`` stacks a second workspace.
+    True if session state or the in-process session-id set says streaming.
+    """
+    if st.session_state.get("_coach_turn_streaming"):
+        return True
+    session_id = _script_session_id()
+    return bool(session_id and session_id in _streaming_session_ids)

@@ -266,6 +266,7 @@
             max-width:100% !important;
             min-height:calc(1em * 1.45) !important;
             max-height:calc(1em * 1.45 * 5) !important;
+            field-sizing:content;
             padding:.2rem 0 .3rem !important;
         }
     }

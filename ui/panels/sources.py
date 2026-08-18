@@ -21,7 +21,7 @@ from ui.rename import (
     render_enter_to_apply_rename,
     sync_rename_select_all,
 )
-from ui.runtime import rerun_app, rerun_fragment, store
+from ui.runtime import coach_turn_is_streaming, rerun_app, rerun_fragment, store
 
 logger = logging.getLogger(__name__)
 
@@ -431,10 +431,12 @@ def render_sources_panel() -> None:
     Auto-refresh (``run_every``) runs only while course-material sync is in
     progress. A permanent 1s timer leaves stale fragment IDs after full-app
     reruns (auth gate, logout, notebook switches) and Streamlit logs
-    "The fragment with id … does not exist anymore".
+    "The fragment with id … does not exist anymore". While a coach turn is
+    streaming, keep the stable fragment so a sync-complete remount cannot
+    stack a second workspace under the in-flight run.
     """
     sync_future = store.request_course_material_sync(st.session_state.thread_id)
-    if sync_future.done():
+    if coach_turn_is_streaming() or sync_future.done():
         _render_sources_panel_stable()
     else:
         _render_sources_panel_polling()
@@ -444,6 +446,8 @@ def render_sources_panel() -> None:
 def _render_sources_panel_stable() -> None:
     """Sources UI without a client auto-refresh timer."""
     _render_sources_panel_body()
+    if coach_turn_is_streaming():
+        return
     if not store.request_course_material_sync(st.session_state.thread_id).done():
         rerun_app()
 
@@ -452,6 +456,8 @@ def _render_sources_panel_stable() -> None:
 def _render_sources_panel_polling() -> None:
     """Sources UI that refreshes every second until course sync finishes."""
     _render_sources_panel_body()
+    if coach_turn_is_streaming():
+        return
     if store.request_course_material_sync(st.session_state.thread_id).done():
         # Remount the stable fragment so the browser drops the 1s timer.
         rerun_app()

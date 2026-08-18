@@ -19,8 +19,51 @@ def test_runtime_exposes_explicit_rerun_helpers_only() -> None:
     source = Path(inspect.getfile(runtime_module)).read_text(encoding="utf-8")
     assert "def rerun_app()" in source
     assert "def rerun_fragment()" in source
+    assert "def coach_turn_is_streaming()" in source
+    assert "def set_coach_turn_streaming(" in source
     assert "def rerun()" not in source
     assert 'st.rerun(scope="fragment")' in source
+
+
+def test_coach_turn_is_streaming_reads_session_flag(monkeypatch) -> None:
+    """Fragments consult the session flag, not a second Streamlit widget."""
+    fake_state: dict[str, object] = {}
+    monkeypatch.setattr(
+        runtime_module,
+        "st",
+        SimpleNamespace(session_state=fake_state),
+    )
+    runtime_module._streaming_session_ids.clear()
+    assert runtime_module.coach_turn_is_streaming() is False
+    fake_state["_coach_turn_streaming"] = True
+    assert runtime_module.coach_turn_is_streaming() is True
+    fake_state["_coach_turn_streaming"] = False
+    assert runtime_module.coach_turn_is_streaming() is False
+
+
+def test_coach_turn_is_streaming_reads_in_process_session_id(monkeypatch) -> None:
+    """A fragment tick without in-flight session_state still sees this session."""
+    fake_state: dict[str, object] = {}
+    monkeypatch.setattr(
+        runtime_module,
+        "st",
+        SimpleNamespace(session_state=fake_state),
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "get_script_run_ctx",
+        lambda suppress_warning=False: SimpleNamespace(session_id="sess-1"),
+    )
+    runtime_module._streaming_session_ids.clear()
+    try:
+        assert runtime_module.coach_turn_is_streaming() is False
+        runtime_module.set_coach_turn_streaming(True)
+        fake_state.clear()
+        assert runtime_module.coach_turn_is_streaming() is True
+        runtime_module.set_coach_turn_streaming(False)
+        assert runtime_module.coach_turn_is_streaming() is False
+    finally:
+        runtime_module._streaming_session_ids.clear()
 
 
 def test_ui_modules_do_not_import_generic_rerun() -> None:
@@ -52,6 +95,65 @@ def test_sources_local_paths_use_fragment_rerun() -> None:
     # Course-sync remount must stay app-scoped.
     assert source.count("rerun_app()") >= 2
     assert 'on_change="rerun"' not in source
+    assert "coach_turn_is_streaming()" in source
+    assert "if coach_turn_is_streaming() or sync_future.done():" in source
+    polling = source.split("def _render_sources_panel_polling", 1)[1].split(
+        "def _render_sources_panel_body", 1
+    )[0]
+    assert "if coach_turn_is_streaming():" in polling
+    assert polling.index("if coach_turn_is_streaming():") < polling.index(
+        "rerun_app()"
+    )
+    stable = source.split("def _render_sources_panel_stable", 1)[1].split(
+        "def _render_sources_panel_polling", 1
+    )[0]
+    assert "if coach_turn_is_streaming():" in stable
+    assert stable.index("if coach_turn_is_streaming():") < stable.index("rerun_app()")
+
+
+def test_studio_deep_review_poll_skips_app_rerun_while_streaming() -> None:
+    """A finishing Deep Review job must not remount the app during a coach stream."""
+    source = Path(inspect.getfile(studio_module)).read_text(encoding="utf-8")
+    assert "coach_turn_is_streaming()" in source
+    stable = source.split("def _render_deep_review_stable", 1)[1].split(
+        "def _render_deep_review_polling", 1
+    )[0]
+    assert "if not coach_turn_is_streaming():" in stable
+    assert stable.index("if not coach_turn_is_streaming():") < stable.index(
+        "rerun_app()"
+    )
+    polling = source.split("def _render_deep_review_polling", 1)[1].split(
+        "def _review_fingerprint", 1
+    )[0]
+    assert "if not coach_turn_is_streaming():" in polling
+    assert polling.index("if not coach_turn_is_streaming():") < polling.index(
+        "rerun_app()"
+    )
+
+
+def test_chat_marks_streaming_around_coach_send_and_revise() -> None:
+    """handle_prompt and revise set the flag before the blocking call and clear it."""
+    chat = Path("ui/panels/chat.py").read_text(encoding="utf-8")
+    assert 'st.session_state["_coach_turn_streaming"] = True' not in chat
+    assert chat.count("set_coach_turn_streaming(True)") == 2
+    assert chat.count("set_coach_turn_streaming(False)") >= 2
+    send_block = chat.split("def handle_prompt(", 1)[1].split(
+        "def _confirm_edit_earlier_message_dialog", 1
+    )[0]
+    assert send_block.index("set_coach_turn_streaming(True)") < send_block.index(
+        "store.upload_sources("
+    )
+    assert send_block.index("set_coach_turn_streaming(True)") < send_block.index(
+        "stream_coach_turn_events(request)"
+    )
+    assert "finally:" in send_block
+    revise_block = chat.split("def _submit_pending_edit(", 1)[1].split(
+        "def render_chat_panel(", 1
+    )[0]
+    assert revise_block.index("set_coach_turn_streaming(True)") < revise_block.index(
+        "store.revise_message("
+    )
+    assert "finally:" in revise_block
 
 
 def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:

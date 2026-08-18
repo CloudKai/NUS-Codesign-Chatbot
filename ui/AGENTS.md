@@ -76,8 +76,10 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
   OpenAI SDKs, or read/write the filesystem directly except through
   backend helpers already used in this package.
 - **Import shared runtime from `ui.runtime` only.** Use `store` (workspace
-  facade), `local_api_client()`, coach helpers, `rerun_app()`, and
-  `rerun_fragment()` from there — never from `streamlit_app.py`. When
+  facade), `local_api_client()`, coach helpers, `rerun_app()`,
+  `rerun_fragment()`, `coach_turn_is_streaming()`, and
+  `set_coach_turn_streaming()` from there — never from
+  `streamlit_app.py`. When
   `USE_LOCAL_API=true`, `store` routes CRUD through the typed API; otherwise it
   uses in-process `WorkspaceService`. Student turns always use the typed coach
   path (API or in-process), not `StudentChatEngine`.
@@ -86,7 +88,9 @@ first-class APIs for those layout behaviours. Do not put educational logic here.
   response language, display-name avatar). Use `rerun_app()` when
   application-wide state changed (notebook switch, auth, coach send/revise,
   layout collapse, course-sync fragment remount, stage selection, **Appearance
-  theme** — `render_theme_css()` only runs on a full script). Do not keep a
+  theme** — `render_theme_css()` only runs on a full script). Sources and Deep
+  Review must not call `rerun_app()` while `coach_turn_is_streaming()` is true
+  (a remount during `handle_prompt` stacks a second workspace). Do not keep a
   generic `rerun()` helper.
 - **Preserve widget keys and dialog decorators.** Keep `@st.dialog` and
   `@st.fragment` on the functions that own them. Changing keys breaks session

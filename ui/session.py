@@ -71,6 +71,7 @@ def initialize_session() -> None:
         "pending_edit": None,
         "editing_message": None,
         "edit_confirm_message_id": None,
+        "_coach_turn_streaming": False,
         "pending_notebook_actions": None,
         "reopen_notebooks_dialog": False,
         "mobile_panel": "Chat",

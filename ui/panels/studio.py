@@ -45,6 +45,7 @@ from ui.components import (
     review_feedback_items_html,
 )
 from ui.runtime import (
+    coach_turn_is_streaming,
     get_deep_review_job,
     rerun_app,
     rerun_fragment,
@@ -172,7 +173,8 @@ def _render_deep_review_stable() -> None:
     metadata = dict(thread.get("metadata") or {})
     job = parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
     if deep_review_job_is_active(job):
-        rerun_app()
+        if not coach_turn_is_streaming():
+            rerun_app()
         return
     view = deep_review_control_view(
         parse_coaching_turns_since_deep_review(metadata.get(COUNTER_SETTINGS_KEY)),
@@ -216,7 +218,8 @@ def _render_deep_review_polling() -> None:
     job = get_deep_review_job(thread_id)
     status = str(getattr(job, "status", "") or "")
     if job is None or status not in {"queued", "running"}:
-        rerun_app()
+        if not coach_turn_is_streaming():
+            rerun_app()
         return
     thread = store.get_thread(thread_id) or {}
     metadata = dict(thread.get("metadata") or {})

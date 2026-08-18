@@ -170,6 +170,8 @@ def test_compatibility_facade_exports_and_signatures_are_stable() -> None:
             "local_api_client": "() -> 'LocalApiClient'",
             "rerun_app": "() -> 'None'",
             "rerun_fragment": "() -> 'None'",
+            "coach_turn_is_streaming": "() -> 'bool'",
+            "set_coach_turn_streaming": "(active: 'bool') -> 'None'",
         },
         "ui.chat": {
             "render_chat_panel": "(model_id: 'str', reasoning_effort: 'str | None') -> 'None'",

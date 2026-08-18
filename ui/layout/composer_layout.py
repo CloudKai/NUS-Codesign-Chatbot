@@ -427,29 +427,45 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
     if (attach) attach.style.removeProperty("display");
   }
 
+  function scheduleApply() {
+    win.requestAnimationFrame(apply);
+  }
+
+  function observeCurrentTextarea(textarea) {
+    if (typeof win.ResizeObserver !== "function" || !textarea) return;
+    if (!win.__cdComposerTextareaRO) {
+      win.__cdComposerTextareaRO = new win.ResizeObserver(scheduleApply);
+    }
+    if (textarea.dataset.cdComposerResizeObserved === "1") return;
+    textarea.dataset.cdComposerResizeObserved = "1";
+    win.__cdComposerTextareaRO.observe(textarea);
+  }
+
   function capTextarea(textarea) {
     const MAX_ROWS = 5;
     const styles = win.getComputedStyle(textarea);
     const fontSize = parseFloat(styles.fontSize) || 15.2;
     const lineHeight = parseFloat(styles.lineHeight) || fontSize * 1.45;
-    const maxHeight = lineHeight * MAX_ROWS;
-    const minHeight = lineHeight;
+    const padY =
+      (parseFloat(styles.paddingTop) || 0) +
+      (parseFloat(styles.paddingBottom) || 0);
+    const minHeight = lineHeight + padY;
+    const maxHeight = lineHeight * MAX_ROWS + padY;
     const shells = textShells(textarea);
 
-    // Collapse first so scrollHeight tracks the current draft, not the old
-    // expanded height left behind after deleting a long paste.
+    // Measure with height auto so wrap/paste is not stuck at one row.
     for (const shell of shells) {
       shell.style.setProperty("height", "auto", "important");
       shell.style.setProperty("max-height", maxHeight + "px", "important");
-      shell.style.setProperty("overflow", "hidden", "important");
+      shell.style.removeProperty("overflow");
     }
     textarea.style.setProperty("max-height", maxHeight + "px", "important");
-    textarea.style.setProperty("height", minHeight + "px", "important");
+    textarea.style.setProperty("height", "auto", "important");
     textarea.style.setProperty("overflow-y", "hidden", "important");
     void textarea.offsetHeight;
 
     const measured = Math.max(textarea.scrollHeight, minHeight);
-    const nextHeight = Math.min(measured, maxHeight);
+    const nextHeight = Math.min(Math.max(measured, minHeight), maxHeight);
     const needsScroll = measured > maxHeight;
 
     textarea.style.setProperty("height", nextHeight + "px", "important");
@@ -472,6 +488,7 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
     composer.classList.add("cd-composer-card");
     input.classList.add("cd-composer-card");
     const textarea = input.querySelector('[data-testid="stChatInputTextArea"], textarea');
+    observeCurrentTextarea(textarea);
     const busy = isComposerBusy(input, textarea);
     setBusyComposer(input, textarea, busy);
     if (textarea && !busy) capTextarea(textarea);
@@ -512,23 +529,40 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
     if (!composer || !input || !textarea) return false;
 
     if (composer.dataset.cdComposerBound === "1") {
+      observeCurrentTextarea(textarea);
       apply();
       return true;
     }
     composer.dataset.cdComposerBound = "1";
 
-    const schedule = () => win.requestAnimationFrame(apply);
-    textarea.addEventListener("input", schedule);
-    textarea.addEventListener("change", schedule);
-    textarea.addEventListener("paste", () => {
-      win.setTimeout(schedule, 0);
-      win.setTimeout(schedule, 50);
-    });
+    const onComposerDraft = (event) => {
+      const target = event.target;
+      if (!target || !target.closest) return;
+      if (
+        !target.closest(
+          '[data-testid="stChatInputTextArea"], textarea'
+        )
+      ) {
+        return;
+      }
+      scheduleApply();
+    };
+    composer.addEventListener("input", onComposerDraft, true);
+    composer.addEventListener("change", onComposerDraft, true);
+    composer.addEventListener(
+      "paste",
+      (event) => {
+        onComposerDraft(event);
+        win.setTimeout(scheduleApply, 0);
+        win.setTimeout(scheduleApply, 50);
+      },
+      true
+    );
     win.addEventListener("resize", () => {
-      schedule();
+      scheduleApply();
       placeAttachTooltip();
     });
-    const observer = new win.MutationObserver(schedule);
+    const observer = new win.MutationObserver(scheduleApply);
     observer.observe(input, { childList: true, subtree: true, characterData: true });
     let overlayFrame = 0;
     const overlayObserver = new win.MutationObserver(() => {
@@ -541,10 +575,10 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
     const slot = modelSlot(composer);
     if (slot) observer.observe(slot, { childList: true, subtree: true });
     if (typeof win.ResizeObserver === "function") {
-      const resizeObserver = new win.ResizeObserver(schedule);
+      const resizeObserver = new win.ResizeObserver(scheduleApply);
       resizeObserver.observe(input);
-      resizeObserver.observe(textarea);
     }
+    observeCurrentTextarea(textarea);
     bindModelMenu();
     watchModelMenu();
     apply();

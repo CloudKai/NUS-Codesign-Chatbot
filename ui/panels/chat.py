@@ -35,7 +35,7 @@ from ui.layout.user_message_edit_layout import (
     USER_MESSAGE_EDIT_HEIGHT_PX,
     sync_user_message_edit_layout,
 )
-from ui.runtime import rerun_app, store, stream_coach_turn_events
+from ui.runtime import rerun_app, set_coach_turn_streaming, store, stream_coach_turn_events
 from ui.retry_keys import get_retry_key, remove_retry_key
 from ui.sources import source_viewer_dialog
 
@@ -606,188 +606,192 @@ def handle_prompt(
     sibling, never ``chat_log``: re-entering that keyed history container
     reuses the last assistant ``st.chat_message``.
     """
-    journey = normalize_journey(st.session_state.learning_journey)
-    sources = store.list_sources(st.session_state.thread_id)
-    selected_sources = [source for source in sources if source.get("selected")]
-    if visible_source_ids is None:
-        visible_source_ids = {
-            str(source.get("id") or "") for source in sources
-        }
-    allow_model_knowledge = not selected_sources and not uploads
-    st.session_state.allow_model_knowledge = allow_model_knowledge
-    pre_thread = store.get_thread(st.session_state.thread_id) or {}
-    pre_meta = dict(pre_thread.get("metadata") or {})
-    pre_stage = str(journey.get("current_stage") or DEFAULT_STAGE)
-    pre_deep_review_available = _deep_review_is_available(pre_meta)
-    pre_deep_review_counter = _deep_review_counter(pre_meta)
-    with target:
-        if existing_user_message_id is None:
-            _render_inflight_user_prompt(prompt, uploads)
-        if uploads:
-            try:
-                store.upload_sources(
-                    st.session_state.thread_id,
-                    [
-                        (
-                            upload.name,
-                            upload.getvalue(),
-                            getattr(upload, "type", None),
-                        )
-                        for upload in uploads
-                    ],
-                    origin="chat_composer",
-                )
-            except Exception:
-                # The source service owns transactional/file cleanup. Do not
-                # submit a coach request when its prerequisite upload failed.
-                # Avoid surfacing raw exception text (paths, internals) in the UI.
-                st.error("The attachment could not be added, so no message was sent.")
-                st.caption("Remove or replace the attachment and try again.")
-                return
-            # A stay turn does not rerun, so the Sources panel would otherwise
-            # render this run against the pre-upload memo.
-            store.forget_source_reads(st.session_state.thread_id)
-            sources = store.list_sources(st.session_state.thread_id)
+    set_coach_turn_streaming(True)
+    try:
+        journey = normalize_journey(st.session_state.learning_journey)
+        sources = store.list_sources(st.session_state.thread_id)
+        selected_sources = [source for source in sources if source.get("selected")]
+        if visible_source_ids is None:
             visible_source_ids = {
                 str(source.get("id") or "") for source in sources
             }
-        # Preserve this key only while the same submitted text is unresolved.
-        # The session helper stores a SHA-256 scope, never the prompt itself.
-        idempotency_key = get_retry_key(
-            st.session_state,
-            thread_id=st.session_state.thread_id,
-            stage=journey["current_stage"],
-            prompt=prompt,
-        )
-
-        # Leave source_ids/context empty so the application service loads them.
-        request = CoachRequest(
-            thread_id=st.session_state.thread_id,
-            student_message=prompt,
-            current_stage=journey["current_stage"],
-            response_detail=journey["response_detail"],
-            allow_model_knowledge=allow_model_knowledge,
-            response_language=st.session_state.get("response_language", "English"),
-            model_id=model_id,
-            reasoning_effort=reasoning_effort,
-            idempotency_key=idempotency_key,
-        )
-        thinking = st.status(
-            "Coach is thinking…",
-            expanded=False,
-            type="compact",
-        )
-        try:
-            turn: CoachTurn | None = None
-            thinking_closed = False
-
-            def _close_thinking(*, label: str, state: str) -> None:
-                nonlocal thinking_closed
-                if thinking_closed:
-                    return
-                thinking.update(label=label, state=state)
-                thinking_closed = True
-
-            for event in stream_coach_turn_events(request):
-                kind = event.get("event")
-                if kind == "started" or kind == "graph":
-                    continue
-                if kind == "status":
-                    phase = str(event.get("phase") or "").strip()
-                    label = str(event.get("label") or "").strip()
-                    if phase == "retrieving":
-                        thinking.update(
-                            label=label or "Searching course materials…"
-                        )
-                    elif phase == "thinking":
-                        thinking.update(label=label or "Coach is thinking…")
-                    elif phase == "saving":
-                        thinking.update(label=label or "Saving response…")
-                    continue
-                if kind == "token":
-                    continue
-                elif kind == "done":
-                    turn = CoachTurn.model_validate(event["turn"])
-                elif kind == "error":
-                    _close_thinking(label="Coaching failed", state="error")
-                    raise CoachTurnStreamError(
-                        str(event.get("detail") or "Coaching failed"),
-                        status=event.get("status"),
-                        category=str(event.get("category") or ""),
+        allow_model_knowledge = not selected_sources and not uploads
+        st.session_state.allow_model_knowledge = allow_model_knowledge
+        pre_thread = store.get_thread(st.session_state.thread_id) or {}
+        pre_meta = dict(pre_thread.get("metadata") or {})
+        pre_stage = str(journey.get("current_stage") or DEFAULT_STAGE)
+        pre_deep_review_available = _deep_review_is_available(pre_meta)
+        pre_deep_review_counter = _deep_review_counter(pre_meta)
+        with target:
+            if existing_user_message_id is None:
+                _render_inflight_user_prompt(prompt, uploads)
+            if uploads:
+                try:
+                    store.upload_sources(
+                        st.session_state.thread_id,
+                        [
+                            (
+                                upload.name,
+                                upload.getvalue(),
+                                getattr(upload, "type", None),
+                            )
+                            for upload in uploads
+                        ],
+                        origin="chat_composer",
                     )
-            if turn is None or not str(turn.response_text or "").strip():
-                _close_thinking(label="Coaching failed", state="error")
-                raise CoachTurnStreamError(
-                    "The coach reply could not be completed",
-                    category="structured_output_failure",
-                )
-            _close_thinking(label="Coach reply ready", state="complete")
-            thinking_stage = str(
-                turn.auto_advanced_to or journey["current_stage"] or DEFAULT_STAGE
-            )
-            message_id = (
-                turn.pending_transition.id
-                if turn.pending_transition is not None
-                else f"done-{idempotency_key}"
-            )
-            # Drop the retry key only after the reply is complete. The
-            # composer is a trigger widget, so this run's submitted value
-            # cannot fire again. Nonce bumps only when a reconciliation
-            # rerun remounts the composer; bumping without a rerun would
-            # desync the on-screen widget key from session state.
-            remove_retry_key(
+                except Exception:
+                    # The source service owns transactional/file cleanup. Do not
+                    # submit a coach request when its prerequisite upload failed.
+                    # Avoid surfacing raw exception text (paths, internals) in the UI.
+                    st.error("The attachment could not be added, so no message was sent.")
+                    st.caption("Remove or replace the attachment and try again.")
+                    return
+                # A stay turn does not rerun, so the Sources panel would otherwise
+                # render this run against the pre-upload memo.
+                store.forget_source_reads(st.session_state.thread_id)
+                sources = store.list_sources(st.session_state.thread_id)
+                visible_source_ids = {
+                    str(source.get("id") or "") for source in sources
+                }
+            # Preserve this key only while the same submitted text is unresolved.
+            # The session helper stores a SHA-256 scope, never the prompt itself.
+            idempotency_key = get_retry_key(
                 st.session_state,
                 thread_id=st.session_state.thread_id,
                 stage=journey["current_stage"],
                 prompt=prompt,
             )
-            needs_reconcile = apply_completed_turn_to_session(
-                turn,
+
+            # Leave source_ids/context empty so the application service loads them.
+            request = CoachRequest(
                 thread_id=st.session_state.thread_id,
-                pre_stage=pre_stage,
-                pre_deep_review_available=pre_deep_review_available,
-                pre_deep_review_counter=pre_deep_review_counter,
+                student_message=prompt,
+                current_stage=journey["current_stage"],
+                response_detail=journey["response_detail"],
+                allow_model_knowledge=allow_model_knowledge,
+                response_language=st.session_state.get("response_language", "English"),
+                model_id=model_id,
+                reasoning_effort=reasoning_effort,
+                idempotency_key=idempotency_key,
             )
-            if needs_reconcile:
-                # History on the next run owns the assistant bubble. Painting
-                # ``done`` into the in-flight slot and then remounting history
-                # from get_messages would show the reply twice.
-                st.session_state.composer_nonce += 1
-                rerun_app()
-                return
-            render_message(
-                assistant_message_from_turn(
+            thinking = st.status(
+                "Coach is thinking…",
+                expanded=False,
+                type="compact",
+            )
+            try:
+                turn: CoachTurn | None = None
+                thinking_closed = False
+
+                def _close_thinking(*, label: str, state: str) -> None:
+                    nonlocal thinking_closed
+                    if thinking_closed:
+                        return
+                    thinking.update(label=label, state=state)
+                    thinking_closed = True
+
+                for event in stream_coach_turn_events(request):
+                    kind = event.get("event")
+                    if kind == "started" or kind == "graph":
+                        continue
+                    if kind == "status":
+                        phase = str(event.get("phase") or "").strip()
+                        label = str(event.get("label") or "").strip()
+                        if phase == "retrieving":
+                            thinking.update(
+                                label=label or "Searching course materials…"
+                            )
+                        elif phase == "thinking":
+                            thinking.update(label=label or "Coach is thinking…")
+                        elif phase == "saving":
+                            thinking.update(label=label or "Saving response…")
+                        continue
+                    if kind == "token":
+                        continue
+                    elif kind == "done":
+                        turn = CoachTurn.model_validate(event["turn"])
+                    elif kind == "error":
+                        _close_thinking(label="Coaching failed", state="error")
+                        raise CoachTurnStreamError(
+                            str(event.get("detail") or "Coaching failed"),
+                            status=event.get("status"),
+                            category=str(event.get("category") or ""),
+                        )
+                if turn is None or not str(turn.response_text or "").strip():
+                    _close_thinking(label="Coaching failed", state="error")
+                    raise CoachTurnStreamError(
+                        "The coach reply could not be completed",
+                        category="structured_output_failure",
+                    )
+                _close_thinking(label="Coach reply ready", state="complete")
+                thinking_stage = str(
+                    turn.auto_advanced_to or journey["current_stage"] or DEFAULT_STAGE
+                )
+                message_id = (
+                    turn.pending_transition.id
+                    if turn.pending_transition is not None
+                    else f"done-{idempotency_key}"
+                )
+                # Drop the retry key only after the reply is complete. The
+                # composer is a trigger widget, so this run's submitted value
+                # cannot fire again. Nonce bumps only when a reconciliation
+                # rerun remounts the composer; bumping without a rerun would
+                # desync the on-screen widget key from session state.
+                remove_retry_key(
+                    st.session_state,
+                    thread_id=st.session_state.thread_id,
+                    stage=journey["current_stage"],
+                    prompt=prompt,
+                )
+                needs_reconcile = apply_completed_turn_to_session(
                     turn,
-                    thinking_stage=thinking_stage,
-                    message_id=message_id,
-                ),
-                visible_source_ids=visible_source_ids,
-            )
-            return
-        except CoachTurnStreamError as error:
-            try:
-                thinking.update(label="Coaching failed", state="error")
+                    thread_id=st.session_state.thread_id,
+                    pre_stage=pre_stage,
+                    pre_deep_review_available=pre_deep_review_available,
+                    pre_deep_review_counter=pre_deep_review_counter,
+                )
+                if needs_reconcile:
+                    # History on the next run owns the assistant bubble. Painting
+                    # ``done`` into the in-flight slot and then remounting history
+                    # from get_messages would show the reply twice.
+                    st.session_state.composer_nonce += 1
+                    rerun_app()
+                    return
+                render_message(
+                    assistant_message_from_turn(
+                        turn,
+                        thinking_stage=thinking_stage,
+                        message_id=message_id,
+                    ),
+                    visible_source_ids=visible_source_ids,
+                )
+                return
+            except CoachTurnStreamError as error:
+                try:
+                    thinking.update(label="Coaching failed", state="error")
+                except Exception:
+                    pass
+                st.error(
+                    student_coach_error_message(error.category, status=error.status)
+                )
+                st.caption(
+                    "Reload the notebook before resubmitting; the completed turn "
+                    "may already be present if the connection ended late."
+                )
+                return
             except Exception:
-                pass
-            st.error(
-                student_coach_error_message(error.category, status=error.status)
-            )
-            st.caption(
-                "Reload the notebook before resubmitting; the completed turn "
-                "may already be present if the connection ended late."
-            )
-            return
-        except Exception:
-            try:
-                thinking.update(label="Coaching failed", state="error")
-            except Exception:
-                pass
-            st.error(student_coach_error_message("unavailable"))
-            st.caption(
-                "Reload the notebook before resubmitting; the completed turn "
-                "may already be present if the connection ended late."
-            )
-            return
+                try:
+                    thinking.update(label="Coaching failed", state="error")
+                except Exception:
+                    pass
+                st.error(student_coach_error_message("unavailable"))
+                st.caption(
+                    "Reload the notebook before resubmitting; the completed turn "
+                    "may already be present if the connection ended late."
+                )
+                return
+    finally:
+        set_coach_turn_streaming(False)
 
 
 @st.dialog("Edit this message?")
@@ -876,54 +880,58 @@ def _submit_pending_edit(
         "idempotency_key": idempotency_key,
     }
     st.session_state.pending_edit = pending
+    set_coach_turn_streaming(True)
     thinking = st.status(
         "Coach is thinking…",
         expanded=False,
         type="compact",
     )
     try:
-        store.revise_message(
-            thread_id,
-            message_id,
-            draft,
-            idempotency_key=idempotency_key,
-            model_id=model_id,
-            reasoning_effort=reasoning_effort,
-            response_detail=st.session_state.get("response_detail")
-            or DEFAULT_RESPONSE_DETAIL,
-            response_language=st.session_state.get("response_language") or "English",
+        try:
+            store.revise_message(
+                thread_id,
+                message_id,
+                draft,
+                idempotency_key=idempotency_key,
+                model_id=model_id,
+                reasoning_effort=reasoning_effort,
+                response_detail=st.session_state.get("response_detail")
+                or DEFAULT_RESPONSE_DETAIL,
+                response_language=st.session_state.get("response_language") or "English",
+            )
+            thinking.update(label="Coach reply ready", state="complete")
+        except Exception:
+            thinking.update(label="Coaching failed", state="error")
+            # Drop pending_edit so the next rerun does not auto-resubmit. Keep the
+            # stable retry key in session and reopen the editor so the student must
+            # click Send again to retry the same revision attempt.
+            st.session_state.pop("pending_edit", None)
+            _restore_pending_edit_draft(message_id, draft)
+            st.error(
+                "Could not finish this edit. Your draft is preserved — click Send "
+                "again to retry the same revision attempt without creating another "
+                "conversation branch. If the server already applied the revision, "
+                "retry resumes the replacement coach reply."
+            )
+            return False
+        remove_retry_key(
+            st.session_state,
+            thread_id=thread_id,
+            stage=f"revise:{message_id}",
+            prompt=draft,
         )
-        thinking.update(label="Coach reply ready", state="complete")
-    except Exception:
-        thinking.update(label="Coaching failed", state="error")
-        # Drop pending_edit so the next rerun does not auto-resubmit. Keep the
-        # stable retry key in session and reopen the editor so the student must
-        # click Send again to retry the same revision attempt.
         st.session_state.pop("pending_edit", None)
-        _restore_pending_edit_draft(message_id, draft)
-        st.error(
-            "Could not finish this edit. Your draft is preserved — click Send "
-            "again to retry the same revision attempt without creating another "
-            "conversation branch. If the server already applied the revision, "
-            "retry resumes the replacement coach reply."
-        )
-        return False
-    remove_retry_key(
-        st.session_state,
-        thread_id=thread_id,
-        stage=f"revise:{message_id}",
-        prompt=draft,
-    )
-    st.session_state.pop("pending_edit", None)
-    st.session_state.editing_message = None
-    updated_thread = store.get_thread(thread_id) or {}
-    updated_metadata = updated_thread.get("metadata") or {}
-    updated_journey = normalize_journey(updated_metadata.get("learning_journey"))
-    st.session_state.learning_journey = updated_journey
-    st.session_state.response_detail = updated_journey["response_detail"]
-    st.session_state.composer_nonce += 1
-    rerun_app()
-    return True
+        st.session_state.editing_message = None
+        updated_thread = store.get_thread(thread_id) or {}
+        updated_metadata = updated_thread.get("metadata") or {}
+        updated_journey = normalize_journey(updated_metadata.get("learning_journey"))
+        st.session_state.learning_journey = updated_journey
+        st.session_state.response_detail = updated_journey["response_detail"]
+        st.session_state.composer_nonce += 1
+        rerun_app()
+        return True
+    finally:
+        set_coach_turn_streaming(False)
 
 
 def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:

@@ -67,16 +67,47 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
 
     workspace_css = Path(_STYLES_DIR / "10-workspace.css").read_text(encoding="utf-8")
     assert ".st-key-chat_inflight" in workspace_css
-    assert "flex:1 1 0%" in _css_rule_body(workspace_css, ":has(.st-key-chat_log)")
-    assert "margin-top:auto" not in _css_rule_body(
-        workspace_css, ":has(.st-key-chat_composer)"
+    log_flex = _css_rule_body(
+        workspace_css,
+        ".st-key-chat_log,\n    [data-testid=\"stElementContainer\"].st-key-chat_log",
     )
-    inflight_wrap = _css_rule_body(workspace_css, ":has(.st-key-chat_inflight)")
-    assert "overflow:hidden" in inflight_wrap
-    assert "overflow:visible" not in inflight_wrap
+    assert "flex:1 1 0%" in log_flex
+    assert "height:auto" in log_flex
+    assert "height:100%" not in log_flex
+    studio_scroll = _css_rule_body(workspace_css, ".st-key-studio_scroll {")
+    assert "height:100%" in studio_scroll
+    assert "margin-top:auto" not in _css_rule_body(
+        workspace_css, ":has(> .st-key-chat_composer)"
+    )
+    inflight_size = _css_rule_body(
+        workspace_css, '[data-testid="stElementContainer"].st-key-chat_inflight'
+    )
+    assert "flex:0 0 auto" in inflight_size
+    assert "flex-shrink:0" in inflight_size
+    assert "overflow:hidden" in inflight_size
+    assert "overflow:visible" not in inflight_size
+    inflight_occupied = _css_rule_body(
+        workspace_css, ".st-key-chat_inflight:has(.cd-user-bubble-text)"
+    )
+    assert "min-height:min-content" in inflight_occupied
+    assert "overflow:hidden" in inflight_occupied
+    inflight_collapse = _css_rule_body(
+        workspace_css, ".st-key-chat_inflight:not(:has("
+    )
+    assert "max-height:0" in inflight_collapse
+    assert "overflow:hidden" in inflight_collapse
+    assert ":not(:has(.cd-user-bubble-text))" in workspace_css
+    assert ":not(:has(.st-key-inflight_user_message_row))" in workspace_css
+    log_children = _css_rule_body(
+        workspace_css,
+        ".st-key-chat_log > [data-testid=\"stVerticalBlock\"] > [data-testid=\"stLayoutWrapper\"]",
+    )
+    assert "flex:0 0 auto" in log_children
+    assert "height:auto" in log_children
 
     chat_css = Path(_STYLES_DIR / "30-chat.css").read_text(encoding="utf-8")
     assert ".st-key-chat_inflight" in chat_css
+    assert ".st-key-inflight_user_message_row" in chat_css
     composer_card = _css_rule_body(chat_css, ".st-key-chat_composer {")
     assert "flex:0 0 auto" in composer_card
     assert "margin-top:auto" not in composer_card

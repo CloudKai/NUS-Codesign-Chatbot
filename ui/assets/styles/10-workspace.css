@@ -727,26 +727,61 @@
         row-gap:0 !important;
     }
 
-    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(.st-key-chat_composer),
-    .st-key-chat_panel > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(.st-key-chat_composer) {
+    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(> .st-key-chat_composer),
+    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(> [data-testid="stElementContainer"].st-key-chat_composer),
+    .st-key-chat_panel > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(> .st-key-chat_composer),
+    .st-key-chat_panel > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(> [data-testid="stElementContainer"].st-key-chat_composer) {
         flex:0 0 auto !important;
     }
 
-    /* In-flight prompt/status/done sit under the scrolling log, not inside it. */
-    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(.st-key-chat_inflight),
-    .st-key-chat_panel > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(.st-key-chat_inflight) {
-        flex:0 0 auto !important;
+    /* Inner column that owns log + inflight + composer as siblings. */
+    .st-key-chat_panel [data-testid="stVerticalBlock"]:has(> .st-key-chat_log),
+    .st-key-chat_panel [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"].st-key-chat_log) {
+        display:flex !important;
+        flex-direction:column !important;
         min-height:0 !important;
+        flex:1 1 auto !important;
+        gap:0 !important;
+        row-gap:0 !important;
+    }
+
+    /* In-flight prompt/status/done sit under the scrolling log, not inside it.
+       Child :has so a parent that also contains chat_log cannot pick up these rules.
+       Overflow hidden + min-content so a long bubble takes in-flow height instead
+       of painting over the last Coach reply. */
+    .st-key-chat_inflight,
+    [data-testid="stElementContainer"].st-key-chat_inflight,
+    .st-key-chat_panel [data-testid="stLayoutWrapper"]:has(> .st-key-chat_inflight):not(:has(> .st-key-chat_log)):not(:has(> [data-testid="stElementContainer"].st-key-chat_log)),
+    .st-key-chat_panel [data-testid="stLayoutWrapper"]:has(> [data-testid="stElementContainer"].st-key-chat_inflight):not(:has(> .st-key-chat_log)):not(:has(> [data-testid="stElementContainer"].st-key-chat_log)) {
+        flex:0 0 auto !important;
+        flex-shrink:0 !important;
+        height:auto !important;
+        min-height:0 !important;
+        max-height:none !important;
         overflow:hidden !important;
     }
 
-    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(.st-key-chat_inflight):not(:has(.st-key-chat_inflight [data-testid="stChatMessage"])):not(:has(.st-key-chat_inflight [data-testid="stStatusWidget"])):not(:has(.st-key-chat_inflight [data-testid="stExpander"])):not(:has(.st-key-chat_inflight [data-testid="stAlert"])),
-    .st-key-chat_panel > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(.st-key-chat_inflight):not(:has(.st-key-chat_inflight [data-testid="stChatMessage"])):not(:has(.st-key-chat_inflight [data-testid="stStatusWidget"])):not(:has(.st-key-chat_inflight [data-testid="stExpander"])):not(:has(.st-key-chat_inflight [data-testid="stAlert"])) {
+    .st-key-chat_inflight:not(:has([data-testid="stChatMessage"])):not(:has([data-testid="stStatusWidget"])):not(:has([data-testid="stExpander"])):not(:has([data-testid="stAlert"])):not(:has(.cd-user-bubble-text)):not(:has(.st-key-inflight_user_message_row)) {
         flex:0 0 0 !important;
+        min-height:0 !important;
         max-height:0 !important;
         overflow:hidden !important;
         margin:0 !important;
         padding:0 !important;
+    }
+
+    .st-key-chat_inflight:has(.cd-user-bubble-text),
+    .st-key-chat_inflight:has(.st-key-inflight_user_message_row),
+    .st-key-chat_inflight:has([data-testid="stChatMessage"]),
+    .st-key-chat_inflight:has([data-testid="stStatusWidget"]),
+    .st-key-chat_inflight:has([data-testid="stExpander"]),
+    .st-key-chat_inflight:has([data-testid="stAlert"]) {
+        flex:0 0 auto !important;
+        flex-shrink:0 !important;
+        height:auto !important;
+        min-height:min-content !important;
+        max-height:none !important;
+        overflow:hidden !important;
     }
 
     .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
@@ -889,12 +924,34 @@
         overflow:hidden;
     }
 
-    /* 0% basis so the log shrinks for inflight + composer instead of covering them. */
-    .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(.st-key-chat_log),
-    .st-key-chat_panel > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(.st-key-chat_log) {
-        min-height:0;
-        flex:1 1 0%;
-        overflow:hidden;
+    /* 0% basis so the log shrinks for inflight + composer instead of covering them.
+       Child :has so a shared parent with inflight does not steal these rules. */
+    .st-key-chat_log,
+    [data-testid="stElementContainer"].st-key-chat_log {
+        min-height:0 !important;
+        flex:1 1 0% !important;
+        height:auto !important;
+        display:flex !important;
+        flex-direction:column !important;
+    }
+
+    .st-key-chat_panel [data-testid="stLayoutWrapper"]:has(> .st-key-chat_log):not(:has(> .st-key-chat_inflight)):not(:has(> [data-testid="stElementContainer"].st-key-chat_inflight)),
+    .st-key-chat_panel [data-testid="stLayoutWrapper"]:has(> [data-testid="stElementContainer"].st-key-chat_log):not(:has(> .st-key-chat_inflight)):not(:has(> [data-testid="stElementContainer"].st-key-chat_inflight)) {
+        min-height:0 !important;
+        flex:1 1 0% !important;
+        height:auto !important;
+        overflow:hidden !important;
+        display:flex !important;
+        flex-direction:column !important;
+    }
+
+    /* History rows keep content height so a long user bubble cannot collapse
+       over the previous Coach reply after the turn lands in chat_log. */
+    .st-key-chat_log > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"],
+    .st-key-chat_log > [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"],
+    .st-key-chat_log > [data-testid="stLayoutWrapper"] > [data-testid="stElementContainer"] {
+        flex:0 0 auto !important;
+        height:auto !important;
     }
 
     .st-key-sources_scroll,
@@ -908,8 +965,7 @@
         scrollbar-color:var(--cd-scrollbar) transparent;
     }
 
-    .st-key-studio_scroll,
-    .st-key-chat_log {
+    .st-key-studio_scroll {
         height:100%;
     }
 

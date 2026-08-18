@@ -229,12 +229,14 @@ def test_streamlit_notebook_workspace_smoke():
     assert "max-height:none !important" in rendered
     assert "max-height:11rem" not in rendered
     assert "min-height:4.5rem" in rendered
-    assert "MAX_ROWS = 5" in Path("ui/layout/composer_layout.py").read_text(
+    composer_layout = Path("ui/layout/composer_layout.py").read_text(
         encoding="utf-8"
     )
-    assert "MAX_COLS" not in Path("ui/layout/composer_layout.py").read_text(
-        encoding="utf-8"
-    )
+    assert "MAX_ROWS = 5" in composer_layout
+    assert 'setProperty("height", "auto"' in composer_layout
+    assert 'addEventListener("input", onComposerDraft, true)' in composer_layout
+    assert "MAX_COLS" not in composer_layout
+    assert "field-sizing:content" in rendered.replace(" ", "")
     edit_layout = Path("ui/layout/user_message_edit_layout.py").read_text(
         encoding="utf-8"
     )
