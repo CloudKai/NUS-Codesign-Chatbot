@@ -33,6 +33,7 @@ from ..retrieval import course_material_id_from_object_key
 from ..settings import settings
 from ..student_store import StudentStore
 from .context import selected_source_context as _selected_source_context
+from .kb_metadata import is_metadata_sidecar_key
 from .projection import (  # noqa: F401 - compatibility re-exports
     image_inputs_for_source_ids,
     image_inputs_for_sources,
@@ -139,6 +140,8 @@ def course_material_fingerprint() -> tuple[tuple[str, int, int], ...]:
         if path.name == LECTURE_NOTES_README or any(
             part.startswith(".") for part in relative.parts
         ):
+            continue
+        if is_metadata_sidecar_key(relative.as_posix()):
             continue
         if path.suffix.lower() not in SUPPORTED_SUFFIXES:
             continue
@@ -288,6 +291,10 @@ def course_material_group(relative_path: str) -> str:
 def _list_shared_course_items_from_storage() -> list[SharedCourseItem]:
     """List shared Lecture Notes and Readings objects without request memoisation.
 
+    Bedrock ``*.metadata.json`` sidecars are indexing artifacts and are skipped
+    before suffix eligibility or ``max_lecture_notes`` so they cannot occupy a
+    course-material slot or become student-visible sources.
+
     Raises:
         Exception: Listing failures propagate so callers can avoid treating an
             outage as an empty catalog (which would delete locked sources).
@@ -301,6 +308,8 @@ def _list_shared_course_items_from_storage() -> list[SharedCourseItem]:
     for folder in SHARED_COURSE_FOLDERS:
         for obj in storage.list_prefix(f"{prefix}{folder}/"):
             if "/derived/" in obj.key or obj.key.endswith("/"):
+                continue
+            if is_metadata_sidecar_key(obj.key):
                 continue
             relative = obj.key[len(prefix) :] if obj.key.startswith(prefix) else obj.key
             filename = Path(relative).name
@@ -909,6 +918,8 @@ def _sync_lecture_notes_folder(
         relative = path.relative_to(root)
         relative_text = relative.as_posix()
         if path.name == LECTURE_NOTES_README or any(part.startswith(".") for part in relative.parts):
+            continue
+        if is_metadata_sidecar_key(relative_text):
             continue
         if path.suffix.lower() not in SUPPORTED_SUFFIXES:
             skipped += 1

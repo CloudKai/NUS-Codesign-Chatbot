@@ -3,20 +3,44 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock-v2`
-**Committed/pushed HEAD:** `bfb1cbacf9a097ee2ac2e8fc2c80fe68810f586a`
-(`Extend the mock load probe with fake-slow coaching and a fake-client KB pool.`)
-**This phase:** uncommitted worktree on that SHA. **Not published to AgentCore.
-Not deployed to EC2.** Do not treat this worktree as live.
-
-**Query before any operator action:** live AgentCore DEFAULT `liveVersion` and
-the running EC2 image/tag (`org.opencontainers.image.revision` / `APP_GIT_SHA`).
-Do not assume liveVersion **21** or image `cde2300-chatbot:b81a5b0` without a
-live query.
+**Starting HEAD:** `d7d6f1d35dd72077840035d4346760453c654dab`
+**This phase:** catalog patch to hide Bedrock `.metadata.json` sidecars from
+Sources. **Not deployed. Not published to AgentCore.** Live RAG remains on
+the previous image until this patch is built and deployed.
 
 **Prompt cache:** production Compose keeps `FAST_CHAT_PROMPT_CACHE_ENABLED=false`.
 Do not enable for this baseline.
 **Session affinity:** Compose does not set `AGENTCORE_SESSION_AFFINITY_ENABLED`;
 settings default is `false`. Do not enable for this baseline.
+
+### Catalog: hide Bedrock `.metadata.json` sidecars from Sources
+
+Live RAG is working (sidecars ingested, equals/`in` Retrieve validated,
+CloudFront Week 1 Q&A cited). After sidecar upload the Sources panel listed
+those indexing artifacts because `Path(filename).suffix == ".json"` is a
+supported upload suffix.
+
+**Change:** `backend/sources/library.py` skips
+`is_metadata_sidecar_key(...)` **before** suffix eligibility and
+`max_lecture_notes` in the shared S3 catalog, local fingerprint, and local
+lecture-notes sync. Personal `.json` uploads are unchanged. RAG Retrieve,
+filters, citations, and S3 sidecars are unchanged.
+
+**Expected after deploy:** Lecture Notes **7**, Readings **3**. The 10
+sidecars stay in S3 for Bedrock. They must not appear as locked sources.
+
+**Validation (this worktree, $0 AWS):** `git diff --check` clean; `ruff check .`
+passed; `compileall` passed. New/updated catalog tests in
+`tests/domain/test_source_library.py` passed, with
+`test_kb_metadata.py`, `test_retrieval.py`, `test_sources_ui.py`, and
+`test_sync_course_kb_metadata.py`. Full mock pytest still reports **7
+pre-existing** `tests/domain/test_bedrock_retrieve.py` failures that expect
+VECTOR `vectorSearchConfiguration` / type `vector` while production is
+MANAGED; `backend/bedrock_retrieve.py` is not in this diff.
+
+**Next exact action.** Deploy the application image (no AgentCore
+republish, no KB ingest, no sidecar mutation). Live-check Sources counts
+(Lecture Notes 7, Readings 3). Do not enable prompt caching.
 
 Release order: [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md)
 (SOURCE CODE READY → AGENTCORE PUBLISHED on the **existing** ARN → EC2 IMAGE
@@ -24,6 +48,12 @@ DEPLOYED). Architecture: [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTAT
 
 This file’s **CURRENT** sections are the operator runbook. Everything under
 **HISTORICAL INVESTIGATION** is a dated archive and is not current.
+
+### Prior worktree note (superseded for this follow-up)
+
+The following release-hardening write-up was prepared on earlier uncommitted
+work that is now at `d7d6f1d`. Keep it for operator context. Do not treat it
+as the current catalog-sidecar diff.
 
 ### Release hardening (this worktree): observability + fail-open, not a redesign
 
