@@ -31,7 +31,9 @@ def _timing_values(caplog) -> dict[str, float]:
     values: dict[str, float] = {}
     for record in caplog.records:
         parts = str(record.message).split()
-        if len(parts) != 3 or parts[0] != "TIMING":
+        if len(parts) < 3 or parts[0] != "TIMING":
+            continue
+        if parts[1].startswith("request_id="):
             continue
         values[parts[1]] = float(parts[2].rstrip("s"))
     return values
@@ -87,7 +89,7 @@ def test_success_perf_log_has_no_student_text_or_secrets(caplog) -> None:
     assert payload["agentcore_call_count"] == 1
     assert payload["success"] is True
     timings = _timing_values(caplog)
-    assert set(timings) == {
+    assert timings.keys() >= {
         "auth",
         "student_state",
         "memory",
@@ -99,6 +101,7 @@ def test_success_perf_log_has_no_student_text_or_secrets(caplog) -> None:
         "persistence",
         "TOTAL",
     }
+    assert "request_id=-" in " ".join(record.message for record in caplog.records)
     assert timings["agent"] >= 0
     assert timings["TOTAL"] >= 0
     assert all("I think option B" not in record.message for record in caplog.records)
@@ -291,6 +294,7 @@ def test_emit_logs_timing_seconds_without_student_text(caplog) -> None:
     blob = " ".join(record.message for record in caplog.records)
     assert "student_message" not in blob
     assert "Bearer" not in blob
+    assert "TIMING_MS request_id=" in blob
 
 
 def test_submit_records_service_latency_breakdown(caplog, tmp_path) -> None:
@@ -555,3 +559,6 @@ def test_runtime_model_fields_are_on_the_privacy_allow_list() -> None:
     assert "runtime_model_region" in SAFE_PERF_FIELDS
     assert "runtime_strands_agents" in SAFE_PERF_FIELDS
     assert "event_loop_cycle_count" in SAFE_PERF_FIELDS
+    assert "request_id" in SAFE_PERF_FIELDS
+    assert "submit_notebook_lookup_ms" in SAFE_PERF_FIELDS
+    assert "history_source_join_ms" in SAFE_PERF_FIELDS

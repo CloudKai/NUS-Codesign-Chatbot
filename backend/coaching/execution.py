@@ -453,8 +453,10 @@ class CoachApplicationService:
         record_field("source_catalog_load_count", 0)
         try:
             with shared_course_catalog_scope():
+                lookup_started = time.perf_counter()
                 thread = self._notebooks.get_thread(request.thread_id)
                 record_count("notebook_load_count")
+                record_field("submit_notebook_lookup_ms", elapsed_ms(lookup_started))
                 if not thread:
                     raise ValueError("Notebook not found")
                 metadata = dict(thread.get("metadata") or {})
@@ -1376,60 +1378,66 @@ class CoachApplicationService:
                 )
 
         def _load_history() -> list[dict[str, Any]]:
-            if frozen_history_revision is not None:
-                store_history = self._store.get_messages_at_revision(
-                    request.thread_id, int(frozen_history_revision)
-                )
-                allowed_ids = {
-                    str(item).strip()
-                    for item in (frozen_message_ids or [])
-                    if str(item).strip()
-                }
-                if allowed_ids:
+            started = time.perf_counter()
+            try:
+                if frozen_history_revision is not None:
+                    store_history = self._store.get_messages_at_revision(
+                        request.thread_id, int(frozen_history_revision)
+                    )
+                    allowed_ids = {
+                        str(item).strip()
+                        for item in (frozen_message_ids or [])
+                        if str(item).strip()
+                    }
+                    if allowed_ids:
+                        store_history = [
+                            message
+                            for message in store_history
+                            if str(message.get("id") or "") in allowed_ids
+                        ]
+                    return store_history
+                store_history = self._store.get_messages(request.thread_id)
+                revise_message_id = str(request.revise_user_message_id or "").strip()
+                if revise_message_id:
                     store_history = [
                         message
                         for message in store_history
-                        if str(message.get("id") or "") in allowed_ids
+                        if str(message.get("id") or "") != revise_message_id
                     ]
                 return store_history
-            store_history = self._store.get_messages(request.thread_id)
-            revise_message_id = str(request.revise_user_message_id or "").strip()
-            if revise_message_id:
-                store_history = [
-                    message
-                    for message in store_history
-                    if str(message.get("id") or "") != revise_message_id
-                ]
-            return store_history
+            finally:
+                record_field("history_load_ms", elapsed_ms(started))
 
         def _load_sources() -> list[dict[str, Any]]:
-            visible_sources = list_visible_sources(
-                self._store,
-                request.thread_id,
-                selected_only=False,
-                include_extracted_text=False,
-            )
-            if frozen_source_ids is not None:
-                frozen_set = {
-                    str(item).strip() for item in frozen_source_ids if str(item).strip()
-                }
-                visible_sources = [
-                    {**dict(source), "selected": str(source.get("id") or "") in frozen_set}
-                    for source in visible_sources
-                ]
-            return visible_sources
+            started = time.perf_counter()
+            try:
+                visible_sources = list_visible_sources(
+                    self._store,
+                    request.thread_id,
+                    selected_only=False,
+                    include_extracted_text=False,
+                )
+                if frozen_source_ids is not None:
+                    frozen_set = {
+                        str(item).strip() for item in frozen_source_ids if str(item).strip()
+                    }
+                    visible_sources = [
+                        {**dict(source), "selected": str(source.get("id") or "") in frozen_set}
+                        for source in visible_sources
+                    ]
+                return visible_sources
+            finally:
+                record_field("source_load_ms", elapsed_ms(started))
 
         from concurrent.futures import ThreadPoolExecutor
 
-        history_started = time.perf_counter()
-        source_started = history_started
+        join_started = time.perf_counter()
         with ThreadPoolExecutor(max_workers=2) as pool:
             history_future = pool.submit(_load_history)
             source_future = pool.submit(_load_sources)
             store_history = history_future.result()
             visible_sources = source_future.result()
-        record_field("history_load_ms", elapsed_ms(history_started))
-        record_field("source_load_ms", elapsed_ms(source_started))
+        record_field("history_source_join_ms", elapsed_ms(join_started))
         if (
             frozen_history_revision is None
             and request.history

@@ -25,7 +25,11 @@ logger = logging.getLogger("co_design.turn_perf")
 SAFE_PERF_FIELDS = frozenset(
     {
         "request_total_ms",
+        "request_id",
         "auth_context_ms",
+        "submit_notebook_lookup_ms",
+        "history_source_join_ms",
+        "ui_stream_ms",
         "notebook_load_ms",
         "history_load_ms",
         "source_load_ms",
@@ -130,6 +134,9 @@ SAFE_PERF_FIELDS = frozenset(
         "runtime_strands_agents",
         "model_input_tokens",
         "model_output_tokens",
+        "model_call_count",
+        "agentcore_ttft_ms",
+        "agentcore_model_duration_ms",
         "notebook_load_count",
         "source_catalog_load_count",
         "citation_source_resolution_count",
@@ -410,47 +417,60 @@ def _log_service_timings(payload: Mapping[str, Any]) -> None:
     """Write grep-friendly service-latency lines with no student content.
 
     Seconds match operator timing snippets. Milliseconds remain on the JSON
-    ``coach_turn_perf`` event. Values are numeric only.
+    ``coach_turn_perf`` event. Values are numeric only. ``request_id`` is the
+    FastAPI ``X-Request-ID`` (UUID), never a notebook or student identifier.
     """
-    logger.info(
-        "TIMING auth %.3fs",
-        _ms_to_seconds(payload.get("auth_context_ms")),
+    request_id = str(payload.get("request_id") or "-").strip() or "-"
+    spans = (
+        ("auth", payload.get("auth_context_ms")),
+        ("submit_notebook", payload.get("submit_notebook_lookup_ms")),
+        ("student_state", payload.get("student_state_ms")),
+        ("notebook_load", payload.get("notebook_load_ms")),
+        ("history_load", payload.get("history_load_ms")),
+        ("source_load", payload.get("source_load_ms")),
+        ("history_source_join", payload.get("history_source_join_ms")),
+        ("memory", payload.get("memory_load_ms")),
+        ("retrieval", payload.get("retrieval_total_ms")),
+        ("kb_sdk", payload.get("kb_sdk_ms")),
+        ("kb_validate", payload.get("kb_validate_ms")),
+        ("context_build", payload.get("context_build_ms")),
+        ("agent", payload.get("agent_ms") or payload.get("agentcore_invoke_ms")),
+        ("persistence", payload.get("persistence_ms")),
+        ("TOTAL", payload.get("request_total_ms")),
     )
+    for name, raw_ms in spans:
+        logger.info(
+            "TIMING %s %.3fs request_id=%s",
+            name,
+            _ms_to_seconds(raw_ms),
+            request_id,
+        )
     logger.info(
-        "TIMING student_state %.3fs",
-        _ms_to_seconds(payload.get("student_state_ms")),
-    )
-    logger.info(
-        "TIMING memory %.3fs",
-        _ms_to_seconds(payload.get("memory_load_ms")),
-    )
-    logger.info(
-        "TIMING retrieval %.3fs",
-        _ms_to_seconds(payload.get("retrieval_total_ms")),
-    )
-    logger.info(
-        "TIMING kb_sdk %.3fs",
-        _ms_to_seconds(payload.get("kb_sdk_ms")),
-    )
-    logger.info(
-        "TIMING kb_validate %.3fs",
-        _ms_to_seconds(payload.get("kb_validate_ms")),
-    )
-    logger.info(
-        "TIMING context_build %.3fs",
-        _ms_to_seconds(payload.get("context_build_ms")),
-    )
-    logger.info(
-        "TIMING agent %.3fs",
-        _ms_to_seconds(payload.get("agent_ms") or payload.get("agentcore_invoke_ms")),
-    )
-    logger.info(
-        "TIMING persistence %.3fs",
-        _ms_to_seconds(payload.get("persistence_ms")),
-    )
-    logger.info(
-        "TIMING TOTAL %.3fs",
-        _ms_to_seconds(payload.get("request_total_ms")),
+        "TIMING_MS request_id=%s auth_ms=%.1f submit_notebook_ms=%.1f "
+        "notebook_load_ms=%.1f history_load_ms=%.1f source_load_ms=%.1f "
+        "history_source_join_ms=%.1f memory_ms=%.1f retrieval_ms=%.1f "
+        "kb_sdk_ms=%.1f kb_validate_ms=%.1f context_build_ms=%.1f "
+        "agentcore_ms=%.1f persistence_ms=%.1f notebook_load_count=%s "
+        "agentcore_call_count=%s event_loop_cycle_count=%s "
+        "total_backend_ms=%.1f",
+        request_id,
+        float(payload.get("auth_context_ms") or 0.0),
+        float(payload.get("submit_notebook_lookup_ms") or 0.0),
+        float(payload.get("notebook_load_ms") or 0.0),
+        float(payload.get("history_load_ms") or 0.0),
+        float(payload.get("source_load_ms") or 0.0),
+        float(payload.get("history_source_join_ms") or 0.0),
+        float(payload.get("memory_load_ms") or 0.0),
+        float(payload.get("retrieval_total_ms") or 0.0),
+        float(payload.get("kb_sdk_ms") or 0.0),
+        float(payload.get("kb_validate_ms") or 0.0),
+        float(payload.get("context_build_ms") or 0.0),
+        float(payload.get("agent_ms") or payload.get("agentcore_invoke_ms") or 0.0),
+        float(payload.get("persistence_ms") or 0.0),
+        payload.get("notebook_load_count", "-"),
+        payload.get("agentcore_call_count", "-"),
+        payload.get("event_loop_cycle_count", "-"),
+        float(payload.get("request_total_ms") or 0.0),
     )
 
 

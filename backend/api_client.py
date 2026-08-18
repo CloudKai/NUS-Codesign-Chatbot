@@ -607,13 +607,20 @@ class LocalApiClient:
         response.raise_for_status()
         return PendingPhaseTransition.model_validate(response.json())
 
-    def _idempotency_request_kwargs(self, request: CoachRequest) -> dict[str, Any]:
-        """Attach auth cookies and the optional Idempotency-Key header."""
-        headers = (
-            {"Idempotency-Key": request.idempotency_key}
-            if request.idempotency_key
-            else None
-        )
+    def _idempotency_request_kwargs(
+        self,
+        request: CoachRequest,
+        extra_headers: Mapping[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Attach auth cookies and optional Idempotency-Key / correlation headers."""
+        headers: dict[str, str] = {}
+        if request.idempotency_key:
+            headers["Idempotency-Key"] = request.idempotency_key
+        if extra_headers:
+            for key, value in extra_headers.items():
+                cleaned = str(value or "").strip()
+                if cleaned:
+                    headers[str(key)] = cleaned
         return self._request_kwargs(**({"headers": headers} if headers else {}))
 
     def coach_turn(self, request: CoachRequest) -> CoachTurn:
@@ -679,13 +686,22 @@ class LocalApiClient:
             return str(detail.get("category") or "").strip()
         return ""
 
-    def stream_coach_turn(self, request: CoachRequest) -> Iterator[dict[str, Any]]:
+    def stream_coach_turn(
+        self,
+        request: CoachRequest,
+        *,
+        request_id: str | None = None,
+    ) -> Iterator[dict[str, Any]]:
         """Yield NDJSON events from the streaming coaching endpoint."""
+        extra: dict[str, str] = {}
+        cleaned_id = str(request_id or "").strip()
+        if cleaned_id:
+            extra["X-Request-ID"] = cleaned_id
         with self._http.stream(
             "POST",
             f"{self._base_url}/api/v1/coach/turn/stream",
             json=request.model_dump(mode="json"),
-            **self._idempotency_request_kwargs(request),
+            **self._idempotency_request_kwargs(request, extra or None),
         ) as response:
             response.raise_for_status()
             for line in response.iter_lines():

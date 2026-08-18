@@ -24,19 +24,31 @@ _OPERATIONAL_LOGGERS = (
     "backend.retrieval",
     "co_design.operational",
     "co_design.turn_perf",
+    "co_design.ui_perf",
 )
+
+_HANDLER_FLAG = "_co_design_operational_stream"
 
 
 def configure_operational_loggers() -> None:
-    """Enable INFO operational logs without lowering the process root logger.
+    """Enable INFO operational logs that remain visible under uvicorn.
 
-    Production uvicorn leaves the root logger at WARNING, which hid
-    ``coach_turn_perf`` and Knowledge Base Retrieve timings. Child loggers
-    set to INFO still propagate to the existing handlers. These loggers
-    must not emit student text, prompts, or notebook identifiers.
+    Production uvicorn leaves the root logger at WARNING and often has no
+    root handler, so INFO ``coach_turn_perf`` / ``TIMING`` lines never
+    reached ``docker logs``. Each operational logger gets its own INFO
+    stream handler. Records still propagate so pytest ``caplog`` works.
+    These loggers must not emit student text, prompts, or notebook ids.
     """
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+    setattr(handler, _HANDLER_FLAG, True)
     for name in _OPERATIONAL_LOGGERS:
-        logging.getLogger(name).setLevel(logging.INFO)
+        log = logging.getLogger(name)
+        log.setLevel(logging.INFO)
+        if any(getattr(existing, _HANDLER_FLAG, False) for existing in log.handlers):
+            continue
+        log.addHandler(handler)
 
 
 def _emit(event: str, **fields: Any) -> None:

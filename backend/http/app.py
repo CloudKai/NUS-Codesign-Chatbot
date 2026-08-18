@@ -1256,6 +1256,7 @@ def create_app(
             # Rate limits apply inside CoachApplicationService only when a new
             # provider execution is claimed, so same-key waiters can converge.
             begin_coach_turn_perf()
+            record_field("request_id", request_id)
             auth_ms = getattr(http_request.state, "auth_context_ms", None)
             if auth_ms is not None:
                 record_field("auth_context_ms", auth_ms)
@@ -1486,6 +1487,7 @@ def create_app(
             def _worker() -> None:
                 try:
                     begin_coach_turn_perf()
+                    record_field("request_id", stream_request_id)
                     auth_ms = getattr(http_request.state, "auth_context_ms", None)
                     if auth_ms is not None:
                         record_field("auth_context_ms", auth_ms)

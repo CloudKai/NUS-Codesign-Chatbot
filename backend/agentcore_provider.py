@@ -802,19 +802,28 @@ def _record_runtime_cache_metrics(payload: dict[str, Any]) -> None:
         record_field("prompt_cache_enabled", bool(payload.get("prompt_cache_enabled")))
     read_raw = payload.get("cache_read_input_tokens")
     write_raw = payload.get("cache_write_input_tokens")
-    if isinstance(read_raw, bool) or isinstance(write_raw, bool):
-        return
-    if isinstance(read_raw, (int, float)):
+    if not isinstance(read_raw, bool) and isinstance(read_raw, (int, float)):
         read_tokens = int(read_raw)
         record_field("cache_read_input_tokens", read_tokens)
         record_field("prompt_cache_hit", read_tokens > 0)
-    if isinstance(write_raw, (int, float)):
+    if not isinstance(write_raw, bool) and isinstance(write_raw, (int, float)):
         record_field("cache_write_input_tokens", int(write_raw))
     cycle_raw = payload.get("event_loop_cycle_count")
-    if isinstance(cycle_raw, bool):
-        return
-    if isinstance(cycle_raw, int) and cycle_raw >= 0:
+    if not isinstance(cycle_raw, bool) and isinstance(cycle_raw, int) and cycle_raw >= 0:
         record_field("event_loop_cycle_count", cycle_raw)
+    for source, dest in (
+        ("inputTokens", "model_input_tokens"),
+        ("outputTokens", "model_output_tokens"),
+        ("model_input_tokens", "model_input_tokens"),
+        ("model_output_tokens", "model_output_tokens"),
+        ("model_call_count", "model_call_count"),
+        ("time_to_first_token_ms", "agentcore_ttft_ms"),
+        ("server_request_duration_ms", "agentcore_model_duration_ms"),
+    ):
+        raw = payload.get(source)
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            continue
+        record_field(dest, int(raw) if dest.endswith("tokens") or dest.endswith("count") else round(float(raw), 1))
 
 
 _RUNTIME_PROVENANCE_MAX_LEN = 80
