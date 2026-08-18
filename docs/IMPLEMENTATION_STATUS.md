@@ -21,6 +21,22 @@ This file’s **CURRENT** sections are the operator runbook. Everything under **
 
 Release steps: [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md). Architecture authority: [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md).
 
+### Local $0 capacity validation (mock/fake only)
+
+Prepared on `Integrate-Bedrock-v2` at HEAD `e556ad76a6a335495031838b422ba0dbddb5cc6b` with an uncommitted script/test/docs worktree. **AWS cost $0.** No Bedrock model, AgentCore, Knowledge Base, DSQL, S3, or Cognito calls. No deploy, no AgentCore publish, no production worker-count change.
+
+Extended [`../scripts/load_probe.py`](../scripts/load_probe.py): fake-slow `DeterministicCoachProvider.assess` (restored on exit), real `BedrockKnowledgeBaseRetriever` with only `client.retrieve` faked, thread/RSS sampler, JSON capacity rows. Pytest uses tiny delays. Operator matrix: [`operations/LOAD_PROBE.md`](operations/LOAD_PROBE.md).
+
+**What this proves:** FastAPI + owner isolation + notebook/user/global caps + SQLite persist can accept 120 concurrent mock turns and 90 concurrent 10s fake-slow turns with 0 unexpected 429s, 0 ownership leaks, 1-call idempotency replay, and no partial assistant turns. The Retrieve pool fail-closes at `workers` (default 4): 90 concurrent fake Retrieves → 4 ok + 86 `capacity_exhausted`, no queueing, slots recover, foreign-bucket hits return no evidence.
+
+**What this does not prove:** AgentCore/Haiku P95, live KB Retrieve, DSQL OCC, Cognito, Uvicorn-on-ARM64-2GB, or EC2 class capacity. Mock/fake-sleep latency is not model latency. Docker 2 CPU / 2 GB envelope was **not run** (Docker engine unavailable on this host).
+
+**Do not raise** `KNOWLEDGE_BASE_RETRIEVE_EXECUTOR_WORKERS` from 4 on this evidence. Per-request `ThreadPoolExecutor(max_workers=2)` stays (option A); 90×10s peaked ~431 Python threads / ~258 MiB RSS locally, not proven harmful.
+
+**Next exact live AWS action (operator-approved only):** staged 2 → 5 → 10 → 25 real students on the deployed image/runtime. Count live `capacity_exhausted`, AgentCore P95, DSQL errors, and RSS. Do not open 90 live students from this mock probe.
+
+
+
 ### Fast Chat latency: fragment reconcile + Fast-Chat-only first-cycle force
 
 Prepared on `Integrate-Bedrock-v2` after `bf7bec5`. **Not published to

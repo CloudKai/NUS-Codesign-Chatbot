@@ -46,7 +46,7 @@ modules.
 | `persistence/` | StudentStore, revisions, idempotency, research persistence, storage adapters |
 | `http/` | FastAPI, auth, ownership, API clients, professor analytics/research, production paths |
 | `ui/` | Streamlit AppTest, presentation state, themes, auth gate, professor UI |
-| `scripts/` | SQLite/DSQL administration and learning-data reset |
+| `scripts/` | SQLite/DSQL administration, learning-data reset, and mock load probe |
 
 ## Detailed test map
 
@@ -113,6 +113,7 @@ modules.
 | `ui/test_rename.py` | Enter-only rename draft helpers and epochs |
 | `scripts/test_init_db.py` | Safe `init_db.py` refuse-existing / `--force` behavior |
 | `scripts/test_init_dsql.py` | Additive DSQL revision planning and five-phase/research bootstrap |
+| `scripts/test_load_probe.py` | Mock load probe: distinct owners, notebook caps, tiny-delay slow provider, fake-client KB pool; no AWS |
 
 ## Hard constraints
 
