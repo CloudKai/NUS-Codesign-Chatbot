@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import html
 import mimetypes
+import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +37,13 @@ from ui.layout.user_message_edit_layout import (
     USER_MESSAGE_EDIT_HEIGHT_PX,
     sync_user_message_edit_layout,
 )
-from ui.runtime import rerun_app, set_coach_turn_streaming, store, stream_coach_turn_events
+from ui.runtime import (
+    log_ui_timing,
+    rerun_app,
+    set_coach_turn_streaming,
+    store,
+    stream_coach_turn_events,
+)
 from ui.retry_keys import get_retry_key, remove_retry_key
 from ui.sources import source_viewer_dialog
 
@@ -607,15 +615,30 @@ def handle_prompt(
     reuses the last assistant ``st.chat_message``.
     """
     set_coach_turn_streaming(True)
+    handle_started = time.perf_counter()
+    request_id = str(uuid.uuid4())
     try:
         journey = normalize_journey(st.session_state.learning_journey)
-        sources = store.list_sources(st.session_state.thread_id)
-        selected_sources = [source for source in sources if source.get("selected")]
-        if visible_source_ids is None:
+        if uploads:
+            sources = store.list_sources(st.session_state.thread_id)
+            selected_sources = [source for source in sources if source.get("selected")]
             visible_source_ids = {
                 str(source.get("id") or "") for source in sources
             }
-        allow_model_knowledge = not selected_sources and not uploads
+            allow_model_knowledge = not selected_sources
+        elif visible_source_ids is None:
+            sources = store.list_sources(st.session_state.thread_id)
+            selected_sources = [source for source in sources if source.get("selected")]
+            visible_source_ids = {
+                str(source.get("id") or "") for source in sources
+            }
+            allow_model_knowledge = not selected_sources
+        else:
+            allow_model_knowledge = bool(
+                st.session_state.get("allow_model_knowledge", True)
+            )
+        if uploads:
+            allow_model_knowledge = False
         st.session_state.allow_model_knowledge = allow_model_knowledge
         pre_thread = store.get_thread(st.session_state.thread_id) or {}
         pre_meta = dict(pre_thread.get("metadata") or {})
@@ -682,6 +705,14 @@ def handle_prompt(
             try:
                 turn: CoachTurn | None = None
                 thinking_closed = False
+                log_ui_timing(
+                    request_id=request_id,
+                    pre_api_ms=round(
+                        max(0.0, (time.perf_counter() - handle_started) * 1000.0),
+                        1,
+                    ),
+                    upload_count=len(uploads),
+                )
 
                 def _close_thinking(*, label: str, state: str) -> None:
                     nonlocal thinking_closed
@@ -690,7 +721,9 @@ def handle_prompt(
                     thinking.update(label=label, state=state)
                     thinking_closed = True
 
-                for event in stream_coach_turn_events(request):
+                for event in stream_coach_turn_events(
+                    request, request_id=request_id
+                ):
                     kind = event.get("event")
                     if kind == "started" or kind == "graph":
                         continue
@@ -750,10 +783,13 @@ def handle_prompt(
                     pre_deep_review_available=pre_deep_review_available,
                     pre_deep_review_counter=pre_deep_review_counter,
                 )
-                if needs_reconcile:
-                    # History on the next run owns the assistant bubble. Painting
-                    # ``done`` into the in-flight slot and then remounting history
-                    # from get_messages would show the reply twice.
+                if needs_reconcile or uploads:
+                    # History on the next run owns the assistant bubble. Stay
+                    # turns without uploads keep painting into the in-flight
+                    # slot so a composer fragment need not remount Journey.
+                    # Uploads remount so Sources can refresh after this
+                    # fragment-only submit. Do not paint ``done`` here and
+                    # then remount history or the reply would show twice.
                     st.session_state.composer_nonce += 1
                     rerun_app()
                     return
@@ -934,6 +970,49 @@ def _submit_pending_edit(
         set_coach_turn_streaming(False)
 
 
+@st.fragment
+def _render_composer_submit_fragment(
+    model_id: str,
+    reasoning_effort: str | None,
+    visible_source_ids: set[str],
+) -> None:
+    """Render the inflight slot and composer; submit without remounting rails.
+
+    Streamlit 1.60 reruns only this fragment when ``st.chat_input`` submits,
+    so Journey, Deep Review, Sources, and chat history are not rebuilt
+    before FastAPI starts. Full ``rerun_app()`` still runs for ADVANCE,
+    pending transitions, Deep Review progress, and composer uploads.
+
+    Args:
+        model_id: Selected coaching model id for the next turn.
+        reasoning_effort: Compatible reasoning effort, or None.
+        visible_source_ids: Source ids currently shown in this notebook.
+    """
+    chat_inflight = st.container(key="chat_inflight")
+    with st.container(key="chat_composer"):
+        composer_value = st.chat_input(
+            "Ask a question or share your thinking",
+            key=f"composer-{st.session_state.composer_nonce}",
+            accept_file="multiple",
+            accept_audio=False,
+            max_upload_size=settings.max_file_size_mb,
+            submit_mode="stop",
+            height="content",
+        )
+        sync_composer_layout(max_file_size_mb=settings.max_file_size_mb)
+    prompt, uploads = normalize_composer_value(composer_value)
+    if prompt:
+        handle_prompt(
+            prompt,
+            uploads,
+            model_id,
+            reasoning_effort,
+            chat_inflight,
+            existing_user_message_id=None,
+            visible_source_ids=visible_source_ids,
+        )
+
+
 def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
     """Render the discussion log, in-flight turn slot, and chat composer.
 
@@ -960,6 +1039,7 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
         str(source.get("id") or "") for source in sources
     }
     chat_log = st.container(key="chat_log")
+    history_started = time.perf_counter()
     with chat_log:
         for message in messages:
             if message.get("role") == "assistant" and not str(
@@ -967,30 +1047,19 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
             ).strip():
                 continue
             render_message(message, visible_source_ids=visible_source_ids)
-    chat_inflight = st.container(key="chat_inflight")
+    log_ui_timing(
+        chat_history_ms=round(
+            max(0.0, (time.perf_counter() - history_started) * 1000.0),
+            1,
+        ),
+        message_count=len(messages),
+    )
 
     if st.session_state.get("edit_confirm_message_id"):
         _confirm_edit_earlier_message_dialog()
 
-    with st.container(key="chat_composer"):
-        composer_value = st.chat_input(
-            "Ask a question or share your thinking",
-            key=f"composer-{st.session_state.composer_nonce}",
-            accept_file="multiple",
-            accept_audio=False,
-            max_upload_size=settings.max_file_size_mb,
-            submit_mode="stop",
-            height="content",
-        )
-        sync_composer_layout(max_file_size_mb=settings.max_file_size_mb)
-    prompt, uploads = normalize_composer_value(composer_value)
-    if prompt:
-        handle_prompt(
-            prompt,
-            uploads,
-            model_id,
-            reasoning_effort,
-            chat_inflight,
-            existing_user_message_id=None,
-            visible_source_ids=visible_source_ids,
-        )
+    _render_composer_submit_fragment(
+        model_id,
+        reasoning_effort,
+        visible_source_ids,
+    )

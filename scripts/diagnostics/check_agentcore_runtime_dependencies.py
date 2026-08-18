@@ -246,6 +246,27 @@ def _check_runtime_contracts() -> None:
         _fail("main.py does not pass a ModelRetryStrategy to Agent")
     if getattr(structured_coach, "FAST_CHAT_INVOKE_LIMITS", None) != {"turns": 2}:
         _fail("FAST_CHAT_INVOKE_LIMITS is not turns=2")
+    if getattr(structured_coach, "FIRST_CYCLE_STRUCTURED_OUTPUT_TOOL_CHOICE", None) != {
+        "any": {}
+    }:
+        _fail("FIRST_CYCLE_STRUCTURED_OUTPUT_TOOL_CHOICE is not {any: {}}")
+    if "apply_first_cycle_tool_choice" not in dir(structured_coach):
+        _fail("apply_first_cycle_tool_choice is missing")
+    if "_install_first_cycle_structured_output(agent)" not in main_text:
+        _fail("main.py does not install first-cycle structured-output middleware")
+    from inspect import getsource
+
+    from strands._middleware.stages import InvokeModelContext, InvokeModelStage
+    from strands.tools.structured_output._structured_output_context import (
+        StructuredOutputContext,
+    )
+
+    if "tool_choice" not in getattr(InvokeModelContext, "__dataclass_fields__", {}):
+        _fail("Strands InvokeModelContext has no tool_choice field")
+    if not hasattr(InvokeModelStage, "Input"):
+        _fail("Strands InvokeModelStage.Input is missing")
+    if '{"any": {}}' not in getsource(StructuredOutputContext.set_forced_mode):
+        _fail("Strands set_forced_mode default is not {any: {}}")
     if getattr(structured_coach, "DEEP_REVIEW_INVOKE_LIMITS", None) != {"turns": 3}:
         _fail("DEEP_REVIEW_INVOKE_LIMITS is not turns=3")
     haiku_retry = structured_coach.model_retry_policy_for_role("fast_chat")

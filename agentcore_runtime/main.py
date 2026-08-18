@@ -75,8 +75,11 @@ try:
         qa_turn_from_agent_result,
         review_turn_from_agent_result,
         agent_system_prompt,
+        apply_first_cycle_tool_choice,
         model_retry_policy_for_role,
         runtime_model_provenance_fields,
+        sanitize_stop_reason,
+        stamp_structured_output_telemetry,
         structured_output_limits_for_role,
         structured_wire_payload,
     )
@@ -134,8 +137,11 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
         qa_turn_from_agent_result,
         review_turn_from_agent_result,
         agent_system_prompt,
+        apply_first_cycle_tool_choice,
         model_retry_policy_for_role,
         runtime_model_provenance_fields,
+        sanitize_stop_reason,
+        stamp_structured_output_telemetry,
         structured_output_limits_for_role,
         structured_wire_payload,
     )
@@ -157,6 +163,7 @@ def _with_cache_telemetry(
     result: Any,
     system_prompt: str | list[dict[str, Any]],
     model_config: Any = None,
+    first_cycle_stop_reason: str = "",
 ) -> dict[str, Any]:
     """Attach numeric cache, cycle, and safe model provenance without student text.
 
@@ -175,9 +182,11 @@ def _with_cache_telemetry(
     except ImportError:  # pragma: no cover - companion package import
         from agentcore_runtime.prompt_cache import cache_usage_from_agent_result
     payload.update(cache_usage_from_agent_result(result))
-    cycle_count = event_loop_cycle_count_from_agent_result(result)
-    if cycle_count is not None:
-        payload["event_loop_cycle_count"] = cycle_count
+    stamp_structured_output_telemetry(
+        payload,
+        cycle_count=event_loop_cycle_count_from_agent_result(result),
+        first_cycle_stop_reason=first_cycle_stop_reason,
+    )
     payload.update(runtime_model_provenance_fields(model_config))
     if enabled:
         logger.info(
@@ -305,6 +314,73 @@ def _log_role(
     )
 
 
+def _install_first_cycle_structured_output(agent: Any) -> bool:
+    """Force a tool call on cycle 1 using Strands 1.52.0 InvokeModel middleware.
+
+    First-party 1.52.0 plugins register on ``InvokeModelStage.Input``. This
+    helper sets ``tool_choice={"any": {}}`` before the first Converse call
+    when Strands has not already entered forced mode. ``turns=2`` recovery
+    and ``STRUCTURED_OUTPUT_REPAIR_PROMPT`` remain for schema-invalid output.
+
+    Args:
+        agent: A Strands ``Agent`` instance.
+
+    Returns:
+        True when middleware was registered. False when Strands middleware
+        is unavailable so invoke still proceeds with voluntary tool use.
+    """
+    registry = getattr(agent, "_middleware_registry", None)
+    adder = getattr(registry, "add_middleware", None)
+    if not callable(adder):
+        return False
+    try:
+        from strands._middleware.stages import InvokeModelStage
+    except ImportError:
+        return False
+
+    def _apply_tool_choice(context: Any) -> Any:
+        context.tool_choice = apply_first_cycle_tool_choice(
+            getattr(context, "tool_choice", None),
+            getattr(context, "tool_specs", None),
+        )
+        return context
+
+    adder(InvokeModelStage.Input, _apply_tool_choice)
+    return True
+
+
+def _attach_first_cycle_stop_reason_hook(agent: Any, sink: list[str]) -> bool:
+    """Record the first model stop_reason without student text.
+
+    Args:
+        agent: A Strands ``Agent`` instance.
+        sink: Mutable list that receives at most one allow-listed reason.
+
+    Returns:
+        True when the AfterModelCall hook was registered.
+    """
+    add_hook = getattr(agent, "add_hook", None)
+    if not callable(add_hook):
+        return False
+    try:
+        from strands.hooks import AfterModelCallEvent
+    except ImportError:
+        return False
+
+    def _capture(event: Any) -> None:
+        if sink:
+            return
+        stop = getattr(event, "stop_response", None)
+        reason = sanitize_stop_reason(
+            getattr(stop, "stop_reason", None) if stop is not None else None
+        )
+        if reason:
+            sink.append(reason)
+
+    add_hook(_capture, AfterModelCallEvent)
+    return True
+
+
 async def _structured_role_invoke(
     *,
     role: str,
@@ -322,8 +398,12 @@ async def _structured_role_invoke(
     structured-output recovery turn is not classified as PROMPT_ATTACK.
     Fast Chat / router / legacy Haiku roles pass ``limits={"turns": 2}``
     (verified 1.52.0: initial generation plus at most one recovery). Deep
-    Review passes ``limits={"turns": 3}``. Model retries are a separate
-    ``ModelRetryStrategy`` on the Agent, not the event-loop cap.
+    Review passes ``limits={"turns": 3}``. Cycle 1 also sets
+    ``tool_choice={"any": {}}`` via ``InvokeModelStage.Input`` so the
+    structured-output tool is required on the first generation. Recovery
+    remains if that call still returns ``end_turn`` or invalid schema.
+    Model retries are a separate ``ModelRetryStrategy`` on the Agent, not
+    the event-loop cap.
     """
     from strands import Agent
 
@@ -413,6 +493,9 @@ async def _structured_role_invoke(
         if prior:
             agent_kwargs["messages"] = prior
     agent = Agent(**agent_kwargs)
+    first_cycle_stop: list[str] = []
+    _install_first_cycle_structured_output(agent)
+    _attach_first_cycle_stop_reason_hook(agent, first_cycle_stop)
     result = None
     try:
         result = await agent.invoke_async(
@@ -425,18 +508,25 @@ async def _structured_role_invoke(
         enforce_mantle_guardrail(
             output_text(output), config=model_config, source="OUTPUT"
         )
+        first_stop = first_cycle_stop[0] if first_cycle_stop else ""
         _log_role(role=role, started=started, success=True)
         log_coach_turn_outcome(
             ok=True,
             stage=stage,
             result=result,
             elapsed_ms=elapsed_ms_since(started),
+            first_cycle_stop_reason=first_stop,
         )
         payload_out = structured_wire_payload(output)
         return _with_cache_telemetry(
-            payload_out, result, system_prompt, model_config
+            payload_out,
+            result,
+            system_prompt,
+            model_config,
+            first_cycle_stop_reason=first_stop,
         )
     except CoachTurnExtractionError as error:
+        first_stop = first_cycle_stop[0] if first_cycle_stop else ""
         _log_role(
             role=role,
             started=started,
@@ -449,9 +539,11 @@ async def _structured_role_invoke(
             stage=stage,
             result=result,
             elapsed_ms=elapsed_ms_since(started),
+            first_cycle_stop_reason=first_stop,
         )
         return harness_error_payload(error.category)
     except Exception as error:
+        first_stop = first_cycle_stop[0] if first_cycle_stop else ""
         category = invoke_failure_category(error)
         _log_role(
             role=role,
@@ -465,6 +557,7 @@ async def _structured_role_invoke(
             stage=stage,
             result=result,
             elapsed_ms=elapsed_ms_since(started),
+            first_cycle_stop_reason=first_stop,
         )
         logger.exception("specialist_invoke_unhandled")
         return harness_error_payload(category)

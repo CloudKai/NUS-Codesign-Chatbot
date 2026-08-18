@@ -231,7 +231,39 @@ def get_deep_review_job(thread_id: str) -> DeepReviewJob | None:
         return None
 
 
-def stream_coach_turn_events(request: CoachRequest) -> Iterator[dict[str, Any]]:
+def log_ui_timing(**fields: Any) -> None:
+    """Emit a privacy-safe UI TIMING line. Values must not include student text.
+
+    Args:
+        **fields: Short tokens or numbers. Strings with whitespace are dropped.
+    """
+    parts = ["UI TIMING"]
+    for key, value in fields.items():
+        if value is None:
+            continue
+        cleaned_key = str(key).strip().replace(" ", "_")[:40]
+        if not cleaned_key.replace("_", "").isalnum():
+            continue
+        if isinstance(value, bool):
+            parts.append(f"{cleaned_key}={'true' if value else 'false'}")
+        elif isinstance(value, int):
+            parts.append(f"{cleaned_key}={value}")
+        elif isinstance(value, float):
+            parts.append(f"{cleaned_key}={value:.1f}")
+        else:
+            token = str(value).strip()[:80]
+            if not token or any(ch.isspace() for ch in token):
+                continue
+            parts.append(f"{cleaned_key}={token}")
+    if len(parts) > 1:
+        _ui_perf_logger.info(" ".join(parts))
+
+
+def stream_coach_turn_events(
+    request: CoachRequest,
+    *,
+    request_id: str | None = None,
+) -> Iterator[dict[str, Any]]:
     """Yield progress and done events for one coaching turn.
 
     Uses the NDJSON streaming API when ``USE_LOCAL_API`` is enabled; otherwise
@@ -239,7 +271,7 @@ def stream_coach_turn_events(request: CoachRequest) -> Iterator[dict[str, Any]]:
     This helper does not invent token slices from a completed reply.
     A UUID ``X-Request-ID`` correlates Streamlit, FastAPI, and TIMING lines.
     """
-    request_id = str(uuid.uuid4())
+    request_id = str(request_id or "").strip() or str(uuid.uuid4())
     started = time.perf_counter()
     try:
         if local_api_enabled():

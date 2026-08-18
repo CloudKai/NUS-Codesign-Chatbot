@@ -144,16 +144,33 @@ def test_chat_marks_streaming_around_coach_send_and_revise() -> None:
         "store.upload_sources("
     )
     assert send_block.index("set_coach_turn_streaming(True)") < send_block.index(
-        "stream_coach_turn_events(request)"
+        "stream_coach_turn_events("
     )
     assert "finally:" in send_block
-    revise_block = chat.split("def _submit_pending_edit(", 1)[1].split(
+    assert "pre_api_ms" in send_block
+    normalized = chat.replace("\r\n", "\n")
+    assert "@st.fragment\ndef _render_composer_submit_fragment(" in normalized
+    composer_block = chat.split("def _render_composer_submit_fragment(", 1)[1].split(
         "def render_chat_panel(", 1
+    )[0]
+    assert "st.chat_input(" in composer_block
+    assert "handle_prompt(" in composer_block
+    revise_block = chat.split("def _submit_pending_edit(", 1)[1].split(
+        "def _render_composer_submit_fragment(", 1
     )[0]
     assert revise_block.index("set_coach_turn_streaming(True)") < revise_block.index(
         "store.revise_message("
     )
     assert "finally:" in revise_block
+
+
+def test_workspace_renders_chat_before_studio() -> None:
+    """Send must not wait on Journey/Deep Review before FastAPI starts."""
+    source = Path("ui/workspace.py").read_text(encoding="utf-8")
+    chat_idx = source.index("render_chat_panel(")
+    studio_idx = source.index("render_studio_panel()")
+    sources_idx = source.index("render_sources_panel()")
+    assert chat_idx < studio_idx < sources_idx
 
 
 def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:

@@ -38,6 +38,7 @@ logic.
 | `reset_learning_data.py` | Dry-run inventory and explicit five-phase learning-data reset | Apply requires an unchanged signed manifest and exact phrase; preserves accounts/auth; creates SQLite backup and file quarantine |
 | `backfill_source_chunks.py` | Offline SQLite maintenance: write missing `derived/chunks.v1.json` | Dry-run default; requires `--database`, `--identifier`, and `--confirm` to write. Runtime does not depend on it. **Do not run against production.** |
 | `benchmark_student_source_chunks.py` | Informational dynamic vs precomputed vs cached chunk probe | In-memory + temp SQLite only. Prints counts and wall time; not a pytest latency SLO. Do not run against production data. |
+| `benchmark_coach_turn_mock.py` | Informational mock `CoachApplicationService` submit time by history size | Isolated temp SQLite + deterministic provider. Refuses live AWS. Not a latency SLO. |
 
 ## Environment variables
 

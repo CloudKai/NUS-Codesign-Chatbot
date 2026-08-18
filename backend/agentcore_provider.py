@@ -811,6 +811,21 @@ def _record_runtime_cache_metrics(payload: dict[str, Any]) -> None:
     cycle_raw = payload.get("event_loop_cycle_count")
     if not isinstance(cycle_raw, bool) and isinstance(cycle_raw, int) and cycle_raw >= 0:
         record_field("event_loop_cycle_count", cycle_raw)
+    if "structured_output_recovery_used" in payload:
+        record_field(
+            "structured_output_recovery_used",
+            bool(payload.get("structured_output_recovery_used")),
+        )
+    recovery_category = payload.get("structured_output_failure_category")
+    if isinstance(recovery_category, str) and recovery_category.strip():
+        cleaned_category = recovery_category.strip()[:80]
+        if cleaned_category.replace("_", "").isalnum():
+            record_field("structured_output_failure_category", cleaned_category)
+    first_stop = payload.get("first_cycle_stop_reason")
+    if isinstance(first_stop, str) and first_stop.strip():
+        cleaned_stop = first_stop.strip()[:40]
+        if cleaned_stop.replace("_", "").isalnum():
+            record_field("first_cycle_stop_reason", cleaned_stop)
     for source, dest in (
         ("inputTokens", "model_input_tokens"),
         ("outputTokens", "model_output_tokens"),

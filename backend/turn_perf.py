@@ -127,6 +127,9 @@ SAFE_PERF_FIELDS = frozenset(
         "hydrate_total_ms",
         "qa_evidence_gap_authored",
         "event_loop_cycle_count",
+        "structured_output_recovery_used",
+        "structured_output_failure_category",
+        "first_cycle_stop_reason",
         "runtime_model_role",
         "runtime_model_provider",
         "runtime_model_id",
@@ -452,6 +455,7 @@ def _log_service_timings(payload: Mapping[str, Any]) -> None:
         "kb_sdk_ms=%.1f kb_validate_ms=%.1f context_build_ms=%.1f "
         "agentcore_ms=%.1f persistence_ms=%.1f notebook_load_count=%s "
         "agentcore_call_count=%s event_loop_cycle_count=%s "
+        "structured_output_recovery_used=%s first_cycle_stop_reason=%s "
         "total_backend_ms=%.1f",
         request_id,
         float(payload.get("auth_context_ms") or 0.0),
@@ -470,6 +474,8 @@ def _log_service_timings(payload: Mapping[str, Any]) -> None:
         payload.get("notebook_load_count", "-"),
         payload.get("agentcore_call_count", "-"),
         payload.get("event_loop_cycle_count", "-"),
+        payload.get("structured_output_recovery_used", "-"),
+        payload.get("first_cycle_stop_reason", "-"),
         float(payload.get("request_total_ms") or 0.0),
     )
 

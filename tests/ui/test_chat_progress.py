@@ -59,9 +59,9 @@ def test_done_payload_renders_reply_without_forced_rerun(monkeypatch) -> None:
     submissions: list[str] = []
     real_stream = chat.stream_coach_turn_events
 
-    def counting_stream(request: Any) -> Iterator[dict[str, Any]]:
+    def counting_stream(request: Any, **_kwargs: Any) -> Iterator[dict[str, Any]]:
         submissions.append(request.student_message)
-        yield from real_stream(request)
+        yield from real_stream(request, **_kwargs)
 
     monkeypatch.setattr(chat, "stream_coach_turn_events", counting_stream)
 
@@ -85,9 +85,9 @@ def test_successful_send_does_not_duplicate_submit_on_next_run(monkeypatch) -> N
     submissions: list[str] = []
     real_stream = chat.stream_coach_turn_events
 
-    def counting_stream(request: Any) -> Iterator[dict[str, Any]]:
+    def counting_stream(request: Any, **_kwargs: Any) -> Iterator[dict[str, Any]]:
         submissions.append(request.student_message)
-        yield from real_stream(request)
+        yield from real_stream(request, **_kwargs)
 
     monkeypatch.setattr(chat, "stream_coach_turn_events", counting_stream)
 
@@ -145,9 +145,9 @@ def test_submitted_prompt_does_not_share_widget_with_previous_assistant(
     submissions: list[str] = []
     real_stream = chat.stream_coach_turn_events
 
-    def counting_stream(request: Any) -> Iterator[dict[str, Any]]:
+    def counting_stream(request: Any, **_kwargs: Any) -> Iterator[dict[str, Any]]:
         submissions.append(request.student_message)
-        yield from real_stream(request)
+        yield from real_stream(request, **_kwargs)
 
     monkeypatch.setattr(chat, "stream_coach_turn_events", counting_stream)
 
@@ -202,7 +202,7 @@ def test_auto_advance_reconciles_thinking_path_after_reply_is_visible(
     monkeypatch.setattr(chat, "rerun_app", spy_rerun)
     reply = "You named a concrete user group. Let's generate concepts next."
 
-    def fake_stream(request: Any) -> Iterator[dict[str, Any]]:
+    def fake_stream(request: Any, **_kwargs: Any) -> Iterator[dict[str, Any]]:
         yield {"event": "status", "phase": "thinking", "label": "Coach is thinking…"}
         local_store = StudentStore()
         local_store.add_message(request.thread_id, "user", request.student_message)
@@ -281,7 +281,7 @@ def test_citation_buttons_render_from_done_payload_without_get_source(
     source_id = str(added["id"])
     app.run()
 
-    def fake_stream(_request: Any) -> Iterator[dict[str, Any]]:
+    def fake_stream(_request: Any, **_kwargs: Any) -> Iterator[dict[str, Any]]:
         turn = CoachTurn(
             response_text="The lecture reports a comparison of two methods [S1].",
             assessment=EducationalAssessment(

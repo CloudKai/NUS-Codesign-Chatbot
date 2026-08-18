@@ -102,6 +102,29 @@ def _phases(client: FakeAgentCoreRuntime) -> list[str]:
     return [str(_decoded(call).get("phase") or "") for call in client.calls]
 
 
+def test_hello_and_coaching_are_one_agentcore_invoke() -> None:
+    """Normal Fast Chat is one InvokeAgentRuntime for short and coaching turns."""
+    hello = FakeAgentCoreRuntime(payload=_coaching_output())
+    _provider(hello).assess(_request(student_message="hello"))
+    coaching = FakeAgentCoreRuntime(payload=_coaching_output())
+    _provider(coaching).assess(_request())
+    assert len(hello.calls) == 1
+    assert len(coaching.calls) == 1
+    assert _phases(hello) == ["fast_chat"]
+    assert _phases(coaching) == ["fast_chat"]
+    assert "review" not in _phases(hello)
+    assert "review" not in _phases(coaching)
+
+
+def test_runtime_cycle_telemetry_is_copied_when_present() -> None:
+    payload = _coaching_output()
+    payload["event_loop_cycle_count"] = 1
+    payload["structured_output_recovery_used"] = False
+    client = FakeAgentCoreRuntime(payload=payload)
+    _provider(client).assess(_request())
+    assert len(client.calls) == 1
+
+
 def test_normal_coaching_invokes_agentcore_once() -> None:
     client = FakeAgentCoreRuntime(payload=_coaching_output())
     result = _provider(client).assess(_request())

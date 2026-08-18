@@ -85,6 +85,8 @@ modules.
 | `persistence/test_research_persistence.py` | Offset-only observations, revisions, human decisions, audit, workflow marker |
 | `scripts/test_reset_learning_data.py` | Dry-run manifest, backup/quarantine, exact confirmation, stale-plan rejection |
 | `domain/test_fast_chat_one_call.py` | One Haiku fast-chat invoke; no router/incremental/Sonnet on the normal path |
+| `domain/test_first_cycle_structured_output.py` | First-cycle `tool_choice={"any": {}}` helpers; `turns=2` recovery kept; no Strands |
+| `domain/test_structured_output_limits.py` | Fast Chat `turns=2` / Deep Review `turns=3` actually passed to `invoke_async` |
 | `domain/test_fast_chat_context.py` | Six-message window, 3000/1500 history budgets, 12k/16k totals, system-prompt estimate, RAG repack |
 | `domain/test_conversation_memory_continuity.py` | 20/50/100-message and chunky-history extractive memory; no LLM summarizer |
 | `domain/test_rag_fallback.py` | Application-owned needs_source_retrieval retry; persist-final-only |

@@ -2,11 +2,13 @@
 
 ## CURRENT STATUS
 
-**Branch:** `Integrate-Bedrock`  
-**HEAD:** `e7132ff` (`e7132ff`)  
-**Origin:** this SHA is `origin/Integrate-Bedrock`. `origin/main` is `2386d65`.
+**Branch:** `Integrate-Bedrock-v2` (local; user expected `Integrate-Bedrock`)  
+**HEAD:** `18d02c8` plus **uncommitted** Fast Chat latency patches in this worktree.  
+**Do not assume** this SHA is deployed. Last measured production image in the
+latency investigation was `cde2300-chatbot:4f5953e` (older than this HEAD).
+AgentCore DEFAULT remains liveVersion **21** until an authorised republish.
 
-**Live cutover 2026-08-17:** same AgentCore ARN, new version **21** on DEFAULT; EC2 app image `cde2300-chatbot:b81a5b0`; Compose / host pin `AGENTCORE_SESSION_GENERATION=2`.
+**Live cutover 2026-08-17 (historical):** same AgentCore ARN, version **21** on DEFAULT; EC2 app image `cde2300-chatbot:b81a5b0` was documented then. Re-verify image/tag before any operator action. Compose / host pin `AGENTCORE_SESSION_GENERATION=2`.
 
 **Always-visible Deep Review button:** Review always shows **Start Deep Review**. Locked/unlocked state and the `{n}/{interval}` caption are derived from persisted `coaching_turns_since_deep_review` and `DEEP_REVIEW_INTERVAL_TURNS`. Eligibility remains FastAPI/DSQL (`explicit_deep_review_available`); Streamlit does not keep a second counter. Ineligible `POST /api/v1/threads/{id}/deep-review` still returns 400. The Review spinner follows persisted `deep_review_job` status via a 2s fragment poll, not a Streamlit session flag. This UI/API change is not in the live EC2 image.
 
@@ -15,6 +17,51 @@
 This file’s **CURRENT** sections are the operator runbook. Everything under **HISTORICAL INVESTIGATION** is a dated archive and is not current.
 
 Release steps: [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md). Architecture authority: [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md).
+
+### Fast Chat latency: first-cycle structured output + Streamlit pre-API (uncommitted)
+
+Prepared 2026-08-18 on `Integrate-Bedrock-v2` at `18d02c8` plus local patches.
+**Not committed. Not pushed. No AgentCore publish. No EC2 deploy. No IAM change.**
+
+#### Production measurements that motivated this phase (heavy notebook)
+
+Taken on the live CloudFront path before these patches. Approximate:
+
+| Case | UI pre-API | FastAPI | AgentCore | cycles | persist |
+|---|---:|---:|---:|---:|---:|
+| Hello | ~3.84 s | ~10.9–12.7 s | ~9.6–12.2 s | 1 | ~0.2–0.3 s |
+| Coaching | (same order) | ~14.1 s | ~13.4 s | 2 | ~0.2–0.3 s |
+| Evidence-gap Q&A | — | ~0.98 s | 0 | n/a | — |
+
+Empty filtered KB Retrieve ~0.51 s. DSQL ~0.26–0.46 s. Prompt cache off.
+EC2 was not CPU-bound. Fresh-notebook Hello was **not** measured live.
+
+#### Cycle-2 root cause (Strands 1.52.0 wheel, not a guess)
+
+Inside **one** `invoke_agent_runtime`, `Agent.invoke_async(..., structured_output_model=FastChatTurnOutput, limits={"turns": 2})` starts with voluntary tool use (`tool_choice` unset). If cycle 1 returns `stop_reason=end_turn` without the structured-output tool, Strands appends `Please use the output tool now.`, `set_forced_mode()` (`tool_choice={"any": {}}`), and recurses. Hello often used the tool on cycle 1; Socratic Coaching more often wrote prose first.
+
+`invoke_async` in 1.52.0 has **no** first-cycle `tool_choice` argument. The documented seam first-party plugins use is `InvokeModelStage.Input` on `agent._middleware_registry`.
+
+#### What this worktree changes
+
+- Runtime: apply `tool_choice={"any": {}}` on cycle 1 when tool specs exist (same constraint as forced-mode recovery). Keep `turns=2`. Log `structured_output_recovery_used`, `first_cycle_stop_reason`, `structured_output_failure_category` without student text.
+- FastAPI: copy those fields onto `coach_turn_perf`.
+- Streamlit 1.60: composer+submit is `@st.fragment` so Send does not rebuild Journey/Deep Review/Sources/history before FastAPI. Workspace executes the chat column before studio on full-script runs. Stay+upload remounts so Sources refresh. `UI TIMING pre_api_ms` / panel timings.
+- Prompt cache: still **disabled**. Pedagogy prompts **unchanged**. Duplicate notebook load **not** removed. DSQL pooling **not** implemented. Guardrails **unchanged**. Deep Review **unchanged**.
+- Mock harness: `scripts/benchmark_coach_turn_mock.py` (isolated SQLite; refuses `--i-approve-live-aws`).
+
+#### Validation (this phase)
+
+- `compileall` of `backend`, `ui`, `streamlit_app.py`, `tests`, `scripts`, `agentcore_runtime`: passed.
+- `ruff check` on touched files: passed.
+- Full mock pytest (` .venv/bin/python -m pytest -q `): passed (existing Starlette cookie deprecation warnings only).
+- Mock harness `scripts/benchmark_coach_turn_mock.py`: fresh/medium/heavy `submit_ms` ~344 / 12 / 11 (cold SQLite then warm mock; **not** AgentCore or user-perceived).
+- AppTest Send probe count is now **9** inner workspace reads because Chat persist runs before Journey (`tests/ui/test_probe_facade_counts.py`). Browser Send still uses the composer fragment.
+- Companion pytest does not install Strands. Cycle=1 on Haiku is **LIVE TRACE REQUIRED** after an authorised AgentCore republish. No production A–D timings in this worktree.
+
+#### Next exact action
+
+Do **not** publish AgentCore or rebuild EC2 until authorised. After authorisation: publish a new runtime version that includes `agentcore_runtime/main.py` first-cycle middleware, bump `AGENTCORE_SESSION_GENERATION`, recreate the app container from a new image, then measure Fresh/Heavy Hello and Coaching with `event_loop_cycle_count` and `UI TIMING pre_api_ms`.
 
 ### Week 1 RAG, Q&A stay, and latency
 
@@ -91,7 +138,7 @@ A capped isolated Fast Chat invoke (`student_message=testing`, no DSQL write) on
 
 Authoritative layering remains [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md). Production generation is AgentCore; FastAPI still owns identity, RAG authorization, transcript, and stage mutation.
 
-**Fast Chat.** One AgentCore invoke per normal student turn. Haiku returns slim `FastChatTurnOutput`: `mode` (`coaching` \| `qa`), `response_text`, optional stay/advance `recommendation`, citations, `needs_source_retrieval`. No per-turn router, incremental review, or automatic Sonnet. Event-loop recovery inside that one invoke is capped at `FAST_CHAT_INVOKE_LIMITS={"turns": 2}` (initial generation plus at most one structured-output recovery cycle).
+**Fast Chat.** One AgentCore invoke per normal student turn. Haiku returns slim `FastChatTurnOutput`: `mode` (`coaching` \| `qa`), `response_text`, optional stay/advance `recommendation`, citations, `needs_source_retrieval`. No per-turn router, incremental review, or automatic Sonnet. Cycle 1 sets `tool_choice={"any": {}}` via Strands 1.52.0 `InvokeModelStage.Input` so the structured-output tool is required on the first generation. Event-loop recovery inside that one invoke remains capped at `FAST_CHAT_INVOKE_LIMITS={"turns": 2}` (at most one recovery if cycle 1 still returns `end_turn` or invalid schema). Do not set `turns=1` while first-cycle output can fail.
 
 **Deep Review.** Separate HTTP route `POST /api/v1/threads/{thread_id}/deep-review`. Server-owned eligibility, Sonnet 4.6, counter, snapshot, idempotency. Event-loop cap `{"turns": 3}`. Not on `/coach/turn`.
 
@@ -115,7 +162,8 @@ auto-advances too.
 - Botocore client config uses **`total_max_attempts`** (inclusive of the first call). Legacy `retries={"max_attempts": N}` is normalised to **N+1** attempts and is not used. FastAPI AgentCore/Bedrock/harness clients set `total_max_attempts = max_retries + 1` with production `AGENTCORE_MAX_RETRIES=0` → one read-timeout window. Runtime Converse (`agentcore_runtime/model.py`) pins `total_max_attempts=1` so Strands `ModelRetryStrategy` is the only Converse retry layer. KB Retrieve also uses `total_max_attempts=1`. DSQL OCC retries are application-level `max_attempts` in `backend/persistence/dsql_connection.py`, not Botocore.
 - Strands `ModelRetryStrategy` (distinct from Botocore): Haiku roles `max_attempts=2` (1s/4s); Deep Review `max_attempts=3` (2s/16s). New strategy instance per Agent.
 - Application RAG fallback: at most one extra retrieve + one extra Fast Chat invoke when the gate skipped retrieval and Haiku sets `needs_source_retrieval`. First result is not persisted. `FAST_CHAT_MAX_PROVIDER_INVOCATIONS_PER_TURN=2`.
-- Fast Chat event-loop: `FAST_CHAT_INVOKE_LIMITS={"turns": 2}`.
+- Fast Chat event-loop: `FAST_CHAT_INVOKE_LIMITS={"turns": 2}` plus first-cycle
+  `tool_choice={"any": {}}` so recovery is not the normal Coaching path.
 
 **Cycle telemetry.** When Strands metrics expose it, the runtime copies `event_loop_cycle_count` onto the payload; FastAPI records it on privacy-safe `coach_turn_perf` JSON. Absent metrics stay unset (not invented). Grep-friendly `TIMING` lines (`auth`, `student_state`, `memory`, `retrieval`, `kb_sdk`, `kb_validate`, `context_build`, `agent`, `persistence`, `TOTAL`) are seconds on logger `co_design.turn_perf`. The JSON event also records `hydrate_total_ms` and `qa_evidence_gap_authored`.
 

@@ -85,6 +85,35 @@ STRUCTURED_OUTPUT_REPAIR_PROMPT = "Please use the output tool now."
 # inside one model call (SDK default ``max_attempts=6``).
 FAST_CHAT_INVOKE_LIMITS: dict[str, int] = {"turns": 2}
 DEEP_REVIEW_INVOKE_LIMITS: dict[str, int] = {"turns": 3}
+# Same default Strands 1.52.0 ``StructuredOutputContext.set_forced_mode()``
+# uses on the recovery cycle. Applied on cycle 1 via InvokeModelStage.Input
+# so Haiku must call a tool immediately. With ``tools=[]`` the only tool is
+# the structured-output tool. Do not drop ``turns=2``; recovery stays for
+# schema-invalid or ignored tool_choice results.
+FIRST_CYCLE_STRUCTURED_OUTPUT_TOOL_CHOICE: dict[str, dict[str, Any]] = {
+    "any": {}
+}
+_ALLOWED_STOP_REASONS = frozenset(
+    {
+        "end_turn",
+        "tool_use",
+        "max_tokens",
+        "guardrail_intervened",
+        "content_filtered",
+        "stop_sequence",
+        "limit_turns",
+        "limit_output_tokens",
+        "limit_total_tokens",
+    }
+)
+_RECOVERY_CATEGORIES = frozenset(
+    {
+        "end_turn_without_output_tool",
+        "max_tokens",
+        "invalid_or_incomplete_tool",
+        "structured_output_recovery",
+    }
+)
 _BOUNDED_STRUCTURED_OUTPUT_ROLES = frozenset(
     {"fast_chat", "router", "qa", "coaching"}
 )
@@ -197,6 +226,121 @@ _KNOWN_ERROR_CATEGORIES = frozenset(
         "unavailable",
     }
 )
+
+
+def apply_first_cycle_tool_choice(existing: Any, tool_specs: Any) -> Any:
+    """Return the tool_choice for one structured Converse call.
+
+    When Strands has not entered forced mode, ``existing`` is ``None`` and
+    the first cycle would otherwise use voluntary tool use. If tool specs
+    are present, return ``{"any": {}}`` so the model must invoke a tool on
+    that call. Non-empty ``existing`` (recovery forced mode) is left unchanged.
+
+    Args:
+        existing: Current ``InvokeModelContext.tool_choice``.
+        tool_specs: Tool specs already selected for this model call.
+
+    Returns:
+        The existing choice, or the first-cycle ``any`` constraint.
+    """
+    if existing is not None:
+        return existing
+    if not tool_specs:
+        return existing
+    return dict(FIRST_CYCLE_STRUCTURED_OUTPUT_TOOL_CHOICE)
+
+
+def sanitize_stop_reason(value: Any) -> str:
+    """Return a known Converse/Strands stop reason, or empty.
+
+    Args:
+        value: Raw stop_reason from metrics or AfterModelCallEvent.
+
+    Returns:
+        An allow-listed token, or ``""`` when unknown. Never returns
+        student text or exception messages.
+    """
+    cleaned = str(value or "").strip()
+    if cleaned in _ALLOWED_STOP_REASONS:
+        return cleaned
+    return ""
+
+
+def recovery_used_from_cycle_count(cycle_count: int | None) -> bool | None:
+    """Return whether Strands used more than one event-loop cycle.
+
+    Args:
+        cycle_count: ``event_loop_cycle_count`` from AgentResult metrics.
+
+    Returns:
+        ``True`` when count > 1, ``False`` when count is 0 or 1, or
+        ``None`` when metrics are absent.
+    """
+    if cycle_count is None:
+        return None
+    return cycle_count > 1
+
+
+def classify_structured_output_recovery(
+    *,
+    first_cycle_stop_reason: str = "",
+    cycle_count: int | None = None,
+) -> str:
+    """Return a category-only reason when cycle 2 recovery ran.
+
+    Args:
+        first_cycle_stop_reason: Allow-listed stop_reason from cycle 1.
+        cycle_count: Event-loop cycle count when metrics expose it.
+
+    Returns:
+        A stable category, or ``""`` when recovery was not used or cannot
+        be proven from metrics.
+    """
+    if cycle_count is None or cycle_count <= 1:
+        return ""
+    reason = sanitize_stop_reason(first_cycle_stop_reason)
+    if reason == "end_turn":
+        return "end_turn_without_output_tool"
+    if reason == "max_tokens":
+        return "max_tokens"
+    if reason == "tool_use":
+        return "invalid_or_incomplete_tool"
+    return "structured_output_recovery"
+
+
+def stamp_structured_output_telemetry(
+    payload: dict[str, Any],
+    *,
+    cycle_count: int | None,
+    first_cycle_stop_reason: str = "",
+) -> dict[str, Any]:
+    """Copy cycle/recovery flags onto a runtime JSON payload.
+
+    Missing metrics stay omitted. Never writes prompts or student text.
+
+    Args:
+        payload: Mutable specialist JSON about to be returned.
+        cycle_count: Optional event-loop cycle count.
+        first_cycle_stop_reason: Optional cycle-1 stop_reason.
+
+    Returns:
+        The same mapping, updated in place.
+    """
+    if cycle_count is not None:
+        payload["event_loop_cycle_count"] = cycle_count
+    recovery_used = recovery_used_from_cycle_count(cycle_count)
+    if recovery_used is not None:
+        payload["structured_output_recovery_used"] = recovery_used
+    reason = sanitize_stop_reason(first_cycle_stop_reason)
+    if reason:
+        payload["first_cycle_stop_reason"] = reason
+    category = classify_structured_output_recovery(
+        first_cycle_stop_reason=reason,
+        cycle_count=cycle_count,
+    )
+    if category in _RECOVERY_CATEGORIES:
+        payload["structured_output_failure_category"] = category
+    return payload
 
 
 def structured_output_limits_for_role(role: str) -> dict[str, int] | None:
@@ -750,6 +894,7 @@ def log_coach_turn_outcome(
     stage: str = "",
     result: Any = None,
     elapsed_ms: int | None = None,
+    first_cycle_stop_reason: str = "",
 ) -> None:
     """Write a category-only coach_turn diagnostic line.
 
@@ -759,13 +904,23 @@ def log_coach_turn_outcome(
         stage: Topic/stage label from the invoke payload.
         result: Optional AgentResult used only for safe shape flags.
         elapsed_ms: Invoke duration in milliseconds.
+        first_cycle_stop_reason: Allow-listed cycle-1 stop_reason when known.
     """
     shape = inspect_agent_result(result) if result is not None else {}
     event = "coach_turn_output_ok" if ok else "coach_turn_output_invalid"
+    cycle_count = shape.get("event_loop_cycle_count")
+    recovery_used = recovery_used_from_cycle_count(
+        cycle_count if isinstance(cycle_count, int) else None
+    )
+    recovery_category = classify_structured_output_recovery(
+        first_cycle_stop_reason=first_cycle_stop_reason,
+        cycle_count=cycle_count if isinstance(cycle_count, int) else None,
+    )
     logger.info(
         "%s stage=%s structured_output_present=%s message_present=%s "
         "text_blocks=%s tool_blocks=%s stop_reason=%s elapsed_ms=%s "
-        "category=%s event_loop_cycle_count=%s",
+        "category=%s event_loop_cycle_count=%s first_cycle_stop_reason=%s "
+        "structured_output_recovery_used=%s structured_output_failure_category=%s",
         event,
         stage or "unknown",
         str(shape.get("structured_output_present", "")).lower() or "unknown",
@@ -776,6 +931,15 @@ def log_coach_turn_outcome(
         elapsed_ms if elapsed_ms is not None else "unknown",
         category or ("ok" if ok else "structured_output_failure"),
         shape.get("event_loop_cycle_count", "unknown"),
+        sanitize_stop_reason(first_cycle_stop_reason) or "unknown",
+        (
+            "true"
+            if recovery_used is True
+            else "false"
+            if recovery_used is False
+            else "unknown"
+        ),
+        recovery_category or "none",
     )
 
 

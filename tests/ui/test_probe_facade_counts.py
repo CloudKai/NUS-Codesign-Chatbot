@@ -19,10 +19,11 @@ After (inner ``WorkspaceService`` / learning / sync reads, measured
 - initial page load: 16
   (get_preferences 4, get_thread 3, get_messages 2, update_preferences 2,
   list_sources 1, backfill 1, get_pending 1, request 1, list_threads 1)
-- Send / waiting / answer-complete: 8 in the same script run
-  (get_thread 2, plus one each of get_messages, get_preferences,
-  list_sources, backfill, get_pending, request; no forced post-reply rerun
-  on stay-turns; waiting is not a separate Streamlit script run)
+- Send / waiting / answer-complete: 9 in the same script run under AppTest
+  (full-script Send still rebuilds Chat then Journey then Sources; the extra
+  read is Journey refreshing after persist because Chat now runs first.
+  Browser Send uses the composer fragment and skips Journey/Sources before
+  FastAPI. Stay-turns still do not force a post-reply remount.)
 - explicit rerun: 7
   (get_preferences 1, get_thread 1, get_messages 1, list_sources 1,
   backfill 1, get_pending 1, request 1)
@@ -128,7 +129,7 @@ def test_run_scoped_memo_cuts_duplicate_workspace_reads() -> None:
         assert after_load.get("request", 0) <= 1
         assert after_load.get("get_source", 0) == 0
         assert load_total == 16
-        assert send_total == 8
+        assert send_total == 9
         assert after_send.get("get_source", 0) == 0
         assert rerun_total == 7
         assert after_rerun.get("get_messages", 0) <= 2

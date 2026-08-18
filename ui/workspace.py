@@ -6,6 +6,8 @@ rails. Layout helpers live under ``ui.layout``; this module only wires panels.
 
 from __future__ import annotations
 
+import time
+
 import streamlit as st
 
 from ui.chat import render_chat_panel
@@ -17,7 +19,7 @@ from ui.layout.column_resize import (
 )
 from ui.layout.sources_scroll import sync_sources_scroll
 from ui.layout.studio_scroll import sync_studio_scroll
-from ui.runtime import rerun_app
+from ui.runtime import log_ui_timing, rerun_app
 from ui.sources import render_sources_panel
 from ui.studio import render_studio_panel
 
@@ -80,6 +82,19 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
             widths,
             gap=0,
         )
+        # Execute Chat first so a full-script Send (AppTest, ADVANCE remount)
+        # starts FastAPI before Journey/Deep Review work. Browser Send uses
+        # the composer fragment and skips this parent body entirely.
+        with chat_column:
+            with st.container(key="chat_panel"):
+                chat_started = time.perf_counter()
+                render_chat_panel(model_id, reasoning_effort)
+                log_ui_timing(
+                    chat_panel_ms=round(
+                        max(0.0, (time.perf_counter() - chat_started) * 1000.0),
+                        1,
+                    )
+                )
         with studio_column:
             if studio_collapsed:
                 _render_collapsed_rail(
@@ -89,9 +104,14 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                 )
             else:
                 with st.container(key="studio_panel"):
-                    # Render content first so the absolute collapse control cannot
-                    # leave a leading spacer above "Thinking Path".
+                    studio_started = time.perf_counter()
                     render_studio_panel()
+                    log_ui_timing(
+                        studio_ms=round(
+                            max(0.0, (time.perf_counter() - studio_started) * 1000.0),
+                            1,
+                        )
+                    )
                     if st.button(
                         "‹",
                         type="tertiary",
@@ -101,9 +121,6 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                         set_side_panel_collapsed("studio", True)
                         rerun_app()
                     sync_studio_scroll()
-        with chat_column:
-            with st.container(key="chat_panel"):
-                render_chat_panel(model_id, reasoning_effort)
         with source_column:
             if sources_collapsed:
                 _render_collapsed_rail(
@@ -113,8 +130,14 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                 )
             else:
                 with st.container(key="sources_panel"):
-                    # Same order as studio: header content before collapse control.
+                    sources_started = time.perf_counter()
                     render_sources_panel()
+                    log_ui_timing(
+                        sources_ms=round(
+                            max(0.0, (time.perf_counter() - sources_started) * 1000.0),
+                            1,
+                        )
+                    )
                     if st.button(
                         "›",
                         type="tertiary",

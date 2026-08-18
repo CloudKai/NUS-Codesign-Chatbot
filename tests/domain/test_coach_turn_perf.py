@@ -500,6 +500,41 @@ def test_event_loop_cycle_count_is_recorded_when_runtime_sends_it(caplog) -> Non
     assert recorded["agentcore_call_count"] == 1
 
 
+def test_structured_output_recovery_flags_are_recorded(caplog) -> None:
+    """Recovery telemetry is copied when the runtime stamps it. No student text."""
+    caplog.set_level(logging.INFO)
+    payload = _output()
+    payload["event_loop_cycle_count"] = 2
+    payload["structured_output_recovery_used"] = True
+    payload["structured_output_failure_category"] = "end_turn_without_output_tool"
+    payload["first_cycle_stop_reason"] = "end_turn"
+    client = FakeAgentCoreRuntime(payload=payload)
+    provider = AgentCoreCoachProvider(
+        _RUNTIME_ARN,
+        region="us-west-2",
+        qualifier="DEFAULT",
+        timeout_seconds=110.0,
+        max_retries=0,
+        client=client,
+    )
+    provider.assess(
+        CoachRequest(
+            thread_id="thread-demo",
+            student_message="I think option B is better.",
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    )
+    recorded = _perf_event(caplog)
+    assert recorded["structured_output_recovery_used"] is True
+    assert recorded["structured_output_failure_category"] == (
+        "end_turn_without_output_tool"
+    )
+    assert recorded["first_cycle_stop_reason"] == "end_turn"
+    assert recorded["agentcore_call_count"] == 1
+    assert "I think option B" not in json.dumps(recorded)
+
+
 def test_deep_review_runtime_provenance_is_recorded(caplog) -> None:
     caplog.set_level(logging.INFO)
     review_payload = {
@@ -559,6 +594,9 @@ def test_runtime_model_fields_are_on_the_privacy_allow_list() -> None:
     assert "runtime_model_region" in SAFE_PERF_FIELDS
     assert "runtime_strands_agents" in SAFE_PERF_FIELDS
     assert "event_loop_cycle_count" in SAFE_PERF_FIELDS
+    assert "structured_output_recovery_used" in SAFE_PERF_FIELDS
+    assert "structured_output_failure_category" in SAFE_PERF_FIELDS
+    assert "first_cycle_stop_reason" in SAFE_PERF_FIELDS
     assert "request_id" in SAFE_PERF_FIELDS
     assert "submit_notebook_lookup_ms" in SAFE_PERF_FIELDS
     assert "history_source_join_ms" in SAFE_PERF_FIELDS
