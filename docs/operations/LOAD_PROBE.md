@@ -50,16 +50,29 @@ Each printed line is JSON with:
 `scenario`, `users`, `fake_provider_delay_ms`, `fake_kb_delay_ms`, `kb_workers`,
 `requests`, `accepted`, `rate_limited`, `capacity_exhausted`, `failed`,
 `p50_ms`, `p95_ms`, `mean_ms`, `requests_per_sec`, `peak_threads`,
-`peak_kb_admitted`, `peak_kb_worker_threads`.
+`peak_kb_admitted`, `peak_kb_worker_threads`, `rss_peak_kb`,
+`process_max_rss_kb`.
+
+`rss_peak_kb` is kept for compatibility. It is **not** exact per-scenario
+incremental memory: both RSS fields are the process-lifetime maximum RSS
+from `resource.getrusage(RUSAGE_SELF).ru_maxrss` (a high-water mark).
+`process_max_rss_kb` is the same value with a clearer name.
 
 Irrelevant fields are JSON `null`. Aggregate metrics only (no notebook IDs,
 emails, or message text).
 
 The probe uses a temporary SQLite store and the mock coach. It never calls
-AgentCore, Bedrock models, Knowledge Base, DSQL, S3, or Cognito. RPM is raised
+AgentCore, Bedrock models, Knowledge Base, DSQL, S3, or Cognito. CLI bootstrap
+and the runtime mutation path both force `APP_ENV=development` and
+`COURSE_MATERIAL_SYNC_ENABLED=false` (snapshot/restore includes those
+fields even if `backend.settings` was already imported). RPM is raised
 to 10_000 so this measures concurrency architecture, not the production
-`COACH_REQUESTS_PER_MINUTE=8` cap. `SYNC_THREADPOOL_TOKENS` is set to 120 to
-match Compose.
+`COACH_REQUESTS_PER_MINUTE=8` cap. That production cap is **per
+authenticated user**, not a class-wide 8-RPM ceiling. Ninety distinct
+students each sending one request can pass the per-user RPM rule; class
+burst ceilings are global concurrency (`MAX_CONCURRENT_MODEL_CALLS`), the
+AnyIO thread limiter, AgentCore, and Knowledge Base Retrieve capacity.
+`SYNC_THREADPOOL_TOKENS` is set to 120 to match Compose.
 
 Pytest uses tiny delays only. Do not put 5–12 second sleeps on the CI path.
 

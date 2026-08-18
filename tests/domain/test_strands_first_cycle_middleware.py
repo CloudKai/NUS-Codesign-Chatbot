@@ -143,7 +143,12 @@ class RecordingModel(Model):
             yield event
 
 
-def _invoke(model: RecordingModel, *, install: bool) -> Any:
+def _invoke(
+    model: RecordingModel,
+    *,
+    install: bool,
+    cycle_state: dict[str, Any] | None = None,
+) -> Any:
     """Run one Fast Chat structured invoke against the fake model."""
     agent = Agent(
         model=model,
@@ -153,7 +158,12 @@ def _invoke(model: RecordingModel, *, install: bool) -> Any:
         load_tools_from_directory=False,
     )
     if install:
-        assert _install_first_cycle_structured_output(agent, role="fast_chat") is True
+        assert (
+            _install_first_cycle_structured_output(
+                agent, role="fast_chat", cycle_state=cycle_state
+            )
+            is True
+        )
     return asyncio.run(
         agent.invoke_async(
             "Older pedestrians may not have enough time to cross.",
@@ -167,13 +177,16 @@ def _invoke(model: RecordingModel, *, install: bool) -> Any:
 def test_fast_chat_first_model_call_receives_forced_tool_choice() -> None:
     """Valid first-cycle structured output uses tool_choice any and one cycle."""
     model = RecordingModel()
-    result = _invoke(model, install=True)
+    cycle_state: dict[str, Any] = {}
+    result = _invoke(model, install=True, cycle_state=cycle_state)
     assert model.calls, "the fake model was never invoked"
     assert model.calls[0]["tool_choice"] == {"any": {}}
     assert model.calls[0]["tool_count"] == 1
     assert len(model.calls) == 1
     cycles = event_loop_cycle_count_from_agent_result(result)
     assert cycles == 1
+    assert cycle_state["applied"] is True
+    assert cycle_state["decision"] == "applied"
     output = getattr(result, "structured_output", None)
     assert output is not None
     assert output.mode == "coaching"
@@ -182,12 +195,15 @@ def test_fast_chat_first_model_call_receives_forced_tool_choice() -> None:
 def test_invalid_first_cycle_uses_bounded_recovery() -> None:
     """Prose on cycle 1 still recovers once; Fast Chat stays at turns=2."""
     model = RecordingModel(recover_after_prose=True)
-    result = _invoke(model, install=True)
+    cycle_state: dict[str, Any] = {}
+    result = _invoke(model, install=True, cycle_state=cycle_state)
     assert len(model.calls) == 2
     assert model.calls[0]["tool_choice"] == {"any": {}}
     assert model.calls[1]["tool_choice"] == {"any": {}}
     cycles = event_loop_cycle_count_from_agent_result(result)
     assert cycles == 2
+    assert cycle_state["applied"] is True
+    assert cycle_state["decision"] == "applied"
     output = getattr(result, "structured_output", None)
     assert output is not None
     assert FAST_CHAT_INVOKE_LIMITS == {"turns": 2}
@@ -197,10 +213,15 @@ def test_middleware_unavailable_keeps_voluntary_tool_choice() -> None:
     """Missing Strands middleware must not crash; cycle 1 stays voluntary."""
     from types import SimpleNamespace
 
+    cycle_state: dict[str, Any] = {}
     assert (
-        _install_first_cycle_structured_output(SimpleNamespace(), role="fast_chat")
+        _install_first_cycle_structured_output(
+            SimpleNamespace(), role="fast_chat", cycle_state=cycle_state
+        )
         is False
     )
+    assert cycle_state["applied"] is False
+    assert cycle_state["decision"] == "middleware_unavailable"
     model = RecordingModel()
     _invoke(model, install=False)
     assert model.calls[0]["tool_choice"] is None
@@ -220,14 +241,23 @@ def test_deep_review_does_not_install_fast_chat_force() -> None:
     """Sonnet Deep Review must not receive the Fast Chat cycle-1 force."""
     from types import SimpleNamespace
 
+    from agentcore_runtime.structured_coach import stamp_structured_output_telemetry
+
     added: list[object] = []
     agent = SimpleNamespace(
         _middleware_registry=SimpleNamespace(
             add_middleware=lambda *args, **kwargs: added.append((args, kwargs))
         )
     )
-    assert _install_first_cycle_structured_output(agent, role="review_deep") is False
+    cycle_state: dict[str, Any] = {}
+    assert (
+        _install_first_cycle_structured_output(
+            agent, role="review_deep", cycle_state=cycle_state
+        )
+        is False
+    )
     assert added == []
+    assert cycle_state == {}
     model = RecordingModel()
     review_agent = Agent(
         model=model,
@@ -246,3 +276,13 @@ def test_deep_review_does_not_install_fast_chat_force() -> None:
         )
     )
     assert model.calls[0]["tool_choice"] is None
+    payload: dict[str, Any] = {}
+    stamp_structured_output_telemetry(
+        payload,
+        cycle_count=1,
+        first_cycle_tool_choice_installed=None,
+        first_cycle_tool_choice_applied=None,
+        first_cycle_tool_choice_decision=None,
+    )
+    assert "first_cycle_tool_choice_applied" not in payload
+    assert "first_cycle_tool_choice_installed" not in payload

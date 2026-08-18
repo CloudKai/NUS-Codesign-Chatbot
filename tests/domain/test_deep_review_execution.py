@@ -10,6 +10,7 @@ import pytest
 
 from backend.agentcore_provider import AgentCoreCoachProvider
 from backend.application import CoachApplicationService, _coach_request_fingerprint
+from backend.settings import settings
 from backend.domain import (
     CoachRequest,
     DeepReviewJobStatus,
@@ -39,6 +40,15 @@ from fake_agentcore_runtime import FakeAgentCoreRuntime
 _RUNTIME_ARN = (
     "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/test-harness"
 )
+
+
+@pytest.fixture(autouse=True)
+def _pin_deep_review_sonnet(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep snapshot model_id independent of operator .env role leftovers."""
+    monkeypatch.setattr(settings, "review_deep_model_provider", "bedrock")
+    monkeypatch.setattr(
+        settings, "review_deep_model_id", "global.anthropic.claude-sonnet-4-6"
+    )
 
 
 def _assessment() -> EducationalAssessment:

@@ -72,6 +72,7 @@ def _bootstrap_free_local_env() -> None:
     os.environ["OPENAI_API_KEY"] = ""
     os.environ["DATABASE_PROVIDER"] = "sqlite"
     os.environ["FILE_STORAGE_PROVIDER"] = "local"
+    os.environ["COURSE_MATERIAL_SYNC_ENABLED"] = "false"
     os.environ["KNOWLEDGE_BASE_ID"] = ""
     os.environ["AGENTCORE_RUNTIME_ARN"] = ""
     os.environ["APP_DATA_DIR"] = str(bootstrap)
@@ -116,6 +117,8 @@ _COURSE_KEY = "course/lectureNotes/crossing.pdf"
 _COURSE_EXCERPT = "Older adults need longer crossing time at signalized intersections."
 
 _CAPACITY_SETTING_NAMES = (
+    "app_env",
+    "course_material_sync_enabled",
     "model_provider",
     "mock_openai",
     "database_provider",
@@ -221,6 +224,7 @@ class ProbeReport:
             "peak_kb_admitted": self.peak_kb_admitted,
             "peak_kb_worker_threads": self.peak_kb_worker_threads,
             "rss_peak_kb": self.rss_peak_kb,
+            "process_max_rss_kb": self.rss_peak_kb,
             "ownership_violations": self.ownership_violations,
             "structurally_invalid": self.structurally_invalid,
             "unexpected_queueing": self.unexpected_queueing,
@@ -316,7 +320,14 @@ class _FakeSleepRetrieveClient:
 
 
 def _rss_kb() -> int | None:
-    """Return peak RSS in KiB when the platform reports it."""
+    """Return process-lifetime maximum RSS in KiB when the platform reports it.
+
+    ``resource.getrusage(RUSAGE_SELF).ru_maxrss`` is a high-water mark for
+    the whole Python process, not exact per-scenario incremental memory.
+    macOS reports bytes; Linux reports KiB. The JSON field ``rss_peak_kb``
+    is kept for compatibility; ``process_max_rss_kb`` is the same value
+    with a clearer name.
+    """
     try:
         usage = resource.getrusage(resource.RUSAGE_SELF)
     except Exception:
@@ -349,10 +360,16 @@ def _restore_capacity_settings(snapshot: dict[str, Any]) -> None:
 def _force_mock_capacity() -> None:
     """Pin the probe to mock coaching and the intended production ceilings.
 
+    Defense in depth when ``backend.settings`` was already imported before
+    this module: force development and disable course-material sync even if
+    the process previously loaded production-shaped settings.
+
     Knowledge Base id is cleared so ``configured_context_retriever`` cannot
     construct a live bedrock-agent-runtime client. The KB pool scenario
     injects a fake client into the real retriever instead.
     """
+    settings.app_env = "development"
+    settings.course_material_sync_enabled = False
     settings.model_provider = "mock"
     settings.mock_openai = True
     settings.database_provider = "sqlite"
@@ -365,6 +382,10 @@ def _force_mock_capacity() -> None:
     settings.sync_threadpool_tokens = 120
     settings.knowledge_base_id = ""
     reset_coach_rate_limiter_for_tests()
+    if (settings.app_env or "").strip().lower() != "development":
+        raise RuntimeError("load probe refused: app_env is not development")
+    if settings.course_material_sync_enabled:
+        raise RuntimeError("load probe refused: course material sync must stay disabled")
     if settings.model_provider != "mock":
         raise RuntimeError("load probe refused: model provider is not mock")
     if settings.database_provider != "sqlite":

@@ -131,6 +131,8 @@ SAFE_PERF_FIELDS = frozenset(
         "structured_output_failure_category",
         "first_cycle_stop_reason",
         "first_cycle_tool_choice_installed",
+        "first_cycle_tool_choice_applied",
+        "first_cycle_tool_choice_decision",
         "runtime_model_role",
         "runtime_model_provider",
         "runtime_model_id",
@@ -458,6 +460,7 @@ def _log_service_timings(payload: Mapping[str, Any]) -> None:
         "notebook_load_count=%s agentcore_call_count=%s "
         "event_loop_cycle_count=%s structured_output_recovery_used=%s "
         "first_cycle_stop_reason=%s first_cycle_tool_choice_installed=%s "
+        "first_cycle_tool_choice_applied=%s first_cycle_tool_choice_decision=%s "
         "total_backend_ms=%.1f total_server_ms=%.1f",
         request_id,
         float(payload.get("auth_context_ms") or 0.0),
@@ -480,6 +483,8 @@ def _log_service_timings(payload: Mapping[str, Any]) -> None:
         payload.get("structured_output_recovery_used", "-"),
         payload.get("first_cycle_stop_reason", "-"),
         payload.get("first_cycle_tool_choice_installed", "-"),
+        payload.get("first_cycle_tool_choice_applied", "-"),
+        payload.get("first_cycle_tool_choice_decision", "-"),
         float(payload.get("request_total_ms") or 0.0),
         float(payload.get("request_total_ms") or 0.0),
     )

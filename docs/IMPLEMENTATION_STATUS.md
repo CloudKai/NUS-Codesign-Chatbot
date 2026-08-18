@@ -2,38 +2,136 @@
 
 ## CURRENT STATUS
 
-**Branch:** `Integrate-Bedrock-v2`  
-**HEAD:** inspect `git rev-parse HEAD` before operator action. This file is
-updated for the fragment-reconcile / Fast-Chat-scoped first-cycle work on
-top of `bf7bec5`. **Do not assume** this SHA is deployed.
+**Branch:** `Integrate-Bedrock-v2`
+**Committed/pushed HEAD:** `bfb1cbacf9a097ee2ac2e8fc2c80fe68810f586a`
+(`Extend the mock load probe with fake-slow coaching and a fake-client KB pool.`)
+**This phase:** uncommitted worktree on that SHA. **Not published to AgentCore.
+Not deployed to EC2.** Do not treat this worktree as live.
 
-**Do not assume** the live image. Last measured production image in the
-latency investigation was `cde2300-chatbot:4f5953e`. AgentCore DEFAULT remains
-liveVersion **21** until an authorised republish.
+**Query before any operator action:** live AgentCore DEFAULT `liveVersion` and
+the running EC2 image/tag (`org.opencontainers.image.revision` / `APP_GIT_SHA`).
+Do not assume liveVersion **21** or image `cde2300-chatbot:b81a5b0` without a
+live query.
 
-**Live cutover 2026-08-17 (historical):** same AgentCore ARN, version **21** on DEFAULT; EC2 app image `cde2300-chatbot:b81a5b0` was documented then. Re-verify image/tag before any operator action. Compose / host pin `AGENTCORE_SESSION_GENERATION=2`.
+**Prompt cache:** production Compose keeps `FAST_CHAT_PROMPT_CACHE_ENABLED=false`.
+Do not enable for this baseline.
+**Session affinity:** Compose does not set `AGENTCORE_SESSION_AFFINITY_ENABLED`;
+settings default is `false`. Do not enable for this baseline.
 
-**Always-visible Deep Review button:** Review always shows **Start Deep Review**. Locked/unlocked state and the `{n}/{interval}` caption are derived from persisted `coaching_turns_since_deep_review` and `DEEP_REVIEW_INTERVAL_TURNS`. Eligibility remains FastAPI/DSQL (`explicit_deep_review_available`); Streamlit does not keep a second counter. Ineligible `POST /api/v1/threads/{id}/deep-review` still returns 400. The Review spinner follows persisted `deep_review_job` status via a 2s fragment poll, not a Streamlit session flag. This UI/API change is not in the live EC2 image.
+Release order: [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md)
+(SOURCE CODE READY → AGENTCORE PUBLISHED on the **existing** ARN → EC2 IMAGE
+DEPLOYED). Architecture: [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md).
 
-**Divergence vs `main`:** history-only ancestry. `git log --no-merges origin/Integrate-Bedrock..origin/main` is empty, and no file exists on `main` that is missing from this branch. `main`’s extra commits are merge commits of PRs #7–#12. This branch is strictly ahead in content.
+This file’s **CURRENT** sections are the operator runbook. Everything under
+**HISTORICAL INVESTIGATION** is a dated archive and is not current.
 
-This file’s **CURRENT** sections are the operator runbook. Everything under **HISTORICAL INVESTIGATION** is a dated archive and is not current.
+### Release hardening (this worktree): observability + fail-open, not a redesign
 
-Release steps: [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md). Architecture authority: [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md).
+Prepared on `Integrate-Bedrock-v2` on top of `bfb1cba`. **AWS cost $0.** No
+Bedrock model, AgentCore, Knowledge Base, DSQL, S3, or Cognito calls. No
+deploy, no AgentCore publish, no new runtime ARN, no production worker-count
+change. Fast Chat / Deep Review models unchanged. RAG/citation/coaching
+prompts unchanged.
+
+- Fast Chat still: FastAPI → **one** `InvokeAgentRuntime` → `role=fast_chat` →
+  Strands `Agent(tools=[])` → first cycle may force `tool_choice={"any": {}}`
+  → normally one Haiku generation → `turns=2` remains as bounded recovery.
+- **Applied telemetry:** `first_cycle_tool_choice_installed` still means
+  middleware **registered**. New `first_cycle_tool_choice_applied` is true
+  only when cycle 1 actually changed an unset `tool_choice` to `{"any": {}}`.
+  Optional allow-listed `first_cycle_tool_choice_decision`. Omit both applied
+  fields for Deep Review. Never logs tool schemas, prompts, or student text.
+- **Tool identity:** Strands 1.52.0 specs are Converse-shaped dicts whose
+  `name` is the Pydantic class (`FastChatTurnOutput` in prod, test doubles in
+  fake-model tests). No brittle name match. Invariant is `Agent(tools=[])` plus
+  exactly one spec; multiple specs are not forced.
+- **Fail-open:** middleware unavailable → `installed=false`,
+  `applied=false` / `middleware_unavailable`, Fast Chat still proceeds,
+  `turns=2` recovery remains.
+- Deep Review: no first-cycle middleware; `DEEP_REVIEW_INVOKE_LIMITS` still
+  `{"turns": 3}`; Sonnet / job / eligibility / persistence unchanged.
+- Load probe: snapshot/restore now includes `app_env` and
+  `course_material_sync_enabled`; runtime force sets development + sync off.
+  `rss_peak_kb` kept; `process_max_rss_kb` is the same process-lifetime
+  `ru_maxrss` high-water (not per-scenario incremental RSS).
+
+#### Validation (this worktree, $0 AWS)
+
+- `git diff --check` clean; `ruff check .` passed (added
+  `scripts/load_probe.py` E402 per-file ignore for the env-bootstrap import
+  order; that pattern was already required).
+- `compileall` passed (`backend`, `ui`, `streamlit_app.py`, `tests`,
+  `scripts`, `agentcore_runtime`).
+- Companion `.venv` mock pytest: **1369 collected, exit 0** (Strands
+  integration module skipped; companion pytest does not install
+  `strands-agents`).
+- Throwaway venv with `agentcore_runtime/requirements.txt`
+  (`strands-agents==1.52.0`, `bedrock-agentcore==1.21.0`,
+  `pydantic==2.13.4`): diagnostic
+  `check_agentcore_runtime_dependencies.py` printed
+  `agentcore_runtime_dependency_check=ok`; **26 passed**
+  (`test_strands_first_cycle_middleware.py` 5 +
+  `test_first_cycle_structured_output.py` 21).
+- GitHub Actions for this uncommitted worktree: **not independently proven**.
+
+**Next exact action.** Do **not** publish AgentCore or rebuild EC2 until
+authorised. After authorisation follow the checklist: commit/push → CI → new
+version on the **existing** runtime ARN → wait READY → move DEFAULT → bump
+`AGENTCORE_SESSION_GENERATION` → ARM64 image from the **same SHA** → deploy →
+`/api/v1/ready` → small controlled live validation. Measure
+`event_loop_cycle_count`, `first_cycle_tool_choice_installed`,
+`first_cycle_tool_choice_applied`, and `UI TIMING fragment_to_api_ms`.
 
 ### Local $0 capacity validation (mock/fake only)
 
-Prepared on `Integrate-Bedrock-v2` at HEAD `e556ad76a6a335495031838b422ba0dbddb5cc6b` with an uncommitted script/test/docs worktree. **AWS cost $0.** No Bedrock model, AgentCore, Knowledge Base, DSQL, S3, or Cognito calls. No deploy, no AgentCore publish, no production worker-count change.
+Load-probe work **is committed and pushed** at
+`bfb1cbacf9a097ee2ac2e8fc2c80fe68810f586a`. This worktree only hardens
+snapshot/restore, RSS naming, and operator docs. **AWS cost $0.** No Bedrock
+model, AgentCore, Knowledge Base, DSQL, S3, or Cognito calls. No deploy, no
+AgentCore publish, no production worker-count change.
 
-Extended [`../scripts/load_probe.py`](../scripts/load_probe.py): fake-slow `DeterministicCoachProvider.assess` (restored on exit), real `BedrockKnowledgeBaseRetriever` with only `client.retrieve` faked, thread/RSS sampler, JSON capacity rows. Pytest uses tiny delays. Operator matrix: [`operations/LOAD_PROBE.md`](operations/LOAD_PROBE.md).
+[`../scripts/load_probe.py`](../scripts/load_probe.py): fake-slow
+`DeterministicCoachProvider.assess` (restored on exit), real
+`BedrockKnowledgeBaseRetriever` with only `client.retrieve` faked, thread/RSS
+sampler, JSON capacity rows. Pytest uses tiny delays. Operator matrix:
+[`operations/LOAD_PROBE.md`](operations/LOAD_PROBE.md).
 
-**What this proves:** FastAPI + owner isolation + notebook/user/global caps + SQLite persist can accept 120 concurrent mock turns and 90 concurrent 10s fake-slow turns with 0 unexpected 429s, 0 ownership leaks, 1-call idempotency replay, and no partial assistant turns. The Retrieve pool fail-closes at `workers` (default 4): 90 concurrent fake Retrieves → 4 ok + 86 `capacity_exhausted`, no queueing, slots recover, foreign-bucket hits return no evidence.
+The probe raises RPM to 10_000 so it is **not** testing production
+`COACH_REQUESTS_PER_MINUTE=8`. That cap is **per authenticated user**, not a
+class-wide 8-RPM ceiling. Ninety distinct students each sending one request
+can pass the per-user RPM rule; class burst ceilings are global concurrency
+(`MAX_CONCURRENT_MODEL_CALLS`), the AnyIO thread limiter, AgentCore, and KB
+Retrieve capacity.
 
-**What this does not prove:** AgentCore/Haiku P95, live KB Retrieve, DSQL OCC, Cognito, Uvicorn-on-ARM64-2GB, or EC2 class capacity. Mock/fake-sleep latency is not model latency. Docker 2 CPU / 2 GB envelope was **not run** (Docker engine unavailable on this host).
+**What this proves:** FastAPI + owner isolation + notebook/user/global caps +
+SQLite persist can accept 120 concurrent mock turns and 90 concurrent 10s
+fake-slow turns with 0 unexpected 429s, 0 ownership leaks, 1-call
+idempotency replay, and no partial assistant turns. The Retrieve pool
+fail-closes at `workers` (default 4): 90 concurrent fake Retrieves → 4 ok +
+86 `capacity_exhausted`, no queueing, slots recover, foreign-bucket hits
+return no evidence.
 
-**Do not raise** `KNOWLEDGE_BASE_RETRIEVE_EXECUTOR_WORKERS` from 4 on this evidence. Per-request `ThreadPoolExecutor(max_workers=2)` stays (option A); 90×10s peaked ~431 Python threads / ~258 MiB RSS locally, not proven harmful.
+**What this does not prove:** AgentCore/Haiku P95, live KB Retrieve, DSQL OCC,
+Cognito, Uvicorn-on-ARM64-2GB, or EC2 class capacity. Mock/fake-sleep latency
+is not model latency. Docker 2 CPU / 2 GB envelope was **not run** (Docker
+engine unavailable on this host).
 
-**Next exact live AWS action (operator-approved only):** staged 2 → 5 → 10 → 25 real students on the deployed image/runtime. Count live `capacity_exhausted`, AgentCore P95, DSQL errors, and RSS. Do not open 90 live students from this mock probe.
+**Do not raise** `KNOWLEDGE_BASE_RETRIEVE_EXECUTOR_WORKERS` from 4 on this
+evidence. Per-request `ThreadPoolExecutor(max_workers=2)` stays (option A);
+90×10s peaked ~431 Python threads / ~258 MiB process-lifetime RSS locally,
+not proven harmful.
+
+**Next exact live AWS action (operator-approved only):** staged 2 → 5 → 10 →
+25 real students on the deployed image/runtime. Count live
+`capacity_exhausted`, AgentCore P95, DSQL errors, and RSS. Do not open 90
+live students from this mock probe.
+
+**Always-visible Deep Review button:** Review always shows **Start Deep Review**. Locked/unlocked state and the `{n}/{interval}` caption are derived from persisted `coaching_turns_since_deep_review` and `DEEP_REVIEW_INTERVAL_TURNS`. Eligibility remains FastAPI/DSQL (`explicit_deep_review_available`); Streamlit does not keep a second counter. Ineligible `POST /api/v1/threads/{id}/deep-review` still returns 400. The Review spinner follows persisted `deep_review_job` status via a 2s fragment poll, not a Streamlit session flag. This UI/API change is not assumed to be in the live EC2 image.
+
+**Divergence vs `main`:** history-only ancestry. `git log --no-merges origin/Integrate-Bedrock..origin/main` is empty, and no file exists on `main` that is missing from this branch. `main`’s extra commits are merge commits of PRs #7–#12. This branch is strictly ahead in content.
+
+**Last documented live cutover (2026-08-17, historical):** same AgentCore ARN, version **21** on DEFAULT; EC2 app image `cde2300-chatbot:b81a5b0`. Compose / host pin `AGENTCORE_SESSION_GENERATION=2`. **Re-query before release.**
+
 
 
 
@@ -53,6 +151,9 @@ caps are unchanged.
 - Runtime: first-cycle `tool_choice={"any": {}}` is Fast Chat only. Deep
   Review is not modified. Unexpected multiple tool specs are not forced.
   `first_cycle_tool_choice_installed` is stamped true/false. `turns=2` kept.
+  Applied telemetry (`first_cycle_tool_choice_applied` / allow-listed
+  decision) is in the later uncommitted hardening worktree, not in this
+  fragment SHA.
 - Observability: `fragment_to_api_ms` from fragment start to HTTP; runtime
   flag copied onto `coach_turn_perf`.
 - Tests: Strands fake-model integration (skipped without strands); A–T
@@ -179,23 +280,37 @@ opens grouped weekly pip / actions / docker PRs.
 
 CI is **mock-only**. It does not prove live AgentCore, Bedrock Converse, Knowledge Base `Retrieve`, DSQL, S3, Cognito, or CloudFront. Passing mock pytest is not a production smoke.
 
-A capped isolated Fast Chat invoke (`student_message=testing`, no DSQL write) on DEFAULT **v21** was run in this session. Deep Review, Cognito login, and RAG were not re-run here.
+This hardening worktree did not invoke AWS. A capped isolated Fast Chat invoke (`student_message=testing`, no DSQL write) on DEFAULT **v21** was historical (prior session). Deep Review, Cognito login, and RAG were not re-run here.
 
 ### Deployment impact of this tip
 
-`b81a5b0` **is** the live EC2 app image (`cde2300-chatbot:b81a5b0`, label/revision `b81a5b09ce622889f60fdcd743c23d7845eb9ee8`, healthy). Host `.env` has `AGENTCORE_SESSION_GENERATION=2`. Rollback image `cde2300-chatbot:2386d65` remains on the host.
+This worktree is **not live**. Query AgentCore DEFAULT `liveVersion` and the
+running EC2 image before any cutover. Last documented live app image was
+`cde2300-chatbot:b81a5b0` (label/revision `b81a5b09ce622889f60fdcd743c23d7845eb9ee8`)
+with host `AGENTCORE_SESSION_GENERATION=2` and rollback image
+`cde2300-chatbot:2386d65`. Those facts can be stale.
 
-- **EC2 / container:** already rebuilt. Recreate only if the host image/revision no longer matches this SHA. Do not use `latest`.
-- **AgentCore:** DEFAULT liveVersion **21** READY on the same ARN `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. Artifact `s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-fast-chat-slim-v21-20260817T125807Z.zip`. Env copied from v20 (Haiku 4.5 Fast Chat, Sonnet 4.6 Deep Review, Guardrail v3). Isolated `"testing"` invoke: `schema_id=fast_chat_turn_v1`, `event_loop_cycle_count=1`, no `assessment` / Facione / `research_coding` on the wire. Rollback: pin `AGENTCORE_QUALIFIER=20` **and** bump session generation again, or `update-agent-runtime-endpoint` DEFAULT → 20, then recreate FastAPI.
-- **Console:** no new Cognito callback, bucket, or Guardrail version (stay on version **3** on both FastAPI Compose and the runtime).
-- **DSQL:** no new DDL in this SHA beyond the additive revision/idempotency schema already owned by `scripts/init_dsql.py`. Confirm the cluster already has those columns. Never run `init_dsql.py` at app startup or as `co_design_app`.
-- **S3:** no new bucket. User objects under `users/`; course objects under `course/` only.
+- **EC2 / container:** rebuild from the **same git SHA** as the authorised
+  source after CI. Do not use `latest`. Do not assume the current host image
+  matches this worktree.
+- **AgentCore:** publish a **new version** to the **existing** runtime ARN
+  (`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` is the last documented
+  id; confirm on the host). Wait until READY, then move DEFAULT. Do **not**
+  create a new runtime ARN. Isolated `"testing"` invoke on last documented
+  DEFAULT **v21** is historical, not this worktree.
+- **Console:** no new Cognito callback, bucket, or Guardrail version (stay on
+  version **3** on both FastAPI Compose and the runtime).
+- **DSQL:** no new DDL in this worktree. Confirm the cluster already has
+  revision/idempotency columns. Never run `init_dsql.py` at app startup or as
+  `co_design_app`.
+- **S3:** no new bucket. User objects under `users/`; course objects under
+  `course/` only.
 
 ## CURRENT ARCHITECTURE
 
 Authoritative layering remains [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md). Production generation is AgentCore; FastAPI still owns identity, RAG authorization, transcript, and stage mutation.
 
-**Fast Chat.** One AgentCore invoke per normal student turn. Haiku returns slim `FastChatTurnOutput`: `mode` (`coaching` \| `qa`), `response_text`, optional stay/advance `recommendation`, citations, `needs_source_retrieval`. No per-turn router, incremental review, or automatic Sonnet. Fast Chat cycle 1 sets `tool_choice={"any": {}}` via Strands 1.52.0 `InvokeModelStage.Input` when exactly one structured-output tool is present. Deep Review is not modified by that force. Event-loop recovery inside that one Fast Chat invoke remains capped at `FAST_CHAT_INVOKE_LIMITS={"turns": 2}`. Do not set `turns=1` while first-cycle output can fail. `first_cycle_tool_choice_installed` is true only when the middleware registered.
+**Fast Chat.** One AgentCore invoke per normal student turn. Haiku returns slim `FastChatTurnOutput`: `mode` (`coaching` \| `qa`), `response_text`, optional stay/advance `recommendation`, citations, `needs_source_retrieval`. No per-turn router, incremental review, or automatic Sonnet. Fast Chat cycle 1 sets `tool_choice={"any": {}}` via Strands 1.52.0 `InvokeModelStage.Input` when exactly one structured-output tool is present. Deep Review is not modified by that force. Event-loop recovery inside that one Fast Chat invoke remains capped at `FAST_CHAT_INVOKE_LIMITS={"turns": 2}`. Do not set `turns=1` while first-cycle output can fail. `first_cycle_tool_choice_installed` is true only when the middleware registered. `first_cycle_tool_choice_applied` is true only when cycle 1 actually changed an unset `tool_choice` to `{"any": {}}`. Omit applied/installed for Deep Review.
 
 **Deep Review.** Separate HTTP route `POST /api/v1/threads/{thread_id}/deep-review`. Server-owned eligibility, Sonnet 4.6, counter, snapshot, idempotency. Event-loop cap `{"turns": 3}`. Not on `/coach/turn`.
 

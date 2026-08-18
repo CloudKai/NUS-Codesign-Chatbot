@@ -252,6 +252,8 @@ def _check_runtime_contracts() -> None:
         _fail("FIRST_CYCLE_STRUCTURED_OUTPUT_TOOL_CHOICE is not {any: {}}")
     if "apply_first_cycle_tool_choice" not in dir(structured_coach):
         _fail("apply_first_cycle_tool_choice is missing")
+    if "record_first_cycle_apply" not in dir(structured_coach):
+        _fail("record_first_cycle_apply is missing")
     invoke = main_text.split("async def _structured_role_invoke", 1)[1].split(
         "async def specialist_invoke", 1
     )[0]
@@ -259,11 +261,18 @@ def _check_runtime_contracts() -> None:
         _fail("main.py does not install first-cycle structured-output middleware")
     if "role=role" not in invoke:
         _fail("first-cycle middleware is not scoped to the invoke role")
+    if '"tools": []' not in invoke:
+        _fail("Fast Chat Agent construction must pass tools=[]")
     if getattr(structured_coach, "FIRST_CYCLE_FORCE_ROLES", None) != frozenset(
         {"fast_chat"}
     ):
         _fail("FIRST_CYCLE_FORCE_ROLES is not fast_chat-only")
     from inspect import getsource
+
+    if "first_cycle_tool_choice_applied" not in getsource(
+        structured_coach.stamp_structured_output_telemetry
+    ):
+        _fail("stamp_structured_output_telemetry omits first_cycle_tool_choice_applied")
 
     from strands._middleware.stages import InvokeModelContext, InvokeModelStage
     from strands.tools.structured_output._structured_output_context import (

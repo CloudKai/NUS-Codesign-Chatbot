@@ -8,3 +8,7 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.ruff.lint.per-file-ignores]
+# Env bootstrap must run before backend.settings is imported.
+"scripts/load_probe.py" = ["E402"]

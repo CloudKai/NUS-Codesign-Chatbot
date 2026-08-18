@@ -45,6 +45,8 @@ _REQUIRED_KEYS = (
     "peak_threads",
     "peak_kb_admitted",
     "peak_kb_worker_threads",
+    "rss_peak_kb",
+    "process_max_rss_kb",
 )
 
 
@@ -169,3 +171,30 @@ def test_kb_fail_closed_drops_foreign_bucket():
     assert report.failed == 0
     assert report.capacity_exhausted == 0
     _assert_privacy(report.as_dict())
+
+
+def test_force_mock_capacity_snapshots_app_env_and_disables_sync(monkeypatch):
+    """Already-imported production-shaped settings must still be forced local."""
+    from backend.settings import settings
+
+    monkeypatch.setattr(settings, "app_env", "production")
+    monkeypatch.setattr(settings, "course_material_sync_enabled", True)
+    snapshot = _PROBE._snapshot_capacity_settings()
+    assert snapshot["app_env"] == "production"
+    assert snapshot["course_material_sync_enabled"] is True
+    try:
+        _PROBE._force_mock_capacity()
+        assert settings.app_env == "development"
+        assert settings.course_material_sync_enabled is False
+        assert settings.model_provider == "mock"
+        assert settings.knowledge_base_id == ""
+    finally:
+        _PROBE._restore_capacity_settings(snapshot)
+
+
+def test_rss_fields_are_process_lifetime_high_water():
+    report = run_sequential_probe(users=2, requests_per_user=1)
+    payload = report.as_dict()
+    assert "rss_peak_kb" in payload
+    assert "process_max_rss_kb" in payload
+    assert payload["rss_peak_kb"] == payload["process_max_rss_kb"]

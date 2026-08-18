@@ -511,6 +511,8 @@ def test_structured_output_recovery_flags_are_recorded(caplog) -> None:
     payload["structured_output_failure_category"] = "end_turn_without_output_tool"
     payload["first_cycle_stop_reason"] = "end_turn"
     payload["first_cycle_tool_choice_installed"] = True
+    payload["first_cycle_tool_choice_applied"] = True
+    payload["first_cycle_tool_choice_decision"] = "applied"
     client = FakeAgentCoreRuntime(payload=payload)
     provider = AgentCoreCoachProvider(
         _RUNTIME_ARN,
@@ -535,6 +537,8 @@ def test_structured_output_recovery_flags_are_recorded(caplog) -> None:
     )
     assert recorded["first_cycle_stop_reason"] == "end_turn"
     assert recorded["first_cycle_tool_choice_installed"] is True
+    assert recorded["first_cycle_tool_choice_applied"] is True
+    assert recorded["first_cycle_tool_choice_decision"] == "applied"
     assert recorded["agentcore_call_count"] == 1
     assert "I think option B" not in json.dumps(recorded)
 
@@ -587,6 +591,9 @@ def test_deep_review_runtime_provenance_is_recorded(caplog) -> None:
     assert recorded["runtime_model_role"] == "review_deep"
     assert recorded["runtime_model_id"] == "global.anthropic.claude-sonnet-4-6"
     assert recorded["runtime_model_provider"] == "bedrock"
+    assert "first_cycle_tool_choice_installed" not in recorded
+    assert "first_cycle_tool_choice_applied" not in recorded
+    assert "first_cycle_tool_choice_decision" not in recorded
     blob = json.dumps(recorded)
     assert "I think option B" not in blob
 
@@ -602,6 +609,8 @@ def test_runtime_model_fields_are_on_the_privacy_allow_list() -> None:
     assert "structured_output_failure_category" in SAFE_PERF_FIELDS
     assert "first_cycle_stop_reason" in SAFE_PERF_FIELDS
     assert "first_cycle_tool_choice_installed" in SAFE_PERF_FIELDS
+    assert "first_cycle_tool_choice_applied" in SAFE_PERF_FIELDS
+    assert "first_cycle_tool_choice_decision" in SAFE_PERF_FIELDS
     assert "request_id" in SAFE_PERF_FIELDS
     assert "submit_notebook_lookup_ms" in SAFE_PERF_FIELDS
     assert "history_source_join_ms" in SAFE_PERF_FIELDS

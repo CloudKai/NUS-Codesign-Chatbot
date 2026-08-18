@@ -104,6 +104,13 @@ _FIRST_CYCLE_DECISION_CATEGORIES = frozenset(
         "role_not_fast_chat",
     }
 )
+_FIRST_CYCLE_TELEMETRY_CATEGORIES = frozenset(
+    {
+        *_FIRST_CYCLE_DECISION_CATEGORIES,
+        "middleware_unavailable",
+        "apply_failed",
+    }
+)
 _ALLOWED_STOP_REASONS = frozenset(
     {
         "end_turn",
@@ -247,9 +254,16 @@ def first_cycle_tool_choice_decision(
 ) -> tuple[Any, str]:
     """Decide whether cycle 1 may force structured-output tool use.
 
-    ``{"any": {}}`` is safe only when exactly one tool spec is present
-    (the structured-output tool on a tools-free Fast Chat Agent). Multiple
-    unexpected specs must not be forced; recovery ``turns=2`` still applies.
+    ``{"any": {}}`` is safe only when exactly one tool spec is present.
+    Fast Chat constructs ``Agent(tools=[])``, so that sole spec is the
+    framework-generated structured-output tool. Strands 1.52.0 exposes
+    Converse-shaped dicts with a ``name`` field, but that name is the
+    Pydantic class (``FastChatTurnOutput`` in production, a test double
+    in fake-model tests). Matching a guessed private identifier would
+    be brittle, so this helper does not string-match tool names.
+
+    Multiple unexpected specs must not be forced; recovery ``turns=2``
+    still applies.
 
     Args:
         existing: Current ``InvokeModelContext.tool_choice``.
@@ -303,6 +317,48 @@ def apply_first_cycle_tool_choice(
     if category not in _FIRST_CYCLE_DECISION_CATEGORIES:
         return existing
     return choice
+
+
+def sanitize_first_cycle_decision(value: Any) -> str:
+    """Return an allow-listed first-cycle decision token, or empty.
+
+    Args:
+        value: Candidate category from middleware or stamp callers.
+
+    Returns:
+        One of the telemetry categories, or ``""`` when unknown. Never
+        returns student text, tool schemas, or exception messages.
+    """
+    cleaned = str(value or "").strip()
+    if cleaned in _FIRST_CYCLE_TELEMETRY_CATEGORIES:
+        return cleaned
+    return ""
+
+
+def record_first_cycle_apply(
+    state: dict[str, Any] | None,
+    *,
+    category: str,
+    applied: bool,
+) -> None:
+    """Store the first InvokeModel cycle decision only.
+
+    Later cycles (recovery ``turns=2``) must not overwrite cycle-1
+    telemetry. ``applied`` is true only when this cycle changed an unset
+    ``tool_choice`` to ``{"any": {}}``.
+
+    Args:
+        state: Mutable Fast Chat telemetry sink, or ``None``.
+        category: Allow-listed decision token.
+        applied: Whether forcing was applied on this cycle.
+    """
+    if state is None or state.get("decision") is not None:
+        return
+    cleaned = sanitize_first_cycle_decision(category)
+    if not cleaned:
+        return
+    state["decision"] = cleaned
+    state["applied"] = bool(applied)
 
 
 def sanitize_stop_reason(value: Any) -> str:
@@ -369,10 +425,16 @@ def stamp_structured_output_telemetry(
     cycle_count: int | None,
     first_cycle_stop_reason: str = "",
     first_cycle_tool_choice_installed: bool | None = None,
+    first_cycle_tool_choice_applied: bool | None = None,
+    first_cycle_tool_choice_decision: str | None = None,
 ) -> dict[str, Any]:
     """Copy cycle/recovery flags onto a runtime JSON payload.
 
     Missing metrics stay omitted. Never writes prompts or student text.
+    ``first_cycle_tool_choice_installed`` is middleware registration.
+    ``first_cycle_tool_choice_applied`` is true only when the first
+    InvokeModel cycle actually changed an unset ``tool_choice`` to
+    ``{"any": {}}``. Omit both for Deep Review.
 
     Args:
         payload: Mutable specialist JSON about to be returned.
@@ -380,6 +442,10 @@ def stamp_structured_output_telemetry(
         first_cycle_stop_reason: Optional cycle-1 stop_reason.
         first_cycle_tool_choice_installed: Whether Fast Chat middleware
             registered on this invoke. ``None`` omits the field.
+        first_cycle_tool_choice_applied: Whether cycle 1 applied forcing.
+            ``None`` omits the field.
+        first_cycle_tool_choice_decision: Allow-listed cycle-1 category.
+            Unknown values are dropped.
 
     Returns:
         The same mapping, updated in place.
@@ -402,6 +468,13 @@ def stamp_structured_output_telemetry(
         payload["first_cycle_tool_choice_installed"] = bool(
             first_cycle_tool_choice_installed
         )
+    if first_cycle_tool_choice_applied is not None:
+        payload["first_cycle_tool_choice_applied"] = bool(
+            first_cycle_tool_choice_applied
+        )
+    decision = sanitize_first_cycle_decision(first_cycle_tool_choice_decision)
+    if decision:
+        payload["first_cycle_tool_choice_decision"] = decision
     return payload
 
 

@@ -13,6 +13,39 @@ Month-1 production (`compose.prod.yaml`) keeps `AUTO_ADVANCE_STAGES=true` and
 
 ---
 
+## Ordered cutover (this release)
+
+Source-ready does **not** mean AgentCore is serving the new code. AgentCore
+READY does **not** mean the EC2 image is new. Keep these gates separate.
+
+### SOURCE CODE READY
+
+1. Commit/push the intended SHA on `Integrate-Bedrock-v2`.
+2. Confirm mock CI (`mock-suite` and `agentcore-runtime-compatibility`).
+
+### AGENTCORE PUBLISHED (existing ARN only)
+
+3. Publish a **new version** to the **existing** AgentCore runtime ARN.
+   Do **not** create a new runtime ARN.
+4. Wait until that new runtime version is **READY**.
+5. Move the **DEFAULT** qualifier only after READY.
+6. Increase `AGENTCORE_SESSION_GENERATION` in host `.env` so warm microVMs
+   cannot keep the previous assets.
+
+### EC2 IMAGE DEPLOYED
+
+7. Build an immutable ARM64 EC2 app image from the **same git SHA**.
+8. Deploy that image (`APP_IMAGE` immutable tag; never `:latest`).
+9. Confirm host-local `/api/v1/ready` (Caddy must **not** expose `/ready`
+   publicly).
+10. Run a small controlled live validation.
+
+Intended order is 1 → 10. Do not skip the READY wait. Do not move DEFAULT
+onto a non-READY version. Prompt cache and session affinity stay **off**
+unless a later authorised phase enables them.
+
+---
+
 ## 1. Git SHA being released
 
 | | |
@@ -34,7 +67,7 @@ Month-1 production (`compose.prod.yaml`) keeps `AUTO_ADVANCE_STAGES=true` and
 | | |
 |---|---|
 | **How** | AWS console: Bedrock AgentCore → this environment’s runtime (ARN from host `.env`) → **DEFAULT** endpoint. CLI used in prior publishes: control-plane `get-agent-runtime` / DEFAULT endpoint for the runtime id parsed from `AGENTCORE_RUNTIME_ARN` (do not paste ARNs into tickets). |
-| **Expected** | Qualifier `DEFAULT`; currently liveVersion **21** (slim `fast_chat`) unless this release includes an authorised republish. FastAPI Compose: `MODEL_PROVIDER=agentcore`, `AGENTCORE_QUALIFIER=DEFAULT`. |
+| **Expected** | Qualifier `DEFAULT`. Query the current liveVersion before this release; last documented value was **21** (slim `fast_chat`) and must not be assumed. This release publishes a **new version on the existing ARN**, waits until READY, then moves DEFAULT. FastAPI Compose: `MODEL_PROVIDER=agentcore`, `AGENTCORE_QUALIFIER=DEFAULT`. |
 | **Pass** | Endpoint **READY**; DEFAULT liveVersion is the version you intend to serve. FastAPI host env qualifier is `DEFAULT`. |
 
 ## 4. `AGENTCORE_SESSION_GENERATION` (required on republish)
@@ -148,3 +181,5 @@ Container logs (json-file → CloudWatch or the host sink). No student text.
 - Copy course objects into `users/`.
 - Flip Month-1 `AUTO_ADVANCE_STAGES` / `STUDENT_STAGE_SELECTION` as a “bugfix”.
 - Republish AgentCore without changing `AGENTCORE_SESSION_GENERATION` and recreating FastAPI.
+- Create a **new** AgentCore runtime ARN (publish a new version on the existing ARN).
+- Enable `FAST_CHAT_PROMPT_CACHE_ENABLED` or `AGENTCORE_SESSION_AFFINITY_ENABLED` on this baseline.

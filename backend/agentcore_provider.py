@@ -831,6 +831,22 @@ def _record_runtime_cache_metrics(payload: dict[str, Any]) -> None:
             "first_cycle_tool_choice_installed",
             bool(payload.get("first_cycle_tool_choice_installed")),
         )
+    if "first_cycle_tool_choice_applied" in payload:
+        record_field(
+            "first_cycle_tool_choice_applied",
+            bool(payload.get("first_cycle_tool_choice_applied")),
+        )
+    applied_decision = payload.get("first_cycle_tool_choice_decision")
+    if isinstance(applied_decision, str) and applied_decision.strip() in {
+        "applied",
+        "existing_choice",
+        "no_tools",
+        "unexpected_tool_count",
+        "role_not_fast_chat",
+        "middleware_unavailable",
+        "apply_failed",
+    }:
+        record_field("first_cycle_tool_choice_decision", applied_decision.strip())
     for source, dest in (
         ("inputTokens", "model_input_tokens"),
         ("outputTokens", "model_output_tokens"),
