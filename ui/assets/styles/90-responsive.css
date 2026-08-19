@@ -1,6 +1,6 @@
     @media (max-width:1050px) {
         .block-container {
-            padding:0 .7rem .7rem;
+            padding:0 .7rem 0;
             background:var(--cd-bg);
         }
 
@@ -229,8 +229,16 @@
             height:100% !important;
             min-height:0 !important;
             max-height:100% !important;
-            padding:1.2rem 1rem 1rem;
+            padding:1.2rem 1rem calc(.45rem + 10px);
             border:0;
+        }
+
+        .st-key-studio_panel,
+        .st-key-sources_panel {
+            overflow:hidden !important;
+        }
+
+        .st-key-chat_panel {
             overflow:hidden !important;
         }
 
@@ -239,12 +247,12 @@
         }
 
         .st-key-chat_composer [data-testid="stChatInput"] {
-            min-height:4.15rem !important;
+            min-height:5.15rem !important;
             max-height:none !important;
         }
 
         .st-key-chat_composer [data-testid="stChatInput"] > div {
-            min-height:4.15rem !important;
+            min-height:5.15rem !important;
             padding:.5rem .7rem .4rem !important;
         }
 
@@ -264,7 +272,7 @@
         .st-key-chat_composer [data-testid="stChatInputTextArea"] {
             width:100% !important;
             max-width:100% !important;
-            min-height:calc(1em * 1.45) !important;
+            min-height:calc(1em * 1.45 * 2) !important;
             max-height:calc(1em * 1.45 * 5) !important;
             field-sizing:content;
             padding:.2rem 0 .3rem !important;
@@ -280,7 +288,7 @@
 
     @media (max-width:520px) {
         .block-container {
-            padding:0 .55rem .55rem;
+            padding:0 .55rem 0;
         }
 
         .st-key-notebook_topbar {
@@ -318,7 +326,7 @@
         .st-key-studio_panel,
         .st-key-chat_panel,
         .st-key-sources_panel {
-            padding:1rem .8rem .8rem;
+            padding:1rem .8rem calc(.45rem + 10px);
         }
 
         [class*="st-key-journey_stage_"]:has(.journey-state.current) {

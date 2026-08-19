@@ -7,6 +7,9 @@ the store), sync appearance, apply theme tokens, and render the top bar
 and three-column workspace. Unauthenticated visitors see only a static shell
 plus the login dialog. Prefer ``sh scripts/start.sh`` so the local API is
 running.
+
+Chat transcript scrolling is owned by ``.st-key-chat_panel`` and
+``ui.layout.chat_scroll``; do not restore per-log overflow scrolling.
 """
 
 from __future__ import annotations

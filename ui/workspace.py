@@ -10,7 +10,8 @@ import time
 
 import streamlit as st
 
-from ui.chat import render_chat_panel
+from ui.panels.chat import render_chat_panel
+from ui.layout.chat_scroll import sync_chat_scroll
 from ui.layout.column_resize import (
     effective_column_widths,
     set_side_panel_collapsed,
@@ -95,6 +96,7 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                         1,
                     )
                 )
+                sync_chat_scroll(mode="reconcile")
         with studio_column:
             if studio_collapsed:
                 _render_collapsed_rail(

@@ -1,4 +1,8 @@
-"""Backward-compatible alias for :mod:`ui.panels.chat`."""
+"""Backward-compatible alias for :mod:`ui.panels.chat`.
+
+Streamlit watches this shim file; keep it so panel edits remount. Chat
+scroll policy lives in ``ui.layout.chat_scroll`` and ``ui.panels.chat``.
+"""
 
 import sys
 

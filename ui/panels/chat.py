@@ -1,4 +1,9 @@
-"""Discussion panel, message rendering, and composer handling."""
+"""Discussion panel, message rendering, and composer handling.
+
+Chat scrolling is owned by ``.st-key-chat_panel`` plus
+``ui.layout.chat_scroll.sync_chat_scroll``; do not write completed turns
+into ``chat_log`` from the composer fragment.
+"""
 
 from __future__ import annotations
 
@@ -32,6 +37,7 @@ from backend.student_journey import (
 
 from ui.coach_welcome import COACH_WELCOME_KIND, seed_coach_welcome
 from ui.constants import DEFAULT_APPEARANCE
+from ui.layout.chat_scroll import sync_chat_scroll
 from ui.layout.composer_layout import sync_composer_layout
 from ui.layout.user_message_edit_layout import (
     USER_MESSAGE_EDIT_HEIGHT_PX,
@@ -92,6 +98,28 @@ def student_coach_error_message(category: str = "", *, status: Any = None) -> st
     if normalized == "timeout":
         return "The coach took too long to reply. Try again."
     return "Coaching is temporarily unavailable. Try again in a moment."
+
+
+_INFLIGHT_ERROR_CAPTION = (
+    "Reload once before resubmitting; the completed turn may already be present."
+)
+
+
+def _render_inflight_error(title: str) -> None:
+    """Render a compact turn-failure row without a full-width alert card.
+
+    Args:
+        title: Student-safe message from ``student_coach_error_message``.
+    """
+    escaped_title = html.escape(title)
+    escaped_caption = html.escape(_INFLIGHT_ERROR_CAPTION)
+    st.markdown(
+        '<div class="cd-inflight-error" role="alert">'
+        f'<p class="cd-inflight-error-title">{escaped_title}</p>'
+        f'<p class="cd-inflight-error-caption">{escaped_caption}</p>'
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def render_media(raw_paths: list[str]) -> None:
@@ -652,6 +680,7 @@ def handle_prompt(
         with target:
             if existing_user_message_id is None:
                 _render_inflight_user_prompt(prompt, uploads)
+            sync_chat_scroll(mode="send")
             if uploads:
                 try:
                     store.upload_sources(
@@ -672,6 +701,7 @@ def handle_prompt(
                     # Avoid surfacing raw exception text (paths, internals) in the UI.
                     st.error("The attachment could not be added, so no message was sent.")
                     st.caption("Remove or replace the attachment and try again.")
+                    sync_chat_scroll(mode="settle")
                     return
                 # Drop the pre-upload source memo before persist. The later
                 # remount reloads Sources from the post-upload catalog.
@@ -793,24 +823,18 @@ def handle_prompt(
                     thinking.update(label="Coaching failed", state="error")
                 except Exception:
                     pass
-                st.error(
+                _render_inflight_error(
                     student_coach_error_message(error.category, status=error.status)
                 )
-                st.caption(
-                    "Reload the notebook before resubmitting; the completed turn "
-                    "may already be present if the connection ended late."
-                )
+                sync_chat_scroll(mode="settle")
                 return
             except Exception:
                 try:
                     thinking.update(label="Coaching failed", state="error")
                 except Exception:
                     pass
-                st.error(student_coach_error_message("unavailable"))
-                st.caption(
-                    "Reload the notebook before resubmitting; the completed turn "
-                    "may already be present if the connection ended late."
-                )
+                _render_inflight_error(student_coach_error_message("unavailable"))
+                sync_chat_scroll(mode="settle")
                 return
     finally:
         set_coach_turn_streaming(False)
@@ -1029,28 +1053,29 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
     visible_source_ids = {
         str(source.get("id") or "") for source in sources
     }
-    chat_log = st.container(key="chat_log")
-    history_started = time.perf_counter()
-    with chat_log:
-        for message in messages:
-            if message.get("role") == "assistant" and not str(
-                message.get("content") or ""
-            ).strip():
-                continue
-            render_message(message, visible_source_ids=visible_source_ids)
-    log_ui_timing(
-        chat_history_ms=round(
-            max(0.0, (time.perf_counter() - history_started) * 1000.0),
-            1,
-        ),
-        message_count=len(messages),
-    )
-
     if st.session_state.get("edit_confirm_message_id"):
         _confirm_edit_earlier_message_dialog()
 
-    _render_composer_submit_fragment(
-        model_id,
-        reasoning_effort,
-        visible_source_ids,
-    )
+    chat_transcript = st.container(key="chat_transcript")
+    with chat_transcript:
+        chat_log = st.container(key="chat_log")
+        history_started = time.perf_counter()
+        with chat_log:
+            for message in messages:
+                if message.get("role") == "assistant" and not str(
+                    message.get("content") or ""
+                ).strip():
+                    continue
+                render_message(message, visible_source_ids=visible_source_ids)
+        log_ui_timing(
+            chat_history_ms=round(
+                max(0.0, (time.perf_counter() - history_started) * 1000.0),
+                1,
+            ),
+            message_count=len(messages),
+        )
+        _render_composer_submit_fragment(
+            model_id,
+            reasoning_effort,
+            visible_source_ids,
+        )

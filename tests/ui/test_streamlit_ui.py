@@ -220,15 +220,16 @@ def test_streamlit_notebook_workspace_smoke():
     ) < rendered.index('<span class="pane-title">Sources</span>')
     assert ".st-key-chat_log" in rendered
     assert ".st-key-chat_inflight" in rendered
-    assert "flex:1 1 0%" in rendered
+    assert ".st-key-chat_panel" in rendered
     assert "overflow-y:auto" in rendered
+    assert "scroll-behavior:auto" in rendered
     assert "scrollbar-color:var(--cd-scrollbar) transparent" in rendered
     assert "max-height:calc(1em * 1.45 * 5)" in rendered
     assert "max-width:80ch" in rendered
     assert "max-width:min(100%, calc(80ch + 16px))" in rendered
     assert "max-height:none !important" in rendered
     assert "max-height:11rem" not in rendered
-    assert "min-height:4.5rem" in rendered
+    assert "min-height:5.5rem" in rendered
     composer_layout = Path("ui/layout/composer_layout.py").read_text(
         encoding="utf-8"
     )

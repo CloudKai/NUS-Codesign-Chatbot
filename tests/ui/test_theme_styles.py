@@ -67,30 +67,53 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
 
     workspace_css = Path(_STYLES_DIR / "10-workspace.css").read_text(encoding="utf-8")
     assert ".st-key-chat_inflight" in workspace_css
+    assert ".st-key-chat_transcript" in workspace_css
+    panel_scroll = _css_rule_body(workspace_css, ".st-key-chat_panel {")
+    assert "overflow-y:hidden" in panel_scroll
+    transcript_flex = _css_rule_body(
+        workspace_css,
+        ".st-key-chat_transcript,\n    [data-testid=\"stElementContainer\"].st-key-chat_transcript",
+    )
+    assert "flex:0 0 auto" in transcript_flex
+    assert "overflow:visible" in transcript_flex
+    assert "overflow-y:auto" not in transcript_flex
     log_flex = _css_rule_body(
         workspace_css,
         ".st-key-chat_log,\n    [data-testid=\"stElementContainer\"].st-key-chat_log",
     )
     assert "flex:1 1 0%" in log_flex
-    assert "height:auto" in log_flex
-    assert "height:100%" not in log_flex
+    assert "overflow-y:auto" in log_flex
     studio_scroll = _css_rule_body(workspace_css, ".st-key-studio_scroll {")
     assert "height:100%" in studio_scroll
     assert "margin-top:auto" not in _css_rule_body(
         workspace_css, ":has(> .st-key-chat_composer)"
     )
+    composer_pin = _css_rule_body(
+        workspace_css,
+        ".st-key-chat_panel > [data-testid=\"stLayoutWrapper\"]:has(.st-key-chat_composer):not(:has(.st-key-chat_log))",
+    )
+    assert "flex:0 0 auto" in composer_pin
+    assert "margin-top:auto" in composer_pin
+    assert "overflow:visible" in composer_pin
+    log_wrap = _css_rule_body(
+        workspace_css,
+        ".st-key-chat_panel [data-testid=\"stLayoutWrapper\"]:has(> .st-key-chat_log):not(:has(> .st-key-chat_inflight))",
+    )
+    assert "height:auto" in log_wrap
+    assert "height:100%" not in log_wrap
     inflight_size = _css_rule_body(
-        workspace_css, '[data-testid="stElementContainer"].st-key-chat_inflight'
+        workspace_css,
+        ".st-key-chat_inflight,\n    [data-testid=\"stElementContainer\"].st-key-chat_inflight",
     )
     assert "flex:0 0 auto" in inflight_size
     assert "flex-shrink:0" in inflight_size
-    assert "overflow:hidden" in inflight_size
-    assert "overflow:visible" not in inflight_size
+    assert "overflow:visible" in inflight_size
+    assert "background:transparent" in inflight_size
     inflight_occupied = _css_rule_body(
         workspace_css, ".st-key-chat_inflight:has(.cd-user-bubble-text)"
     )
-    assert "min-height:min-content" in inflight_occupied
-    assert "overflow:hidden" in inflight_occupied
+    assert "min-height:0" in inflight_occupied
+    assert "overflow:visible" in inflight_occupied
     inflight_collapse = _css_rule_body(
         workspace_css, ".st-key-chat_inflight:not(:has("
     )
@@ -108,9 +131,15 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     chat_css = Path(_STYLES_DIR / "30-chat.css").read_text(encoding="utf-8")
     assert ".st-key-chat_inflight" in chat_css
     assert ".st-key-inflight_user_message_row" in chat_css
+    assert ".cd-inflight-error" in chat_css
     composer_card = _css_rule_body(chat_css, ".st-key-chat_composer {")
     assert "flex:0 0 auto" in composer_card
     assert "margin-top:auto" not in composer_card
+    transcript_composer = _css_rule_body(
+        chat_css, ".st-key-chat_panel .st-key-chat_composer"
+    )
+    assert "position:relative" in transcript_composer
+    assert "margin-top:auto" in transcript_composer
     assert (
         '.st-key-chat_inflight [data-testid="stChatMessage"]:last-of-type'
         in chat_css

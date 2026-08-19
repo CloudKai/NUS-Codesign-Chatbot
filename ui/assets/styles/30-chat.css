@@ -20,6 +20,7 @@
 
     .st-key-chat_log {
         padding:0 .25rem 0 0;
+        overflow-anchor:auto;
     }
 
     .st-key-chat_log > [data-testid="stVerticalBlock"],
@@ -47,6 +48,10 @@
 
     .st-key-chat_inflight {
         padding:0 .25rem 0 0;
+        background:transparent !important;
+        border:0 !important;
+        box-shadow:none !important;
+        border-radius:0 !important;
     }
 
     .st-key-chat_inflight > [data-testid="stVerticalBlock"],
@@ -55,10 +60,59 @@
         row-gap:0 !important;
         margin:0 !important;
         padding:0 !important;
+        background:transparent !important;
+        border:0 !important;
+        box-shadow:none !important;
     }
 
     .st-key-chat_inflight [data-testid="stChatMessage"]:last-of-type {
         margin-bottom:.35rem;
+    }
+
+    .st-key-chat_inflight [data-testid="stStatusWidget"],
+    .st-key-chat_inflight [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"]) {
+        overflow-anchor:none;
+        margin:.15rem 0 .35rem !important;
+        padding:0 !important;
+    }
+
+    .st-key-chat_inflight:has(.cd-inflight-error) [data-testid="stStatusWidget"],
+    .st-key-chat_inflight:has(.cd-inflight-error) [data-testid="stExpander"] {
+        display:none !important;
+        height:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+        overflow:hidden !important;
+    }
+
+    .cd-inflight-error {
+        overflow-anchor:none;
+        width:100%;
+        max-width:40rem;
+        margin:.1rem 0 .45rem;
+        padding:.15rem 0 .2rem;
+        border:0;
+        background:transparent;
+        color:var(--cd-text);
+    }
+
+    .cd-inflight-error-title {
+        margin:0;
+        color:var(--cd-text);
+        font-size:.88rem;
+        font-weight:620;
+        line-height:1.4;
+    }
+
+    .cd-inflight-error-title::before {
+        content:"⚠ ";
+    }
+
+    .cd-inflight-error-caption {
+        margin:.2rem 0 0;
+        color:var(--cd-muted);
+        font-size:.78rem;
+        line-height:1.35;
     }
 
     [data-testid="stChatMessage"] {
@@ -389,7 +443,25 @@
         position:relative;
         flex:0 0 auto;
         padding-top:0;
+        padding-bottom:0;
+        margin-bottom:0;
         overflow:visible;
+        gap:0 !important;
+        row-gap:0 !important;
+    }
+
+    .st-key-chat_panel .st-key-chat_composer,
+    .st-key-chat_transcript .st-key-chat_composer {
+        position:relative;
+        bottom:auto;
+        z-index:8;
+        margin-top:auto;
+        flex-shrink:0;
+        overflow:visible;
+        overflow-anchor:none;
+        background:var(--cd-surface);
+        padding-top:.25rem;
+        padding-bottom:0;
     }
 
     /* Model chip: overlay the composer so bottom/left pin to the footer. */
@@ -787,7 +859,7 @@
         display:block !important;
         width:100% !important;
         box-sizing:border-box !important;
-        min-height:4.5rem !important;
+        min-height:5.5rem !important;
         max-height:none !important;
         height:auto !important;
         overflow:hidden !important;
@@ -805,7 +877,7 @@
 
     .st-key-chat_composer [data-testid="stChatInput"] > div {
         width:100% !important;
-        min-height:4.5rem !important;
+        min-height:5.5rem !important;
         height:auto !important;
         max-height:none !important;
         box-sizing:border-box !important;
@@ -913,7 +985,7 @@
         box-sizing:border-box !important;
         /* Grow with the draft; cap at 5 rows, then scroll. */
         field-sizing:content;
-        min-height:calc(1em * 1.45) !important;
+        min-height:calc(1em * 1.45 * 2) !important;
         max-height:calc(1em * 1.45 * 5) !important;
         overflow-y:auto !important;
         overflow-x:hidden !important;
@@ -1174,9 +1246,21 @@
     }
 
     /* Keep the zero-height composer layout bridge iframe out of layout. */
+    .st-key-chat_panel
+    [data-testid="stElementContainer"]:has(iframe[height="0"]),
+    .st-key-chat_panel
+    [data-testid="stElementContainer"]:has(iframe[style*="height: 0"]),
     .st-key-chat_composer
     [data-testid="stElementContainer"]:has(iframe[height="0"]),
     .st-key-chat_composer
+    [data-testid="stElementContainer"]:has(iframe[style*="height: 0"]),
+    .st-key-chat_inflight
+    [data-testid="stElementContainer"]:has(iframe[height="0"]),
+    .st-key-chat_inflight
+    [data-testid="stElementContainer"]:has(iframe[style*="height: 0"]),
+    .st-key-chat_transcript
+    [data-testid="stElementContainer"]:has(iframe[height="0"]),
+    .st-key-chat_transcript
     [data-testid="stElementContainer"]:has(iframe[style*="height: 0"]) {
         position:absolute !important;
         width:0 !important;
