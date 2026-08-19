@@ -149,6 +149,12 @@ def test_chat_marks_streaming_around_coach_send_and_revise() -> None:
     assert "finally:" in send_block
     assert "pre_api_ms" in send_block
     assert "fragment_to_api_ms" in send_block
+    assert "composer_layout_ms" in send_block
+    assert "thread_lookup_ms" in send_block
+    assert "pending_user_render_ms" in send_block
+    assert "chat_scroll_send_ms" in send_block
+    assert "thinking_render_ms" in send_block
+    assert "request_build_ms" in send_block
     assert "rerun_app()" in send_block
     done_block = send_block.split("if turn is None", 1)[1].split(
         "except CoachTurnStreamError", 1
@@ -162,6 +168,10 @@ def test_chat_marks_streaming_around_coach_send_and_revise() -> None:
     )[0]
     assert "st.chat_input(" in composer_block
     assert "handle_prompt(" in composer_block
+    assert "sync_composer_layout(" in composer_block
+    assert "prompt_accept_ms" in composer_block
+    assert "composer_layout_ms" in composer_block
+    assert "fragment_spans=" in composer_block
     revise_block = chat.split("def _submit_pending_edit(", 1)[1].split(
         "def _render_composer_submit_fragment(", 1
     )[0]

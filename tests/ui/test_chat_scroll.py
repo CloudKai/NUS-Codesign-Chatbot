@@ -79,7 +79,9 @@ def test_fragment_submit_path_still_owns_inflight() -> None:
     send_block = chat.split("def handle_prompt(", 1)[1].split(
         "def _confirm_edit_earlier_message_dialog", 1
     )[0]
+    assert "fragment_to_api_ms" in send_block
+    assert "pre_api_ms" in send_block
     assert 'sync_chat_scroll(mode="send")' in send_block
+    assert "chat_scroll_send_ms" in send_block
     assert "stream_coach_turn_events(" in send_block
     assert "rerun_app()" in send_block
-    assert "fragment_to_api_ms" in send_block

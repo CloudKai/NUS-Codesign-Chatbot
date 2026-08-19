@@ -3,8 +3,8 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock-v2`
-**Starting HEAD:** `1e1e0698fce0f451bafa837738fecaf14f1f9ef1`
-**This phase:** Deep Review adversarial workflow regressions (tests only).
+**Starting HEAD:** `31b320acde4316832fdd6605ad03ae107740af55`
+**This phase:** Make Streamlit `UI TIMING` visible in Docker logs and split the pre-API Send path.
 **Not deployed. Not published to AgentCore.**
 
 **Prompt cache:** production Compose keeps `FAST_CHAT_PROMPT_CACHE_ENABLED=false`.
@@ -12,42 +12,48 @@ Do not enable for this baseline.
 **Session affinity:** Compose does not set `AGENTCORE_SESSION_AFFINITY_ENABLED`;
 settings default is `false`. Do not enable for this baseline.
 
-### Deep Review: harden remaining workflow/race gaps with three regressions
+### Streamlit UI TIMING: visible logs + pre-API step spans (no UI optimization)
 
-Product behavior is unchanged from `1e1e069` (frozen `reviewed_stage_id`,
-latest-snapshot-only Review-tab merge). This phase adds three adversarial
-tests and does not redesign Deep Review.
+Live CloudFront already showed the ~14–19s Send delay is **before FastAPI**.
+The instrumented `log_ui_timing` helper existed, but Streamlit is a separate
+process from uvicorn: `co_design.ui_perf` had no handler, parents were unset,
+and Python lastResort is WARNING, so INFO `UI TIMING` never reached
+`docker logs`. FastAPI `configure_operational_loggers()` does not run in the
+Streamlit process.
 
-**Test A.** Cross-stage replacement: successful Review A on
-`problem_identification` then Review B on `concept_generation` keeps only
-snapshot B on the Review tab. Historical incremental assessments remain.
-**Test B.** A stale worker blocked before `complete_deep_review_job` is
-failed through the same GET/stale path, Review B completes, then worker A
-actually attempts completion and cannot overwrite B's job, snapshot,
-`reviewed_stage_id`, or counter.
-**Test C.** Fake DSQL-over-SQLite `DsqlStudentStore` OCC wrappers preserve
-live `concept_generation` while the completed snapshot keeps
-`reviewed_stage_id=problem_identification`, including an explicit SQLSTATE
-`40001` retry subcase.
+**Change:** `configure_ui_perf_logger()` attaches
+one idempotent INFO stderr handler to **only** `co_design.ui_perf`. Send now
+logs `fragment_to_api_ms`, `pre_api_ms`, plus wall-clock spans for fragment
+enter, `st.chat_input`, `sync_composer_layout`, source list, notebook lookup,
+inflight user paint, `sync_chat_scroll(mode="send")`, CoachRequest build,
+Thinking/`st.status`, and first NDJSON event (`api_to_started_ms` /
+`api_to_first_event_ms` / `stream_ms`). Fragment submit architecture is
+unchanged. No FastAPI, AgentCore, RAG, Fast Chat, or prompt-cache changes.
 
-**Validation (this worktree, $0 AWS):** `git diff --check` clean;
-`ruff check .` passed; `compileall` passed. Targeted pytest passed for
-`test_deep_review_review_projection.py`, `test_deep_review_execution.py`,
-`test_deep_review.py`, `test_deep_review_control.py`, and
-`test_deep_review_dsql.py`. Full mock pytest passed. Previously reported
-VECTOR-vs-MANAGED Bedrock Retrieve failures did not reproduce here
-(`tests/domain/test_bedrock_retrieve.py` passed).
-`backend/bedrock_retrieve.py` is not in this diff.
+**Validation (this worktree, $0 AWS):** `git diff --check` clean; `ruff check .`
+passed; `compileall` passed. Targeted pytest passed for
+`tests/ui/test_ui_perf_logging.py`, `test_rerun_scope.py`,
+`test_chat_scroll.py`, and `test_chat_progress.py`. Full mock pytest passed.
+Backend, AgentCore, RAG, and Fast Chat files are unchanged.
 
-**Next exact action.** Catalog sidecar hide (`18c288e`) remains undeployed;
-deploy is a separate operator step.
+**Next exact action.** Deploy this app image (no AgentCore republish). Then
+**one** live Hello. Grep `UI TIMING` and the matching FastAPI `TIMING` /
+`request_id`. Do not enable prompt cache until the 14–19s pre-API span is
+identified.
 
 Release order: [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md)
-(SOURCE CODE READY → AGENTCORE PUBLISHED on the **existing** ARN → EC2 IMAGE
-DEPLOYED). Architecture: [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md).
+(SOURCE CODE READY → EC2 IMAGE DEPLOYED; AgentCore DEFAULT stays on the
+existing liveVersion). Architecture: [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md).
 
 This file’s **CURRENT** sections are the operator runbook. Everything under
 **HISTORICAL INVESTIGATION** is a dated archive and is not current.
+
+### Prior on this branch: Deep Review adversarial workflow regressions
+
+Product behavior is unchanged from `1e1e069` (frozen `reviewed_stage_id`,
+latest-snapshot-only Review-tab merge). That phase added three adversarial
+tests and did not redesign Deep Review.
+
 
 ### Prior on this branch: Deep Review Review-tab projection (`1e1e069`)
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import sys
 import threading
 import time
 import uuid
@@ -46,7 +47,10 @@ from backend.workspace_service import SourceContent, TranscriptExport, Workspace
 
 
 _T = TypeVar("_T")
-_ui_perf_logger = logging.getLogger("co_design.ui_perf")
+_UI_PERF_LOGGER_NAME = "co_design.ui_perf"
+_UI_PERF_HANDLER_FLAG = "_co_design_ui_perf_stream"
+_OPERATIONAL_HANDLER_FLAG = "_co_design_operational_stream"
+_ui_perf_logger = logging.getLogger(_UI_PERF_LOGGER_NAME)
 
 
 class _NonPersistentCookies(httpx.Cookies):
@@ -231,12 +235,49 @@ def get_deep_review_job(thread_id: str) -> DeepReviewJob | None:
         return None
 
 
+def configure_ui_perf_logger() -> None:
+    """Attach one INFO stderr handler so Streamlit ``UI TIMING`` reaches Docker logs.
+
+    FastAPI already enables ``co_design.ui_perf`` in the API process. Streamlit
+    is a separate process: this logger has no handlers, parents are unset, and
+    Python's lastResort handler is WARNING, so INFO lines never appear in
+    ``docker logs``. This configures only ``co_design.ui_perf``; it does not
+    change the root logger or third-party log levels.
+
+    Returns:
+        None. Side effect: at most one flagged StreamHandler on the logger.
+        Repeated Streamlit reruns and imports are idempotent.
+    """
+    log = logging.getLogger(_UI_PERF_LOGGER_NAME)
+    log.setLevel(logging.INFO)
+    if any(
+        getattr(existing, _UI_PERF_HANDLER_FLAG, False)
+        or getattr(existing, _OPERATIONAL_HANDLER_FLAG, False)
+        for existing in log.handlers
+    ):
+        return
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+    setattr(handler, _UI_PERF_HANDLER_FLAG, True)
+    # Same-process FastAPI tests also call configure_operational_loggers();
+    # sharing this flag prevents a second stderr handler on ui_perf.
+    setattr(handler, _OPERATIONAL_HANDLER_FLAG, True)
+    log.addHandler(handler)
+
+
+def _duration_ms(started: float) -> float:
+    """Return milliseconds elapsed since a ``perf_counter`` mark."""
+    return round(max(0.0, (time.perf_counter() - started) * 1000.0), 1)
+
+
 def log_ui_timing(**fields: Any) -> None:
     """Emit a privacy-safe UI TIMING line. Values must not include student text.
 
     Args:
         **fields: Short tokens or numbers. Strings with whitespace are dropped.
     """
+    configure_ui_perf_logger()
     parts = ["UI TIMING"]
     for key, value in fields.items():
         if value is None:
@@ -271,9 +312,14 @@ def stream_coach_turn_events(
     This helper does not invent token slices from a completed reply.
     A UUID ``X-Request-ID`` correlates Streamlit, FastAPI, and TIMING lines.
     """
+    configure_ui_perf_logger()
     request_id = str(request_id or "").strip() or str(uuid.uuid4())
     started = time.perf_counter()
-    try:
+    api_to_first_event_ms: float | None = None
+    api_to_started_ms: float | None = None
+    api_to_first_status_ms: float | None = None
+
+    def _iter_events() -> Iterator[dict[str, Any]]:
         if local_api_enabled():
             yield from local_api_client().stream_coach_turn(
                 request, request_id=request_id
@@ -317,12 +363,26 @@ def stream_coach_turn_events(
                 yield item
         finally:
             worker.join(timeout=1.0)
+
+    try:
+        for event in _iter_events():
+            elapsed = _duration_ms(started)
+            if api_to_first_event_ms is None:
+                api_to_first_event_ms = elapsed
+            kind = str(event.get("event") or "")
+            if kind == "started" and api_to_started_ms is None:
+                api_to_started_ms = elapsed
+            elif kind == "status" and api_to_first_status_ms is None:
+                api_to_first_status_ms = elapsed
+            yield event
     finally:
-        elapsed_ms = round(max(0.0, (time.perf_counter() - started) * 1000.0), 1)
-        _ui_perf_logger.info(
-            "UI TIMING request_id=%s stream_ms=%.1f",
-            request_id,
-            elapsed_ms,
+        log_ui_timing(
+            request_id=request_id,
+            stream_ms=_duration_ms(started),
+            api_to_first_event_ms=api_to_first_event_ms,
+            api_to_started_ms=api_to_started_ms,
+            api_to_first_status_ms=api_to_first_status_ms,
+            api_dispatch_ms=api_to_first_event_ms,
         )
 
 

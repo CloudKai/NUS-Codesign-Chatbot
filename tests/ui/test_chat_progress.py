@@ -28,6 +28,12 @@ def test_chat_panel_consumes_status_events_and_skips_fake_tokens() -> None:
     assert "assistant_message_from_turn" in chat
     assert "apply_completed_turn_to_session" in chat
     assert "fragment_to_api_ms" in chat
+    assert "pre_api_ms" in chat
+    assert "composer_layout_ms" in chat
+    assert "thread_lookup_ms" in chat
+    assert "thinking_render_ms" in chat
+    assert "api_to_started_ms" in runtime
+    assert "configure_ui_perf_logger" in runtime
     assert 'st.container(key="chat_inflight")' in chat
     assert "_render_inflight_user_prompt" in chat
     assert "chat_inflight," in chat

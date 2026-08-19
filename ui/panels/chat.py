@@ -54,6 +54,11 @@ from ui.retry_keys import get_retry_key, remove_retry_key
 from ui.sources import source_viewer_dialog
 
 
+def _duration_ms(started: float) -> float:
+    """Return milliseconds elapsed since a ``perf_counter`` mark."""
+    return round(max(0.0, (time.perf_counter() - started) * 1000.0), 1)
+
+
 class CoachTurnStreamError(RuntimeError):
     """Raised when a streamed coaching turn ends with a structured error event."""
 
@@ -632,6 +637,7 @@ def handle_prompt(
     visible_source_ids: set[str] | None = None,
     request_id: str | None = None,
     fragment_started: float | None = None,
+    fragment_spans: dict[str, float] | None = None,
 ) -> None:
     """Submit one student turn through the typed coaching workflow.
 
@@ -649,8 +655,10 @@ def handle_prompt(
     api_origin = (
         fragment_started if fragment_started is not None else handle_started
     )
+    spans: dict[str, float] = dict(fragment_spans or {})
     try:
         journey = normalize_journey(st.session_state.learning_journey)
+        list_started = time.perf_counter()
         if uploads:
             sources = store.list_sources(st.session_state.thread_id)
             selected_sources = [source for source in sources if source.get("selected")]
@@ -669,20 +677,28 @@ def handle_prompt(
             allow_model_knowledge = bool(
                 st.session_state.get("allow_model_knowledge", True)
             )
+        spans["source_list_ms"] = _duration_ms(list_started)
         if uploads:
             allow_model_knowledge = False
         st.session_state.allow_model_knowledge = allow_model_knowledge
+        thread_started = time.perf_counter()
         pre_thread = store.get_thread(st.session_state.thread_id) or {}
+        spans["thread_lookup_ms"] = _duration_ms(thread_started)
         pre_meta = dict(pre_thread.get("metadata") or {})
         pre_stage = str(journey.get("current_stage") or DEFAULT_STAGE)
         pre_deep_review_available = _deep_review_is_available(pre_meta)
         pre_deep_review_counter = _deep_review_counter(pre_meta)
         with target:
+            pending_started = time.perf_counter()
             if existing_user_message_id is None:
                 _render_inflight_user_prompt(prompt, uploads)
+            spans["pending_user_render_ms"] = _duration_ms(pending_started)
+            scroll_started = time.perf_counter()
             sync_chat_scroll(mode="send")
+            spans["chat_scroll_send_ms"] = _duration_ms(scroll_started)
             if uploads:
                 try:
+                    upload_started = time.perf_counter()
                     store.upload_sources(
                         st.session_state.thread_id,
                         [
@@ -695,6 +711,7 @@ def handle_prompt(
                         ],
                         origin="chat_composer",
                     )
+                    spans["source_upload_ms"] = _duration_ms(upload_started)
                 except Exception:
                     # The source service owns transactional/file cleanup. Do not
                     # submit a coach request when its prerequisite upload failed.
@@ -706,12 +723,21 @@ def handle_prompt(
                 # Drop the pre-upload source memo before persist. The later
                 # remount reloads Sources from the post-upload catalog.
                 store.forget_source_reads(st.session_state.thread_id)
+                post_list_started = time.perf_counter()
                 sources = store.list_sources(st.session_state.thread_id)
                 visible_source_ids = {
                     str(source.get("id") or "") for source in sources
                 }
+                spans["source_list_ms"] = round(
+                    float(spans.get("source_list_ms") or 0.0)
+                    + _duration_ms(post_list_started),
+                    1,
+                )
+            else:
+                spans["source_upload_ms"] = 0.0
             # Preserve this key only while the same submitted text is unresolved.
             # The session helper stores a SHA-256 scope, never the prompt itself.
+            build_started = time.perf_counter()
             idempotency_key = get_retry_key(
                 st.session_state,
                 thread_id=st.session_state.thread_id,
@@ -731,23 +757,37 @@ def handle_prompt(
                 reasoning_effort=reasoning_effort,
                 idempotency_key=idempotency_key,
             )
+            spans["request_build_ms"] = _duration_ms(build_started)
+            thinking_started = time.perf_counter()
             thinking = st.status(
                 "Coach is thinking…",
                 expanded=False,
                 type="compact",
             )
+            spans["thinking_render_ms"] = _duration_ms(thinking_started)
             try:
                 turn: CoachTurn | None = None
                 thinking_closed = False
                 log_ui_timing(
                     request_id=request_id,
-                    fragment_to_api_ms=round(
-                        max(0.0, (time.perf_counter() - api_origin) * 1000.0),
-                        1,
+                    fragment_to_api_ms=_duration_ms(api_origin),
+                    pre_api_ms=_duration_ms(handle_started),
+                    fragment_enter_ms=float(spans.get("fragment_enter_ms") or 0.0),
+                    prompt_accept_ms=float(spans.get("prompt_accept_ms") or 0.0),
+                    composer_layout_ms=float(spans.get("composer_layout_ms") or 0.0),
+                    source_list_ms=float(spans.get("source_list_ms") or 0.0),
+                    thread_lookup_ms=float(spans.get("thread_lookup_ms") or 0.0),
+                    pending_user_render_ms=float(
+                        spans.get("pending_user_render_ms") or 0.0
                     ),
-                    pre_api_ms=round(
-                        max(0.0, (time.perf_counter() - handle_started) * 1000.0),
-                        1,
+                    chat_scroll_send_ms=float(spans.get("chat_scroll_send_ms") or 0.0),
+                    source_upload_ms=float(spans.get("source_upload_ms") or 0.0),
+                    request_build_ms=float(spans.get("request_build_ms") or 0.0),
+                    thinking_render_ms=float(spans.get("thinking_render_ms") or 0.0),
+                    fragment_enter_epoch_ms=(
+                        int(spans["fragment_enter_epoch_ms"])
+                        if "fragment_enter_epoch_ms" in spans
+                        else None
                     ),
                     upload_count=len(uploads),
                 )
@@ -1000,9 +1040,12 @@ def _render_composer_submit_fragment(
         visible_source_ids: Source ids currently shown in this notebook.
     """
     fragment_started = time.perf_counter()
+    fragment_enter_epoch_ms = int(time.time() * 1000)
     request_id = str(uuid.uuid4())
     chat_inflight = st.container(key="chat_inflight")
     with st.container(key="chat_composer"):
+        fragment_enter_ms = _duration_ms(fragment_started)
+        prompt_started = time.perf_counter()
         composer_value = st.chat_input(
             "Ask a question or share your thinking",
             key=f"composer-{st.session_state.composer_nonce}",
@@ -1012,7 +1055,10 @@ def _render_composer_submit_fragment(
             submit_mode="stop",
             height="content",
         )
+        prompt_accept_ms = _duration_ms(prompt_started)
+        layout_started = time.perf_counter()
         sync_composer_layout(max_file_size_mb=settings.max_file_size_mb)
+        composer_layout_ms = _duration_ms(layout_started)
     prompt, uploads = normalize_composer_value(composer_value)
     if prompt:
         handle_prompt(
@@ -1025,6 +1071,12 @@ def _render_composer_submit_fragment(
             visible_source_ids=visible_source_ids,
             request_id=request_id,
             fragment_started=fragment_started,
+            fragment_spans={
+                "fragment_enter_ms": fragment_enter_ms,
+                "prompt_accept_ms": prompt_accept_ms,
+                "composer_layout_ms": composer_layout_ms,
+                "fragment_enter_epoch_ms": float(fragment_enter_epoch_ms),
+            },
         )
 
 

@@ -30,7 +30,7 @@ from ui.auth_gate import (
 from ui.constants import DEFAULT_APPEARANCE
 from ui.toasts import show_corner_toasts
 from ui.notebooks import notebook_actions_dialog, notebooks_dialog
-from ui.runtime import bind_owner_identifier
+from ui.runtime import bind_owner_identifier, configure_ui_perf_logger
 from ui.session import initialize_session
 from ui.settings import sync_appearance_from_widget
 from ui.theme import inject_template_css, render_theme_css
@@ -47,6 +47,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+configure_ui_perf_logger()
 inject_template_css()
 consume_auth_refresh_marker()
 

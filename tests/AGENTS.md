@@ -112,6 +112,7 @@ modules.
 | `ui/test_streamlit_ui.py` | AppTest smoke against `streamlit_app.py` (in-process path) |
 | `ui/test_theme_styles.py` | Ordered CSS partial manifest and assembled stylesheet contracts |
 | `ui/test_chat_scroll.py` | Transcript scroll policy, inflight chrome, compact turn-error, fragment submit |
+| `ui/test_ui_perf_logging.py` | Streamlit `co_design.ui_perf` INFO visibility, handler idempotency, privacy-safe UI TIMING, pre-API span contracts |
 | `ui/test_streamlit_api_mode.py` | AppTest API confirmation + auto-advance |
 | `ui/test_rename.py` | Enter-only rename draft helpers and epochs |
 | `scripts/test_init_db.py` | Safe `init_db.py` refuse-existing / `--force` behavior |
