@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -27,9 +29,11 @@ from backend.source_library import add_text_source
 from backend.sources.chunk_cache import reset_student_source_chunk_cache
 from backend.specialists.review_orchestration import (
     COUNTER_SETTINGS_KEY,
+    DEEP_REVIEW_JOB_KEY,
     DEEP_REVIEW_SNAPSHOT_KEY,
     DEEP_REVIEW_TURN_MESSAGE,
     explicit_deep_review_available,
+    parse_deep_review_job,
 )
 from backend.student_journey import learning_review
 from backend.student_store import StudentStore
@@ -85,6 +89,7 @@ def _deep_payload(
     synthesis: str = "Formative Deep Review A.",
     strengths: list[str] | None = None,
     areas_to_develop: list[str] | None = None,
+    current_stage: str = "problem_identification",
 ) -> dict[str, Any]:
     """Return one explicit Deep Review body that stays on the current stage."""
     return {
@@ -92,7 +97,7 @@ def _deep_payload(
         "strengths": list(strengths or ["Named a real constraint"]),
         "areas_to_develop": list(areas_to_develop or ["Name who is affected"]),
         "synthesis": synthesis,
-        "current_stage": "problem_identification",
+        "current_stage": current_stage,
         "recommendation": "advance",
         "rationale_summary": "Readiness information only.",
         "working_conclusion": "Option B is the working concept.",
@@ -158,6 +163,62 @@ def _snapshot(store: StudentStore, thread_id: str) -> dict[str, Any] | None:
     metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
     raw = metadata.get(DEEP_REVIEW_SNAPSHOT_KEY)
     return raw if isinstance(raw, dict) else None
+
+
+def _job_blob(store: StudentStore, thread_id: str) -> dict[str, Any] | None:
+    """Return the persisted Deep Review job blob when present."""
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    return parse_deep_review_job(metadata.get(DEEP_REVIEW_JOB_KEY))
+
+
+def _current_stage(store: StudentStore, thread_id: str) -> str:
+    """Return the live Thinking Path stage from notebook metadata."""
+    journey = dict(
+        ((store.get_thread(thread_id) or {}).get("metadata") or {}).get(
+            "learning_journey"
+        )
+        or {}
+    )
+    return str(journey.get("current_stage") or "")
+
+
+def _assistant_assessments(store: StudentStore, thread_id: str) -> list[dict[str, Any]]:
+    """Return assistant assessment payloads in transcript order."""
+    found: list[dict[str, Any]] = []
+    for item in store.get_messages(thread_id):
+        if item.get("role") != "assistant":
+            continue
+        assessment = (item.get("metadata") or {}).get("assessment")
+        if isinstance(assessment, dict):
+            found.append(dict(assessment))
+    return found
+
+
+def _add_incremental_assessment(
+    store: StudentStore,
+    thread_id: str,
+    *,
+    stage: str,
+    strengths: list[str],
+    improvements: list[str] | None = None,
+) -> None:
+    """Persist one message-derived Review-tab assessment without Deep Review."""
+    store.add_message(
+        thread_id,
+        "assistant",
+        "Incremental coach reply.",
+        metadata={
+            "assessment": {
+                "current_stage": stage,
+                "recommendation": "stay",
+                "review_strengths": list(strengths),
+                "review_improvements": list(improvements or []),
+                "learning_summary": "Incremental summary.",
+                "stage_assessment": "Incremental note.",
+                "contribution_summary": "Draft.",
+            }
+        },
+    )
 
 
 def _review_items(
@@ -511,3 +572,220 @@ def test_deep_review_selected_source_uses_chunk_artifact(
     assert counts.chunks_gets <= 1
     assert _counter(store, thread_id) == 0
     reset_student_source_chunk_cache()
+
+
+def test_later_deep_review_on_new_stage_replaces_prior_snapshot_contribution(
+    tmp_path,
+) -> None:
+    """Review A @ stage 1 then Review B @ stage 2 keeps only snapshot B."""
+    store = StudentStore(tmp_path / "dr-cross-stage.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _add_incremental_assessment(
+        store,
+        thread_id,
+        stage="problem_identification",
+        strengths=["Problem incremental strength"],
+    )
+    _unlock(store, thread_id)
+    review_a = _service(
+        store,
+        FakeAgentCoreRuntime(
+            deep_payload=_deep_payload(
+                synthesis="Formative Deep Review A.",
+                strengths=["Problem deep strength"],
+                areas_to_develop=["Problem deep area"],
+            )
+        ),
+    )
+    review_a.enqueue_deep_review(thread_id, idempotency_key="deep-a")
+    assert _wait_job(review_a, thread_id).status is DeepReviewJobStatus.COMPLETED
+    snapshot_a = _snapshot(store, thread_id)
+    assert snapshot_a is not None
+    assert snapshot_a["reviewed_stage_id"] == "problem_identification"
+    assert "Problem deep strength" in _review_items(
+        store, thread_id, "strength_sections", "problem_identification"
+    )
+    assert "Problem deep area" in _review_items(
+        store, thread_id, "improvement_sections", "problem_identification"
+    )
+
+    store.select_learning_stage(thread_id, "concept_generation")
+    _add_incremental_assessment(
+        store,
+        thread_id,
+        stage="concept_generation",
+        strengths=["Concept incremental strength"],
+    )
+    assessments_before_b = _assistant_assessments(store, thread_id)
+    message_ids_before_b = [
+        str(item.get("id") or "") for item in store.get_messages(thread_id)
+    ]
+    _unlock(store, thread_id)
+    review_b = _service(
+        store,
+        FakeAgentCoreRuntime(
+            deep_payload=_deep_payload(
+                synthesis="Formative Deep Review B.",
+                strengths=["Concept deep strength"],
+                areas_to_develop=["Concept deep area"],
+                current_stage="concept_generation",
+            )
+        ),
+    )
+    review_b.enqueue_deep_review(thread_id, idempotency_key="deep-b")
+    assert _wait_job(review_b, thread_id).status is DeepReviewJobStatus.COMPLETED
+
+    snapshot = _snapshot(store, thread_id)
+    assert snapshot is not None
+    assert snapshot["reviewed_stage_id"] == "concept_generation"
+    assert "Deep Review B" in str(snapshot.get("synthesis") or "")
+    assert "Deep Review A" not in str(snapshot.get("synthesis") or "")
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    assert isinstance(metadata.get(DEEP_REVIEW_SNAPSHOT_KEY), dict)
+    assert _current_stage(store, thread_id) == "concept_generation"
+
+    problem_strengths = _review_items(
+        store, thread_id, "strength_sections", "problem_identification"
+    )
+    problem_areas = _review_items(
+        store, thread_id, "improvement_sections", "problem_identification"
+    )
+    concept_strengths = _review_items(
+        store, thread_id, "strength_sections", "concept_generation"
+    )
+    concept_areas = _review_items(
+        store, thread_id, "improvement_sections", "concept_generation"
+    )
+    assert "Problem deep strength" not in problem_strengths
+    assert "Problem deep area" not in problem_areas
+    assert "Problem incremental strength" in problem_strengths
+    assert "Concept deep strength" in concept_strengths
+    assert "Concept deep area" in concept_areas
+    assert "Concept incremental strength" in concept_strengths
+    assert _assistant_assessments(store, thread_id) == assessments_before_b
+    assert [
+        str(item.get("id") or "") for item in store.get_messages(thread_id)
+    ] == message_ids_before_b
+    _assert_no_review_transcript(store, thread_id)
+
+
+def test_stale_worker_cannot_overwrite_later_completed_deep_review(
+    tmp_path, monkeypatch
+) -> None:
+    """A late worker A completion must not replace successful Review B."""
+    monkeypatch.setattr(settings, "deep_review_max_concurrent", 8)
+    store = StudentStore(tmp_path / "dr-stale-worker.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _unlock(store, thread_id)
+    original_complete = store.complete_deep_review_job
+    first_id: dict[str, str | None] = {"review_id": None}
+    attempted_a: dict[str, Any] = {}
+    started = threading.Event()
+    release = threading.Event()
+    stale_complete_finished = threading.Event()
+
+    def gated_complete(
+        target_thread_id: str, *, review_id: str, snapshot: dict[str, Any]
+    ) -> None:
+        if first_id["review_id"] is None:
+            first_id["review_id"] = review_id
+            attempted_a["snapshot"] = dict(snapshot)
+            started.set()
+            assert release.wait(timeout=8.0), "stale worker A was not released"
+            try:
+                return original_complete(
+                    target_thread_id, review_id=review_id, snapshot=snapshot
+                )
+            finally:
+                stale_complete_finished.set()
+        return original_complete(
+            target_thread_id, review_id=review_id, snapshot=snapshot
+        )
+
+    store.complete_deep_review_job = gated_complete  # type: ignore[method-assign]
+    try:
+        review_a = _service(
+            store,
+            FakeAgentCoreRuntime(
+                deep_payload=_deep_payload(
+                    synthesis="Formative Deep Review A.",
+                    strengths=["Review A strength"],
+                    areas_to_develop=["Review A area"],
+                )
+            ),
+        )
+        job_a = review_a.enqueue_deep_review(thread_id, idempotency_key="deep-a")
+        assert started.wait(timeout=8.0), "worker A never reached completion"
+        review_a_id = str(first_id["review_id"] or "")
+        assert review_a_id
+        assert job_a.review_id == review_a_id
+        assert "Review A strength" in list(
+            (attempted_a.get("snapshot") or {}).get("strengths") or []
+        )
+
+        stale_started = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        job_blob = dict(_job_blob(store, thread_id) or {})
+        assert job_blob.get("review_id") == review_a_id
+        job_blob["started_at"] = stale_started
+        job_blob["updated_at"] = stale_started
+        store.update_thread(thread_id, metadata={DEEP_REVIEW_JOB_KEY: job_blob})
+        failed = review_a.get_deep_review_job(thread_id)
+        assert failed is not None
+        assert failed.review_id == review_a_id
+        assert failed.status is DeepReviewJobStatus.FAILED
+        assert _snapshot(store, thread_id) is None
+        assert _counter(store, thread_id) == 3
+
+        _unlock(store, thread_id)
+        review_b = _service(
+            store,
+            FakeAgentCoreRuntime(
+                deep_payload=_deep_payload(
+                    synthesis="Formative Deep Review B.",
+                    strengths=["Review B strength"],
+                    areas_to_develop=["Review B area"],
+                )
+            ),
+        )
+        job_b = review_b.enqueue_deep_review(thread_id, idempotency_key="deep-b")
+        assert job_b.review_id != review_a_id
+        finished_b = _wait_job(review_b, thread_id, timeout=8.0)
+        assert finished_b.status is DeepReviewJobStatus.COMPLETED
+        assert finished_b.review_id == job_b.review_id
+        snapshot_b = _snapshot(store, thread_id)
+        assert snapshot_b is not None
+        assert snapshot_b["reviewed_stage_id"] == "problem_identification"
+        assert "Review B strength" in list(snapshot_b.get("strengths") or [])
+        assert "Review A strength" not in list(snapshot_b.get("strengths") or [])
+        stage_before_stale_complete = _current_stage(store, thread_id)
+        counter_after_b = _counter(store, thread_id)
+        assert counter_after_b == 0
+
+        release.set()
+        assert stale_complete_finished.wait(
+            timeout=8.0
+        ), "stale worker A never attempted completion"
+        store.complete_deep_review_job = original_complete  # type: ignore[method-assign]
+        original_complete(
+            thread_id,
+            review_id=review_a_id,
+            snapshot=dict(attempted_a["snapshot"]),
+        )
+
+        job = _job_blob(store, thread_id)
+        snapshot = _snapshot(store, thread_id)
+        assert job is not None
+        assert job.get("review_id") == job_b.review_id
+        assert job.get("status") == DeepReviewJobStatus.COMPLETED.value
+        assert snapshot is not None
+        assert snapshot["reviewed_stage_id"] == "problem_identification"
+        assert "Review B strength" in list(snapshot.get("strengths") or [])
+        assert "Review A strength" not in list(snapshot.get("strengths") or [])
+        assert "Review A area" not in list(snapshot.get("areas_to_develop") or [])
+        assert _counter(store, thread_id) == 0
+        assert _current_stage(store, thread_id) == stage_before_stale_complete
+        _assert_no_review_transcript(store, thread_id)
+    finally:
+        release.set()
+        store.complete_deep_review_job = original_complete  # type: ignore[method-assign]
+        stale_complete_finished.wait(timeout=8.0)

@@ -62,6 +62,7 @@ modules.
 | `ui/test_auth_gate.py` | Streamlit auth gate, Redirecting UX, Cognito profile upsert, owner binding |
 | `ui/test_professor_ui.py` | Professor workbench AppTest contracts |
 | `persistence/test_storage_providers.py` | SQLite/local defaults, DSQL/S3 provider selection, mocked DSQL auth + S3 |
+| `persistence/test_deep_review_dsql.py` | Fake DSQL-over-SQLite Deep Review OCC: frozen `reviewed_stage_id` vs live stage, SQLSTATE 40001 retry |
 | `http/test_runtime_auth.py` | Cognito owner isolation vs single-owner local API |
 | `http/test_workspace_api.py` | Notebook/source/preference CRUD API, path redaction, student transcript download |
 | `domain/test_agentcore_provider.py` | AgentCore Runtime adapter contract with an injected fake client; stateless session plus DSQL history as Converse messages |
@@ -92,7 +93,7 @@ modules.
 | `domain/test_fast_chat_context.py` | Six-message window, 3000/1500 history budgets, 12k/16k totals, system-prompt estimate, RAG repack |
 | `domain/test_conversation_memory_continuity.py` | 20/50/100-message and chunky-history extractive memory; no LLM summarizer |
 | `domain/test_rag_fallback.py` | Application-owned needs_source_retrieval retry; persist-final-only |
-| `domain/test_deep_review_execution.py` | Background Deep Review enqueue, frozen snapshot, counter, no transcript rows |
+| `domain/test_deep_review_execution.py` | Background Deep Review enqueue, frozen snapshot, counter, no transcript rows, cross-stage snapshot replacement, stale-worker completion guard |
 | `domain/test_deep_review_review_projection.py` | Review-tab merge of snapshot strengths/areas onto the frozen reviewed stage |
 | `http/test_deep_review.py` | Deep Review job POST/GET, coaching overlap, duplicate/stale/owner isolation |
 | `domain/test_coaching_prompt_baseline.py` | SHA-256 lock on canonical Coaching/stage prompt files |

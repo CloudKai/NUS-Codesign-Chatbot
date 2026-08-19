@@ -3,16 +3,53 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock-v2`
-**Starting HEAD:** `18c288e6c4253ab97aed746e248a9b2387276046`
-**This phase:** Deep Review Review-tab projection of snapshot strengths and
-areas-to-develop. **Not deployed. Not published to AgentCore.**
+**Starting HEAD:** `1e1e0698fce0f451bafa837738fecaf14f1f9ef1`
+**This phase:** Deep Review adversarial workflow regressions (tests only).
+**Not deployed. Not published to AgentCore.**
 
 **Prompt cache:** production Compose keeps `FAST_CHAT_PROMPT_CACHE_ENABLED=false`.
 Do not enable for this baseline.
 **Session affinity:** Compose does not set `AGENTCORE_SESSION_AFFINITY_ENABLED`;
 settings default is `false`. Do not enable for this baseline.
 
-### Deep Review: merge snapshot strengths/areas onto the frozen reviewed stage
+### Deep Review: harden remaining workflow/race gaps with three regressions
+
+Product behavior is unchanged from `1e1e069` (frozen `reviewed_stage_id`,
+latest-snapshot-only Review-tab merge). This phase adds three adversarial
+tests and does not redesign Deep Review.
+
+**Test A.** Cross-stage replacement: successful Review A on
+`problem_identification` then Review B on `concept_generation` keeps only
+snapshot B on the Review tab. Historical incremental assessments remain.
+**Test B.** A stale worker blocked before `complete_deep_review_job` is
+failed through the same GET/stale path, Review B completes, then worker A
+actually attempts completion and cannot overwrite B's job, snapshot,
+`reviewed_stage_id`, or counter.
+**Test C.** Fake DSQL-over-SQLite `DsqlStudentStore` OCC wrappers preserve
+live `concept_generation` while the completed snapshot keeps
+`reviewed_stage_id=problem_identification`, including an explicit SQLSTATE
+`40001` retry subcase.
+
+**Validation (this worktree, $0 AWS):** `git diff --check` clean;
+`ruff check .` passed; `compileall` passed. Targeted pytest passed for
+`test_deep_review_review_projection.py`, `test_deep_review_execution.py`,
+`test_deep_review.py`, `test_deep_review_control.py`, and
+`test_deep_review_dsql.py`. Full mock pytest passed. Previously reported
+VECTOR-vs-MANAGED Bedrock Retrieve failures did not reproduce here
+(`tests/domain/test_bedrock_retrieve.py` passed).
+`backend/bedrock_retrieve.py` is not in this diff.
+
+**Next exact action.** Catalog sidecar hide (`18c288e`) remains undeployed;
+deploy is a separate operator step.
+
+Release order: [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md)
+(SOURCE CODE READY → AGENTCORE PUBLISHED on the **existing** ARN → EC2 IMAGE
+DEPLOYED). Architecture: [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md).
+
+This file’s **CURRENT** sections are the operator runbook. Everything under
+**HISTORICAL INVESTIGATION** is a dated archive and is not current.
+
+### Prior on this branch: Deep Review Review-tab projection (`1e1e069`)
 
 A successful Deep Review already persisted `strengths`, `areas_to_develop`,
 `synthesis`/`summary`, `facione_scores`, and `working_conclusion` in durable
@@ -21,36 +58,12 @@ the Review tab; Strengths and Areas for improvement did not, because
 `learning_review()` built those sections only from incremental assistant
 `review_strengths` / `review_improvements`.
 
-**Change:** persist `reviewed_stage_id` (enqueue-time Thinking Path stage) on
-the snapshot. `learning_review()` still builds stage history from messages,
-then merges the latest snapshot's strengths/areas onto that frozen stage
-(Deep Review items first, case-insensitive dedupe). Old snapshots without a
-valid stage id skip the merge instead of attaching to the current stage.
-Failed Deep Review still does not replace the snapshot. Normal Coaching still
-omits the snapshot key. No fake assistant message, no Streamlit copy of the
-content, no eligibility/polling/model changes.
-
-**Validation (this worktree, $0 AWS):** `git diff --check` clean; `ruff check .`
-passed; `compileall` passed. Targeted pytest passed for
-`test_deep_review_review_projection.py`, `test_deep_review_execution.py`,
-`test_deep_review.py`, `test_student_journey.py`, `test_review_agent.py`,
-`test_progress_merge.py`, `test_deep_review_control.py`, and
-`test_architecture_contracts.py`. Full mock pytest: only the **7 pre-existing**
-`tests/domain/test_bedrock_retrieve.py` failures (VECTOR
-`vectorSearchConfiguration` / type `vector` vs production MANAGED).
-`backend/bedrock_retrieve.py` is not in this diff.
-
-**Next exact action.** Confirm the Review tab after a successful Deep Review
-shows Strengths / Areas under the stage that was reviewed, including when the
-student advanced while the job ran. Catalog sidecar hide (`18c288e`) remains
-undeployed; deploy is a separate operator step.
-
-Release order: [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md)
-(SOURCE CODE READY → AGENTCORE PUBLISHED on the **existing** ARN → EC2 IMAGE
-DEPLOYED). Architecture: [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md).
-
-This file’s **CURRENT** sections are the operator runbook. Everything under
-**HISTORICAL INVESTIGATION** is a dated archive and is not current.
+**Change (committed):** persist `reviewed_stage_id` (enqueue-time Thinking
+Path stage) on the snapshot. `learning_review()` still builds stage history
+from messages, then merges the latest snapshot's strengths/areas onto that
+frozen stage (Deep Review items first, case-insensitive dedupe). Old
+snapshots without a valid stage id skip the merge instead of attaching to
+the current stage.
 
 ### Prior on this branch: catalog sidecar hide (`18c288e`, not deployed)
 
