@@ -121,7 +121,7 @@ def test_streamlit_notebook_workspace_smoke():
     assert "data-tooltip=" in sources_py
     assert "Max {settings.max_file_size_mb} MB per file" in sources_py
 
-    assert any(
+    assert not any(
         (button.key or "").startswith("profile-language-") for button in app.button
     )
     assert any(control.label == "Appearance" for control in app.segmented_control)
@@ -341,8 +341,8 @@ def test_streamlit_notebook_workspace_smoke():
 
     assert any(input_widget.label == "Display name" for input_widget in app.text_input)
     assert any(control.label == "Appearance" for control in app.segmented_control)
-    assert "cd-profile-language-label" in rendered
-    assert any(
+    assert "cd-profile-language-label" not in rendered
+    assert not any(
         (button.key or "").startswith("profile-language-") for button in app.button
     )
     assert "cd-profile-menu" in rendered
@@ -555,36 +555,18 @@ def test_notebook_activity_helpers_format_relative_time_and_counts():
     assert _relative_activity("", now=now) == "Unknown"
 
 
-def test_language_theme_and_journey_has_no_manual_progression_control():
+def test_theme_coaching_style_and_journey_has_no_manual_progression_control():
     from backend.student_store import StudentStore
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     # Preferences live in the profile settings popover (content exposed to AppTest).
 
-    # Language is a select-only popover (no text caret).
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "cd-profile-language-label" in rendered
-    assert "cd-profile-language-tooltip" in rendered
-    assert "The coach responds in this language" in rendered
-    from ui.theme import _template_stylesheet
-
-    css = _template_stylesheet()
-    assert (
-        ".st-key-profile_language div[data-testid=\"stPopover\"] button > div > div:first-child"
-        in css
-    )
-    assert ".cd-profile-language-help:hover .cd-profile-language-tooltip" in css
-    assert "use_container_width=True" in Path("ui/profile.py").read_text(encoding="utf-8")
-    assert any(
+    assert "cd-profile-language-label" not in rendered
+    assert "The coach responds in this language" not in rendered
+    assert not any(
         (button.key or "").startswith("profile-language-") for button in app.button
     )
-    chinese = next(
-        button
-        for button in app.button
-        if button.label == "中文" and (button.key or "").startswith("profile-language-")
-    )
-    chinese.click().run()
-    assert app.session_state["response_language"] == "中文"
 
     coaching_style = next(
         control

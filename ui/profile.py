@@ -1,4 +1,4 @@
-"""Profile settings popover for local appearance, language, and coaching style."""
+"""Profile settings popover for local appearance, coaching style, and logout."""
 
 from __future__ import annotations
 
@@ -7,17 +7,15 @@ from html import escape
 
 import streamlit as st
 import streamlit.components.v1 as components
-from streamlit.errors import StreamlitAPIException
 
 from backend.student_journey import RESPONSE_DETAILS, normalize_journey
 
 from ui.auth_gate import app_logout_url, logout_user
 from ui.components import profile_initial
-from ui.constants import APPEARANCE_MODES, RESPONSE_LANGUAGES
-from ui.menu_popovers import close_menu_popover, menu_popover_widget_key
-from ui.runtime import rerun_fragment, store
+from ui.constants import APPEARANCE_MODES
+from ui.runtime import store
 from ui.session import save_journey
-from ui.settings import persist_appearance, persist_response_language
+from ui.settings import persist_appearance
 
 
 COACHING_STYLE_LABELS = {
@@ -74,17 +72,6 @@ def _render_display_name_fragment(display_name: str) -> None:
     )
     current_name = str(st.session_state.get("display_name") or "Student")
     _sync_profile_avatar_initial(profile_initial(current_name))
-
-
-@st.fragment
-def _render_language_fragment() -> None:
-    """Render response-language selection without redrawing the workspace."""
-    current_language = str(st.session_state.response_language or "English")
-    if current_language not in RESPONSE_LANGUAGES:
-        current_language = "English"
-        st.session_state.response_language = current_language
-    st.session_state.setting_response_language = current_language
-    _render_language_dropdown(current_language)
 
 
 def _select_coaching_style(detail: str) -> None:
@@ -144,7 +131,6 @@ def render_profile_menu() -> None:
                     # the complete theme and layout stylesheet is re-injected.
                     on_change=persist_appearance,
                 )
-                _render_language_fragment()
                 _render_coaching_style_fragment()
                 st.divider()
                 # --- Logout (same-tab) ---
@@ -170,51 +156,6 @@ def render_profile_menu() -> None:
                             logout_user()
 
 
-def _render_language_dropdown(current_language: str) -> None:
-    """Render Language as a select-only menu (no text caret), left-aligned.
-
-    Uses a popover + button pattern so the control cannot be typed into while
-    keeping the value left-aligned in the trigger.
-    """
-    with st.container(key="profile_language"):
-        st.markdown(
-            '<div class="cd-profile-language-head">'
-            '<span class="cd-profile-language-label">Language</span>'
-            '<span class="cd-profile-language-help" tabindex="0" '
-            'aria-label="The coach responds in this language">'
-            "?"
-            '<span class="cd-profile-language-tooltip" role="tooltip">'
-            "The coach responds in this language"
-            "</span>"
-            "</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-        with st.popover(
-            current_language,
-            use_container_width=True,
-            key=menu_popover_widget_key("profile-language"),
-        ):
-            for index, language in enumerate(RESPONSE_LANGUAGES):
-                if st.button(
-                    language,
-                    key=f"profile-language-{index}",
-                    use_container_width=True,
-                    type="tertiary",
-                ):
-                    if language != current_language:
-                        st.session_state.setting_response_language = language
-                        persist_response_language()
-                    close_menu_popover("profile-language")
-                    try:
-                        rerun_fragment()
-                    except StreamlitAPIException:
-                        # Button clicks already rerun this fragment. AppTest
-                        # invokes the handler during a full script run, where
-                        # scope="fragment" is rejected.
-                        pass
-
-
 def inject_profile_leave_helper() -> None:
     """Install the leave-to-close script outside the avatar layout chain."""
     with st.container(key="profile_leave_helper"):
@@ -225,7 +166,7 @@ def _sync_profile_popover_close_on_leave() -> None:
     """Close the profile menu only after the pointer leaves its chrome.
 
     Uses mouseenter/mouseleave on the popover body (not document mousemove) so
-    widget rerenders and Language portals do not false-close the menu.
+    widget rerenders do not false-close the menu.
     """
     components.html(
         """
@@ -270,8 +211,7 @@ def _sync_profile_popover_close_on_leave() -> None:
       node.closest(".st-key-topbar_profile") ||
       node.closest(".st-key-profile_menu_root") ||
       node.closest('[data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)') ||
-      node.closest('[data-testid="stPopoverBody"]:has(.cd-profile-menu)') ||
-      node.closest('[data-testid="stPopoverBody"]:has([class*="st-key-profile-language-"])')
+      node.closest('[data-testid="stPopoverBody"]:has(.cd-profile-menu)')
     ) {
       return true;
     }

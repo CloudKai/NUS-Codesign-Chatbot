@@ -50,7 +50,7 @@ copy.
 ### Student control
 
 Potentially consequential actions require clear confirmation. Students can choose response
-length, language, theme, model, sources, and when to manually move to the next journey step.
+length, theme, sources, and when to manually move to the next journey step.
 
 ### Authentication and course transparency
 
@@ -76,7 +76,7 @@ Top bar
 └── Profile avatar
     ├── Display name
     ├── Appearance
-    ├── Language
+    ├── Coaching style
     └── Logout
 
 Workspace
@@ -228,8 +228,8 @@ The top bar contains:
 - A visible `Short` or `Long` response-detail selector.
 - A compact Preferences trigger contained inside one bordered control.
 
-Response detail remains visible because it changes the conversational experience. Language,
-appearance, model, assignment context, and notebook details live in Preferences.
+Response detail remains visible because it changes the conversational experience. Appearance
+and notebook details live in Preferences.
 
 Inside the Preferences trigger, treat the tune icon and chevron as one compact group. Center
 that group with a slight optical shift toward the chevron; do not distribute the two icons
