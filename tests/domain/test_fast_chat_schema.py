@@ -162,6 +162,12 @@ def test_generated_schema_is_single_object_not_union() -> None:
     assert then_rec.get("type") == "string"
     assert then_rec.get("enum") == ["stay", "advance"]
     assert "recommendation" in schema["then"]["required"]
+    assert "citations" in (schema.get("required") or [])
+    citations = (schema.get("properties") or {}).get("citations") or {}
+    assert citations.get("type") == "array"
+    assert "null" not in str(citations.get("type"))
+    assert citations.get("anyOf") is None
+    assert citations.get("oneOf") is None
 
 
 def test_generated_schema_rejects_coaching_null_and_keeps_qa_null() -> None:
@@ -170,20 +176,32 @@ def test_generated_schema_rejects_coaching_null_and_keeps_qa_null() -> None:
         "mode": "coaching",
         "response_text": _TEXT,
         "recommendation": "stay",
+        "citations": [],
     }
     coaching_advance = {
         "mode": "coaching",
         "response_text": _TEXT,
         "recommendation": "advance",
+        "citations": [],
     }
     coaching_null = {
         "mode": "coaching",
         "response_text": _TEXT,
         "recommendation": None,
+        "citations": [],
     }
-    coaching_missing = {"mode": "coaching", "response_text": _TEXT}
-    qa_null = {"mode": "qa", "response_text": "Week 1.", "recommendation": None}
-    qa_omitted = {"mode": "qa", "response_text": "Week 1."}
+    coaching_missing = {
+        "mode": "coaching",
+        "response_text": _TEXT,
+        "citations": [],
+    }
+    qa_null = {
+        "mode": "qa",
+        "response_text": "Week 1.",
+        "recommendation": None,
+        "citations": [],
+    }
+    qa_omitted = {"mode": "qa", "response_text": "Week 1.", "citations": []}
     assert _schema_allows(schema, coaching_stay)
     assert _schema_allows(schema, coaching_advance)
     assert not _schema_allows(schema, coaching_null)
@@ -374,3 +392,118 @@ def test_adapt_malformed_payload_fails_closed() -> None:
             }
         )
     assert raised_review.value.reason == "wrong_contract"
+
+
+def test_coaching_omitted_citations_default_to_empty_list() -> None:
+    parsed = FastChatTurnOutput.model_validate(_coaching())
+    assert parsed.citations == []
+
+
+def test_coaching_empty_citations_are_valid() -> None:
+    parsed = FastChatTurnOutput.model_validate(_coaching(citations=[]))
+    assert parsed.citations == []
+
+
+def test_coaching_null_citations_fail_pydantic() -> None:
+    with pytest.raises(ValidationError) as raised:
+        FastChatTurnOutput.model_validate(_coaching(citations=None))
+    assert "citations" in str(raised.value)
+
+
+def test_coaching_string_citations_fail_pydantic() -> None:
+    with pytest.raises(ValidationError):
+        FastChatTurnOutput.model_validate(_coaching(citations="S1"))
+
+
+def test_coaching_object_citations_fail_pydantic() -> None:
+    with pytest.raises(ValidationError):
+        FastChatTurnOutput.model_validate(_coaching(citations={}))
+
+
+def test_coaching_numeric_citations_fail_pydantic() -> None:
+    with pytest.raises(ValidationError):
+        FastChatTurnOutput.model_validate(_coaching(citations=123))
+
+
+def test_coaching_malformed_citation_item_fails_pydantic() -> None:
+    with pytest.raises(ValidationError):
+        FastChatTurnOutput.model_validate(_coaching(citations=[{"wrong": "shape"}]))
+
+
+def test_coaching_valid_citation_list_passes_pydantic() -> None:
+    parsed = FastChatTurnOutput.model_validate(
+        _coaching(citations=[{"label": "S1", "title": "Week 1"}])
+    )
+    assert parsed.citations[0].label == "S1"
+    assert parsed.citations[0].title == "Week 1"
+
+
+def test_qa_omitted_citations_default_to_empty_list() -> None:
+    parsed = FastChatTurnOutput.model_validate(
+        {"mode": "qa", "response_text": "Week 1 covers innovation."}
+    )
+    assert parsed.mode == "qa"
+    assert parsed.citations == []
+
+
+def test_qa_empty_citations_are_valid() -> None:
+    parsed = FastChatTurnOutput.model_validate(
+        {"mode": "qa", "response_text": "Week 1 covers innovation.", "citations": []}
+    )
+    assert parsed.citations == []
+
+
+def test_qa_null_citations_fail_pydantic() -> None:
+    with pytest.raises(ValidationError) as raised:
+        FastChatTurnOutput.model_validate(
+            {
+                "mode": "qa",
+                "response_text": "Week 1 covers innovation.",
+                "citations": None,
+            }
+        )
+    assert "citations" in str(raised.value)
+
+
+def test_qa_valid_citation_list_passes_pydantic() -> None:
+    parsed = FastChatTurnOutput.model_validate(_qa())
+    assert parsed.citations[0].label == "S1"
+
+
+def test_generated_schema_rejects_citations_null_and_requires_array() -> None:
+    schema = FastChatTurnOutput.model_json_schema()
+    coaching_empty = {
+        "mode": "coaching",
+        "response_text": _TEXT,
+        "recommendation": "stay",
+        "citations": [],
+    }
+    coaching_null = {
+        "mode": "coaching",
+        "response_text": _TEXT,
+        "recommendation": "stay",
+        "citations": None,
+    }
+    coaching_omitted = {
+        "mode": "coaching",
+        "response_text": _TEXT,
+        "recommendation": "stay",
+    }
+    coaching_string = {
+        "mode": "coaching",
+        "response_text": _TEXT,
+        "recommendation": "stay",
+        "citations": "S1",
+    }
+    qa_valid = {
+        "mode": "qa",
+        "response_text": "Week 1.",
+        "citations": [{"label": "S1"}],
+    }
+    qa_null = {"mode": "qa", "response_text": "Week 1.", "citations": None}
+    assert _schema_allows(schema, coaching_empty)
+    assert not _schema_allows(schema, coaching_null)
+    assert not _schema_allows(schema, coaching_omitted)
+    assert not _schema_allows(schema, coaching_string)
+    assert _schema_allows(schema, qa_valid)
+    assert not _schema_allows(schema, qa_null)

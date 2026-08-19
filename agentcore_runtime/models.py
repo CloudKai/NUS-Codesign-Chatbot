@@ -371,13 +371,20 @@ _FAST_CHAT_RECOMMENDATION_ENUM = ("stay", "advance")
 
 
 def _attach_fast_chat_mode_conditions(schema: dict[str, Any]) -> None:
-    """Add JSON Schema conditions so coaching cannot emit a null recommendation.
+    """Harden Fast Chat JSON Schema for coaching recommendation and citations.
 
     Strands 1.52.0 ``convert_pydantic_to_tool_spec`` flattens to ``type=object``
     plus ``properties`` and drops top-level ``oneOf`` / ``anyOf``. Claude tool
     ``input_schema`` also rejects top-level composition keywords. A
     discriminated-union RootModel is therefore unsafe here. Keep one object
     and express the coaching invariant with ``if`` / ``then``.
+
+    The same flatten path marks every non-required property as
+    ``type: [T, "null"]``. ``citations`` has a Python default of ``[]``, so
+    Pydantic omits it from ``required`` and the model-facing spec becomes
+    ``["array", "null"]``. Claude then emits ``citations: null``, which this
+    model still rejects. Require an array so flatten keeps ``type: array``.
+    JSON ``null`` stays invalid. Python callers may still omit the field.
 
     Args:
         schema: Mutable ``model_json_schema()`` output for this class.
@@ -400,6 +407,16 @@ def _attach_fast_chat_mode_conditions(schema: dict[str, Any]) -> None:
             }
         },
     }
+    required = list(schema.get("required") or [])
+    if "citations" not in required:
+        required.append("citations")
+    schema["required"] = required
+    properties = schema.get("properties")
+    citations = properties.get("citations") if isinstance(properties, dict) else None
+    if isinstance(citations, dict):
+        citations["type"] = "array"
+        citations.pop("anyOf", None)
+        citations.pop("oneOf", None)
 
 
 class FastChatTurnOutput(BaseModel):
@@ -425,7 +442,10 @@ class FastChatTurnOutput(BaseModel):
         ),
     )
     recommendation_rationale: str | None = Field(default=None, max_length=4_000)
-    citations: list[CitationOutput] = Field(default_factory=list)
+    citations: list[CitationOutput] = Field(
+        default_factory=list,
+        description="Always return an array. Use [] when no citations are needed.",
+    )
     needs_source_retrieval: bool = False
 
     @field_validator("mode", mode="before")

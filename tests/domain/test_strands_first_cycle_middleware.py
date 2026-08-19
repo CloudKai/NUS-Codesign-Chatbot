@@ -323,6 +323,10 @@ def _flatten_schema_allows(schema: dict[str, Any], instance: dict[str, Any]) -> 
                 actual = "string"
             elif isinstance(value, bool):
                 actual = "boolean"
+            elif isinstance(value, list):
+                actual = "array"
+            elif isinstance(value, dict):
+                actual = "object"
             else:
                 actual = type(value).__name__
             if actual not in names:
@@ -375,23 +379,37 @@ def test_fast_chat_turn_output_is_one_strands_object_tool() -> None:
     assert schema.get("type") == "object"
     assert "oneOf" not in schema
     assert "anyOf" not in schema
+    citations = (schema.get("properties") or {}).get("citations") or {}
+    assert citations.get("type") == "array"
+    assert "null" not in str(citations.get("type"))
+    assert "citations" in (schema.get("required") or [])
     coaching_null = {
         "mode": "coaching",
         "response_text": "Which constraint is actually binding?",
         "recommendation": None,
+        "citations": [],
     }
     coaching_stay = {
         "mode": "coaching",
         "response_text": "Which constraint is actually binding?",
         "recommendation": "stay",
+        "citations": [],
+    }
+    coaching_citations_null = {
+        "mode": "coaching",
+        "response_text": "Which constraint is actually binding?",
+        "recommendation": "stay",
+        "citations": None,
     }
     qa_null = {
         "mode": "qa",
         "response_text": "Week 1 covers innovation.",
         "recommendation": None,
+        "citations": [],
     }
     assert _flatten_schema_allows(schema, coaching_stay)
     assert not _flatten_schema_allows(schema, coaching_null)
+    assert not _flatten_schema_allows(schema, coaching_citations_null)
     if "if" in schema:
         assert _flatten_schema_allows(schema, qa_null)
     else:
@@ -438,6 +456,7 @@ def test_fast_chat_turn_output_agent_keeps_first_cycle_force() -> None:
                     "mode": "coaching",
                     "response_text": "Which constraint is actually binding?",
                     "recommendation": "stay",
+                    "citations": [],
                 }
             )
             events = [
@@ -570,3 +589,207 @@ def test_coaching_null_recovers_within_turns_two() -> None:
     output = getattr(result, "structured_output", None)
     assert isinstance(output, FastChatTurnOutput)
     assert output.recommendation == "stay"
+
+
+def _scripted_fast_chat_model(payloads: list[dict[str, Any]]) -> RecordingModel:
+    """Return a fake Converse model that emits successive Fast Chat tool payloads."""
+
+    class ScriptedFastChatModel(RecordingModel):
+        """Emit one scripted FastChatTurnOutput tool payload per cycle."""
+
+        async def stream(
+            self,
+            messages: Any,
+            tool_specs: list[Any] | None = None,
+            system_prompt: str | None = None,
+            *,
+            tool_choice: Any = None,
+            **kwargs: Any,
+        ) -> AsyncIterator[dict[str, Any]]:
+            del messages, system_prompt, kwargs
+            specs = list(tool_specs or [])
+            self.calls.append(
+                {
+                    "tool_choice": tool_choice,
+                    "tool_count": len(specs),
+                }
+            )
+            name = "FastChatTurnOutput"
+            if specs and isinstance(specs[0], dict) and specs[0].get("name"):
+                name = str(specs[0]["name"])
+            index = min(len(self.calls) - 1, len(payloads) - 1)
+            events = [
+                {"messageStart": {"role": "assistant"}},
+                {
+                    "contentBlockStart": {
+                        "start": {
+                            "toolUse": {
+                                "toolUseId": f"tu-{len(self.calls)}",
+                                "name": name,
+                            }
+                        }
+                    }
+                },
+                {
+                    "contentBlockDelta": {
+                        "delta": {"toolUse": {"input": json.dumps(payloads[index])}}
+                    }
+                },
+                {"contentBlockStop": {}},
+                {"messageStop": {"stopReason": "tool_use"}},
+                {"metadata": _usage()},
+            ]
+            for event in events:
+                yield event
+
+    return ScriptedFastChatModel()
+
+
+def _invoke_scripted_fast_chat(payloads: list[dict[str, Any]]) -> Any:
+    """Invoke Fast Chat with a scripted fake model. No AWS."""
+    from agentcore_runtime.models import FastChatTurnOutput
+
+    model = _scripted_fast_chat_model(payloads)
+    agent = Agent(
+        model=model,
+        tools=[],
+        system_prompt="Return the structured Fast Chat result.",
+        callback_handler=None,
+        load_tools_from_directory=False,
+    )
+    assert _install_first_cycle_structured_output(agent, role="fast_chat") is True
+    result = asyncio.run(
+        agent.invoke_async(
+            "Older pedestrians may not have enough time to cross.",
+            structured_output_model=FastChatTurnOutput,
+            structured_output_prompt=STRUCTURED_OUTPUT_REPAIR_PROMPT,
+            limits=FAST_CHAT_INVOKE_LIMITS,
+        )
+    )
+    return model, result
+
+
+_STAY_EMPTY_CITATIONS = {
+    "mode": "coaching",
+    "response_text": "What evidence would help you verify that assumption?",
+    "recommendation": "stay",
+    "citations": [],
+}
+
+
+def test_empty_citations_complete_in_one_cycle() -> None:
+    """Structurally valid empty citations must not trigger recovery."""
+    from agentcore_runtime.models import FastChatTurnOutput
+
+    model, result = _invoke_scripted_fast_chat([_STAY_EMPTY_CITATIONS])
+    assert len(model.calls) == 1
+    output = getattr(result, "structured_output", None)
+    assert isinstance(output, FastChatTurnOutput)
+    assert output.citations == []
+    assert output.recommendation == "stay"
+    assert output.response_text == _STAY_EMPTY_CITATIONS["response_text"]
+    assert event_loop_cycle_count_from_agent_result(result) == 1
+
+
+def test_valid_citation_list_completes_in_one_cycle() -> None:
+    """A valid CitationOutput list is accepted on cycle 1."""
+    from agentcore_runtime.models import FastChatTurnOutput
+
+    payload = {
+        "mode": "qa",
+        "response_text": "Week 1 covers innovation [S1].",
+        "citations": [{"label": "S1", "title": "Week 1"}],
+    }
+    model, result = _invoke_scripted_fast_chat([payload])
+    assert len(model.calls) == 1
+    output = getattr(result, "structured_output", None)
+    assert isinstance(output, FastChatTurnOutput)
+    assert output.mode == "qa"
+    assert output.citations[0].label == "S1"
+    assert event_loop_cycle_count_from_agent_result(result) == 1
+
+
+def test_null_citations_remain_invalid_and_recover_within_turns_two() -> None:
+    """citations=null must not be normalized; bounded recovery still works."""
+    from agentcore_runtime.models import FastChatTurnOutput
+
+    model, result = _invoke_scripted_fast_chat(
+        [
+            {
+                "mode": "coaching",
+                "response_text": "What evidence would help you verify that assumption?",
+                "recommendation": "stay",
+                "citations": None,
+            },
+            _STAY_EMPTY_CITATIONS,
+        ]
+    )
+    assert len(model.calls) == 2
+    assert FAST_CHAT_INVOKE_LIMITS == {"turns": 2}
+    output = getattr(result, "structured_output", None)
+    assert isinstance(output, FastChatTurnOutput)
+    assert output.citations == []
+    assert output.recommendation == "stay"
+
+
+def test_string_citations_remain_invalid_and_recover_within_turns_two() -> None:
+    """A primitive citations value stays invalid; recovery still succeeds."""
+    from agentcore_runtime.models import FastChatTurnOutput
+
+    model, result = _invoke_scripted_fast_chat(
+        [
+            {
+                "mode": "coaching",
+                "response_text": "What evidence would help you verify that assumption?",
+                "recommendation": "stay",
+                "citations": "S1",
+            },
+            _STAY_EMPTY_CITATIONS,
+        ]
+    )
+    assert len(model.calls) == 2
+    output = getattr(result, "structured_output", None)
+    assert isinstance(output, FastChatTurnOutput)
+    assert output.citations == []
+
+
+def test_object_citations_remain_invalid_and_recover_within_turns_two() -> None:
+    """An object citations value stays invalid; recovery still succeeds."""
+    from agentcore_runtime.models import FastChatTurnOutput
+
+    model, result = _invoke_scripted_fast_chat(
+        [
+            {
+                "mode": "coaching",
+                "response_text": "What evidence would help you verify that assumption?",
+                "recommendation": "stay",
+                "citations": {},
+            },
+            _STAY_EMPTY_CITATIONS,
+        ]
+    )
+    assert len(model.calls) == 2
+    output = getattr(result, "structured_output", None)
+    assert isinstance(output, FastChatTurnOutput)
+    assert output.citations == []
+
+
+def test_malformed_citation_item_remains_invalid_and_recovers() -> None:
+    """A list item missing CitationOutput.label stays invalid."""
+    from agentcore_runtime.models import FastChatTurnOutput
+
+    model, result = _invoke_scripted_fast_chat(
+        [
+            {
+                "mode": "coaching",
+                "response_text": "What evidence would help you verify that assumption?",
+                "recommendation": "stay",
+                "citations": [{"wrong": "shape"}],
+            },
+            _STAY_EMPTY_CITATIONS,
+        ]
+    )
+    assert len(model.calls) == 2
+    output = getattr(result, "structured_output", None)
+    assert isinstance(output, FastChatTurnOutput)
+    assert output.citations == []

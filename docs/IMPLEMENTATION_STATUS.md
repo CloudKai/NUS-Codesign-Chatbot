@@ -3,8 +3,60 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock-v2`
-**HEAD:** `6616e15cff703c70254f7442a75773477b01f22c`
+**HEAD:** citations schema RC on `Integrate-Bedrock-v2` (this commit).
+Composer layout remains `711d4e6`.
 **Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
+**Live AgentCore:** DEFAULT → **v23**. Affinity ON. Generation 2. Prompt cache
+OFF. **Do not publish v24 yet.**
+
+**This phase:** Local Fast Chat citations schema release candidate. No
+AgentCore publish, no DEFAULT move, no EC2 rebuild, $0 AWS.
+
+**Root cause (proven against strands-agents==1.52.0).** Pydantic
+`FastChatTurnOutput.citations` is `list[CitationOutput]` with
+`type: array` and a Python default of `[]`, so it is omitted from JSON
+Schema `required`. Strands `_process_property` then rewrites every
+non-required field to `type: [T, "null"]`. The model-facing tool spec
+therefore advertised `citations: ["array", "null"]`. Claude emitted
+`citations: null`; Pydantic still rejected it (`Input should be a valid
+list`); bounded recovery ran a second Haiku cycle.
+
+**Local fix (not published).** Keep Pydantic rejecting JSON `null`. Do not
+normalize `None → []`. Mark `citations` required as `type: array` in
+`json_schema_extra` and add the short Field description “Always return an
+array. Use [] when no citations are needed.” After Strands flatten the
+tool spec is `type: array` and `required` includes `citations`. Python
+construction may still omit the field (default `[]`).
+
+**Not changed.** Recommendation `if/then` / `coaching_requires_recommendation`;
+first-cycle `tool_choice={"any": {}}`; Fast Chat `turns=2`; Deep Review
+`turns=3`; RAG; models; prompts; pedagogy.
+
+**Validation ($0 AWS).** `git diff --check` clean on RC files.
+`.venv/bin/ruff check --no-fix . --exclude scripts/load_probe.py` passed
+(unrelated dirty `scripts/load_probe.py` is syntax-broken and was excluded).
+`compileall` passed. Focused Fast Chat / citation / RAG / Deep Review tests
+passed. Full mock pytest **1414 collected, passed**, ignoring
+`tests/scripts/test_load_probe.py`. Throwaway `strands-agents==1.52.0`
+`pytest --noconftest tests/domain/test_strands_first_cycle_middleware.py`:
+**14 passed**.
+
+**Production recommendation.** Keep DEFAULT → **23** until this RC is
+reviewed. If accepted, surgical v24 overlay of `agentcore_runtime/models.py`
+only is enough. Do not bump generation. Do not enable prompt cache.
+
+**Next exact action.** Decide whether to publish a controlled v24 overlay of
+`agentcore_runtime/models.py` only. Keep DEFAULT → **23** until then. Do not
+bump generation. Do not enable prompt cache.
+
+**Known residual risk.** Claude can still emit `citations: null` against an
+array-only schema; that remains invalid and recovery still runs. Nested
+`CitationOutput` optional strings remain `[string, null]` after flatten;
+that is not the observed failure.
+
+### Prior live baseline: v23 schema release (2026-08-19)
+
+**HEAD at publish:** `6616e15cff703c70254f7442a75773477b01f22c`
 **This phase:** Surgical AgentCore **v23** schema release. Affinity ON.
 Generation 2. Prompt cache OFF.
 
@@ -41,10 +93,9 @@ RAG run.
 2, prompt cache OFF. Do not bump generation. Do not enable prompt cache.
 Do not rebuild EC2 for this schema-only change.
 
-**Next exact action.** Optional later: surgical `citations` schema so JSON
-`null` cannot be emitted (same class as the recommendation hole). Do not
-bundle that into a rollback. Do not start Deep Review on the validation
-notebook.
+**Next exact action at the time of v23.** The citations flatten hole below was
+the leftover recovery. The local RC above now addresses it; it is not
+published. Do not start Deep Review on the v23 validation notebook.
 
 **Session affinity:** Compose `AGENTCORE_SESSION_AFFINITY_ENABLED=true` and
 `AGENTCORE_SESSION_GENERATION=2`. Host `.env` still has unused generation
