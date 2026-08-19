@@ -78,7 +78,7 @@ modules.
 | `domain/test_bedrock_retrieve.py` | Bedrock Knowledge Base Retrieve adapter: selected `[S#]` mapping, foreign-key drop, required/degraded/disabled filter modes, no silent unfiltered retry, shared-executor timeouts |
 | `domain/test_kb_metadata.py` | Canonical `course_material_id` and Bedrock sidecar payload |
 | `scripts/test_sync_course_kb_metadata.py` | Sidecar dry-run, idempotent bytes, local verify |
-| `domain/test_fast_chat_schema.py` | Slim FastChatTurnOutput; legacy EducationalAssessment parse |
+| `domain/test_fast_chat_schema.py` | Slim FastChatTurnOutput; coaching/Q&A contract matrix; generated JSON Schema rejects coaching+null |
 | `domain/test_coach_turn_perf.py` | Privacy-safe `coach_turn_perf` JSON and `TIMING` service-latency lines |
 | `domain/test_coach_progress.py` | retrieving/thinking/saving execution-boundary events; slim persist |
 | `domain/test_primary_path.py` | All five phases, stale/reject, restart, notebook isolation, schema |
@@ -87,7 +87,7 @@ modules.
 | `scripts/test_reset_learning_data.py` | Dry-run manifest, backup/quarantine, exact confirmation, stale-plan rejection |
 | `domain/test_fast_chat_one_call.py` | One Haiku fast-chat invoke; no router/incremental/Sonnet on the normal path |
 | `domain/test_first_cycle_structured_output.py` | First-cycle `tool_choice={"any": {}}` helpers; applied vs installed telemetry; Fast Chat only; `Agent(tools=[])`; `turns=2` recovery kept; no Strands |
-| `domain/test_strands_first_cycle_middleware.py` | Real Strands 1.52.0 fake-model path; skipped unless `strands` is installed |
+| `domain/test_strands_first_cycle_middleware.py` | Real Strands 1.52.0 fake-model path; skipped unless `strands` is installed; FastChatTurnOutput object-schema + bounded recovery |
 | `domain/test_fast_chat_quality_matrix.py` | A–T quality-matrix inventory; does not invent live scores |
 | `domain/test_structured_output_limits.py` | Fast Chat `turns=2` / Deep Review `turns=3` actually passed to `invoke_async` |
 | `domain/test_fast_chat_context.py` | Six-message window, 3000/1500 history budgets, 12k/16k totals, system-prompt estimate, RAG repack |

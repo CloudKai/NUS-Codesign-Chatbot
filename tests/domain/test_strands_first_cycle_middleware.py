@@ -133,6 +133,22 @@ class RecordingModel(Model):
             {
                 "tool_choice": tool_choice,
                 "tool_count": len(list(tool_specs or [])),
+                "tool_names": [
+                    spec.get("name") if isinstance(spec, dict) else None
+                    for spec in list(tool_specs or [])
+                ],
+                "tool_schema_types": [
+                    ((spec.get("inputSchema") or {}).get("json") or {}).get("type")
+                    if isinstance(spec, dict)
+                    else None
+                    for spec in list(tool_specs or [])
+                ],
+                "tool_schema_has_top_one_of": [
+                    "oneOf" in ((spec.get("inputSchema") or {}).get("json") or {})
+                    if isinstance(spec, dict)
+                    else False
+                    for spec in list(tool_specs or [])
+                ],
             }
         )
         if self._recover_after_prose and len(self.calls) == 1:
@@ -286,3 +302,271 @@ def test_deep_review_does_not_install_fast_chat_force() -> None:
     )
     assert "first_cycle_tool_choice_applied" not in payload
     assert "first_cycle_tool_choice_installed" not in payload
+
+
+def _flatten_schema_allows(schema: dict[str, Any], instance: dict[str, Any]) -> bool:
+    """Return whether a flattened Bedrock object schema accepts ``instance``."""
+    required = schema.get("required") or []
+    if any(key not in instance for key in required):
+        return False
+    properties = schema.get("properties") or {}
+    for key, subschema in properties.items():
+        if key not in instance:
+            continue
+        value = instance[key]
+        expected = subschema.get("type")
+        if expected is not None:
+            names = expected if isinstance(expected, list) else [expected]
+            if value is None:
+                actual = "null"
+            elif isinstance(value, str):
+                actual = "string"
+            elif isinstance(value, bool):
+                actual = "boolean"
+            else:
+                actual = type(value).__name__
+            if actual not in names:
+                return False
+        if "enum" in subschema and value not in subschema["enum"]:
+            return False
+        if "anyOf" in subschema:
+            options = subschema["anyOf"]
+            if not any(
+                (opt.get("type") == "null" and value is None)
+                or (
+                    value in (opt.get("enum") or [])
+                    if "enum" in opt
+                    else opt.get("type") == "string" and isinstance(value, str)
+                )
+                for opt in options
+            ):
+                return False
+    if_schema = schema.get("if")
+    then_schema = schema.get("then")
+    if if_schema and then_schema:
+        mode_ok = instance.get("mode") == (if_schema.get("properties") or {}).get(
+            "mode", {}
+        ).get("const")
+        if mode_ok:
+            then_required = then_schema.get("required") or []
+            if any(key not in instance for key in then_required):
+                return False
+            then_props = then_schema.get("properties") or {}
+            rec_schema = then_props.get("recommendation") or {}
+            rec = instance.get("recommendation")
+            if "enum" in rec_schema and rec not in rec_schema["enum"]:
+                return False
+            if rec_schema.get("type") == "string" and not isinstance(rec, str):
+                return False
+    return True
+
+
+def test_fast_chat_turn_output_is_one_strands_object_tool() -> None:
+    """Strands 1.52.0 must emit one FastChatTurnOutput object schema, not a union."""
+    from strands.tools.structured_output.structured_output_utils import (
+        convert_pydantic_to_tool_spec,
+    )
+
+    from agentcore_runtime.models import FastChatTurnOutput
+
+    spec = convert_pydantic_to_tool_spec(FastChatTurnOutput)
+    assert spec["name"] == "FastChatTurnOutput"
+    schema = spec["inputSchema"]["json"]
+    assert schema.get("type") == "object"
+    assert "oneOf" not in schema
+    assert "anyOf" not in schema
+    coaching_null = {
+        "mode": "coaching",
+        "response_text": "Which constraint is actually binding?",
+        "recommendation": None,
+    }
+    coaching_stay = {
+        "mode": "coaching",
+        "response_text": "Which constraint is actually binding?",
+        "recommendation": "stay",
+    }
+    qa_null = {
+        "mode": "qa",
+        "response_text": "Week 1 covers innovation.",
+        "recommendation": None,
+    }
+    assert _flatten_schema_allows(schema, coaching_stay)
+    assert not _flatten_schema_allows(schema, coaching_null)
+    if "if" in schema:
+        assert _flatten_schema_allows(schema, qa_null)
+    else:
+        # Flatten may drop if/then. Enum without null still blocks coaching
+        # null. Q&A null remains valid on the Pydantic model.
+        rec = (schema.get("properties") or {}).get("recommendation") or {}
+        assert "stay" in (rec.get("enum") or [])
+        FastChatTurnOutput.model_validate(qa_null)
+
+
+def test_fast_chat_turn_output_agent_keeps_first_cycle_force() -> None:
+    """Production FastChatTurnOutput still gets cycle-1 tool_choice any."""
+    from agentcore_runtime.models import FastChatTurnOutput
+
+    class FastChatRecordingModel(RecordingModel):
+        """Emit a valid FastChatTurnOutput tool payload."""
+
+        async def stream(
+            self,
+            messages: Any,
+            tool_specs: list[Any] | None = None,
+            system_prompt: str | None = None,
+            *,
+            tool_choice: Any = None,
+            **kwargs: Any,
+        ) -> AsyncIterator[dict[str, Any]]:
+            del messages, system_prompt, kwargs
+            specs = list(tool_specs or [])
+            self.calls.append(
+                {
+                    "tool_choice": tool_choice,
+                    "tool_count": len(specs),
+                    "tool_names": [
+                        spec.get("name") if isinstance(spec, dict) else None
+                        for spec in specs
+                    ],
+                }
+            )
+            name = "FastChatTurnOutput"
+            if specs and isinstance(specs[0], dict) and specs[0].get("name"):
+                name = str(specs[0]["name"])
+            payload = json.dumps(
+                {
+                    "mode": "coaching",
+                    "response_text": "Which constraint is actually binding?",
+                    "recommendation": "stay",
+                }
+            )
+            events = [
+                {"messageStart": {"role": "assistant"}},
+                {
+                    "contentBlockStart": {
+                        "start": {"toolUse": {"toolUseId": "tu-1", "name": name}}
+                    }
+                },
+                {"contentBlockDelta": {"delta": {"toolUse": {"input": payload}}}},
+                {"contentBlockStop": {}},
+                {"messageStop": {"stopReason": "tool_use"}},
+                {"metadata": _usage()},
+            ]
+            for event in events:
+                yield event
+
+    model = FastChatRecordingModel()
+    cycle_state: dict[str, Any] = {}
+    agent = Agent(
+        model=model,
+        tools=[],
+        system_prompt="Return the structured Fast Chat result.",
+        callback_handler=None,
+        load_tools_from_directory=False,
+    )
+    assert (
+        _install_first_cycle_structured_output(
+            agent, role="fast_chat", cycle_state=cycle_state
+        )
+        is True
+    )
+    result = asyncio.run(
+        agent.invoke_async(
+            "Older pedestrians may not have enough time to cross.",
+            structured_output_model=FastChatTurnOutput,
+            structured_output_prompt=STRUCTURED_OUTPUT_REPAIR_PROMPT,
+            limits=FAST_CHAT_INVOKE_LIMITS,
+        )
+    )
+    assert model.calls[0]["tool_choice"] == {"any": {}}
+    assert model.calls[0]["tool_count"] == 1
+    assert model.calls[0]["tool_names"] == ["FastChatTurnOutput"]
+    assert cycle_state["applied"] is True
+    assert cycle_state["decision"] == "applied"
+    output = getattr(result, "structured_output", None)
+    assert isinstance(output, FastChatTurnOutput)
+    assert output.recommendation == "stay"
+    cycles = event_loop_cycle_count_from_agent_result(result)
+    assert cycles == 1
+
+
+def test_coaching_null_recovers_within_turns_two() -> None:
+    """Bounded recovery still runs when cycle 1 coaching recommendation is null."""
+    from agentcore_runtime.models import FastChatTurnOutput
+
+    class RecoveringFastChatModel(RecordingModel):
+        """Cycle 1 emits coaching+null; cycle 2 emits stay."""
+
+        async def stream(
+            self,
+            messages: Any,
+            tool_specs: list[Any] | None = None,
+            system_prompt: str | None = None,
+            *,
+            tool_choice: Any = None,
+            **kwargs: Any,
+        ) -> AsyncIterator[dict[str, Any]]:
+            del messages, system_prompt, kwargs
+            specs = list(tool_specs or [])
+            self.calls.append(
+                {
+                    "tool_choice": tool_choice,
+                    "tool_count": len(specs),
+                }
+            )
+            name = "FastChatTurnOutput"
+            if specs and isinstance(specs[0], dict) and specs[0].get("name"):
+                name = str(specs[0]["name"])
+            if len(self.calls) == 1:
+                payload = json.dumps(
+                    {
+                        "mode": "coaching",
+                        "response_text": "Which constraint is actually binding?",
+                        "recommendation": None,
+                    }
+                )
+            else:
+                payload = json.dumps(
+                    {
+                        "mode": "coaching",
+                        "response_text": "Which constraint is actually binding?",
+                        "recommendation": "stay",
+                    }
+                )
+            events = [
+                {"messageStart": {"role": "assistant"}},
+                {
+                    "contentBlockStart": {
+                        "start": {"toolUse": {"toolUseId": f"tu-{len(self.calls)}", "name": name}}
+                    }
+                },
+                {"contentBlockDelta": {"delta": {"toolUse": {"input": payload}}}},
+                {"contentBlockStop": {}},
+                {"messageStop": {"stopReason": "tool_use"}},
+                {"metadata": _usage()},
+            ]
+            for event in events:
+                yield event
+
+    model = RecoveringFastChatModel()
+    agent = Agent(
+        model=model,
+        tools=[],
+        system_prompt="Return the structured Fast Chat result.",
+        callback_handler=None,
+        load_tools_from_directory=False,
+    )
+    assert _install_first_cycle_structured_output(agent, role="fast_chat") is True
+    result = asyncio.run(
+        agent.invoke_async(
+            "Older pedestrians may not have enough time to cross.",
+            structured_output_model=FastChatTurnOutput,
+            structured_output_prompt=STRUCTURED_OUTPUT_REPAIR_PROMPT,
+            limits=FAST_CHAT_INVOKE_LIMITS,
+        )
+    )
+    assert len(model.calls) == 2
+    assert FAST_CHAT_INVOKE_LIMITS == {"turns": 2}
+    output = getattr(result, "structured_output", None)
+    assert isinstance(output, FastChatTurnOutput)
+    assert output.recommendation == "stay"

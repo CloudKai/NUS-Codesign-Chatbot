@@ -11,7 +11,7 @@ coaching assessment fails closed.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -367,19 +367,68 @@ def adapt_fast_chat_turn_payload(value: Any) -> FastChatTurnOutput:
     )
 
 
+_FAST_CHAT_RECOMMENDATION_ENUM = ("stay", "advance")
+
+
+def _attach_fast_chat_mode_conditions(schema: dict[str, Any]) -> None:
+    """Add JSON Schema conditions so coaching cannot emit a null recommendation.
+
+    Strands 1.52.0 ``convert_pydantic_to_tool_spec`` flattens to ``type=object``
+    plus ``properties`` and drops top-level ``oneOf`` / ``anyOf``. Claude tool
+    ``input_schema`` also rejects top-level composition keywords. A
+    discriminated-union RootModel is therefore unsafe here. Keep one object
+    and express the coaching invariant with ``if`` / ``then``.
+
+    Args:
+        schema: Mutable ``model_json_schema()`` output for this class.
+
+    Returns:
+        None. Mutates ``schema`` in place.
+    """
+    schema["if"] = {
+        "type": "object",
+        "properties": {"mode": {"const": "coaching"}},
+        "required": ["mode"],
+    }
+    schema["then"] = {
+        "type": "object",
+        "required": ["recommendation"],
+        "properties": {
+            "recommendation": {
+                "type": "string",
+                "enum": list(_FAST_CHAT_RECOMMENDATION_ENUM),
+            }
+        },
+    }
+
+
 class FastChatTurnOutput(BaseModel):
-    """Lightweight one-call Coaching or Q&A result. Deep Review is separate."""
+    """Lightweight one-call Coaching or Q&A result. Deep Review is separate.
 
-    model_config = ConfigDict(extra="ignore")
+    Wire shape stays a single object named ``FastChatTurnOutput``. Coaching
+    requires ``recommendation`` stay or advance in both JSON Schema and
+    Pydantic. Q&A still allows a null or omitted recommendation. Rationale
+    remains optional.
+    """
 
-    mode: str
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra=_attach_fast_chat_mode_conditions,
+    )
+
+    mode: Literal["coaching", "qa"]
     response_text: str = Field(min_length=1)
-    recommendation: str | None = None
+    recommendation: Literal["stay", "advance"] | None = Field(
+        default=None,
+        description=(
+            "stay or advance when mode is coaching; omit or null when mode is qa"
+        ),
+    )
     recommendation_rationale: str | None = Field(default=None, max_length=4_000)
     citations: list[CitationOutput] = Field(default_factory=list)
     needs_source_retrieval: bool = False
 
-    @field_validator("mode")
+    @field_validator("mode", mode="before")
     @classmethod
     def mode_must_be_coaching_or_qa(cls, value: str) -> str:
         """Reject modes outside the two-value fast-chat contract."""
@@ -388,7 +437,7 @@ class FastChatTurnOutput(BaseModel):
             raise ValueError("mode must be coaching or qa")
         return cleaned
 
-    @field_validator("recommendation")
+    @field_validator("recommendation", mode="before")
     @classmethod
     def recommendation_stay_advance_or_empty(cls, value: str | None) -> str | None:
         """Accept stay/advance; treat blank as absent."""

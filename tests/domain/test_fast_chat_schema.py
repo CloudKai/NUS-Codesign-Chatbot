@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
@@ -13,6 +15,181 @@ from agentcore_runtime.models import (
     parse_fast_chat_turn_output,
 )
 from backend.domain import EducationalAssessment, StageDecision
+
+
+_TEXT = "What specifically prevents noon booking?"
+
+
+def _coaching(**extra: Any) -> dict[str, Any]:
+    """Return a coaching payload with optional overrides. No student secrets."""
+    payload: dict[str, Any] = {
+        "mode": "coaching",
+        "response_text": _TEXT,
+        "recommendation": "stay",
+    }
+    payload.update(extra)
+    return payload
+
+
+def _qa(**extra: Any) -> dict[str, Any]:
+    """Return a Q&A payload with optional overrides."""
+    payload: dict[str, Any] = {
+        "mode": "qa",
+        "response_text": "Week 1 covers Innovation-driven economy [S1].",
+        "citations": [{"label": "S1", "title": "Week 1"}],
+    }
+    payload.update(extra)
+    return payload
+
+
+def _schema_allows(schema: dict[str, Any], instance: Any) -> bool:
+    """Return whether ``instance`` satisfies a Fast Chat JSON Schema subset.
+
+    Supports the keywords this model actually emits: type, properties,
+    required, enum, const, anyOf, if/then, minLength. Extra instance keys
+    are allowed. This is a structural checker, not a full JSON Schema suite.
+    """
+    if not isinstance(schema, dict):
+        return False
+    if "anyOf" in schema:
+        return any(_schema_allows(option, instance) for option in schema["anyOf"])
+    expected = schema.get("type")
+    if expected is not None:
+        names = expected if isinstance(expected, list) else [expected]
+        actual = _json_type_name(instance)
+        if actual not in names:
+            return False
+    if "const" in schema and instance != schema["const"]:
+        return False
+    if "enum" in schema and instance not in schema["enum"]:
+        return False
+    if isinstance(instance, str) and "minLength" in schema:
+        if len(instance) < int(schema["minLength"]):
+            return False
+    if not isinstance(instance, dict):
+        return True
+    required = schema.get("required") or []
+    if any(key not in instance for key in required):
+        return False
+    properties = schema.get("properties") or {}
+    for key, subschema in properties.items():
+        if key not in instance:
+            continue
+        if not _schema_allows(subschema, instance[key]):
+            return False
+    if_schema = schema.get("if")
+    then_schema = schema.get("then")
+    if if_schema is not None and then_schema is not None:
+        if _schema_allows(if_schema, instance) and not _schema_allows(
+            then_schema, instance
+        ):
+            return False
+    return True
+
+
+def _json_type_name(value: Any) -> str:
+    """Return the JSON Schema type name for a Python value."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return type(value).__name__
+
+
+def test_qa_null_recommendation_passes_pydantic() -> None:
+    parsed = FastChatTurnOutput.model_validate(_qa(recommendation=None))
+    assert parsed.mode == "qa"
+    assert parsed.recommendation is None
+
+
+def test_qa_omitted_recommendation_passes_pydantic() -> None:
+    parsed = FastChatTurnOutput.model_validate(_qa())
+    assert parsed.recommendation is None
+
+
+def test_coaching_stay_passes_pydantic() -> None:
+    parsed = FastChatTurnOutput.model_validate(_coaching(recommendation="stay"))
+    assert parsed.recommendation == "stay"
+
+
+def test_coaching_advance_passes_pydantic() -> None:
+    parsed = FastChatTurnOutput.model_validate(_coaching(recommendation="advance"))
+    assert parsed.recommendation == "advance"
+
+
+def test_coaching_null_recommendation_fails_pydantic() -> None:
+    with pytest.raises(ValidationError):
+        FastChatTurnOutput.model_validate(_coaching(recommendation=None))
+
+
+def test_coaching_missing_recommendation_fails() -> None:
+    with pytest.raises(ValidationError):
+        FastChatTurnOutput.model_validate(
+            {"mode": "coaching", "response_text": _TEXT}
+        )
+
+
+def test_invalid_recommendation_enum_fails() -> None:
+    with pytest.raises(ValidationError):
+        FastChatTurnOutput.model_validate(_coaching(recommendation="maybe"))
+
+
+def test_coaching_rationale_is_optional() -> None:
+    parsed = FastChatTurnOutput.model_validate(_coaching())
+    assert parsed.recommendation == "stay"
+    assert parsed.recommendation_rationale is None
+
+
+def test_generated_schema_is_single_object_not_union() -> None:
+    schema = FastChatTurnOutput.model_json_schema()
+    assert schema.get("type") == "object"
+    assert "oneOf" not in schema
+    assert "anyOf" not in schema
+    assert "allOf" not in schema
+    assert "if" in schema
+    assert "then" in schema
+    then_rec = schema["then"]["properties"]["recommendation"]
+    assert then_rec.get("type") == "string"
+    assert then_rec.get("enum") == ["stay", "advance"]
+    assert "recommendation" in schema["then"]["required"]
+
+
+def test_generated_schema_rejects_coaching_null_and_keeps_qa_null() -> None:
+    schema = FastChatTurnOutput.model_json_schema()
+    coaching_stay = {
+        "mode": "coaching",
+        "response_text": _TEXT,
+        "recommendation": "stay",
+    }
+    coaching_advance = {
+        "mode": "coaching",
+        "response_text": _TEXT,
+        "recommendation": "advance",
+    }
+    coaching_null = {
+        "mode": "coaching",
+        "response_text": _TEXT,
+        "recommendation": None,
+    }
+    coaching_missing = {"mode": "coaching", "response_text": _TEXT}
+    qa_null = {"mode": "qa", "response_text": "Week 1.", "recommendation": None}
+    qa_omitted = {"mode": "qa", "response_text": "Week 1."}
+    assert _schema_allows(schema, coaching_stay)
+    assert _schema_allows(schema, coaching_advance)
+    assert not _schema_allows(schema, coaching_null)
+    assert not _schema_allows(schema, coaching_missing)
+    assert _schema_allows(schema, qa_null)
+    assert _schema_allows(schema, qa_omitted)
 
 
 def test_coaching_schema_requires_stay_or_advance_and_omits_assessment() -> None:

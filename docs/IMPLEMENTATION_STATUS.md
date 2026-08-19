@@ -3,14 +3,90 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock-v2`
-**Starting HEAD:** `31b320acde4316832fdd6605ad03ae107740af55`
-**This phase:** Make Streamlit `UI TIMING` visible in Docker logs and split the pre-API Send path.
-**Not deployed. Not published to AgentCore.**
+**HEAD:** `ddfc3f46561c2dcb390d847cb331b22f3a0659d0`
+**Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged)
+**This phase:** Local Fast Chat JSON Schema alignment. Production DEFAULT
+stays **v22**. Affinity ON. Generation 2. Prompt cache OFF. Not published.
 
-**Prompt cache:** production Compose keeps `FAST_CHAT_PROMPT_CACHE_ENABLED=false`.
-Do not enable for this baseline.
-**Session affinity:** Compose does not set `AGENTCORE_SESSION_AFFINITY_ENABLED`;
-settings default is `false`. Do not enable for this baseline.
+**Local schema fix (2026-08-20, not deployed).** `FastChatTurnOutput` now
+emits `if mode=coaching then recommendation in {stay, advance}`. Pydantic
+`coaching_requires_recommendation` is unchanged. Discriminated unions were
+rejected: Strands 1.52.0 flatten requires `type=object`, and Claude tool
+schemas reject top-level `oneOf`. Strands flatten still drops `if`/`then`;
+the flattened recommendation is `{enum: [stay, advance], type: [string, null]}`
+which still rejects JSON `null` via `enum`. Q&A `null` remains valid in
+Pydantic. Rationale stays optional. `turns=2` kept. No AWS calls.
+
+**Production recommendation.** Keep DEFAULT → **22**. Do not publish v23
+until a controlled Fast Chat sample is authorized.
+
+**Next exact action.** Operator may later authorize a surgical v23 overlay of
+`agentcore_runtime/models.py` only. Do not bump generation. Do not enable
+prompt cache.
+
+**AgentCore:** DEFAULT liveVersion **22** READY. Same ARN
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. v21 was not deleted.
+
+**Session affinity:** host `.env` `AGENTCORE_SESSION_AFFINITY_ENABLED=true`.
+Compose still pins `AGENTCORE_SESSION_GENERATION=2` (not bumped). Effective
+FastAPI generation is **2**. Host `.env` still has unused `=3`; do not use it.
+
+### First-cycle hardening publish (2026-08-19): DEFAULT 21 → 22
+
+v21 source (`b81a5b0` zip) had **no** `first_cycle_tool_choice_*` middleware.
+HEAD contains it (`bf7bec5` / `e556ad7` / `d7d6f1d`). Live v21 logs also lacked
+those fields. `V21_FIRST_CYCLE_HARDENING = ABSENT`.
+
+Published artifact is a **surgical overlay** of live v21 zip + current
+`main.py` + current `structured_coach.py` with the `4f5953e` Q&A prompt hunk
+reverted. `specialists/fast_chat.py` stayed at v21. Not bundled: RAG, model,
+guardrail, Deep Review limits, cache, affinity, generation.
+
+Local: `git diff --check` clean; Ruff passed; `compileall` passed; companion
+pytest 147 passed; Strands 1.52.0 throwaway venv 5 first-cycle middleware tests
+passed (`--noconftest`).
+
+Validation used a **new untitled notebook** (new `codesign-d0bf0a01…` session)
+because existing microVMs stay on the version they were created with. Two paid
+Hellos. C1 cold one-cycle; C2 warm reused the same session (pre-handler ~117 ms)
+but recovered once (`event_loop_cycle_count=2`) even though
+`first_cycle_tool_choice_applied=true`. Compare C2 invoke **4914 ms** to warm
+v21 B2 **7225 ms**, not to cold A. RAG off, DSQL unchanged, Deep Review not
+invoked. Hello is structural latency only.
+
+**Production recommendation.** Keep DEFAULT → **22**, affinity ON, generation 2,
+prompt cache OFF. Do not overfit coaching quality to Hello. Do not bump
+generation merely because the runtime version changed.
+
+**C2 recovery cause (2026-08-19, read-only).** Cycle 1 `tool_use` of
+`FastChatTurnOutput` failed Pydantic `coaching_requires_recommendation`:
+`mode=coaching` with `recommendation=null` (`Field 'root'`). Live v22 JSON
+Schema still allows that shape. Local HEAD now rejects it (not published).
+
+### Affinity A/B (2026-08-19): warm session removes ~5.4s pre-handler
+
+Reused the 15:07 stateless Hello as **A**. Enabled affinity only; recreated the
+same `ddfc3f4` container. Two paid Hellos on the same KM notebook (RAG off).
+
+| | Stateless A | Affinity B1 (cold) | Affinity B2 (warm) |
+|---|---:|---:|---:|
+| `runtimeSessionId` | `stateless-1e4d…` | `codesign-bd337c…` | **same as B1** |
+| Pre-handler | 5402 ms | 5475 ms | **116 ms** |
+| Handler | 5300 ms | 8560 ms (2 cycles) | 7091 ms (2 cycles) |
+| Invoke clock | 10725 ms | 14055 ms | 7225 ms |
+
+B2 reused B1’s opaque `codesign-` id. First B2 runtime log was `POST /invocations`
+(no OTEL process boot). Pre-handler dropped 97.8% vs A (**excellent**, &lt;500 ms).
+B1/B2 each used two model cycles (`end_turn` then `tool_use`); that extra model
+time is **not** an affinity effect. DSQL remained the transcript (`rag_used=false`,
+history still sent, stage unchanged). Mock tests in
+`tests/domain/test_agentcore_session_affinity.py` still pass.
+
+**Production recommendation.** Keep affinity **on** for the Month-1 pilot unless
+the operator asks to revert. Idle timeout remains 900 s; after idle, the same
+session id may wake a new microVM. This v22 publish kept generation **2** and
+used a new notebook so the warm session was not pinned to v21. Do not bump
+generation merely to force a new runtime version.
 
 ### Streamlit UI TIMING: visible logs + pre-API step spans (no UI optimization)
 
@@ -36,10 +112,7 @@ passed; `compileall` passed. Targeted pytest passed for
 `test_chat_scroll.py`, and `test_chat_progress.py`. Full mock pytest passed.
 Backend, AgentCore, RAG, and Fast Chat files are unchanged.
 
-**Next exact action.** Deploy this app image (no AgentCore republish). Then
-**one** live Hello. Grep `UI TIMING` and the matching FastAPI `TIMING` /
-`request_id`. Do not enable prompt cache until the 14–19s pre-API span is
-identified.
+**Status:** Deployed as `cde2300-chatbot:ddfc3f4`. Live Hello TIMING is in Docker logs.
 
 Release order: [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md)
 (SOURCE CODE READY → EC2 IMAGE DEPLOYED; AgentCore DEFAULT stays on the
