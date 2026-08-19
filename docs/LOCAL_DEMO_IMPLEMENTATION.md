@@ -147,7 +147,10 @@ append-only review/adjudication, and formula-safe CSV. Every identifiable read
 or export writes an access audit first and fails closed when auditing fails.
 Students receive the established Review projection plus Facione behaviour
 occurrences and the provisional Reflection candidate; CLEAR and ethics labels
-remain research-review data.
+remain research-review data. The latest successful Deep Review snapshot, when
+present, also contributes its strengths and areas-to-develop onto the frozen
+reviewed Thinking Path stage; it does not replace historical incremental
+assessments.
 
 Only the student's explicit confirmation may apply an advancement in the safe
 default mode (`AUTO_ADVANCE_STAGES=false`). The system must persist the

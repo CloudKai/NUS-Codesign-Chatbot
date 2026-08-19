@@ -641,6 +641,105 @@ def _stage_feedback_history(
     return strength_sections, improvement_sections
 
 
+def _reviewed_stage_id_from_snapshot(snapshot: dict[str, Any] | None) -> str | None:
+    """Return the frozen Thinking Path stage for one Deep Review snapshot.
+
+    Prefers ``reviewed_stage_id``, then a snapshot-local ``stage_at_start``
+    alias from older job copies. Missing or unknown ids return ``None`` so
+    stale feedback is never assigned to the student's current stage.
+
+    Args:
+        snapshot: Durable ``deep_review_snapshot`` mapping, if any.
+
+    Returns:
+        A valid stage id, or ``None`` when provenance is absent.
+    """
+    if not isinstance(snapshot, dict):
+        return None
+    for key in ("reviewed_stage_id", "stage_at_start"):
+        stage_id = str(snapshot.get(key) or "").strip()
+        if stage_id in STAGE_BY_ID:
+            return stage_id
+    return None
+
+
+def _merge_stage_section_items(
+    sections: list[dict[str, Any]],
+    *,
+    stage_id: str,
+    extra_items: list[str],
+) -> list[dict[str, Any]]:
+    """Prepend *extra_items* into one stage section with case-insensitive dedupe.
+
+    Args:
+        sections: Stage-grouped feedback sections.
+        stage_id: Thinking Path stage that received Deep Review.
+        extra_items: Deep Review strengths or areas, already cleaned.
+
+    Returns:
+        New section list. Other stages are unchanged.
+    """
+    merged: list[dict[str, Any]] = []
+    for section in sections:
+        if str(section.get("stage_id") or "") != stage_id:
+            merged.append(section)
+            continue
+        existing = [
+            str(item) for item in (section.get("items") or []) if str(item).strip()
+        ]
+        merged.append(
+            {
+                **section,
+                "items": _clean_feedback_items([*extra_items, *existing]),
+            }
+        )
+    return merged
+
+
+def _merge_deep_review_feedback(
+    strength_sections: list[dict[str, Any]],
+    improvement_sections: list[dict[str, Any]],
+    snapshot: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Merge the latest Deep Review snapshot into one reviewed stage.
+
+    Incremental Haiku ``review_strengths`` / ``review_improvements`` stay
+    under their assessment stages. Snapshot strengths and areas-to-develop
+    are prepended only onto the frozen reviewed stage. Duplicate strings
+    (case-insensitive) are dropped. A snapshot without a valid stage id is
+    left out of these sections.
+
+    Args:
+        strength_sections: History-derived strength groups.
+        improvement_sections: History-derived improvement groups.
+        snapshot: Latest successful Deep Review snapshot, if any.
+
+    Returns:
+        Updated ``(strength_sections, improvement_sections)``.
+    """
+    stage_id = _reviewed_stage_id_from_snapshot(snapshot)
+    if stage_id is None or not isinstance(snapshot, dict):
+        return strength_sections, improvement_sections
+    raw_strengths = snapshot.get("strengths")
+    raw_improvements = snapshot.get("areas_to_develop")
+    deep_strengths = _clean_feedback_items(
+        raw_strengths if isinstance(raw_strengths, list) else []
+    )
+    deep_improvements = _clean_feedback_items(
+        raw_improvements if isinstance(raw_improvements, list) else []
+    )
+    if not deep_strengths and not deep_improvements:
+        return strength_sections, improvement_sections
+    return (
+        _merge_stage_section_items(
+            strength_sections, stage_id=stage_id, extra_items=deep_strengths
+        ),
+        _merge_stage_section_items(
+            improvement_sections, stage_id=stage_id, extra_items=deep_improvements
+        ),
+    )
+
+
 def learning_review(
     messages: Iterable[dict[str, Any]],
     journey: dict[str, Any],
@@ -652,8 +751,10 @@ def learning_review(
 
     Summary, Facione profile, and working conclusion prefer the latest
     successful Deep Review snapshot when one exists. Strengths and areas for
-    improvement are still aggregated by Thinking Path stage across the full
-    conversation. Empty notebooks stay empty instead of showing generic filler.
+    improvement start from Thinking Path stage history across the full
+    conversation, then merge the latest snapshot's ``strengths`` and
+    ``areas_to_develop`` onto the frozen reviewed stage. Empty notebooks stay
+    empty instead of showing generic filler.
 
     Returns:
         A dict consumed by ``ui.studio.render_learning_review``, including
@@ -690,6 +791,11 @@ def learning_review(
                 or level_description
             )
     strength_sections, improvement_sections = _stage_feedback_history(message_list)
+    strength_sections, improvement_sections = _merge_deep_review_feedback(
+        strength_sections,
+        improvement_sections,
+        snapshot,
+    )
     current_strengths = next(
         (
             section["items"]

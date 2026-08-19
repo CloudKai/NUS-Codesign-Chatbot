@@ -80,12 +80,17 @@ def _coaching_payload() -> dict[str, Any]:
     }
 
 
-def _deep_payload(*, synthesis: str = "Formative Deep Review A.") -> dict[str, Any]:
+def _deep_payload(
+    *,
+    synthesis: str = "Formative Deep Review A.",
+    strengths: list[str] | None = None,
+    areas_to_develop: list[str] | None = None,
+) -> dict[str, Any]:
     """Return one explicit Deep Review body that stays on the current stage."""
     return {
         "response_text": synthesis,
-        "strengths": ["Named a real constraint"],
-        "areas_to_develop": ["Name who is affected"],
+        "strengths": list(strengths or ["Named a real constraint"]),
+        "areas_to_develop": list(areas_to_develop or ["Name who is affected"]),
         "synthesis": synthesis,
         "current_stage": "problem_identification",
         "recommendation": "advance",
@@ -153,6 +158,24 @@ def _snapshot(store: StudentStore, thread_id: str) -> dict[str, Any] | None:
     metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
     raw = metadata.get(DEEP_REVIEW_SNAPSHOT_KEY)
     return raw if isinstance(raw, dict) else None
+
+
+def _review_items(
+    store: StudentStore, thread_id: str, key: str, stage_id: str
+) -> list[str]:
+    """Return one stage's Review-tab items from persisted messages + snapshot."""
+    thread = store.get_thread(thread_id) or {}
+    metadata = dict(thread.get("metadata") or {})
+    review = learning_review(
+        store.get_messages(thread_id),
+        metadata.get("learning_journey") or {},
+        deep_review_snapshot=_snapshot(store, thread_id),
+    )
+    return next(
+        section["items"]
+        for section in review[key]
+        if section["stage_id"] == stage_id
+    )
 
 
 def _unlock(store: StudentStore, thread_id: str) -> None:
@@ -238,6 +261,9 @@ def test_eligible_deep_review_is_one_sonnet_call_and_resets_counter(tmp_path) ->
     assert snapshot["review_depth"] == "deep"
     assert snapshot["review_trigger"] == "explicit"
     assert snapshot["model_id"] == "global.anthropic.claude-sonnet-4-6"
+    assert snapshot["reviewed_stage_id"] == "problem_identification"
+    assert snapshot["strengths"] == ["Named a real constraint"]
+    assert snapshot["areas_to_develop"] == ["Name who is affected"]
     assert "Formative Deep Review A" in snapshot["synthesis"]
     thread = store.get_thread(thread_id) or {}
     journey = dict((thread.get("metadata") or {}).get("learning_journey") or {})
@@ -259,6 +285,31 @@ def test_failed_deep_review_leaves_counter_and_snapshot_unchanged(tmp_path) -> N
     assert _snapshot(store, thread_id) is None
     assert all(item["role"] != "assistant" for item in store.get_messages(thread_id))
     _assert_no_review_transcript(store, thread_id)
+
+
+def test_failed_deep_review_preserves_previous_snapshot_feedback(tmp_path) -> None:
+    store = StudentStore(tmp_path / "dr-fail-keep.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _unlock(store, thread_id)
+    first = _service(
+        store,
+        FakeAgentCoreRuntime(
+            deep_payload=_deep_payload(strengths=["Previous deep strength"])
+        ),
+    )
+    first.enqueue_deep_review(thread_id, idempotency_key="deep-keep")
+    assert _wait_job(first, thread_id).status is DeepReviewJobStatus.COMPLETED
+    previous = _snapshot(store, thread_id)
+    assert previous is not None
+    assert previous["strengths"] == ["Previous deep strength"]
+    _unlock(store, thread_id)
+    failing = _service(store, FakeAgentCoreRuntime(deep_error=TimeoutError("deep-timeout")))
+    failing.enqueue_deep_review(thread_id, idempotency_key="deep-fail-keep")
+    assert _wait_job(failing, thread_id).status is DeepReviewJobStatus.FAILED
+    assert _snapshot(store, thread_id) == previous
+    assert "Previous deep strength" in _review_items(
+        store, thread_id, "strength_sections", "problem_identification"
+    )
 
 
 def test_completed_deep_review_cannot_start_another_until_eligible(tmp_path) -> None:
@@ -303,19 +354,33 @@ def test_normal_coaching_does_not_overwrite_snapshot(tmp_path) -> None:
         deep_review_snapshot=after,
     )
     assert "Formative Deep Review A" in str(review.get("summary") or "")
+    assert "Named a real constraint" in _review_items(
+        store, thread_id, "strength_sections", "problem_identification"
+    )
+    assert "Name who is affected" in _review_items(
+        store, thread_id, "improvement_sections", "problem_identification"
+    )
 
 
 def test_next_successful_deep_review_replaces_snapshot(tmp_path) -> None:
     store = StudentStore(tmp_path / "dr-replace.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     _unlock(store, thread_id)
-    first_service = _service(store, FakeAgentCoreRuntime(deep_payload=_deep_payload()))
+    first_service = _service(
+        store,
+        FakeAgentCoreRuntime(deep_payload=_deep_payload(strengths=["Old deep strength"])),
+    )
     first_service.enqueue_deep_review(thread_id, idempotency_key="deep-a")
     assert _wait_job(first_service, thread_id).status is DeepReviewJobStatus.COMPLETED
     _unlock(store, thread_id)
     second_service = _service(
         store,
-        FakeAgentCoreRuntime(deep_payload=_deep_payload(synthesis="Formative Deep Review C.")),
+        FakeAgentCoreRuntime(
+            deep_payload=_deep_payload(
+                synthesis="Formative Deep Review C.",
+                strengths=["New deep strength"],
+            )
+        ),
     )
     second_service.enqueue_deep_review(thread_id, idempotency_key="deep-c")
     assert _wait_job(second_service, thread_id).status is DeepReviewJobStatus.COMPLETED
@@ -323,6 +388,11 @@ def test_next_successful_deep_review_replaces_snapshot(tmp_path) -> None:
     assert snapshot is not None
     assert "Deep Review C" in snapshot["synthesis"]
     assert "Deep Review A" not in snapshot["synthesis"]
+    items = _review_items(
+        store, thread_id, "strength_sections", "problem_identification"
+    )
+    assert "New deep strength" in items
+    assert "Old deep strength" not in items
 
 
 def test_submit_cannot_select_review_specialist(tmp_path) -> None:
@@ -357,6 +427,35 @@ def test_deep_review_fingerprint_differs_from_coach_turn() -> None:
     deep = _coach_request_fingerprint(request, surface="deep_review")
     assert coach == same_surface
     assert deep != coach
+
+
+def test_snapshot_reviewed_stage_survives_later_stage_change(tmp_path) -> None:
+    store = StudentStore(tmp_path / "dr-stage.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _unlock(store, thread_id)
+    client = FakeAgentCoreRuntime(deep_payload=_deep_payload(strengths=["Frozen deep strength"]))
+    service = _service(store, client)
+    job = service.enqueue_deep_review(thread_id, idempotency_key="deep-frozen-stage")
+    assert job.status in {DeepReviewJobStatus.QUEUED, DeepReviewJobStatus.RUNNING}
+    store.select_learning_stage(thread_id, "concept_generation")
+    finished = _wait_job(service, thread_id)
+    assert finished.status is DeepReviewJobStatus.COMPLETED
+    snapshot = _snapshot(store, thread_id)
+    assert snapshot is not None
+    assert snapshot["reviewed_stage_id"] == "problem_identification"
+    journey = dict(
+        ((store.get_thread(thread_id) or {}).get("metadata") or {}).get(
+            "learning_journey"
+        )
+        or {}
+    )
+    assert journey.get("current_stage") == "concept_generation"
+    assert "Frozen deep strength" in _review_items(
+        store, thread_id, "strength_sections", "problem_identification"
+    )
+    assert "Frozen deep strength" not in _review_items(
+        store, thread_id, "strength_sections", "concept_generation"
+    )
 
 
 def test_coach_turn_idempotency_key_does_not_block_deep_review_job(tmp_path) -> None:

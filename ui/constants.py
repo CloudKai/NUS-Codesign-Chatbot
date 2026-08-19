@@ -1,7 +1,8 @@
 """Shared Streamlit UI constants.
 
 These values are presentation-facing only. Stage review copy is derived in
-``backend.student_journey.learning_review`` from coach assessments when available.
+``backend.student_journey.learning_review`` from coach assessments and the
+latest Deep Review snapshot when available.
 """
 
 PRODUCT_TITLE = "CDE2300 Design Thinking Companion"

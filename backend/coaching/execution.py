@@ -82,6 +82,7 @@ from backend.source_library import (
 from backend.sources.chunk_load import hydrate_selected_retrieval_sources
 from backend.student_journey import (
     DEFAULT_RESPONSE_DETAIL,
+    STAGE_BY_ID,
     advanced_stage_response,
     current_stage,
     normalize_journey,
@@ -730,9 +731,14 @@ class CoachApplicationService:
                     )
                     return
                 journey = normalize_journey(metadata.get("learning_journey"))
-                stage_id = str(job.get("stage_at_start") or "") or current_stage(
-                    journey
-                ).id
+                # Provenance must stay on the enqueue-time stage even if the
+                # student advanced while this job was running.
+                frozen_stage = str(job.get("stage_at_start") or "").strip()
+                stage_id = (
+                    frozen_stage
+                    if frozen_stage in STAGE_BY_ID
+                    else current_stage(journey).id
+                )
                 request = CoachRequest(
                     thread_id=thread_id,
                     student_message=DEEP_REVIEW_TURN_MESSAGE,
@@ -781,6 +787,9 @@ class CoachApplicationService:
                     ),
                     model_id=str(turn.assessment.review_model or "").strip()
                     or "global.anthropic.claude-sonnet-4-6",
+                    reviewed_stage_id=(
+                        frozen_stage if frozen_stage in STAGE_BY_ID else ""
+                    ),
                 )
                 self._store.complete_deep_review_job(
                     thread_id,
@@ -1104,6 +1113,7 @@ class CoachApplicationService:
         }
         summary.update(meaningful_progress_fields(progress_fields))
         if owned_review:
+            reviewed_stage = str(prepared_request.current_stage or "").strip()
             summary[DEEP_REVIEW_SNAPSHOT_KEY] = deep_review_snapshot_payload(
                 conversation_revision=int(
                     prepared_request.conversation_revision or 0
@@ -1125,6 +1135,9 @@ class CoachApplicationService:
                 ),
                 model_id=str(turn.assessment.review_model or "").strip()
                 or "global.anthropic.claude-sonnet-4-6",
+                reviewed_stage_id=(
+                    reviewed_stage if reviewed_stage in STAGE_BY_ID else ""
+                ),
             )
         return summary
 

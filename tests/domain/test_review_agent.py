@@ -638,11 +638,18 @@ def test_review_tab_projection_does_not_invoke_models() -> None:
     review = learning_review([], {"current_stage": "problem_identification"})
     assert "summary" in review
     studio = Path("ui/panels/studio.py").read_text(encoding="utf-8")
+    journey = Path("backend/learning/journey.py").read_text(encoding="utf-8")
     assert "def render_learning_review" in studio
     assert "AgentCore" not in studio
     assert "assess(" not in studio.split("def render_learning_review", 1)[1].split(
         "def ", 1
     )[0]
+    review_fn = studio.split("def render_learning_review", 1)[1].split("def ", 1)[0]
+    assert "deep_review_snapshot=" in review_fn
+    review_call = review_fn.split("review = learning_review", 1)[1].split(")", 1)[0]
+    assert "session_state" not in review_call
+    assert "_merge_deep_review_feedback" in journey
+    assert "reviewed_stage_id" in journey
 
 
 def test_fast_chat_logs_omit_student_text(caplog: pytest.LogCaptureFixture) -> None:

@@ -19,6 +19,7 @@ from backend.specialists.review_orchestration import (
     DEEP_REVIEW_JOB_RUNNING,
     DEEP_REVIEW_TURN_MESSAGE,
 )
+from backend.student_journey import learning_review
 from backend.student_store import StudentStore
 
 
@@ -119,6 +120,12 @@ def test_eligible_deep_review_endpoint_enqueues_server_owned_review(tmp_path) ->
     snapshot = metadata.get("deep_review_snapshot")
     assert isinstance(snapshot, dict)
     assert snapshot["review_trigger"] == "explicit"
+    assert snapshot.get("reviewed_stage_id") == "problem_identification"
+    assert "You located the work in a concrete setting." in snapshot.get("strengths", [])
+    assert (
+        "Name who is affected and what success would look like."
+        in snapshot.get("areas_to_develop", [])
+    )
     journey = dict(metadata.get("learning_journey") or {})
     assert journey.get("current_stage") == "problem_identification"
     assert all(
@@ -310,6 +317,21 @@ def test_stage_advance_during_review_is_not_reverted(tmp_path, monkeypatch) -> N
     metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
     journey = dict(metadata.get("learning_journey") or {})
     assert journey.get("current_stage") == "concept_generation"
+    snapshot = metadata.get("deep_review_snapshot")
+    assert isinstance(snapshot, dict)
+    assert snapshot.get("reviewed_stage_id") == "problem_identification"
+    review = learning_review(
+        store.get_messages(thread_id),
+        journey,
+        deep_review_snapshot=snapshot,
+    )
+    by_stage = {
+        section["stage_id"]: section["items"]
+        for section in review["strength_sections"]
+    }
+    deep_strength = "You located the work in a concrete setting."
+    assert deep_strength in by_stage["problem_identification"]
+    assert deep_strength not in by_stage["concept_generation"]
 
 
 def test_stale_running_deep_review_is_failed_on_get(tmp_path) -> None:

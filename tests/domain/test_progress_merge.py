@@ -287,6 +287,8 @@ def test_deep_review_persist_does_not_blank_prior_progress(tmp_path) -> None:
     snapshot = summary[DEEP_REVIEW_SNAPSHOT_KEY]
     assert snapshot["summary"] == ""
     assert snapshot["working_conclusion"] == ""
+    assert snapshot["reviewed_stage_id"] == "problem_identification"
+    assert snapshot["strengths"] == ["Named a constraint"]
 
     store.persist_coach_turn(
         thread_id,

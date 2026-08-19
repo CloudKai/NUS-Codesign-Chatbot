@@ -3,17 +3,59 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock-v2`
-**Starting HEAD:** `d7d6f1d35dd72077840035d4346760453c654dab`
-**This phase:** catalog patch to hide Bedrock `.metadata.json` sidecars from
-Sources. **Not deployed. Not published to AgentCore.** Live RAG remains on
-the previous image until this patch is built and deployed.
+**Starting HEAD:** `18c288e6c4253ab97aed746e248a9b2387276046`
+**This phase:** Deep Review Review-tab projection of snapshot strengths and
+areas-to-develop. **Not deployed. Not published to AgentCore.**
 
 **Prompt cache:** production Compose keeps `FAST_CHAT_PROMPT_CACHE_ENABLED=false`.
 Do not enable for this baseline.
 **Session affinity:** Compose does not set `AGENTCORE_SESSION_AFFINITY_ENABLED`;
 settings default is `false`. Do not enable for this baseline.
 
-### Catalog: hide Bedrock `.metadata.json` sidecars from Sources
+### Deep Review: merge snapshot strengths/areas onto the frozen reviewed stage
+
+A successful Deep Review already persisted `strengths`, `areas_to_develop`,
+`synthesis`/`summary`, `facione_scores`, and `working_conclusion` in durable
+`deep_review_snapshot`. Summary, Facione, and working conclusion updated in
+the Review tab; Strengths and Areas for improvement did not, because
+`learning_review()` built those sections only from incremental assistant
+`review_strengths` / `review_improvements`.
+
+**Change:** persist `reviewed_stage_id` (enqueue-time Thinking Path stage) on
+the snapshot. `learning_review()` still builds stage history from messages,
+then merges the latest snapshot's strengths/areas onto that frozen stage
+(Deep Review items first, case-insensitive dedupe). Old snapshots without a
+valid stage id skip the merge instead of attaching to the current stage.
+Failed Deep Review still does not replace the snapshot. Normal Coaching still
+omits the snapshot key. No fake assistant message, no Streamlit copy of the
+content, no eligibility/polling/model changes.
+
+**Validation (this worktree, $0 AWS):** `git diff --check` clean; `ruff check .`
+passed; `compileall` passed. Targeted pytest passed for
+`test_deep_review_review_projection.py`, `test_deep_review_execution.py`,
+`test_deep_review.py`, `test_student_journey.py`, `test_review_agent.py`,
+`test_progress_merge.py`, `test_deep_review_control.py`, and
+`test_architecture_contracts.py`. Full mock pytest: only the **7 pre-existing**
+`tests/domain/test_bedrock_retrieve.py` failures (VECTOR
+`vectorSearchConfiguration` / type `vector` vs production MANAGED).
+`backend/bedrock_retrieve.py` is not in this diff.
+
+**Next exact action.** Confirm the Review tab after a successful Deep Review
+shows Strengths / Areas under the stage that was reviewed, including when the
+student advanced while the job ran. Catalog sidecar hide (`18c288e`) remains
+undeployed; deploy is a separate operator step.
+
+Release order: [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md)
+(SOURCE CODE READY → AGENTCORE PUBLISHED on the **existing** ARN → EC2 IMAGE
+DEPLOYED). Architecture: [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md).
+
+This file’s **CURRENT** sections are the operator runbook. Everything under
+**HISTORICAL INVESTIGATION** is a dated archive and is not current.
+
+### Prior on this branch: catalog sidecar hide (`18c288e`, not deployed)
+
+**Committed HEAD:** `18c288e`. Live RAG remains on the previous image until
+this patch is built and deployed.
 
 Live RAG is working (sidecars ingested, equals/`in` Retrieve validated,
 CloudFront Week 1 Q&A cited). After sidecar upload the Sources panel listed
@@ -28,26 +70,6 @@ filters, citations, and S3 sidecars are unchanged.
 
 **Expected after deploy:** Lecture Notes **7**, Readings **3**. The 10
 sidecars stay in S3 for Bedrock. They must not appear as locked sources.
-
-**Validation (this worktree, $0 AWS):** `git diff --check` clean; `ruff check .`
-passed; `compileall` passed. New/updated catalog tests in
-`tests/domain/test_source_library.py` passed, with
-`test_kb_metadata.py`, `test_retrieval.py`, `test_sources_ui.py`, and
-`test_sync_course_kb_metadata.py`. Full mock pytest still reports **7
-pre-existing** `tests/domain/test_bedrock_retrieve.py` failures that expect
-VECTOR `vectorSearchConfiguration` / type `vector` while production is
-MANAGED; `backend/bedrock_retrieve.py` is not in this diff.
-
-**Next exact action.** Deploy the application image (no AgentCore
-republish, no KB ingest, no sidecar mutation). Live-check Sources counts
-(Lecture Notes 7, Readings 3). Do not enable prompt caching.
-
-Release order: [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md)
-(SOURCE CODE READY → AGENTCORE PUBLISHED on the **existing** ARN → EC2 IMAGE
-DEPLOYED). Architecture: [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md).
-
-This file’s **CURRENT** sections are the operator runbook. Everything under
-**HISTORICAL INVESTIGATION** is a dated archive and is not current.
 
 ### Prior worktree note (superseded for this follow-up)
 
@@ -342,7 +364,7 @@ Authoritative layering remains [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLE
 
 **Fast Chat.** One AgentCore invoke per normal student turn. Haiku returns slim `FastChatTurnOutput`: `mode` (`coaching` \| `qa`), `response_text`, optional stay/advance `recommendation`, citations, `needs_source_retrieval`. No per-turn router, incremental review, or automatic Sonnet. Fast Chat cycle 1 sets `tool_choice={"any": {}}` via Strands 1.52.0 `InvokeModelStage.Input` when exactly one structured-output tool is present. Deep Review is not modified by that force. Event-loop recovery inside that one Fast Chat invoke remains capped at `FAST_CHAT_INVOKE_LIMITS={"turns": 2}`. Do not set `turns=1` while first-cycle output can fail. `first_cycle_tool_choice_installed` is true only when the middleware registered. `first_cycle_tool_choice_applied` is true only when cycle 1 actually changed an unset `tool_choice` to `{"any": {}}`. Omit applied/installed for Deep Review.
 
-**Deep Review.** Separate HTTP route `POST /api/v1/threads/{thread_id}/deep-review`. Server-owned eligibility, Sonnet 4.6, counter, snapshot, idempotency. Event-loop cap `{"turns": 3}`. Not on `/coach/turn`.
+**Deep Review.** Separate HTTP route `POST /api/v1/threads/{thread_id}/deep-review`. Server-owned eligibility, Sonnet 4.6, counter, snapshot, idempotency. Event-loop cap `{"turns": 3}`. Not on `/coach/turn`. The latest successful snapshot is the Review-tab source for summary, Facione scores, working conclusion, and merged strengths / areas-to-develop. Snapshot strengths and areas are merged onto the frozen `reviewed_stage_id` (enqueue-time stage), not the student's stage at completion or render. Incremental Haiku `review_strengths` / `review_improvements` remain in message history. Failed jobs do not replace the snapshot.
 
 **Course RAG.** Locked Lecture Notes/Readings are virtual catalog rows (no local extracted text). Evidence comes from Bedrock **MANAGED** `Retrieve` with `course_material_id` metadata filters when configured, then bucket/object-key validation onto request-local `[S#]`. Details: [`RAG_ARCHITECTURE.md`](RAG_ARCHITECTURE.md) and [`KB_REQUIRED_MODE_RUNBOOK.md`](KB_REQUIRED_MODE_RUNBOOK.md). AgentCore specialists have `tools=[]` (no KB search).
 

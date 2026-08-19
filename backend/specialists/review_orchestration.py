@@ -355,11 +355,13 @@ def deep_review_snapshot_payload(
     readiness_evidence: list[str],
     missing_requirements: list[str],
     model_id: str,
+    reviewed_stage_id: str = "",
 ) -> dict[str, Any]:
     """Return the durable Deep Review snapshot stored in notebook settings.
 
     Hidden prompts are never included. Normal Coaching persist must omit this
-    key so a later Haiku turn cannot overwrite the snapshot.
+    key so a later Haiku turn cannot overwrite the snapshot. ``reviewed_stage_id``
+    is the Thinking Path stage frozen at enqueue, not the stage at completion.
 
     Args:
         conversation_revision: Revision reviewed through.
@@ -374,12 +376,14 @@ def deep_review_snapshot_payload(
         readiness_evidence: Evidence strings supporting readiness.
         missing_requirements: Remaining requirements.
         model_id: Review model identifier (Sonnet 4.6).
+        reviewed_stage_id: Stage id frozen when Deep Review started.
 
     Returns:
         JSON-serialisable snapshot dictionary.
     """
     return {
         "reviewed_through_revision": max(0, int(conversation_revision)),
+        "reviewed_stage_id": str(reviewed_stage_id or "").strip(),
         "created_at": str(created_at or "").strip(),
         "synthesis": " ".join(str(synthesis or "").split()).strip()[:4_000],
         "summary": " ".join(str(summary or "").split()).strip()[:4_000],

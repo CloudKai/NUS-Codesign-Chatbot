@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from streamlit.testing.v1 import AppTest
+
 from ui.panels.studio import deep_review_control_view
 
 
@@ -51,6 +53,68 @@ def test_running_disables_button_even_when_eligible() -> None:
     assert view.detail_caption is None
     assert view.status_label is not None
     assert view.status_label.startswith("Running Deep Review")
+
+
+def test_review_tab_renders_projected_deep_review_feedback() -> None:
+    """Completed Deep Review snapshot items appear in Strengths / Areas expanders."""
+    from backend.specialists.review_orchestration import (
+        DEEP_REVIEW_SNAPSHOT_KEY,
+        deep_review_snapshot_payload,
+    )
+    from backend.student_store import StudentStore
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    assert not app.exception
+    thread_id = str(app.session_state["thread_id"])
+    store = StudentStore()
+    store.add_message(
+        thread_id,
+        "assistant",
+        "Coach reply",
+        metadata={
+            "assessment": {
+                "current_stage": "problem_identification",
+                "recommendation": "stay",
+                "review_strengths": ["Normal strength"],
+                "review_improvements": ["Normal improvement"],
+                "learning_summary": "Incremental summary.",
+                "stage_assessment": "Incremental stage note.",
+                "contribution_summary": "Draft.",
+            }
+        },
+    )
+    store.update_thread(
+        thread_id,
+        metadata={
+            DEEP_REVIEW_SNAPSHOT_KEY: deep_review_snapshot_payload(
+                conversation_revision=1,
+                created_at="2026-08-19T00:00:00+00:00",
+                synthesis="Deep Review summary.",
+                summary="Deep Review summary.",
+                strengths=["Deep strength from Sonnet"],
+                areas_to_develop=["Deep improvement from Sonnet"],
+                facione_scores={"analysis": 3},
+                working_conclusion="Deep working conclusion.",
+                readiness_candidate=False,
+                readiness_evidence=[],
+                missing_requirements=[],
+                model_id="global.anthropic.claude-sonnet-4-6",
+                reviewed_stage_id="problem_identification",
+            )
+        },
+    )
+    app.run()
+    assert not app.exception
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert "Deep strength from Sonnet" in rendered
+    assert "Deep improvement from Sonnet" in rendered
+    assert "Normal strength" in rendered
+    assert "Normal improvement" in rendered
+    assert {expander.label for expander in app.expander} >= {
+        "Strengths",
+        "Areas for improvement",
+        "Problem identification",
+    }
 
 
 def test_deep_review_button_is_full_width_and_grouped_with_caption() -> None:

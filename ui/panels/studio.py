@@ -544,12 +544,14 @@ def _render_review_stage_expanders(
 def render_learning_review(journey: dict[str, Any]) -> None:
     """Render actionable Review cards from the latest coaching assessment.
 
-    Prefers a model-written summary and Facione scores from the newest assistant
+    Prefers a model-written summary and Facione scores from the newest Deep
+    Review snapshot when present, otherwise the newest assistant
     ``assessment``. Strengths and areas for improvement nest one expander per
-    Thinking Path stage, with only the current stage open by default. Marks the
-    Review notification fingerprint as seen when the Review tab is active.
-    Start Deep Review is always visible; enablement comes from the persisted
-    notebook counter, not a Streamlit-only count.
+    Thinking Path stage, merging historical incremental feedback with the
+    latest snapshot onto the frozen reviewed stage. Only the current stage is
+    open by default. Marks the Review notification fingerprint as seen when
+    the Review tab is active. Start Deep Review is always visible; enablement
+    comes from the persisted notebook counter, not a Streamlit-only count.
     """
     messages = store.get_messages(st.session_state.thread_id)
     thread = store.get_thread(st.session_state.thread_id) or {}
