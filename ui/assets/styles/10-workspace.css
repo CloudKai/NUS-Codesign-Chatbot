@@ -748,12 +748,12 @@
         row-gap:0 !important;
     }
 
-    /* Optional grouping wrapper only. Nested overflow here would clip inflight
-       after Streamlit hoists the composer fragment beside chat_log. */
+    /* Transcript fills the panel so chat_log can consume leftover height.
+       Nested overflow stays visible so inflight is not clipped. */
     .st-key-chat_transcript,
     [data-testid="stElementContainer"].st-key-chat_transcript {
         min-height:0 !important;
-        flex:0 0 auto !important;
+        flex:1 1 auto !important;
         height:auto !important;
         display:flex !important;
         flex-direction:column !important;
@@ -764,20 +764,43 @@
     .st-key-chat_transcript > [data-testid="stLayoutWrapper"] {
         display:flex !important;
         flex-direction:column !important;
-        flex:1 1 auto !important;
         min-height:0 !important;
         gap:0 !important;
         row-gap:0 !important;
     }
 
+    .st-key-chat_transcript > [data-testid="stVerticalBlock"]:has(.st-key-chat_log),
+    .st-key-chat_transcript > [data-testid="stLayoutWrapper"]:has(.st-key-chat_log) {
+        flex:1 1 0% !important;
+        min-height:0 !important;
+    }
+
     .st-key-chat_transcript [data-testid="stVerticalBlock"]:has(> .st-key-chat_inflight),
-    .st-key-chat_transcript [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"].st-key-chat_inflight),
-    .st-key-chat_transcript [data-testid="stVerticalBlock"]:has(> .st-key-chat_composer),
-    .st-key-chat_transcript [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"].st-key-chat_composer) {
+    .st-key-chat_transcript [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"].st-key-chat_inflight) {
         display:flex !important;
         flex-direction:column !important;
-        flex:1 1 auto !important;
+        flex:0 0 auto !important;
         min-height:0 !important;
+        gap:0 !important;
+        row-gap:0 !important;
+        background:transparent !important;
+        border:0 !important;
+        box-shadow:none !important;
+    }
+
+    /* Composer column must stay input-sized. Growing it (flex 1) leaves a
+       tall empty band above the textarea and shrinks the log. */
+    .st-key-chat_transcript [data-testid="stVerticalBlock"]:has(.st-key-chat_composer),
+    .st-key-chat_transcript [data-testid="stLayoutWrapper"]:has(.st-key-chat_composer):not(:has(.st-key-chat_log)),
+    .st-key-chat_transcript > [data-testid="stVerticalBlock"]:has(.st-key-chat_composer),
+    .st-key-chat_transcript > [data-testid="stLayoutWrapper"]:has(.st-key-chat_composer) {
+        display:flex !important;
+        flex-direction:column !important;
+        flex:0 0 auto !important;
+        flex-grow:0 !important;
+        height:auto !important;
+        min-height:0 !important;
+        margin-top:0 !important;
         gap:0 !important;
         row-gap:0 !important;
         background:transparent !important;
@@ -971,7 +994,10 @@
         overflow:hidden;
     }
 
-    /* History is the scrollport. Composer stays a footer under it. */
+    /* History is the scrollport. Composer stays a footer under it.
+       Do not use justify-content:flex-end here: overflow + flex-end
+       clips the top of a long thread and blocks vertical scroll.
+       Short threads pack down via margin-top:auto on the inner wrapper. */
     .st-key-chat_log,
     [data-testid="stElementContainer"].st-key-chat_log {
         min-height:0 !important;
@@ -979,6 +1005,7 @@
         height:auto !important;
         display:flex !important;
         flex-direction:column !important;
+        justify-content:flex-start !important;
         overflow-x:hidden !important;
         overflow-y:auto !important;
         overflow-anchor:auto;
@@ -1012,28 +1039,37 @@
         justify-content:flex-start !important;
     }
 
-    /* History rows keep content height so a long user bubble cannot collapse
-       over the previous Coach reply after the turn lands in chat_log. */
+    /* Direct inner wrapper absorbs leftover column height above the bubbles.
+       Nested message rows stay content-sized so they can overflow and scroll. */
+    .st-key-chat_log > [data-testid="stVerticalBlock"],
+    .st-key-chat_log > [data-testid="stLayoutWrapper"] {
+        flex:0 0 auto !important;
+        min-height:0 !important;
+        height:auto !important;
+        margin-top:auto !important;
+    }
+
     .st-key-chat_log > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"],
     .st-key-chat_log > [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"],
     .st-key-chat_log > [data-testid="stLayoutWrapper"] > [data-testid="stElementContainer"] {
         flex:0 0 auto !important;
+        min-height:0 !important;
         height:auto !important;
     }
 
-    /* Composer is a footer. Do not grow the wrapper that also owns history. */
+    /* Composer is a footer. Size to the input; chat_log already grows. */
     .st-key-chat_panel > [data-testid="stLayoutWrapper"]:has(.st-key-chat_composer):not(:has(.st-key-chat_log)),
-    .st-key-chat_transcript [data-testid="stLayoutWrapper"]:has(> .st-key-chat_composer),
-    .st-key-chat_transcript [data-testid="stLayoutWrapper"]:has(> [data-testid="stElementContainer"].st-key-chat_composer) {
+    .st-key-chat_transcript [data-testid="stLayoutWrapper"]:has(.st-key-chat_composer):not(:has(.st-key-chat_log)) {
         flex:0 0 auto !important;
         min-height:0 !important;
+        height:auto !important;
         display:flex !important;
         flex-direction:column !important;
-        justify-content:flex-end !important;
+        justify-content:flex-start !important;
         position:relative !important;
         bottom:auto !important;
         z-index:8 !important;
-        margin-top:auto !important;
+        margin-top:0 !important;
         overflow:visible !important;
         overflow-anchor:none;
         background:var(--cd-surface) !important;

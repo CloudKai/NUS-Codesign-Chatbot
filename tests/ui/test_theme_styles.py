@@ -74,7 +74,7 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
         workspace_css,
         ".st-key-chat_transcript,\n    [data-testid=\"stElementContainer\"].st-key-chat_transcript",
     )
-    assert "flex:0 0 auto" in transcript_flex
+    assert "flex:1 1 auto" in transcript_flex
     assert "overflow:visible" in transcript_flex
     assert "overflow-y:auto" not in transcript_flex
     log_flex = _css_rule_body(
@@ -83,6 +83,8 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     )
     assert "flex:1 1 0%" in log_flex
     assert "overflow-y:auto" in log_flex
+    assert "justify-content:flex-start" in log_flex
+    assert "justify-content:flex-end" not in log_flex
     studio_scroll = _css_rule_body(workspace_css, ".st-key-studio_scroll {")
     assert "height:100%" in studio_scroll
     assert "margin-top:auto" not in _css_rule_body(
@@ -93,8 +95,15 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
         ".st-key-chat_panel > [data-testid=\"stLayoutWrapper\"]:has(.st-key-chat_composer):not(:has(.st-key-chat_log))",
     )
     assert "flex:0 0 auto" in composer_pin
-    assert "margin-top:auto" in composer_pin
+    assert "margin-top:0" in composer_pin
     assert "overflow:visible" in composer_pin
+    composer_column = _css_rule_body(
+        workspace_css,
+        ".st-key-chat_transcript [data-testid=\"stVerticalBlock\"]:has(.st-key-chat_composer)",
+    )
+    assert "flex:0 0 auto" in composer_column
+    assert "flex-grow:0" in composer_column
+    assert "height:auto" in composer_column
     log_wrap = _css_rule_body(
         workspace_css,
         ".st-key-chat_panel [data-testid=\"stLayoutWrapper\"]:has(> .st-key-chat_log):not(:has(> .st-key-chat_inflight))",
@@ -127,6 +136,15 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     )
     assert "flex:0 0 auto" in log_children
     assert "height:auto" in log_children
+    assert "flex-grow" not in log_children
+    assert "margin-top:auto" not in log_children
+    log_direct = _css_rule_body(
+        workspace_css,
+        ".st-key-chat_log > [data-testid=\"stVerticalBlock\"],\n    .st-key-chat_log > [data-testid=\"stLayoutWrapper\"] {",
+    )
+    assert "flex:0 0 auto" in log_direct
+    assert "margin-top:auto" in log_direct
+    assert "flex-grow" not in log_direct
 
     chat_css = Path(_STYLES_DIR / "30-chat.css").read_text(encoding="utf-8")
     assert ".st-key-chat_inflight" in chat_css
@@ -139,7 +157,8 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
         chat_css, ".st-key-chat_panel .st-key-chat_composer"
     )
     assert "position:relative" in transcript_composer
-    assert "margin-top:auto" in transcript_composer
+    assert "margin-top:0" in transcript_composer
+    assert "flex:0 0 auto" in transcript_composer
     assert (
         '.st-key-chat_inflight [data-testid="stChatMessage"]:last-of-type'
         in chat_css
