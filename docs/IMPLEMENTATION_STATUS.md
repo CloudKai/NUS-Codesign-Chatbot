@@ -3,33 +3,52 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock-v2`
-**HEAD:** `ddfc3f46561c2dcb390d847cb331b22f3a0659d0`
-**Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged)
-**This phase:** Local Fast Chat JSON Schema alignment. Production DEFAULT
-stays **v22**. Affinity ON. Generation 2. Prompt cache OFF. Not published.
+**HEAD:** `6616e15cff703c70254f7442a75773477b01f22c`
+**Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
+**This phase:** Surgical AgentCore **v23** schema release. Affinity ON.
+Generation 2. Prompt cache OFF.
 
-**Local schema fix (2026-08-20, not deployed).** `FastChatTurnOutput` now
-emits `if mode=coaching then recommendation in {stay, advance}`. Pydantic
-`coaching_requires_recommendation` is unchanged. Discriminated unions were
-rejected: Strands 1.52.0 flatten requires `type=object`, and Claude tool
-schemas reject top-level `oneOf`. Strands flatten still drops `if`/`then`;
-the flattened recommendation is `{enum: [stay, advance], type: [string, null]}`
-which still rejects JSON `null` via `enum`. Q&A `null` remains valid in
-Pydantic. Rationale stays optional. `turns=2` kept. No AWS calls.
+**v23 publish (2026-08-19).** Overlay of live v22 zip + HEAD
+`agentcore_runtime/models.py` only. Artifact
+`s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-schema-fix-20260819T170837Z.zip`.
+Same ARN `NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. v22 kept
+READY. DEFAULT liveVersion **23** READY (`lastUpdated`
+2026-08-19T17:08:56Z).
 
-**Production recommendation.** Keep DEFAULT → **22**. Do not publish v23
-until a controlled Fast Chat sample is authorized.
+**Live coaching sample (3 paid Fast Chat turns, dedicated notebook).** New
+affinity session `codesign-c33b219f…` (not the v22 Hello session). C1 cold
+OTEL boot; C2/C3 warm same `runtimeSessionId`. All three: mode=coaching,
+recommendation=stay, stage stayed `problem_identification`, persistence ok,
+Deep Review not invoked, `rag_used=false`. CloudWatch: **zero**
+`coaching mode requires` / `recommendation=null` events. Cycle 1 still
+recovered (`event_loop_cycle_count=2`) because `citations` was `null`
+(`Field 'citations': Input should be a valid list`) — **other** bounded
+recovery, not the published schema hole.
 
-**Next exact action.** Operator may later authorize a surgical v23 overlay of
-`agentcore_runtime/models.py` only. Do not bump generation. Do not enable
-prompt cache.
+| | C1 cold | C2 warm | C3 warm |
+|---|---:|---:|---:|
+| pre-handler (invoke − runtime) | ~5452 ms | **~110 ms** | **~110 ms** |
+| `agentcore_invoke_ms` | 13604 | 8347 | 9066 |
+| cycles | 2 | 2 | 2 |
+| first-cycle applied | true | true | true |
+| old coaching+null bug | absent | absent | absent |
 
-**AgentCore:** DEFAULT liveVersion **22** READY. Same ARN
-`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. v21 was not deleted.
+C3 set `retrieval_required=true` from the evidence-worded prompt; KB returned
+0 validated hits (`rag_used=false`). Do not treat that as a selected-source
+RAG run.
 
-**Session affinity:** host `.env` `AGENTCORE_SESSION_AFFINITY_ENABLED=true`.
-Compose still pins `AGENTCORE_SESSION_GENERATION=2` (not bumped). Effective
-FastAPI generation is **2**. Host `.env` still has unused `=3`; do not use it.
+**Production recommendation.** Keep DEFAULT → **23**, affinity ON, generation
+2, prompt cache OFF. Do not bump generation. Do not enable prompt cache.
+Do not rebuild EC2 for this schema-only change.
+
+**Next exact action.** Optional later: surgical `citations` schema so JSON
+`null` cannot be emitted (same class as the recommendation hole). Do not
+bundle that into a rollback. Do not start Deep Review on the validation
+notebook.
+
+**Session affinity:** Compose `AGENTCORE_SESSION_AFFINITY_ENABLED=true` and
+`AGENTCORE_SESSION_GENERATION=2`. Host `.env` still has unused generation
+`=3`; do not use it.
 
 ### First-cycle hardening publish (2026-08-19): DEFAULT 21 → 22
 
