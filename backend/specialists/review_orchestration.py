@@ -117,6 +117,18 @@ def parse_deep_review_job(value: Any) -> dict[str, Any] | None:
         for item in (value.get("message_ids") or [])
         if str(item).strip()
     ]
+    try:
+        base_checkpoint_revision = int(value.get("base_checkpoint_revision"))
+        if base_checkpoint_revision < 0:
+            base_checkpoint_revision = None
+    except (TypeError, ValueError):
+        base_checkpoint_revision = None
+    try:
+        base_checkpoint_version = int(value.get("base_checkpoint_version"))
+        if base_checkpoint_version < 1:
+            base_checkpoint_version = None
+    except (TypeError, ValueError):
+        base_checkpoint_version = None
     return {
         "review_id": review_id,
         "status": status,
@@ -124,6 +136,8 @@ def parse_deep_review_job(value: Any) -> dict[str, Any] | None:
         "stage_at_start": str(value.get("stage_at_start") or "").strip() or None,
         "source_ids": source_ids,
         "message_ids": message_ids,
+        "base_checkpoint_revision": base_checkpoint_revision,
+        "base_checkpoint_version": base_checkpoint_version,
         "started_at": str(value.get("started_at") or "").strip() or None,
         "updated_at": str(value.get("updated_at") or "").strip() or None,
         "error_code": str(value.get("error_code") or "").strip() or None,
@@ -174,6 +188,8 @@ def new_deep_review_job(
     source_ids: list[str],
     message_ids: list[str],
     started_at: str,
+    base_checkpoint_revision: int | None = None,
+    base_checkpoint_version: int | None = None,
 ) -> dict[str, Any]:
     """Return a queued Deep Review job payload for notebook settings.
 
@@ -184,11 +200,14 @@ def new_deep_review_job(
         source_ids: Selected source ids frozen at enqueue.
         message_ids: Active message ids frozen at enqueue.
         started_at: UTC timestamp when the job was first persisted.
+        base_checkpoint_revision: Prior checkpoint revision frozen at
+            enqueue, when a checkpoint-capable snapshot exists.
+        base_checkpoint_version: Prior checkpoint version frozen at enqueue.
 
     Returns:
         JSON-serialisable job dictionary.
     """
-    return {
+    payload: dict[str, Any] = {
         "review_id": str(review_id).strip(),
         "status": DEEP_REVIEW_JOB_QUEUED,
         "reviewed_revision": max(0, int(reviewed_revision)),
@@ -198,7 +217,20 @@ def new_deep_review_job(
         "started_at": str(started_at or "").strip(),
         "updated_at": str(started_at or "").strip(),
         "error_code": None,
+        "base_checkpoint_revision": None,
+        "base_checkpoint_version": None,
     }
+    try:
+        if base_checkpoint_revision is not None:
+            payload["base_checkpoint_revision"] = max(0, int(base_checkpoint_revision))
+    except (TypeError, ValueError):
+        payload["base_checkpoint_revision"] = None
+    try:
+        if base_checkpoint_version is not None:
+            payload["base_checkpoint_version"] = max(1, int(base_checkpoint_version))
+    except (TypeError, ValueError):
+        payload["base_checkpoint_version"] = None
+    return payload
 
 
 def bound_deep_review_interval(value: Any) -> int:
@@ -435,11 +467,22 @@ def normalize_deep_review_stage_reviews(
             continue
         strengths = _compact_stage_review_items(item.get("strengths"))
         areas = _compact_stage_review_items(item.get("areas_to_develop"))
+        supporting_ids: list[str] = []
+        seen_ids: set[str] = set()
+        for message_id in item.get("supporting_message_ids") or []:
+            cleaned = str(message_id or "").strip()
+            if not cleaned or cleaned in seen_ids:
+                continue
+            seen_ids.add(cleaned)
+            supporting_ids.append(cleaned)
+            if len(supporting_ids) >= 3:
+                break
         existing = merged.get(stage_id)
         if existing is None:
             merged[stage_id] = {
                 "strengths": strengths,
                 "areas_to_develop": areas,
+                "supporting_message_ids": supporting_ids,
             }
             continue
         existing["strengths"] = _compact_stage_review_items(
@@ -448,6 +491,13 @@ def normalize_deep_review_stage_reviews(
         existing["areas_to_develop"] = _compact_stage_review_items(
             [*existing["areas_to_develop"], *areas]
         )
+        merged_ids = list(existing.get("supporting_message_ids") or [])
+        for message_id in supporting_ids:
+            if message_id not in merged_ids:
+                merged_ids.append(message_id)
+            if len(merged_ids) >= 3:
+                break
+        existing["supporting_message_ids"] = merged_ids
     payload: list[dict[str, Any]] = []
     for stage in THINKING_STAGES:
         row = merged.get(stage.id)
@@ -460,6 +510,7 @@ def normalize_deep_review_stage_reviews(
                 "stage_id": stage.id,
                 "strengths": list(row["strengths"]),
                 "areas_to_develop": list(row["areas_to_develop"]),
+                "supporting_message_ids": list(row.get("supporting_message_ids") or []),
             }
         )
     return payload
@@ -505,6 +556,9 @@ def deep_review_snapshot_payload(
     model_id: str,
     reviewed_stage_id: str = "",
     stage_reviews: list[dict[str, Any]] | None = None,
+    reviewed_message_ids: list[str] | None = None,
+    source_ids: list[str] | None = None,
+    checkpoint_version: int | None = None,
 ) -> dict[str, Any]:
     """Return the durable Deep Review snapshot stored in notebook settings.
 
@@ -513,6 +567,9 @@ def deep_review_snapshot_payload(
     is the Thinking Path stage frozen at enqueue, not the stage at completion.
     ``stage_reviews`` is the authoritative per-stage Strengths / Areas
     projection when non-empty. Older snapshots omit that key.
+    Checkpoint-capable snapshots also persist ``checkpoint_version``,
+    ``reviewed_message_ids``, and ``source_ids`` without duplicating message
+    content.
 
     Args:
         conversation_revision: Revision reviewed through.
@@ -528,13 +585,17 @@ def deep_review_snapshot_payload(
         missing_requirements: Remaining requirements.
         model_id: Review model identifier (Sonnet 4.6).
         reviewed_stage_id: Stage id frozen when Deep Review started.
-        stage_reviews: Optional per-stage strengths and areas.
+        stage_reviews: Optional per-stage strengths, areas, and supporting ids.
+        reviewed_message_ids: Frozen active message ids reviewed, ids only.
+        source_ids: Frozen selected-source ids used for this review.
+        checkpoint_version: Internal marker distinguishing compact-capable
+            snapshots. Omit for legacy callers; successful new reviews pass 1.
 
     Returns:
         JSON-serialisable snapshot dictionary.
     """
     normalized_reviews = normalize_deep_review_stage_reviews(stage_reviews or [])
-    return {
+    payload: dict[str, Any] = {
         "reviewed_through_revision": max(0, int(conversation_revision)),
         "reviewed_stage_id": str(reviewed_stage_id or "").strip(),
         "created_at": str(created_at or "").strip(),
@@ -560,3 +621,23 @@ def deep_review_snapshot_payload(
         "review_depth": REVIEW_DEPTH_DEEP,
         "review_trigger": REVIEW_TRIGGER_EXPLICIT,
     }
+    if checkpoint_version is not None:
+        try:
+            payload["checkpoint_version"] = max(1, int(checkpoint_version))
+        except (TypeError, ValueError):
+            pass
+    if reviewed_message_ids is not None:
+        seen: set[str] = set()
+        ids: list[str] = []
+        for item in reviewed_message_ids:
+            cleaned = str(item or "").strip()
+            if not cleaned or cleaned in seen:
+                continue
+            seen.add(cleaned)
+            ids.append(cleaned)
+        payload["reviewed_message_ids"] = ids
+    if source_ids is not None:
+        payload["source_ids"] = [
+            str(item).strip() for item in source_ids if str(item).strip()
+        ]
+    return payload

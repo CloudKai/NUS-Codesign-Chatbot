@@ -34,7 +34,7 @@ FastAPI (`api.py` façade → `http/app.py`)
 | Module | Responsibility |
 |---|---|
 | `domain.py` | Pydantic contracts: `CoachRequest`, `CoachTurn`, `EducationalAssessment`, `PendingPhaseTransition`, citations |
-| `application.py` / `coaching/` | Compatibility import plus durable `CoachApplicationService` execution, including research-observation persist |
+| `application.py` / `coaching/` | Compatibility import plus durable `CoachApplicationService` execution, including research-observation persist. `coaching/deep_review_context.py` owns Deep Review `full_history` vs `checkpoint_delta` planning. |
 | `api.py` / `http/app.py` | Compatibility import plus FastAPI app factory/composition, student and professor routes, and HTTP error mapping |
 | `api_client.py` | Typed client used by Streamlit when `USE_LOCAL_API=true` |
 | `workspace_service.py` | Notebook/history/source/preference CRUD application service; student transcript export |

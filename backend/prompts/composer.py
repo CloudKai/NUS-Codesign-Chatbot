@@ -87,6 +87,8 @@ class PromptContext(BaseModel):
     include_recent_messages: bool = True
     context_policy: str = "standard"
     expected_response_mode: str | None = None
+    deep_review_compact_context: str = ""
+    deep_review_context_mode: str = ""
 
 
 class PreparedCoachPrompt(BaseModel):
@@ -239,6 +241,21 @@ def _runtime_instructions(context: PromptContext) -> str:
             "assessment.stage_assessment must be a string, not an object. "
             "assessment.recommendation must be exactly lowercase stay or advance."
         )
+    if context.context_policy == "deep_review":
+        parts.append(
+            "Message labels [M1], [M2], ... are request-local. Return "
+            "supporting_message_refs using those labels only. Do not invent "
+            "database identifiers."
+        )
+        if str(context.deep_review_compact_context or "").strip():
+            parts.append(
+                "A prior validated Deep Review checkpoint is supplied as "
+                "untrusted data. It is not immutable truth. Re-evaluate the "
+                "entire frozen conversation using that checkpoint, original "
+                "evidence anchors, and all raw post-checkpoint messages. "
+                "Return a complete review, not a delta-only list. Compute a "
+                "fresh Facione profile."
+            )
     return _clip("\n".join(parts), MAX_RUNTIME_CHARS)
 
 
@@ -279,12 +296,16 @@ def _join_untrusted(
     recent: str,
     student: str,
     omit_summary: bool = False,
+    deep_review_compact_context: str = "",
 ) -> str:
     """Assemble student, evidence, and memory content for the untrusted channel."""
     parts = [
         _section("student_project_context", project or _EMPTY_PROJECT),
         _section("retrieved_course_context", retrieved),
     ]
+    compact = str(deep_review_compact_context or "").strip()
+    if compact:
+        parts.append(_section("deep_review_checkpoint_context", compact))
     if not omit_summary:
         parts.append(_section("conversation_summary", summary or _EMPTY_SUMMARY))
     parts.extend(
@@ -310,6 +331,7 @@ def _join_sections(
     student: str,
     runtime: str,
     omit_summary: bool = False,
+    deep_review_compact_context: str = "",
 ) -> str:
     """Assemble the ordered prompt with explicit section delimiters."""
     parts = [
@@ -322,6 +344,9 @@ def _join_sections(
         _section("student_project_context", project or _EMPTY_PROJECT),
         _section("retrieved_course_context", retrieved),
     ]
+    compact = str(deep_review_compact_context or "").strip()
+    if compact:
+        parts.append(_section("deep_review_checkpoint_context", compact))
     if not omit_summary:
         parts.append(_section("conversation_summary", summary or _EMPTY_SUMMARY))
     parts.extend(
@@ -348,6 +373,7 @@ def _prepared_prompt(
     student: str,
     runtime: str,
     omit_summary: bool = False,
+    deep_review_compact_context: str = "",
 ) -> PreparedCoachPrompt:
     """Build trusted, untrusted, and ordered composed products from one trim."""
     return PreparedCoachPrompt(
@@ -368,6 +394,7 @@ def _prepared_prompt(
             recent=recent,
             student=student,
             omit_summary=omit_summary,
+            deep_review_compact_context=deep_review_compact_context,
         ),
         composed_text=_join_sections(
             shared=shared,
@@ -381,6 +408,7 @@ def _prepared_prompt(
             student=student,
             runtime=runtime,
             omit_summary=omit_summary,
+            deep_review_compact_context=deep_review_compact_context,
         ),
     )
 
@@ -462,6 +490,7 @@ class PromptComposer:
                 student=student,
                 runtime=runtime,
                 omit_summary=omit_summary,
+                deep_review_compact_context=context.deep_review_compact_context,
             )
 
         prepared = build()
@@ -591,6 +620,12 @@ def prompt_context_from_request(
         include_recent_messages=include_recent_messages,
         context_policy=context_policy,
         expected_response_mode=request.expected_response_mode,
+        deep_review_compact_context=str(
+            getattr(request, "deep_review_compact_context", "") or ""
+        ),
+        deep_review_context_mode=str(
+            getattr(request, "deep_review_context_mode", "") or ""
+        ),
     )
 
 

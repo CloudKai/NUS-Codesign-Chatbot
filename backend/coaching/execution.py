@@ -13,6 +13,13 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from backend.context_planner import memory_from_metadata
+from backend.coaching.deep_review_context import (
+    DEEP_REVIEW_CHECKPOINT_VERSION,
+    bind_supporting_message_ids,
+    checkpoint_identity_for_enqueue,
+    plan_deep_review_context,
+    record_deep_review_context_telemetry,
+)
 from backend.coaching.mode_policy import (
     qa_evidence_gap_turn,
     resolve_mode_policy,
@@ -623,6 +630,9 @@ class CoachApplicationService:
             for source in visible_sources
             if str(source.get("id") or "").strip()
         ]
+        base_revision, base_version = checkpoint_identity_for_enqueue(
+            metadata.get(DEEP_REVIEW_SNAPSHOT_KEY)
+        )
         job_payload, created = self._store.start_or_get_deep_review_job(
             thread_id,
             review_id=str(uuid.uuid4()),
@@ -630,6 +640,8 @@ class CoachApplicationService:
             stage_at_start=current_stage(journey).id,
             source_ids=source_ids,
             message_ids=message_ids,
+            base_checkpoint_revision=base_revision,
+            base_checkpoint_version=base_version,
         )
         if created:
             submit_deep_review_job(self, thread_id, str(job_payload["review_id"]))
@@ -760,6 +772,31 @@ class CoachApplicationService:
                 )
                 prepared = self._server_owned_deep_review_request(prepared)
                 prepared = prepared.model_copy(update={"review_id": cleaned_id})
+                context_plan = plan_deep_review_context(
+                    frozen_history=list(prepared.history or []),
+                    frozen_source_ids=list(job.get("source_ids") or []),
+                    frozen_revision=int(job.get("reviewed_revision") or 0),
+                    frozen_stage=stage_id,
+                    snapshot=metadata.get(DEEP_REVIEW_SNAPSHOT_KEY),
+                    expected_checkpoint_revision=job.get("base_checkpoint_revision"),
+                    expected_checkpoint_version=job.get("base_checkpoint_version"),
+                    threshold=int(
+                        runtime_settings.deep_review_checkpoint_token_threshold
+                    ),
+                    force_full_final=bool(
+                        runtime_settings.deep_review_force_full_final
+                    ),
+                )
+                metrics = record_deep_review_context_telemetry(context_plan)
+                prepared = prepared.model_copy(
+                    update={
+                        "history": context_plan.converse_history,
+                        "deep_review_context_mode": context_plan.mode,
+                        "deep_review_compact_context": context_plan.compact_context,
+                        "deep_review_ref_map": context_plan.ref_map,
+                        "deep_review_context_metrics": metrics,
+                    }
+                )
                 turn = self._workflow.run(prepared)
                 prepared, turn = self._maybe_rag_fallback(prepared, turn, snapshot)
                 self._workflow.take_provisional_research_coding(thread_id)
@@ -776,7 +813,10 @@ class CoachApplicationService:
                     reviewed_stage_id=(
                         frozen_stage if frozen_stage in STAGE_BY_ID else ""
                     ),
-                    history=list(prepared.history or []),
+                    history=list(context_plan.frozen_history),
+                    ref_map=context_plan.ref_map,
+                    reviewed_message_ids=list(job.get("message_ids") or []),
+                    source_ids=list(job.get("source_ids") or []),
                 )
                 self._store.complete_deep_review_job(
                     thread_id,
@@ -815,16 +855,25 @@ class CoachApplicationService:
         reviewed_stage_id: str,
         history: list[dict[str, Any]] | None,
         created_at: str | None = None,
+        ref_map: dict[str, str] | None = None,
+        reviewed_message_ids: list[str] | None = None,
+        source_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         """Build one durable Deep Review snapshot from a validated turn.
 
         ``stage_reviews`` is filtered to stages evidenced in the frozen
-        history. When present, those lists also fill the holistic
+        history. Model ``M#`` refs are mapped to durable message ids before
+        persistence. When present, those lists also fill the holistic
         ``strengths`` / ``areas_to_develop`` fields. When absent, the
         assessment's flat lists are stored for legacy projection.
         """
-        stage_reviews = deep_review_stage_reviews_for_snapshot(
+        bound_reviews = bind_supporting_message_ids(
             list(turn.assessment.review_stage_feedback or []),
+            ref_map=dict(ref_map or {}),
+            frozen_history=list(history or []),
+        )
+        stage_reviews = deep_review_stage_reviews_for_snapshot(
+            bound_reviews,
             history=history,
             fallback_stage=reviewed_stage_id,
         )
@@ -861,6 +910,9 @@ class CoachApplicationService:
             or "global.anthropic.claude-sonnet-4-6",
             reviewed_stage_id=reviewed_stage_id,
             stage_reviews=stage_reviews,
+            reviewed_message_ids=list(reviewed_message_ids or []),
+            source_ids=list(source_ids or []),
+            checkpoint_version=DEEP_REVIEW_CHECKPOINT_VERSION,
         )
 
     @staticmethod
@@ -1686,6 +1738,10 @@ class CoachApplicationService:
                 "review_id": (
                     request.review_id if frozen_history_revision is not None else None
                 ),
+                "deep_review_context_mode": "",
+                "deep_review_compact_context": "",
+                "deep_review_ref_map": {},
+                "deep_review_context_metrics": {},
             }
         )
         return prepared, snapshot

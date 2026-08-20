@@ -17,7 +17,7 @@ backend/
   http/app.py                 FastAPI composition, routes and HTTP errors
   api_client.py               typed client used by Streamlit
   application.py              coaching compatibility facade
-  coaching/                   execution, mode policy, progress-field merge, turn snapshot
+  coaching/                   execution, Deep Review checkpoint context, mode policy, progress-field merge, turn snapshot
   workspace_service.py        notebook/message/source/preference use cases; transcript export
   learning_service.py         transition confirmation and stage selection
   domain.py                   Pydantic API/workflow contracts

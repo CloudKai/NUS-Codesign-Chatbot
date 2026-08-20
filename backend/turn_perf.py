@@ -149,6 +149,16 @@ SAFE_PERF_FIELDS = frozenset(
         "source_catalog_load_count",
         "citation_source_resolution_count",
         "retrieval_count",
+        "deep_review_context_mode",
+        "deep_review_full_estimated_tokens",
+        "deep_review_actual_context_estimated_tokens",
+        "deep_review_checkpoint_revision",
+        "deep_review_checkpoint_valid",
+        "deep_review_checkpoint_fallback_reason",
+        "deep_review_anchor_count",
+        "deep_review_delta_message_count",
+        "deep_review_reviewed_message_count",
+        "deep_review_estimated_tokens_saved",
     }
 )
 

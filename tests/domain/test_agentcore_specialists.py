@@ -11,6 +11,7 @@ import pytest
 
 from agentcore_runtime.models import (
     DeepReviewTurnOutput,
+    FastChatTurnOutput,
     QATurnOutput,
     ReviewTurnOutput,
     parse_review_turn_output,
@@ -153,6 +154,15 @@ def test_deep_review_schema_requires_stage_reviews_array() -> None:
     assert "anyOf" not in node
     incremental = ReviewTurnOutput.model_json_schema()
     assert "stage_reviews" not in incremental.get("properties", {})
+    defs = schema.get("$defs") or schema.get("definitions") or {}
+    feedback = defs.get("DeepReviewStageFeedback") or {}
+    refs = (feedback.get("properties") or {}).get("supporting_message_refs") or {}
+    assert (feedback.get("required") or []) and "supporting_message_refs" in feedback["required"]
+    assert refs.get("type") == "array"
+    assert "anyOf" not in refs
+    fast = FastChatTurnOutput.model_json_schema()
+    assert "supporting_message_refs" not in fast.get("properties", {})
+    assert "stage_reviews" not in fast.get("properties", {})
 
 
 def test_parse_review_turn_output_keeps_stage_reviews() -> None:
@@ -192,6 +202,7 @@ def test_parse_review_turn_output_keeps_stage_reviews() -> None:
     assert parsed.stage_reviews[0].strengths == [
         "Constructed a How Might We question"
     ]
+    assert parsed.stage_reviews[0].supporting_message_refs == []
 
 
 def test_review_turn_output_ignores_stage_reviews_field() -> None:

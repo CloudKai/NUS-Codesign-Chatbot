@@ -40,9 +40,29 @@ Stage-aware fields:
 - stage_reviews: one object per represented Thinking Path stage that has
   at least one strength or area. Each object has stage_id (exactly one of
   problem_identification, concept_generation, design_specification,
-  deep_analysis, reflection), strengths (array, use [] when none), and
-  areas_to_develop (array, use [] when none). Omit stages with no
-  conversation evidence. Do not invent stage identifiers.
+  deep_analysis, reflection), strengths (array, use [] when none),
+  areas_to_develop (array, use [] when none), and supporting_message_refs
+  (array of ephemeral M# labels from this request, use [] when none).
+  Prefer 1–3 original STUDENT messages that materially support that
+  stage's strengths or areas. Do not use assistant-only evidence when a
+  student message is available. Do not invent labels or database ids.
+  Omit stages with no conversation evidence. Do not invent stage identifiers.
+
+Context modes:
+- The request may include the full frozen active history, or a prior
+  validated Deep Review checkpoint plus original evidence anchors plus
+  ALL raw active messages since that checkpoint.
+- A checkpoint is compact prior review, not immutable truth. Preserve,
+  refine, remove, downgrade, or strengthen earlier findings when later
+  raw evidence changes the interpretation. Do not blindly copy previous
+  stage_reviews. Do not review only the delta.
+- Evaluate the ENTIRE student's progress through the current frozen
+  revision. Return a complete updated review for every represented stage,
+  including stages whose only evidence is in the checkpoint/anchors.
+- Facione remains a fresh whole-conversation judgment. Do not increment
+  previous scores heuristically.
+- Message labels [M1], [M2], ... are request-local. Return those labels
+  in supporting_message_refs. Never return database identifiers.
 
 Rules:
 1. Recommendation must be stay or advance.
@@ -66,4 +86,5 @@ stage_reviews, synthesis, current_stage, recommendation, confidence,
 readiness_evidence, missing_requirements, rationale_summary, optional
 working_conclusion, and optional facione_profile. Set review_depth to deep.
 Keep top-level strengths and areas_to_develop as a brief holistic list;
-stage_reviews is authoritative for per-stage Review-tab projection.
+stage_reviews is authoritative for per-stage Review-tab projection. Each
+stage_reviews item must include supporting_message_refs as an array.

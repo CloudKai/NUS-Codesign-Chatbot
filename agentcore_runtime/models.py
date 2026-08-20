@@ -10,6 +10,7 @@ coaching assessment fails closed.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any, Literal
 
@@ -636,10 +637,29 @@ def _force_schema_array(schema: dict[str, Any], field: str) -> None:
         node.pop("oneOf", None)
 
 
+def _compact_message_refs(values: Any, *, limit: int = 3) -> list[str]:
+    """Keep unique ephemeral ``M#`` labels; drop unknown shapes."""
+    if not isinstance(values, list):
+        return []
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    pattern = re.compile(r"^M([1-9][0-9]{0,3})$")
+    for item in values:
+        label = str(item or "").strip()
+        if not pattern.fullmatch(label) or label in seen:
+            continue
+        seen.add(label)
+        cleaned.append(label)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
 def _attach_deep_review_stage_feedback_schema(schema: dict[str, Any]) -> None:
     """Keep stage-feedback bullet lists as arrays after Strands flatten."""
     _force_schema_array(schema, "strengths")
     _force_schema_array(schema, "areas_to_develop")
+    _force_schema_array(schema, "supporting_message_refs")
 
 
 def _attach_deep_review_turn_schema(schema: dict[str, Any]) -> None:
@@ -688,12 +708,28 @@ class DeepReviewStageFeedback(BaseModel):
             "Always return an array. Use [] when this stage has no areas to develop."
         ),
     )
+    supporting_message_refs: list[str] = Field(
+        default_factory=list,
+        max_length=3,
+        description=(
+            "Always return an array of ephemeral M# labels from this request "
+            "that support this stage's strengths or areas. Prefer student "
+            "messages. Use [] when there is no specific original-message anchor. "
+            "Do not invent labels or database identifiers."
+        ),
+    )
 
     @field_validator("strengths", "areas_to_develop", mode="before")
     @classmethod
     def coerce_bullet_arrays(cls, value: Any) -> list[str]:
         """Reject null bullet lists; keep compact unique strings."""
         return _compact_review_bullets(value if value is not None else [])
+
+    @field_validator("supporting_message_refs", mode="before")
+    @classmethod
+    def coerce_supporting_message_refs(cls, value: Any) -> list[str]:
+        """Reject null ref lists; keep unique ephemeral M# labels."""
+        return _compact_message_refs(value if value is not None else [])
 
 
 class DeepReviewTurnOutput(ReviewTurnOutput):
@@ -741,11 +777,15 @@ class DeepReviewTurnOutput(ReviewTurnOutput):
                 continue
             strengths = item.get("strengths")
             areas = item.get("areas_to_develop")
+            refs = item.get("supporting_message_refs")
             cleaned.append(
                 {
                     "stage_id": stage_id,
                     "strengths": strengths if isinstance(strengths, list) else [],
                     "areas_to_develop": areas if isinstance(areas, list) else [],
+                    "supporting_message_refs": (
+                        refs if isinstance(refs, list) else []
+                    ),
                 }
             )
         data["stage_reviews"] = cleaned
@@ -767,6 +807,12 @@ class DeepReviewTurnOutput(ReviewTurnOutput):
                     ),
                     "areas_to_develop": _compact_review_bullets(
                         [*existing.areas_to_develop, *item.areas_to_develop]
+                    ),
+                    "supporting_message_refs": _compact_message_refs(
+                        [
+                            *existing.supporting_message_refs,
+                            *item.supporting_message_refs,
+                        ]
                     ),
                 }
             )

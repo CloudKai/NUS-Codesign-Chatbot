@@ -420,6 +420,7 @@ class DeterministicCoachProvider:
                     "areas_to_develop": [
                         "Name who is affected and what success would look like."
                     ],
+                    "supporting_message_refs": [],
                 }
             ],
         )

@@ -331,6 +331,14 @@ def test_eligible_deep_review_is_one_sonnet_call_and_resets_counter(tmp_path) ->
     assert snapshot["strengths"] == ["Named a real constraint"]
     assert snapshot["areas_to_develop"] == ["Name who is affected"]
     assert "Formative Deep Review A" in snapshot["synthesis"]
+    assert snapshot["checkpoint_version"] == 1
+    assert snapshot["reviewed_message_ids"] == [
+        str(item.get("id") or "")
+        for item in store.get_messages(thread_id)
+        if str(item.get("id") or "").strip()
+    ]
+    assert "source_ids" in snapshot
+    assert "content" not in snapshot
     thread = store.get_thread(thread_id) or {}
     journey = dict((thread.get("metadata") or {}).get("learning_journey") or {})
     assert journey.get("current_stage") == "problem_identification"
@@ -819,8 +827,12 @@ def _add_turn(
     content: str,
     stage: str,
     response_mode: str = "coaching",
-) -> None:
-    """Persist one transcript row with Thinking Path provenance."""
+) -> str:
+    """Persist one transcript row with Thinking Path provenance.
+
+    Returns:
+        The new message id.
+    """
     metadata: dict[str, Any] = {"thinking_stage": stage}
     if role == "assistant":
         assessment: dict[str, Any] = {
@@ -834,7 +846,7 @@ def _add_turn(
             assessment["stage_assessment"] = "Incremental note."
             assessment["contribution_summary"] = "Draft."
         metadata["assessment"] = assessment
-    store.add_message(thread_id, role, content, metadata=metadata)
+    return store.add_message(thread_id, role, content, metadata=metadata)
 
 
 def test_deep_review_request_includes_whole_frozen_pi_and_cg_history(tmp_path) -> None:
@@ -1142,5 +1154,393 @@ def test_failed_stage_aware_deep_review_leaves_previous_stage_reviews(tmp_path) 
     assert _wait_job(failing, thread_id).status is DeepReviewJobStatus.FAILED
     assert _snapshot(store, thread_id) == previous
     assert "Previous PI deep strength" in _review_items(
+        store, thread_id, "strength_sections", "problem_identification"
+    )
+
+
+def _long_text(marker: str) -> str:
+    """Return enough characters for the conservative token estimator."""
+    return f"{marker} " + ("evidence " * 40)
+
+
+def test_first_deep_review_uses_full_history_and_maps_supporting_refs(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The first Deep Review sends every frozen turn and persists mapped ids."""
+    monkeypatch.setattr(settings, "deep_review_checkpoint_token_threshold", 10_000)
+    store = StudentStore(tmp_path / "dr-first-full.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    user_id = _add_turn(
+        store,
+        thread_id,
+        role="user",
+        content=_long_text("UNIQUE_FIRST_PI_ANCHOR"),
+        stage="problem_identification",
+    )
+    _add_turn(
+        store,
+        thread_id,
+        role="assistant",
+        content="Which crossing constraint is binding?",
+        stage="problem_identification",
+    )
+    _unlock(store, thread_id)
+    client = FakeAgentCoreRuntime(
+        deep_payload=_deep_payload(
+            stage_reviews=[
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["Named a real constraint"],
+                    "areas_to_develop": ["Name who is affected"],
+                    "supporting_message_refs": ["M1", "M9999"],
+                }
+            ]
+        )
+    )
+    service = _service(store, client)
+    service.enqueue_deep_review(thread_id, idempotency_key="deep-first-full")
+    assert _wait_job(service, thread_id).status is DeepReviewJobStatus.COMPLETED
+    assert _phases(client) == ["review"]
+    text = _payload_text(_decoded(client.calls[0]))
+    assert "UNIQUE_FIRST_PI_ANCHOR" in text
+    assert "[M1]" in text
+    snapshot = _snapshot(store, thread_id)
+    assert snapshot is not None
+    assert snapshot["checkpoint_version"] == 1
+    assert snapshot["stage_reviews"][0]["supporting_message_ids"] == [user_id]
+    assert "M1" not in json.dumps(snapshot)
+    assert "UNIQUE_FIRST_PI_ANCHOR" not in json.dumps(snapshot)
+
+
+def test_small_second_deep_review_keeps_full_history(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A valid checkpoint below the token threshold still uses full_history."""
+    monkeypatch.setattr(settings, "deep_review_checkpoint_token_threshold", 10_000)
+    store = StudentStore(tmp_path / "dr-small-second.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _add_turn(
+        store,
+        thread_id,
+        role="user",
+        content="UNIQUE_SMALL_PRE_CHECKPOINT filler about older pedestrians.",
+        stage="problem_identification",
+    )
+    _unlock(store, thread_id)
+    first = FakeAgentCoreRuntime(
+        deep_payload=_deep_payload(
+            stage_reviews=[
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["Named a real constraint"],
+                    "areas_to_develop": ["Name who is affected"],
+                    "supporting_message_refs": ["M1"],
+                }
+            ]
+        )
+    )
+    first_service = _service(store, first)
+    first_service.enqueue_deep_review(thread_id, idempotency_key="deep-small-1")
+    assert _wait_job(first_service, thread_id).status is DeepReviewJobStatus.COMPLETED
+    _add_turn(
+        store,
+        thread_id,
+        role="user",
+        content="UNIQUE_SMALL_DELTA later student turn.",
+        stage="problem_identification",
+    )
+    _unlock(store, thread_id)
+    second = FakeAgentCoreRuntime(
+        deep_payload=_deep_payload(
+            stage_reviews=[
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["Named a real constraint"],
+                    "areas_to_develop": ["Name who is affected"],
+                    "supporting_message_refs": ["M1"],
+                }
+            ]
+        )
+    )
+    second_service = _service(store, second)
+    second_service.enqueue_deep_review(thread_id, idempotency_key="deep-small-2")
+    assert _wait_job(second_service, thread_id).status is DeepReviewJobStatus.COMPLETED
+    payload = _decoded(second.calls[0])
+    assert payload.get("runtime_context", {}).get("deep_review_context_mode") == (
+        "full_history"
+    )
+    text = _payload_text(payload)
+    assert "UNIQUE_SMALL_PRE_CHECKPOINT" in text
+    assert "UNIQUE_SMALL_DELTA" in text
+    assert "DEEP REVIEW CONTEXT MODE" not in text
+
+
+def test_long_second_deep_review_uses_checkpoint_delta(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Compatible long reviews send checkpoint + anchors + raw delta only."""
+    monkeypatch.setattr(settings, "deep_review_checkpoint_token_threshold", 50)
+    monkeypatch.setattr(settings, "deep_review_force_full_final", False)
+    store = StudentStore(tmp_path / "dr-long-delta.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    anchor_id = _add_turn(
+        store,
+        thread_id,
+        role="user",
+        content=_long_text("UNIQUE_ANCHOR_PI_STUDENT"),
+        stage="problem_identification",
+    )
+    for index in range(8):
+        _add_turn(
+            store,
+            thread_id,
+            role="user",
+            content=_long_text(f"UNIQUE_OLD_PRE_CHECKPOINT_FILLER_{index}"),
+            stage="problem_identification",
+        )
+    _add_turn(
+        store,
+        thread_id,
+        role="assistant",
+        content=_long_text("UNIQUE_OLD_PRE_CHECKPOINT_COACH"),
+        stage="problem_identification",
+    )
+    _unlock(store, thread_id)
+    first = FakeAgentCoreRuntime(
+        deep_payload=_deep_payload(
+            stage_reviews=[
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["Named a real constraint"],
+                    "areas_to_develop": ["Name who is affected"],
+                    "supporting_message_refs": ["M1"],
+                }
+            ]
+        )
+    )
+    first_service = _service(store, first)
+    first_service.enqueue_deep_review(thread_id, idempotency_key="deep-long-1")
+    assert _wait_job(first_service, thread_id).status is DeepReviewJobStatus.COMPLETED
+    snapshot = _snapshot(store, thread_id)
+    assert snapshot is not None
+    store.select_learning_stage(thread_id, "concept_generation")
+    delta_21 = _add_turn(
+        store,
+        thread_id,
+        role="user",
+        content=_long_text("UNIQUE_DELTA_TURN_A"),
+        stage="concept_generation",
+    )
+    _add_turn(
+        store,
+        thread_id,
+        role="assistant",
+        content=_long_text("UNIQUE_DELTA_COACH"),
+        stage="concept_generation",
+    )
+    delta_last = _add_turn(
+        store,
+        thread_id,
+        role="user",
+        content=_long_text("UNIQUE_DELTA_TURN_LAST"),
+        stage="concept_generation",
+    )
+    _unlock(store, thread_id)
+    second = FakeAgentCoreRuntime(
+        deep_payload=_deep_payload(
+            current_stage="concept_generation",
+            synthesis="Updated whole-conversation Deep Review.",
+            stage_reviews=[
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["Still names the crossing problem"],
+                    "areas_to_develop": [],
+                    "supporting_message_refs": ["M1"],
+                },
+                {
+                    "stage_id": "concept_generation",
+                    "strengths": ["Named two concepts"],
+                    "areas_to_develop": ["Compare the concepts"],
+                    "supporting_message_refs": ["M4"],
+                },
+            ],
+        )
+    )
+    second_service = _service(store, second)
+    second_service.enqueue_deep_review(thread_id, idempotency_key="deep-long-2")
+    finished = _wait_job(second_service, thread_id)
+    assert finished.status is DeepReviewJobStatus.COMPLETED
+    assert _phases(second) == ["review"]
+    payload = _decoded(second.calls[0])
+    assert payload.get("runtime_context", {}).get("deep_review_context_mode") == (
+        "checkpoint_delta"
+    )
+    text = _payload_text(payload)
+    assert "checkpoint_delta" in text
+    assert "UNIQUE_ANCHOR_PI_STUDENT" in text
+    assert "UNIQUE_DELTA_TURN_A" in text
+    assert "UNIQUE_DELTA_COACH" in text
+    assert "UNIQUE_DELTA_TURN_LAST" in text
+    assert "UNIQUE_OLD_PRE_CHECKPOINT_FILLER_0" not in text
+    assert "UNIQUE_OLD_PRE_CHECKPOINT_COACH" not in text
+    updated = _snapshot(store, thread_id)
+    assert updated is not None
+    assert "Updated whole-conversation Deep Review" in updated["synthesis"]
+    assert anchor_id in updated["reviewed_message_ids"]
+    assert delta_21 in updated["reviewed_message_ids"]
+    assert delta_last in updated["reviewed_message_ids"]
+    assert len(updated["reviewed_message_ids"]) > len(snapshot["reviewed_message_ids"])
+    supporting = [
+        item
+        for row in updated["stage_reviews"]
+        for item in row.get("supporting_message_ids") or []
+    ]
+    assert anchor_id in supporting
+    assert "Still names the crossing problem" in _review_items(
+        store, thread_id, "strength_sections", "problem_identification"
+    )
+    assert "Named two concepts" in _review_items(
+        store, thread_id, "strength_sections", "concept_generation"
+    )
+
+
+def test_revision_invalidates_checkpoint_for_full_history(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Superseding an earlier turn must not reuse the stale checkpoint."""
+    monkeypatch.setattr(settings, "deep_review_checkpoint_token_threshold", 50)
+    store = StudentStore(tmp_path / "dr-rev-inval.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    first_user = _add_turn(
+        store,
+        thread_id,
+        role="user",
+        content=_long_text("UNIQUE_ORIGINAL_BRANCH"),
+        stage="problem_identification",
+    )
+    _add_turn(
+        store,
+        thread_id,
+        role="assistant",
+        content=_long_text("Coach on the original branch."),
+        stage="problem_identification",
+    )
+    later = _add_turn(
+        store,
+        thread_id,
+        role="user",
+        content=_long_text("UNIQUE_LATER_ORIGINAL"),
+        stage="problem_identification",
+    )
+    _unlock(store, thread_id)
+    first = FakeAgentCoreRuntime(
+        deep_payload=_deep_payload(
+            stage_reviews=[
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["Named a real constraint"],
+                    "areas_to_develop": ["Name who is affected"],
+                    "supporting_message_refs": ["M1"],
+                }
+            ]
+        )
+    )
+    first_service = _service(store, first)
+    first_service.enqueue_deep_review(thread_id, idempotency_key="deep-rev-1")
+    assert _wait_job(first_service, thread_id).status is DeepReviewJobStatus.COMPLETED
+    store.revise_conversation_from_user_message(
+        thread_id, later, _long_text("UNIQUE_REVISED_BRANCH")
+    )
+    _unlock(store, thread_id)
+    second = FakeAgentCoreRuntime(
+        deep_payload=_deep_payload(
+            stage_reviews=[
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["Revised constraint"],
+                    "areas_to_develop": ["Name who is affected"],
+                    "supporting_message_refs": ["M1"],
+                }
+            ]
+        )
+    )
+    second_service = _service(store, second)
+    second_service.enqueue_deep_review(thread_id, idempotency_key="deep-rev-2")
+    assert _wait_job(second_service, thread_id).status is DeepReviewJobStatus.COMPLETED
+    payload = _decoded(second.calls[0])
+    assert payload.get("runtime_context", {}).get("deep_review_context_mode") == (
+        "full_history"
+    )
+    text = _payload_text(payload)
+    assert "UNIQUE_REVISED_BRANCH" in text
+    assert first_user in {
+        str(item.get("id") or "") for item in store.get_messages(thread_id)
+    }
+
+
+def test_legacy_snapshot_stays_renderable_and_next_review_is_full_history(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Old snapshots without checkpoint metadata must not compact."""
+    monkeypatch.setattr(settings, "deep_review_checkpoint_token_threshold", 10)
+    store = StudentStore(tmp_path / "dr-legacy.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _add_turn(
+        store,
+        thread_id,
+        role="user",
+        content=_long_text("UNIQUE_LEGACY_STUDENT"),
+        stage="problem_identification",
+    )
+    from backend.specialists.review_orchestration import deep_review_snapshot_payload
+
+    legacy = deep_review_snapshot_payload(
+        conversation_revision=int(
+            (store.get_thread(thread_id) or {}).get("conversation_revision") or 0
+        ),
+        created_at="2026-08-01T00:00:00+00:00",
+        synthesis="Legacy Deep Review summary.",
+        summary="Legacy Deep Review summary.",
+        strengths=["Legacy PI strength"],
+        areas_to_develop=["Legacy PI area"],
+        facione_scores={"analysis": 2},
+        working_conclusion="Legacy conclusion.",
+        readiness_candidate=False,
+        readiness_evidence=[],
+        missing_requirements=[],
+        model_id="global.anthropic.claude-sonnet-4-6",
+        reviewed_stage_id="problem_identification",
+    )
+    assert "checkpoint_version" not in legacy
+    store.update_thread(thread_id, metadata={DEEP_REVIEW_SNAPSHOT_KEY: legacy})
+    assert "Legacy PI strength" in _review_items(
+        store, thread_id, "strength_sections", "problem_identification"
+    )
+    _unlock(store, thread_id)
+    client = FakeAgentCoreRuntime(
+        deep_payload=_deep_payload(
+            strengths=["Upgraded PI strength"],
+            stage_reviews=[
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["Upgraded PI strength"],
+                    "areas_to_develop": ["Name who is affected"],
+                    "supporting_message_refs": ["M1"],
+                }
+            ]
+        )
+    )
+    service = _service(store, client)
+    service.enqueue_deep_review(thread_id, idempotency_key="deep-legacy")
+    assert _wait_job(service, thread_id).status is DeepReviewJobStatus.COMPLETED
+    payload = _decoded(client.calls[0])
+    assert payload.get("runtime_context", {}).get("deep_review_context_mode") == (
+        "full_history"
+    )
+    upgraded = _snapshot(store, thread_id)
+    assert upgraded is not None
+    assert upgraded["checkpoint_version"] == 1
+    assert upgraded["reviewed_message_ids"]
+    assert "Upgraded PI strength" in _review_items(
         store, thread_id, "strength_sections", "problem_identification"
     )

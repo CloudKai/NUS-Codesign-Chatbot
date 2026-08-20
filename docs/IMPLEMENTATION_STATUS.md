@@ -3,9 +3,54 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock-v2`
-**HEAD before this work:** `51927c5` (course-materials toasts + AgentCore v24
-record). Live citations RC remains `64410dc`. Composer layout remains
+**HEAD before this work:** `f81d508` (Review expander remount + stage-aware
+Deep Review). Live citations RC remains `64410dc`. Composer layout remains
 `711d4e6`. HMW 2-of-3 remains `89ccfed`.
+**Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
+**Live AgentCore:** DEFAULT → **v24 READY**. Affinity ON. Generation 2.
+Prompt cache OFF. **Do not publish AgentCore for this phase.**
+
+**This phase:** Cost-efficient Deep Review context. Small/first/incompatible
+reviews still send the full frozen active history. Long compatible reviews
+send the prior validated Deep Review checkpoint, exact student evidence
+anchors, and every raw active turn since that checkpoint. One Sonnet invoke.
+No Fast Chat assessment expansion. No extra model calls.
+
+**Behavior.** FastAPI freezes revision, message ids, source ids, and prior
+checkpoint identity at enqueue. Context mode is `full_history` or
+`checkpoint_delta`. Default compact threshold is 10,000 estimated transcript
+tokens (`DEEP_REVIEW_CHECKPOINT_TOKEN_THRESHOLD`), well below Sonnet's 210k
+max input. Reflection stays full history when `DEEP_REVIEW_FORCE_FULL_FINAL`
+is true. Sonnet returns ephemeral `M#` supporting refs; FastAPI maps them to
+durable ids. Failed Deep Review leaves the previous snapshot. Fast Chat is
+unchanged (one Haiku call).
+
+**Not changed.** AgentCore DEFAULT/generation/prompt cache; EC2 image;
+DSQL schema; RAG; citations; HMW; stage advancement; Fast Chat `turns=2`;
+Deep Review `turns=3`; frozen enqueue semantics besides optional checkpoint
+identity.
+
+**Validation (local worktree, $0 AWS).** Targeted mock pytest passed (Deep
+Review context/execution/projection, AgentCore specialists/runtime, Fast
+Chat one-call/schema, context planner, revision, DSQL Deep Review, HMW,
+RAG/citations). Full deterministic suite: **1518 passed**
+(`--ignore=tests/scripts/test_load_probe.py`; pre-existing broken
+`scripts/load_probe.py` left unstaged). Ruff passed on touched Python.
+`compileall` passed for `backend`, `ui`, `streamlit_app.py`, `tests`,
+`agentcore_runtime`. Synthetic 30→80 message comparison:
+full_history 14609 estimated tokens vs checkpoint_delta 10802
+(saved 3807); all 50 delta turns and the evidence anchor remained present.
+
+**Next exact action.** A future AgentCore publish is required before live
+Sonnet emits `supporting_message_refs` (and continues to emit
+`stage_reviews`). Until then, live Deep Review still uses full_history
+whenever anchors are missing. Do not move DEFAULT. Do not rebuild EC2 in
+this phase. Do not enable prompt cache.
+
+### Prior: Review-tab expander remount + stage-aware Deep Review
+
+**HEAD:** `f81d508`. Live citations RC remains `64410dc`. Composer layout
+remains `711d4e6`. HMW 2-of-3 remains `89ccfed`.
 **Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
 **Live AgentCore:** DEFAULT → **v24 READY**. Affinity ON. Generation 2.
 Prompt cache OFF. **Do not publish AgentCore for this phase.**

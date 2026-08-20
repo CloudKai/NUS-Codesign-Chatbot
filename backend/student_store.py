@@ -1137,6 +1137,8 @@ class StudentStore:
         stage_at_start: str,
         source_ids: list[str],
         message_ids: list[str],
+        base_checkpoint_revision: int | None = None,
+        base_checkpoint_version: int | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Persist a queued Deep Review job, or return the in-flight job.
 
@@ -1151,6 +1153,9 @@ class StudentStore:
             stage_at_start: Thinking Path stage at enqueue.
             source_ids: Selected source ids frozen at enqueue.
             message_ids: Active message ids frozen at enqueue.
+            base_checkpoint_revision: Prior checkpoint revision frozen at
+                enqueue, when a checkpoint-capable snapshot exists.
+            base_checkpoint_version: Prior checkpoint version frozen at enqueue.
 
         Returns:
             ``(job, created)`` where *created* is ``True`` only for a new job.
@@ -1187,6 +1192,8 @@ class StudentStore:
                     source_ids=source_ids,
                     message_ids=message_ids,
                     started_at=utc_now(),
+                    base_checkpoint_revision=base_checkpoint_revision,
+                    base_checkpoint_version=base_checkpoint_version,
                 )
                 metadata[DEEP_REVIEW_JOB_KEY] = job
                 if self._update_settings_text_only(

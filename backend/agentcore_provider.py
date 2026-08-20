@@ -589,6 +589,12 @@ def _runtime_context(
         context["review_mode"] = review_mode
     if review_trigger:
         context["review_trigger"] = str(review_trigger)
+    mode = str(getattr(request, "deep_review_context_mode", "") or "").strip().lower()
+    if review_mode == REVIEW_DEPTH_DEEP and mode in {
+        "full_history",
+        "checkpoint_delta",
+    }:
+        context["deep_review_context_mode"] = mode
     return context
 
 
@@ -1573,6 +1579,13 @@ class AgentCoreCoachProvider:
         record_field("deep_review_invoked", is_review)
         if is_review:
             record_field("deep_review_model_role", "review_deep")
+            metrics = getattr(request, "deep_review_context_metrics", None) or {}
+            if isinstance(metrics, dict):
+                for key, value in metrics.items():
+                    record_field(str(key), value)
+            mode = str(getattr(request, "deep_review_context_mode", "") or "").strip()
+            if mode:
+                record_field("deep_review_context_mode", mode)
         record_field("compressed_message_count", int(plan.compressed_message_count))
         record_field("compression_used", bool(plan.compression_used))
         record_field("context_policy", context_policy)
@@ -1930,6 +1943,9 @@ class AgentCoreCoachProvider:
 
     def _assess_explicit_review(self, request: CoachRequest) -> ProviderAssessmentResult:
         """Run one explicit Deep Review invoke. Never used for normal chat."""
+        owns_perf = current_perf() is None
+        if owns_perf:
+            begin_coach_turn_perf()
         routed = request.model_copy(update={"specialist": SPECIALIST_REVIEW})
         started = time.monotonic()
         try:
@@ -1991,7 +2007,7 @@ class AgentCoreCoachProvider:
         text = str(review.response_text or "").strip()
         if text:
             merged = merged.model_copy(update={"response_text": text})
-        return self._with_memory(
+        merged_result = self._with_memory(
             request,
             merged.model_copy(
                 update={
@@ -2003,6 +2019,10 @@ class AgentCoreCoachProvider:
             ),
             plan,
         )
+        if owns_perf:
+            record_success()
+            emit_coach_turn_perf()
+        return merged_result
 
     def _invoke_specialist(
         self, request: CoachRequest, specialist: str

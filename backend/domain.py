@@ -431,6 +431,12 @@ class CoachRequest(BaseModel):
     # student message and selected-source metadata.
     expected_response_mode: str | None = Field(default=None, max_length=16)
     mode_policy_intent: str = Field(default="", max_length=64)
+    # Server-filled Deep Review context plan. Clients cannot make these
+    # authoritative; ``_prepare_authoritative_turn`` clears them.
+    deep_review_context_mode: str = Field(default="", max_length=32)
+    deep_review_compact_context: str = ""
+    deep_review_ref_map: dict[str, str] = Field(default_factory=dict)
+    deep_review_context_metrics: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("current_stage")
     @classmethod
@@ -493,6 +499,15 @@ class CoachRequest(BaseModel):
             "high_confidence_personal",
             "ambiguous",
         }:
+            return cleaned
+        return ""
+
+    @field_validator("deep_review_context_mode")
+    @classmethod
+    def deep_review_context_mode_must_be_known(cls, value: str) -> str:
+        """Keep only server-owned Deep Review context modes."""
+        cleaned = str(value or "").strip().lower()
+        if cleaned in {"full_history", "checkpoint_delta"}:
             return cleaned
         return ""
 

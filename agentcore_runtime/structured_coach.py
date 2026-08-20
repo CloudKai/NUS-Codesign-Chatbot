@@ -242,10 +242,13 @@ missing_requirements, and rationale_summary.
 stage_reviews is required and must be an array. Each item has stage_id
 (exactly one of problem_identification, concept_generation,
 design_specification, deep_analysis, reflection), strengths (array; use
-[] when none), and areas_to_develop (array; use [] when none). Include
+[] when none), areas_to_develop (array; use [] when none), and
+supporting_message_refs (array of ephemeral M# labels from this request;
+use [] when none; at most 3). Prefer original student messages. Include
 only stages with conversation evidence. Attribute each item to the stage
 where the student's reasoning occurred, not the stage that is current
-when Deep Review runs. Omit future stages with no evidence.
+when Deep Review runs. Omit future stages with no evidence. A prior
+checkpoint is not immutable truth; return a complete review, not a delta.
 
 Do not use application, retrieval, browsing, database, S3, Knowledge Base,
 or user-accessible tools. Do not assign a grade.

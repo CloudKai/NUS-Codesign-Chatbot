@@ -355,6 +355,7 @@ def test_unknown_phase_falls_closed_to_coaching_not_qa() -> None:
     assert "Deep Review specialist" in review
     assert "not a grade" in review.lower()
     assert "stage_reviews" in review
+    assert "supporting_message_refs" in review
     assert "ENTIRE frozen active conversation" in review
     incremental = specialist_system_prompt(
         {"phase": "review", "review_mode": "incremental"}
