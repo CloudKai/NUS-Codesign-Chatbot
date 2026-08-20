@@ -43,8 +43,8 @@ the student starts Deep Review.
 
 ### How Might We scaffold
 
-Problem Identification may show a read-only How Might We card near the chat
-composer. The same Fast Chat Haiku call returns `hmw_scaffold_ready`. FastAPI
+Problem Identification may show a read-only How Might We card in the chat
+log immediately after the Coach welcome. The same Fast Chat Haiku call returns `hmw_scaffold_ready`. FastAPI
 projects `hmw_scaffold.available` from the authoritative stage plus active
 Coaching assessments (minimum two qualifying turns, sticky while any active
 PI coaching assessment is ready). The field is internal, defaults false on

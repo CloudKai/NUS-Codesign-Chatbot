@@ -40,6 +40,7 @@ from ui.coach_welcome import (
     COACH_WELCOME_KIND,
     render_hmw_scaffold_if_needed,
     seed_coach_welcome,
+    transcript_hmw_render_plan,
 )
 from ui.constants import DEFAULT_APPEARANCE
 from ui.layout.chat_scroll import sync_chat_scroll
@@ -1113,15 +1114,25 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
     if st.session_state.get("edit_confirm_message_id"):
         _confirm_edit_earlier_message_dialog()
 
+    journey = normalize_journey(st.session_state.get("learning_journey"))
+    hmw_available = hmw_scaffold_available(
+        str(journey.get("current_stage") or DEFAULT_STAGE),
+        messages,
+        enabled=settings.hmw_scaffold_enabled,
+    )
     chat_transcript = st.container(key="chat_transcript")
     with chat_transcript:
         chat_log = st.container(key="chat_log")
         history_started = time.perf_counter()
         with chat_log:
-            for message in messages:
-                if message.get("role") == "assistant" and not str(
-                    message.get("content") or ""
-                ).strip():
+            for kind, message in transcript_hmw_render_plan(
+                messages,
+                hmw_available=hmw_available,
+            ):
+                if kind == "hmw":
+                    render_hmw_scaffold_if_needed(available=True)
+                    continue
+                if message is None:
                     continue
                 render_message(message, visible_source_ids=visible_source_ids)
         log_ui_timing(
@@ -1130,14 +1141,6 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
                 1,
             ),
             message_count=len(messages),
-        )
-        journey = normalize_journey(st.session_state.get("learning_journey"))
-        render_hmw_scaffold_if_needed(
-            available=hmw_scaffold_available(
-                str(journey.get("current_stage") or DEFAULT_STAGE),
-                messages,
-                enabled=settings.hmw_scaffold_enabled,
-            )
         )
         _render_composer_submit_fragment(
             model_id,

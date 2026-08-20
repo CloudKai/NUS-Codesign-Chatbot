@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from collections.abc import Mapping, Sequence
+from typing import Any, Literal, Protocol
 
 import streamlit as st
 
@@ -46,8 +47,92 @@ HMW_FORMULA_OUTRO = (
 )
 
 
+def _is_skipped_transcript_message(message: Mapping[str, Any]) -> bool:
+    """Return whether the chat log should omit this persisted row.
+
+    Empty assistant turns are skipped by ``render_chat_panel`` so they must
+    not count as a visible welcome or a conversation anchor.
+
+    Args:
+        message: One persisted chat message.
+
+    Returns:
+        True when the row is an empty assistant turn.
+    """
+    return (
+        str(message.get("role") or "").strip().lower() == "assistant"
+        and not str(message.get("content") or "").strip()
+    )
+
+
+def is_visible_coach_welcome(message: Mapping[str, Any]) -> bool:
+    """Return whether this row is the persisted Coach welcome in the log.
+
+    Identification uses ``metadata.kind == COACH_WELCOME_KIND`` only. Empty
+    assistant rows are not visible and do not count.
+
+    Args:
+        message: One persisted chat message.
+
+    Returns:
+        True when the row will render as the Coach welcome.
+    """
+    if _is_skipped_transcript_message(message):
+        return False
+    if str(message.get("role") or "").strip().lower() != "assistant":
+        return False
+    metadata = message.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return False
+    return str(metadata.get("kind") or "").strip() == COACH_WELCOME_KIND
+
+
+def transcript_hmw_render_plan(
+    messages: Sequence[Mapping[str, Any]] | None,
+    *,
+    hmw_available: bool,
+) -> list[tuple[Literal["message", "hmw"], Mapping[str, Any] | None]]:
+    """Return chat-log steps with the HMW card after welcome when eligible.
+
+    Eligibility is supplied by the caller from ``hmw_scaffold_available``.
+    This helper only decides placement and guarantees at most one ``hmw``
+    step. When a visible welcome exists, the card follows it. When eligible
+    history has no welcome (legacy notebooks), the card is first. The card
+    is omitted when ``hmw_available`` is false.
+
+    Args:
+        messages: Active-branch messages already loaded for the panel.
+        hmw_available: Server-owned visibility flag.
+
+    Returns:
+        Ordered ``("message", row)`` and optional ``("hmw", None)`` steps.
+        Skipped empty assistant rows are omitted.
+    """
+    visible = [
+        item
+        for item in (messages or ())
+        if isinstance(item, Mapping) and not _is_skipped_transcript_message(item)
+    ]
+    has_welcome = any(is_visible_coach_welcome(item) for item in visible)
+    steps: list[tuple[Literal["message", "hmw"], Mapping[str, Any] | None]] = []
+    hmw_inserted = False
+    if hmw_available and not has_welcome:
+        steps.append(("hmw", None))
+        hmw_inserted = True
+    for item in visible:
+        steps.append(("message", item))
+        if (
+            not hmw_inserted
+            and hmw_available
+            and is_visible_coach_welcome(item)
+        ):
+            steps.append(("hmw", None))
+            hmw_inserted = True
+    return steps
+
+
 def render_hmw_scaffold() -> None:
-    """Render the read-only How Might We guidance near the chat composer.
+    """Render the read-only How Might We guidance under the Coach welcome.
 
     Uses ``st.code`` so the formula looks like a code block but is not an
     input widget. Students still reply in the existing chat composer. This

@@ -3,8 +3,9 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock-v2`
-**HEAD:** `64410dc` plus local progressive How Might We (HMW) work (uncommitted).
-Citations schema RC remains `64410dc`. Composer layout remains `711d4e6`.
+**HEAD:** `d2257a7` plus local HMW placement under the Coach welcome
+(uncommitted). Citations schema RC remains `64410dc`. Composer layout
+remains `711d4e6`.
 **Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
 **Live AgentCore:** DEFAULT → **v23**. Affinity ON. Generation 2. Prompt cache
 OFF. **Do not publish v24 yet.** Do not overlay HMW prompts until this local
@@ -18,7 +19,8 @@ rebuild, $0 AWS, zero extra model/Retrieve/AgentCore calls.
 enough qualifying Problem Identification Coaching and a validated
 `hmw_scaffold_ready=true` from the existing Fast Chat structured result,
 FastAPI projects `hmw_scaffold.available`. Streamlit renders one read-only
-card after the latest assistant, before the composer. Students type a working
+card in the chat log immediately after the Coach welcome (or at the top of
+legacy notebooks that have no welcome). Students type a working
 HMW (or equivalent framing) in the existing chat. `hmw_scaffold_ready=true`
 with `recommendation=stay` is normal and does not advance. ADVANCE still uses
 the existing StageDecision / pending Next / auto-advance path. Leaving
