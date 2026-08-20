@@ -93,8 +93,8 @@ modules.
 | `domain/test_fast_chat_context.py` | Six-message window, 3000/1500 history budgets, 12k/16k totals, system-prompt estimate, RAG repack |
 | `domain/test_conversation_memory_continuity.py` | 20/50/100-message and chunky-history extractive memory; no LLM summarizer |
 | `domain/test_rag_fallback.py` | Application-owned needs_source_retrieval retry; persist-final-only |
-| `domain/test_deep_review_execution.py` | Background Deep Review enqueue, frozen snapshot, counter, no transcript rows, cross-stage snapshot replacement, stale-worker completion guard |
-| `domain/test_deep_review_review_projection.py` | Review-tab merge of snapshot strengths/areas onto the frozen reviewed stage |
+| `domain/test_deep_review_execution.py` | Background Deep Review enqueue, frozen snapshot, whole-history input, stage-aware `stage_reviews`, counter, no transcript rows, cross-stage snapshot replacement, stale-worker completion guard |
+| `domain/test_deep_review_review_projection.py` | Review-tab merge of `stage_reviews` onto matching stages, legacy `reviewed_stage_id` fallback, HMW attribution, latest-snapshot replacement |
 | `http/test_deep_review.py` | Deep Review job POST/GET, coaching overlap, duplicate/stale/owner isolation |
 | `domain/test_coaching_prompt_baseline.py` | SHA-256 lock on canonical Coaching/stage prompt files |
 | `domain/test_prompt_cache.py` | SystemContentBlock prefix cache; no CacheConfig auto on student text |
@@ -113,6 +113,7 @@ modules.
 | `ui/test_theme_styles.py` | Ordered CSS partial manifest and assembled stylesheet contracts |
 | `ui/test_chat_scroll.py` | Transcript scroll policy, inflight chrome, compact turn-error, fragment submit |
 | `ui/test_toasts.py` | Parent-window corner toast controller: delegated close, parent timers, iframe boot only |
+| `ui/test_review_stage_expanders.py` | Review Strengths/Areas stage expanders remount on notebook or current-stage change; same-stage keys stay stable |
 | `ui/test_hmw_scaffold.py` | Progressive How Might We card: hidden on empty notebook, one card after the unlocking Coach turn when eligible, hidden after Concept Generation |
 | `domain/test_hmw_scaffold_gate.py` | Server-owned HMW eligibility, stickiness, Q&A/Deep Review exclusion, persist/idempotency, read-only learning-state projection |
 | `domain/test_hmw_stage_completion.py` | HMW readiness vs ADVANCE in PI prompts, stay/advance via existing StageDecision, no regex evaluator |

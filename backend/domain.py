@@ -244,6 +244,7 @@ class EducationalAssessment(BaseModel):
     review_trigger: str | None = Field(default=None, max_length=64)
     response_mode: str = Field(default="", max_length=32)
     hmw_scaffold_ready: bool = False
+    review_stage_feedback: list[dict[str, Any]] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -314,6 +315,7 @@ class EducationalAssessment(BaseModel):
         like Deep Review assessments. Historical full objects still parse.
         """
         data = self.model_dump(mode="json")
+        data.pop("review_stage_feedback", None)
         mode = str(self.response_mode or "").strip().lower()
         if mode not in {"qa", "coaching"}:
             return data

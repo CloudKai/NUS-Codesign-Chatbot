@@ -11,6 +11,9 @@ from backend.learning.stages import (
     THINKING_STAGES,
     ThinkingStage,
 )
+from backend.specialists.review_orchestration import (
+    normalize_deep_review_stage_reviews,
+)
 
 RESPONSE_DETAILS = ("short", "long")
 DEFAULT_RESPONSE_DETAIL = "long"
@@ -696,18 +699,47 @@ def _merge_stage_section_items(
     return merged
 
 
+def _authoritative_stage_reviews(
+    snapshot: dict[str, Any] | None,
+) -> list[dict[str, Any]] | None:
+    """Return validated ``stage_reviews`` when they should drive projection.
+
+    A non-empty validated list is authoritative. Missing, malformed, or
+    empty ``stage_reviews`` leave projection on the legacy frozen-stage
+    lists so older snapshots keep working.
+
+    Args:
+        snapshot: Durable ``deep_review_snapshot`` mapping, if any.
+
+    Returns:
+        Ordered stage-review dicts, or ``None`` to use legacy merge.
+    """
+    if not isinstance(snapshot, dict):
+        return None
+    raw = snapshot.get("stage_reviews")
+    if not isinstance(raw, list):
+        return None
+    reviews = normalize_deep_review_stage_reviews(raw)
+    return reviews or None
+
+
 def _merge_deep_review_feedback(
     strength_sections: list[dict[str, Any]],
     improvement_sections: list[dict[str, Any]],
     snapshot: dict[str, Any] | None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Merge the latest Deep Review snapshot into one reviewed stage.
+    """Merge the latest Deep Review snapshot into Review-tab stage sections.
+
+    When the snapshot has validated ``stage_reviews``, those lists are
+    prepended onto matching stages and the holistic ``strengths`` /
+    ``areas_to_develop`` lists are not also merged (no duplicate). Older
+    snapshots without ``stage_reviews`` keep the legacy behaviour: prepend
+    the flat lists onto ``reviewed_stage_id`` only.
 
     Incremental Haiku ``review_strengths`` / ``review_improvements`` stay
-    under their assessment stages. Snapshot strengths and areas-to-develop
-    are prepended only onto the frozen reviewed stage. Duplicate strings
-    (case-insensitive) are dropped. A snapshot without a valid stage id is
-    left out of these sections.
+    under their assessment stages. Duplicate strings (case-insensitive)
+    are dropped. A legacy snapshot without a valid stage id is left out of
+    these sections.
 
     Args:
         strength_sections: History-derived strength groups.
@@ -717,8 +749,31 @@ def _merge_deep_review_feedback(
     Returns:
         Updated ``(strength_sections, improvement_sections)``.
     """
+    if not isinstance(snapshot, dict):
+        return strength_sections, improvement_sections
+    reviews = _authoritative_stage_reviews(snapshot)
+    if reviews is not None:
+        merged_strengths = strength_sections
+        merged_improvements = improvement_sections
+        for review in reviews:
+            stage_id = str(review.get("stage_id") or "").strip()
+            if stage_id not in STAGE_BY_ID:
+                continue
+            merged_strengths = _merge_stage_section_items(
+                merged_strengths,
+                stage_id=stage_id,
+                extra_items=_clean_feedback_items(review.get("strengths") or []),
+            )
+            merged_improvements = _merge_stage_section_items(
+                merged_improvements,
+                stage_id=stage_id,
+                extra_items=_clean_feedback_items(
+                    review.get("areas_to_develop") or []
+                ),
+            )
+        return merged_strengths, merged_improvements
     stage_id = _reviewed_stage_id_from_snapshot(snapshot)
-    if stage_id is None or not isinstance(snapshot, dict):
+    if stage_id is None:
         return strength_sections, improvement_sections
     raw_strengths = snapshot.get("strengths")
     raw_improvements = snapshot.get("areas_to_develop")
@@ -752,9 +807,9 @@ def learning_review(
     Summary, Facione profile, and working conclusion prefer the latest
     successful Deep Review snapshot when one exists. Strengths and areas for
     improvement start from Thinking Path stage history across the full
-    conversation, then merge the latest snapshot's ``strengths`` and
-    ``areas_to_develop`` onto the frozen reviewed stage. Empty notebooks stay
-    empty instead of showing generic filler.
+    conversation, then merge the latest snapshot's ``stage_reviews`` onto
+    matching stages (or the legacy flat lists onto ``reviewed_stage_id``).
+    Empty notebooks stay empty instead of showing generic filler.
 
     Returns:
         A dict consumed by ``ui.studio.render_learning_review``, including

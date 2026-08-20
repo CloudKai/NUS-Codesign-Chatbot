@@ -42,6 +42,7 @@ from agentcore_runtime.models import (
     RouterOutput,
     adapt_fast_chat_turn_payload,
     fast_chat_payload_shape_log,
+    parse_review_turn_output,
 )
 
 from .coaching.mode_policy import enforce_model_mode, policy_from_request
@@ -1276,6 +1277,15 @@ def _overlay_review_fields(
             result.assessment.readiness_candidate or review.readiness_candidate
         ),
     }
+    stage_feedback = []
+    raw_reviews = getattr(review, "stage_reviews", None) or []
+    for item in raw_reviews:
+        if hasattr(item, "model_dump"):
+            stage_feedback.append(item.model_dump(mode="json"))
+        elif isinstance(item, dict):
+            stage_feedback.append(dict(item))
+    if stage_feedback:
+        update["review_stage_feedback"] = stage_feedback
     if review_depth == REVIEW_DEPTH_DEEP and synthesis:
         update["stage_assessment"] = synthesis
     if force_stay:
@@ -1825,7 +1835,7 @@ class AgentCoreCoachProvider:
 
     def _parse_review_turn(self, parsed: dict[str, Any]) -> ReviewTurnOutput:
         """Validate Review structured output or raise."""
-        return ReviewTurnOutput.model_validate(parsed)
+        return parse_review_turn_output(parsed)
 
     def _with_memory(
         self,

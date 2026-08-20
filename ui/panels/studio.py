@@ -460,27 +460,47 @@ def render_journey_track() -> None:
                     _render_stage_suggestions(stage)
 
 
-def _sync_review_stage_expander_state(
+def review_stage_expander_key(
     *,
     key_prefix: str,
     thread_key: str,
-    stage_ids: list[str],
     current_stage_id: str,
-) -> None:
-    """Open only the current-stage expander when the notebook or stage changes.
+    stage_key: str,
+) -> str:
+    """Return a remount-scoped Streamlit expander widget key.
 
-    Streamlit expanders with ``key`` keep open/closed state in session. Without
-    a sync, switching notebooks (or advancing stages) can leave the previous
-    stage open — e.g. Examine evidence staying open on a new Focus notebook.
+    The render generation is notebook/thread id plus the current Thinking
+    Path stage. Changing either identity creates a new widget so
+    ``expanded`` applies reliably. Same-stage reruns keep the key so a
+    student's manual open or close is preserved.
+
+    Args:
+        key_prefix: ``strengths`` or ``improvements``.
+        thread_key: Sanitized notebook/thread id.
+        current_stage_id: Persisted Thinking Path stage.
+        stage_key: Stage id (or label fallback) for this expander.
+
+    Returns:
+        Stable widget key for one render generation.
     """
-    sync_key = f"_review_expander_sync_{key_prefix}"
-    marker = f"{thread_key}:{current_stage_id}"
-    if st.session_state.get(sync_key) == marker:
-        return
-    st.session_state[sync_key] = marker
-    for stage_id in stage_ids:
-        expander_key = f"review_{key_prefix}_{thread_key}_{stage_id}"
-        st.session_state[expander_key] = stage_id == current_stage_id
+    render_scope = f"{str(thread_key or 'none')}_{str(current_stage_id or '')}"
+    return f"review_{key_prefix}_{render_scope}_{stage_key}"
+
+
+def review_stage_expander_defaults(current_stage_id: str) -> dict[str, bool]:
+    """Return default open/closed flags for the five Thinking Path stages.
+
+    Only the current stage starts open. Strengths and Areas for improvement
+    share this mapping.
+
+    Args:
+        current_stage_id: Persisted Thinking Path stage.
+
+    Returns:
+        Mapping of stage id to whether that expander should start expanded.
+    """
+    current = str(current_stage_id or "").strip()
+    return {stage.id: stage.id == current for stage in THINKING_STAGES}
 
 
 def _render_review_stage_expanders(
@@ -493,9 +513,10 @@ def _render_review_stage_expanders(
 
     Every stage starts collapsed except the student's current stage, so past
     feedback stays available without competing with the active focus. The
-    current stage is wrapped so CSS can give it a stronger outline. Expander
-    keys are scoped to the active notebook so open state does not leak across
-    notebooks.
+    current stage is wrapped so CSS can give it a stronger outline. Widget
+    keys include the current stage so a stage change remounts expanders
+    instead of fighting leftover Streamlit client state. Within the same
+    stage the keys stay stable, so a student's manual open/close is kept.
     """
     stage_sections = list(sections or [])
     if not stage_sections:
@@ -506,24 +527,13 @@ def _render_review_stage_expanders(
         return
 
     thread_key = str(st.session_state.get("thread_id") or "none").replace("-", "_")
-    stage_ids = [
-        str(section.get("stage_id") or "").strip()
-        or str(section.get("stage") or "").strip()
-        or "stage"
-        for section in stage_sections
-    ]
-    _sync_review_stage_expander_state(
-        key_prefix=key_prefix,
-        thread_key=thread_key,
-        stage_ids=stage_ids,
-        current_stage_id=current_stage_id,
-    )
+    defaults = review_stage_expander_defaults(current_stage_id)
 
     for section in stage_sections:
         stage_id = str(section.get("stage_id") or "").strip()
         stage_label = str(section.get("stage") or "").strip() or "Stage"
         stage_key = stage_id or stage_label
-        is_current = bool(stage_id) and stage_id == current_stage_id
+        is_current = bool(defaults.get(stage_id)) if stage_id else False
         expander_parent = (
             st.container(key=f"review_{key_prefix}_{thread_key}_current")
             if is_current
@@ -533,7 +543,12 @@ def _render_review_stage_expanders(
             with st.expander(
                 stage_label,
                 expanded=is_current,
-                key=f"review_{key_prefix}_{thread_key}_{stage_key}",
+                key=review_stage_expander_key(
+                    key_prefix=key_prefix,
+                    thread_key=thread_key,
+                    current_stage_id=current_stage_id,
+                    stage_key=stage_key,
+                ),
             ):
                 st.markdown(
                     review_feedback_items_html(section.get("items")),
@@ -548,8 +563,9 @@ def render_learning_review(journey: dict[str, Any]) -> None:
     Review snapshot when present, otherwise the newest assistant
     ``assessment``. Strengths and areas for improvement nest one expander per
     Thinking Path stage, merging historical incremental feedback with the
-    latest snapshot onto the frozen reviewed stage. Only the current stage is
-    open by default. Marks the Review notification fingerprint as seen when
+    latest Deep Review ``stage_reviews`` (or the legacy frozen-stage lists).
+    Only the current stage is open by default. Marks the Review notification
+    fingerprint as seen when
     the Review tab is active. Start Deep Review is always visible; enablement
     comes from the persisted notebook counter, not a Streamlit-only count.
     """

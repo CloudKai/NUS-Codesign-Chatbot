@@ -48,6 +48,7 @@ def _snapshot(
     summary: str = "Deep Review summary.",
     facione: dict[str, int] | None = None,
     conclusion: str = "Deep working conclusion.",
+    stage_reviews: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Return one durable Deep Review snapshot mapping."""
     payload = deep_review_snapshot_payload(
@@ -72,6 +73,7 @@ def _snapshot(
         missing_requirements=[],
         model_id="global.anthropic.claude-sonnet-4-6",
         reviewed_stage_id=stage_id if include_stage_id else "",
+        stage_reviews=stage_reviews,
     )
     if not include_stage_id:
         payload.pop("reviewed_stage_id", None)
@@ -107,6 +109,7 @@ def test_snapshot_payload_persists_reviewed_stage_id() -> None:
     assert payload["reviewed_stage_id"] == "problem_identification"
     assert payload["strengths"] == ["Deep strength"]
     assert payload["areas_to_develop"] == ["Deep improvement"]
+    assert payload["stage_reviews"] == []
 
 
 def test_deep_review_strengths_appear_under_reviewed_stage() -> None:
@@ -393,3 +396,282 @@ def test_review_projection_keeps_five_thinking_path_stages() -> None:
     assert [
         section["stage_id"] for section in review["improvement_sections"]
     ] == expected
+
+
+def test_stage_reviews_are_authoritative_and_skip_flat_lists() -> None:
+    journey = default_journey()
+    journey["current_stage"] = "concept_generation"
+    journey["completed_stages"] = ["problem_identification"]
+    messages = [
+        _assistant(stage="problem_identification", strengths=["Incremental PI"]),
+        _assistant(stage="concept_generation", strengths=["Incremental CG"]),
+    ]
+    review = learning_review(
+        messages,
+        journey,
+        deep_review_snapshot=_snapshot(
+            strengths=["Flat list must not duplicate"],
+            stage_id="concept_generation",
+            stage_reviews=[
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["Identified the pedestrian signal timing problem"],
+                    "areas_to_develop": ["Could add frequency or location evidence"],
+                },
+                {
+                    "stage_id": "concept_generation",
+                    "strengths": ["Named two distinct crossing concepts"],
+                    "areas_to_develop": ["Generate a third distinct concept"],
+                },
+            ],
+        ),
+    )
+    assert _items(review, "strength_sections", "problem_identification") == [
+        "Identified the pedestrian signal timing problem",
+        "Incremental PI",
+    ]
+    assert _items(review, "strength_sections", "concept_generation") == [
+        "Named two distinct crossing concepts",
+        "Incremental CG",
+    ]
+    assert "Flat list must not duplicate" not in _items(
+        review, "strength_sections", "concept_generation"
+    )
+    assert "Flat list must not duplicate" not in _items(
+        review, "strength_sections", "problem_identification"
+    )
+    assert _items(review, "improvement_sections", "design_specification") == []
+    assert _items(review, "improvement_sections", "deep_analysis") == []
+    assert _items(review, "improvement_sections", "reflection") == []
+
+
+def test_hmw_strength_stays_under_problem_identification() -> None:
+    journey = default_journey()
+    journey["current_stage"] = "concept_generation"
+    review = learning_review(
+        [
+            _assistant(stage="problem_identification", strengths=["Framed older pedestrians"]),
+            _assistant(stage="concept_generation", strengths=[], improvements=[]),
+        ],
+        journey,
+        deep_review_snapshot=_snapshot(
+            strengths=["Constructed a How Might We question"],
+            stage_id="concept_generation",
+            stage_reviews=[
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["Constructed a How Might We question"],
+                    "areas_to_develop": [],
+                },
+                {
+                    "stage_id": "concept_generation",
+                    "strengths": [],
+                    "areas_to_develop": [
+                        "Generate multiple distinct concepts before selecting one."
+                    ],
+                },
+            ],
+        ),
+    )
+    assert "Constructed a How Might We question" in _items(
+        review, "strength_sections", "problem_identification"
+    )
+    assert "Constructed a How Might We question" not in _items(
+        review, "strength_sections", "concept_generation"
+    )
+    assert _items(review, "improvement_sections", "concept_generation") == [
+        "Generate multiple distinct concepts before selecting one."
+    ]
+
+
+def test_stage_reviews_update_previous_stage_while_current_is_open() -> None:
+    journey = default_journey()
+    journey["current_stage"] = "concept_generation"
+    review = learning_review(
+        [_assistant(stage="concept_generation", strengths=["CG incremental"])],
+        journey,
+        deep_review_snapshot=_snapshot(
+            stage_id="concept_generation",
+            stage_reviews=[
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["Updated PI deep strength"],
+                    "areas_to_develop": ["Updated PI deep area"],
+                },
+                {
+                    "stage_id": "concept_generation",
+                    "strengths": ["Genuine CG deep strength"],
+                    "areas_to_develop": [],
+                },
+            ],
+        ),
+    )
+    assert "Updated PI deep strength" in _items(
+        review, "strength_sections", "problem_identification"
+    )
+    assert "Genuine CG deep strength" in _items(
+        review, "strength_sections", "concept_generation"
+    )
+    assert "CG incremental" in _items(review, "strength_sections", "concept_generation")
+    assert _items(review, "strength_sections", "design_specification") == []
+
+
+def test_stage_reviews_dedupe_with_incremental_case_insensitively() -> None:
+    review = learning_review(
+        [
+            _assistant(
+                stage="problem_identification",
+                strengths=["Clearly identified the affected users."],
+            )
+        ],
+        default_journey(),
+        deep_review_snapshot=_snapshot(
+            stage_reviews=[
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["clearly identified the affected users."],
+                    "areas_to_develop": [],
+                }
+            ]
+        ),
+    )
+    assert _items(review, "strength_sections", "problem_identification") == [
+        "clearly identified the affected users."
+    ]
+
+
+def test_later_stage_reviews_replace_previous_deep_review_contribution() -> None:
+    messages = [
+        _assistant(stage="problem_identification", strengths=["Normal strength"]),
+        _assistant(stage="concept_generation", strengths=["CG incremental"]),
+    ]
+    journey = default_journey()
+    journey["current_stage"] = "concept_generation"
+    first = learning_review(
+        messages,
+        journey,
+        deep_review_snapshot=_snapshot(
+            stage_reviews=[
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["Old PI deep strength"],
+                    "areas_to_develop": [],
+                }
+            ]
+        ),
+    )
+    second = learning_review(
+        messages,
+        journey,
+        deep_review_snapshot=_snapshot(
+            stage_reviews=[
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["New PI deep strength"],
+                    "areas_to_develop": [],
+                },
+                {
+                    "stage_id": "concept_generation",
+                    "strengths": ["New CG deep strength"],
+                    "areas_to_develop": [],
+                },
+            ]
+        ),
+    )
+    assert "Old PI deep strength" in _items(
+        first, "strength_sections", "problem_identification"
+    )
+    assert "Old PI deep strength" not in _items(
+        second, "strength_sections", "problem_identification"
+    )
+    assert "New PI deep strength" in _items(
+        second, "strength_sections", "problem_identification"
+    )
+    assert "New CG deep strength" in _items(
+        second, "strength_sections", "concept_generation"
+    )
+    assert "Normal strength" in _items(
+        second, "strength_sections", "problem_identification"
+    )
+
+
+def test_legacy_snapshot_without_stage_reviews_still_uses_reviewed_stage() -> None:
+    snapshot = _snapshot(
+        strengths=["Legacy deep strength"],
+        areas=["Legacy deep area"],
+        stage_id="problem_identification",
+    )
+    snapshot.pop("stage_reviews", None)
+    review = learning_review(
+        [_assistant(stage="problem_identification", strengths=["Incremental"])],
+        default_journey(),
+        deep_review_snapshot=snapshot,
+    )
+    assert _items(review, "strength_sections", "problem_identification") == [
+        "Legacy deep strength",
+        "Incremental",
+    ]
+
+
+def test_review_stage_feedback_is_not_persisted_on_messages() -> None:
+    from backend.domain import EducationalAssessment, StageDecision
+
+    feedback = [
+        {
+            "stage_id": "problem_identification",
+            "strengths": ["Deep PI"],
+            "areas_to_develop": [],
+        }
+    ]
+    slim = EducationalAssessment(
+        current_stage="problem_identification",
+        recommendation=StageDecision.STAY,
+        response_mode="coaching",
+        review_stage_feedback=feedback,
+    ).persisted_mapping()
+    full = EducationalAssessment(
+        current_stage="problem_identification",
+        recommendation=StageDecision.STAY,
+        review_stage_feedback=feedback,
+    ).persisted_mapping()
+    assert "review_stage_feedback" not in slim
+    assert "review_stage_feedback" not in full
+
+
+def test_qa_messages_do_not_become_incremental_stage_feedback() -> None:
+    messages = [
+        {
+            "role": "user",
+            "content": "What is JTBD in week 2?",
+            "metadata": {"thinking_stage": "problem_identification"},
+        },
+        {
+            "role": "assistant",
+            "content": "JTBD is jobs to be done.",
+            "metadata": {
+                "assessment": {
+                    "current_stage": "problem_identification",
+                    "response_mode": "qa",
+                    "citations": [],
+                }
+            },
+        },
+        _assistant(stage="problem_identification", strengths=["Named a crossing problem"]),
+    ]
+    review = learning_review(
+        messages,
+        default_journey(),
+        deep_review_snapshot=_snapshot(
+            stage_reviews=[
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["Named a crossing problem"],
+                    "areas_to_develop": [],
+                }
+            ]
+        ),
+    )
+    items = _items(review, "strength_sections", "problem_identification")
+    assert items == ["Named a crossing problem"]
+    assert "jobs to be done" not in " ".join(items).lower()
+    assert "JTBD" not in " ".join(items)

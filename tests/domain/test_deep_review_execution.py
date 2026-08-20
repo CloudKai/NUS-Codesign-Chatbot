@@ -90,9 +90,10 @@ def _deep_payload(
     strengths: list[str] | None = None,
     areas_to_develop: list[str] | None = None,
     current_stage: str = "problem_identification",
+    stage_reviews: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Return one explicit Deep Review body that stays on the current stage."""
-    return {
+    payload: dict[str, Any] = {
         "response_text": synthesis,
         "strengths": list(strengths or ["Named a real constraint"]),
         "areas_to_develop": list(areas_to_develop or ["Name who is affected"]),
@@ -101,6 +102,7 @@ def _deep_payload(
         "recommendation": "advance",
         "rationale_summary": "Readiness information only.",
         "working_conclusion": "Option B is the working concept.",
+        "review_depth": "deep",
         "facione_profile": {
             "interpretation": 2,
             "analysis": 2,
@@ -110,6 +112,9 @@ def _deep_payload(
             "self_regulation": 2,
         },
     }
+    if stage_reviews is not None:
+        payload["stage_reviews"] = stage_reviews
+    return payload
 
 
 def _provider(client: FakeAgentCoreRuntime) -> AgentCoreCoachProvider:
@@ -788,4 +793,354 @@ def test_stale_worker_cannot_overwrite_later_completed_deep_review(
     finally:
         release.set()
         store.complete_deep_review_job = original_complete  # type: ignore[method-assign]
-        stale_complete_finished.wait(timeout=8.0)
+def _payload_text(payload: dict[str, Any]) -> str:
+    """Join text blocks from one InvokeAgentRuntime companion payload."""
+    blobs: list[str] = []
+    for message in payload.get("messages") or []:
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            blobs.append(content)
+            continue
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict) and str(block.get("text") or "").strip():
+                blobs.append(str(block["text"]))
+    return "\n".join(blobs)
+
+
+def _add_turn(
+    store: StudentStore,
+    thread_id: str,
+    *,
+    role: str,
+    content: str,
+    stage: str,
+    response_mode: str = "coaching",
+) -> None:
+    """Persist one transcript row with Thinking Path provenance."""
+    metadata: dict[str, Any] = {"thinking_stage": stage}
+    if role == "assistant":
+        assessment: dict[str, Any] = {
+            "current_stage": stage,
+            "response_mode": response_mode,
+            "citations": [],
+        }
+        if response_mode == "coaching":
+            assessment["recommendation"] = "stay"
+            assessment["learning_summary"] = "Incremental summary."
+            assessment["stage_assessment"] = "Incremental note."
+            assessment["contribution_summary"] = "Draft."
+        metadata["assessment"] = assessment
+    store.add_message(thread_id, role, content, metadata=metadata)
+
+
+def test_deep_review_request_includes_whole_frozen_pi_and_cg_history(tmp_path) -> None:
+    """Deep Review must receive earlier-stage turns, not Fast Chat's last-6 window."""
+    store = StudentStore(tmp_path / "dr-history.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    pi_marker = "UNIQUE_PI_HOLLAND_ROAD_SIGNAL_DURATION"
+    cg_marker = "UNIQUE_CG_COUNTDOWN_TIMER_CONCEPT"
+    _add_turn(
+        store,
+        thread_id,
+        role="user",
+        content=f"Older pedestrians cannot finish crossing at Holland Road. {pi_marker}",
+        stage="problem_identification",
+    )
+    _add_turn(
+        store,
+        thread_id,
+        role="assistant",
+        content="What evidence shows the signal is too short?",
+        stage="problem_identification",
+    )
+    for index in range(8):
+        _add_turn(
+            store,
+            thread_id,
+            role="user",
+            content=f"Filler Problem Identification turn {index}.",
+            stage="problem_identification",
+        )
+        _add_turn(
+            store,
+            thread_id,
+            role="assistant",
+            content=f"Filler coach reply {index}.",
+            stage="problem_identification",
+        )
+    store.select_learning_stage(thread_id, "concept_generation")
+    _add_turn(
+        store,
+        thread_id,
+        role="user",
+        content=f"I am considering a countdown timer and a volunteer marshal. {cg_marker}",
+        stage="concept_generation",
+    )
+    _add_turn(
+        store,
+        thread_id,
+        role="assistant",
+        content="How do those two concepts differ for older pedestrians?",
+        stage="concept_generation",
+    )
+    _unlock(store, thread_id)
+    client = FakeAgentCoreRuntime(deep_payload=_deep_payload(current_stage="concept_generation"))
+    service = _service(store, client)
+    service.enqueue_deep_review(thread_id, idempotency_key="deep-history")
+    assert _wait_job(service, thread_id).status is DeepReviewJobStatus.COMPLETED
+    assert _phases(client) == ["review"]
+    payload = _decoded(client.calls[0])
+    assert payload.get("review_mode") == "deep"
+    text = _payload_text(payload)
+    assert pi_marker in text
+    assert cg_marker in text
+    assert "Filler Problem Identification turn 0" in text
+
+
+def test_stage_aware_deep_review_persists_and_projects_pi_and_cg(tmp_path) -> None:
+    store = StudentStore(tmp_path / "dr-stages.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _add_turn(
+        store,
+        thread_id,
+        role="user",
+        content="Older pedestrians cannot finish crossing.",
+        stage="problem_identification",
+    )
+    _add_incremental_assessment(
+        store,
+        thread_id,
+        stage="problem_identification",
+        strengths=["Incremental PI strength"],
+    )
+    store.select_learning_stage(thread_id, "concept_generation")
+    _add_turn(
+        store,
+        thread_id,
+        role="user",
+        content="I have not proposed concepts yet.",
+        stage="concept_generation",
+    )
+    _add_incremental_assessment(
+        store,
+        thread_id,
+        stage="concept_generation",
+        strengths=["Incremental CG strength"],
+    )
+    _unlock(store, thread_id)
+    hmw = "Constructed a How Might We question"
+    client = FakeAgentCoreRuntime(
+        deep_payload=_deep_payload(
+            current_stage="concept_generation",
+            strengths=["Misplaced holistic strength"],
+            stage_reviews=[
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": [
+                        "Identified the pedestrian signal timing problem",
+                        hmw,
+                    ],
+                    "areas_to_develop": ["Could strengthen frequency evidence"],
+                },
+                {
+                    "stage_id": "concept_generation",
+                    "strengths": [],
+                    "areas_to_develop": [
+                        "Generate multiple distinct concepts before selecting one."
+                    ],
+                },
+                {
+                    "stage_id": "design_specification",
+                    "strengths": ["Hallucinated future-stage strength"],
+                    "areas_to_develop": [],
+                },
+            ],
+        )
+    )
+    service = _service(store, client)
+    service.enqueue_deep_review(thread_id, idempotency_key="deep-stages")
+    assert _wait_job(service, thread_id).status is DeepReviewJobStatus.COMPLETED
+    snapshot = _snapshot(store, thread_id)
+    assert snapshot is not None
+    assert snapshot["reviewed_stage_id"] == "concept_generation"
+    stage_ids = [row["stage_id"] for row in snapshot["stage_reviews"]]
+    assert stage_ids == ["problem_identification", "concept_generation"]
+    assert hmw in _review_items(
+        store, thread_id, "strength_sections", "problem_identification"
+    )
+    assert hmw not in _review_items(
+        store, thread_id, "strength_sections", "concept_generation"
+    )
+    assert "Identified the pedestrian signal timing problem" in _review_items(
+        store, thread_id, "strength_sections", "problem_identification"
+    )
+    assert "Generate multiple distinct concepts before selecting one." in _review_items(
+        store, thread_id, "improvement_sections", "concept_generation"
+    )
+    assert "Hallucinated future-stage strength" not in _review_items(
+        store, thread_id, "strength_sections", "design_specification"
+    )
+    assert _review_items(store, thread_id, "strength_sections", "design_specification") == []
+    assert _review_items(store, thread_id, "strength_sections", "deep_analysis") == []
+    assert "Misplaced holistic strength" not in _review_items(
+        store, thread_id, "strength_sections", "concept_generation"
+    )
+    assert "Incremental PI strength" in _review_items(
+        store, thread_id, "strength_sections", "problem_identification"
+    )
+    assert _current_stage(store, thread_id) == "concept_generation"
+    _assert_no_review_transcript(store, thread_id)
+
+
+def test_deep_review_started_in_cg_ignores_later_stage_advance(tmp_path) -> None:
+    store = StudentStore(tmp_path / "dr-async-stage.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _add_turn(
+        store,
+        thread_id,
+        role="user",
+        content="Holland Road signals are too short.",
+        stage="problem_identification",
+    )
+    _add_incremental_assessment(
+        store,
+        thread_id,
+        stage="problem_identification",
+        strengths=["PI incremental"],
+    )
+    store.select_learning_stage(thread_id, "concept_generation")
+    _add_turn(
+        store,
+        thread_id,
+        role="user",
+        content="A countdown timer is one concept.",
+        stage="concept_generation",
+    )
+    _unlock(store, thread_id)
+    client = FakeAgentCoreRuntime(
+        deep_payload=_deep_payload(
+            current_stage="concept_generation",
+            stage_reviews=[
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["Frozen PI strength"],
+                    "areas_to_develop": [],
+                },
+                {
+                    "stage_id": "concept_generation",
+                    "strengths": ["Frozen CG strength"],
+                    "areas_to_develop": [],
+                },
+            ],
+        )
+    )
+    service = _service(store, client)
+    job = service.enqueue_deep_review(thread_id, idempotency_key="deep-async")
+    assert job.status in {DeepReviewJobStatus.QUEUED, DeepReviewJobStatus.RUNNING}
+    store.select_learning_stage(thread_id, "design_specification")
+    _add_turn(
+        store,
+        thread_id,
+        role="user",
+        content="This DS turn must not enter the frozen review.",
+        stage="design_specification",
+    )
+    finished = _wait_job(service, thread_id)
+    assert finished.status is DeepReviewJobStatus.COMPLETED
+    snapshot = _snapshot(store, thread_id)
+    assert snapshot is not None
+    assert snapshot["reviewed_stage_id"] == "concept_generation"
+    payload_text = _payload_text(_decoded(client.calls[0]))
+    assert "This DS turn must not enter the frozen review." not in payload_text
+    assert "Holland Road signals are too short." in payload_text
+    assert "Frozen PI strength" in _review_items(
+        store, thread_id, "strength_sections", "problem_identification"
+    )
+    assert "Frozen CG strength" in _review_items(
+        store, thread_id, "strength_sections", "concept_generation"
+    )
+    assert _review_items(store, thread_id, "strength_sections", "design_specification") == []
+    assert _current_stage(store, thread_id) == "design_specification"
+
+
+def test_qa_turns_reach_deep_review_but_do_not_change_stage_or_counter(tmp_path) -> None:
+    store = StudentStore(tmp_path / "dr-qa.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    qa_marker = "UNIQUE_QA_JTBD_WEEK_TWO"
+    _add_turn(
+        store,
+        thread_id,
+        role="user",
+        content=f"What is JTBD in week 2? {qa_marker}",
+        stage="problem_identification",
+        response_mode="qa",
+    )
+    _add_turn(
+        store,
+        thread_id,
+        role="assistant",
+        content="JTBD is jobs to be done.",
+        stage="problem_identification",
+        response_mode="qa",
+    )
+    _add_incremental_assessment(
+        store,
+        thread_id,
+        stage="problem_identification",
+        strengths=["Named a crossing problem"],
+    )
+    stage_before = _current_stage(store, thread_id)
+    _unlock(store, thread_id)
+    client = FakeAgentCoreRuntime(deep_payload=_deep_payload())
+    service = _service(store, client)
+    service.enqueue_deep_review(thread_id, idempotency_key="deep-qa")
+    assert _wait_job(service, thread_id).status is DeepReviewJobStatus.COMPLETED
+    assert qa_marker in _payload_text(_decoded(client.calls[0]))
+    assert _current_stage(store, thread_id) == stage_before == "problem_identification"
+    assert _counter(store, thread_id) == 0
+    assert "JTBD" not in " ".join(
+        _review_items(store, thread_id, "strength_sections", "problem_identification")
+    )
+    _assert_no_review_transcript(store, thread_id)
+
+
+def test_failed_stage_aware_deep_review_leaves_previous_stage_reviews(tmp_path) -> None:
+    store = StudentStore(tmp_path / "dr-fail-stages.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _add_turn(
+        store,
+        thread_id,
+        role="user",
+        content="Older pedestrians cannot finish crossing.",
+        stage="problem_identification",
+    )
+    _unlock(store, thread_id)
+    first = _service(
+        store,
+        FakeAgentCoreRuntime(
+            deep_payload=_deep_payload(
+                stage_reviews=[
+                    {
+                        "stage_id": "problem_identification",
+                        "strengths": ["Previous PI deep strength"],
+                        "areas_to_develop": [],
+                    }
+                ]
+            )
+        ),
+    )
+    first.enqueue_deep_review(thread_id, idempotency_key="deep-keep-stages")
+    assert _wait_job(first, thread_id).status is DeepReviewJobStatus.COMPLETED
+    previous = _snapshot(store, thread_id)
+    _unlock(store, thread_id)
+    failing = _service(store, FakeAgentCoreRuntime(deep_error=TimeoutError("deep-timeout")))
+    failing.enqueue_deep_review(thread_id, idempotency_key="deep-fail-stages")
+    assert _wait_job(failing, thread_id).status is DeepReviewJobStatus.FAILED
+    assert _snapshot(store, thread_id) == previous
+    assert "Previous PI deep strength" in _review_items(
+        store, thread_id, "strength_sections", "problem_identification"
+    )

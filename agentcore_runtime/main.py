@@ -37,6 +37,7 @@ try:
     )
     from models import (
         CoachTurnOutput,
+        DeepReviewTurnOutput,
         FastChatTurnOutput,
         QATurnOutput,
         ReviewTurnOutput,
@@ -53,6 +54,7 @@ try:
         PHASE_QA,
         PHASE_REVIEW,
         PHASE_ROUTER,
+        REVIEW_MODE_DEEP,
         REVIEW_MODE_INCREMENTAL,
         invoke_kind,
         payload_phase,
@@ -100,6 +102,7 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
     )
     from agentcore_runtime.models import (
         CoachTurnOutput,
+        DeepReviewTurnOutput,
         FastChatTurnOutput,
         QATurnOutput,
         ReviewTurnOutput,
@@ -116,6 +119,7 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.main
         PHASE_QA,
         PHASE_REVIEW,
         PHASE_ROUTER,
+        REVIEW_MODE_DEEP,
         REVIEW_MODE_INCREMENTAL,
         invoke_kind,
         payload_phase,
@@ -234,7 +238,9 @@ def _role_for_payload(payload: Mapping[str, Any] | None) -> str:
     return MODEL_ROLE_COACHING
 
 
-def _output_model_for(phase: str, output_contract: str) -> type[Any]:
+def _output_model_for(
+    phase: str, output_contract: str, review_mode: str = ""
+) -> type[Any]:
     """Return the Pydantic structured-output class for one specialist invoke."""
     contract = str(output_contract or "").strip().lower()
     cleaned_phase = str(phase or "").strip().lower()
@@ -243,18 +249,22 @@ def _output_model_for(phase: str, output_contract: str) -> type[Any]:
     if contract == "qa_turn" or cleaned_phase == PHASE_QA:
         return QATurnOutput
     if contract == "review_turn" or cleaned_phase == PHASE_REVIEW:
+        if str(review_mode or "").strip().lower() == REVIEW_MODE_DEEP:
+            return DeepReviewTurnOutput
         return ReviewTurnOutput
     return CoachTurnOutput
 
 
-def _parse_result(phase: str, output_contract: str, result: Any) -> Any:
+def _parse_result(
+    phase: str, output_contract: str, result: Any, review_mode: str = ""
+) -> Any:
     """Validate AgentResult against the specialist contract."""
-    model = _output_model_for(phase, output_contract)
+    model = _output_model_for(phase, output_contract, review_mode)
     if model is FastChatTurnOutput:
         return fast_chat_turn_from_agent_result(result)
     if model is QATurnOutput:
         return qa_turn_from_agent_result(result)
-    if model is ReviewTurnOutput:
+    if model is ReviewTurnOutput or model is DeepReviewTurnOutput:
         return review_turn_from_agent_result(result)
     return coach_turn_from_agent_result(result)
 
@@ -680,6 +690,9 @@ async def specialist_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]
     contract = ""
     if isinstance(payload, Mapping):
         contract = str(payload.get("output_contract") or "").strip().lower()
+    review_mode = ""
+    if phase == PHASE_REVIEW or contract == "review_turn":
+        review_mode = payload_review_mode(payload)
     system_prompt = agent_system_prompt(payload)
     prior, prompt = conversation_for_invoke(payload)
     del prior
@@ -688,8 +701,8 @@ async def specialist_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]
         payload=payload,
         system_prompt=system_prompt,
         user_prompt=prompt,
-        output_model=_output_model_for(phase, contract),
-        parse=lambda result: _parse_result(phase, contract, result),
+        output_model=_output_model_for(phase, contract, review_mode),
+        parse=lambda result: _parse_result(phase, contract, result, review_mode),
         output_text=lambda output: str(getattr(output, "response_text", "") or ""),
         include_history=True,
     )

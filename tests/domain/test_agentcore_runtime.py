@@ -16,6 +16,7 @@ import pytest
 
 from agentcore_runtime.models import (
     CoachTurnOutput,
+    DeepReviewTurnOutput,
     FastChatTurnOutput,
     QATurnOutput,
     ReviewTurnOutput,
@@ -353,10 +354,13 @@ def test_unknown_phase_falls_closed_to_coaching_not_qa() -> None:
     review = specialist_system_prompt({"phase": "review", "review_mode": "deep"})
     assert "Deep Review specialist" in review
     assert "not a grade" in review.lower()
+    assert "stage_reviews" in review
+    assert "ENTIRE frozen active conversation" in review
     incremental = specialist_system_prompt(
         {"phase": "review", "review_mode": "incremental"}
     )
     assert "Incremental Review specialist" in incremental
+    assert "stage_reviews" not in incremental
 
 
 def test_inspect_and_log_omit_student_text(caplog: pytest.LogCaptureFixture) -> None:
@@ -424,6 +428,17 @@ def _sample_structured_output(output_model: type[Any]) -> Any:
     if output_model is QATurnOutput:
         return QATurnOutput.model_validate(
             {"response_text": "Week 2 covers the JTBD framework.", "citations": []}
+        )
+    if output_model is DeepReviewTurnOutput:
+        return DeepReviewTurnOutput.model_validate(
+            {
+                **_review_turn(),
+                "review_depth": "deep",
+                "current_stage": "problem_identification",
+                "recommendation": "stay",
+                "rationale_summary": "Stay for more evidence.",
+                "stage_reviews": [],
+            }
         )
     if output_model is ReviewTurnOutput:
         return ReviewTurnOutput.model_validate(_review_turn())
@@ -554,6 +569,8 @@ def test_all_structured_roles_use_shared_output_contracts() -> None:
     assert _output_model_for("fast_chat", "fast_chat_turn") is FastChatTurnOutput
     assert _output_model_for("coaching", "coach_turn") is CoachTurnOutput
     assert _output_model_for("review", "review_turn") is ReviewTurnOutput
+    assert _output_model_for("review", "review_turn", "deep") is DeepReviewTurnOutput
+    assert _output_model_for("review", "review_turn", "incremental") is ReviewTurnOutput
     assert MODEL_ROLE_ROUTER == "router"
 
 
@@ -743,7 +760,7 @@ def test_structured_roles_pass_custom_repair_prompt_to_invoke_async(
         QATurnOutput,
         CoachTurnOutput,
         ReviewTurnOutput,
-        ReviewTurnOutput,
+        DeepReviewTurnOutput,
         FastChatTurnOutput,
     )
     for call, expected_model, result in zip(calls, expected_models, results, strict=True):

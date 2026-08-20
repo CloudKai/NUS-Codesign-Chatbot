@@ -3,6 +3,47 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock-v2`
+**HEAD before this work:** `51927c5` (course-materials toasts + AgentCore v24
+record). Live citations RC remains `64410dc`. Composer layout remains
+`711d4e6`. HMW 2-of-3 remains `89ccfed`.
+**Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
+**Live AgentCore:** DEFAULT → **v24 READY**. Affinity ON. Generation 2.
+Prompt cache OFF. **Do not publish AgentCore for this phase.**
+
+**This phase:** Review-tab expander remount + stage-aware Deep Review
+projection. Uncommitted on `51927c5`.
+
+**Behavior.** When the Thinking Path current stage changes (or the notebook
+changes), Strengths and Areas for improvement remount so only the current
+stage starts open. Same-stage reruns keep widget keys, so a student's
+manual open/close is preserved. Deep Review still freezes the whole active
+conversation at enqueue. New snapshots persist `stage_reviews` and merge
+those lists onto matching Review stages. Holistic synthesis, Facione, and
+working conclusion stay whole-conversation. Legacy snapshots without
+`stage_reviews` still dump flat strengths/areas onto `reviewed_stage_id`.
+Failed Deep Review leaves the previous snapshot. Fast Chat is unchanged
+(one Haiku call, no extra router/retrieval).
+
+**Not changed.** AgentCore DEFAULT/generation/prompt cache; EC2 image;
+DSQL schema; RAG; citations; HMW; stage advancement; Fast Chat
+`turns=2`; Deep Review `turns=3`; frozen `message_ids` / sources /
+revision.
+
+**Validation (local worktree, $0 AWS).** Targeted mock pytest: 212 passed
+(expander remount, Deep Review projection/execution, runtime/specialists,
+HMW, Fast Chat one-call, progress merge). Full deterministic suite:
+1497 passed (`--ignore=tests/scripts/test_load_probe.py`; pre-existing
+broken `scripts/load_probe.py` left unstaged). `compileall` passed for
+`backend`, `ui`, `streamlit_app.py`, `tests`.
+
+**Next exact action.** A future AgentCore publish is required before live
+Sonnet emits `stage_reviews`. Until then, live Deep Review still falls
+back to the legacy flat-list → `reviewed_stage_id` merge. Expander remount
+does not need a runtime publish. Do not move DEFAULT. Do not rebuild EC2
+in this phase. Do not enable prompt cache.
+
+### Prior: AgentCore v24 HMW overlay
+
 **HEAD:** `89ccfed` (HMW 2-of-3 + unlock-turn placement). Citations schema
 RC remains `64410dc`. Composer layout remains `711d4e6`.
 **Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)

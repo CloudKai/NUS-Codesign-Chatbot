@@ -9,7 +9,12 @@ from typing import Any
 
 import pytest
 
-from agentcore_runtime.models import QATurnOutput, ReviewTurnOutput
+from agentcore_runtime.models import (
+    DeepReviewTurnOutput,
+    QATurnOutput,
+    ReviewTurnOutput,
+    parse_review_turn_output,
+)
 from agentcore_runtime.prompts.loader import (
     COACHING_TOPICS,
     load_qa_prompt,
@@ -137,6 +142,76 @@ def test_review_turn_from_structured_output() -> None:
     )
     assert parsed.areas_to_develop
     assert "grade" in parsed.synthesis
+
+
+def test_deep_review_schema_requires_stage_reviews_array() -> None:
+    schema = DeepReviewTurnOutput.model_json_schema()
+    assert "stage_reviews" in schema["required"]
+    node = schema["properties"]["stage_reviews"]
+    assert node.get("type") == "array"
+    assert "null" not in str(node.get("type"))
+    assert "anyOf" not in node
+    incremental = ReviewTurnOutput.model_json_schema()
+    assert "stage_reviews" not in incremental.get("properties", {})
+
+
+def test_parse_review_turn_output_keeps_stage_reviews() -> None:
+    parsed = parse_review_turn_output(
+        {
+            "response_text": "Formative deep review.",
+            "strengths": ["Holistic strength"],
+            "areas_to_develop": ["Holistic area"],
+            "synthesis": "Progress is formative.",
+            "review_depth": "deep",
+            "current_stage": "concept_generation",
+            "recommendation": "stay",
+            "rationale_summary": "Stay.",
+            "stage_reviews": [
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["Constructed a How Might We question"],
+                    "areas_to_develop": [],
+                },
+                {
+                    "stage_id": "not_a_stage",
+                    "strengths": ["Dropped"],
+                    "areas_to_develop": [],
+                },
+                {
+                    "stage_id": "concept_generation",
+                    "strengths": [],
+                    "areas_to_develop": [],
+                },
+            ],
+        }
+    )
+    assert isinstance(parsed, DeepReviewTurnOutput)
+    assert [item.stage_id for item in parsed.stage_reviews] == [
+        "problem_identification"
+    ]
+    assert parsed.stage_reviews[0].strengths == [
+        "Constructed a How Might We question"
+    ]
+
+
+def test_review_turn_output_ignores_stage_reviews_field() -> None:
+    parsed = ReviewTurnOutput.model_validate(
+        {
+            "response_text": "Incremental review.",
+            "strengths": ["Setting"],
+            "areas_to_develop": ["Users"],
+            "synthesis": "Formative.",
+            "stage_reviews": [
+                {
+                    "stage_id": "problem_identification",
+                    "strengths": ["Should be ignored"],
+                    "areas_to_develop": [],
+                }
+            ],
+        }
+    )
+    assert not isinstance(parsed, DeepReviewTurnOutput)
+    assert not hasattr(parsed, "stage_reviews")
 
 
 def test_agentcore_payload_uses_fast_chat_for_week_question() -> None:

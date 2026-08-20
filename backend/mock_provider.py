@@ -411,6 +411,17 @@ class DeterministicCoachProvider:
             review_depth="deep",
             review_model="global.anthropic.claude-sonnet-4-6",
             review_trigger="explicit",
+            review_stage_feedback=[
+                {
+                    "stage_id": request.current_stage,
+                    "strengths": [
+                        "You located the work in a concrete setting."
+                    ],
+                    "areas_to_develop": [
+                        "Name who is affected and what success would look like."
+                    ],
+                }
+            ],
         )
         return ProviderAssessmentResult(
             response_text=response,

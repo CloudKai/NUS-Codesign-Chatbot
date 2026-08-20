@@ -70,6 +70,7 @@ from backend.specialists.review_orchestration import (
     bound_deep_review_interval,
     deep_review_job_is_stale,
     deep_review_snapshot_payload,
+    deep_review_stage_reviews_for_snapshot,
     explicit_deep_review_available,
     parse_coaching_turns_since_deep_review,
     parse_deep_review_job,
@@ -769,28 +770,13 @@ class CoachApplicationService:
                         "Deep Review could not be completed",
                         category="malformed",
                     )
-                snapshot_payload = deep_review_snapshot_payload(
+                snapshot_payload = self._deep_review_snapshot_from_turn(
+                    turn,
                     conversation_revision=int(job.get("reviewed_revision") or 0),
-                    created_at=datetime.now(timezone.utc).isoformat(),
-                    synthesis=turn.assessment.learning_summary
-                    or turn.assessment.stage_assessment,
-                    summary=turn.assessment.learning_summary,
-                    strengths=list(turn.assessment.review_strengths),
-                    areas_to_develop=list(turn.assessment.review_improvements),
-                    facione_scores=turn.assessment.facione_scores.model_dump(
-                        mode="json"
-                    ),
-                    working_conclusion=turn.assessment.working_conclusion,
-                    readiness_candidate=bool(turn.assessment.readiness_candidate),
-                    readiness_evidence=list(turn.assessment.evidence_identified),
-                    missing_requirements=list(
-                        turn.assessment.missing_reasoning_elements
-                    ),
-                    model_id=str(turn.assessment.review_model or "").strip()
-                    or "global.anthropic.claude-sonnet-4-6",
                     reviewed_stage_id=(
                         frozen_stage if frozen_stage in STAGE_BY_ID else ""
                     ),
+                    history=list(prepared.history or []),
                 )
                 self._store.complete_deep_review_job(
                     thread_id,
@@ -819,6 +805,62 @@ class CoachApplicationService:
         """Compatibility alias for :meth:`enqueue_deep_review`."""
         return self.enqueue_deep_review(
             thread_id, idempotency_key=idempotency_key
+        )
+
+    @staticmethod
+    def _deep_review_snapshot_from_turn(
+        turn: CoachTurn,
+        *,
+        conversation_revision: int,
+        reviewed_stage_id: str,
+        history: list[dict[str, Any]] | None,
+        created_at: str | None = None,
+    ) -> dict[str, Any]:
+        """Build one durable Deep Review snapshot from a validated turn.
+
+        ``stage_reviews`` is filtered to stages evidenced in the frozen
+        history. When present, those lists also fill the holistic
+        ``strengths`` / ``areas_to_develop`` fields. When absent, the
+        assessment's flat lists are stored for legacy projection.
+        """
+        stage_reviews = deep_review_stage_reviews_for_snapshot(
+            list(turn.assessment.review_stage_feedback or []),
+            history=history,
+            fallback_stage=reviewed_stage_id,
+        )
+        if stage_reviews:
+            strengths = [
+                item
+                for row in stage_reviews
+                for item in (row.get("strengths") or [])
+                if str(item).strip()
+            ]
+            areas = [
+                item
+                for row in stage_reviews
+                for item in (row.get("areas_to_develop") or [])
+                if str(item).strip()
+            ]
+        else:
+            strengths = list(turn.assessment.review_strengths)
+            areas = list(turn.assessment.review_improvements)
+        return deep_review_snapshot_payload(
+            conversation_revision=conversation_revision,
+            created_at=created_at or datetime.now(timezone.utc).isoformat(),
+            synthesis=turn.assessment.learning_summary
+            or turn.assessment.stage_assessment,
+            summary=turn.assessment.learning_summary,
+            strengths=strengths,
+            areas_to_develop=areas,
+            facione_scores=turn.assessment.facione_scores.model_dump(mode="json"),
+            working_conclusion=turn.assessment.working_conclusion,
+            readiness_candidate=bool(turn.assessment.readiness_candidate),
+            readiness_evidence=list(turn.assessment.evidence_identified),
+            missing_requirements=list(turn.assessment.missing_reasoning_elements),
+            model_id=str(turn.assessment.review_model or "").strip()
+            or "global.anthropic.claude-sonnet-4-6",
+            reviewed_stage_id=reviewed_stage_id,
+            stage_reviews=stage_reviews,
         )
 
     @staticmethod
@@ -1140,30 +1182,15 @@ class CoachApplicationService:
         summary.update(meaningful_progress_fields(progress_fields))
         if owned_review:
             reviewed_stage = str(prepared_request.current_stage or "").strip()
-            summary[DEEP_REVIEW_SNAPSHOT_KEY] = deep_review_snapshot_payload(
+            summary[DEEP_REVIEW_SNAPSHOT_KEY] = self._deep_review_snapshot_from_turn(
+                turn,
                 conversation_revision=int(
                     prepared_request.conversation_revision or 0
                 ),
-                created_at=datetime.now(timezone.utc).isoformat(),
-                synthesis=turn.assessment.learning_summary
-                or turn.assessment.stage_assessment,
-                summary=turn.assessment.learning_summary,
-                strengths=list(turn.assessment.review_strengths),
-                areas_to_develop=list(turn.assessment.review_improvements),
-                facione_scores=turn.assessment.facione_scores.model_dump(
-                    mode="json"
-                ),
-                working_conclusion=turn.assessment.working_conclusion,
-                readiness_candidate=bool(turn.assessment.readiness_candidate),
-                readiness_evidence=list(turn.assessment.evidence_identified),
-                missing_requirements=list(
-                    turn.assessment.missing_reasoning_elements
-                ),
-                model_id=str(turn.assessment.review_model or "").strip()
-                or "global.anthropic.claude-sonnet-4-6",
                 reviewed_stage_id=(
                     reviewed_stage if reviewed_stage in STAGE_BY_ID else ""
                 ),
+                history=list(prepared_request.history or []),
             )
         return summary
 

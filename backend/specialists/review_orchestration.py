@@ -27,6 +27,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from backend.learning.stages import STAGE_BY_ID, THINKING_STAGES
+
 DEFAULT_DEEP_REVIEW_INTERVAL_TURNS = 3
 MIN_DEEP_REVIEW_INTERVAL_TURNS = 1
 MAX_DEEP_REVIEW_INTERVAL_TURNS = 20
@@ -341,6 +343,152 @@ def explicit_deep_review_available(
     return current >= bound_deep_review_interval(interval)
 
 
+def _compact_stage_review_items(values: Any, *, limit: int = 8) -> list[str]:
+    """Normalize one Deep Review bullet list without empty or duplicate items."""
+    if not isinstance(values, list):
+        return []
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        item = " ".join(str(value or "").split()).strip()[:400]
+        if not item:
+            continue
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(item)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
+def represented_thinking_path_stages(
+    messages: list[dict[str, Any]] | None,
+    *,
+    fallback_stage: str = "",
+) -> frozenset[str]:
+    """Return Thinking Path stages evidenced in a frozen conversation.
+
+    Uses persisted ``thinking_stage`` / ``assessment.current_stage`` metadata
+    plus the enqueue-time fallback stage. Future stages with no messages are
+    not included.
+
+    Args:
+        messages: Frozen active-branch messages at Deep Review enqueue.
+        fallback_stage: Stage id frozen when Deep Review started.
+
+    Returns:
+        Canonical stage ids that appear in the frozen snapshot.
+    """
+    found: set[str] = set()
+    fallback = str(fallback_stage or "").strip()
+    if fallback in STAGE_BY_ID:
+        found.add(fallback)
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+        metadata = message.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        for key in ("thinking_stage", "current_stage"):
+            stage_id = str(metadata.get(key) or "").strip()
+            if stage_id in STAGE_BY_ID:
+                found.add(stage_id)
+        assessment = metadata.get("assessment")
+        if isinstance(assessment, dict):
+            stage_id = str(assessment.get("current_stage") or "").strip()
+            if stage_id in STAGE_BY_ID:
+                found.add(stage_id)
+    return frozenset(found)
+
+
+def normalize_deep_review_stage_reviews(
+    raw: Any,
+    *,
+    allowed_stage_ids: frozenset[str] | set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Validate Deep Review ``stage_reviews`` for persistence and projection.
+
+    Unknown stage identifiers are dropped. Duplicate stage ids are merged.
+    Entries with both lists empty are omitted. When ``allowed_stage_ids`` is
+    provided, stages without conversation evidence are dropped.
+
+    Args:
+        raw: Model or snapshot ``stage_reviews`` value.
+        allowed_stage_ids: Optional set of stages represented in the frozen
+            transcript. ``None`` disables that filter.
+
+    Returns:
+        Ordered list of ``{stage_id, strengths, areas_to_develop}`` dicts.
+    """
+    if not isinstance(raw, list):
+        return []
+    merged: dict[str, dict[str, list[str]]] = {}
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        stage_id = str(item.get("stage_id") or "").strip()
+        if stage_id not in STAGE_BY_ID:
+            continue
+        if allowed_stage_ids is not None and stage_id not in allowed_stage_ids:
+            continue
+        strengths = _compact_stage_review_items(item.get("strengths"))
+        areas = _compact_stage_review_items(item.get("areas_to_develop"))
+        existing = merged.get(stage_id)
+        if existing is None:
+            merged[stage_id] = {
+                "strengths": strengths,
+                "areas_to_develop": areas,
+            }
+            continue
+        existing["strengths"] = _compact_stage_review_items(
+            [*existing["strengths"], *strengths]
+        )
+        existing["areas_to_develop"] = _compact_stage_review_items(
+            [*existing["areas_to_develop"], *areas]
+        )
+    payload: list[dict[str, Any]] = []
+    for stage in THINKING_STAGES:
+        row = merged.get(stage.id)
+        if row is None:
+            continue
+        if not row["strengths"] and not row["areas_to_develop"]:
+            continue
+        payload.append(
+            {
+                "stage_id": stage.id,
+                "strengths": list(row["strengths"]),
+                "areas_to_develop": list(row["areas_to_develop"]),
+            }
+        )
+    return payload
+
+
+def deep_review_stage_reviews_for_snapshot(
+    raw: Any,
+    *,
+    history: list[dict[str, Any]] | None = None,
+    fallback_stage: str = "",
+) -> list[dict[str, Any]]:
+    """Filter model ``stage_reviews`` to stages in the frozen conversation.
+
+    Args:
+        raw: Provider ``review_stage_feedback`` or model ``stage_reviews``.
+        history: Frozen active messages reconstructed for this job.
+        fallback_stage: Stage id frozen at enqueue.
+
+    Returns:
+        Snapshot-ready ``stage_reviews`` list. Empty when none are valid.
+    """
+    allowed = represented_thinking_path_stages(
+        history, fallback_stage=fallback_stage
+    )
+    return normalize_deep_review_stage_reviews(
+        raw, allowed_stage_ids=allowed
+    )
+
+
 def deep_review_snapshot_payload(
     *,
     conversation_revision: int,
@@ -356,12 +504,15 @@ def deep_review_snapshot_payload(
     missing_requirements: list[str],
     model_id: str,
     reviewed_stage_id: str = "",
+    stage_reviews: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Return the durable Deep Review snapshot stored in notebook settings.
 
     Hidden prompts are never included. Normal Coaching persist must omit this
     key so a later Haiku turn cannot overwrite the snapshot. ``reviewed_stage_id``
     is the Thinking Path stage frozen at enqueue, not the stage at completion.
+    ``stage_reviews`` is the authoritative per-stage Strengths / Areas
+    projection when non-empty. Older snapshots omit that key.
 
     Args:
         conversation_revision: Revision reviewed through.
@@ -377,10 +528,12 @@ def deep_review_snapshot_payload(
         missing_requirements: Remaining requirements.
         model_id: Review model identifier (Sonnet 4.6).
         reviewed_stage_id: Stage id frozen when Deep Review started.
+        stage_reviews: Optional per-stage strengths and areas.
 
     Returns:
         JSON-serialisable snapshot dictionary.
     """
+    normalized_reviews = normalize_deep_review_stage_reviews(stage_reviews or [])
     return {
         "reviewed_through_revision": max(0, int(conversation_revision)),
         "reviewed_stage_id": str(reviewed_stage_id or "").strip(),
@@ -391,6 +544,7 @@ def deep_review_snapshot_payload(
         "areas_to_develop": [
             str(item).strip() for item in areas_to_develop if str(item).strip()
         ][:8],
+        "stage_reviews": normalized_reviews,
         "facione_scores": dict(facione_scores or {}),
         "working_conclusion": " ".join(str(working_conclusion or "").split()).strip()[
             :4_000

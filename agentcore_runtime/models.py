@@ -605,6 +605,184 @@ class ReviewTurnOutput(BaseModel):
         return cleaned[:8]
 
 
+_THINKING_PATH_STAGE_IDS = (
+    "problem_identification",
+    "concept_generation",
+    "design_specification",
+    "deep_analysis",
+    "reflection",
+)
+ThinkingPathStageId = Literal[
+    "problem_identification",
+    "concept_generation",
+    "design_specification",
+    "deep_analysis",
+    "reflection",
+]
+_THINKING_PATH_STAGE_ID_SET = frozenset(_THINKING_PATH_STAGE_IDS)
+
+
+def _force_schema_array(schema: dict[str, Any], field: str) -> None:
+    """Require one JSON Schema field to be an array, never null."""
+    required = list(schema.get("required") or [])
+    if field not in required:
+        required.append(field)
+    schema["required"] = required
+    properties = schema.get("properties")
+    node = properties.get(field) if isinstance(properties, dict) else None
+    if isinstance(node, dict):
+        node["type"] = "array"
+        node.pop("anyOf", None)
+        node.pop("oneOf", None)
+
+
+def _attach_deep_review_stage_feedback_schema(schema: dict[str, Any]) -> None:
+    """Keep stage-feedback bullet lists as arrays after Strands flatten."""
+    _force_schema_array(schema, "strengths")
+    _force_schema_array(schema, "areas_to_develop")
+
+
+def _attach_deep_review_turn_schema(schema: dict[str, Any]) -> None:
+    """Keep ``stage_reviews`` as a required array after Strands flatten."""
+    _force_schema_array(schema, "stage_reviews")
+
+
+def _compact_review_bullets(values: Any, *, limit: int = 8) -> list[str]:
+    """Normalize Deep Review bullet lists without keeping empty items."""
+    if not isinstance(values, list):
+        return []
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        text = " ".join(str(item or "").split())[:400]
+        if text and text not in seen:
+            seen.add(text)
+            cleaned.append(text)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
+class DeepReviewStageFeedback(BaseModel):
+    """Stage-attributed Deep Review strengths and areas.
+
+    Incremental Review does not use this object. Empty arrays mean the stage
+    was represented in the frozen conversation but has no item of that kind.
+    """
+
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra=_attach_deep_review_stage_feedback_schema,
+    )
+
+    stage_id: ThinkingPathStageId
+    strengths: list[str] = Field(
+        default_factory=list,
+        max_length=8,
+        description="Always return an array. Use [] when this stage has no strengths.",
+    )
+    areas_to_develop: list[str] = Field(
+        default_factory=list,
+        max_length=8,
+        description=(
+            "Always return an array. Use [] when this stage has no areas to develop."
+        ),
+    )
+
+    @field_validator("strengths", "areas_to_develop", mode="before")
+    @classmethod
+    def coerce_bullet_arrays(cls, value: Any) -> list[str]:
+        """Reject null bullet lists; keep compact unique strings."""
+        return _compact_review_bullets(value if value is not None else [])
+
+
+class DeepReviewTurnOutput(ReviewTurnOutput):
+    """Deep Review result with whole-conversation and per-stage feedback.
+
+    Holistic fields stay on the parent: synthesis, Facione, working
+    conclusion, readiness, and missing requirements. ``stage_reviews`` is
+    the student-facing Strengths / Areas projection. Incremental Review
+    keeps :class:`ReviewTurnOutput` and must not emit this object.
+    """
+
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra=_attach_deep_review_turn_schema,
+    )
+
+    stage_reviews: list[DeepReviewStageFeedback] = Field(
+        default_factory=list,
+        description=(
+            "Always return an array. Include only Thinking Path stages with "
+            "conversation evidence. Use [] when no stage-specific items exist."
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_stage_reviews(cls, value: Any) -> Any:
+        """Drop unknown stage ids and coerce omitted ``stage_reviews`` to []."""
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        raw = data.get("stage_reviews")
+        if raw is None:
+            data["stage_reviews"] = []
+            return data
+        if not isinstance(raw, list):
+            data["stage_reviews"] = []
+            return data
+        cleaned: list[dict[str, Any]] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            stage_id = str(item.get("stage_id") or "").strip()
+            if stage_id not in _THINKING_PATH_STAGE_ID_SET:
+                continue
+            strengths = item.get("strengths")
+            areas = item.get("areas_to_develop")
+            cleaned.append(
+                {
+                    "stage_id": stage_id,
+                    "strengths": strengths if isinstance(strengths, list) else [],
+                    "areas_to_develop": areas if isinstance(areas, list) else [],
+                }
+            )
+        data["stage_reviews"] = cleaned
+        return data
+
+    @model_validator(mode="after")
+    def compact_stage_reviews(self) -> "DeepReviewTurnOutput":
+        """Merge duplicate stage ids, drop empty entries, keep path order."""
+        merged: dict[str, DeepReviewStageFeedback] = {}
+        for item in self.stage_reviews:
+            existing = merged.get(item.stage_id)
+            if existing is None:
+                merged[item.stage_id] = item
+                continue
+            merged[item.stage_id] = item.model_copy(
+                update={
+                    "strengths": _compact_review_bullets(
+                        [*existing.strengths, *item.strengths]
+                    ),
+                    "areas_to_develop": _compact_review_bullets(
+                        [*existing.areas_to_develop, *item.areas_to_develop]
+                    ),
+                }
+            )
+        kept: list[DeepReviewStageFeedback] = []
+        for stage_id in _THINKING_PATH_STAGE_IDS:
+            item = merged.get(stage_id)
+            if item is None:
+                continue
+            if not item.strengths and not item.areas_to_develop:
+                continue
+            kept.append(item)
+        if kept == list(self.stage_reviews):
+            return self
+        return self.model_copy(update={"stage_reviews": kept})
+
+
 class RouterOutput(BaseModel):
     """Strict specialist classification. Never a stage or authorization decision."""
 
@@ -730,9 +908,28 @@ def parse_fast_chat_turn_output(value: Any) -> FastChatTurnOutput:
 
 
 def parse_review_turn_output(value: Any) -> ReviewTurnOutput:
-    """Validate one Review payload or raise ``ValidationError``."""
+    """Validate one Review payload or raise ``ValidationError``.
+
+    Deep Review payloads with ``stage_reviews`` or ``review_depth=deep``
+    become :class:`DeepReviewTurnOutput` so per-stage feedback is not dropped
+    by ``extra="ignore"`` on :class:`ReviewTurnOutput`.
+    """
+    if isinstance(value, DeepReviewTurnOutput):
+        return value
     if isinstance(value, ReviewTurnOutput):
         return value
+    payload = value
+    if hasattr(value, "model_dump") and callable(value.model_dump):
+        try:
+            payload = value.model_dump(mode="json")
+        except (TypeError, ValidationError):
+            payload = value
+    data = payload if isinstance(payload, dict) else None
+    if data is not None and (
+        "stage_reviews" in data
+        or str(data.get("review_depth") or "").strip().lower() == "deep"
+    ):
+        return DeepReviewTurnOutput.model_validate(data)
     if hasattr(value, "model_dump") and callable(value.model_dump):
         try:
             return ReviewTurnOutput.model_validate(value.model_dump(mode="json"))

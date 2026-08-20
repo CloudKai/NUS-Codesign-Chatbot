@@ -34,6 +34,7 @@ try:
         PHASE_FAST_CHAT,
         PHASE_QA,
         PHASE_REVIEW,
+        REVIEW_MODE_INCREMENTAL,
         payload_output_contract,
         payload_phase,
         payload_review_mode,
@@ -58,6 +59,7 @@ except ImportError:  # pragma: no cover - flat runtime copy next to main.py
         PHASE_FAST_CHAT,
         PHASE_QA,
         PHASE_REVIEW,
+        REVIEW_MODE_INCREMENTAL,
         payload_output_contract,
         payload_phase,
         payload_review_mode,
@@ -226,9 +228,25 @@ Do not claim to mutate the Thinking Path stage.
 
 _REVIEW_JSON_CONTRACT = """Return the final response using the
 framework-provided structured-output mechanism. Include response_text,
-strengths, areas_to_develop, synthesis, and readiness_candidate. Deep Review
-also returns current_stage, recommendation (stay or advance), confidence,
-readiness_evidence, missing_requirements, and rationale_summary.
+strengths, areas_to_develop, synthesis, and readiness_candidate.
+Do not use application, retrieval, browsing, database, S3, Knowledge Base,
+or user-accessible tools. Do not assign a grade.
+"""
+
+_DEEP_REVIEW_JSON_CONTRACT = """Return the final response using the
+framework-provided structured-output mechanism. Include response_text,
+strengths, areas_to_develop, stage_reviews, synthesis, current_stage,
+recommendation (stay or advance), confidence, readiness_evidence,
+missing_requirements, and rationale_summary.
+
+stage_reviews is required and must be an array. Each item has stage_id
+(exactly one of problem_identification, concept_generation,
+design_specification, deep_analysis, reflection), strengths (array; use
+[] when none), and areas_to_develop (array; use [] when none). Include
+only stages with conversation evidence. Attribute each item to the stage
+where the student's reasoning occurred, not the stage that is current
+when Deep Review runs. Omit future stages with no evidence.
+
 Do not use application, retrieval, browsing, database, S3, Knowledge Base,
 or user-accessible tools. Do not assign a grade.
 """
@@ -634,10 +652,15 @@ def specialist_system_prompt(payload: Mapping[str, Any] | None) -> str:
         return qa_system_prompt(trusted) + "\n\n" + _QA_JSON_CONTRACT
     if phase == PHASE_REVIEW:
         mode = payload_review_mode(payload)
+        contract_text = (
+            _REVIEW_JSON_CONTRACT
+            if mode == REVIEW_MODE_INCREMENTAL
+            else _DEEP_REVIEW_JSON_CONTRACT
+        )
         return (
             review_system_prompt(trusted, review_mode=mode)
             + "\n\n"
-            + _REVIEW_JSON_CONTRACT
+            + contract_text
         )
     return (
         coaching_system_prompt(payload_topic(payload), trusted)

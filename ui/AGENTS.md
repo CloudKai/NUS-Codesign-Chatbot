@@ -45,7 +45,7 @@ Only read that for UI tasks that touch API migration or coaching flow.
 | `workspace.py` | Mobile panel radio and three-column studio/chat/sources layout |
 | `chat.py` | Compatibility alias for `panels/chat.py` (messages, citations, composer, `handle_prompt()`) |
 | `sources.py` | Compatibility alias for `panels/sources.py` (library, search/filter, add/viewer dialogs) |
-| `studio.py` | Compatibility alias for `panels/studio.py` (five-phase Journey/Review, pending transitions) |
+| `studio.py` | Compatibility alias for `panels/studio.py` (five-phase Journey/Review, pending transitions). Review stage expanders remount when notebook or current stage changes; keys stay stable within a stage. |
 | `professor.py` | Lecturer Research/analytics workbench. Do not relocate. CSS lives in `assets/styles/70-professor.css`. |
 | `notebooks.py` | Folder-free notebook library and actions dialog (rename, transcript download, delete) |
 | `settings.py` | Preference persistence callbacks used by the profile popover |

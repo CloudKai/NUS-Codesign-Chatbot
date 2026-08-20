@@ -39,7 +39,10 @@ Deep Review is an explicit FastAPI operation
 `specialist=review` only after client-controlled fields are discarded.
 `POST /api/v1/coach/turn` cannot choose Sonnet. Unlock still requires 3
 successful Coaching replies; opening the Review tab is display-only until
-the student starts Deep Review.
+the student starts Deep Review. Deep Review structured output includes
+`stage_reviews` so Strengths / Areas are attributed by Thinking Path stage.
+Holistic synthesis, Facione, and working conclusion stay whole-conversation
+fields. Incremental Review keeps the flatter `review_turn` contract.
 
 ### How Might We scaffold
 
