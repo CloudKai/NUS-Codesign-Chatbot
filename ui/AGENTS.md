@@ -33,7 +33,7 @@ Only read that for UI tasks that touch API migration or coaching flow.
 | `constants.py` | Response languages and appearance modes |
 | `coach_welcome.py` | Seeded welcome copy and the progressive How Might We scaffold card (shown after the unlocking Coach turn when the server projection is available) |
 | `components.py` | Shared HTML helpers for progress, empty states, review cards |
-| `toasts.py` | Corner toast helper (timed slide-in; falls back to `st.toast`) |
+| `toasts.py` | Corner toast helper (timed slide-in; dismiss/timers live on the parent window; falls back to `st.toast`) |
 | `assets/styles/` | Ordered static CSS partials (edit the matching component file) |
 | `theme.py` | Loads `assets/styles/` in fixed order, `inject_template_css()`, dynamic `render_theme_css()` |
 | `layout/` | Browser-side layout helpers (column resize, sources scroll, composer) |

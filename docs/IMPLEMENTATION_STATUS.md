@@ -3,17 +3,51 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock-v2`
-**HEAD:** `20d3369` plus local HMW 2-of-3 readiness and unlock-turn
-placement (uncommitted). Citations schema RC remains `64410dc`. Composer
-layout remains `711d4e6`.
+**HEAD:** `89ccfed` (HMW 2-of-3 + unlock-turn placement). Citations schema
+RC remains `64410dc`. Composer layout remains `711d4e6`.
 **Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
-**Live AgentCore:** DEFAULT → **v23**. Affinity ON. Generation 2. Prompt cache
-OFF. **Do not publish v24 yet.** Do not overlay HMW prompts until this local
-change is reviewed.
+**Live AgentCore:** DEFAULT → **v24 READY**. Affinity ON. Generation 2.
+Prompt cache OFF.
 
-**This phase:** Progressive Problem Identification How Might We scaffold.
-Model-informed + server-gated. No AgentCore publish, no DEFAULT move, no EC2
-rebuild, $0 AWS, zero extra model/Retrieve/AgentCore calls.
+**This phase:** Surgical AgentCore **v24** overlay so live Haiku can emit
+`hmw_scaffold_ready` and judge Problem Identification HMW readiness as two
+of three framing signals. Same ARN
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. v23 kept READY.
+
+**v24 publish (2026-08-20).** Overlay of live v23 zip + HEAD
+`agentcore_runtime/models.py`, `prompts/fast_chat.md`, and
+`prompts/stages/problem_identification.md` only. Artifact
+`s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-hmw-scaffold-20260820T142111Z.zip`.
+DEFAULT liveVersion **24** READY (`lastUpdated` 2026-08-20T14:22:16Z).
+Runtime env copied from v23: Haiku 4.5 Fast Chat, Guardrail v3, Sonnet
+Deep Review. Not bundled: `structured_coach.py`, `specialists/fast_chat.py`,
+RAG, affinity, generation, prompt cache.
+
+`models.py` also carries the local citations-as-array RC (`64410dc`) so
+flatten no longer advertises `citations: ["array", "null"]`.
+
+**Not changed.** FastAPI/EC2 image; `AGENTCORE_SESSION_GENERATION=2`;
+prompt cache OFF; DSQL; RAG; Deep Review `turns=3`. Existing affinity
+sessions stay on the microVM version they were created with. New notebooks
+get v24.
+
+**Production UI.** Live `ddfc3f4` FastAPI does not project
+`hmw_scaffold.available`. Extra `hmw_scaffold_ready` on the wire is ignored
+until an EC2 rebuild from `89ccfed` or later. Do not bump generation.
+
+**Validation.** Targeted mock pytest for Fast Chat schema, HMW prompts, prompt
+baseline, and first-cycle middleware passed before publish. No paid coaching
+turns in this publish. Control-plane confirm: runtime 24 READY, DEFAULT 24
+READY, artifact prefix `chatbot_harnessAgent-hmw-scaffold-20260820T142111Z.zip`.
+
+**Next exact action.** Rebuild/redeploy the EC2 app image from `89ccfed` or
+later when the HMW card should appear in production. Keep generation **2**
+unless you need existing warm sessions off v23. Do not enable prompt cache.
+
+### Prior: local progressive HMW (published as v24)
+
+**HEAD at the local gate:** `89ccfed`. Live AgentCore was still v23 until
+the overlay above.
 
 **Behavior.** New notebooks stay clean: welcome only, no HMW card. After
 enough qualifying Problem Identification Coaching and a validated
@@ -32,30 +66,22 @@ default false.
 **Authority.** Haiku recommends. FastAPI validates, persists slim assessment
 metadata, and derives visibility. The client cannot write the flag.
 
-**Not changed.** AgentCore affinity/generation/runtime version; Fast Chat
-`turns=2`; first-cycle structured output; Deep Review `turns=3`; RAG;
+**Not changed (local HMW work).** AgentCore affinity/generation until v24;
+Fast Chat `turns=2`; first-cycle structured output; Deep Review `turns=3`; RAG;
 citations schema; recommendation `if/then`; DSQL schema; auth; prompt-cache
 config.
 
-**Known residual risk.** Live v23 Haiku will not emit `hmw_scaffold_ready`
-until a later AgentCore overlay. FastAPI treats omit as false, so production
-keeps the scaffold hidden until that overlay. Mock tests inject the field.
+**Known residual risk before v24.** Live v23 Haiku did not emit
+`hmw_scaffold_ready`. FastAPI treated omit as false.
 
-**Next exact action.** Review this local progressive HMW change. Keep
-DEFAULT → **23**. Do not publish AgentCore, rebuild EC2, bump generation, or
-enable prompt cache.
-
-**Validation (this worktree, $0 AWS).** Ruff on touched Python: passed.
+**Validation (local worktree, $0 AWS).** Ruff on touched Python: passed.
 `compileall` passed for `backend`, `ui`, `streamlit_app.py`, `tests`, and
 `scripts` excluding pre-existing broken `scripts/load_probe.py`
 (`IndentationError`; left unstaged). `git diff --check` clean on this
 change. Targeted HMW / Fast Chat schema / first-cycle / prompt-baseline /
 quality matrix / workflow / retrieval / Deep Review / revision /
 idempotency tests passed. Full mock pytest **1454 collected, passed**,
-ignoring `tests/scripts/test_load_probe.py`. No AgentCore publish, no EC2
-rebuild, no production env change.
-
-### Prior: always-on PI HMW card (superseded locally)
+ignoring `tests/scripts/test_load_probe.py`.
 
 The first uncommitted HMW pass showed the formula whenever the stage was
 `problem_identification`, including on an empty notebook. Progressive HMW
@@ -66,8 +92,8 @@ replaces that gate. Completion still uses semantic stay/advance, not a regex.
 **HEAD:** citations schema RC on `Integrate-Bedrock-v2` (`64410dc`).
 Composer layout remains `711d4e6`.
 **Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
-**Live AgentCore:** DEFAULT → **v23**. Affinity ON. Generation 2. Prompt cache
-OFF. **Do not publish v24 yet.**
+**Live AgentCore at that RC:** DEFAULT → **v23**. Affinity ON. Generation 2.
+Prompt cache OFF. The citations-as-array change shipped in the v24 overlay.
 
 **This phase:** Local Fast Chat citations schema release candidate. No
 AgentCore publish, no DEFAULT move, no EC2 rebuild, $0 AWS.
@@ -81,7 +107,7 @@ therefore advertised `citations: ["array", "null"]`. Claude emitted
 `citations: null`; Pydantic still rejected it (`Input should be a valid
 list`); bounded recovery ran a second Haiku cycle.
 
-**Local fix (not published).** Keep Pydantic rejecting JSON `null`. Do not
+**Local fix (later included in v24).** Keep Pydantic rejecting JSON `null`. Do not
 normalize `None → []`. Mark `citations` required as `type: array` in
 `json_schema_extra` and add the short Field description “Always return an
 array. Use [] when no citations are needed.” After Strands flatten the
@@ -101,13 +127,13 @@ passed. Full mock pytest **1414 collected, passed**, ignoring
 `pytest --noconftest tests/domain/test_strands_first_cycle_middleware.py`:
 **14 passed**.
 
-**Production recommendation.** Keep DEFAULT → **23** until this RC is
-reviewed. If accepted, surgical v24 overlay of `agentcore_runtime/models.py`
-only is enough. Do not bump generation. Do not enable prompt cache.
+**Production recommendation at the RC.** Keep DEFAULT → **23** until reviewed.
+The citations-as-array change then shipped in the v24 `models.py` overlay
+together with `hmw_scaffold_ready`. Do not bump generation. Do not enable
+prompt cache.
 
-**Next exact action.** Decide whether to publish a controlled v24 overlay of
-`agentcore_runtime/models.py` only. Keep DEFAULT → **23** until then. Do not
-bump generation. Do not enable prompt cache.
+**Next exact action at the RC.** Publish v24 (done 2026-08-20). Keep
+generation 2. Do not enable prompt cache.
 
 **Known residual risk.** Claude can still emit `citations: null` against an
 array-only schema; that remains invalid and recovery still runs. Nested
@@ -149,13 +175,13 @@ C3 set `retrieval_required=true` from the evidence-worded prompt; KB returned
 0 validated hits (`rag_used=false`). Do not treat that as a selected-source
 RAG run.
 
-**Production recommendation.** Keep DEFAULT → **23**, affinity ON, generation
-2, prompt cache OFF. Do not bump generation. Do not enable prompt cache.
-Do not rebuild EC2 for this schema-only change.
+**Production recommendation at v23.** Keep DEFAULT → **23**, affinity ON,
+generation 2, prompt cache OFF. Do not bump generation. Do not enable prompt
+cache. Do not rebuild EC2 for that schema-only change.
 
-**Next exact action at the time of v23.** The citations flatten hole below was
-the leftover recovery. The local RC above now addresses it; it is not
-published. Do not start Deep Review on the v23 validation notebook.
+**Next exact action at the time of v23.** The citations flatten hole was the
+leftover recovery; it shipped in v24 with HMW. Do not start Deep Review on
+the v23 validation notebook.
 
 **Session affinity:** Compose `AGENTCORE_SESSION_AFFINITY_ENABLED=true` and
 `AGENTCORE_SESSION_GENERATION=2`. Host `.env` still has unused generation
