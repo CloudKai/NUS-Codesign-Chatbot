@@ -159,6 +159,7 @@ SAFE_PERF_FIELDS = frozenset(
         "deep_review_delta_message_count",
         "deep_review_reviewed_message_count",
         "deep_review_estimated_tokens_saved",
+        "deep_review_estimated_savings_ratio",
     }
 )
 

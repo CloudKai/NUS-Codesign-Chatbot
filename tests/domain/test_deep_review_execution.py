@@ -1158,16 +1158,16 @@ def test_failed_stage_aware_deep_review_leaves_previous_stage_reviews(tmp_path) 
     )
 
 
-def _long_text(marker: str) -> str:
+def _long_text(marker: str, *, words: int = 40) -> str:
     """Return enough characters for the conservative token estimator."""
-    return f"{marker} " + ("evidence " * 40)
+    return f"{marker} " + ("evidence " * words)
 
 
 def test_first_deep_review_uses_full_history_and_maps_supporting_refs(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The first Deep Review sends every frozen turn and persists mapped ids."""
-    monkeypatch.setattr(settings, "deep_review_checkpoint_token_threshold", 10_000)
+    monkeypatch.setattr(settings, "deep_review_checkpoint_token_threshold", 20_000)
     store = StudentStore(tmp_path / "dr-first-full.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     user_id = _add_turn(
@@ -1216,7 +1216,7 @@ def test_small_second_deep_review_keeps_full_history(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A valid checkpoint below the token threshold still uses full_history."""
-    monkeypatch.setattr(settings, "deep_review_checkpoint_token_threshold", 10_000)
+    monkeypatch.setattr(settings, "deep_review_checkpoint_token_threshold", 20_000)
     store = StudentStore(tmp_path / "dr-small-second.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     _add_turn(
@@ -1287,7 +1287,7 @@ def test_long_second_deep_review_uses_checkpoint_delta(
         store,
         thread_id,
         role="user",
-        content=_long_text("UNIQUE_ANCHOR_PI_STUDENT"),
+        content=_long_text("UNIQUE_ANCHOR_PI_STUDENT", words=200),
         stage="problem_identification",
     )
     for index in range(8):
@@ -1295,14 +1295,14 @@ def test_long_second_deep_review_uses_checkpoint_delta(
             store,
             thread_id,
             role="user",
-            content=_long_text(f"UNIQUE_OLD_PRE_CHECKPOINT_FILLER_{index}"),
+                content=_long_text(f"UNIQUE_OLD_PRE_CHECKPOINT_FILLER_{index}", words=200),
             stage="problem_identification",
         )
     _add_turn(
         store,
         thread_id,
         role="assistant",
-        content=_long_text("UNIQUE_OLD_PRE_CHECKPOINT_COACH"),
+            content=_long_text("UNIQUE_OLD_PRE_CHECKPOINT_COACH", words=200),
         stage="problem_identification",
     )
     _unlock(store, thread_id)
@@ -1328,21 +1328,21 @@ def test_long_second_deep_review_uses_checkpoint_delta(
         store,
         thread_id,
         role="user",
-        content=_long_text("UNIQUE_DELTA_TURN_A"),
+        content=_long_text("UNIQUE_DELTA_TURN_A", words=200),
         stage="concept_generation",
     )
     _add_turn(
         store,
         thread_id,
         role="assistant",
-        content=_long_text("UNIQUE_DELTA_COACH"),
+            content=_long_text("UNIQUE_DELTA_COACH", words=200),
         stage="concept_generation",
     )
     delta_last = _add_turn(
         store,
         thread_id,
         role="user",
-        content=_long_text("UNIQUE_DELTA_TURN_LAST"),
+            content=_long_text("UNIQUE_DELTA_TURN_LAST", words=200),
         stage="concept_generation",
     )
     _unlock(store, thread_id)
@@ -1361,7 +1361,7 @@ def test_long_second_deep_review_uses_checkpoint_delta(
                     "stage_id": "concept_generation",
                     "strengths": ["Named two concepts"],
                     "areas_to_develop": ["Compare the concepts"],
-                    "supporting_message_refs": ["M4"],
+                    "supporting_message_refs": ["M11"],
                 },
             ],
         )
@@ -1396,6 +1396,7 @@ def test_long_second_deep_review_uses_checkpoint_delta(
         for item in row.get("supporting_message_ids") or []
     ]
     assert anchor_id in supporting
+    assert delta_21 in supporting
     assert "Still names the crossing problem" in _review_items(
         store, thread_id, "strength_sections", "problem_identification"
     )

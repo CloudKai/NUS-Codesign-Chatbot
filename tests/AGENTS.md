@@ -94,7 +94,7 @@ modules.
 | `domain/test_conversation_memory_continuity.py` | 20/50/100-message and chunky-history extractive memory; no LLM summarizer |
 | `domain/test_rag_fallback.py` | Application-owned needs_source_retrieval retry; persist-final-only |
 | `domain/test_deep_review_execution.py` | Background Deep Review enqueue, frozen snapshot, whole-history input, stage-aware `stage_reviews`, checkpoint persistence, counter, no transcript rows, cross-stage snapshot replacement, stale-worker completion guard |
-| `domain/test_deep_review_context.py` | Deep Review `full_history` vs `checkpoint_delta` planning, evidence-ref validation, revision/source invalidation, synthetic token comparison |
+| `domain/test_deep_review_context.py` | Deep Review `full_history` vs `checkpoint_delta` planning, exposed-only `M#` validation, readiness-evidence compact body, absolute+ratio savings gates, revision/source invalidation, synthetic token comparison |
 | `domain/test_deep_review_review_projection.py` | Review-tab merge of `stage_reviews` onto matching stages, legacy `reviewed_stage_id` fallback, HMW attribution, latest-snapshot replacement |
 | `http/test_deep_review.py` | Deep Review job POST/GET, coaching overlap, duplicate/stale/owner isolation |
 | `domain/test_coaching_prompt_baseline.py` | SHA-256 lock on canonical Coaching/stage prompt files |

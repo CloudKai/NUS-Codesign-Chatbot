@@ -3,18 +3,55 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock-v2`
-**HEAD before this work:** `a217316` (Deep Review checkpoint-delta). The
-prompt's `f81d508` SHA was stale. Live citations RC remains `64410dc`.
-Composer layout remains `711d4e6`. Previous HMW 2-of-3 card remains
-`89ccfed` on live AgentCore v24 until a future publish.
+**HEAD before this work:** `9f32fb5` (HMW framing progression). The prompt's
+`a217316` SHA was stale. Live citations RC remains `64410dc`. Composer layout
+remains `711d4e6`. Previous HMW 2-of-3 card remains `89ccfed` on live AgentCore
+v24 until a future publish.
 **Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
 **Live AgentCore:** DEFAULT → **v24 READY**. Affinity ON. Generation 2.
 Prompt cache OFF. **Do not publish AgentCore during this phase.**
 
-**This phase:** Problem Identification → How Might We → Concept Generation
-progression. Framing readiness follows what the student has established, not
-Coaching-turn count. `hmw_scaffold_ready` now means the construction scaffold
-is pedagogically useful. FastAPI remains stage authority.
+**This phase:** Harden Deep Review checkpoint-delta without redesign. Keep
+checkpoint version 1. FastAPI still freezes revision, message ids, source ids,
+and prior checkpoint identity at enqueue. One Sonnet invoke. No Fast Chat
+change. No extra retrieval.
+
+**Behavior.** `context_plan.ref_map` is the model-exposed `M#` map for that
+invoke, not every label theoretically generable from the frozen transcript.
+`checkpoint_delta` therefore accepts supporting refs only for validated
+anchors plus raw delta messages. Compact checkpoint body now includes bounded
+prior `readiness_evidence`. Compacting requires the transcript to exceed
+20,000 estimated tokens **and** save at least 1,000 tokens **and** at least
+20% of the full transcript; otherwise `full_history` (fallback
+`compact_not_smaller`, `compact_savings_too_small`, or
+`compact_savings_ratio_too_small`). Source fingerprinting remains selected
+`source_id` identity: student uploads mint a new UUID per add, so ids are
+immutable per content version. Do not claim production cost savings.
+
+**Not changed.** AgentCore DEFAULT/generation/prompt cache; EC2 image;
+DSQL schema; RAG; citations; Fast Chat slim schema; Fast Chat `turns=2`;
+HMW visibility/progression; Review-tab stage expanders; checkpoint version.
+
+**Validation (local worktree, $0 AWS).** Ruff passed on touched Python.
+`compileall` passed for `backend`, `ui`, `streamlit_app.py`, `tests`, and
+`agentcore_runtime` (`scripts/load_probe.py` remains a pre-existing
+`IndentationError`; left unstaged). Targeted Deep Review context/execution/
+projection, AgentCore Deep Review schema, Fast Chat one-call/schema, HMW,
+revision, RAG/citation, and Deep Review HTTP tests passed. Full
+deterministic suite: **1538 passed**
+(`--ignore=tests/scripts/test_load_probe.py`). Synthetic 30→80 comparison
+at the new 20k threshold (expanded message bodies): full_history 24209
+estimated tokens vs checkpoint_delta 16980 (saved 7229, ratio 0.2986).
+
+**Next exact action.** A future AgentCore runtime publish is required before
+live Sonnet emits `supporting_message_refs` (and follows the exposed-label
+prompt wording). Until then, live Deep Review still uses full_history whenever
+anchors are missing. Do not move DEFAULT. Do not rebuild EC2. Do not enable
+prompt cache.
+
+### Prior: Problem Identification → How Might We progression
+
+**HEAD:** `9f32fb5`. Live AgentCore was still v24.
 
 **Behavior.** 0–1 framing components: stay, hide scaffold, one Socratic
 question. 2–3 components without a valid student HMW: stay, show the HMW
@@ -25,24 +62,10 @@ an HMW does not complete the stage. A deterministic `student_hmw_candidate_prese
 guard forces stay when Haiku recommends ADVANCE without an active-user HMW
 attempt. Latest stay+ready governs visibility; a later valid HMW ADVANCE
 hides the card. Q&A and Deep Review stay isolated. One Fast Chat invoke. Zero
-extra Retrieve calls.
-
-**Not changed.** AgentCore DEFAULT/generation/prompt cache; EC2 image;
-DSQL schema; RAG; citations; Fast Chat slim schema; Fast Chat `turns=2`;
-Deep Review checkpoint architecture; Review-tab stage expanders.
-
-**Validation (local worktree, $0 AWS).** Ruff passed on touched Python.
-`compileall` passed for `backend`, `ui`, `streamlit_app.py`, `tests`, and
-`agentcore_runtime` (`scripts/load_probe.py` remains a pre-existing
-`IndentationError`; left unstaged). Targeted HMW, prompt-baseline, Fast Chat
-schema/first-cycle, stage, revision, Q&A, RAG/citation, Deep Review, and
-Review-tab tests passed. Full deterministic suite: **1526 passed**
-(`--ignore=tests/scripts/test_load_probe.py`).
+extra Retrieve calls. No minimum Coaching-turn count.
 
 **Next exact action.** A future AgentCore runtime publish is required before
 live Haiku follows the updated Problem Identification / Fast Chat prompts.
-Do not publish in this task. Do not rebuild EC2 unless the HMW card copy and
-first-turn visibility must appear in production UI.
 
 ### Prior: cost-efficient Deep Review context
 

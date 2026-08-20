@@ -4,15 +4,22 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from backend.coaching.deep_review_context import (
     DEEP_REVIEW_CHECKPOINT_VERSION,
     DEEP_REVIEW_CONTEXT_CHECKPOINT_DELTA,
     DEEP_REVIEW_CONTEXT_FULL_HISTORY,
     DEFAULT_CHECKPOINT_TOKEN_THRESHOLD,
+    MIN_MEANINGFUL_TOKEN_SAVINGS,
+    MIN_MEANINGFUL_TOKEN_SAVINGS_RATIO,
     assign_message_refs,
     bind_supporting_message_ids,
     checkpoint_identity_for_enqueue,
+    compact_context_fallback_reason,
+    context_metrics,
     estimate_transcript_tokens,
+    estimated_savings_ratio,
     is_checkpoint_capable_snapshot,
     plan_deep_review_context,
     source_fingerprint,
@@ -56,6 +63,7 @@ def _checkpoint(
     revision: int = 20,
     stage_id: str = "problem_identification",
     extra_reviews: list[dict[str, Any]] | None = None,
+    readiness_evidence: list[str] | None = None,
 ) -> dict[str, Any]:
     """Return one checkpoint-capable Deep Review snapshot."""
     reviews = [
@@ -85,7 +93,7 @@ def _checkpoint(
         },
         working_conclusion="Prior working conclusion.",
         readiness_candidate=False,
-        readiness_evidence=[],
+        readiness_evidence=list(readiness_evidence or []),
         missing_requirements=["Name the outcome"],
         model_id="global.anthropic.claude-sonnet-4-6",
         reviewed_stage_id=stage_id,
@@ -96,8 +104,10 @@ def _checkpoint(
     )
 
 
-def test_default_threshold_is_ten_thousand_transcript_tokens() -> None:
-    assert DEFAULT_CHECKPOINT_TOKEN_THRESHOLD == 10_000
+def test_default_threshold_is_twenty_thousand_transcript_tokens() -> None:
+    assert DEFAULT_CHECKPOINT_TOKEN_THRESHOLD == 20_000
+    assert MIN_MEANINGFUL_TOKEN_SAVINGS == 1_000
+    assert MIN_MEANINGFUL_TOKEN_SAVINGS_RATIO == 0.20
 
 
 def test_first_review_without_checkpoint_uses_full_history() -> None:
@@ -137,7 +147,7 @@ def test_small_second_review_stays_full_history() -> None:
         snapshot=snapshot,
         expected_checkpoint_revision=1,
         expected_checkpoint_version=1,
-        threshold=10_000,
+        threshold=20_000,
     )
     assert plan.mode == DEEP_REVIEW_CONTEXT_FULL_HISTORY
     assert plan.fallback_reason == "below_threshold"
@@ -322,17 +332,17 @@ def test_synthetic_long_history_checkpoint_delta_saves_tokens() -> None:
     prior = [
         _message(
             f"p{i}",
-            _long(f"PRIOR{i}", words=60),
+            _long(f"PRIOR{i}", words=100),
             role="user" if i % 2 == 0 else "assistant",
         )
         for i in range(30)
     ]
-    prior[0] = _message("p0", _long("ANCHOR_PRIOR0", words=60), role="user")
+    prior[0] = _message("p0", _long("ANCHOR_PRIOR0", words=100), role="user")
     snapshot = _checkpoint(prior, supporting_ids=["p0"], revision=30)
     delta = [
         _message(
             f"d{i}",
-            _long(f"DELTA{i}", words=60),
+            _long(f"DELTA{i}", words=100),
             role="user" if i % 2 == 0 else "assistant",
         )
         for i in range(50)
@@ -346,10 +356,13 @@ def test_synthetic_long_history_checkpoint_delta_saves_tokens() -> None:
         snapshot=snapshot,
         expected_checkpoint_revision=30,
         expected_checkpoint_version=1,
-        threshold=200,
+        threshold=DEFAULT_CHECKPOINT_TOKEN_THRESHOLD,
         force_full_final=False,
     )
     assert plan.mode == DEEP_REVIEW_CONTEXT_CHECKPOINT_DELTA
+    assert plan.full_estimated_tokens > DEFAULT_CHECKPOINT_TOKEN_THRESHOLD
+    assert plan.estimated_tokens_saved >= MIN_MEANINGFUL_TOKEN_SAVINGS
+    assert plan.estimated_savings_ratio >= MIN_MEANINGFUL_TOKEN_SAVINGS_RATIO
     assert plan.actual_context_estimated_tokens < plan.full_estimated_tokens
     assert plan.delta_message_count == 50
     assert "ANCHOR_PRIOR0" in plan.compact_context
@@ -481,3 +494,336 @@ def test_checkpoint_mismatch_at_worker_falls_back() -> None:
     )
     assert plan.mode == DEEP_REVIEW_CONTEXT_FULL_HISTORY
     assert plan.fallback_reason == "checkpoint_replaced"
+
+
+def _compatible_follow_on_history() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Return a compatible checkpoint plus a short delta for savings tests."""
+    prior = [_message(f"u{i}", _long(f"OLD{i}"), role="user") for i in range(1, 8)]
+    snapshot = _checkpoint(prior, supporting_ids=["u1"], revision=8)
+    current = [
+        *prior,
+        _message("d1", _long("DELTA_USER"), role="user"),
+        _message("d2", _long("DELTA_COACH"), role="assistant"),
+    ]
+    return current, snapshot
+
+
+def _plan_with_token_estimates(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    full_tokens: int,
+    compact_tokens: int,
+    threshold: int,
+) -> Any:
+    """Plan one compatible review with injected token estimates."""
+    import backend.coaching.deep_review_context as module
+
+    current, snapshot = _compatible_follow_on_history()
+    monkeypatch.setattr(module, "estimate_transcript_tokens", lambda _messages: full_tokens)
+    monkeypatch.setattr(module, "estimate_tokens", lambda _text: compact_tokens)
+    return plan_deep_review_context(
+        frozen_history=current,
+        frozen_source_ids=[],
+        frozen_revision=10,
+        frozen_stage="problem_identification",
+        snapshot=snapshot,
+        expected_checkpoint_revision=8,
+        expected_checkpoint_version=1,
+        threshold=threshold,
+        force_full_final=False,
+    )
+
+
+def test_unexposed_historical_ref_is_dropped_in_checkpoint_delta() -> None:
+    prior = [_message(f"u{i}", _long(f"OLD{i}"), role="user") for i in range(1, 21)]
+    snapshot = _checkpoint(prior, supporting_ids=["u1"], revision=20)
+    delta = [
+        _message("d1", _long("DELTA_USER"), role="user"),
+        _message("d2", _long("DELTA_COACH"), role="assistant"),
+    ]
+    current = [*prior, *delta]
+    plan = plan_deep_review_context(
+        frozen_history=current,
+        frozen_source_ids=[],
+        frozen_revision=22,
+        frozen_stage="problem_identification",
+        snapshot=snapshot,
+        expected_checkpoint_revision=20,
+        expected_checkpoint_version=1,
+        threshold=200,
+        force_full_final=False,
+    )
+    assert plan.mode == DEEP_REVIEW_CONTEXT_CHECKPOINT_DELTA
+    assert "M1" in plan.ref_map
+    assert "M4" not in plan.ref_map
+    bound = bind_supporting_message_ids(
+        [
+            {
+                "stage_id": "problem_identification",
+                "strengths": ["Should not cite unseen history"],
+                "areas_to_develop": [],
+                "supporting_message_refs": ["M4"],
+            }
+        ],
+        ref_map=plan.ref_map,
+        frozen_history=current,
+    )
+    assert bound[0]["supporting_message_ids"] == []
+
+
+def test_exposed_anchor_ref_maps_to_durable_id() -> None:
+    prior = [_message(f"u{i}", _long(f"OLD{i}"), role="user") for i in range(1, 21)]
+    snapshot = _checkpoint(prior, supporting_ids=["u1"], revision=20)
+    current = [*prior, _message("d1", _long("DELTA_USER"), role="user")]
+    plan = plan_deep_review_context(
+        frozen_history=current,
+        frozen_source_ids=[],
+        frozen_revision=21,
+        frozen_stage="problem_identification",
+        snapshot=snapshot,
+        expected_checkpoint_revision=20,
+        expected_checkpoint_version=1,
+        threshold=200,
+        force_full_final=False,
+    )
+    assert plan.mode == DEEP_REVIEW_CONTEXT_CHECKPOINT_DELTA
+    assert plan.ref_map["M1"] == "u1"
+    bound = bind_supporting_message_ids(
+        [
+            {
+                "stage_id": "problem_identification",
+                "strengths": ["Named a constraint"],
+                "areas_to_develop": [],
+                "supporting_message_refs": ["M1"],
+            }
+        ],
+        ref_map=plan.ref_map,
+        frozen_history=current,
+    )
+    assert bound[0]["supporting_message_ids"] == ["u1"]
+
+
+def test_exposed_delta_ref_maps_to_durable_id() -> None:
+    prior = [_message(f"u{i}", _long(f"OLD{i}"), role="user") for i in range(1, 21)]
+    snapshot = _checkpoint(prior, supporting_ids=["u1"], revision=20)
+    current = [
+        *prior,
+        _message("d1", _long("DELTA_USER"), role="user"),
+        _message("d2", _long("DELTA_COACH"), role="assistant"),
+    ]
+    plan = plan_deep_review_context(
+        frozen_history=current,
+        frozen_source_ids=[],
+        frozen_revision=22,
+        frozen_stage="problem_identification",
+        snapshot=snapshot,
+        expected_checkpoint_revision=20,
+        expected_checkpoint_version=1,
+        threshold=200,
+        force_full_final=False,
+    )
+    assert plan.mode == DEEP_REVIEW_CONTEXT_CHECKPOINT_DELTA
+    assert plan.ref_map["M21"] == "d1"
+    bound = bind_supporting_message_ids(
+        [
+            {
+                "stage_id": "problem_identification",
+                "strengths": ["Later student turn"],
+                "areas_to_develop": [],
+                "supporting_message_refs": ["M21"],
+            }
+        ],
+        ref_map=plan.ref_map,
+        frozen_history=current,
+    )
+    assert bound[0]["supporting_message_ids"] == ["d1"]
+
+
+def test_full_history_still_accepts_visible_old_refs() -> None:
+    history = [
+        _message("u1", _long("FIRST_USER"), role="user"),
+        _message("a1", "Which users?", role="assistant"),
+        _message("u2", _long("SECOND_USER"), role="user"),
+    ]
+    plan = plan_deep_review_context(
+        frozen_history=history,
+        frozen_source_ids=[],
+        frozen_revision=2,
+        frozen_stage="problem_identification",
+        snapshot=None,
+        expected_checkpoint_revision=None,
+        expected_checkpoint_version=None,
+        threshold=10,
+    )
+    assert plan.mode == DEEP_REVIEW_CONTEXT_FULL_HISTORY
+    assert plan.ref_map["M1"] == "u1"
+    assert plan.ref_map["M3"] == "u2"
+    bound = bind_supporting_message_ids(
+        [
+            {
+                "stage_id": "problem_identification",
+                "strengths": ["Two student turns"],
+                "areas_to_develop": [],
+                "supporting_message_refs": ["M1", "M3"],
+            }
+        ],
+        ref_map=plan.ref_map,
+        frozen_history=history,
+    )
+    assert bound[0]["supporting_message_ids"] == ["u1", "u2"]
+
+
+def test_exposed_assistant_delta_ref_is_still_rejected() -> None:
+    prior = [_message(f"u{i}", _long(f"OLD{i}"), role="user") for i in range(1, 21)]
+    snapshot = _checkpoint(prior, supporting_ids=["u1"], revision=20)
+    current = [
+        *prior,
+        _message("d1", _long("DELTA_USER"), role="user"),
+        _message("d2", _long("DELTA_COACH"), role="assistant"),
+    ]
+    plan = plan_deep_review_context(
+        frozen_history=current,
+        frozen_source_ids=[],
+        frozen_revision=22,
+        frozen_stage="problem_identification",
+        snapshot=snapshot,
+        expected_checkpoint_revision=20,
+        expected_checkpoint_version=1,
+        threshold=200,
+        force_full_final=False,
+    )
+    assert plan.mode == DEEP_REVIEW_CONTEXT_CHECKPOINT_DELTA
+    assert plan.ref_map["M22"] == "d2"
+    bound = bind_supporting_message_ids(
+        [
+            {
+                "stage_id": "problem_identification",
+                "strengths": ["Must stay student evidence"],
+                "areas_to_develop": [],
+                "supporting_message_refs": ["M22"],
+            }
+        ],
+        ref_map=plan.ref_map,
+        frozen_history=current,
+    )
+    assert bound[0]["supporting_message_ids"] == []
+
+
+def test_checkpoint_ref_map_matches_exposed_anchor_and_delta_objects() -> None:
+    prior = [_message(f"u{i}", _long(f"OLD{i}"), role="user") for i in range(1, 21)]
+    snapshot = _checkpoint(prior, supporting_ids=["u1"], revision=20)
+    delta = [
+        _message("d1", _long("DELTA_USER"), role="user"),
+        _message("d2", _long("DELTA_COACH"), role="assistant"),
+    ]
+    current = [*prior, *delta]
+    _eligible, _ref_to_id, id_to_ref = assign_message_refs(current)
+    plan = plan_deep_review_context(
+        frozen_history=current,
+        frozen_source_ids=[],
+        frozen_revision=22,
+        frozen_stage="problem_identification",
+        snapshot=snapshot,
+        expected_checkpoint_revision=20,
+        expected_checkpoint_version=1,
+        threshold=200,
+        force_full_final=False,
+    )
+    assert plan.mode == DEEP_REVIEW_CONTEXT_CHECKPOINT_DELTA
+    exposed_ids = {"u1", "d1", "d2"}
+    expected_labels = {id_to_ref[message_id] for message_id in exposed_ids}
+    assert set(plan.ref_map.keys()) == expected_labels
+    assert set(plan.ref_map.values()) == exposed_ids
+    assert expected_labels.isdisjoint({"M2", "M4", "M10", "M20"})
+
+
+def test_readiness_evidence_appears_in_checkpoint_delta_only() -> None:
+    prior = [_message(f"u{i}", _long(f"OLD{i}"), role="user") for i in range(1, 21)]
+    snapshot = _checkpoint(
+        prior,
+        supporting_ids=["u1"],
+        revision=20,
+        readiness_evidence=["UNIQUE_READINESS_MARKER"],
+    )
+    current = [*prior, _message("d1", _long("DELTA_USER"), role="user")]
+    compact_plan = plan_deep_review_context(
+        frozen_history=current,
+        frozen_source_ids=[],
+        frozen_revision=21,
+        frozen_stage="problem_identification",
+        snapshot=snapshot,
+        expected_checkpoint_revision=20,
+        expected_checkpoint_version=1,
+        threshold=200,
+        force_full_final=False,
+    )
+    assert compact_plan.mode == DEEP_REVIEW_CONTEXT_CHECKPOINT_DELTA
+    assert "UNIQUE_READINESS_MARKER" in compact_plan.compact_context
+    assert "Readiness evidence:" in compact_plan.compact_context
+    full_plan = plan_deep_review_context(
+        frozen_history=current,
+        frozen_source_ids=[],
+        frozen_revision=21,
+        frozen_stage="problem_identification",
+        snapshot=None,
+        expected_checkpoint_revision=None,
+        expected_checkpoint_version=None,
+        threshold=200,
+    )
+    assert full_plan.mode == DEEP_REVIEW_CONTEXT_FULL_HISTORY
+    converse = "\n".join(str(item.get("content") or "") for item in full_plan.converse_history)
+    assert "UNIQUE_READINESS_MARKER" not in converse
+    assert full_plan.compact_context == ""
+
+
+def test_compact_savings_helper_requires_absolute_and_ratio() -> None:
+    assert compact_context_fallback_reason(10_500, 10_250) == "compact_savings_too_small"
+    assert compact_context_fallback_reason(100_000, 85_000) == (
+        "compact_savings_ratio_too_small"
+    )
+    assert compact_context_fallback_reason(2_000, 1_500) == "compact_savings_too_small"
+    assert compact_context_fallback_reason(25_000, 15_000) == ""
+    assert compact_context_fallback_reason(8_000, 8_000) == "compact_not_smaller"
+    assert estimated_savings_ratio(0, 100) == 0.0
+
+
+def test_tiny_saving_does_not_compact(monkeypatch: pytest.MonkeyPatch) -> None:
+    plan = _plan_with_token_estimates(
+        monkeypatch, full_tokens=25_000, compact_tokens=24_500, threshold=20_000
+    )
+    assert plan.mode == DEEP_REVIEW_CONTEXT_FULL_HISTORY
+    assert plan.fallback_reason == "compact_savings_too_small"
+
+
+def test_absolute_pass_but_ratio_fail_does_not_compact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = _plan_with_token_estimates(
+        monkeypatch, full_tokens=100_000, compact_tokens=85_000, threshold=20_000
+    )
+    assert plan.mode == DEEP_REVIEW_CONTEXT_FULL_HISTORY
+    assert plan.fallback_reason == "compact_savings_ratio_too_small"
+
+
+def test_ratio_pass_but_absolute_fail_does_not_compact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = _plan_with_token_estimates(
+        monkeypatch, full_tokens=2_000, compact_tokens=1_500, threshold=100
+    )
+    assert plan.mode == DEEP_REVIEW_CONTEXT_FULL_HISTORY
+    assert plan.fallback_reason == "compact_savings_too_small"
+
+
+def test_meaningful_absolute_and_ratio_saving_uses_checkpoint_delta(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = _plan_with_token_estimates(
+        monkeypatch, full_tokens=25_000, compact_tokens=15_000, threshold=20_000
+    )
+    assert plan.mode == DEEP_REVIEW_CONTEXT_CHECKPOINT_DELTA
+    assert plan.estimated_tokens_saved == 10_000
+    assert plan.estimated_savings_ratio == 0.4
+    metrics = context_metrics(plan)
+    assert metrics["deep_review_estimated_savings_ratio"] == 0.4
+    assert metrics["deep_review_estimated_tokens_saved"] == 10_000

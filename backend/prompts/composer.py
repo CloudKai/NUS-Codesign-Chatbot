@@ -244,8 +244,11 @@ def _runtime_instructions(context: PromptContext) -> str:
     if context.context_policy == "deep_review":
         parts.append(
             "Message labels [M1], [M2], ... are request-local. Return "
-            "supporting_message_refs using those labels only. Do not invent "
-            "database identifiers."
+            "supporting_message_refs using those labels only. Cite only labels "
+            "that appear in this request's supplied messages. In "
+            "checkpoint_delta mode that is original evidence anchors plus raw "
+            "post-checkpoint messages, not historical turns omitted from the "
+            "payload. Do not invent database identifiers."
         )
         if str(context.deep_review_compact_context or "").strip():
             parts.append(

@@ -63,6 +63,10 @@ Context modes:
   previous scores heuristically.
 - Message labels [M1], [M2], ... are request-local. Return those labels
   in supporting_message_refs. Never return database identifiers.
+  Cite only labels that appear in this request. Labels may be
+  non-contiguous. In checkpoint_delta mode the supplied messages are the
+  original evidence anchors plus ALL raw active turns since the
+  checkpoint; do not cite historical M# labels that were not included.
 
 Rules:
 1. Recommendation must be stay or advance.

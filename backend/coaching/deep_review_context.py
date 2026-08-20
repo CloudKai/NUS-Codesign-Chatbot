@@ -8,6 +8,11 @@ Small, first, legacy, and incompatible reviews keep full frozen history.
 Long compatible reviews send the prior validated checkpoint, exact raw
 evidence anchors, and every raw active turn since that checkpoint. There is
 still one Sonnet invoke. Checkpoints are not rolling summaries.
+
+``DeepReviewContextPlan.ref_map`` is the model-exposed label map for that
+exact invoke, not every label that could theoretically be generated from the
+frozen transcript. Durable ``supporting_message_ids`` may originate only from
+those exposed ``M#`` labels.
 """
 
 from __future__ import annotations
@@ -23,10 +28,13 @@ from backend.turn_perf import record_field
 DEEP_REVIEW_CHECKPOINT_VERSION = 1
 DEEP_REVIEW_CONTEXT_FULL_HISTORY = "full_history"
 DEEP_REVIEW_CONTEXT_CHECKPOINT_DELTA = "checkpoint_delta"
-DEFAULT_CHECKPOINT_TOKEN_THRESHOLD = 10_000
+DEFAULT_CHECKPOINT_TOKEN_THRESHOLD = 20_000
 MAX_SUPPORTING_MESSAGE_REFS = 3
 MAX_COMPACT_CONTEXT_CHARS = 120_000
-MIN_MEANINGFUL_TOKEN_SAVINGS = 200
+MIN_MEANINGFUL_TOKEN_SAVINGS = 1_000
+MIN_MEANINGFUL_TOKEN_SAVINGS_RATIO = 0.20
+_MAX_COMPACT_READINESS_EVIDENCE_ITEMS = 12
+_MAX_COMPACT_READINESS_EVIDENCE_CHARS = 400
 _MESSAGE_REF_RE = re.compile(r"^M([1-9][0-9]{0,3})$")
 _DEEP_REVIEW_SYNTHETIC_KINDS = frozenset({"deep_review", "review_deep"})
 
@@ -41,6 +49,7 @@ DEEP_REVIEW_CONTEXT_METRIC_KEYS = (
     "deep_review_delta_message_count",
     "deep_review_reviewed_message_count",
     "deep_review_estimated_tokens_saved",
+    "deep_review_estimated_savings_ratio",
 )
 
 
@@ -50,7 +59,8 @@ class DeepReviewContextPlan:
 
     ``converse_history`` is what the planner may send as Converse messages.
     ``frozen_history`` remains the authoritative frozen active branch used
-    for persistence and represented-stage filtering.
+    for persistence and represented-stage filtering. ``ref_map`` contains
+    only ``M#`` labels actually exposed to Sonnet in this invocation.
     """
 
     mode: str
@@ -60,6 +70,7 @@ class DeepReviewContextPlan:
     full_estimated_tokens: int
     actual_context_estimated_tokens: int
     estimated_tokens_saved: int
+    estimated_savings_ratio: float
     anchor_count: int
     delta_message_count: int
     reviewed_message_count: int
@@ -98,6 +109,13 @@ def _id_set(values: Any) -> set[str]:
 
 def source_fingerprint(source_ids: list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
     """Return a sorted unique fingerprint of frozen selected-source ids.
+
+    Student uploads allocate a new UUID on each add, and rename does not
+    replace file bytes in place, so ``source_id`` is immutable per content
+    version. Shared course ids are uuid5 of the object key; an overwrite at
+    the same key would keep that virtual id. Deep Review does not download
+    files or hash content solely to fingerprint. Selected-source identity
+    changes still invalidate the checkpoint.
 
     Args:
         source_ids: Source identifiers frozen on the job or checkpoint.
@@ -205,6 +223,95 @@ def assign_message_refs(
         ref_to_id[label] = message_id
         id_to_ref[message_id] = label
     return eligible, ref_to_id, id_to_ref
+
+
+def filter_ref_map(
+    ref_to_id: dict[str, str],
+    exposed_message_ids: set[str] | frozenset[str],
+) -> dict[str, str]:
+    """Return only labels whose durable ids were actually sent to Sonnet.
+
+    Global request-local numbering is preserved. Unexposed historical labels
+    are omitted so they cannot validate.
+
+    Args:
+        ref_to_id: Full eligible ``M#`` → durable id map for this request.
+        exposed_message_ids: Durable ids present in the model-facing payload.
+
+    Returns:
+        A subset of *ref_to_id* covering only exposed messages.
+    """
+    exposed = {
+        _clean_id(message_id)
+        for message_id in exposed_message_ids
+        if _clean_id(message_id)
+    }
+    return {
+        label: message_id
+        for label, message_id in ref_to_id.items()
+        if message_id in exposed
+    }
+
+
+def exposed_message_ids_for_blocks(
+    *message_groups: list[dict[str, Any]],
+) -> set[str]:
+    """Return durable ids from the message objects rendered as compact blocks.
+
+    Args:
+        *message_groups: Anchor and delta message lists in render order.
+
+    Returns:
+        Unique non-empty message ids. Derived from objects, not generated text.
+    """
+    found: set[str] = set()
+    for group in message_groups:
+        for item in group:
+            message_id = _message_id(item)
+            if message_id:
+                found.add(message_id)
+    return found
+
+
+def estimated_savings_ratio(full_tokens: int, saved: int) -> float:
+    """Return ``saved / full_tokens``, or ``0.0`` when *full_tokens* is not positive.
+
+    Args:
+        full_tokens: Estimated full-history transcript tokens.
+        saved: ``full_tokens - compact_tokens``.
+
+    Returns:
+        A non-negative ratio. Never divides by zero.
+    """
+    if int(full_tokens) <= 0:
+        return 0.0
+    return max(0.0, int(saved)) / int(full_tokens)
+
+
+def compact_context_fallback_reason(full_tokens: int, compact_tokens: int) -> str:
+    """Return why compact context must not replace full history, or empty.
+
+    Threshold membership is decided separately. This helper only answers
+    whether a particular checkpoint actually saves enough context.
+
+    Args:
+        full_tokens: Estimated full-history tokens.
+        compact_tokens: Estimated checkpoint-delta tokens.
+
+    Returns:
+        ``compact_not_smaller``, ``compact_savings_too_small``,
+        ``compact_savings_ratio_too_small``, or ``""`` when compacting is
+        worthwhile.
+    """
+    saved = int(full_tokens) - int(compact_tokens)
+    if int(compact_tokens) >= int(full_tokens) or saved <= 0:
+        return "compact_not_smaller"
+    if saved < MIN_MEANINGFUL_TOKEN_SAVINGS:
+        return "compact_savings_too_small"
+    ratio = estimated_savings_ratio(full_tokens, saved)
+    if ratio < MIN_MEANINGFUL_TOKEN_SAVINGS_RATIO:
+        return "compact_savings_ratio_too_small"
+    return ""
 
 
 def format_labeled_message(label: str, message: dict[str, Any]) -> str:
@@ -361,6 +468,11 @@ def _format_checkpoint_body(snapshot: dict[str, Any]) -> str:
         "Readiness candidate: "
         + ("true" if snapshot.get("readiness_candidate") else "false"),
     ]
+    readiness_evidence = _bounded_readiness_evidence(snapshot)
+    if readiness_evidence:
+        lines.extend(
+            ["", "Readiness evidence:", *[f"- {item}" for item in readiness_evidence]]
+        )
     missing = [
         str(item).strip()
         for item in (snapshot.get("missing_requirements") or [])
@@ -410,6 +522,32 @@ def _format_checkpoint_body(snapshot: dict[str, Any]) -> str:
         ]
     )
     return "\n".join(lines)
+
+
+def _bounded_readiness_evidence(snapshot: dict[str, Any]) -> list[str]:
+    """Return persisted readiness-evidence strings clipped for compact context.
+
+    This is Sonnet's prior holistic summary, not student message content.
+    Bounds reuse the snapshot persist cap (12 items) plus a per-item clip.
+
+    Args:
+        snapshot: Prior validated Deep Review snapshot.
+
+    Returns:
+        Compact, bounded evidence lines.
+    """
+    raw = snapshot.get("readiness_evidence")
+    if not isinstance(raw, list):
+        return []
+    bounded: list[str] = []
+    for item in raw:
+        cleaned = str(item).strip()
+        if not cleaned:
+            continue
+        bounded.append(cleaned[:_MAX_COMPACT_READINESS_EVIDENCE_CHARS])
+        if len(bounded) >= _MAX_COMPACT_READINESS_EVIDENCE_ITEMS:
+            break
+    return bounded
 
 
 def build_checkpoint_delta_context(
@@ -663,7 +801,7 @@ def plan_deep_review_context(
 
     Returns:
         A plan with converse history, optional compact untrusted context, and
-        the ephemeral ``M#`` map.
+        the model-exposed ``M#`` map for this invoke.
     """
     eligible, ref_to_id, id_to_ref = assign_message_refs(frozen_history)
     full_tokens = estimate_transcript_tokens(eligible)
@@ -686,6 +824,7 @@ def plan_deep_review_context(
             full_estimated_tokens=full_tokens,
             actual_context_estimated_tokens=full_tokens,
             estimated_tokens_saved=0,
+            estimated_savings_ratio=0.0,
             anchor_count=anchor_count,
             delta_message_count=delta_count,
             reviewed_message_count=reviewed_count,
@@ -755,14 +894,17 @@ def plan_deep_review_context(
         )
     compact_tokens = estimate_tokens(compact)
     saved = full_tokens - compact_tokens
-    if compact_tokens >= full_tokens or saved < MIN_MEANINGFUL_TOKEN_SAVINGS:
+    savings_reason = compact_context_fallback_reason(full_tokens, compact_tokens)
+    if savings_reason:
         return _full(
-            "compact_not_smaller",
+            savings_reason,
             checkpoint_valid=True,
             checkpoint_revision=_optional_int(snapshot.get("reviewed_through_revision")),
             anchor_count=len(anchors),
             delta_count=len(delta_messages),
         )
+    exposed_ids = exposed_message_ids_for_blocks(anchors, delta_messages)
+    exposed_ref_map = filter_ref_map(ref_to_id, exposed_ids)
     return DeepReviewContextPlan(
         mode=DEEP_REVIEW_CONTEXT_CHECKPOINT_DELTA,
         fallback_reason="",
@@ -771,11 +913,12 @@ def plan_deep_review_context(
         full_estimated_tokens=full_tokens,
         actual_context_estimated_tokens=compact_tokens,
         estimated_tokens_saved=max(0, saved),
+        estimated_savings_ratio=round(estimated_savings_ratio(full_tokens, saved), 4),
         anchor_count=len(anchors),
         delta_message_count=len(delta_messages),
         reviewed_message_count=reviewed_count,
         compact_context=compact,
-        ref_map=ref_to_id,
+        ref_map=exposed_ref_map,
         converse_history=[],
         frozen_history=list(frozen_history),
     )
@@ -805,6 +948,7 @@ def context_metrics(plan: DeepReviewContextPlan) -> dict[str, Any]:
         "deep_review_delta_message_count": int(plan.delta_message_count),
         "deep_review_reviewed_message_count": int(plan.reviewed_message_count),
         "deep_review_estimated_tokens_saved": int(plan.estimated_tokens_saved),
+        "deep_review_estimated_savings_ratio": float(plan.estimated_savings_ratio),
     }
 
 

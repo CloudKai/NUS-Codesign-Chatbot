@@ -46,18 +46,23 @@ fields. Incremental Review keeps the flatter `review_turn` contract.
 
 Deep Review context policy:
 
-- `full_history` for first reviews, conversations below
-  `DEEP_REVIEW_CHECKPOINT_TOKEN_THRESHOLD` (default 10,000 estimated
-  transcript tokens), incompatible/legacy snapshots, Reflection when
+- `full_history` for first reviews, conversations at or below
+  `DEEP_REVIEW_CHECKPOINT_TOKEN_THRESHOLD` (default 20,000 estimated
+  transcript tokens), compact results that are not meaningfully cheaper,
+  incompatible/legacy snapshots, Reflection when
   `DEEP_REVIEW_FORCE_FULL_FINAL=true`, and any uncertain compatibility check.
-- `checkpoint_delta` for a compatible long conversation: the prior Sonnet
-  review, exact validated student evidence anchors, all raw active turns
-  since that checkpoint, and current frozen source context. Still one
-  Sonnet invoke.
+- `checkpoint_delta` only when the transcript is above that threshold and
+  compacting saves at least 1,000 estimated tokens and at least 20% of the
+  full transcript. The payload is the prior Sonnet review (including
+  persisted `readiness_evidence`), exact validated student evidence anchors,
+  all raw active turns since that checkpoint, and current frozen source
+  context. Still one Sonnet invoke.
+- `ref_map` contains only `M#` labels actually exposed in that invocation.
+  FastAPI maps those labels to durable message ids. Unexposed historical
+  labels cannot persist.
 
 Checkpoints are not rolling summaries, Fast Chat memory, or AgentCore
-Memory, and they do not replace DSQL as conversation authority. FastAPI
-maps ephemeral `M#` labels to durable message ids before persistence.
+Memory, and they do not replace DSQL as conversation authority.
 
 ### How Might We scaffold
 

@@ -361,12 +361,14 @@ class Settings:
         )
     )
     # Compact checkpoint_delta only when the frozen transcript itself is
-    # large. Default 10,000 estimated tokens (~30k characters at 3
-    # chars/token) sits well below Sonnet's 210k max input so small and
-    # first reviews keep full_history. Do not reuse the Fast Chat 12k/16k
+    # large enough that compacting is worth considering. Default 20,000
+    # estimated tokens sits well below Sonnet's 210k max input so ordinary
+    # classroom reviews keep full_history. Absolute and relative savings
+    # gates in deep_review_context.py decide whether a particular checkpoint
+    # is actually cheaper enough to use. Do not reuse the Fast Chat 12k/16k
     # window; that policy is latency-oriented and must not apply here.
     deep_review_checkpoint_token_threshold: int = _bounded_int(
-        "DEEP_REVIEW_CHECKPOINT_TOKEN_THRESHOLD", 10_000, 2_000, 80_000
+        "DEEP_REVIEW_CHECKPOINT_TOKEN_THRESHOLD", 20_000, 2_000, 80_000
     )
     deep_review_force_full_final: bool = _boolean(
         "DEEP_REVIEW_FORCE_FULL_FINAL", True
