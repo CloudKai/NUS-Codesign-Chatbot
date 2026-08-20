@@ -42,6 +42,7 @@ from backend.domain import (
     StageDecision,
 )
 from backend.learning_service import LearningProgressService
+from backend.learning.hmw import hmw_scaffold_available
 from backend.models import DEFAULT_CHAT_MODEL_ID, get_model, validate_reasoning
 from backend.prompts.composer import COACH_PROMPT_VERSION
 from backend.research.models import ResearchEvidenceSpan, ResearchObservationCreate
@@ -1083,6 +1084,31 @@ class CoachApplicationService:
             ),
         )
         record_field("persist_turn_ms", elapsed_ms(persist_started))
+        persist_stage = (
+            auto_advance.to_stage
+            if auto_advance is not None
+            else prepared_request.current_stage
+        )
+        record_field(
+            "hmw_scaffold_ready_model",
+            bool(turn.assessment.hmw_scaffold_ready),
+        )
+        record_field(
+            "hmw_scaffold_available",
+            hmw_scaffold_available(
+                persist_stage,
+                list(prepared_request.history or [])
+                + [
+                    {
+                        "role": "assistant",
+                        "metadata": {
+                            "assessment": turn.assessment.persisted_mapping(),
+                        },
+                    }
+                ],
+                enabled=runtime_settings.hmw_scaffold_enabled,
+            ),
+        )
         return turn
 
     def _summary_metadata_for_persist(

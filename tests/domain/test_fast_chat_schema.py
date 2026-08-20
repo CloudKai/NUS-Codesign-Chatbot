@@ -42,6 +42,16 @@ def _qa(**extra: Any) -> dict[str, Any]:
     return payload
 
 
+def _schema_instance(**fields: Any) -> dict[str, Any]:
+    """Return a Fast Chat instance that satisfies generated ``required`` keys."""
+    payload: dict[str, Any] = {
+        "citations": [],
+        "hmw_scaffold_ready": False,
+    }
+    payload.update(fields)
+    return payload
+
+
 def _schema_allows(schema: dict[str, Any], instance: Any) -> bool:
     """Return whether ``instance`` satisfies a Fast Chat JSON Schema subset.
 
@@ -163,45 +173,46 @@ def test_generated_schema_is_single_object_not_union() -> None:
     assert then_rec.get("enum") == ["stay", "advance"]
     assert "recommendation" in schema["then"]["required"]
     assert "citations" in (schema.get("required") or [])
+    assert "hmw_scaffold_ready" in (schema.get("required") or [])
     citations = (schema.get("properties") or {}).get("citations") or {}
     assert citations.get("type") == "array"
     assert "null" not in str(citations.get("type"))
     assert citations.get("anyOf") is None
     assert citations.get("oneOf") is None
+    hmw_ready = (schema.get("properties") or {}).get("hmw_scaffold_ready") or {}
+    assert hmw_ready.get("type") == "boolean"
+    assert "null" not in str(hmw_ready.get("type"))
+    assert hmw_ready.get("anyOf") is None
+    assert hmw_ready.get("oneOf") is None
 
 
 def test_generated_schema_rejects_coaching_null_and_keeps_qa_null() -> None:
     schema = FastChatTurnOutput.model_json_schema()
-    coaching_stay = {
-        "mode": "coaching",
-        "response_text": _TEXT,
-        "recommendation": "stay",
-        "citations": [],
-    }
-    coaching_advance = {
-        "mode": "coaching",
-        "response_text": _TEXT,
-        "recommendation": "advance",
-        "citations": [],
-    }
-    coaching_null = {
-        "mode": "coaching",
-        "response_text": _TEXT,
-        "recommendation": None,
-        "citations": [],
-    }
-    coaching_missing = {
-        "mode": "coaching",
-        "response_text": _TEXT,
-        "citations": [],
-    }
-    qa_null = {
-        "mode": "qa",
-        "response_text": "Week 1.",
-        "recommendation": None,
-        "citations": [],
-    }
-    qa_omitted = {"mode": "qa", "response_text": "Week 1.", "citations": []}
+    coaching_stay = _schema_instance(
+        mode="coaching",
+        response_text=_TEXT,
+        recommendation="stay",
+    )
+    coaching_advance = _schema_instance(
+        mode="coaching",
+        response_text=_TEXT,
+        recommendation="advance",
+    )
+    coaching_null = _schema_instance(
+        mode="coaching",
+        response_text=_TEXT,
+        recommendation=None,
+    )
+    coaching_missing = _schema_instance(
+        mode="coaching",
+        response_text=_TEXT,
+    )
+    qa_null = _schema_instance(
+        mode="qa",
+        response_text="Week 1.",
+        recommendation=None,
+    )
+    qa_omitted = _schema_instance(mode="qa", response_text="Week 1.")
     assert _schema_allows(schema, coaching_stay)
     assert _schema_allows(schema, coaching_advance)
     assert not _schema_allows(schema, coaching_null)
@@ -283,6 +294,7 @@ def test_fast_chat_persisted_mapping_omits_review_fields() -> None:
     ).persisted_mapping()
     assert slim["response_mode"] == "coaching"
     assert slim["recommendation"] == "stay"
+    assert "hmw_scaffold_ready" not in slim
     assert "facione_scores" not in slim
     assert "review_strengths" not in slim
     assert "working_conclusion" not in slim
@@ -472,38 +484,140 @@ def test_qa_valid_citation_list_passes_pydantic() -> None:
 
 def test_generated_schema_rejects_citations_null_and_requires_array() -> None:
     schema = FastChatTurnOutput.model_json_schema()
-    coaching_empty = {
-        "mode": "coaching",
-        "response_text": _TEXT,
-        "recommendation": "stay",
-        "citations": [],
-    }
-    coaching_null = {
-        "mode": "coaching",
-        "response_text": _TEXT,
-        "recommendation": "stay",
-        "citations": None,
-    }
+    coaching_empty = _schema_instance(
+        mode="coaching",
+        response_text=_TEXT,
+        recommendation="stay",
+    )
+    coaching_null = _schema_instance(
+        mode="coaching",
+        response_text=_TEXT,
+        recommendation="stay",
+        citations=None,
+    )
     coaching_omitted = {
         "mode": "coaching",
         "response_text": _TEXT,
         "recommendation": "stay",
+        "hmw_scaffold_ready": False,
     }
-    coaching_string = {
-        "mode": "coaching",
-        "response_text": _TEXT,
-        "recommendation": "stay",
-        "citations": "S1",
-    }
-    qa_valid = {
-        "mode": "qa",
-        "response_text": "Week 1.",
-        "citations": [{"label": "S1"}],
-    }
-    qa_null = {"mode": "qa", "response_text": "Week 1.", "citations": None}
+    coaching_string = _schema_instance(
+        mode="coaching",
+        response_text=_TEXT,
+        recommendation="stay",
+        citations="S1",
+    )
+    qa_valid = _schema_instance(
+        mode="qa",
+        response_text="Week 1.",
+        citations=[{"label": "S1"}],
+    )
+    qa_null = _schema_instance(mode="qa", response_text="Week 1.", citations=None)
     assert _schema_allows(schema, coaching_empty)
     assert not _schema_allows(schema, coaching_null)
     assert not _schema_allows(schema, coaching_omitted)
     assert not _schema_allows(schema, coaching_string)
     assert _schema_allows(schema, qa_valid)
     assert not _schema_allows(schema, qa_null)
+
+
+def test_hmw_scaffold_ready_omitted_or_null_defaults_false() -> None:
+    """Old Fast Chat payloads without the field must still parse."""
+    omitted = parse_fast_chat_turn_output(
+        {
+            "mode": "coaching",
+            "response_text": _TEXT,
+            "recommendation": "stay",
+            "citations": [],
+        }
+    )
+    assert omitted.hmw_scaffold_ready is False
+    nullish = parse_fast_chat_turn_output(
+        {
+            "mode": "coaching",
+            "response_text": _TEXT,
+            "recommendation": "stay",
+            "citations": [],
+            "hmw_scaffold_ready": None,
+        }
+    )
+    assert nullish.hmw_scaffold_ready is False
+    malformed = parse_fast_chat_turn_output(
+        {
+            "mode": "coaching",
+            "response_text": _TEXT,
+            "recommendation": "stay",
+            "citations": [],
+            "hmw_scaffold_ready": "true",
+        }
+    )
+    assert malformed.hmw_scaffold_ready is False
+
+
+def test_qa_forces_hmw_scaffold_ready_false() -> None:
+    """Q&A cannot unlock How Might We readiness."""
+    parsed = parse_fast_chat_turn_output(
+        _qa(hmw_scaffold_ready=True, recommendation="advance")
+    )
+    assert parsed.mode == "qa"
+    assert parsed.recommendation is None
+    assert parsed.hmw_scaffold_ready is False
+
+
+def test_coaching_hmw_scaffold_ready_true_does_not_imply_advance() -> None:
+    """Readiness to formulate is independent of stay/advance."""
+    parsed = parse_fast_chat_turn_output(
+        _coaching(hmw_scaffold_ready=True, recommendation="stay", citations=[])
+    )
+    assert parsed.hmw_scaffold_ready is True
+    assert parsed.recommendation == "stay"
+
+
+def test_generated_schema_rejects_hmw_scaffold_ready_null() -> None:
+    schema = FastChatTurnOutput.model_json_schema()
+    valid = _schema_instance(
+        mode="coaching",
+        response_text=_TEXT,
+        recommendation="stay",
+        hmw_scaffold_ready=True,
+    )
+    omitted = {
+        "mode": "coaching",
+        "response_text": _TEXT,
+        "recommendation": "stay",
+        "citations": [],
+    }
+    nullish = _schema_instance(
+        mode="coaching",
+        response_text=_TEXT,
+        recommendation="stay",
+        hmw_scaffold_ready=None,
+    )
+    assert _schema_allows(schema, valid)
+    assert not _schema_allows(schema, omitted)
+    assert not _schema_allows(schema, nullish)
+
+
+def test_persisted_mapping_keeps_hmw_scaffold_ready_only_when_true() -> None:
+    slim_false = EducationalAssessment(
+        current_stage="problem_identification",
+        recommendation=StageDecision.STAY,
+        response_mode="coaching",
+        hmw_scaffold_ready=False,
+    ).persisted_mapping()
+    assert "hmw_scaffold_ready" not in slim_false
+    slim_true = EducationalAssessment(
+        current_stage="problem_identification",
+        recommendation=StageDecision.STAY,
+        response_mode="coaching",
+        hmw_scaffold_ready=True,
+    ).persisted_mapping()
+    assert slim_true["hmw_scaffold_ready"] is True
+    old = EducationalAssessment.model_validate(
+        {
+            "current_stage": "problem_identification",
+            "response_mode": "coaching",
+            "recommendation": "stay",
+        }
+    )
+    assert old.hmw_scaffold_ready is False

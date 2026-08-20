@@ -220,6 +220,10 @@ class Settings:
     # When true, Journey lets students pick any Thinking Path stage. Takes
     # precedence over auto_advance_stages (selection wins if both are true).
     student_stage_selection: bool = _boolean("STUDENT_STAGE_SELECTION", False)
+    # Progressive How Might We scaffold in Problem Identification. Default
+    # on; FastAPI still gates visibility from stage + active Coaching
+    # assessments. Do not treat this as a client-writable switch.
+    hmw_scaffold_enabled: bool = _boolean("HMW_SCAFFOLD_ENABLED", True)
     model_provider: str = os.getenv("MODEL_PROVIDER", "mock").strip().lower()
     openai_chat_model: str = os.getenv("OPENAI_CHAT_MODEL", "gpt-5.6-luna")
     openai_timeout_seconds: float = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "110"))

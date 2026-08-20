@@ -55,6 +55,8 @@ from backend.providers import (
 )
 from backend.rate_limit import RateLimitExceeded
 from backend.settings import settings, validate_production_configuration
+from backend.learning.hmw import hmw_scaffold_projection
+from backend.student_journey import DEFAULT_STAGE, normalize_journey
 from backend.source_library import CourseMaterialSyncCoordinator, list_visible_sources
 from backend.turn_perf import begin_coach_turn_perf, record_field
 from backend.student_store import (
@@ -1121,11 +1123,22 @@ def create_app(
         thread_id: str,
         owner: OwnerServices = Depends(current_owner),
     ) -> dict:
-        """Return persisted notebook learning metadata for the owned thread."""
+        """Return persisted notebook learning metadata for the owned thread.
+
+        Includes a read-only ``hmw_scaffold`` projection derived from the
+        authoritative stage and active conversation. Clients cannot set it.
+        """
         thread = owner.store.get_thread(thread_id)
         if not thread:
             raise HTTPException(status_code=404, detail="Notebook not found")
-        return dict(thread.get("metadata") or {})
+        payload = dict(thread.get("metadata") or {})
+        journey = normalize_journey(payload.get("learning_journey"))
+        payload["hmw_scaffold"] = hmw_scaffold_projection(
+            str(journey.get("current_stage") or DEFAULT_STAGE),
+            owner.store.get_messages(thread_id),
+            enabled=settings.hmw_scaffold_enabled,
+        )
+        return payload
 
     @app.post("/api/v1/threads/{thread_id}/learning-state/select-stage")
     def select_learning_stage(

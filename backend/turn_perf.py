@@ -75,6 +75,8 @@ SAFE_PERF_FIELDS = frozenset(
         "mode_returned",
         "mode_policy_intent",
         "mode_policy_enforced",
+        "hmw_scaffold_ready_model",
+        "hmw_scaffold_available",
         "idempotency_claim_ms",
         "persist_turn_ms",
         "idempotency_complete_ms",

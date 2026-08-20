@@ -620,12 +620,15 @@ def _fast_chat_assessment(
     recommendation: StageDecision | None,
     recommendation_rationale: str,
     citations: list[CitationReference] | None = None,
+    hmw_scaffold_ready: bool = False,
 ) -> EducationalAssessment:
     """Build the slim persisted assessment for one Fast Chat turn.
 
     Facione, review lists, and research coding are omitted. Historical rows
-    may still contain those fields; new turns do not invent them.
+    may still contain those fields; new turns do not invent them. Q&A never
+    persists How Might We readiness.
     """
+    ready = bool(hmw_scaffold_ready) if mode == "coaching" else False
     return EducationalAssessment(
         current_stage=request.current_stage,
         recommendation=recommendation,
@@ -633,6 +636,7 @@ def _fast_chat_assessment(
         citations=citations or [],
         response_mode=mode,
         readiness_candidate=recommendation is StageDecision.ADVANCE,
+        hmw_scaffold_ready=ready,
     )
 
 
@@ -955,6 +959,7 @@ def _validated_fast_chat(
         str(enforcement.overridden).lower(),
     )
     if enforcement.effective_mode == SPECIALIST_QA:
+        record_field("hmw_scaffold_ready_model", False)
         return ProviderAssessmentResult(
             response_text=output.response_text,
             assessment=_fast_chat_assessment(
@@ -963,6 +968,7 @@ def _validated_fast_chat(
                 recommendation=None,
                 recommendation_rationale="",
                 citations=citations,
+                hmw_scaffold_ready=False,
             ),
             research_coding=None,
             specialist=SPECIALIST_QA,
@@ -973,12 +979,14 @@ def _validated_fast_chat(
         )
     if output.recommendation not in {StageDecision.STAY.value, StageDecision.ADVANCE.value}:
         raise _malformed_error()
+    record_field("hmw_scaffold_ready_model", bool(output.hmw_scaffold_ready))
     assessment = _fast_chat_assessment(
         request,
         mode="coaching",
         recommendation=StageDecision(output.recommendation),
         recommendation_rationale=str(output.recommendation_rationale or ""),
         citations=citations,
+        hmw_scaffold_ready=bool(output.hmw_scaffold_ready),
     )
     if assessment.recommendation is StageDecision.ADVANCE:
         assessment = assessment.model_copy(update={"readiness_candidate": True})

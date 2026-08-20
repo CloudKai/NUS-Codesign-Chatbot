@@ -3,7 +3,64 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock-v2`
-**HEAD:** citations schema RC on `Integrate-Bedrock-v2` (this commit).
+**HEAD:** `64410dc` plus local progressive How Might We (HMW) work (uncommitted).
+Citations schema RC remains `64410dc`. Composer layout remains `711d4e6`.
+**Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
+**Live AgentCore:** DEFAULT → **v23**. Affinity ON. Generation 2. Prompt cache
+OFF. **Do not publish v24 yet.** Do not overlay HMW prompts until this local
+change is reviewed.
+
+**This phase:** Progressive Problem Identification How Might We scaffold.
+Model-informed + server-gated. No AgentCore publish, no DEFAULT move, no EC2
+rebuild, $0 AWS, zero extra model/Retrieve/AgentCore calls.
+
+**Behavior.** New notebooks stay clean: welcome only, no HMW card. After
+enough qualifying Problem Identification Coaching and a validated
+`hmw_scaffold_ready=true` from the existing Fast Chat structured result,
+FastAPI projects `hmw_scaffold.available`. Streamlit renders one read-only
+card after the latest assistant, before the composer. Students type a working
+HMW (or equivalent framing) in the existing chat. `hmw_scaffold_ready=true`
+with `recommendation=stay` is normal and does not advance. ADVANCE still uses
+the existing StageDecision / pending Next / auto-advance path. Leaving
+Problem Identification hides the card. Q&A and Deep Review do not count.
+Active-branch revision semantics apply. Old assessments omit the field and
+default false.
+
+**Authority.** Haiku recommends. FastAPI validates, persists slim assessment
+metadata, and derives visibility. The client cannot write the flag.
+
+**Not changed.** AgentCore affinity/generation/runtime version; Fast Chat
+`turns=2`; first-cycle structured output; Deep Review `turns=3`; RAG;
+citations schema; recommendation `if/then`; DSQL schema; auth; prompt-cache
+config.
+
+**Known residual risk.** Live v23 Haiku will not emit `hmw_scaffold_ready`
+until a later AgentCore overlay. FastAPI treats omit as false, so production
+keeps the scaffold hidden until that overlay. Mock tests inject the field.
+
+**Next exact action.** Review this local progressive HMW change. Keep
+DEFAULT → **23**. Do not publish AgentCore, rebuild EC2, bump generation, or
+enable prompt cache.
+
+**Validation (this worktree, $0 AWS).** Ruff on touched Python: passed.
+`compileall` passed for `backend`, `ui`, `streamlit_app.py`, `tests`, and
+`scripts` excluding pre-existing broken `scripts/load_probe.py`
+(`IndentationError`; left unstaged). `git diff --check` clean on this
+change. Targeted HMW / Fast Chat schema / first-cycle / prompt-baseline /
+quality matrix / workflow / retrieval / Deep Review / revision /
+idempotency tests passed. Full mock pytest **1454 collected, passed**,
+ignoring `tests/scripts/test_load_probe.py`. No AgentCore publish, no EC2
+rebuild, no production env change.
+
+### Prior: always-on PI HMW card (superseded locally)
+
+The first uncommitted HMW pass showed the formula whenever the stage was
+`problem_identification`, including on an empty notebook. Progressive HMW
+replaces that gate. Completion still uses semantic stay/advance, not a regex.
+
+### Prior: citations schema RC (2026-08-20)
+
+**HEAD:** citations schema RC on `Integrate-Bedrock-v2` (`64410dc`).
 Composer layout remains `711d4e6`.
 **Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
 **Live AgentCore:** DEFAULT → **v23**. Affinity ON. Generation 2. Prompt cache

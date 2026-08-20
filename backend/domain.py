@@ -243,6 +243,7 @@ class EducationalAssessment(BaseModel):
     review_model: str | None = Field(default=None, max_length=128)
     review_trigger: str | None = Field(default=None, max_length=64)
     response_mode: str = Field(default="", max_length=32)
+    hmw_scaffold_ready: bool = False
 
     @model_validator(mode="before")
     @classmethod
@@ -270,6 +271,8 @@ class EducationalAssessment(BaseModel):
         if isinstance(recommendation, str):
             cleaned = recommendation.strip().lower()
             data["recommendation"] = cleaned or None
+        if data.get("hmw_scaffold_ready") is not True:
+            data["hmw_scaffold_ready"] = False
         return data
 
     @field_validator("guidance_questions")
@@ -280,6 +283,12 @@ class EducationalAssessment(BaseModel):
         if any(not value.endswith("?") for value in cleaned):
             raise ValueError("Guidance questions must end with a question mark")
         return cleaned
+
+    @field_validator("hmw_scaffold_ready", mode="before")
+    @classmethod
+    def coerce_hmw_scaffold_ready(cls, value: Any) -> bool:
+        """Persist only JSON true; omit, null, strings, and other values are false."""
+        return value is True
 
     @field_validator("review_strengths", "review_improvements")
     @classmethod
@@ -321,6 +330,8 @@ class EducationalAssessment(BaseModel):
                 slim["recommendation_rationale"] = rationale
         if data.get("readiness_candidate"):
             slim["readiness_candidate"] = True
+        if data.get("hmw_scaffold_ready") is True:
+            slim["hmw_scaffold_ready"] = True
         return slim
 
 

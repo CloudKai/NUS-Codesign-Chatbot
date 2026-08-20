@@ -218,8 +218,14 @@ class DeterministicCoachProvider:
 
     provider_id = "mock"
 
-    def __init__(self, recommendation: StageDecision | None = None):
+    def __init__(
+        self,
+        recommendation: StageDecision | None = None,
+        *,
+        hmw_scaffold_ready: bool = False,
+    ):
         self.recommendation = recommendation
+        self.hmw_scaffold_ready = bool(hmw_scaffold_ready)
         self.last_prepared_prompt: PreparedCoachPrompt | None = None
         self.last_stage_id: str | None = None
 
@@ -314,11 +320,21 @@ class DeterministicCoachProvider:
             facione_scores=_mock_facione_scores(stage.id, is_advancing=is_advancing),
             review_strengths=strengths,
             review_improvements=improvements,
+            hmw_scaffold_ready=self.hmw_scaffold_ready,
         )
         if is_advancing and upcoming:
             follow_up = next_questions[0] if next_questions else upcoming.reflection_prompt
+            hmw_feedback = ""
+            if stage.id == "problem_identification" and summary:
+                hmw_feedback = (
+                    "This is a clear How Might We direction because it identifies "
+                    "the people you are designing for, the opportunity you are "
+                    "exploring, and the outcome you want to achieve. Keep that "
+                    "intended benefit in view as you generate concepts.\n\n"
+                )
             response = (
                 f"**{upcoming.label}**\n\n"
+                f"{hmw_feedback}"
                 f"That's a solid start—now let's look more carefully at "
                 f"{upcoming.short_label.lower()}. {upcoming.description}\n\n"
                 f"{evidence_block}"
@@ -361,6 +377,8 @@ class DeterministicCoachProvider:
             recommendation_rationale="Q&A specialist does not recommend Thinking Path changes.",
             guidance_questions=[],
             learning_summary="The student asked a course-information question.",
+            response_mode="qa",
+            hmw_scaffold_ready=False,
         )
         return ProviderAssessmentResult(
             response_text=response,

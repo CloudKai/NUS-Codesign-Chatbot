@@ -19,6 +19,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from backend.domain import CoachRequest, CoachTurn
+from backend.learning.hmw import hmw_scaffold_available
 from backend.settings import settings
 from backend.specialists.review_orchestration import (
     COUNTER_SETTINGS_KEY,
@@ -35,7 +36,11 @@ from backend.student_journey import (
     personalized_stage_questions,
 )
 
-from ui.coach_welcome import COACH_WELCOME_KIND, seed_coach_welcome
+from ui.coach_welcome import (
+    COACH_WELCOME_KIND,
+    render_hmw_scaffold_if_needed,
+    seed_coach_welcome,
+)
 from ui.constants import DEFAULT_APPEARANCE
 from ui.layout.chat_scroll import sync_chat_scroll
 from ui.layout.composer_layout import sync_composer_layout
@@ -1125,6 +1130,14 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
                 1,
             ),
             message_count=len(messages),
+        )
+        journey = normalize_journey(st.session_state.get("learning_journey"))
+        render_hmw_scaffold_if_needed(
+            available=hmw_scaffold_available(
+                str(journey.get("current_stage") or DEFAULT_STAGE),
+                messages,
+                enabled=settings.hmw_scaffold_enabled,
+            )
         )
         _render_composer_submit_fragment(
             model_id,

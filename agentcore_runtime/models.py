@@ -386,6 +386,11 @@ def _attach_fast_chat_mode_conditions(schema: dict[str, Any]) -> None:
     model still rejects. Require an array so flatten keeps ``type: array``.
     JSON ``null`` stays invalid. Python callers may still omit the field.
 
+    ``hmw_scaffold_ready`` is the same Boolean case: a Python default of
+    ``False`` would otherwise flatten to ``["boolean", "null"]``. Require a
+    boolean so the model-facing spec stays ``type: boolean``. Pydantic parse
+    of omitted or malformed values still fails closed to ``False``.
+
     Args:
         schema: Mutable ``model_json_schema()`` output for this class.
 
@@ -410,6 +415,8 @@ def _attach_fast_chat_mode_conditions(schema: dict[str, Any]) -> None:
     required = list(schema.get("required") or [])
     if "citations" not in required:
         required.append("citations")
+    if "hmw_scaffold_ready" not in required:
+        required.append("hmw_scaffold_ready")
     schema["required"] = required
     properties = schema.get("properties")
     citations = properties.get("citations") if isinstance(properties, dict) else None
@@ -417,6 +424,13 @@ def _attach_fast_chat_mode_conditions(schema: dict[str, Any]) -> None:
         citations["type"] = "array"
         citations.pop("anyOf", None)
         citations.pop("oneOf", None)
+    hmw_ready = (
+        properties.get("hmw_scaffold_ready") if isinstance(properties, dict) else None
+    )
+    if isinstance(hmw_ready, dict):
+        hmw_ready["type"] = "boolean"
+        hmw_ready.pop("anyOf", None)
+        hmw_ready.pop("oneOf", None)
 
 
 class FastChatTurnOutput(BaseModel):
@@ -445,6 +459,14 @@ class FastChatTurnOutput(BaseModel):
     citations: list[CitationOutput] = Field(
         default_factory=list,
         description="Always return an array. Use [] when no citations are needed.",
+    )
+    hmw_scaffold_ready: bool = Field(
+        default=False,
+        description=(
+            "Internal Problem Identification framing readiness. Always return "
+            "a boolean. Use false for Q&A and when the student is not yet "
+            "ready to attempt a working How Might We statement."
+        ),
     )
     needs_source_retrieval: bool = False
 
@@ -475,15 +497,29 @@ class FastChatTurnOutput(BaseModel):
         cleaned = " ".join(str(value or "").split()).strip()
         return cleaned[:4_000] if cleaned else None
 
+    @field_validator("hmw_scaffold_ready", mode="before")
+    @classmethod
+    def coerce_hmw_scaffold_ready(cls, value: Any) -> bool:
+        """Accept only JSON true; omit, null, and malformed values are false."""
+        return value is True
+
     @model_validator(mode="after")
     def coaching_requires_recommendation(self) -> "FastChatTurnOutput":
-        """Coaching must recommend stay or advance; Q&A must not."""
+        """Coaching must recommend stay or advance; Q&A must not.
+
+        Q&A also forces ``hmw_scaffold_ready`` false so a course question
+        cannot unlock Problem Identification UI guidance.
+        """
         if self.mode == "coaching":
             if self.recommendation not in {"stay", "advance"}:
                 raise ValueError("coaching mode requires recommendation stay or advance")
             return self
         return self.model_copy(
-            update={"recommendation": None, "recommendation_rationale": None}
+            update={
+                "recommendation": None,
+                "recommendation_rationale": None,
+                "hmw_scaffold_ready": False,
+            }
         )
 
 

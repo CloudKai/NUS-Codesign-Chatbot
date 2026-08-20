@@ -383,29 +383,37 @@ def test_fast_chat_turn_output_is_one_strands_object_tool() -> None:
     assert citations.get("type") == "array"
     assert "null" not in str(citations.get("type"))
     assert "citations" in (schema.get("required") or [])
+    hmw_ready = (schema.get("properties") or {}).get("hmw_scaffold_ready") or {}
+    assert hmw_ready.get("type") == "boolean"
+    assert "null" not in str(hmw_ready.get("type"))
+    assert "hmw_scaffold_ready" in (schema.get("required") or [])
     coaching_null = {
         "mode": "coaching",
         "response_text": "Which constraint is actually binding?",
         "recommendation": None,
         "citations": [],
+        "hmw_scaffold_ready": False,
     }
     coaching_stay = {
         "mode": "coaching",
         "response_text": "Which constraint is actually binding?",
         "recommendation": "stay",
         "citations": [],
+        "hmw_scaffold_ready": False,
     }
     coaching_citations_null = {
         "mode": "coaching",
         "response_text": "Which constraint is actually binding?",
         "recommendation": "stay",
         "citations": None,
+        "hmw_scaffold_ready": False,
     }
     qa_null = {
         "mode": "qa",
         "response_text": "Week 1 covers innovation.",
         "recommendation": None,
         "citations": [],
+        "hmw_scaffold_ready": False,
     }
     assert _flatten_schema_allows(schema, coaching_stay)
     assert not _flatten_schema_allows(schema, coaching_null)
