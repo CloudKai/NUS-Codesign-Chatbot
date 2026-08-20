@@ -27,7 +27,10 @@ def test_confirmed_recommendation_is_the_only_way_to_advance(tmp_path):
     workflow = CoachWorkflow(DeterministicCoachProvider(StageDecision.ADVANCE), transitions)
     request = CoachRequest(
         thread_id=thread_id,
-        student_message="My central claim is that the evidence needs evaluation.",
+        student_message=(
+            "How might we improve road crossings for older pedestrians so that "
+            "they can cross safely without rushing?"
+        ),
         current_stage="problem_identification",
         response_detail="short",
     )
@@ -55,7 +58,10 @@ def test_rejected_recommendation_keeps_current_stage(tmp_path):
     ).run(
         CoachRequest(
             thread_id=thread_id,
-            student_message="I have defined a focused question.",
+            student_message=(
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
+            ),
             current_stage="problem_identification",
             response_detail="short",
         )
@@ -87,7 +93,10 @@ def test_accepted_transition_rolls_back_when_journey_write_fails(tmp_path, monke
     ).run(
         CoachRequest(
             thread_id=thread_id,
-            student_message="I have defined a focused question.",
+            student_message=(
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
+            ),
             current_stage="problem_identification",
             response_detail="short",
         )
@@ -165,7 +174,10 @@ def test_select_stage_rejects_pending_transition(tmp_path, monkeypatch):
     ).run(
         CoachRequest(
             thread_id=thread_id,
-            student_message="I have defined a focused question.",
+            student_message=(
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
+            ),
             current_stage="problem_identification",
             response_detail="short",
         )

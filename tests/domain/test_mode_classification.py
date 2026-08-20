@@ -496,9 +496,8 @@ def test_mixed_adversarial_keeps_coaching_semantics(tmp_path) -> None:
     assert len(client.calls) == 1
     assert _phases(client) == ["fast_chat"]
     assert turn.assessment.response_mode == "coaching"
-    assert turn.assessment.recommendation is StageDecision.ADVANCE
-    assert turn.pending_transition is not None
-    assert turn.pending_transition.to_stage == "concept_generation"
+    assert turn.assessment.recommendation is StageDecision.STAY
+    assert turn.pending_transition is None
     assert _counter(store, thread_id) == 1
     assert RUNTIME_HINT_QA not in _trusted_instructions(client)
 

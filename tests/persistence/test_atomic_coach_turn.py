@@ -108,8 +108,8 @@ def _request(thread_id: str, *, key: str | None = None) -> CoachRequest:
     return CoachRequest(
         thread_id=thread_id,
         student_message=(
-            "I defined the crossing problem, affected older pedestrians, and "
-            "the safety context."
+            "How might we improve road crossings for older pedestrians so that "
+            "they can cross safely without rushing?"
         ),
         current_stage="problem_identification",
         response_detail="short",

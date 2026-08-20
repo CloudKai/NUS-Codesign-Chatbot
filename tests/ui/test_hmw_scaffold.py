@@ -13,9 +13,7 @@ from ui.coach_welcome import (
     COACH_WELCOME_KIND,
     COACH_WELCOME_TITLE,
     HMW_FORMULA,
-    HMW_FORMULA_INTRO,
     HMW_FORMULA_OUTRO,
-    HMW_PROMPT_LINE,
     HMW_SCAFFOLD_LEAD,
     HMW_SCAFFOLD_TITLE,
     transcript_hmw_render_plan,
@@ -135,19 +133,12 @@ def _plan_tokens(
 
 
 def _seed_ready_coaching(store: StudentStore, thread_id: str) -> None:
-    """Persist two Problem Identification Coaching turns with HMW readiness."""
+    """Persist one Problem Identification Coaching turn with HMW readiness."""
     store.add_message(thread_id, "user", _FIRST_USER)
     store.add_message(
         thread_id,
         "assistant",
         _FIRST_COACH,
-        metadata={"assessment": _pi_coaching()},
-    )
-    store.add_message(thread_id, "user", _SECOND_USER)
-    store.add_message(
-        thread_id,
-        "assistant",
-        _SECOND_COACH,
         metadata={"assessment": _pi_coaching(ready=True)},
     )
 
@@ -181,7 +172,7 @@ def test_plan_places_hmw_after_unlocking_coach_response() -> None:
     first_coach = {
         "role": "assistant",
         "content": _FIRST_COACH,
-        "metadata": {"assessment": _pi_coaching()},
+        "metadata": {"assessment": _pi_coaching(ready=True)},
     }
     second_coach = {
         "role": "assistant",
@@ -212,23 +203,23 @@ def test_plan_places_hmw_after_unlocking_coach_response() -> None:
         "welcome",
         "user",
         _FIRST_COACH,
+        "hmw",
         "user",
         _SECOND_COACH,
-        "hmw",
         "user",
         _QA_ASSISTANT,
     ]
 
 
-def test_plan_keeps_sticky_anchor_after_later_false() -> None:
-    """A later ready=false Coaching turn must not move the card."""
+def test_plan_keeps_sticky_anchor_after_later_ready_stay() -> None:
+    """A later stay/ready Coaching turn must not move the card."""
     messages = [
         _welcome_row(),
         {"role": "user", "content": _FIRST_USER, "metadata": {}},
         {
             "role": "assistant",
             "content": _FIRST_COACH,
-            "metadata": {"assessment": _pi_coaching()},
+            "metadata": {"assessment": _pi_coaching(ready=True)},
         },
         {"role": "user", "content": _SECOND_USER, "metadata": {}},
         {
@@ -240,16 +231,16 @@ def test_plan_keeps_sticky_anchor_after_later_false() -> None:
         {
             "role": "assistant",
             "content": _THIRD_COACH,
-            "metadata": {"assessment": _pi_coaching()},
+            "metadata": {"assessment": _pi_coaching(ready=True)},
         },
     ]
     assert _plan_tokens(messages, hmw_available=True) == [
         "welcome",
         "user",
         _FIRST_COACH,
+        "hmw",
         "user",
         _SECOND_COACH,
-        "hmw",
         "user",
         _THIRD_COACH,
     ]
@@ -262,7 +253,7 @@ def test_plan_places_hmw_after_first_visible_ready_without_welcome() -> None:
         {
             "role": "assistant",
             "content": _FIRST_COACH,
-            "metadata": {"assessment": _pi_coaching()},
+            "metadata": {"assessment": _pi_coaching(ready=True)},
         },
         {"role": "user", "content": _SECOND_USER, "metadata": {}},
         {
@@ -274,9 +265,9 @@ def test_plan_places_hmw_after_first_visible_ready_without_welcome() -> None:
     assert _plan_tokens(messages, hmw_available=True) == [
         "user",
         _FIRST_COACH,
+        "hmw",
         "user",
         _SECOND_COACH,
-        "hmw",
     ]
     assert "hmw" not in _plan_tokens(messages, hmw_available=False)
 
@@ -289,7 +280,7 @@ def test_deep_review_does_not_move_hmw_anchor() -> None:
         {
             "role": "assistant",
             "content": _FIRST_COACH,
-            "metadata": {"assessment": _pi_coaching()},
+            "metadata": {"assessment": _pi_coaching(ready=True)},
         },
         {"role": "user", "content": _SECOND_USER, "metadata": {}},
         {
@@ -316,9 +307,9 @@ def test_deep_review_does_not_move_hmw_anchor() -> None:
         "welcome",
         "user",
         _FIRST_COACH,
+        "hmw",
         "user",
         _SECOND_COACH,
-        "hmw",
         _REVIEW_ASSISTANT,
     ]
 
@@ -350,6 +341,36 @@ def test_three_weak_coaching_turns_hide_hmw() -> None:
     assert "hmw" not in _plan_tokens(messages, hmw_available=False)
 
 
+def test_valid_hmw_advance_never_shows_scaffold() -> None:
+    """A completed student HMW hides the construction card even while still on PI."""
+    messages = [
+        _welcome_row(),
+        {
+            "role": "user",
+            "content": (
+                "How might we improve road crossings near schools for older "
+                "pedestrians so that they can cross safely without rushing?"
+            ),
+            "metadata": {},
+        },
+        {
+            "role": "assistant",
+            "content": "That is specific enough to guide ideation.",
+            "metadata": {
+                "assessment": {
+                    "current_stage": "problem_identification",
+                    "response_mode": "coaching",
+                    "recommendation": "advance",
+                    "hmw_scaffold_ready": False,
+                    "citations": [],
+                }
+            },
+        },
+    ]
+    assert hmw_scaffold_available("problem_identification", messages) is False
+    assert "hmw" not in _plan_tokens(messages, hmw_available=False)
+
+
 def test_empty_notebook_hides_hmw_scaffold() -> None:
     """A new Problem Identification notebook keeps the welcome and hides HMW."""
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
@@ -358,14 +379,13 @@ def test_empty_notebook_hides_hmw_scaffold() -> None:
     visible = _visible_text(app)
     assert COACH_WELCOME_TITLE in visible
     assert HMW_FORMULA not in visible
-    assert HMW_PROMPT_LINE not in visible
     assert HMW_SCAFFOLD_TITLE not in visible
     assert _formula_code_count(app) == 0
     assert len(app.chat_input) == 1
 
 
-def test_one_coaching_turn_hides_hmw_scaffold() -> None:
-    """Minimum Coaching guardrail still hides the card after a single turn."""
+def test_one_ready_coaching_turn_shows_hmw_scaffold() -> None:
+    """A first useful Coaching assessment shows the card after that Coach reply."""
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     assert not app.exception
     thread_id = str(app.session_state["thread_id"])
@@ -379,17 +399,18 @@ def test_one_coaching_turn_hides_hmw_scaffold() -> None:
     )
     assert hmw_scaffold_available(
         "problem_identification", store.get_messages(thread_id)
-    ) is False
+    ) is True
     app.run()
     assert not app.exception
     visible = _visible_text(app)
     assert COACH_WELCOME_TITLE in visible
-    assert HMW_SCAFFOLD_TITLE not in visible
-    assert _formula_code_count(app) == 0
+    assert HMW_SCAFFOLD_TITLE in visible
+    assert _formula_code_count(app) == 1
+    assert _hmw_inside_chat_messages(app) is False
 
 
 def test_hmw_scaffold_renders_once_when_eligible() -> None:
-    """Server-owned readiness plus two Coaching turns shows one card after the unlocking Coach."""
+    """Server-owned readiness on the first useful Coach turn shows one card."""
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     assert not app.exception
     thread_id = str(app.session_state["thread_id"])
@@ -401,8 +422,6 @@ def test_hmw_scaffold_renders_once_when_eligible() -> None:
         "welcome",
         "user",
         _FIRST_COACH,
-        "user",
-        _SECOND_COACH,
         "hmw",
     ]
     app.run()
@@ -411,8 +430,6 @@ def test_hmw_scaffold_renders_once_when_eligible() -> None:
     assert COACH_WELCOME_TITLE in visible
     assert HMW_SCAFFOLD_TITLE in visible
     assert HMW_SCAFFOLD_LEAD in visible
-    assert HMW_PROMPT_LINE in visible
-    assert HMW_FORMULA_INTRO in visible
     assert HMW_FORMULA in visible
     assert HMW_FORMULA_OUTRO in visible
     assert _FIRST_USER in visible
@@ -473,8 +490,6 @@ def test_qa_turn_keeps_hmw_after_unlocking_coach() -> None:
         "welcome",
         "user",
         _FIRST_COACH,
-        "user",
-        _SECOND_COACH,
         "hmw",
         "user",
         _QA_ASSISTANT,
@@ -511,8 +526,6 @@ def test_legacy_notebook_without_welcome_places_hmw_after_unlocking_coach() -> N
     assert _plan_tokens(messages, hmw_available=True) == [
         "user",
         _FIRST_COACH,
-        "user",
-        _SECOND_COACH,
         "hmw",
     ]
     store.update_user_preferences({"active_thread_id": legacy_id})
@@ -542,7 +555,6 @@ def test_hmw_scaffold_hides_after_concept_generation() -> None:
     assert not app.exception
     visible = _visible_text(app)
     assert HMW_FORMULA not in visible
-    assert HMW_PROMPT_LINE not in visible
     assert HMW_SCAFFOLD_TITLE not in visible
     assert _formula_code_count(app) == 0
     assert len(app.chat_input) == 1

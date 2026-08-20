@@ -56,7 +56,8 @@ def test_api_client_health_and_confirmation_round_trip(tmp_path):
             CoachRequest(
                 thread_id=thread_id,
                 student_message=(
-                    "Which crossing design gives older pedestrians enough time?"
+                    "How might we improve road crossings for older pedestrians so that "
+                    "they can cross safely without rushing?"
                 ),
                 current_stage="problem_identification",
                 response_detail="short",
@@ -94,7 +95,8 @@ def test_api_client_auto_advance_mode(tmp_path):
             CoachRequest(
                 thread_id=thread_id,
                 student_message=(
-                    "Which crossing design gives older pedestrians enough time?"
+                    "How might we improve road crossings for older pedestrians so that "
+                    "they can cross safely without rushing?"
                 ),
                 current_stage="problem_identification",
                 response_detail="short",

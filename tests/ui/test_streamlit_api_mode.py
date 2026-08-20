@@ -53,7 +53,8 @@ def test_authenticated_inprocess_path_confirms_pending_transition():
         "Which design gives older pedestrians enough time and visibility?"
     ).run()
     app.chat_input[0].set_value(
-        "Older adults near schools need a longer crossing interval than the current signal."
+        "How might we improve road crossings for older pedestrians so that "
+        "they can cross safely without rushing?"
     ).run()
 
     next_button = next(
@@ -88,7 +89,8 @@ def test_streamlit_api_mode_confirmation_creates_pending_transition(monkeypatch)
         assert not app.exception
 
         app.chat_input[0].set_value(
-            "Older adults near schools need a longer crossing interval than the current signal."
+            "How might we improve road crossings for older pedestrians so that "
+            "they can cross safely without rushing?"
         ).run()
         assert not app.exception
 
@@ -123,7 +125,8 @@ def test_streamlit_api_mode_auto_advance_moves_thinking_path(monkeypatch):
         assert not app.exception
 
         app.chat_input[0].set_value(
-            "Older adults near schools need a longer crossing interval than the current signal."
+            "How might we improve road crossings for older pedestrians so that "
+            "they can cross safely without rushing?"
         ).run()
         assert not app.exception
 

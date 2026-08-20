@@ -8,10 +8,16 @@ from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
 
 
-def _request(thread_id: str) -> CoachRequest:
+_PI_HMW = (
+    "How might we improve road crossings for older pedestrians so that they "
+    "can cross safely without rushing?"
+)
+
+
+def _request(thread_id: str, message: str | None = None) -> CoachRequest:
     return CoachRequest(
         thread_id=thread_id,
-        student_message="I want to assess whether the evidence supports this claim.",
+        student_message=message or _PI_HMW,
         current_stage="problem_identification",
         response_detail="short",
     )
@@ -57,10 +63,12 @@ def test_guided_mock_changes_its_question_then_recommends_progress(tmp_path):
         SQLitePhaseTransitionRepository(store),
     )
 
-    first = workflow.run(_request(thread_id))
+    first = workflow.run(
+        _request(thread_id, "I want to assess whether the evidence supports this claim.")
+    )
     follow_up_request = _request(thread_id).model_copy(
         update={
-            "student_message": "I need a precise safety outcome for older pedestrians.",
+            "student_message": _PI_HMW,
             "history": [
                 {
                     "role": "assistant",

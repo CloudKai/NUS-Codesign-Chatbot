@@ -115,9 +115,9 @@ modules.
 | `ui/test_chat_scroll.py` | Transcript scroll policy, inflight chrome, compact turn-error, fragment submit |
 | `ui/test_toasts.py` | Parent-window corner toast controller: delegated close, parent timers, iframe boot only |
 | `ui/test_review_stage_expanders.py` | Review Strengths/Areas stage expanders remount on notebook or current-stage change; same-stage keys stay stable |
-| `ui/test_hmw_scaffold.py` | Progressive How Might We card: hidden on empty notebook, one card after the unlocking Coach turn when eligible, hidden after Concept Generation |
-| `domain/test_hmw_scaffold_gate.py` | Server-owned HMW eligibility, stickiness, Q&A/Deep Review exclusion, persist/idempotency, read-only learning-state projection |
-| `domain/test_hmw_stage_completion.py` | HMW readiness vs ADVANCE in PI prompts, stay/advance via existing StageDecision, no regex evaluator |
+| `ui/test_hmw_scaffold.py` | Progressive How Might We card: hidden until 2/3 framing, one card after the first useful Coach turn, hidden after a valid student HMW or Concept Generation |
+| `domain/test_hmw_scaffold_gate.py` | Server-owned HMW eligibility from the latest stay+ready assessment, no minimum-turn gate, student HMW provenance guard, Q&A/Deep Review exclusion |
+| `domain/test_hmw_stage_completion.py` | HMW 0/1 → 2/3 → valid-HMW state machine in PI prompts, stay/advance via existing StageDecision, no regex evaluator |
 | `ui/test_ui_perf_logging.py` | Streamlit `co_design.ui_perf` INFO visibility, handler idempotency, privacy-safe UI TIMING, pre-API span contracts |
 | `ui/test_streamlit_api_mode.py` | AppTest API confirmation + auto-advance |
 | `ui/test_rename.py` | Enter-only rename draft helpers and epochs |

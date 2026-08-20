@@ -62,12 +62,18 @@ maps ephemeral `M#` labels to durable message ids before persistence.
 ### How Might We scaffold
 
 Problem Identification may show a read-only How Might We card in the chat
-log immediately after the Coaching response that first unlocks it. Haiku may
-set `hmw_scaffold_ready` when at least two of three framing signals (user,
-problem, outcome) are reasonably clear. FastAPI still requires two qualifying
-Problem Identification Coaching turns. The field is internal, defaults false
-on old notebooks, and never advances the stage. Zero extra model or Retrieve
-calls. Clients cannot write it.
+log immediately after the Coaching response that first makes the scaffold
+useful. Haiku sets `hmw_scaffold_ready=true` when at least two of three
+framing components (user, problem, outcome) are reasonably clear and the
+student has not yet authored a valid working HMW. FastAPI shows the card when
+the latest qualifying PI Coaching assessment is `ready=true` and
+`recommendation=stay`. There is no minimum Coaching-turn count. A valid
+student-authored HMW sets `ready=false` and `recommendation=advance`; the
+card hides and existing stage machinery may move to Concept Generation.
+Equivalent prose without an HMW stays in Problem Identification. FastAPI
+also requires a deterministic student HMW candidate in the active user
+message before accepting ADVANCE. Zero extra model or Retrieve calls.
+Clients cannot write the flag.
 
 Legacy router / Q&A / Coaching / Incremental Review payloads remain in the
 runtime for compatibility and are unused on the active FastAPI path.

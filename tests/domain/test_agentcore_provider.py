@@ -991,7 +991,7 @@ def test_street_stay_does_not_advance_stage(tmp_path):
     assert _thread_stage(store, thread_id) == "problem_identification"
 
 
-def test_street_advance_follows_validated_recommendation_not_the_sentence(tmp_path):
+def test_street_advance_without_hmw_candidate_is_forced_stay(tmp_path):
     store = StudentStore(tmp_path / "agentcore-street-advance.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     client = FakeAgentCoreRuntime(
@@ -1000,27 +1000,34 @@ def test_street_advance_follows_validated_recommendation_not_the_sentence(tmp_pa
     turn = _service(store, _provider(client)).submit(
         _request(thread_id=thread_id, student_message=_STREET)
     )
-    assert turn.assessment.recommendation is StageDecision.ADVANCE
-    assert turn.pending_transition is not None
+    assert turn.assessment.recommendation is StageDecision.STAY
+    assert turn.pending_transition is None
     assert _thread_stage(store, thread_id) == "problem_identification"
 
 
-def test_street_advance_auto_applies_when_configured(tmp_path):
+def test_street_advance_auto_applies_only_with_student_hmw(tmp_path):
     store = StudentStore(tmp_path / "agentcore-street-auto.sqlite3")
-    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    blocked_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     client = FakeAgentCoreRuntime(
         payload=_output(research=None, recommendation=StageDecision.ADVANCE)
     )
-    turn = _service(
+    blocked = _service(
         store, _provider(client), auto_advance_stages=True
-    ).submit(_request(thread_id=thread_id, student_message=_STREET))
-    assert turn.assessment.recommendation is StageDecision.ADVANCE
-    assert turn.pending_transition is None
-    assert turn.auto_advanced_to == "concept_generation"
-    assert _thread_stage(store, thread_id) == "concept_generation"
-    messages = store.get_messages(thread_id)
-    assert [item["role"] for item in messages].count("assistant") == 1
-    assert all(str(item.get("content") or "").strip() for item in messages)
+    ).submit(_request(thread_id=blocked_id, student_message=_STREET))
+    assert blocked.assessment.recommendation is StageDecision.STAY
+    assert blocked.auto_advanced_to is None
+    hmw = (
+        "How might we improve road crossings for older pedestrians so that "
+        "they can cross safely without rushing?"
+    )
+    allowed_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    allowed = _service(
+        store, _provider(client), auto_advance_stages=True
+    ).submit(_request(thread_id=allowed_id, student_message=hmw))
+    assert allowed.assessment.recommendation is StageDecision.ADVANCE
+    assert allowed.pending_transition is None
+    assert allowed.auto_advanced_to == "concept_generation"
+    assert _thread_stage(store, allowed_id) == "concept_generation"
 
 
 _NOTEBOOK_A_MARKER = "NOTEBOOK_A_ONLY"

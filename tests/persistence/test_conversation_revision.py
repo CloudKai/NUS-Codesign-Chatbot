@@ -347,7 +347,10 @@ def test_revise_earlier_keeps_downstream_physically_excludes_from_active(
     first = coach.submit(
         CoachRequest(
             thread_id=thread_id,
-            student_message="Focus message one.",
+            student_message=(
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
+            ),
             current_stage="problem_identification",
             response_detail="short",
             idempotency_key="a1",
@@ -478,7 +481,10 @@ def test_double_edit_previous_message_id_lineage(tmp_path, monkeypatch):
     first = coach.submit(
         CoachRequest(
             thread_id=thread_id,
-            student_message="Focus A.",
+            student_message=(
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
+            ),
             current_stage="problem_identification",
             response_detail="short",
             idempotency_key="seq-1",
@@ -763,7 +769,10 @@ def test_old_pending_transition_cannot_resolve_after_supersede(
     turn = coach.submit(
         CoachRequest(
             thread_id=thread_id,
-            student_message="Ready to move on with a clear focus.",
+            student_message=(
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
+            ),
             current_stage="problem_identification",
             response_detail="short",
             idempotency_key="pending-1",
@@ -838,7 +847,10 @@ def test_provider_failure_after_revise_keeps_historical_rows(tmp_path, monkeypat
     first = ok_coach.submit(
         CoachRequest(
             thread_id=thread_id,
-            student_message="Focus A.",
+            student_message=(
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
+            ),
             current_stage="problem_identification",
             response_detail="short",
             idempotency_key="pf-1",
@@ -1307,7 +1319,10 @@ def test_select_learning_stage_rejects_only_active_pending(tmp_path, monkeypatch
     turn = coach.submit(
         CoachRequest(
             thread_id=thread_id,
-            student_message="Ready to move on with a clear focus.",
+            student_message=(
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
+            ),
             current_stage="problem_identification",
             response_detail="short",
             idempotency_key="stage-pending-1",

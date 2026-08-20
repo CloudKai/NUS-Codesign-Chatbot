@@ -105,8 +105,8 @@ def test_local_api_runs_a_mock_turn_and_auto_advances(tmp_path):
         json={
             "thread_id": thread_id,
             "student_message": (
-                "I want to decide which crossing design gives older pedestrians enough "
-                "time and visibility to cross safely."
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
             ),
             "current_stage": "problem_identification",
             "response_detail": "short",
@@ -154,7 +154,10 @@ def test_local_api_can_retain_confirmation_mode(tmp_path, caplog):
         "/api/v1/coach/turn",
         json={
             **request,
-            "student_message": "Which design gives older pedestrians time to cross?",
+            "student_message": (
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
+            ),
         },
     )
 
@@ -315,8 +318,8 @@ def test_strict_guidance_is_stricter_before_recommending_advance(tmp_path):
         json={
             **request,
             "student_message": (
-                "I will compare signal timing and curb cuts for older pedestrians "
-                "near schools."
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
             ),
         },
     )

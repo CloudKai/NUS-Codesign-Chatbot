@@ -1,13 +1,15 @@
 """Server-owned How Might We scaffold eligibility for Problem Identification.
 
-Visibility is projected from the persisted Thinking Path stage plus active
-validated Coaching assessments. The model may set ``hmw_scaffold_ready``;
-FastAPI decides whether the UI may show the scaffold. This module never
+Visibility is projected from the persisted Thinking Path stage plus the latest
+meaningful active Coaching assessment. The model may set
+``hmw_scaffold_ready``; FastAPI decides whether the UI may show the scaffold
+and whether a Problem Identification ADVANCE may proceed. This module never
 calls a model and never mutates stage.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -15,8 +17,31 @@ from backend.learning.stages import DEFAULT_STAGE
 
 
 HMW_SCAFFOLD_STAGE_ID = "problem_identification"
-HMW_SCAFFOLD_MINIMUM_COACHING_TURNS = 2
 COACH_WELCOME_KIND = "coach_welcome"
+
+_HMW_MARKER = "how might we"
+_MIN_HMW_CONTENT_WORDS = 6
+_HMW_META_RE = re.compile(
+    r"|".join(
+        (
+            r"what does how might we",
+            r"what is (?:a |an )?how might we",
+            r"what are how might we",
+            r"what do how might we",
+            r"(?:can|could) you (?:explain|define) how might we",
+            r"explain how might we",
+            r"meaning of how might we",
+            r"should i use (?:a |an )?how might we",
+            r"how might we (?:questions?|statements?|formula|scaffold)",
+            r"(?:lecture|week \d+|course material).{0,80}how might we",
+            r"the lecture says how might we",
+        )
+    )
+)
+_HMW_LEADING_META_RE = re.compile(
+    r"^(?:what|why|when|where|who|how do|how does|can you|could you|"
+    r"should i|do i|does)\b"
+)
 
 
 def _as_mapping(value: Any) -> Mapping[str, Any] | None:
@@ -105,6 +130,57 @@ def _hmw_ready(assessment: Mapping[str, Any]) -> bool:
     return assessment.get("hmw_scaffold_ready") is True
 
 
+def _recommendation_stay(assessment: Mapping[str, Any]) -> bool:
+    """Return whether one persisted assessment recommended stay."""
+    return str(assessment.get("recommendation") or "").strip().lower() == "stay"
+
+
+def _scaffold_is_useful(assessment: Mapping[str, Any]) -> bool:
+    """Return whether one assessment says the construction scaffold is useful.
+
+    ``hmw_scaffold_ready`` means the card is pedagogically useful now. A valid
+    student HMW uses ``ready=false`` with ``recommendation=advance``, so the
+    scaffold must hide.
+
+    Args:
+        assessment: Persisted Problem Identification Coaching assessment.
+
+    Returns:
+        True when the assessment is stay plus ready.
+    """
+    return _hmw_ready(assessment) and _recommendation_stay(assessment)
+
+
+def student_hmw_candidate_present(text: str | None) -> bool:
+    """Return whether active user text looks like a student-authored HMW attempt.
+
+    This is a deterministic provenance/structure check, not a semantic quality
+    judge. Haiku still decides whether an attempt is a valid working HMW.
+    Meta-questions, lecture commentary, and empty "How might we?" fragments
+    are not candidates.
+
+    Args:
+        text: The current active student contribution for this Coaching turn.
+
+    Returns:
+        True when the text contains a substantive ``how might we`` framing
+        attempt.
+    """
+    cleaned = " ".join(str(text or "").split()).strip()
+    if not cleaned:
+        return False
+    lower = cleaned.lower()
+    if _HMW_MARKER not in lower:
+        return False
+    if _HMW_META_RE.search(lower):
+        return False
+    if _HMW_LEADING_META_RE.match(lower):
+        return False
+    after = cleaned[lower.find(_HMW_MARKER) + len(_HMW_MARKER) :].strip(" :,-")
+    words = [token for token in re.split(r"\W+", after) if token]
+    return len(words) >= _MIN_HMW_CONTENT_WORDS
+
+
 def qualifying_pi_coaching_assessments(
     active_messages: Sequence[Mapping[str, Any]] | None,
 ) -> list[Mapping[str, Any]]:
@@ -140,30 +216,26 @@ def _is_empty_assistant(message: Mapping[str, Any]) -> bool:
 
 def hmw_scaffold_anchor_message(
     active_messages: Sequence[Mapping[str, Any]] | None,
-    *,
-    minimum: int = HMW_SCAFFOLD_MINIMUM_COACHING_TURNS,
 ) -> Mapping[str, Any] | None:
     """Return the visible Coaching row after which the HMW card should render.
 
     The card belongs to the first qualifying Problem Identification Coaching
-    response at which eligibility would become true: at least ``minimum``
-    qualifying Coaching assessments exist, and at least one of them is
-    ready. Later ``ready=false`` turns do not move the anchor. Q&A, Deep
-    Review, and welcome rows are never anchors.
+    response at which the scaffold became useful (``hmw_scaffold_ready=true``
+    with ``recommendation=stay``). Later stay/ready turns do not move the
+    anchor. Q&A, Deep Review, and welcome rows are never anchors. Callers
+    still hide the card when ``hmw_scaffold_available`` is false, including
+    after a later valid HMW ADVANCE.
 
-    If eligibility trips on a skipped empty assistant, fall back to the
-    latest visible qualifying Coaching row.
+    If usefulness trips on a skipped empty assistant, fall back to the latest
+    visible qualifying Coaching row.
 
     Args:
         active_messages: Active-branch messages from ``get_messages``.
-        minimum: Qualifying Coaching-exchange guardrail. Defaults to 2.
 
     Returns:
         The visible assistant message to follow with the scaffold, or
         ``None`` when no visible Coaching anchor exists.
     """
-    required = max(1, int(minimum))
-    seen: list[Mapping[str, Any]] = []
     unlock: Mapping[str, Any] | None = None
     last_visible_qualifying: Mapping[str, Any] | None = None
     for message in active_messages or ():
@@ -173,18 +245,15 @@ def hmw_scaffold_anchor_message(
         assessment = _assistant_assessment(mapping)
         if assessment is None or not _is_qualifying_pi_coaching(assessment):
             continue
-        seen.append(assessment)
         visible = not _is_empty_assistant(mapping)
         if visible:
             last_visible_qualifying = mapping
         if unlock is not None:
             continue
-        if len(seen) < required:
-            continue
-        if not any(_hmw_ready(item) for item in seen):
+        if not _scaffold_is_useful(assessment):
             continue
         unlock = mapping if visible else last_visible_qualifying
-    return unlock or last_visible_qualifying
+    return unlock
 
 
 def hmw_scaffold_available(
@@ -192,28 +261,25 @@ def hmw_scaffold_available(
     active_messages: Sequence[Mapping[str, Any]] | None,
     *,
     enabled: bool = True,
-    minimum: int = HMW_SCAFFOLD_MINIMUM_COACHING_TURNS,
 ) -> bool:
     """Return whether the How Might We scaffold may be shown.
 
-    Eligibility is server-derived:
+    Eligibility is server-derived from the latest meaningful HMW state:
 
     1. The HMW feature is enabled.
     2. The authoritative stage is Problem Identification.
-    3. At least ``minimum`` active qualifying Coaching assessments exist
-       for that stage (a guardrail against showing the card immediately).
-    4. Any of those assessments recorded ``hmw_scaffold_ready=true``.
+    3. The latest active qualifying PI Coaching assessment has
+       ``hmw_scaffold_ready=true`` and ``recommendation=stay``.
 
-    Turn count alone never unlocks the scaffold. A later Coaching
-    assessment that returns false does not hide an already-unlocked card
-    while the notebook remains in Problem Identification. Leaving the
-    stage hides it because the stage check fails.
+    There is no minimum Coaching-turn count. A later valid HMW with
+    ``ready=false`` and ``recommendation=advance`` hides the card. Q&A and
+    Deep Review never govern visibility. Leaving the stage hides it because
+    the stage check fails.
 
     Args:
         current_stage: Authoritative Thinking Path stage id.
         active_messages: Active-branch persisted messages.
         enabled: Feature flag; false hides the scaffold.
-        minimum: Qualifying Coaching-exchange guardrail. Defaults to 2.
 
     Returns:
         True when the UI may render the scaffold.
@@ -223,11 +289,10 @@ def hmw_scaffold_available(
     stage = str(current_stage or DEFAULT_STAGE).strip()
     if stage != HMW_SCAFFOLD_STAGE_ID:
         return False
-    required = max(1, int(minimum))
     coaching = qualifying_pi_coaching_assessments(active_messages)
-    if len(coaching) < required:
+    if not coaching:
         return False
-    return any(_hmw_ready(item) for item in coaching)
+    return _scaffold_is_useful(coaching[-1])
 
 
 def hmw_scaffold_projection(
@@ -235,7 +300,6 @@ def hmw_scaffold_projection(
     active_messages: Sequence[Mapping[str, Any]] | None,
     *,
     enabled: bool = True,
-    minimum: int = HMW_SCAFFOLD_MINIMUM_COACHING_TURNS,
 ) -> dict[str, bool]:
     """Return the read-only UI contract for HMW scaffold visibility.
 
@@ -243,7 +307,6 @@ def hmw_scaffold_projection(
         current_stage: Authoritative Thinking Path stage id.
         active_messages: Active-branch persisted messages.
         enabled: Feature flag; false hides the scaffold.
-        minimum: Qualifying Coaching-exchange guardrail.
 
     Returns:
         ``{"available": bool}`` with no internal model rationale.
@@ -253,6 +316,5 @@ def hmw_scaffold_projection(
             current_stage,
             active_messages,
             enabled=enabled,
-            minimum=minimum,
         )
     }

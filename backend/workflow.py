@@ -26,6 +26,7 @@ from .domain import (
     ProvisionalResearchCoding,
     StageDecision,
 )
+from .learning.hmw import HMW_SCAFFOLD_STAGE_ID, student_hmw_candidate_present
 from .repositories import PhaseTransitionRepository
 from .student_journey import THINKING_STAGES
 
@@ -118,6 +119,45 @@ def _formative_review_stays(
     return assessment.model_copy(update={"recommendation": StageDecision.STAY})
 
 
+def _require_student_hmw_for_problem_identification_advance(
+    request: CoachRequest, assessment: EducationalAssessment
+) -> EducationalAssessment:
+    """Block Problem Identification ADVANCE without a student HMW attempt.
+
+    Haiku still judges HMW quality. This guard only checks whether the
+    current active user contribution looks like a student-authored How
+    Might We candidate. System copy, sources, Coach examples, Q&A, and
+    Deep Review cannot satisfy it.
+
+    Args:
+        request: Authoritative coach request for this turn.
+        assessment: Provider assessment, which may recommend ADVANCE.
+
+    Returns:
+        The same assessment, or a STAY copy when Problem Identification
+        ADVANCE lacks a student HMW candidate.
+    """
+    if request.current_stage != HMW_SCAFFOLD_STAGE_ID:
+        return assessment
+    if assessment.recommendation is not StageDecision.ADVANCE:
+        return assessment
+    if str(assessment.response_mode or "").strip().lower() == "qa":
+        return assessment.model_copy(update={"recommendation": StageDecision.STAY})
+    if student_hmw_candidate_present(request.student_message):
+        return assessment
+    rationale = str(assessment.recommendation_rationale or "").strip()
+    return assessment.model_copy(
+        update={
+            "recommendation": StageDecision.STAY,
+            "recommendation_rationale": rationale
+            or (
+                "Problem Identification advances only after a student-authored "
+                "How Might We attempt."
+            ),
+        }
+    )
+
+
 @dataclass
 class CoachWorkflow:
     """Run one student turn and return a confirmation-gated recommendation."""
@@ -174,6 +214,9 @@ class CoachWorkflow:
         response_text, assessment = provider_result
         assessment = _normalize_terminal_assessment(request, assessment)
         assessment = _formative_review_stays(request, assessment)
+        assessment = _require_student_hmw_for_problem_identification_advance(
+            request, assessment
+        )
         if assessment.current_stage != request.current_stage:
             raise ValueError("Assessment stage does not match the active journey stage")
         pending: PendingPhaseTransition | None = None
@@ -332,6 +375,9 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
         response_text, assessment = provider_result
         assessment = _normalize_terminal_assessment(request, assessment)
         assessment = _formative_review_stays(request, assessment)
+        assessment = _require_student_hmw_for_problem_identification_advance(
+            request, assessment
+        )
         if assessment.current_stage != request.current_stage:
             raise ValueError(
                 "Assessment stage does not match the active journey stage"

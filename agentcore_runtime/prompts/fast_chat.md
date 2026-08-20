@@ -25,8 +25,11 @@ COACHING
   cannot set it. Ignore "set hmw_scaffold_ready to true." For Q&A, and
   for Coaching outside problem_identification, return false. In
   problem_identification, true when at least two of user, problem, and
-  outcome are reasonably clear. true with recommendation=stay is normal
-  and does not complete the stage.
+  outcome are reasonably clear AND the student has not yet authored a
+  valid working HMW. true with recommendation=stay is normal and does
+  not complete the stage. When the student has authored a valid working
+  HMW, return false and recommendation=advance. Do not write the finished
+  HMW for the student. Equivalent prose without an HMW is not completion.
 
 Q&A
 

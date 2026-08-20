@@ -43,7 +43,8 @@ def test_complete_thinking_path_two_turns_per_stage(tmp_path) -> None:
     contributions = {
         "problem_identification": [
             "Older pedestrians wait too long at Holland Road.",
-            "They can be stranded mid-crossing at night if the signal is too short.",
+            "How might we improve the Holland Road crossing for older pedestrians "
+            "so that they can reach the far kerb before the signal changes?",
         ],
         "concept_generation": [
             "A raised table or a longer pedestrian interval are two different concepts.",

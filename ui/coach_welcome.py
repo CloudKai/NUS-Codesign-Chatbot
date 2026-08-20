@@ -31,15 +31,11 @@ HMW_SCAFFOLD_LEAD = (
     "together. Your statement can still be refined as you learn more."
 )
 
-HMW_PROMPT_LINE = "Try framing your problem as a How Might We statement."
-
-HMW_FORMULA_INTRO = (
-    'A "How Might We" (HMW) statement follows this core structure:'
-)
-
 HMW_FORMULA = (
-    "How might we + [action/intervention] + for [user] + so that "
-    "[desired outcome/benefit]"
+    "How might we\n"
+    "+ [action / opportunity]\n"
+    "+ for [user]\n"
+    "+ so that [desired outcome / benefit]"
 )
 
 HMW_FORMULA_OUTRO = (
@@ -110,9 +106,8 @@ def transcript_hmw_render_plan(
     Eligibility is supplied by the caller from ``hmw_scaffold_available``.
     This helper only decides placement and guarantees at most one ``hmw``
     step. When eligible, the card follows the first Coaching response at
-    which the two-turn gate plus readiness would unlock. Welcome, Q&A, and
-    Deep Review rows are never anchors. The card is omitted when
-    ``hmw_available`` is false.
+    which the scaffold became useful. Welcome, Q&A, and Deep Review rows
+    are never anchors. The card is omitted when ``hmw_available`` is false.
 
     Args:
         messages: Active-branch messages already loaded for the panel.
@@ -153,8 +148,6 @@ def render_hmw_scaffold() -> None:
     with st.container(key="hmw_scaffold"):
         st.markdown(f"**{HMW_SCAFFOLD_TITLE}**")
         st.markdown(HMW_SCAFFOLD_LEAD)
-        st.markdown(HMW_PROMPT_LINE)
-        st.markdown(HMW_FORMULA_INTRO)
         st.code(HMW_FORMULA, language=None, wrap_lines=True)
         st.markdown(HMW_FORMULA_OUTRO)
 

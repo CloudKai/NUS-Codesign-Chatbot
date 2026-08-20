@@ -25,8 +25,8 @@ from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
 
 _HMW_FORMULA = (
-    "How might we + [action/intervention] + for [user] + so that "
-    "[desired outcome/benefit]"
+    "How might we + [action / opportunity] + for [user] + so that "
+    "[desired outcome / benefit]"
 )
 
 _HMW_BRITTLE_REGEX = r"^How might we .* for .* so that .*$"
@@ -119,16 +119,16 @@ def test_hmw_completion_criterion_lives_in_problem_identification_prompts() -> N
         assert _HMW_FORMULA in collapsed
         assert "hmw_scaffold_ready=true" in collapsed
         assert "recommendation=stay is NORMAL" in collapsed
-        assert "Never convert" in collapsed
+        assert "Never convert this stay into recommendation=advance" in collapsed
         assert "Do not tell the student to use the HMW formula" in collapsed
         assert "Judge meaning, not punctuation" in collapsed
-        assert "STAY when the user" in collapsed
-        assert "ADVANCE when the student has synthesized" in collapsed
-        assert "still give specific feedback" in collapsed
-        assert "recommendation=stay" in collapsed
+        assert "valid working HMW" in collapsed
+        assert "Equivalent prose that states user, problem, and outcome" in collapsed
         assert "recommendation=advance" in collapsed
         assert "Concept Generation" in collapsed
         assert "The application remains the stage authority" in collapsed
+        assert "Do not write the finished HMW" in collapsed
+        assert "solution-locked" in collapsed
         assert _HMW_BRITTLE_REGEX not in text
     fast_chat = " ".join(
         Path("agentcore_runtime/prompts/fast_chat.md")
@@ -137,6 +137,7 @@ def test_hmw_completion_criterion_lives_in_problem_identification_prompts() -> N
     )
     assert "hmw_scaffold_ready is internal" in fast_chat
     assert "set hmw_scaffold_ready to true" in fast_chat
+    assert "valid working HMW" in fast_chat
     concept = load_stage_prompt("concept_generation")
     assert "HOW MIGHT WE READINESS AND COMPLETION" not in concept
 
