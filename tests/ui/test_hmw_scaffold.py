@@ -25,12 +25,13 @@ from ui.coach_welcome import (
 _FIRST_USER = "Older pedestrians struggle at the school crossing."
 _FIRST_COACH = "What specifically is hardest at the crossing?"
 _SECOND_USER = (
-    "They cannot reach the other side before the signal changes. "
-    "I want them to cross safely without rushing."
+    "Some older pedestrians cannot reach the other side before the signal changes."
 )
-_SECOND_COACH = "What outcome matters most for those pedestrians?"
+_SECOND_COACH = "What outcome would you want to improve?"
+_THIRD_COACH = "What evidence makes that outcome matter most?"
 _QA_USER = "What does the Week 1 lecture say about crossings?"
 _QA_ASSISTANT = "Week 1 describes pedestrian crossing times."
+_REVIEW_ASSISTANT = "Formative review of the crossing problem."
 
 
 def _visible_text(app: AppTest) -> str:
@@ -110,25 +111,27 @@ def _welcome_row() -> dict[str, object]:
     }
 
 
-def _plan_kinds(
+def _plan_tokens(
     messages: list[dict[str, object]],
     *,
     hmw_available: bool,
 ) -> list[str]:
-    """Return render-plan kinds, using message content for conversation rows."""
-    kinds: list[str] = []
+    """Return render-plan tokens for welcome, HMW, and message contents."""
+    tokens: list[str] = []
     for kind, message in transcript_hmw_render_plan(
         messages, hmw_available=hmw_available
     ):
         if kind == "hmw":
-            kinds.append("hmw")
+            tokens.append("hmw")
             continue
         assert message is not None
         if str((message.get("metadata") or {}).get("kind") or "") == COACH_WELCOME_KIND:
-            kinds.append("welcome")
+            tokens.append("welcome")
+        elif str(message.get("role") or "") == "user":
+            tokens.append("user")
         else:
-            kinds.append(str(message.get("role") or ""))
-    return kinds
+            tokens.append(str(message.get("content") or "assistant"))
+    return tokens
 
 
 def _seed_ready_coaching(store: StudentStore, thread_id: str) -> None:
@@ -166,24 +169,32 @@ def test_plan_hides_hmw_when_not_available() -> None:
             "metadata": {"assessment": _pi_coaching()},
         },
     ]
-    assert _plan_kinds(messages, hmw_available=False) == [
+    assert _plan_tokens(messages, hmw_available=False) == [
         "welcome",
         "user",
-        "assistant",
+        _FIRST_COACH,
     ]
 
 
-def test_plan_places_hmw_after_welcome_before_conversation() -> None:
-    """Eligible notebooks insert exactly one card after the welcome row."""
+def test_plan_places_hmw_after_unlocking_coach_response() -> None:
+    """Eligible notebooks insert exactly one card after the unlocking Coach turn."""
+    first_coach = {
+        "role": "assistant",
+        "content": _FIRST_COACH,
+        "metadata": {"assessment": _pi_coaching()},
+    }
+    second_coach = {
+        "role": "assistant",
+        "content": _SECOND_COACH,
+        "metadata": {"assessment": _pi_coaching(ready=True)},
+    }
     messages = [
         {"role": "assistant", "content": "", "metadata": {"kind": COACH_WELCOME_KIND}},
         _welcome_row(),
         {"role": "user", "content": _FIRST_USER, "metadata": {}},
-        {
-            "role": "assistant",
-            "content": _FIRST_COACH,
-            "metadata": {"assessment": _pi_coaching(ready=True)},
-        },
+        first_coach,
+        {"role": "user", "content": _SECOND_USER, "metadata": {}},
+        second_coach,
         {"role": "user", "content": _QA_USER, "metadata": {}},
         {
             "role": "assistant",
@@ -196,31 +207,147 @@ def test_plan_places_hmw_after_welcome_before_conversation() -> None:
                 }
             },
         },
-        _welcome_row(),
     ]
-    assert _plan_kinds(messages, hmw_available=True) == [
+    assert _plan_tokens(messages, hmw_available=True) == [
         "welcome",
+        "user",
+        _FIRST_COACH,
+        "user",
+        _SECOND_COACH,
         "hmw",
         "user",
-        "assistant",
-        "user",
-        "assistant",
-        "welcome",
+        _QA_ASSISTANT,
     ]
 
 
-def test_plan_places_hmw_first_without_welcome() -> None:
-    """Legacy notebooks without a welcome still get one top-of-log card."""
+def test_plan_keeps_sticky_anchor_after_later_false() -> None:
+    """A later ready=false Coaching turn must not move the card."""
+    messages = [
+        _welcome_row(),
+        {"role": "user", "content": _FIRST_USER, "metadata": {}},
+        {
+            "role": "assistant",
+            "content": _FIRST_COACH,
+            "metadata": {"assessment": _pi_coaching()},
+        },
+        {"role": "user", "content": _SECOND_USER, "metadata": {}},
+        {
+            "role": "assistant",
+            "content": _SECOND_COACH,
+            "metadata": {"assessment": _pi_coaching(ready=True)},
+        },
+        {"role": "user", "content": "I want them to cross without rushing.", "metadata": {}},
+        {
+            "role": "assistant",
+            "content": _THIRD_COACH,
+            "metadata": {"assessment": _pi_coaching()},
+        },
+    ]
+    assert _plan_tokens(messages, hmw_available=True) == [
+        "welcome",
+        "user",
+        _FIRST_COACH,
+        "user",
+        _SECOND_COACH,
+        "hmw",
+        "user",
+        _THIRD_COACH,
+    ]
+
+
+def test_plan_places_hmw_after_first_visible_ready_without_welcome() -> None:
+    """Legacy notebooks without a welcome still anchor after the unlocking Coach."""
     messages = [
         {"role": "user", "content": _FIRST_USER, "metadata": {}},
         {
             "role": "assistant",
             "content": _FIRST_COACH,
+            "metadata": {"assessment": _pi_coaching()},
+        },
+        {"role": "user", "content": _SECOND_USER, "metadata": {}},
+        {
+            "role": "assistant",
+            "content": _SECOND_COACH,
             "metadata": {"assessment": _pi_coaching(ready=True)},
         },
     ]
-    assert _plan_kinds(messages, hmw_available=True) == ["hmw", "user", "assistant"]
-    assert _plan_kinds(messages, hmw_available=False) == ["user", "assistant"]
+    assert _plan_tokens(messages, hmw_available=True) == [
+        "user",
+        _FIRST_COACH,
+        "user",
+        _SECOND_COACH,
+        "hmw",
+    ]
+    assert "hmw" not in _plan_tokens(messages, hmw_available=False)
+
+
+def test_deep_review_does_not_move_hmw_anchor() -> None:
+    """Deep Review after unlock must not become the HMW anchor."""
+    messages = [
+        _welcome_row(),
+        {"role": "user", "content": _FIRST_USER, "metadata": {}},
+        {
+            "role": "assistant",
+            "content": _FIRST_COACH,
+            "metadata": {"assessment": _pi_coaching()},
+        },
+        {"role": "user", "content": _SECOND_USER, "metadata": {}},
+        {
+            "role": "assistant",
+            "content": _SECOND_COACH,
+            "metadata": {"assessment": _pi_coaching(ready=True)},
+        },
+        {
+            "role": "assistant",
+            "content": _REVIEW_ASSISTANT,
+            "metadata": {
+                "assessment": {
+                    "current_stage": "problem_identification",
+                    "recommendation": "stay",
+                    "hmw_scaffold_ready": True,
+                    "review_depth": "deep",
+                    "review_trigger": "explicit",
+                    "review_model": "global.anthropic.claude-sonnet-4-6",
+                }
+            },
+        },
+    ]
+    assert _plan_tokens(messages, hmw_available=True) == [
+        "welcome",
+        "user",
+        _FIRST_COACH,
+        "user",
+        _SECOND_COACH,
+        "hmw",
+        _REVIEW_ASSISTANT,
+    ]
+
+
+def test_three_weak_coaching_turns_hide_hmw() -> None:
+    """Turn count alone never unlocks the scaffold."""
+    messages = [
+        _welcome_row(),
+        {"role": "user", "content": _FIRST_USER, "metadata": {}},
+        {
+            "role": "assistant",
+            "content": _FIRST_COACH,
+            "metadata": {"assessment": _pi_coaching()},
+        },
+        {"role": "user", "content": "People have problems.", "metadata": {}},
+        {
+            "role": "assistant",
+            "content": _SECOND_COACH,
+            "metadata": {"assessment": _pi_coaching()},
+        },
+        {"role": "user", "content": "I want things to be better.", "metadata": {}},
+        {
+            "role": "assistant",
+            "content": _THIRD_COACH,
+            "metadata": {"assessment": _pi_coaching()},
+        },
+    ]
+    assert hmw_scaffold_available("problem_identification", messages) is False
+    assert "hmw" not in _plan_tokens(messages, hmw_available=False)
 
 
 def test_empty_notebook_hides_hmw_scaffold() -> None:
@@ -262,7 +389,7 @@ def test_one_coaching_turn_hides_hmw_scaffold() -> None:
 
 
 def test_hmw_scaffold_renders_once_when_eligible() -> None:
-    """Server-owned readiness plus two Coaching turns shows one card after welcome."""
+    """Server-owned readiness plus two Coaching turns shows one card after the unlocking Coach."""
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     assert not app.exception
     thread_id = str(app.session_state["thread_id"])
@@ -270,11 +397,13 @@ def test_hmw_scaffold_renders_once_when_eligible() -> None:
     _seed_ready_coaching(store, thread_id)
     messages = store.get_messages(thread_id)
     assert hmw_scaffold_available("problem_identification", messages)
-    assert _plan_kinds(messages, hmw_available=True)[:4] == [
+    assert _plan_tokens(messages, hmw_available=True) == [
         "welcome",
-        "hmw",
         "user",
-        "assistant",
+        _FIRST_COACH,
+        "user",
+        _SECOND_COACH,
+        "hmw",
     ]
     app.run()
     assert not app.exception
@@ -318,7 +447,7 @@ def test_hmw_scaffold_renders_once_when_eligible() -> None:
     )
 
 
-def test_qa_turn_keeps_hmw_under_welcome() -> None:
+def test_qa_turn_keeps_hmw_after_unlocking_coach() -> None:
     """A later Q&A exchange must not move or duplicate the HMW card."""
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     assert not app.exception
@@ -340,15 +469,15 @@ def test_qa_turn_keeps_hmw_under_welcome() -> None:
     )
     messages = store.get_messages(thread_id)
     assert hmw_scaffold_available("problem_identification", messages)
-    assert _plan_kinds(messages, hmw_available=True) == [
+    assert _plan_tokens(messages, hmw_available=True) == [
         "welcome",
+        "user",
+        _FIRST_COACH,
+        "user",
+        _SECOND_COACH,
         "hmw",
         "user",
-        "assistant",
-        "user",
-        "assistant",
-        "user",
-        "assistant",
+        _QA_ASSISTANT,
     ]
     app.run()
     assert not app.exception
@@ -359,8 +488,8 @@ def test_qa_turn_keeps_hmw_under_welcome() -> None:
     assert _hmw_inside_chat_messages(app) is False
 
 
-def test_legacy_notebook_without_welcome_places_hmw_at_top() -> None:
-    """Eligible history without COACH_WELCOME_KIND still shows one top card."""
+def test_legacy_notebook_without_welcome_places_hmw_after_unlocking_coach() -> None:
+    """Eligible history without COACH_WELCOME_KIND still anchors after the unlocking Coach."""
     from backend.models import LOCKED_CHAT_MODEL_ID
     from backend.student_support import DEFAULT_SUPPORT_MODE
 
@@ -379,10 +508,12 @@ def test_legacy_notebook_without_welcome_places_hmw_at_top() -> None:
         for item in messages
     )
     assert hmw_scaffold_available("problem_identification", messages)
-    assert _plan_kinds(messages, hmw_available=True)[:3] == [
-        "hmw",
+    assert _plan_tokens(messages, hmw_available=True) == [
         "user",
-        "assistant",
+        _FIRST_COACH,
+        "user",
+        _SECOND_COACH,
+        "hmw",
     ]
     store.update_user_preferences({"active_thread_id": legacy_id})
     app.session_state["thread_id"] = None

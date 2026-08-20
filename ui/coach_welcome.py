@@ -7,6 +7,8 @@ from typing import Any, Literal, Protocol
 
 import streamlit as st
 
+from backend.learning.hmw import hmw_scaffold_anchor_message
+
 
 COACH_WELCOME_KIND = "coach_welcome"
 
@@ -22,11 +24,11 @@ COACH_WELCOME_MARKDOWN = (
     f"**{COACH_WELCOME_TITLE}**\n\n{COACH_WELCOME_BODY}"
 )
 
-HMW_SCAFFOLD_TITLE = "Ready to frame your design opportunity?"
+HMW_SCAFFOLD_TITLE = "Ready to start framing your design opportunity?"
 
 HMW_SCAFFOLD_LEAD = (
-    "You've clarified enough of the problem to start bringing your ideas "
-    "together."
+    "You've clarified enough of the problem to try bringing your ideas "
+    "together. Your statement can still be refined as you learn more."
 )
 
 HMW_PROMPT_LINE = "Try framing your problem as a How Might We statement."
@@ -41,9 +43,8 @@ HMW_FORMULA = (
 )
 
 HMW_FORMULA_OUTRO = (
-    "When you're ready, use this structure to draft a working HMW statement "
-    "in the chat. Your coach can help you refine it before you move on to "
-    "the next stage."
+    "Draft a working version in the chat. If one part is still unclear, "
+    "your coach can help you refine it before you move on."
 )
 
 
@@ -87,18 +88,31 @@ def is_visible_coach_welcome(message: Mapping[str, Any]) -> bool:
     return str(metadata.get("kind") or "").strip() == COACH_WELCOME_KIND
 
 
+def _is_same_transcript_row(
+    left: Mapping[str, Any],
+    right: Mapping[str, Any],
+) -> bool:
+    """Return whether two message mappings are the same transcript row."""
+    if left is right:
+        return True
+    left_id = str(left.get("id") or "").strip()
+    right_id = str(right.get("id") or "").strip()
+    return bool(left_id) and left_id == right_id
+
+
 def transcript_hmw_render_plan(
     messages: Sequence[Mapping[str, Any]] | None,
     *,
     hmw_available: bool,
 ) -> list[tuple[Literal["message", "hmw"], Mapping[str, Any] | None]]:
-    """Return chat-log steps with the HMW card after welcome when eligible.
+    """Return chat-log steps with the HMW card after the unlocking Coach turn.
 
     Eligibility is supplied by the caller from ``hmw_scaffold_available``.
     This helper only decides placement and guarantees at most one ``hmw``
-    step. When a visible welcome exists, the card follows it. When eligible
-    history has no welcome (legacy notebooks), the card is first. The card
-    is omitted when ``hmw_available`` is false.
+    step. When eligible, the card follows the first Coaching response at
+    which the two-turn gate plus readiness would unlock. Welcome, Q&A, and
+    Deep Review rows are never anchors. The card is omitted when
+    ``hmw_available`` is false.
 
     Args:
         messages: Active-branch messages already loaded for the panel.
@@ -113,18 +127,16 @@ def transcript_hmw_render_plan(
         for item in (messages or ())
         if isinstance(item, Mapping) and not _is_skipped_transcript_message(item)
     ]
-    has_welcome = any(is_visible_coach_welcome(item) for item in visible)
+    anchor = hmw_scaffold_anchor_message(messages) if hmw_available else None
     steps: list[tuple[Literal["message", "hmw"], Mapping[str, Any] | None]] = []
     hmw_inserted = False
-    if hmw_available and not has_welcome:
-        steps.append(("hmw", None))
-        hmw_inserted = True
     for item in visible:
         steps.append(("message", item))
         if (
             not hmw_inserted
             and hmw_available
-            and is_visible_coach_welcome(item)
+            and anchor is not None
+            and _is_same_transcript_row(item, anchor)
         ):
             steps.append(("hmw", None))
             hmw_inserted = True
@@ -132,7 +144,7 @@ def transcript_hmw_render_plan(
 
 
 def render_hmw_scaffold() -> None:
-    """Render the read-only How Might We guidance under the Coach welcome.
+    """Render the read-only How Might We guidance after the unlocking Coach turn.
 
     Uses ``st.code`` so the formula looks like a code block but is not an
     input widget. Students still reply in the existing chat composer. This

@@ -13,20 +13,26 @@ Guide the student to identify:
 - a workable scope for this project
 
 HOW MIGHT WE READINESS AND COMPLETION
-HMW is a late framing tool, not the opening instruction. Before who / need /
-outcome are clear, keep Socratic coaching: one focused question about the
-most consequential missing framing. Do not tell the student to use the HMW
-formula yet. Do not reward a premature solution such as "install a longer
-traffic light".
+HMW is an intermediate synthesis scaffold, not a reward for completing Problem
+Identification and not the opening instruction. Before at least two core
+framing signals are reasonably clear, keep Socratic coaching: one focused
+question about the most consequential missing framing. Do not tell the
+student to use the HMW formula yet. Do not reward a premature solution such
+as "install a longer traffic light".
 
-Set hmw_scaffold_ready=true only when the student can reasonably attempt a
-working How Might We statement:
-A. identifiable user/stakeholder (need not be maximally specific)
+Consider three core framing signals:
+A. identifiable user/stakeholder
 B. understandable problem, need, or context
-C. some meaningful desired outcome
-D. remaining gaps are refinement-level, not fundamental who / what / why
+C. meaningful desired outcome
 
-Final evidence, a final design, or perfect wording is not required.
+Set hmw_scaffold_ready=true when at least TWO of these THREE signals are
+reasonably clear enough for the student to attempt a working HMW statement.
+The third signal may still need clarification. The scaffold exists partly to
+help the student expose and refine the missing component. Vague mentions of
+"people" and "make things better" are not two signals.
+
+Do not wait for complete evidence, root-cause certainty, perfect scope, all
+stakeholders, final validation, or final wording.
 hmw_scaffold_ready=true with recommendation=stay is NORMAL. Never convert
 it into recommendation=advance.
 

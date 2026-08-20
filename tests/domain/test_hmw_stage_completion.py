@@ -113,9 +113,9 @@ def test_hmw_completion_criterion_lives_in_problem_identification_prompts() -> N
     for text in (backend, agentcore):
         collapsed = " ".join(text.split())
         assert "HOW MIGHT WE READINESS AND COMPLETION" in collapsed
-        assert "HOW MIGHT WE COMPLETION" not in collapsed.replace(
-            "HOW MIGHT WE READINESS AND COMPLETION", ""
-        )
+        assert "intermediate synthesis scaffold" in collapsed
+        assert "TWO of these THREE signals" in collapsed
+        assert "third signal may still need clarification" in collapsed
         assert _HMW_FORMULA in collapsed
         assert "hmw_scaffold_ready=true" in collapsed
         assert "recommendation=stay is NORMAL" in collapsed

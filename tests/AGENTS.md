@@ -112,7 +112,7 @@ modules.
 | `ui/test_streamlit_ui.py` | AppTest smoke against `streamlit_app.py` (in-process path) |
 | `ui/test_theme_styles.py` | Ordered CSS partial manifest and assembled stylesheet contracts |
 | `ui/test_chat_scroll.py` | Transcript scroll policy, inflight chrome, compact turn-error, fragment submit |
-| `ui/test_hmw_scaffold.py` | Progressive How Might We card: hidden on empty notebook, one card after welcome when eligible, hidden after Concept Generation |
+| `ui/test_hmw_scaffold.py` | Progressive How Might We card: hidden on empty notebook, one card after the unlocking Coach turn when eligible, hidden after Concept Generation |
 | `domain/test_hmw_scaffold_gate.py` | Server-owned HMW eligibility, stickiness, Q&A/Deep Review exclusion, persist/idempotency, read-only learning-state projection |
 | `domain/test_hmw_stage_completion.py` | HMW readiness vs ADVANCE in PI prompts, stay/advance via existing StageDecision, no regex evaluator |
 | `ui/test_ui_perf_logging.py` | Streamlit `co_design.ui_perf` INFO visibility, handler idempotency, privacy-safe UI TIMING, pre-API span contracts |

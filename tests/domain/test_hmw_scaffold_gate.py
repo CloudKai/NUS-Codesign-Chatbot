@@ -16,6 +16,7 @@ from backend.domain import (
 from backend.learning.hmw import (
     HMW_SCAFFOLD_MINIMUM_COACHING_TURNS,
     HMW_SCAFFOLD_STAGE_ID,
+    hmw_scaffold_anchor_message,
     hmw_scaffold_available,
     hmw_scaffold_projection,
 )
@@ -103,6 +104,55 @@ def test_readiness_is_sticky_after_later_false() -> None:
         _coaching_message(ready=False),
     ]
     assert hmw_scaffold_available("problem_identification", messages) is True
+
+
+def test_anchor_is_the_second_turn_even_if_first_was_ready() -> None:
+    """Eligibility unlocks at turn 2; the card follows that Coach response."""
+    first = _coaching_message(ready=True)
+    first["content"] = "First Socratic probe."
+    second = _coaching_message(ready=False)
+    second["content"] = "Second Socratic probe."
+    messages = [first, second]
+    assert hmw_scaffold_available("problem_identification", messages) is True
+    assert hmw_scaffold_anchor_message(messages) is second
+
+
+def test_anchor_stays_on_unlocking_turn_when_later_ready_false() -> None:
+    first = _coaching_message(ready=False)
+    first["content"] = "First Socratic probe."
+    second = _coaching_message(ready=True)
+    second["content"] = "Unlocking Socratic probe."
+    third = _coaching_message(ready=False)
+    third["content"] = "Later Socratic probe."
+    messages = [first, second, third]
+    assert hmw_scaffold_available("problem_identification", messages) is True
+    assert hmw_scaffold_anchor_message(messages) is second
+
+
+def test_anchor_skips_qa_and_deep_review() -> None:
+    first = _coaching_message(ready=False)
+    first["content"] = "First Socratic probe."
+    second = _coaching_message(ready=True)
+    second["content"] = "Unlocking Socratic probe."
+    qa = _coaching_message(mode="qa", ready=True)
+    qa["content"] = "Week 1 describes pedestrian crossing times."
+    review = {
+        "role": "assistant",
+        "content": "Formative review.",
+        "metadata": {
+            "assessment": {
+                "current_stage": "problem_identification",
+                "recommendation": "stay",
+                "hmw_scaffold_ready": True,
+                "review_depth": "deep",
+                "review_trigger": "explicit",
+                "review_model": "global.anthropic.claude-sonnet-4-6",
+            }
+        },
+    }
+    messages = [first, second, qa, review]
+    assert hmw_scaffold_available("problem_identification", messages) is True
+    assert hmw_scaffold_anchor_message(messages) is second
 
 
 def test_qa_does_not_count_or_unlock() -> None:

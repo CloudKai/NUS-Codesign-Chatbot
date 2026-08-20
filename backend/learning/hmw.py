@@ -130,6 +130,63 @@ def qualifying_pi_coaching_assessments(
     return found
 
 
+def _is_empty_assistant(message: Mapping[str, Any]) -> bool:
+    """Return whether an assistant row has no visible transcript content."""
+    return (
+        str(message.get("role") or "").strip().lower() == "assistant"
+        and not str(message.get("content") or "").strip()
+    )
+
+
+def hmw_scaffold_anchor_message(
+    active_messages: Sequence[Mapping[str, Any]] | None,
+    *,
+    minimum: int = HMW_SCAFFOLD_MINIMUM_COACHING_TURNS,
+) -> Mapping[str, Any] | None:
+    """Return the visible Coaching row after which the HMW card should render.
+
+    The card belongs to the first qualifying Problem Identification Coaching
+    response at which eligibility would become true: at least ``minimum``
+    qualifying Coaching assessments exist, and at least one of them is
+    ready. Later ``ready=false`` turns do not move the anchor. Q&A, Deep
+    Review, and welcome rows are never anchors.
+
+    If eligibility trips on a skipped empty assistant, fall back to the
+    latest visible qualifying Coaching row.
+
+    Args:
+        active_messages: Active-branch messages from ``get_messages``.
+        minimum: Qualifying Coaching-exchange guardrail. Defaults to 2.
+
+    Returns:
+        The visible assistant message to follow with the scaffold, or
+        ``None`` when no visible Coaching anchor exists.
+    """
+    required = max(1, int(minimum))
+    seen: list[Mapping[str, Any]] = []
+    unlock: Mapping[str, Any] | None = None
+    last_visible_qualifying: Mapping[str, Any] | None = None
+    for message in active_messages or ():
+        mapping = _as_mapping(message)
+        if mapping is None:
+            continue
+        assessment = _assistant_assessment(mapping)
+        if assessment is None or not _is_qualifying_pi_coaching(assessment):
+            continue
+        seen.append(assessment)
+        visible = not _is_empty_assistant(mapping)
+        if visible:
+            last_visible_qualifying = mapping
+        if unlock is not None:
+            continue
+        if len(seen) < required:
+            continue
+        if not any(_hmw_ready(item) for item in seen):
+            continue
+        unlock = mapping if visible else last_visible_qualifying
+    return unlock or last_visible_qualifying
+
+
 def hmw_scaffold_available(
     current_stage: str | None,
     active_messages: Sequence[Mapping[str, Any]] | None,

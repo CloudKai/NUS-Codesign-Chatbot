@@ -1,6 +1,6 @@
 {
   "baseline_commit": "a6d163668902beae4938fe552cced7ba92b15e88",
-  "note": "Updating these hashes requires explicit pedagogical review. 2026-08-20: problem_identification.md splits How Might We readiness (hmw_scaffold_ready) from ADVANCE; HMW is a late framing tool, not the opening instruction. Shared coaching and other stage files unchanged. 2026-08-17: shared_coaching.md dropped the assumptions_identified schema sentence and the Fast Chat structured-output section (contract now lives once in the runtime JSON block). RESEARCH CODING, Socratic, V&V, and assumption-check pedagogy are unchanged.",
+  "note": "Updating these hashes requires explicit pedagogical review. 2026-08-20: problem_identification.md treats How Might We readiness as 2-of-3 framing signals, distinct from ADVANCE. Shared coaching and other stage files unchanged. 2026-08-17: shared_coaching.md dropped the assumptions_identified schema sentence and the Fast Chat structured-output section (contract now lives once in the runtime JSON block). RESEARCH CODING, Socratic, V&V, and assumption-check pedagogy are unchanged.",
   "files": [
     {
       "path": "agentcore_runtime/prompts/shared_coaching.md",
@@ -8,7 +8,7 @@
     },
     {
       "path": "agentcore_runtime/prompts/stages/problem_identification.md",
-      "sha256": "6c1474057609f01306a0734d7828966603ff27f69116d3e1447bee4c56c9dad6"
+      "sha256": "99eae669756bc37419cd166af070260aa3a4819acd6dd2608b0d8994b83a843c"
     },
     {
       "path": "agentcore_runtime/prompts/stages/concept_generation.md",
