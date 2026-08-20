@@ -520,6 +520,18 @@
         margin-top:0 !important;
     }
 
+    /* Running Deep Review is compact st.status; hide the expander chevron. */
+    .st-key-deep_review_control [data-testid="stExpander"] summary::-webkit-details-marker,
+    .st-key-deep_review_control [data-testid="stExpander"] summary::marker {
+        display:none !important;
+        content:none !important;
+    }
+
+    .st-key-deep_review_control [data-testid="stExpander"] summary
+    [data-testid="stIconMaterial"] {
+        display:none !important;
+    }
+
     .st-key-start_deep_review,
     .st-key-start_deep_review [data-testid="stButton"],
     .st-key-start_deep_review button {

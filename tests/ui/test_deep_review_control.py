@@ -144,3 +144,16 @@ def test_deep_review_button_is_full_width_and_grouped_with_caption() -> None:
     assert "color:var(--cd-muted)" in disabled_block
     assert "background:var(--cd-accent)" in primary_block
     assert "background:var(--cd-subtle)" not in primary_block
+
+
+def test_running_status_hides_expander_chevron() -> None:
+    """Compact Deep Review st.status keeps the spinner and hides the toggle arrow."""
+    css = Path("ui/assets/styles/20-studio.css").read_text(encoding="utf-8")
+    status_css = css.split(
+        '.st-key-deep_review_control [data-testid="stExpander"]', 1
+    )[1]
+    assert "summary::marker" in status_css
+    assert "::-webkit-details-marker" in status_css
+    assert "stIconMaterial" in status_css
+    assert "display:none !important" in status_css.split("stIconMaterial", 1)[1]
+
