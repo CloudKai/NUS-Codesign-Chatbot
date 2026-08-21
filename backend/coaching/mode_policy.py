@@ -421,8 +421,19 @@ def should_author_qa_evidence_gap(request: object) -> bool:
     if gap_note:
         return True
     # Image-only Q&A has selected sources but no textual retrieve. The model
-    # still needs the vision turn; do not author a course-material gap.
-    if getattr(request, "image_inputs", None) and not retrieved_context.strip():
+    # still needs the vision turn; do not author a course-material gap. A
+    # mixed image + textual-source turn remains grounded: its course claims
+    # still require a validated textual chunk.
+    image_inputs = getattr(request, "image_inputs", None) or []
+    image_ids = {
+        str(item.get("source_id") or "")
+        if isinstance(item, dict)
+        else str(getattr(item, "source_id", "") or "")
+        for item in image_inputs
+    }
+    source_ids = {str(source_id) for source_id in source_ids}
+    image_only = bool(image_inputs) and source_ids and source_ids <= image_ids
+    if image_only and not retrieved_context.strip():
         return False
     return True
 

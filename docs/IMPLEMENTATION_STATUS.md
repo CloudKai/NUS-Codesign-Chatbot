@@ -4744,3 +4744,41 @@ object cleanup, ownership-in-write checks, `ca-certificates` in image.
 **DSQL bootstrap / adapter hardening**
 
 **AWS stateless EC2 migration scaffolding**
+
+**Course Q&A evidence-gap hardening** — Current working-tree phase
+
+- High-confidence source questions now fail closed when selected-source
+  retrieval raises before producing validated chunks. The server persists the
+  existing evidence-gap response without invoking AgentCore, emitting model
+  claims, or attaching citations. Image-only Q&A remains model-owned; a mixed
+  image plus textual-source turn still requires textual evidence.
+- Selected source title matching now also indexes the meaningful pieces of
+  hyphenated/underscored filenames, so a question such as “L2 Network
+  Bootstrapping” is classified consistently with the selected
+  `L2-Network-Bootstrapping-ARP-DHCP.pdf` source.
+- Added deterministic coverage for retrieval exceptions, mixed image/text
+  evidence gaps, and hyphenated selected-source matching.
+- Validation: focused Q&A/mode/retrieval/RAG-fallback/citation/one-call suite
+  passed (101 tests); Ruff, compileall, and `git diff --check` passed. No AWS
+  or paid model calls were made.
+- Compatibility: no persistence/schema/API changes and no AgentCore runtime
+  publication required. The next exact action is to run the focused suite in
+  CI/EC2 after deploying the current backend image, then manually verify a
+  selected-source Q&A with a temporarily unavailable retriever.
+
+**Edited-message chat-history visibility** — Current working-tree phase
+
+- During an in-flight edit, the chat fragment now renders only the authoritative
+  prefix before the edited user message, followed by the revised prompt and
+  Coach progress. The obsolete suffix remains hidden until the successful
+  authoritative rerun.
+- A bounded transient prefix snapshot handles stale fragment arguments without
+  becoming a second transcript store. It is cleared on success, failure, and
+  stale-target recovery; DSQL/persisted messages remain canonical.
+- Validation: edit/render-plan, chat-scroll, progress, and rerun-scope tests
+  passed (34 tests); Ruff, UI/backend compileall, and `git diff --check` passed.
+  The broader Streamlit UI run still has the existing attachment-error AppTest
+  timeout; it is unrelated to edit rendering and was not changed here.
+- Compatibility: no backend, API, persistence, AgentCore, RAG, attachment,
+  citation, HMW, or stage semantics changed. The next exact action is a manual
+  delayed edit check at desktop and mobile widths after the app rebuild.

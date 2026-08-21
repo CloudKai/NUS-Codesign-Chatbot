@@ -55,6 +55,7 @@ from backend.prompts.composer import COACH_PROMPT_VERSION
 from backend.research.models import ResearchEvidenceSpan, ResearchObservationCreate
 from backend.repositories import NotebookRepository
 from backend.retrieval import (
+    COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT,
     ContextRetriever,
     LocalChunkRetriever,
     RetrievalQuery,
@@ -1727,14 +1728,31 @@ class CoachApplicationService:
         retrieval_sources = snapshot.retrieval_sources
         if needs_retrieval and retrieval_sources:
             emit_coach_progress(PROGRESS_RETRIEVING)
-            retrieved_chunks, retrieval_result_context = self._retrieve_for_turn(
-                student_message=request.student_message,
-                current_stage=authoritative_stage,
-                retrieval_sources=retrieval_sources,
-                project_context=project_context,
-                conversation_summary=conversation_summary,
-                recent_messages=store_history,
-            )
+            try:
+                retrieved_chunks, retrieval_result_context = self._retrieve_for_turn(
+                    student_message=request.student_message,
+                    current_stage=authoritative_stage,
+                    retrieval_sources=retrieval_sources,
+                    project_context=project_context,
+                    conversation_summary=conversation_summary,
+                    recent_messages=store_history,
+                )
+            except Exception:
+                # A source Q&A turn cannot fall through to the provider when
+                # retrieval itself fails: doing so would let model knowledge or
+                # prior assistant prose become an unsupported course answer.
+                # Image-only Q&A remains provider-owned because its evidence is
+                # the resolved image input, not textual retrieval. A mixed turn
+                # with any textual selected source must still fail closed.
+                image_only = bool(image_inputs) and all(
+                    str(source.kind or "").lower() == "image"
+                    or str(source.mime or "").lower().startswith("image/")
+                    for source in retrieval_sources
+                )
+                if mode_policy.expected_mode != "qa" or image_only:
+                    raise
+                retrieved_chunks = []
+                retrieval_result_context = COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT
         else:
             record_field("retrieval_total_ms", 0)
             record_field("course_kb_retrieval_ms", 0)

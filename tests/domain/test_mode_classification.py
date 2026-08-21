@@ -304,6 +304,19 @@ def test_impersonal_course_concept_questions_expect_qa(
     assert policy.retrieve is True, note
 
 
+def test_hyphenated_selected_source_title_matches_spaced_question() -> None:
+    """Filename tokens still ground a question when the student uses spaces."""
+    policy = resolve_mode_policy(
+        "what is in L2 Network Bootstrapping",
+        selected_source_titles=["L2-Network Bootstrapping-ARP-DHCP.pdf"],
+        selected_source_filenames=["L2-Network Bootstrapping-ARP-DHCP.pdf"],
+        has_selected_sources=True,
+    )
+    assert policy.intent == INTENT_HIGH_CONFIDENCE_SOURCE
+    assert policy.expected_mode == "qa"
+    assert policy.retrieve is True
+
+
 def test_personal_reflection_phrased_as_a_question_is_not_qa() -> None:
     """A first-person reflective question stays with the coach."""
     for message in (
@@ -344,7 +357,7 @@ def test_should_author_qa_evidence_gap_skips_image_only_turns() -> None:
         retrieved_chunks=[],
         source_ids=["img-1"],
         retrieved_course_context="",
-        image_inputs=[{"media_type": "image/png"}],
+        image_inputs=[{"source_id": "img-1", "media_type": "image/png"}],
     )
     assert should_author_qa_evidence_gap(image_only) is False
     course_gap = SimpleNamespace(
@@ -356,6 +369,16 @@ def test_should_author_qa_evidence_gap_skips_image_only_turns() -> None:
         image_inputs=[],
     )
     assert should_author_qa_evidence_gap(course_gap) is True
+
+    mixed = SimpleNamespace(
+        expected_response_mode="qa",
+        allow_model_knowledge=False,
+        retrieved_chunks=[],
+        source_ids=["img-1", "pdf-1"],
+        retrieved_course_context="",
+        image_inputs=[SimpleNamespace(source_id="img-1")],
+    )
+    assert should_author_qa_evidence_gap(mixed) is True
 
 
 def test_runtime_hint_is_silent_when_ambiguous_and_qa_skips_coaching_guidance() -> None:

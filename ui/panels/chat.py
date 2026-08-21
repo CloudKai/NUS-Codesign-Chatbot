@@ -388,10 +388,29 @@ def render_message(
                             stage=f"revise:{message['id']}",
                             prompt=draft,
                         )
+                        # Keep only the bounded prefix captured by the render
+                        # that owned this editor.  A fragment rerun can receive
+                        # stale/empty function arguments while the revise call
+                        # is in flight; the prefix keeps that transient view
+                        # visible without becoming a second transcript store.
+                        snapshot = st.session_state.get("_chat_edit_prefix_snapshot")
+                        if (
+                            isinstance(snapshot, dict)
+                            and str(snapshot.get("message_id") or "") == message["id"]
+                        ):
+                            prefix_messages = list(snapshot.get("prefix") or [])
+                            target_found = bool(snapshot.get("target_found"))
+                        else:
+                            prefix_messages, target_found = _edit_render_plan(
+                                None,
+                                message["id"],
+                            )
                         st.session_state.pending_edit = {
                             "message_id": message["id"],
                             "prompt": draft,
                             "idempotency_key": idempotency_key,
+                            "render_prefix": prefix_messages,
+                            "render_target_found": target_found,
                         }
                         st.session_state.editing_message = None
                         # Stay inside the chat fragment while the replacement
@@ -634,6 +653,35 @@ def _render_inflight_user_prompt(prompt: str, uploads: list[Any]) -> None:
             )
             if uploads:
                 st.caption("Attached · " + ", ".join(upload.name for upload in uploads))
+
+
+def _edit_render_plan(
+    messages: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None,
+    message_id: str,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Return the active transcript prefix for one in-flight edit.
+
+    The prefix is intentionally a transient render value only.  The persisted
+    transcript remains authoritative; this helper merely prevents a fragment
+    rerun from replacing the visible branch with an empty feed while revise is
+    running.
+
+    Args:
+        messages: Active messages loaded before the edit rerun.
+        message_id: User-message id being revised.
+
+    Returns:
+        ``(prefix, found)`` where ``prefix`` contains only rows before the
+        target and ``found`` reports whether the target was present.
+    """
+    target = str(message_id or "")
+    rows = [message for message in (messages or ()) if isinstance(message, dict)]
+    if not target:
+        return rows, False
+    for index, message in enumerate(rows):
+        if str(message.get("id") or "") == target:
+            return rows[:index], True
+    return rows, False
 
 
 def handle_prompt(
@@ -958,6 +1006,7 @@ def _submit_pending_edit(
     draft = str(pending.get("prompt") or "").strip()
     if not message_id or not draft:
         st.session_state.pop("pending_edit", None)
+        st.session_state.pop("_chat_edit_prefix_snapshot", None)
         _restore_pending_edit_draft(message_id, draft)
         st.session_state.edit_error_message = "Enter a message before resending."
         _rerun_edit_fragment()
@@ -1010,6 +1059,7 @@ def _submit_pending_edit(
             # stable retry key in session and reopen the editor so the student must
             # click Send again to retry the same revision attempt.
             st.session_state.pop("pending_edit", None)
+            st.session_state.pop("_chat_edit_prefix_snapshot", None)
             _restore_pending_edit_draft(message_id, draft)
             st.session_state.edit_error_message = (
                 "Could not finish this edit. Your draft is preserved — click Send "
@@ -1026,6 +1076,7 @@ def _submit_pending_edit(
             prompt=draft,
         )
         st.session_state.pop("pending_edit", None)
+        st.session_state.pop("_chat_edit_prefix_snapshot", None)
         st.session_state.editing_message = None
         updated_thread = store.get_thread(thread_id) or {}
         updated_metadata = updated_thread.get("metadata") or {}
@@ -1096,6 +1147,19 @@ def _render_composer_submit_fragment(
     fragment_enter_epoch_ms = int(time.time() * 1000)
     request_id = str(uuid.uuid4())
     pending = st.session_state.get("pending_edit")
+    # This is a bounded, one-action render snapshot. It is not used as
+    # conversation authority and is cleared when the revise attempt ends.
+    if not isinstance(pending, dict):
+        editing_message_id = str(st.session_state.get("editing_message") or "")
+        if editing_message_id:
+            prefix, target_found = _edit_render_plan(messages, editing_message_id)
+            st.session_state._chat_edit_prefix_snapshot = {
+                "message_id": editing_message_id,
+                "prefix": prefix,
+                "target_found": target_found,
+            }
+        else:
+            st.session_state.pop("_chat_edit_prefix_snapshot", None)
     pending_message_id = ""
     pending_prompt = ""
     if isinstance(pending, dict):
@@ -1107,12 +1171,44 @@ def _render_composer_submit_fragment(
             chat_log = st.container(key="chat_log")
             with chat_log:
                 history_started = time.perf_counter()
-                found_edit = _render_chat_history(
-                    messages,
-                    hmw_available=hmw_available,
-                    visible_source_ids=visible_source_ids,
-                    stop_before_message_id=pending_message_id or None,
-                )
+                render_messages = messages
+                render_stop_id = pending_message_id or None
+                found_edit = False
+                if pending_message_id:
+                    _, found_edit = _edit_render_plan(
+                        messages,
+                        pending_message_id,
+                    )
+                    if not found_edit and pending.get("render_target_found"):
+                        saved_prefix = pending.get("render_prefix")
+                        if isinstance(saved_prefix, list):
+                            # The saved value is only the already-visible
+                            # prefix, so render it without looking for the
+                            # target again.  This avoids a blank feed if the
+                            # fragment's captured args are stale.
+                            render_messages = saved_prefix
+                            render_stop_id = None
+                            found_edit = True
+                if pending_message_id and found_edit:
+                    if render_stop_id is None:
+                        _render_chat_history(
+                            render_messages,
+                            hmw_available=hmw_available,
+                            visible_source_ids=visible_source_ids,
+                        )
+                    else:
+                        _render_chat_history(
+                            render_messages,
+                            hmw_available=hmw_available,
+                            visible_source_ids=visible_source_ids,
+                            stop_before_message_id=pending_message_id or None,
+                        )
+                elif not pending_message_id:
+                    _render_chat_history(
+                        render_messages,
+                        hmw_available=hmw_available,
+                        visible_source_ids=visible_source_ids,
+                    )
                 log_ui_timing(
                     chat_history_ms=round(
                         max(0.0, (time.perf_counter() - history_started) * 1000.0),
@@ -1131,6 +1227,7 @@ def _render_composer_submit_fragment(
                     )
                 elif pending_message_id and not found_edit:
                     st.session_state.pop("pending_edit", None)
+                    st.session_state.pop("_chat_edit_prefix_snapshot", None)
                     st.session_state.edit_error_message = (
                         "This edit could not be matched to the active conversation. "
                         "Reload the notebook before trying again."

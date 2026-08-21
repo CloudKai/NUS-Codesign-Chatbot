@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import ui.runtime as runtime_module
 import ui.sources as sources_module
 import ui.studio as studio_module
+from ui.panels.chat import _edit_render_plan
 from ui.sources import (
     _select_all_widget_key,
     _source_selected_widget_key,
@@ -206,6 +207,37 @@ def test_edit_send_stays_in_chat_fragment_until_revision_completes() -> None:
         "def _render_chat_history(", 1
     )[0]
     assert "rerun_app()" in revise_block
+
+
+def test_edit_render_plan_keeps_only_prefix_for_any_branch_position() -> None:
+    """An in-flight edit renders its logical prefix, including first/latest edits."""
+    messages = [
+        {"id": "u1", "role": "user", "content": "U1"},
+        {"id": "a1", "role": "assistant", "content": "A1"},
+        {"id": "u2", "role": "user", "content": "U2"},
+        {"id": "a2", "role": "assistant", "content": "A2"},
+        {"id": "u3", "role": "user", "content": "U3"},
+    ]
+
+    prefix, found = _edit_render_plan(messages, "u2")
+    assert found is True
+    assert [item["id"] for item in prefix] == ["u1", "a1"]
+
+    prefix, found = _edit_render_plan(messages, "u3")
+    assert found is True
+    assert [item["id"] for item in prefix] == ["u1", "a1", "u2", "a2"]
+
+    prefix, found = _edit_render_plan(messages, "u1")
+    assert found is True
+    assert prefix == []
+
+
+def test_edit_render_plan_stale_target_reports_failure_without_blank_fallback() -> None:
+    """A missing target is distinguished from a valid first-message empty prefix."""
+    messages = [{"id": "u1", "role": "user", "content": "U1"}]
+    prefix, found = _edit_render_plan(messages, "missing")
+    assert found is False
+    assert [item["id"] for item in prefix] == ["u1"]
 
 
 def test_workspace_renders_chat_before_studio() -> None:

@@ -243,6 +243,11 @@ def _title_markers(values: Iterable[str]) -> tuple[str, ...]:
                 continue
             seen.add(token)
             markers.append(token)
+            for part in re.split(r"[-_.]+", token):
+                if len(part) < 4 or part in seen:
+                    continue
+                seen.add(part)
+                markers.append(part)
     return tuple(markers)
 
 

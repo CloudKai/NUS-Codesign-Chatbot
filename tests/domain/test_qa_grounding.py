@@ -45,6 +45,16 @@ class _EmptyCourseRetriever:
         )
 
 
+class _FailingCourseRetriever:
+    """Selected-source retriever that raises before producing evidence."""
+
+    def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
+        del query
+        error = RuntimeError("knowledge base unavailable")
+        error.category = "timeout"  # type: ignore[attr-defined]
+        raise error
+
+
 class _Week1Retriever:
     """Return one Week 1 excerpt mapped onto the first selected source."""
 
@@ -203,6 +213,44 @@ def test_successful_qa_cites_retrieved_week_one_and_does_not_coach(tmp_path) -> 
     assert "[S1]" in turn.response_text
     labels = {citation.label for citation in turn.assessment.citations}
     assert "S1" in labels
+
+
+def test_qa_retrieval_error_fails_closed_without_agentcore_or_citation(tmp_path) -> None:
+    """A retrieval exception must not fall through to general model knowledge."""
+    store = StudentStore(tmp_path / "qa-error.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    add_text_source(
+        store,
+        thread_id,
+        "L2-Network Bootstrapping-ARP-DHCP.pdf",
+        "Placeholder text must not become course evidence.",
+    )
+    client = FakeAgentCoreRuntime(
+        payload={
+            "mode": "qa",
+            "response_text": "The lecture covers ARP and DHCP. [S1]",
+            "citations": [{"label": "S1"}],
+            "needs_source_retrieval": False,
+        }
+    )
+    service = _service(store, client, retriever=_FailingCourseRetriever())
+
+    turn = service.submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="what is in L2 Network Bootstrapping",
+            current_stage="problem_identification",
+            response_detail="long",
+            idempotency_key="l2-error",
+        )
+    )
+
+    assert client.calls == []
+    assert turn.response_text == QA_EVIDENCE_GAP_RESPONSE
+    assert "ARP" not in turn.response_text
+    assert "DHCP" not in turn.response_text
+    assert turn.assessment.citations == []
+    assert turn.assessment.recommendation is None
 
 
 def test_composer_empty_qa_forbids_history_as_evidence() -> None:
