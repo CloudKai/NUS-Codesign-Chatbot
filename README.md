@@ -331,12 +331,13 @@ ui/  → presentation only
 backend/ → domain, workflow, providers, SQLite, sources
 ```
 
-Prefer the API coaching path for all new behaviour. The legacy
-`StudentChatEngine` path exists only as a fallback when `USE_LOCAL_API` is off;
-do not add new behavior there. Production requires `USE_LOCAL_API=true`:
-Streamlit calls FastAPI, which verifies the Cognito session and applies the
-authenticated-owner boundary before accessing student data. The in-process
-fallback is limited to local development and deterministic tests.
+Prefer the FastAPI coaching path for all new behaviour. When `USE_LOCAL_API`
+is off, the in-process fallback is `CoachApplicationService`; the legacy
+`StudentChatEngine` is compatibility-only. Production requires
+`USE_LOCAL_API=true`: Streamlit calls FastAPI, which verifies the Cognito
+session and applies the authenticated-owner boundary before accessing student
+data. The in-process fallback is limited to local development and deterministic
+tests.
 
 ---
 
