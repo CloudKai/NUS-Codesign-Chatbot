@@ -140,9 +140,7 @@ def render_media(raw_paths: list[str]) -> None:
         path = Path(raw_path).resolve()
         workspace_root = settings.workspaces_dir.resolve()
         files_root = settings.files_dir.resolve()
-        if not path.is_file() or not (
-            workspace_root in path.parents or files_root in path.parents
-        ):
+        if not path.is_file() or not (workspace_root in path.parents or files_root in path.parents):
             continue
         mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         if mime.startswith("image/") or path.suffix.lower() == ".svg":
@@ -169,13 +167,10 @@ def render_citations(
     allowed_ids = visible_source_ids
     if allowed_ids is None:
         allowed_ids = {
-            str(source.get("id") or "")
-            for source in store.list_sources(st.session_state.thread_id)
+            str(source.get("id") or "") for source in store.list_sources(st.session_state.thread_id)
         }
     valid_references = [
-        reference
-        for reference in references
-        if str(reference.get("id") or "") in allowed_ids
+        reference for reference in references if str(reference.get("id") or "") in allowed_ids
     ]
     if not valid_references:
         return
@@ -349,11 +344,7 @@ def render_message(
     role = message["role"]
     with st.chat_message(
         role,
-        avatar=(
-            ":material/auto_awesome:"
-            if role == "assistant"
-            else ":material/person:"
-        ),
+        avatar=(":material/auto_awesome:" if role == "assistant" else ":material/person:"),
     ):
         metadata = message.get("metadata") or {}
         if role == "user" and st.session_state.editing_message == message["id"]:
@@ -403,7 +394,11 @@ def render_message(
                             "idempotency_key": idempotency_key,
                         }
                         st.session_state.editing_message = None
-                        rerun_app()
+                        # Stay inside the chat fragment while the replacement
+                        # turn is running so the prefix history and in-flight
+                        # edit remain visible. _submit_pending_edit performs
+                        # the full app rerun only after authoritative success.
+                        rerun_fragment()
             return
         if role == "user":
             safe_id = message["id"].replace("-", "_")
@@ -416,6 +411,22 @@ def render_message(
                     f'<div class="cd-user-bubble-text">{escaped}</div>',
                     unsafe_allow_html=True,
                 )
+                attachments = metadata.get("attachments") or []
+                if attachments:
+                    attachment_items = [item for item in attachments if isinstance(item, dict)]
+                    labels = [str(item.get("title") or "Attachment") for item in attachment_items]
+                    if labels:
+                        st.caption("Attached · " + ", ".join(labels))
+                    for attachment in attachment_items:
+                        attachment_id = str(attachment.get("id") or "")
+                        if not attachment_id:
+                            continue
+                        if st.button(
+                            f"Open attachment · {attachment.get('title') or 'Attachment'}",
+                            key=f"open-attachment-{message['id']}-{attachment_id}",
+                            type="tertiary",
+                        ):
+                            source_viewer_dialog(attachment_id)
                 with st.container(key=f"user_message_actions_{safe_id}"):
                     _, copy_column, edit_column = st.columns(
                         [0.76, 0.12, 0.12],
@@ -432,11 +443,7 @@ def render_message(
                     ):
                         messages = store.get_messages(st.session_state.thread_id)
                         latest_user = next(
-                            (
-                                item
-                                for item in reversed(messages)
-                                if item.get("role") == "user"
-                            ),
+                            (item for item in reversed(messages) if item.get("role") == "user"),
                             None,
                         )
                         if latest_user and latest_user.get("id") != message["id"]:
@@ -556,9 +563,7 @@ def assistant_message_from_turn(
 
 def _deep_review_counter(metadata: dict[str, Any]) -> int:
     """Return the persisted Deep Review coaching-turn counter."""
-    return parse_coaching_turns_since_deep_review(
-        metadata.get(COUNTER_SETTINGS_KEY)
-    )
+    return parse_coaching_turns_since_deep_review(metadata.get(COUNTER_SETTINGS_KEY))
 
 
 def _deep_review_is_available(metadata: dict[str, Any]) -> bool:
@@ -628,10 +633,7 @@ def _render_inflight_user_prompt(prompt: str, uploads: list[Any]) -> None:
                 unsafe_allow_html=True,
             )
             if uploads:
-                st.caption(
-                    "Adding to Sources · "
-                    + ", ".join(upload.name for upload in uploads)
-                )
+                st.caption("Attached · " + ", ".join(upload.name for upload in uploads))
 
 
 def handle_prompt(
@@ -649,7 +651,7 @@ def handle_prompt(
 ) -> None:
     """Submit one student turn through the typed coaching workflow.
 
-    Uploads become sources first. The coach path always uses ``CoachRequest``
+    Uploads are private turn attachments. The coach path always uses ``CoachRequest``
     via the local API or in-process ``CoachApplicationService``, streaming
     progress events and then the final validated reply. On ``done``, this
     helper never keeps completed history only in the composer fragment:
@@ -660,34 +662,20 @@ def handle_prompt(
     set_coach_turn_streaming(True)
     handle_started = time.perf_counter()
     request_id = str(request_id or uuid.uuid4())
-    api_origin = (
-        fragment_started if fragment_started is not None else handle_started
-    )
+    api_origin = fragment_started if fragment_started is not None else handle_started
     spans: dict[str, float] = dict(fragment_spans or {})
     try:
         journey = normalize_journey(st.session_state.learning_journey)
         list_started = time.perf_counter()
-        if uploads:
+        if visible_source_ids is None:
             sources = store.list_sources(st.session_state.thread_id)
             selected_sources = [source for source in sources if source.get("selected")]
-            visible_source_ids = {
-                str(source.get("id") or "") for source in sources
-            }
-            allow_model_knowledge = not selected_sources
-        elif visible_source_ids is None:
-            sources = store.list_sources(st.session_state.thread_id)
-            selected_sources = [source for source in sources if source.get("selected")]
-            visible_source_ids = {
-                str(source.get("id") or "") for source in sources
-            }
+            visible_source_ids = {str(source.get("id") or "") for source in sources}
             allow_model_knowledge = not selected_sources
         else:
-            allow_model_knowledge = bool(
-                st.session_state.get("allow_model_knowledge", True)
-            )
+            allow_model_knowledge = bool(st.session_state.get("allow_model_knowledge", True))
         spans["source_list_ms"] = _duration_ms(list_started)
-        if uploads:
-            allow_model_knowledge = False
+        attachment_source_ids: list[str] = []
         st.session_state.allow_model_knowledge = allow_model_knowledge
         thread_started = time.perf_counter()
         pre_thread = store.get_thread(st.session_state.thread_id) or {}
@@ -704,10 +692,33 @@ def handle_prompt(
             scroll_started = time.perf_counter()
             sync_chat_scroll(mode="send")
             spans["chat_scroll_send_ms"] = _duration_ms(scroll_started)
-            if uploads:
+            # Keep the same private attachment records when a provider failure
+            # is retried with the same prompt/idempotency scope. Attachments never
+            # become selected notebook Sources.
+            idempotency_key = get_retry_key(
+                st.session_state,
+                thread_id=st.session_state.thread_id,
+                stage=journey["current_stage"],
+                prompt=prompt,
+            )
+            attachment_records = st.session_state.setdefault("coach_turn_attachments", {})
+            thinking: Any | None = None
+            existing_attachments = attachment_records.get(idempotency_key)
+            if isinstance(existing_attachments, list):
+                attachment_source_ids = [
+                    str(item.get("id") or "")
+                    for item in existing_attachments
+                    if isinstance(item, dict) and str(item.get("id") or "")
+                ]
+            elif uploads:
+                thinking = st.status(
+                    "Uploading attachment…",
+                    expanded=False,
+                    type="compact",
+                )
                 try:
                     upload_started = time.perf_counter()
-                    store.upload_sources(
+                    attachment_records[idempotency_key] = store.upload_attachments(
                         st.session_state.thread_id,
                         [
                             (
@@ -717,42 +728,28 @@ def handle_prompt(
                             )
                             for upload in uploads
                         ],
-                        origin="chat_composer",
                     )
                     spans["source_upload_ms"] = _duration_ms(upload_started)
                 except Exception:
                     # The source service owns transactional/file cleanup. Do not
                     # submit a coach request when its prerequisite upload failed.
                     # Avoid surfacing raw exception text (paths, internals) in the UI.
+                    thinking.update(label="Attachment upload failed", state="error")
                     st.error("The attachment could not be added, so no message was sent.")
                     st.caption("Remove or replace the attachment and try again.")
                     sync_chat_scroll(mode="settle")
                     return
-                # Drop the pre-upload source memo before persist. The later
-                # remount reloads Sources from the post-upload catalog.
-                store.forget_source_reads(st.session_state.thread_id)
-                post_list_started = time.perf_counter()
-                sources = store.list_sources(st.session_state.thread_id)
-                visible_source_ids = {
-                    str(source.get("id") or "") for source in sources
-                }
-                spans["source_list_ms"] = round(
-                    float(spans.get("source_list_ms") or 0.0)
-                    + _duration_ms(post_list_started),
-                    1,
-                )
+                attachment_source_ids = [
+                    str(item.get("id") or "")
+                    for item in attachment_records[idempotency_key]
+                    if isinstance(item, dict) and str(item.get("id") or "")
+                ]
+                thinking.update(label="Coach is thinking…", state="running")
             else:
                 spans["source_upload_ms"] = 0.0
             # Preserve this key only while the same submitted text is unresolved.
             # The session helper stores a SHA-256 scope, never the prompt itself.
             build_started = time.perf_counter()
-            idempotency_key = get_retry_key(
-                st.session_state,
-                thread_id=st.session_state.thread_id,
-                stage=journey["current_stage"],
-                prompt=prompt,
-            )
-
             # Leave source_ids/context empty so the application service loads them.
             request = CoachRequest(
                 thread_id=st.session_state.thread_id,
@@ -764,14 +761,16 @@ def handle_prompt(
                 model_id=model_id,
                 reasoning_effort=reasoning_effort,
                 idempotency_key=idempotency_key,
+                attachment_source_ids=attachment_source_ids,
             )
             spans["request_build_ms"] = _duration_ms(build_started)
             thinking_started = time.perf_counter()
-            thinking = st.status(
-                "Coach is thinking…",
-                expanded=False,
-                type="compact",
-            )
+            if thinking is None:
+                thinking = st.status(
+                    "Coach is thinking…",
+                    expanded=False,
+                    type="compact",
+                )
             spans["thinking_render_ms"] = _duration_ms(thinking_started)
             try:
                 turn: CoachTurn | None = None
@@ -785,9 +784,7 @@ def handle_prompt(
                     composer_layout_ms=float(spans.get("composer_layout_ms") or 0.0),
                     source_list_ms=float(spans.get("source_list_ms") or 0.0),
                     thread_lookup_ms=float(spans.get("thread_lookup_ms") or 0.0),
-                    pending_user_render_ms=float(
-                        spans.get("pending_user_render_ms") or 0.0
-                    ),
+                    pending_user_render_ms=float(spans.get("pending_user_render_ms") or 0.0),
                     chat_scroll_send_ms=float(spans.get("chat_scroll_send_ms") or 0.0),
                     source_upload_ms=float(spans.get("source_upload_ms") or 0.0),
                     request_build_ms=float(spans.get("request_build_ms") or 0.0),
@@ -807,9 +804,7 @@ def handle_prompt(
                     thinking.update(label=label, state=state)
                     thinking_closed = True
 
-                for event in stream_coach_turn_events(
-                    request, request_id=request_id
-                ):
+                for event in stream_coach_turn_events(request, request_id=request_id):
                     kind = event.get("event")
                     if kind == "started" or kind == "graph":
                         continue
@@ -817,9 +812,7 @@ def handle_prompt(
                         phase = str(event.get("phase") or "").strip()
                         label = str(event.get("label") or "").strip()
                         if phase == "retrieving":
-                            thinking.update(
-                                label=label or "Searching course materials…"
-                            )
+                            thinking.update(label=label or "Searching course materials…")
                         elif phase == "thinking":
                             thinking.update(label=label or "Coach is thinking…")
                         elif phase == "saving":
@@ -852,6 +845,7 @@ def handle_prompt(
                     stage=journey["current_stage"],
                     prompt=prompt,
                 )
+                attachment_records.pop(idempotency_key, None)
                 apply_completed_turn_to_session(
                     turn,
                     thread_id=st.session_state.thread_id,
@@ -1006,8 +1000,7 @@ def _submit_pending_edit(
                 idempotency_key=idempotency_key,
                 model_id=model_id,
                 reasoning_effort=reasoning_effort,
-                response_detail=st.session_state.get("response_detail")
-                or DEFAULT_RESPONSE_DETAIL,
+                response_detail=st.session_state.get("response_detail") or DEFAULT_RESPONSE_DETAIL,
                 response_language=st.session_state.get("response_language") or "English",
             )
             thinking.update(label="Coach reply ready", state="complete")
@@ -1197,9 +1190,16 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
     st.session_state.allow_model_knowledge = allow_model_knowledge
     seed_coach_welcome(store, st.session_state.thread_id)
     messages = store.get_messages(st.session_state.thread_id)
-    visible_source_ids = {
-        str(source.get("id") or "") for source in sources
-    }
+    visible_source_ids = {str(source.get("id") or "") for source in sources}
+    # Private attachments are absent from Sources but remain safe to open from
+    # their authoritative message history (including a Coach citation to one).
+    for message in messages:
+        metadata = message.get("metadata") or {}
+        visible_source_ids.update(
+            str(source_id)
+            for source_id in metadata.get("attachment_source_ids") or []
+            if str(source_id).strip()
+        )
     if st.session_state.get("edit_confirm_message_id"):
         _confirm_edit_earlier_message_dialog()
 

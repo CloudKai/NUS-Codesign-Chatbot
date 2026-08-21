@@ -399,6 +399,9 @@ class CoachRequest(BaseModel):
     # Never a notebook id; clients cannot make this authoritative.
     student_id: str | None = Field(default=None, max_length=128)
     source_ids: list[str] = Field(default_factory=list)
+    # Per-turn uploads are stored privately with the student message. They are
+    # not selected notebook Sources and must be resolved server-side.
+    attachment_source_ids: list[str] = Field(default_factory=list, max_length=5)
     source_context: str = ""
     student_project_context: str = ""
     conversation_summary: str = ""
@@ -462,6 +465,15 @@ class CoachRequest(BaseModel):
         cleaned = [str(value).strip() for value in values if str(value).strip()]
         if len(cleaned) != len(set(cleaned)):
             raise ValueError("source_ids must be unique")
+        return cleaned
+
+    @field_validator("attachment_source_ids")
+    @classmethod
+    def attachment_source_ids_must_be_unique(cls, values: list[str]) -> list[str]:
+        """Normalize bounded current-turn attachment identifiers."""
+        cleaned = [str(value).strip() for value in values if str(value).strip()]
+        if len(cleaned) != len(set(cleaned)):
+            raise ValueError("attachment_source_ids must be unique")
         return cleaned
 
     @field_validator("specialist")

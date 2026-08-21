@@ -96,7 +96,8 @@ def test_sources_local_paths_use_fragment_rerun() -> None:
     assert source.count("rerun_app()") >= 2
     assert 'on_change="rerun"' not in source
     assert "coach_turn_is_streaming()" in source
-    assert "if coach_turn_is_streaming() or sync_future.done():" in source
+    assert "uploads_active = any(" in source
+    assert "sync_future.done() and not uploads_active" in source
     polling = source.split("def _render_sources_panel_polling", 1)[1].split(
         "def _render_sources_panel_body", 1
     )[0]
@@ -141,7 +142,7 @@ def test_chat_marks_streaming_around_coach_send_and_revise() -> None:
         "def _confirm_edit_earlier_message_dialog", 1
     )[0]
     assert send_block.index("set_coach_turn_streaming(True)") < send_block.index(
-        "store.upload_sources("
+        "store.upload_attachments("
     )
     assert send_block.index("set_coach_turn_streaming(True)") < send_block.index(
         "stream_coach_turn_events("
@@ -179,6 +180,32 @@ def test_chat_marks_streaming_around_coach_send_and_revise() -> None:
         "store.revise_message("
     )
     assert "finally:" in revise_block
+
+
+def test_edit_send_stays_in_chat_fragment_until_revision_completes() -> None:
+    """Edit submission preserves the prefix transcript during the wait."""
+    chat = Path("ui/panels/chat.py").read_text(encoding="utf-8")
+    edit_block = chat.split(
+        'if role == "user" and st.session_state.editing_message == message["id"]:',
+        1,
+    )[1].split('        if role == "user":', 1)[0]
+    send_block = edit_block.split('if send_column.button(', 1)[1].rsplit(
+        "            return", 1
+    )[0]
+    assert "st.session_state.pending_edit" in send_block
+    assert "rerun_fragment()" in send_block
+    assert "rerun_app()" not in send_block
+
+    composer_block = chat.split("def _render_composer_submit_fragment(", 1)[1].split(
+        "def render_chat_panel(", 1
+    )[0]
+    assert "stop_before_message_id=pending_message_id or None" in composer_block
+    assert "_render_inflight_user_prompt(pending_prompt, [])" in composer_block
+
+    revise_block = chat.split("def _submit_pending_edit(", 1)[1].split(
+        "def _render_chat_history(", 1
+    )[0]
+    assert "rerun_app()" in revise_block
 
 
 def test_workspace_renders_chat_before_studio() -> None:

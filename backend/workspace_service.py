@@ -18,6 +18,7 @@ from .source_library import (
     LectureNotesSyncResult,
     add_file_sources,
     backfill_legacy_sources,
+    CHAT_ATTACHMENT_ORIGIN,
     get_visible_source,
     is_locked_course_source,
     list_visible_sources,
@@ -44,6 +45,17 @@ class TranscriptExport:
     data: bytes
     filename: str
     mime: str = "text/plain; charset=utf-8"
+
+
+def public_attachment(source: dict[str, Any]) -> dict[str, Any]:
+    """Return the small safe descriptor stored on a chat message."""
+    return {
+        "id": str(source.get("id") or ""),
+        "title": str(source.get("title") or "Attachment"),
+        "mime": str(source.get("mime") or "application/octet-stream"),
+        "kind": str(source.get("kind") or "file"),
+        "size": max(0, int(source.get("size") or 0)),
+    }
 
 
 def format_notebook_transcript(
@@ -287,6 +299,24 @@ class WorkspaceService:
             self._store, thread_id, uploads, origin=origin
         )
         return [public_source(source) for source in created]
+
+    def upload_attachments(
+        self,
+        thread_id: str,
+        uploads: Iterable[tuple[str, bytes, str | None]],
+    ) -> list[dict[str, Any]]:
+        """Store private current-turn attachments outside the Sources library."""
+        if not self._store.get_thread(thread_id):
+            raise ValueError("Notebook not found")
+        created = add_file_sources(
+            self._store,
+            thread_id,
+            uploads,
+            origin=CHAT_ATTACHMENT_ORIGIN,
+            selected=False,
+            extra_metadata={"hidden_from_sources": True},
+        )
+        return [public_attachment(source) for source in created]
 
     def set_source_selected(
         self, thread_id: str, source_id: str, selected: bool

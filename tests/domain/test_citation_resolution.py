@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 from backend.agentcore_provider import AgentCoreCoachProvider
 from backend.application import CoachApplicationService
-from backend.domain import CoachRequest
+from backend.domain import CoachImageInput, CoachRequest, CoachTurn, EducationalAssessment
 from backend.learning_service import LearningProgressService
 from backend.persistence.factory import reset_file_storage_cache
 from backend.persistence.memory_files import MemoryFileStorage
 from backend.persistence.ports import ListedObject
+from backend.prompts.composer import prompt_context_from_request
 from backend.repositories import (
     SQLiteNotebookRepository,
     SQLitePhaseTransitionRepository,
@@ -229,3 +231,94 @@ def test_citation_resolution_is_bounded_and_keeps_selected_list_labels(
     assert cited["S17"].title == expected_titles[16]
     assert cited["S5"].label == "S5"
     assert cited["S17"].label == "S17"
+
+
+def test_direct_image_citation_uses_authoritative_selected_label() -> None:
+    """A resolved image can be cited without becoming a fake RAG chunk."""
+    service = object.__new__(CoachApplicationService)
+    request = CoachRequest(
+        thread_id="thread-1",
+        student_message="What is this image about?",
+        current_stage="problem_identification",
+        response_detail="short",
+        source_ids=["image-1", "text-1"],
+        image_inputs=[
+            CoachImageInput(
+                source_id="image-1",
+                mime="image/png",
+                data_url="data:image/png;base64,AA==",
+            )
+        ],
+    )
+    sources = {
+        "image-1": {"id": "image-1", "title": "ChatGPT Image.png", "kind": "image"},
+        "text-1": {"id": "text-1", "title": "Lecture.pdf", "kind": "file"},
+    }
+    turn = CoachTurn(
+        response_text="The image shows a crossing layout [S1].",
+        assessment=EducationalAssessment(current_stage="problem_identification"),
+    )
+
+    citations = service._relevant_citations(
+        request,
+        turn,
+        SimpleNamespace(sources_by_id=sources),
+    )
+
+    assert [(item.source_id, item.label, item.title) for item in citations] == [
+        ("image-1", "S1", "ChatGPT Image.png")
+    ]
+
+
+def test_selected_image_without_resolved_input_is_not_citable() -> None:
+    """Selection alone must not create an image Sources-used entry."""
+    service = object.__new__(CoachApplicationService)
+    request = CoachRequest(
+        thread_id="thread-1",
+        student_message="Discuss pedestrian safety.",
+        current_stage="problem_identification",
+        response_detail="short",
+        source_ids=["image-1"],
+    )
+    turn = CoachTurn(
+        response_text="Pedestrian safety needs attention [S1].",
+        assessment=EducationalAssessment(current_stage="problem_identification"),
+    )
+
+    citations = service._relevant_citations(
+        request,
+        turn,
+        SimpleNamespace(
+            sources_by_id={
+                "image-1": {
+                    "id": "image-1",
+                    "title": "ChatGPT Image.png",
+                    "kind": "image",
+                }
+            }
+        ),
+    )
+
+    assert citations == []
+
+
+def test_image_prompt_uses_full_selected_source_labels() -> None:
+    """Image metadata uses the same S# order as mixed text retrieval."""
+    request = CoachRequest(
+        thread_id="thread-1",
+        student_message="Compare the image with the lecture.",
+        current_stage="problem_identification",
+        response_detail="short",
+        source_ids=["image-1", "text-1"],
+        image_inputs=[
+            CoachImageInput(
+                source_id="image-1",
+                mime="image/png",
+                data_url="data:image/png;base64,AA==",
+            )
+        ],
+    )
+
+    context = prompt_context_from_request(request)
+
+    assert "Attached notebook images (1): S1" in context.image_note

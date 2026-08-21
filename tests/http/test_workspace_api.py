@@ -105,7 +105,9 @@ def test_workspace_api_rejects_stage_and_transition_metadata(tmp_path):
         },
     )
     assert poisoned_patch.status_code == 422
-    assert (store.get_thread(thread_id) or {})["metadata"]["thinking_stage"] == "problem_identification"
+    assert (store.get_thread(thread_id) or {})["metadata"][
+        "thinking_stage"
+    ] == "problem_identification"
 
     forged_transition = client.post(
         f"/api/v1/threads/{thread_id}/messages",
@@ -168,21 +170,38 @@ def test_workspace_api_source_upload_selection_and_content(tmp_path, monkeypatch
     assert selected.status_code == 200
     assert selected.json()[0]["selected"] is True
 
-    content = client.get(
-        f"/api/v1/threads/{thread_id}/sources/{source['id']}/content"
-    )
+    content = client.get(f"/api/v1/threads/{thread_id}/sources/{source['id']}/content")
     assert content.status_code == 200
     assert b"Older pedestrians" in content.content
 
-    removed = client.delete(
-        f"/api/v1/threads/{thread_id}/sources/{source['id']}"
-    )
+    removed = client.delete(f"/api/v1/threads/{thread_id}/sources/{source['id']}")
     assert removed.status_code == 200
+    assert client.get(f"/api/v1/threads/{thread_id}/sources/{source['id']}").status_code == 404
+
+
+def test_workspace_api_attachment_upload_is_hidden_but_readable(tmp_path, monkeypatch):
+    """Turn attachments use the source storage pipeline without joining Sources."""
+    from backend import file_processing, source_library
+
+    files_dir = tmp_path / "files"
+    files_dir.mkdir()
+    monkeypatch.setattr(file_processing.settings, "files_dir", files_dir)
+    monkeypatch.setattr(source_library.settings, "files_dir", files_dir)
+    store = StudentStore(tmp_path / "attachments.sqlite3")
+    client = TestClient(create_app(store))
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+
+    uploaded = client.post(
+        f"/api/v1/threads/{thread_id}/attachments",
+        files=[("files", ("diagram.txt", b"private attachment", "text/plain"))],
+    )
+    assert uploaded.status_code == 200
+    attachment = uploaded.json()[0]
+    assert set(attachment) == {"id", "title", "mime", "kind", "size"}
+    assert client.get(f"/api/v1/threads/{thread_id}/sources").json() == []
     assert (
-        client.get(
-            f"/api/v1/threads/{thread_id}/sources/{source['id']}"
-        ).status_code
-        == 404
+        client.get(f"/api/v1/threads/{thread_id}/sources/{attachment['id']}/content").content
+        == b"private attachment"
     )
 
 
@@ -249,8 +268,6 @@ def test_workspace_api_transcript_download_uses_persisted_messages(tmp_path):
     assert response.content.decode("utf-8") == expected
     assert not (tmp_path / "poc_store.json").exists()
 
-    exported = LocalApiClient("http://testserver", session=client).download_transcript(
-        thread_id
-    )
+    exported = LocalApiClient("http://testserver", session=client).download_transcript(thread_id)
     assert exported.filename == transcript_filename("Studio research")
     assert exported.data.decode("utf-8") == expected

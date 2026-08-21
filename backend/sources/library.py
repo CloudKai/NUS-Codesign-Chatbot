@@ -18,7 +18,7 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -474,6 +474,11 @@ def list_visible_sources(
         selected_only=False,
         include_extracted_text=include_extracted_text,
     )
+    persisted = [
+        source
+        for source in persisted
+        if not is_chat_attachment_source(source)
+    ]
     persisted_course_paths = {
         str((source.get("metadata") or {}).get("lecture_note_relative_path") or "")
         for source in persisted
@@ -489,6 +494,15 @@ def list_visible_sources(
     if selected_only:
         return [source for source in merged if source.get("selected")]
     return merged
+
+
+CHAT_ATTACHMENT_ORIGIN = "chat_attachment"
+
+
+def is_chat_attachment_source(source: Mapping[str, Any]) -> bool:
+    """Return whether a private source belongs only to one chat turn."""
+    metadata = source.get("metadata") or {}
+    return str(metadata.get("origin") or "").strip() == CHAT_ATTACHMENT_ORIGIN
 
 
 def get_visible_source(
@@ -779,6 +793,7 @@ def add_file_sources(
     max_file_size_mb: int | None = None,
     preserve_display_names: bool = False,
     compress: bool = True,
+    selected: bool = True,
 ) -> list[dict[str, Any]]:
     upload_items = list(uploads)
     # Generate source ids server-side before object storage so keys include them.
@@ -814,7 +829,7 @@ def add_file_sources(
                 path=upload.storage_key or str(upload.path),
                 extracted_text=upload.extracted_text,
                 size=upload.size,
-                selected=True,
+                selected=selected,
                 source_id=upload.source_id or source_ids[index],
                 metadata={
                     **(extra_metadata or {}),

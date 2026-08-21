@@ -83,6 +83,7 @@ from backend.specialists.review_orchestration import (
     parse_deep_review_job,
 )
 from backend.source_library import (
+    CHAT_ATTACHMENT_ORIGIN,
     image_inputs_for_sources,
     list_visible_sources,
     selected_source_context,
@@ -1105,6 +1106,29 @@ class CoachApplicationService:
             user_metadata={
                 "thinking_stage": prepared_request.current_stage,
                 "source_ids": prepared_request.source_ids,
+                "attachment_source_ids": prepared_request.attachment_source_ids,
+                "attachments": [
+                    {
+                        "id": source_id,
+                        "title": str(
+                            snapshot.sources_by_id[source_id].get("title")
+                            or "Attachment"
+                        ),
+                        "mime": str(
+                            snapshot.sources_by_id[source_id].get("mime")
+                            or "application/octet-stream"
+                        ),
+                        "kind": str(
+                            snapshot.sources_by_id[source_id].get("kind") or "file"
+                        ),
+                        "size": max(
+                            0,
+                            int(snapshot.sources_by_id[source_id].get("size") or 0),
+                        ),
+                    }
+                    for source_id in prepared_request.attachment_source_ids
+                    if source_id in snapshot.sources_by_id
+                ],
                 "workflow": "langgraph",
                 **(
                     {"coach_idempotency_key": prepared_request.idempotency_key}
@@ -1573,6 +1597,27 @@ class CoachApplicationService:
             current_stage=authoritative_stage,
             visible_sources=visible_sources,
         )
+        attachment_ids = list(request.attachment_source_ids)
+        attachment_sources: list[dict[str, Any]] = []
+        for attachment_id in attachment_ids:
+            attachment = self._store.get_source(
+                request.thread_id,
+                attachment_id,
+                include_extracted_text=False,
+            )
+            if not attachment or str(
+                (attachment.get("metadata") or {}).get("origin") or ""
+            ).strip() != CHAT_ATTACHMENT_ORIGIN:
+                raise ValueError("One or more attachments are unavailable for this turn")
+            attachment_sources.append({**dict(attachment), "selected": True})
+        if attachment_sources:
+            # Attachments are selected only inside this request snapshot. Their
+            # persisted source rows remain hidden and unselected for later turns.
+            snapshot = TurnSnapshot.from_authoritative_state(
+                thread=thread,
+                current_stage=authoritative_stage,
+                visible_sources=[*visible_sources, *attachment_sources],
+            )
         selected_sources = list(snapshot.selected_sources)
         authoritative_ids = [str(source["id"]) for source in selected_sources]
         authoritative_id_set = set(authoritative_ids)
@@ -1862,6 +1907,14 @@ class CoachApplicationService:
                 )
             # Store returns the replacement user row id as edited_message_id.
             replacement_user_message_id = str(revision.edited_message_id)
+            replacement_metadata = next(
+                (
+                    dict(message.get("metadata") or {})
+                    for message in revision.surviving_history
+                    if str(message.get("id") or "") == replacement_user_message_id
+                ),
+                {},
+            )
             request = CoachRequest(
                 thread_id=thread_id,
                 student_message=content.strip(),
@@ -1873,6 +1926,9 @@ class CoachApplicationService:
                 idempotency_key=cleaned_key,
                 conversation_revision=revision.conversation_revision,
                 revise_user_message_id=replacement_user_message_id,
+                attachment_source_ids=list(
+                    replacement_metadata.get("attachment_source_ids") or []
+                ),
             )
             return self.submit(request, execution_lease_held=True)
 
@@ -1884,9 +1940,9 @@ class CoachApplicationService:
         """Map ``S#`` labels to selected notebook sources for citation resolution.
 
         Labels use the position in the full selected ``source_ids`` list, matching
-        retrieval/context-planner numbering. Metadata is resolved only for
-        sources that contributed a retrieved chunk, using the request-scoped
-        visible-source map rather than per-id store/catalog lookups.
+        retrieval/context-planner numbering. Text metadata is resolved only for
+        sources that contributed a retrieved chunk. Direct image metadata is
+        resolved only for image inputs successfully materialized for this turn.
         """
         catalog: dict[str, CitationReference] = {}
         retrieved_by_source: dict[str, RetrievalChunkReference] = {}
@@ -1894,13 +1950,22 @@ class CoachApplicationService:
             # Retrieval order is relevance order; keep the strongest excerpt
             # for the student-visible citation preview.
             retrieved_by_source.setdefault(chunk.source_id, chunk)
+        resolved_image_ids = {str(image.source_id) for image in request.image_inputs}
         resolved = 0
         for index, source_id in enumerate(request.source_ids, start=1):
             retrieved = retrieved_by_source.get(source_id)
-            if retrieved is None:
+            source = sources_by_id.get(source_id)
+            direct_image = (
+                source_id in resolved_image_ids
+                and source is not None
+                and (
+                    str(source.get("kind") or "").lower() == "image"
+                    or str(source.get("mime") or "").lower().startswith("image/")
+                )
+            )
+            if retrieved is None and not direct_image:
                 continue
             resolved += 1
-            source = sources_by_id.get(source_id)
             if not source:
                 continue
             catalog[f"S{index}"] = CitationReference(
@@ -1908,7 +1973,7 @@ class CoachApplicationService:
                 label=f"S{index}",
                 title=str(source.get("title") or "Untitled source"),
                 excerpt=focused_excerpt(
-                    retrieved.excerpt,
+                    retrieved.excerpt if retrieved is not None else "",
                     request.student_message,
                     limit=240,
                 ),

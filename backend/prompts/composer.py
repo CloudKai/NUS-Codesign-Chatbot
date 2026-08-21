@@ -597,10 +597,11 @@ def prompt_context_from_request(
     image_note = ""
     if request.image_inputs:
         labels_by_source = {
-            chunk.source_id: chunk.label for chunk in request.retrieved_chunks
+            str(source_id): f"S{index}"
+            for index, source_id in enumerate(request.source_ids, start=1)
         }
         labels = ", ".join(
-            labels_by_source.get(image.source_id, image.source_id)
+            labels_by_source.get(str(image.source_id), str(image.source_id))
             for image in request.image_inputs
         )
         image_note = (

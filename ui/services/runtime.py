@@ -16,6 +16,8 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass
 from typing import Any, Iterator, TypeVar
 
 import httpx
@@ -51,6 +53,85 @@ _UI_PERF_LOGGER_NAME = "co_design.ui_perf"
 _UI_PERF_HANDLER_FLAG = "_co_design_ui_perf_stream"
 _OPERATIONAL_HANDLER_FLAG = "_co_design_operational_stream"
 _ui_perf_logger = logging.getLogger(_UI_PERF_LOGGER_NAME)
+
+
+@dataclass
+class PendingSourceUpload:
+    """One process-local Sources-panel upload, keyed by owner and notebook."""
+
+    upload_id: str
+    owner_id: str
+    thread_id: str
+    uploads: list[tuple[str, bytes, str | None]]
+    future: Future[list[dict[str, Any]]]
+    failed: bool = False
+
+
+class SourceUploadCoordinator:
+    """Run reusable Sources uploads without blocking a Streamlit fragment."""
+
+    def __init__(self) -> None:
+        self._executor = ThreadPoolExecutor(max_workers=2)
+        self._jobs: dict[str, PendingSourceUpload] = {}
+        self._lock = threading.Lock()
+
+    def submit(
+        self,
+        *,
+        owner_id: str,
+        thread_id: str,
+        uploads: list[tuple[str, bytes, str | None]],
+        upload: Callable[[], list[dict[str, Any]]],
+    ) -> str:
+        """Start one background upload and return its opaque identifier."""
+        upload_id = str(uuid.uuid4())
+        job = PendingSourceUpload(
+            upload_id=upload_id,
+            owner_id=owner_id,
+            thread_id=thread_id,
+            uploads=uploads,
+            future=self._executor.submit(upload),
+        )
+        with self._lock:
+            self._jobs[upload_id] = job
+        return upload_id
+
+    def jobs_for(self, owner_id: str, thread_id: str) -> list[PendingSourceUpload]:
+        """Return only this owner's notebook jobs, newest first."""
+        with self._lock:
+            return [
+                job
+                for job in self._jobs.values()
+                if job.owner_id == owner_id and job.thread_id == thread_id
+            ]
+
+    def retry(self, upload_id: str, upload: Callable[[], list[dict[str, Any]]]) -> bool:
+        """Restart a failed job with its original file batch."""
+        with self._lock:
+            job = self._jobs.get(upload_id)
+            if job is None or not job.future.done() or not job.failed:
+                return False
+            job.future = self._executor.submit(upload)
+            job.failed = False
+            return True
+
+    def mark_failed(self, upload_id: str) -> None:
+        """Remember that the UI observed a terminal upload failure."""
+        with self._lock:
+            job = self._jobs.get(upload_id)
+            if job is not None:
+                job.failed = True
+
+    def discard(self, upload_id: str) -> None:
+        """Remove a terminal job from the local UI coordinator."""
+        with self._lock:
+            self._jobs.pop(upload_id, None)
+
+
+@st.cache_resource
+def source_upload_coordinator() -> SourceUploadCoordinator:
+    """Return the process-local coordinator for Sources-panel file work."""
+    return SourceUploadCoordinator()
 
 
 class _NonPersistentCookies(httpx.Cookies):
@@ -197,6 +278,76 @@ def local_api_enabled() -> bool:
     the verified Cognito ID cookie (or falls back to local-student for demos).
     """
     return bool(getattr(settings, "use_local_api", False))
+
+
+def _source_upload_callable(
+    thread_id: str,
+    uploads: list[tuple[str, bytes, str | None]],
+) -> Callable[[], list[dict[str, Any]]]:
+    """Build a background-safe Sources upload without reading session state later."""
+    if local_api_enabled():
+        client = local_api_client()
+        auth_cookies = client.auth_cookies_snapshot()
+
+        def _upload() -> list[dict[str, Any]]:
+            return client.upload_sources(
+                thread_id,
+                uploads,
+                auth_cookies=auth_cookies,
+            )
+
+        return _upload
+    _, service, _, _ = _resolve_resources()
+
+    def _upload() -> list[dict[str, Any]]:
+        return service.upload_sources(thread_id, uploads, origin="source_panel")
+
+    return _upload
+
+
+def enqueue_source_upload(
+    thread_id: str,
+    uploads: list[tuple[str, bytes, str | None]],
+) -> str:
+    """Start a reusable Sources upload and return its opaque local job id."""
+    return source_upload_coordinator().submit(
+        owner_id=owner_identifier(),
+        thread_id=thread_id,
+        uploads=uploads,
+        upload=_source_upload_callable(thread_id, uploads),
+    )
+
+
+def pending_source_uploads(thread_id: str) -> list[PendingSourceUpload]:
+    """Return current-session uploads for the active authenticated notebook."""
+    return source_upload_coordinator().jobs_for(owner_identifier(), thread_id)
+
+
+def retry_source_upload(upload_id: str, thread_id: str) -> bool:
+    """Retry a failed Sources upload using its original immutable batch."""
+    for job in pending_source_uploads(thread_id):
+        if job.upload_id == upload_id:
+            return source_upload_coordinator().retry(
+                upload_id,
+                _source_upload_callable(thread_id, job.uploads),
+            )
+    return False
+
+
+def discard_source_upload(upload_id: str) -> None:
+    """Forget one terminal local Sources upload card."""
+    source_upload_coordinator().discard(upload_id)
+
+
+def finalize_source_upload(upload_id: str, thread_id: str) -> None:
+    """Drop cached reads once a successful background upload is observed."""
+    discard_source_upload(upload_id)
+    _forget_reads(("list_sources", thread_id), ("get_thread", thread_id))
+
+
+def mark_source_upload_failed(upload_id: str) -> None:
+    """Mark a background upload retryable after its safe error is rendered."""
+    source_upload_coordinator().mark_failed(upload_id)
 
 
 def submit_coach_turn(request: CoachRequest) -> CoachTurn:
@@ -657,6 +808,16 @@ class WorkspaceFacade:
             )
         _forget_reads(("list_sources", thread_id), ("get_thread", thread_id))
         return added
+
+    def upload_attachments(
+        self,
+        thread_id: str,
+        uploads: list[tuple[str, bytes, str | None]],
+    ) -> list[dict[str, Any]]:
+        """Upload private current-turn attachments without adding Sources rows."""
+        if local_api_enabled():
+            return local_api_client().upload_attachments(thread_id, uploads)
+        return self._service().upload_attachments(thread_id, uploads)
 
     def get_source_content(self, thread_id: str, source_id: str) -> SourceContent:
         """Read source bytes for preview/download."""

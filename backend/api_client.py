@@ -94,6 +94,10 @@ class LocalApiClient:
                     cookies[str(key)] = cleaned
         return cookies
 
+    def auth_cookies_snapshot(self) -> dict[str, str]:
+        """Capture the current request's ID-cookie for a background upload."""
+        return self._auth_cookies()
+
     def _request_kwargs(self, **kwargs: Any) -> dict[str, Any]:
         """Attach auth cookies without dropping caller-supplied cookie maps."""
         merged = self._auth_cookies(kwargs.pop("cookies", None))
@@ -434,6 +438,8 @@ class LocalApiClient:
         self,
         thread_id: str,
         uploads: list[tuple[str, bytes, str | None]],
+        *,
+        auth_cookies: Mapping[str, str] | None = None,
     ) -> list[dict[str, Any]]:
         """Upload files into the source library."""
         files = [
@@ -443,10 +449,33 @@ class LocalApiClient:
         response = self._http.post(
             f"{self._base_url}/api/v1/threads/{thread_id}/sources",
             files=files,
-            **self._request_kwargs(),
+            **(
+                self._request_kwargs()
+                if auth_cookies is None
+                else {"cookies": self._auth_cookies(auth_cookies)}
+            ),
         )
         response.raise_for_status()
         return response.json()
+
+    def upload_attachments(
+        self,
+        thread_id: str,
+        uploads: list[tuple[str, bytes, str | None]],
+    ) -> list[dict[str, Any]]:
+        """Upload private attachments for exactly one coaching turn."""
+        files = [
+            ("files", (name, data, mime or "application/octet-stream"))
+            for name, data, mime in uploads
+        ]
+        response = self._http.post(
+            f"{self._base_url}/api/v1/threads/{thread_id}/attachments",
+            files=files,
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, list) else []
 
     def update_source(
         self, thread_id: str, source_id: str, request: SourceUpdateRequest

@@ -21,7 +21,18 @@ from ui.rename import (
     render_enter_to_apply_rename,
     sync_rename_select_all,
 )
-from ui.runtime import coach_turn_is_streaming, rerun_app, rerun_fragment, store
+from ui.runtime import (
+    coach_turn_is_streaming,
+    discard_source_upload,
+    enqueue_source_upload,
+    finalize_source_upload,
+    mark_source_upload_failed,
+    pending_source_uploads,
+    rerun_app,
+    rerun_fragment,
+    retry_source_upload,
+    store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +77,8 @@ def _source_has_downloadable_file(source: dict[str, Any]) -> bool:
     return bool(source.get("path"))
 
 
-def _import_uploaded_sources(uploads: list[Any]) -> None:
-    """Persist selected files into the active notebook and reset the picker.
+def _enqueue_uploaded_sources(uploads: list[Any]) -> None:
+    """Queue selected files and reset the picker without blocking the panel.
 
     Dedupes against the current uploader widget generation (``source_upload_nonce``)
     so the 1s Sources fragment cannot re-import the same selection, while a later
@@ -83,37 +94,28 @@ def _import_uploaded_sources(uploads: list[Any]) -> None:
     handled_key = f"source-upload-handled-{thread_id}-{nonce}"
     if st.session_state.get(handled_key) == fingerprint:
         return
-    # Claim this selection before the slow import so the fragment cannot start
-    # a second concurrent attempt while the first is still running.
+    # Claim this selection before enqueueing so the fragment cannot start a
+    # duplicate background import while the first is still running.
     st.session_state[handled_key] = fingerprint
     try:
-        added = store.upload_sources(
+        enqueue_source_upload(
             thread_id,
             [
                 (upload.name, upload.getvalue(), getattr(upload, "type", None))
                 for upload in uploads
             ],
-            origin="source_panel",
         )
     except Exception:
         logger.exception(
-            "Source panel upload failed for notebook %s",
+            "Source panel upload could not be queued for notebook %s",
             thread_id,
         )
         st.session_state["source_upload_error"] = _SOURCE_UPLOAD_ERROR
-        # Clear the picker so the fragment stops retrying the failed selection.
-        st.session_state["source_upload_nonce"] = nonce + 1
-        rerun_fragment()
-        return
-    st.session_state.pop("source_upload_error", None)
-    if added:
-        st.session_state.allow_model_knowledge = False
-        store.update_thread(
-            thread_id,
-            metadata={"allow_model_knowledge": False},
-        )
-        st.toast(f"Added {len(added)} source{'s' if len(added) != 1 else ''}.")
+    else:
+        st.session_state.pop("source_upload_error", None)
     st.session_state["source_upload_nonce"] = nonce + 1
+    # Remount immediately so the student sees the non-authoritative Uploading
+    # card while the worker persists and extracts the file.
     rerun_fragment()
 
 
@@ -435,8 +437,12 @@ def render_sources_panel() -> None:
     streaming, keep the stable fragment so a sync-complete remount cannot
     stack a second workspace under the in-flight run.
     """
-    sync_future = store.request_course_material_sync(st.session_state.thread_id)
-    if coach_turn_is_streaming() or sync_future.done():
+    thread_id = st.session_state.thread_id
+    sync_future = store.request_course_material_sync(thread_id)
+    uploads_active = any(
+        not job.future.done() for job in pending_source_uploads(thread_id)
+    )
+    if coach_turn_is_streaming() or (sync_future.done() and not uploads_active):
         _render_sources_panel_stable()
     else:
         _render_sources_panel_polling()
@@ -468,8 +474,25 @@ def _render_sources_panel_body() -> None:
     st.session_state["_sources_fragment_runs"] = (
         int(st.session_state.get("_sources_fragment_runs") or 0) + 1
     )
-    store.backfill_legacy_sources(st.session_state.thread_id)
-    sync_future = store.request_course_material_sync(st.session_state.thread_id)
+    thread_id = st.session_state.thread_id
+    store.backfill_legacy_sources(thread_id)
+    for job in pending_source_uploads(thread_id):
+        if not job.future.done():
+            continue
+        try:
+            added = job.future.result()
+        except Exception:
+            logger.exception("Source panel upload failed for notebook %s", thread_id)
+            mark_source_upload_failed(job.upload_id)
+            continue
+        if added:
+            st.session_state.allow_model_knowledge = False
+            store.update_thread(thread_id, metadata={"allow_model_knowledge": False})
+            st.toast(f"Added {len(added)} source{'s' if len(added) != 1 else ''}.")
+        finalize_source_upload(job.upload_id, thread_id)
+        rerun_fragment()
+    pending_uploads = pending_source_uploads(thread_id)
+    sync_future = store.request_course_material_sync(thread_id)
     sync_loading = not sync_future.done()
     lecture_sync = None
     sync_error = ""
@@ -526,7 +549,7 @@ def _render_sources_panel_body() -> None:
                     max_upload_size=settings.max_file_size_mb,
                 )
                 if uploads:
-                    _import_uploaded_sources(list(uploads))
+                    _enqueue_uploaded_sources(list(uploads))
             upload_error = st.session_state.pop("source_upload_error", None)
             if upload_error:
                 st.error(upload_error)
@@ -750,6 +773,24 @@ def _render_sources_panel_body() -> None:
                             )
                             rerun_fragment()
 
+    def render_pending_upload_card(job: Any) -> None:
+        """Render a non-authoritative source card while its upload runs."""
+        safe_id = str(job.upload_id).replace("-", "_")
+        with st.container(key=f"source_upload_{safe_id}"):
+            names = ", ".join(str(item[0]) for item in job.uploads)
+            st.markdown(f"**{escape(names)}**")
+            if not job.future.done():
+                st.caption("Uploading…")
+                return
+            st.caption("The file could not be added.")
+            retry_column, remove_column = st.columns(2, gap="small")
+            if retry_column.button("Retry", key=f"retry-source-upload-{job.upload_id}"):
+                if retry_source_upload(job.upload_id, thread_id):
+                    rerun_fragment()
+            if remove_column.button("Remove", key=f"remove-source-upload-{job.upload_id}"):
+                discard_source_upload(job.upload_id)
+                rerun_fragment()
+
     with st.container(key="sources_scroll", height="stretch"):
         grouped_course_sources = {
             group: [
@@ -776,6 +817,8 @@ def _render_sources_panel_body() -> None:
             on_change=_sources_expander_changed,
             args=("My Sources", my_sources_key),
         ):
+            for pending_upload in pending_uploads:
+                render_pending_upload_card(pending_upload)
             if personal_sources:
                 for source in personal_sources:
                     render_source_card(source)

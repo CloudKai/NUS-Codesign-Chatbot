@@ -7,6 +7,46 @@
 **Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
 **Live AgentCore:** DEFAULT → **v29 READY** (`lastUpdated` 2026-08-21T17:36:01Z).
 
+### Direct image source attribution (2026-08-22)
+
+**Change.** Citation resolution now keeps the existing retrieved-chunk rule for
+text sources and additionally admits an image only when its authoritative
+selected source was successfully resolved into the current turn's
+`image_inputs`. Image labels use the same full selected-source `S#` order as
+text retrieval, and the prompt now gives the model that trusted label.
+
+**Validation.** Added deterministic coverage for direct image citations and
+selected-but-unresolved images. Citation, retrieval, prompt-composition,
+AgentCore-provider, and one-call tests pass except the pre-existing synthetic
+6k context-budget regression. No RAG routing, retrieval, latency, model,
+Guardrail, HMW, or Deep Review behavior changed; no AWS calls or deployment
+was performed.
+
+**Next exact action.** Rebuild the FastAPI application for the changed backend
+resolver/prompt composer. AgentCore republishing is not required unless the
+runtime prompt artifact itself is separately changed.
+
+### Immediate reusable Sources uploads and private chat attachments (2026-08-22)
+
+**Change.** Sources-panel uploads now enter a process-local background worker
+and show an immediate non-authoritative Uploading card; Chat remains usable
+while extraction/storage completes. Chat-composer files instead use the new
+authenticated attachments route and are stored as hidden, unselected
+`chat_attachment` source records. They are resolved only for the submitted
+turn, persisted as sanitized message descriptors for display/retry/edit, and
+are excluded from Sources, subsequent turns, and Deep Review snapshots.
+
+**Validation.** Deterministic source-library, workspace API, chat progress,
+chat-scroll, Sources UI, rerun-scope, and API-client tests pass. Ruff,
+compileall, and `git diff --check` pass. No model calls, AWS calls, schema
+migration, or deployment was performed.
+
+**Compatibility / risk.** Existing reusable Sources and historical messages
+remain unchanged. Pending Sources cards are process-local and disappear after a
+Streamlit process restart; successfully stored sources are authoritative. The
+next exact action is desktop/mobile visual verification with a deliberately
+slow upload, followed by the ordinary application deployment.
+
 ### AgentCore Guardrail v4 release (2026-08-22)
 
 **Change.** Published immutable AgentCore runtime **v29** on the existing

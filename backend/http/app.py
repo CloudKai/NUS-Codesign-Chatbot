@@ -1018,6 +1018,34 @@ def create_app(
         except ValueError as error:
             raise _value_error(error) from error
 
+    @app.post("/api/v1/threads/{thread_id}/attachments")
+    async def upload_attachments(
+        thread_id: str,
+        files: list[UploadFile] = File(...),
+        owner: OwnerServices = Depends(current_owner),
+    ) -> list[dict[str, Any]]:
+        """Store private files used only by one submitted coaching turn."""
+        if len(files) > settings.max_files:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Upload at most {settings.max_files} files per message.",
+            )
+        max_bytes = max(1, int(settings.max_file_size_mb)) * 1024 * 1024
+        uploads: list[tuple[str, bytes, str | None]] = []
+        for upload in files:
+            payload = await upload.read(max_bytes + 1)
+            name = upload.filename or "upload.bin"
+            if len(payload) > max_bytes:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{name} exceeds the {settings.max_file_size_mb} MB limit.",
+                )
+            uploads.append((name, payload, upload.content_type))
+        try:
+            return owner.workspace.upload_attachments(thread_id, uploads)
+        except ValueError as error:
+            raise _value_error(error) from error
+
     @app.patch("/api/v1/threads/{thread_id}/sources/{source_id}")
     def update_source(
         thread_id: str,
