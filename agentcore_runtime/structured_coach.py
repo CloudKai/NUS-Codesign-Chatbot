@@ -296,10 +296,12 @@ Decide Coaching versus Q&A internally; this turn is Fast Chat, not a locked Coac
   null for qa
 - recommendation_rationale: optional short string for coaching; omit for qa
 - citations: only supplied [S#] labels; empty when unused
+- hmw_scaffold_ready: always a JSON boolean; false for Q&A and Coaching
+  outside Problem Identification
 - needs_source_retrieval: true only when selected-source evidence was
   required for this turn and was not supplied because retrieval was skipped;
-  otherwise false. After FastAPI already retrieved for this turn, this must
-  stay false.
+  otherwise false. Always return this field as a JSON boolean. After FastAPI
+  already retrieved for this turn, this must stay false.
 
 Do not return Facione scores, review fields, research coding, or an
 assessment object. Do not use application, retrieval, browsing, database,

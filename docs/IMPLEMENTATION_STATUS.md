@@ -4782,3 +4782,24 @@ object cleanup, ownership-in-write checks, `ca-certificates` in image.
 - Compatibility: no backend, API, persistence, AgentCore, RAG, attachment,
   citation, HMW, or stage semantics changed. The next exact action is a manual
   delayed edit check at desktop and mobile widths after the app rebuild.
+
+**Fast Chat structured-output boolean contract hardening** — Current working-tree phase
+
+- The Fast Chat model-facing schema now requires `needs_source_retrieval` as a
+  non-null boolean, matching Pydantic validation. Previously its Python default
+  made the generated property optional/nullable, so a Q&A `null` could produce
+  the category-only `structured_output_failure` envelope despite successful RAG.
+- The Fast Chat Q&A prompt now explicitly emits `hmw_scaffold_ready: false` and
+  `needs_source_retrieval: false` as JSON booleans. Strict validation, one outer
+  invoke, bounded recovery, RAG, citations, HMW, Deep Review, and Guardrails
+  are unchanged.
+- Validation: focused schema, prompt-composition, first-cycle, runtime parser,
+  HMW, Fast Chat one-call, Deep Review, and provider envelope tests passed;
+  Ruff, compileall, and `git diff --check` passed. No AWS or paid model calls.
+- Compatibility: `agentcore_runtime` changed, so republish the runtime before
+  using this fix. FastAPI application logic is not required to change, but the
+  production host must recreate the app with the next
+  `AGENTCORE_SESSION_GENERATION` after publishing so affinity sessions cannot
+  retain the previous runtime assets. Next exact action: publish the updated
+  runtime, bump the host generation, and run bounded normal/revised RAG Q&A
+  smoke tests.

@@ -47,6 +47,7 @@ def _schema_instance(**fields: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "citations": [],
         "hmw_scaffold_ready": False,
+        "needs_source_retrieval": False,
     }
     payload.update(fields)
     return payload
@@ -142,6 +143,12 @@ def test_coaching_null_recommendation_fails_pydantic() -> None:
         FastChatTurnOutput.model_validate(_coaching(recommendation=None))
 
 
+def test_null_needs_source_retrieval_fails_pydantic() -> None:
+    """The required retrieval flag must remain a JSON boolean, not null."""
+    with pytest.raises(ValidationError):
+        FastChatTurnOutput.model_validate(_qa(needs_source_retrieval=None))
+
+
 def test_coaching_missing_recommendation_fails() -> None:
     with pytest.raises(ValidationError):
         FastChatTurnOutput.model_validate(
@@ -174,6 +181,7 @@ def test_generated_schema_is_single_object_not_union() -> None:
     assert "recommendation" in schema["then"]["required"]
     assert "citations" in (schema.get("required") or [])
     assert "hmw_scaffold_ready" in (schema.get("required") or [])
+    assert "needs_source_retrieval" in (schema.get("required") or [])
     citations = (schema.get("properties") or {}).get("citations") or {}
     assert citations.get("type") == "array"
     assert "null" not in str(citations.get("type"))
@@ -189,6 +197,13 @@ def test_generated_schema_is_single_object_not_union() -> None:
     assert "does not prevent true" in description
     assert "not yet ready to attempt" not in description.lower()
     assert "hmw_scaffold_ready" in (schema.get("required") or [])
+    needs_retrieval = (
+        (schema.get("properties") or {}).get("needs_source_retrieval") or {}
+    )
+    assert needs_retrieval.get("type") == "boolean"
+    assert "null" not in str(needs_retrieval.get("type"))
+    assert needs_retrieval.get("anyOf") is None
+    assert needs_retrieval.get("oneOf") is None
 
 
 def test_generated_schema_rejects_coaching_null_and_keeps_qa_null() -> None:
@@ -224,6 +239,14 @@ def test_generated_schema_rejects_coaching_null_and_keeps_qa_null() -> None:
     assert not _schema_allows(schema, coaching_missing)
     assert _schema_allows(schema, qa_null)
     assert _schema_allows(schema, qa_omitted)
+
+
+def test_generated_schema_rejects_null_boolean_contract_fields() -> None:
+    """The model-facing schema must not advertise null for required booleans."""
+    schema = FastChatTurnOutput.model_json_schema()
+    base = _schema_instance(mode="qa", response_text="Week 1.")
+    assert not _schema_allows(schema, {**base, "hmw_scaffold_ready": None})
+    assert not _schema_allows(schema, {**base, "needs_source_retrieval": None})
 
 
 def test_coaching_schema_requires_stay_or_advance_and_omits_assessment() -> None:

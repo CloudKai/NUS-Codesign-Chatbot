@@ -392,6 +392,10 @@ def _attach_fast_chat_mode_conditions(schema: dict[str, Any]) -> None:
     boolean so the model-facing spec stays ``type: boolean``. Pydantic parse
     of omitted or malformed values still fails closed to ``False``.
 
+    ``needs_source_retrieval`` is also required by the Fast Chat wire contract.
+    Keep it as a non-null boolean in the model-facing schema; otherwise a
+    nullable generated property can invite ``null``, which Pydantic rejects.
+
     Args:
         schema: Mutable ``model_json_schema()`` output for this class.
 
@@ -418,6 +422,8 @@ def _attach_fast_chat_mode_conditions(schema: dict[str, Any]) -> None:
         required.append("citations")
     if "hmw_scaffold_ready" not in required:
         required.append("hmw_scaffold_ready")
+    if "needs_source_retrieval" not in required:
+        required.append("needs_source_retrieval")
     schema["required"] = required
     properties = schema.get("properties")
     citations = properties.get("citations") if isinstance(properties, dict) else None
@@ -432,6 +438,13 @@ def _attach_fast_chat_mode_conditions(schema: dict[str, Any]) -> None:
         hmw_ready["type"] = "boolean"
         hmw_ready.pop("anyOf", None)
         hmw_ready.pop("oneOf", None)
+    needs_retrieval = (
+        properties.get("needs_source_retrieval") if isinstance(properties, dict) else None
+    )
+    if isinstance(needs_retrieval, dict):
+        needs_retrieval["type"] = "boolean"
+        needs_retrieval.pop("anyOf", None)
+        needs_retrieval.pop("oneOf", None)
 
 
 class FastChatTurnOutput(BaseModel):

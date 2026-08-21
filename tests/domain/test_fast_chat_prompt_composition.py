@@ -63,3 +63,5 @@ def test_fast_chat_markers_occur_exactly_once() -> None:
     assert "Use Socratic guidance." in system
     assert "STAGE: PROBLEM IDENTIFICATION" in system
     assert "The application, not the model, controls" in system
+    assert "Always include the `hmw_scaffold_ready` field as a JSON boolean" in system
+    assert "needs_source_retrieval: false" in system
