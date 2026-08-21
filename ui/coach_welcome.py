@@ -17,6 +17,7 @@ COACH_WELCOME_TITLE = "Welcome to your critical-thinking coach"
 COACH_WELCOME_BODY = (
     "I'm here to help you think through a design or research challenge with "
     "clearer questions, stronger evidence, and more careful reasoning.\n\n"
+    "Students are encouraged to craft their “How Might We” problem statement.\n\n"
     "What design challenge or problem are you working on today?"
 )
 

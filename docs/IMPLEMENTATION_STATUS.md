@@ -4803,3 +4803,11 @@ object cleanup, ownership-in-write checks, `ca-certificates` in image.
   retain the previous runtime assets. Next exact action: publish the updated
   runtime, bump the host generation, and run bounded normal/revised RAG Q&A
   smoke tests.
+
+**Coach welcome HMW guidance** — Current working-tree phase
+
+- Added a concise opening sentence encouraging students to craft a “How Might
+  We” problem statement before the first design-challenge prompt.
+- No coaching, HMW detection, stage, persistence, or AgentCore behavior changed.
+- Validation: welcome/HMW/context-planner focused tests, Ruff, compileall, and
+  `git diff --check` passed.
