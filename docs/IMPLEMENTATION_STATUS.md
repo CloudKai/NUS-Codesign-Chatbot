@@ -59,11 +59,11 @@ layout, IAM role, PUBLIC network, MMDSv2 requirement, gateway/memory settings,
 Artifact:
 `s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-guardrail-v4-ccb388-20260822T-release.zip`
 
-**FastAPI cutover.** Tracked Compose/example configuration and the private
-local `.env` now use `GUARDRAIL_VERSION=4` and
-`AGENTCORE_SESSION_GENERATION=6`. The production EC2 container must be
-recreated with those values before existing affinity sessions can no longer
-reuse v28 assets. DSQL remains the canonical transcript/state store.
+**FastAPI cutover.** Tracked Compose/example configuration uses
+`GUARDRAIL_VERSION=4` and `AGENTCORE_SESSION_GENERATION=7`. Update the private
+local/EC2 `.env` and recreate the production container with those values before
+existing affinity sessions can no longer reuse the previous runtime assets.
+DSQL remains the canonical transcript/state store.
 
 **Validation.** Guardrail v4 is `READY`; AgentCore v29 is `READY`; `DEFAULT`
 routes to v29; runtime tests/config tests, Ruff, compileall, and

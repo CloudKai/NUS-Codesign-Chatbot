@@ -448,7 +448,7 @@ Required production `.env` keys (host-only):
 - `AGENTCORE_RUNTIME_ARN=arn:aws:bedrock-agentcore:us-west-2:355604674280:runtime/NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`
 - `AGENTCORE_QUALIFIER=DEFAULT`
 - `AGENTCORE_SESSION_AFFINITY_ENABLED=true`
-- `AGENTCORE_SESSION_GENERATION=6`
+- `AGENTCORE_SESSION_GENERATION=7`
 - `AGENTCORE_MODEL_PROVIDER=bedrock`
 - `AGENTCORE_MODEL_ID=global.anthropic.claude-haiku-4-5-20251001-v1:0`
 - `AGENTCORE_MODEL_REGION=us-west-2`
