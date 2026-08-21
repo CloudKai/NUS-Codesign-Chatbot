@@ -5,7 +5,21 @@
 **Branch:** `Integrate-Bedrock-v2`
 **Git HEAD:** `dd7e66d` (prompt/schema fix is still uncommitted working-tree).
 **Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
-**Live AgentCore:** DEFAULT → **v27 READY** (`lastUpdated` 2026-08-21T08:35:39Z).
+**Live AgentCore:** DEFAULT → **v28 READY** (`lastUpdated` 2026-08-21T08:54:30Z).
+
+### AgentCore runtime configuration correction (2026-08-21)
+
+**Issue.** The lifecycle-only v27 update omitted the prior runtime environment
+variables. v27 was `READY`, but its environment was empty, so Fast Chat failed
+immediately with a generic AgentCore-unavailable 503 before model generation.
+
+**Correction.** Created v28 on the same runtime ARN, restoring the v26 model,
+Guardrail v3, gateway, memory, and MMDSv2 metadata configuration while keeping
+`idleRuntimeSessionTimeout=1800` seconds and `maxLifetime=28800` seconds.
+`DEFAULT` now points to v28 `READY`. Existing v27 sessions can retain their
+old environment until expiry, so the application affinity generation was
+advanced to **5** to force fresh v28 sessions. No application code or prompt
+change was made for this correction.
 
 ### AgentCore lifecycle update (2026-08-21)
 
@@ -17,8 +31,8 @@ artifact and runtime role, changing only lifecycle settings to
 database, or retrieval behavior changed.
 
 **Affinity cutover.** Production Compose now explicitly enables the existing
-compute-affinity path and sets `AGENTCORE_SESSION_GENERATION=4`. The private
-ignored local `.env` was also bumped from 3 to 4. This forces new affinity
+compute-affinity path and sets `AGENTCORE_SESSION_GENERATION=5`. The private
+ignored local `.env` was also bumped from 3 to 5. This forces new affinity
 session identities after the lifecycle/version change; DSQL remains the
 canonical transcript and AgentCore remains generation-only.
 
