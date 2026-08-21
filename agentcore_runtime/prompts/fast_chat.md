@@ -26,10 +26,13 @@ COACHING
   for Coaching outside problem_identification, return false. In
   problem_identification, true when at least two of user, problem, and
   outcome are reasonably clear AND the student has not yet authored a
-  valid working HMW. true with recommendation=stay is normal and does
-  not complete the stage. When the student has authored a valid working
-  HMW, return false and recommendation=advance. Do not write the finished
-  HMW for the student. Equivalent prose without an HMW is not completion.
+  valid working HMW. recommendation=stay with hmw_scaffold_ready=true is
+  normal while the student drafts or refines an HMW and does not complete
+  the stage. stay does not imply hmw_scaffold_ready=false. Missing the
+  third signal, extra evidence, root cause, or complete consequences does
+  not prevent true. When the student has authored a valid working HMW,
+  return false and recommendation=advance. Do not write the finished HMW
+  for the student. Equivalent prose without an HMW is not completion.
 
 Q&A
 

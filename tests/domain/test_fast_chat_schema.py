@@ -184,6 +184,11 @@ def test_generated_schema_is_single_object_not_union() -> None:
     assert "null" not in str(hmw_ready.get("type"))
     assert hmw_ready.get("anyOf") is None
     assert hmw_ready.get("oneOf") is None
+    description = " ".join(str(hmw_ready.get("description") or "").split())
+    assert "at least two of identifiable user" in description
+    assert "does not prevent true" in description
+    assert "not yet ready to attempt" not in description.lower()
+    assert "hmw_scaffold_ready" in (schema.get("required") or [])
 
 
 def test_generated_schema_rejects_coaching_null_and_keeps_qa_null() -> None:

@@ -464,9 +464,15 @@ class FastChatTurnOutput(BaseModel):
     hmw_scaffold_ready: bool = Field(
         default=False,
         description=(
-            "Internal Problem Identification framing readiness. Always return "
-            "a boolean. Use false for Q&A and when the student is not yet "
-            "ready to attempt a working How Might We statement."
+            "Problem Identification only. Always return a boolean. Return true "
+            "when at least two of identifiable user, understandable "
+            "problem/context, and meaningful desired outcome are reasonably "
+            "clear AND the student has not yet authored a valid working How "
+            "Might We. Missing the third component, extra evidence, "
+            "root-cause certainty, perfect scope, or complete consequences "
+            "does not prevent true. Return false for 0–1 signals, Q&A, "
+            "stages outside Problem Identification, or after a valid working "
+            "How Might We."
         ),
     )
     needs_source_retrieval: bool = False

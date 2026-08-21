@@ -37,10 +37,12 @@ transcript. Do not store student messages in:
 - DynamoDB
 - a JSON file such as the POC ``poc_store.json``
 
-Each AgentCore invoke is stateless (a fresh ``runtimeSessionId`` that is never
-a notebook id). FastAPI persists the turn in ``messages`` after structured
-validation. Student ``transcript.txt`` download is a projection of
-``get_messages``, not a second store.
+Each AgentCore invoke is transcript-stateless: FastAPI sends bounded canonical
+history and persists the turn in ``messages`` after structured validation.
+With affinity disabled, each invoke uses a fresh ``runtimeSessionId``; optional
+FastAPI-owned affinity may reuse an opaque compute id that is never a notebook
+id. Student ``transcript.txt`` download is a projection of ``get_messages``,
+not a second store.
 
 ## Ownership and relationships
 

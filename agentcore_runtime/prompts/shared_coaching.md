@@ -184,7 +184,9 @@ Recommend ADVANCE when the student has adequately achieved the purpose of the
 current stage.
 
 Recommend STAY when an important piece of reasoning for the current stage is
-still missing.
+still missing. STAY does not imply hmw_scaffold_ready=false. On Problem
+Identification, recommendation=stay with hmw_scaffold_ready=true is normal
+while the student drafts or refines a How Might We statement.
 
 Do not require perfection.
 

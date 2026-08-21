@@ -172,7 +172,7 @@ _PROJECT_REASONING = (
     ),
 )
 _QUESTION_SHAPE = re.compile(
-    r"\?|\b(what|why|how|when|where|which|who|explain|describe|according|"
+    r"\?|^\s*who\b|\b(what|why|how|when|where|which|explain|describe|according|"
     r"summar(?:y|ise|ize)|tell me)\b",
     re.IGNORECASE,
 )

@@ -41,8 +41,9 @@ READY does **not** mean the EC2 image is new. Keep these gates separate.
 10. Run a small controlled live validation.
 
 Intended order is 1 → 10. Do not skip the READY wait. Do not move DEFAULT
-onto a non-READY version. Prompt cache and session affinity stay **off**
-unless a later authorised phase enables them.
+onto a non-READY version. Prompt cache stays **off**. Session affinity is
+enabled by `compose.prod.yaml` and is safe only while production owner ids
+remain unique Cognito subjects.
 
 ---
 
@@ -182,4 +183,6 @@ Container logs (json-file → CloudWatch or the host sink). No student text.
 - Flip Month-1 `AUTO_ADVANCE_STAGES` / `STUDENT_STAGE_SELECTION` as a “bugfix”.
 - Republish AgentCore without changing `AGENTCORE_SESSION_GENERATION` and recreating FastAPI.
 - Create a **new** AgentCore runtime ARN (publish a new version on the existing ARN).
-- Enable `FAST_CHAT_PROMPT_CACHE_ENABLED` or `AGENTCORE_SESSION_AFFINITY_ENABLED` on this baseline.
+- Enable `FAST_CHAT_PROMPT_CACHE_ENABLED` on this baseline. Session affinity is
+  already enabled in `compose.prod.yaml`; do not enable it with shared owner
+  identifiers.

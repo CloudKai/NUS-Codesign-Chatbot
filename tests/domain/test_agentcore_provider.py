@@ -414,11 +414,15 @@ def test_agentcore_payload_sends_bounded_history_and_owner_student_id():
 def test_agentcore_compression_keeps_early_decision_out_of_recent_messages():
     from backend.context_planner import ContextBudget, HistoryContextPlanner
 
+    # The current Fast Chat contract is intentionally sizeable (~5.5k tokens
+    # before history).  A 6k synthetic ceiling leaves no room for the
+    # extractive memory this test is meant to exercise, so use a small rounded
+    # constrained budget that can carry both the contract and that memory.
     client = FakeAgentCoreRuntime(payload=_output())
     planner = HistoryContextPlanner(
         ContextBudget(
-            model_context_limit_tokens=7_000,
-            max_input_tokens=6_000,
+            model_context_limit_tokens=7_500,
+            max_input_tokens=6_500,
             output_reserve_tokens=500,
             safety_margin_tokens=500,
             recent_verbatim_messages=4,

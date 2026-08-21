@@ -40,7 +40,12 @@ services:
       MODEL_PROVIDER: "agentcore"
       MOCK_OPENAI: "false"
       AGENTCORE_QUALIFIER: "DEFAULT"
-      AGENTCORE_SESSION_GENERATION: "2"
+      # Compute affinity is safe because production owner ids are unique
+      # Cognito subjects. DSQL remains the canonical transcript/state store.
+      AGENTCORE_SESSION_AFFINITY_ENABLED: "true"
+      # Bump when publishing a new AgentCore version or changing lifecycle
+      # settings so new requests cannot reuse older warm microVM sessions.
+      AGENTCORE_SESSION_GENERATION: "4"
       AGENTCORE_MODEL_PROVIDER: "bedrock"
       AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       AGENTCORE_MODEL_REGION: "us-west-2"
@@ -80,8 +85,8 @@ services:
       # USER_UPLOADS_BUCKET: set in host .env
       # COURSE_MATERIALS_BUCKET: set in host .env (cde2300-course-content-s3)
       # AGENTCORE_RUNTIME_ARN: set in host .env
-      # AGENTCORE_QUALIFIER: DEFAULT (currently liveVersion 21, slim fast_chat).
-      # AGENTCORE_SESSION_GENERATION: Compose sets 2 after the slim Fast Chat publish.
+      # AGENTCORE_QUALIFIER: DEFAULT (query liveVersion before each release).
+      # AgentCore lifecycle: idle 30 minutes, max lifetime 8 hours.
       # GUARDRAIL_ID: set in host .env; also inject the same ID and version 3 on the runtime
       # KNOWLEDGE_BASE_ID: set in host .env (JUQNP8AZAZ) when course sync is on
       # Lecture notes are not bundled into the production image.

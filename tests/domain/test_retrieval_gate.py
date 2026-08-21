@@ -67,3 +67,35 @@ def test_selected_source_factual_question_retrieves() -> None:
         )
         is False
     )
+
+
+def test_relative_who_statements_do_not_trigger_selected_source_retrieval() -> None:
+    for message in (
+        "Older pedestrians who walk slowly struggle to cross.",
+        "Students who use wheelchairs may need more time.",
+        "People who live nearby avoid the crossing.",
+    ):
+        assert (
+            retrieval_required(
+                message,
+                selected_source_titles=["Stakeholder mapping notes"],
+                has_selected_sources=True,
+            )
+            is False
+        )
+
+
+def test_genuine_who_and_source_questions_still_retrieve() -> None:
+    for message in (
+        "Who introduced the How Might We framework?",
+        "What does the lecture say about stakeholder mapping?",
+        "According to the uploaded source, why is this method used?",
+    ):
+        assert (
+            retrieval_required(
+                message,
+                selected_source_titles=["Stakeholder mapping notes"],
+                has_selected_sources=True,
+            )
+            is True
+        )

@@ -88,7 +88,10 @@ target and **16,000** hard ceiling. Deep Review uses a separate
 untrusted product from
 `compose_coach_prompt(..., include_recent_messages=False, context_policy="fast_chat")`.
 Derived memory is model input only; DSQL remains the complete transcript.
-A fresh `runtimeSessionId` (`stateless-…`) is still used per invoke.
+By default each invoke uses a fresh `stateless-…` `runtimeSessionId`. When
+FastAPI-owned session affinity is enabled, the adapter may reuse an opaque
+per-owner/notebook/role id for warm compute; this never changes DSQL transcript
+authority or the bounded history sent on each turn.
 
 Invariants:
 
@@ -99,8 +102,10 @@ Invariants:
   fence fallback);
 - citations stay `[S#]` over selected notebook sources — no
   `RetrieveAndGenerate`;
-- invokes are **stateless** (`runtimeSessionId` is a fresh `stateless-…` value,
-  never a notebook id) so DSQL remains the only durable transcript;
+- invokes remain **transcript-stateless**: with affinity disabled,
+  `runtimeSessionId` is a fresh `stateless-…` value; with affinity enabled it
+  is an opaque compute-affinity id, never a notebook id. DSQL remains the only
+  durable transcript;
 - the coaching specialist must have **zero** Knowledge Base / MCP tools;
 - images map to Converse-style JSON blocks or the adapter fails closed;
 - provider exceptions map to category-only `ProviderUnavailableError`;
@@ -221,10 +226,11 @@ Without those flags the script refuses.
 ## Not a database
 
 Aurora DSQL (and local SQLite) `messages` are the only durable transcript.
-This adapter must keep invoking with a fresh `stateless-…` session id. Do not
-wire AgentCore Runtime LRU, AgentCore Memory, DynamoDB, or a JSON file as chat
-history. Student `GET /api/v1/threads/{id}/transcript.txt` is a projection of
-`get_messages`.
+This adapter must keep DSQL/SQLite as the only durable transcript. A fresh
+`stateless-…` session is the default; optional FastAPI-owned affinity may reuse
+only an opaque compute id. Do not wire AgentCore Runtime LRU, AgentCore
+Memory, DynamoDB, or a JSON file as chat history. Student
+`GET /api/v1/threads/{id}/transcript.txt` is a projection of `get_messages`.
 
 ## Isolated InvokeHarness evaluation
 

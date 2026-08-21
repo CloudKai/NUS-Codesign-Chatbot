@@ -3,20 +3,136 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock-v2`
-**HEAD before this work:** `c4a8e1f` (`Harden Deep Review contracts and HMW
-progression guards`). Live citations RC remains `64410dc`. Composer layout
-remains `711d4e6`. Previous HMW 2-of-3 card remains `89ccfed` on live
-AgentCore v24 until a future publish.
+**Git HEAD:** `dd7e66d` (prompt/schema fix is still uncommitted working-tree).
 **Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
-**Live AgentCore:** DEFAULT → **v24 READY**. Affinity ON. Generation 2.
-Prompt cache OFF. **Do not publish AgentCore during this phase.**
+**Live AgentCore:** DEFAULT → **v27 READY** (`lastUpdated` 2026-08-21T08:35:39Z).
 
-**This phase:** Implement the two follow-up hardening items from the RC
-review: make all new Deep Review top-level arrays required at runtime, and
-force the guarded HMW scaffold visible for an active-branch rejected PI
-advance while clearing it on revision. The five blocker fixes remain intact;
-checkpoint version 1, one Sonnet invoke, existing Fast Chat/RAG behavior, and
-no deploy are preserved.
+### AgentCore lifecycle update (2026-08-21)
+
+**Change.** Updated the existing runtime ARN in place with the same v26 code
+artifact and runtime role, changing only lifecycle settings to
+`idleRuntimeSessionTimeout=1800` seconds (30 minutes) and
+`maxLifetime=28800` seconds (8 hours). AWS created immutable version **27**;
+`DEFAULT` now points to v27 and is READY. No application model, prompt,
+database, or retrieval behavior changed.
+
+**Affinity cutover.** Production Compose now explicitly enables the existing
+compute-affinity path and sets `AGENTCORE_SESSION_GENERATION=4`. The private
+ignored local `.env` was also bumped from 3 to 4. This forces new affinity
+session identities after the lifecycle/version change; DSQL remains the
+canonical transcript and AgentCore remains generation-only.
+
+**Next exact action.** Rebuild/redeploy the production FastAPI image from the
+intended SHA so Compose generation 4 is active, then run the bounded release
+smoke. Do not change the runtime ARN or create another runtime.
+
+**This phase.** Published AgentCore **v26** on the existing ARN
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. Surgical overlay of
+live v25 zip plus working-tree `models.py`, `prompts/fast_chat.md`,
+`prompts/shared_coaching.md`, and `prompts/stages/problem_identification.md`.
+Artifact
+`s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-hmw-prompt-conflict-20260821T040421Z.zip`.
+Runtime env copied from v25 (Haiku 4.5 Fast Chat, Sonnet 4.6 Deep Review,
+Guardrail v3). DEFAULT auto-moved to 26 and is READY. No generation bump.
+No FastAPI/EC2 rebuild. No paid smoke.
+
+**What v26 carries.** The 2/3 HMW rule is unchanged. Later CORE FOCUS /
+READINESS SIGNALS, shared stay-when-missing wording, and the
+`hmw_scaffold_ready` tool-field description now cannot override stay+true
+when at least two of user / problem / outcome are clear.
+
+**Warm sessions.** Production affinity remains ON and
+`AGENTCORE_SESSION_GENERATION` remains **2**. Warm v25 microVMs keep v25
+assets until generation is bumped and FastAPI is recreated. Local testing
+with affinity **off** uses a fresh `stateless-` session and therefore hits
+DEFAULT v26. New production notebooks / new affinity sessions should also
+get v26.
+
+**Next exact action.** Local Fast Chat with `AGENTCORE_QUALIFIER=DEFAULT`
+and affinity off: reproduce the older-pedestrians 2/3 turn and confirm
+`hmw_scaffold_ready_model=true`. Do not bump generation or rebuild EC2
+unless existing production warm sessions must leave v25.
+
+### Fast Chat latency implementation (local, 2026-08-21)
+
+**Scope.** Kept the existing deterministic false-positive `who` retrieval
+gate fix and made the local AgentCore example use the existing affinity path.
+No AWS or paid model calls were made. Runtime model/config caches, AgentCore
+client reuse, prompt-file caching, retrieval deduplication, and the 8,000
+character Fast Chat evidence cap were already present; no speculative changes
+were made to those paths.
+
+**Changes.** `.env.example` now sets
+`AGENTCORE_SESSION_AFFINITY_ENABLED=true` for the single-owner local smoke
+setup, while `backend/settings.py` remains fail-safe when the variable is
+omitted and production must use unique authenticated owner identifiers.
+The private ignored local `.env` also has
+`AGENTCORE_SESSION_AFFINITY_ENABLED=true` with
+`AGENTCORE_SESSION_GENERATION=4`; this is untracked local-only configuration,
+not a commit or deployment change.
+The synthetic provider compression fixture now uses a 6,500-token constrained
+budget (a conservative rounded value; the first integer threshold for the
+fixture was approximately 6,280). The old 6,000-token fixture was stale and
+artificial: it is parser-accepted by the settings range but is not a shipped
+or recommended configuration, and cannot retain the current contract plus the
+memory invariant. Provider documentation now describes affinity as
+compute-only and conditional rather than asserting every invoke is fresh.
+
+**Evidence.** Retrieval-gate, AgentCore provider/affinity, context planner,
+Fast Chat context/one-call/first-cycle, RAG fallback, prompt, deployment, and
+performance tests passed: **690 passed, 1 skipped** (the optional Strands
+middleware test because `strands` is not installed). The separately run
+prompt-baseline lock still has its one known failure because the pre-existing
+dirty HMW prompt edits change `agentcore_runtime/prompts/shared_coaching.md`.
+The six-run warm deterministic provider benchmark medians were: PI no-RAG
+**0.248 ms**, PI fake RAG **0.263 ms**, Q&A fake RAG **0.230 ms**, and
+long-history Fast Chat **2.874 ms**. Fake RAG used an injected evidence
+fixture and excludes retrieval I/O. Ruff, compileall, and
+`git diff --check` passed; live affinity A/B still requires an approved paid
+smoke.
+
+**Next exact action.** Run the bounded approved affinity OFF/ON live A/B on the
+same notebook, recording cold separately from three to five warm turns. Keep
+DSQL/SQLite canonical and bump `AGENTCORE_SESSION_GENERATION` only when
+publishing new runtime assets.
+
+### Prior: AgentCore v25 publish
+
+**HEAD at publish:** `dd7e66d`. Live citations RC remains `64410dc`. Composer
+layout remains `711d4e6`.
+**Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
+**Live AgentCore:** DEFAULT → **v25 READY**. Affinity ON. Generation 2.
+Prompt cache OFF.
+
+**This phase:** Publish AgentCore **v25** on the existing ARN
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`. Overlay of live v24 zip
+plus HEAD `main.py`, `models.py`, `structured_coach.py`,
+`prompts/fast_chat.md`, `prompts/review_deep.md`, and
+`prompts/stages/problem_identification.md`. Artifact
+`s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-deep-review-hmw-20260821T032025Z.zip`.
+DEFAULT liveVersion **25** READY (`lastUpdated` 2026-08-21T03:20:46Z). Runtime
+env copied from v24. Not bundled: RAG, affinity, generation, prompt cache.
+No paid coaching or Deep Review smoke in this publish.
+
+**What v25 carries.** Deep Review `DeepReviewTurnOutput` with required
+`stage_reviews` / `supporting_message_refs`; exposed-label `M#` prompt
+wording; HMW 0–1 / 2–3 / valid-student-HMW ADVANCE prompts. New notebooks
+and new affinity sessions get v25. Warm v24 microVMs stay on the version
+they were created with because generation remains **2**.
+
+**Not changed.** FastAPI/EC2 image; `AGENTCORE_SESSION_GENERATION=2`; prompt
+cache OFF; DSQL; RAG. Live `ddfc3f4` FastAPI still lacks later HMW-card and
+Deep Review checkpoint mapping until an EC2 rebuild from current HEAD.
+
+**Next exact action at the time.** Rebuild/redeploy the EC2 app image from
+`dd7e66d` or later when production FastAPI should persist mapped
+`supporting_message_ids` and show current HMW-card behaviour. Keep
+generation **2** unless existing warm sessions must leave v24. Do not enable
+prompt cache.
+
+### Prior: Deep Review array and HMW scaffold guards (local)
+
+**HEAD before that work:** `c4a8e1f`. Live AgentCore was still v24.
 
 **Prior blocker phase behavior:** Implemented only the five confirmed RC
 blockers: fail closed when oversized Deep Review `full_history` would be
@@ -53,12 +169,10 @@ deterministic suite: **1564 passed**
 (`--ignore=tests/scripts/test_load_probe.py`). Ruff passed on all touched
 Python files; `git diff --check` passed. No paid model calls were made.
 
-**Next exact action.** Review and approve this local patch, then publish a
-matching AgentCore runtime before live Sonnet is expected to emit the strict
-stage-aware arrays. Do not move DEFAULT, rebuild EC2, or enable prompt cache
-in this phase. Remaining follow-ups from the RC review (same-key course-source
-fingerprints and horizontal-worker running-job claims) are intentionally
-unfixed.
+**Next exact action at the time.** Publish a matching AgentCore runtime
+(done as v25). Remaining follow-ups from the RC review (same-key
+course-source fingerprints and horizontal-worker running-job claims) were
+intentionally unfixed.
 
 ### Prior: Problem Identification → How Might We progression
 

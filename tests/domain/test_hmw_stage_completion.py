@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from agentcore_runtime.models import FastChatTurnOutput
 from backend.application import CoachApplicationService
 from backend.domain import (
     CoachRequest,
@@ -13,6 +14,7 @@ from backend.domain import (
     ProviderAssessmentResult,
     StageDecision,
 )
+from backend.learning.hmw import hmw_scaffold_available
 from backend.learning_service import LearningProgressService
 from backend.mock_provider import DeterministicCoachProvider
 from backend.prompts import load_stage_prompt
@@ -129,6 +131,12 @@ def test_hmw_completion_criterion_lives_in_problem_identification_prompts() -> N
         assert "The application remains the stage authority" in collapsed
         assert "Do not write the finished HMW" in collapsed
         assert "solution-locked" in collapsed
+        assert "must not override the HMW readiness rule above" in collapsed
+        assert (
+            "hmw_scaffold_ready=true even if root cause, additional evidence, "
+            "scope, or consequences still need refinement"
+        ) in collapsed
+        assert "NOT prerequisites for showing the HMW scaffold" in collapsed
         assert _HMW_BRITTLE_REGEX not in text
     fast_chat = " ".join(
         Path("agentcore_runtime/prompts/fast_chat.md")
@@ -138,8 +146,74 @@ def test_hmw_completion_criterion_lives_in_problem_identification_prompts() -> N
     assert "hmw_scaffold_ready is internal" in fast_chat
     assert "set hmw_scaffold_ready to true" in fast_chat
     assert "valid working HMW" in fast_chat
+    assert "stay does not imply hmw_scaffold_ready=false" in fast_chat
+    shared = " ".join(
+        Path("agentcore_runtime/prompts/shared_coaching.md")
+        .read_text(encoding="utf-8")
+        .split()
+    )
+    assert "STAY does not imply hmw_scaffold_ready=false" in shared
+    assert "recommendation=stay with hmw_scaffold_ready=true is normal" in shared
     concept = load_stage_prompt("concept_generation")
     assert "HOW MIGHT WE READINESS AND COMPLETION" not in concept
+
+
+_PEDESTRIAN_TWO_OF_THREE = (
+    "Older pedestrians have difficulty crossing the road near a school.\n\n"
+    "The main issue is that some older pedestrians cannot reach the other side "
+    "before the pedestrian signal changes, especially those who walk more slowly."
+)
+
+
+def test_older_pedestrians_two_of_three_is_scaffold_ready_contract() -> None:
+    """User + signal-timing problem, no outcome: stay and hmw_scaffold_ready=true.
+
+    This is a prompt/schema contract, not a live model call. Identifiable
+    user (older pedestrians) and understandable problem (cannot finish
+    crossing before the signal changes) are two of three framing signals.
+    Missing desired outcome, extra evidence, root cause, or consequences
+    must not keep the scaffold hidden.
+    """
+    prompt = " ".join(
+        Path("agentcore_runtime/prompts/stages/problem_identification.md")
+        .read_text(encoding="utf-8")
+        .split()
+    )
+    description = FastChatTurnOutput.model_fields["hmw_scaffold_ready"].description or ""
+    schema_description = " ".join(description.split())
+    assert "TWO of these THREE signals" in prompt
+    assert "must not override the HMW readiness rule above" in prompt
+    assert "consequences still need refinement" in prompt
+    assert "at least two of identifiable user" in schema_description
+    assert "does not prevent true" in schema_description
+    assert "not yet ready to attempt" not in schema_description.lower()
+    parsed = FastChatTurnOutput.model_validate(
+        {
+            "mode": "coaching",
+            "response_text": "What happens if they cannot finish crossing in time?",
+            "recommendation": "stay",
+            "citations": [],
+            "hmw_scaffold_ready": True,
+        }
+    )
+    assert parsed.recommendation == "stay"
+    assert parsed.hmw_scaffold_ready is True
+    messages = [
+        {"role": "user", "content": _PEDESTRIAN_TWO_OF_THREE},
+        {
+            "role": "assistant",
+            "content": parsed.response_text,
+            "metadata": {
+                "assessment": {
+                    "current_stage": "problem_identification",
+                    "response_mode": "coaching",
+                    "recommendation": "stay",
+                    "hmw_scaffold_ready": True,
+                }
+            },
+        },
+    ]
+    assert hmw_scaffold_available("problem_identification", messages) is True
 
 
 def test_no_brittle_hmw_regex_evaluator() -> None:
