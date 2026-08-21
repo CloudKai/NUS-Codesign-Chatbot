@@ -69,6 +69,7 @@ def initialize_session() -> None:
         "assignment": {"title": "", "course": "", "brief": "", "rubric": ""},
         "composer_nonce": 0,
         "pending_edit": None,
+        "edit_error_message": None,
         "editing_message": None,
         "edit_confirm_message_id": None,
         "_coach_turn_streaming": False,
@@ -158,6 +159,7 @@ def new_notebook(should_rerun: bool = True) -> None:
     st.session_state.allow_model_knowledge = False
     st.session_state.editing_message = None
     st.session_state.pending_edit = None
+    st.session_state.edit_error_message = None
     st.session_state.edit_confirm_message_id = None
     _persist_active_thread(thread_id)
     if should_rerun:
@@ -250,6 +252,7 @@ def select_thread(thread_id: str, should_rerun: bool = True) -> None:
     st.session_state.thread_id = thread_id
     st.session_state.editing_message = None
     st.session_state.pending_edit = None
+    st.session_state.edit_error_message = None
     st.session_state.edit_confirm_message_id = None
     _persist_active_thread(thread_id)
     store.backfill_legacy_sources(thread_id)

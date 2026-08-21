@@ -1,6 +1,6 @@
 """Discussion panel, message rendering, and composer handling.
 
-Chat scrolling is owned by ``.st-key-chat_panel`` plus
+Chat scrolling is owned by ``.st-key-chat_feed`` plus
 ``ui.layout.chat_scroll.sync_chat_scroll``; do not write completed turns
 into ``chat_log`` from the composer fragment.
 """
@@ -17,6 +17,7 @@ from typing import Any
 
 import streamlit as st
 import streamlit.components.v1 as components
+from streamlit.errors import StreamlitAPIException
 
 from backend.domain import CoachRequest, CoachTurn
 from backend.learning.hmw import hmw_scaffold_available
@@ -52,6 +53,7 @@ from ui.layout.user_message_edit_layout import (
 from ui.runtime import (
     log_ui_timing,
     rerun_app,
+    rerun_fragment,
     set_coach_turn_streaming,
     store,
     stream_coach_turn_events,
@@ -378,7 +380,7 @@ def render_message(
                     ):
                         st.session_state.editing_message = None
                         st.session_state.pop(edit_key, None)
-                        rerun_app()
+                        rerun_fragment()
                     if send_column.button(
                         "Send",
                         key=f"save-{message['id']}",
@@ -918,6 +920,20 @@ def _restore_pending_edit_draft(message_id: str, draft: str) -> None:
         st.session_state[f"edit-text-{message_id}"] = draft
 
 
+def _rerun_edit_fragment() -> None:
+    """Rerun the chat fragment when already in a fragment-scoped run.
+
+    A pending edit can also be restored by a full app rerun (for example after
+    a browser refresh or an explicit retry). Streamlit rejects fragment scope
+    in that context; the caller can continue rendering the safe error there.
+    """
+    try:
+        rerun_fragment()
+    except StreamlitAPIException as error:
+        if 'scope="fragment"' not in str(error):
+            raise
+
+
 def _submit_pending_edit(
     *,
     model_id: str,
@@ -937,7 +953,9 @@ def _submit_pending_edit(
         True when revise succeeded and a rerun was requested; False when the
         edit could not run so the chat panel should keep rendering. On failure,
         clears ``pending_edit``, restores the in-bubble editor draft, and keeps
-        the stable revise idempotency key for an explicit Send retry.
+        the stable revise idempotency key for an explicit Send retry. The safe
+        error is shown on the next fragment render when fragment scope is
+        available, or in the current full-run fallback.
     """
     pending = st.session_state.get("pending_edit")
     if not isinstance(pending, dict):
@@ -947,7 +965,8 @@ def _submit_pending_edit(
     if not message_id or not draft:
         st.session_state.pop("pending_edit", None)
         _restore_pending_edit_draft(message_id, draft)
-        st.error("Enter a message before resending.")
+        st.session_state.edit_error_message = "Enter a message before resending."
+        _rerun_edit_fragment()
         return False
     thread_id = st.session_state.thread_id
     pending_key = str(pending.get("idempotency_key") or "").strip()
@@ -999,12 +1018,13 @@ def _submit_pending_edit(
             # click Send again to retry the same revision attempt.
             st.session_state.pop("pending_edit", None)
             _restore_pending_edit_draft(message_id, draft)
-            st.error(
+            st.session_state.edit_error_message = (
                 "Could not finish this edit. Your draft is preserved — click Send "
                 "again to retry the same revision attempt without creating another "
                 "conversation branch. If the server already applied the revision, "
                 "retry resumes the replacement coach reply."
             )
+            _rerun_edit_fragment()
             return False
         remove_retry_key(
             st.session_state,
@@ -1026,13 +1046,45 @@ def _submit_pending_edit(
         set_coach_turn_streaming(False)
 
 
+def _render_chat_history(
+    messages: list[dict[str, Any]],
+    *,
+    hmw_available: bool,
+    visible_source_ids: set[str],
+    stop_before_message_id: str | None = None,
+) -> bool:
+    """Render persisted history, optionally stopping before an edited message.
+
+    Returns:
+        True when ``stop_before_message_id`` was found. The edit flow uses this
+        to hide the obsolete branch while the replacement turn is running.
+    """
+    found = False
+    for kind, message in transcript_hmw_render_plan(
+        messages,
+        hmw_available=hmw_available,
+    ):
+        if kind == "hmw":
+            render_hmw_scaffold_if_needed(available=True)
+            continue
+        if message is None:
+            continue
+        if stop_before_message_id and message.get("id") == stop_before_message_id:
+            found = True
+            break
+        render_message(message, visible_source_ids=visible_source_ids)
+    return found
+
+
 @st.fragment
 def _render_composer_submit_fragment(
+    messages: list[dict[str, Any]],
+    hmw_available: bool,
     model_id: str,
     reasoning_effort: str | None,
     visible_source_ids: set[str],
 ) -> None:
-    """Render the inflight slot and composer; submit without remounting rails.
+    """Render one scrollable feed plus its fixed composer footer.
 
     Streamlit 1.60 reruns only this fragment when ``st.chat_input`` submits,
     so Journey, Deep Review, Sources, and chat history are not rebuilt
@@ -1041,6 +1093,8 @@ def _render_composer_submit_fragment(
     and Deep Review caption.
 
     Args:
+        messages: Active persisted branch loaded by the parent app run.
+        hmw_available: Server-owned HMW visibility projection for this branch.
         model_id: Selected coaching model id for the next turn.
         reasoning_effort: Compatible reasoning effort, or None.
         visible_source_ids: Source ids currently shown in this notebook.
@@ -1048,25 +1102,69 @@ def _render_composer_submit_fragment(
     fragment_started = time.perf_counter()
     fragment_enter_epoch_ms = int(time.time() * 1000)
     request_id = str(uuid.uuid4())
-    chat_inflight = st.container(key="chat_inflight")
-    with st.container(key="chat_composer"):
-        fragment_enter_ms = _duration_ms(fragment_started)
-        prompt_started = time.perf_counter()
-        composer_value = st.chat_input(
-            "Ask a question or share your thinking",
-            key=f"composer-{st.session_state.composer_nonce}",
-            accept_file="multiple",
-            accept_audio=False,
-            max_upload_size=settings.max_file_size_mb,
-            submit_mode="stop",
-            height="content",
-        )
-        prompt_accept_ms = _duration_ms(prompt_started)
-        layout_started = time.perf_counter()
-        sync_composer_layout(max_file_size_mb=settings.max_file_size_mb)
-        composer_layout_ms = _duration_ms(layout_started)
+    pending = st.session_state.get("pending_edit")
+    pending_message_id = ""
+    pending_prompt = ""
+    if isinstance(pending, dict):
+        pending_message_id = str(pending.get("message_id") or "")
+        pending_prompt = str(pending.get("prompt") or "").strip()
+
+    with st.container(key="chat_transcript"):
+        with st.container(key="chat_feed"):
+            chat_log = st.container(key="chat_log")
+            with chat_log:
+                history_started = time.perf_counter()
+                found_edit = _render_chat_history(
+                    messages,
+                    hmw_available=hmw_available,
+                    visible_source_ids=visible_source_ids,
+                    stop_before_message_id=pending_message_id or None,
+                )
+                log_ui_timing(
+                    chat_history_ms=round(
+                        max(0.0, (time.perf_counter() - history_started) * 1000.0),
+                        1,
+                    ),
+                    message_count=len(messages),
+                )
+            chat_inflight = st.container(key="chat_inflight")
+            with chat_inflight:
+                if pending_message_id and found_edit:
+                    if pending_prompt:
+                        _render_inflight_user_prompt(pending_prompt, [])
+                    _submit_pending_edit(
+                        model_id=model_id,
+                        reasoning_effort=reasoning_effort,
+                    )
+                elif pending_message_id and not found_edit:
+                    st.session_state.pop("pending_edit", None)
+                    st.session_state.edit_error_message = (
+                        "This edit could not be matched to the active conversation. "
+                        "Reload the notebook before trying again."
+                    )
+                    _rerun_edit_fragment()
+                edit_error = st.session_state.pop("edit_error_message", None)
+                if edit_error:
+                    st.error(str(edit_error))
+
+        with st.container(key="chat_composer"):
+            fragment_enter_ms = _duration_ms(fragment_started)
+            prompt_started = time.perf_counter()
+            composer_value = st.chat_input(
+                "Ask a question or share your thinking",
+                key=f"composer-{st.session_state.composer_nonce}",
+                accept_file="multiple",
+                accept_audio=False,
+                max_upload_size=settings.max_file_size_mb,
+                submit_mode="stop",
+                height="content",
+            )
+            prompt_accept_ms = _duration_ms(prompt_started)
+            layout_started = time.perf_counter()
+            sync_composer_layout(max_file_size_mb=settings.max_file_size_mb)
+            composer_layout_ms = _duration_ms(layout_started)
     prompt, uploads = normalize_composer_value(composer_value)
-    if prompt:
+    if prompt and not pending_message_id:
         handle_prompt(
             prompt,
             uploads,
@@ -1093,15 +1191,6 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
         model_id: Selected coaching model id for the next turn.
         reasoning_effort: Compatible reasoning effort for that model, or None.
     """
-    if st.session_state.get("pending_edit"):
-        # Successful revise calls ``rerun_app()``. On failure, keep rendering the
-        # active chat instead of blanking the panel.
-        if _submit_pending_edit(
-            model_id=model_id,
-            reasoning_effort=reasoning_effort,
-        ):
-            return
-
     sources = store.list_sources(st.session_state.thread_id)
     selected_sources = [source for source in sources if source.get("selected")]
     allow_model_knowledge = not selected_sources
@@ -1120,30 +1209,10 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
         messages,
         enabled=settings.hmw_scaffold_enabled,
     )
-    chat_transcript = st.container(key="chat_transcript")
-    with chat_transcript:
-        chat_log = st.container(key="chat_log")
-        history_started = time.perf_counter()
-        with chat_log:
-            for kind, message in transcript_hmw_render_plan(
-                messages,
-                hmw_available=hmw_available,
-            ):
-                if kind == "hmw":
-                    render_hmw_scaffold_if_needed(available=True)
-                    continue
-                if message is None:
-                    continue
-                render_message(message, visible_source_ids=visible_source_ids)
-        log_ui_timing(
-            chat_history_ms=round(
-                max(0.0, (time.perf_counter() - history_started) * 1000.0),
-                1,
-            ),
-            message_count=len(messages),
-        )
-        _render_composer_submit_fragment(
-            model_id,
-            reasoning_effort,
-            visible_source_ids,
-        )
+    _render_composer_submit_fragment(
+        messages,
+        hmw_available,
+        model_id,
+        reasoning_effort,
+        visible_source_ids,
+    )

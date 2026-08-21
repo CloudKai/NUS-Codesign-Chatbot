@@ -6,6 +6,8 @@ without AWS. ``str(result)`` is never the production contract.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import logging
 import time
@@ -140,6 +142,86 @@ _BOUNDED_STRUCTURED_OUTPUT_ROLES = frozenset(
 _REVIEW_STRUCTURED_OUTPUT_ROLES = frozenset(
     {"review_deep", "review_incremental", "review"}
 )
+
+
+def _decode_image_source_bytes(value: Any) -> bytes:
+    """Decode one JSON base64 image payload into raw SDK image bytes.
+
+    Args:
+        value: The JSON value from ``image.source.bytes``.
+
+    Returns:
+        Non-empty raw image bytes.
+
+    Raises:
+        CoachTurnExtractionError: If the value is not a non-empty, strictly
+            valid base64 string. The public error path intentionally exposes
+            only the stable structured-output failure category.
+    """
+    if not isinstance(value, str) or not value:
+        raise CoachTurnExtractionError("structured_output_failure")
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except (ValueError, binascii.Error, UnicodeEncodeError) as error:
+        raise CoachTurnExtractionError("structured_output_failure") from error
+    if not decoded:
+        raise CoachTurnExtractionError("structured_output_failure")
+    return decoded
+
+
+def _normalize_image_content_block(block: Mapping[str, Any]) -> dict[str, Any]:
+    """Copy one image content block while decoding its source bytes.
+
+    Args:
+        block: Converse content block from the companion JSON payload.
+
+    Returns:
+        A copied content block whose ``image.source.bytes`` is raw bytes.
+
+    Raises:
+        CoachTurnExtractionError: If the image or byte source has an
+            unsupported shape.
+    """
+    image = block.get("image")
+    if not isinstance(image, Mapping):
+        raise CoachTurnExtractionError("structured_output_failure")
+    source = image.get("source")
+    if not isinstance(source, Mapping):
+        raise CoachTurnExtractionError("structured_output_failure")
+    source_copy = dict(source)
+    source_copy["bytes"] = _decode_image_source_bytes(source.get("bytes"))
+    image_copy = dict(image)
+    image_copy["source"] = source_copy
+    block_copy = dict(block)
+    block_copy["image"] = image_copy
+    return block_copy
+
+
+def _normalize_content_blocks(content: list[Any]) -> list[Any]:
+    """Normalize JSON Converse blocks without changing text or block order.
+
+    Args:
+        content: One message's content list.
+
+    Returns:
+        A copied content list with valid image bytes decoded for the SDK.
+
+    Raises:
+        CoachTurnExtractionError: If an image-like block is malformed or has
+            an unsupported byte shape.
+    """
+    normalized: list[Any] = []
+    for block in content:
+        if not isinstance(block, Mapping):
+            normalized.append(block)
+            continue
+        if "image" in block:
+            normalized.append(_normalize_image_content_block(block))
+            continue
+        if "imageSource" in block or "bytes" in block:
+            raise CoachTurnExtractionError("structured_output_failure")
+        normalized.append(block)
+    return normalized
 
 
 class ModelRetryPolicy(NamedTuple):
@@ -725,8 +807,9 @@ def conversation_for_invoke(
 
     Returns:
         ``(prior_messages, current_prompt)``. Prior messages are Converse-style
-        history. Current prompt is a string for text-only turns or the original
-        content-block list when images are present.
+        history. Current prompt is a string for text-only turns or a normalized
+        content-block list when images are present. Image source bytes are
+        decoded into raw SDK bytes in copied blocks.
     """
     if not isinstance(payload, Mapping):
         return [], ""
@@ -752,7 +835,9 @@ def conversation_for_invoke(
             continue
         content = item.get("content")
         if isinstance(content, list) and content:
-            prior.append({"role": role, "content": content})
+            prior.append(
+                {"role": role, "content": _normalize_content_blocks(content)}
+            )
         elif isinstance(content, str) and content.strip():
             prior.append({"role": role, "content": [{"text": content.strip()}]})
     last = messages[last_user_index]
@@ -760,6 +845,7 @@ def conversation_for_invoke(
     if isinstance(content, str):
         return prior, content.strip()
     if isinstance(content, list) and content:
+        content = _normalize_content_blocks(content)
         has_non_text = any(
             isinstance(block, Mapping)
             and any(key in block for key in ("image", "imageSource", "bytes"))

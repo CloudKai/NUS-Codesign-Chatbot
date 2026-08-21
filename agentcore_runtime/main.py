@@ -460,6 +460,7 @@ async def _structured_role_invoke(
     parse: Callable[[Any], Any],
     output_text: Callable[[Any], str],
     include_history: bool,
+    prior_messages: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run one tools-free structured invoke for a named model role.
 
@@ -558,9 +559,8 @@ async def _structured_role_invoke(
         "retry_strategy": _retry_strategy_for_role(role),
     }
     if include_history:
-        prior, _current = conversation_for_invoke(payload)
-        if prior:
-            agent_kwargs["messages"] = prior
+        if prior_messages:
+            agent_kwargs["messages"] = prior_messages
     agent = Agent(**agent_kwargs)
     first_cycle_stop: list[str] = []
     fast_chat = str(role).strip().lower() == MODEL_ROLE_FAST_CHAT
@@ -686,6 +686,10 @@ async def specialist_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]
         A validated specialist object, or a category-only error envelope.
         Never returns an empty string, fenced markdown, or ``str(AgentResult)``.
     """
+    try:
+        prior, prompt = conversation_for_invoke(payload)
+    except CoachTurnExtractionError as error:
+        return harness_error_payload(error.category)
     phase = payload_phase(payload)
     contract = ""
     if isinstance(payload, Mapping):
@@ -694,8 +698,6 @@ async def specialist_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]
     if phase == PHASE_REVIEW or contract == "review_turn":
         review_mode = payload_review_mode(payload)
     system_prompt = agent_system_prompt(payload)
-    prior, prompt = conversation_for_invoke(payload)
-    del prior
     return await _structured_role_invoke(
         role=_role_for_payload(payload),
         payload=payload,
@@ -705,6 +707,7 @@ async def specialist_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]
         parse=lambda result: _parse_result(phase, contract, result, review_mode),
         output_text=lambda output: str(getattr(output, "response_text", "") or ""),
         include_history=True,
+        prior_messages=prior,
     )
 
 
@@ -715,15 +718,20 @@ async def fast_chat_invoke(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     code issues one ``invoke_agent``. Whether Strands performs one event-loop
     cycle is a live-trace concern, not a unit-test invariant.
     """
+    try:
+        prior, prompt = conversation_for_invoke(payload)
+    except CoachTurnExtractionError as error:
+        return harness_error_payload(error.category)
     return await _structured_role_invoke(
         role=MODEL_ROLE_FAST_CHAT,
         payload=payload,
         system_prompt=agent_system_prompt(payload),
-        user_prompt=conversation_for_invoke(payload)[1],
+        user_prompt=prompt,
         output_model=FastChatTurnOutput,
         parse=fast_chat_turn_from_agent_result,
         output_text=lambda output: str(getattr(output, "response_text", "") or ""),
         include_history=True,
+        prior_messages=prior,
     )
 
 

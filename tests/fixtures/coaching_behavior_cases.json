@@ -39,6 +39,58 @@
       }
     },
     {
+      "id": "pi_hmw_two_of_three_scaffold_stay",
+      "stage": "problem_identification",
+      "student_message": "Older pedestrians near the school struggle to reach the far kerb before the signal changes.",
+      "expected": {
+        "stay_or_advance": "stay",
+        "hmw_scaffold_ready": true,
+        "mode": "coaching",
+        "stage_should_remain": "problem_identification"
+      }
+    },
+    {
+      "id": "pi_rough_hmw_advance",
+      "stage": "problem_identification",
+      "student_message": "How might we make crossing easier + for older pedestrians near school + so that they cross safely and reach where they need to go",
+      "expected": {
+        "stay_or_advance": "advance_allowed",
+        "hmw_scaffold_ready": false,
+        "mode": "coaching",
+        "stage_should_become": "concept_generation"
+      }
+    },
+    {
+      "id": "pi_solution_locked_hmw_stay",
+      "stage": "problem_identification",
+      "student_message": "How might we install a 60-second pedestrian light for older pedestrians so that they have more time?",
+      "expected": {
+        "stay_or_advance": "stay",
+        "mode": "coaching",
+        "stage_should_remain": "problem_identification"
+      }
+    },
+    {
+      "id": "pi_filler_stay",
+      "stage": "problem_identification",
+      "student_message": "It is fine and people will like it.",
+      "expected": {
+        "stay_or_advance": "stay",
+        "mode": "coaching",
+        "stage_should_remain": "problem_identification"
+      }
+    },
+    {
+      "id": "pi_misconception_stay",
+      "stage": "problem_identification",
+      "student_message": "Longer green time always makes every crossing safer.",
+      "expected": {
+        "stay_or_advance": "stay",
+        "mode": "coaching",
+        "stage_should_remain": "problem_identification"
+      }
+    },
+    {
       "id": "pi_stakeholder",
       "stage": "problem_identification",
       "student_message": "My users are elderly pedestrians.",
@@ -88,6 +140,26 @@
         "should_not_complete_assignment": true,
         "max_primary_questions": 1,
         "stage_should_remain": "concept_generation"
+      }
+    },
+    {
+      "id": "cg_adequate_imperfect_advance",
+      "stage": "concept_generation",
+      "student_message": "We considered a longer signal, a crossing sensor, and a volunteer escort. The sensor is more feasible than staffing and more responsive than a fixed timer, so we will specify it; the maintenance details can be refined later.",
+      "expected": {
+        "stay_or_advance": "advance_allowed",
+        "mode": "coaching",
+        "stage_should_become": "design_specification"
+      }
+    },
+    {
+      "id": "cg_optional_refinement_advance",
+      "stage": "concept_generation",
+      "student_message": "A longer signal and a sensor are distinct approaches. We chose the sensor because it adapts to slower walkers, although the scope and maintenance trade-off still need a little refinement.",
+      "expected": {
+        "stay_or_advance": "advance_allowed",
+        "mode": "coaching",
+        "stage_should_become": "design_specification"
       }
     },
     {
@@ -296,6 +368,18 @@
         "should_not_complete_assignment": true,
         "max_primary_questions": 1,
         "stage_should_remain": "problem_identification"
+      }
+    },
+    {
+      "id": "qa_isolation",
+      "stage": "concept_generation",
+      "student_message": "What does the selected lecture say about accessibility?",
+      "expected": {
+        "mode": "qa",
+        "must_remain_socratic": false,
+        "must_not_recommend_stage_change": true,
+        "source_question": true,
+        "stage_should_remain": "concept_generation"
       }
     },
     {

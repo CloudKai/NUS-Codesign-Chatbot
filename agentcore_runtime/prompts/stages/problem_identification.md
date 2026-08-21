@@ -36,11 +36,18 @@ interrogating indefinitely or demand complete evidence. Invite a draft.
 hmw_scaffold_ready=true with recommendation=stay is NORMAL. Never convert
 this stay into recommendation=advance.
 
-If the student has authored a valid working HMW with a meaningful
-opportunity/action, identifiable user, and meaningful desired outcome, open
-enough for Concept Generation: hmw_scaffold_ready=false,
-recommendation=advance. Give concise specific feedback. Do not restate the
-formula or demand perfect wording.
+If the student has authored a valid working HMW with an identifiable user, a
+meaningful problem/need/opportunity or action direction, and a meaningful
+desired outcome, open enough for Concept Generation: hmw_scaffold_ready=false,
+recommendation=advance. A student-authored HMW is a working draft, not a
+polished final statement. Advance when its substance communicates those three
+parts even if grammar is awkward, the student uses bullets, plus signs, or
+template formatting, the ``for`` clause contains extra problem wording, the
+opportunity is expressed as a problem or friction, the desired outcome has
+closely related benefits, or the scope could still be refined. Give concise
+feedback on at most one refinement, but do not make refinement a progression
+gate or ask a blocking question whose answer is required before advancing.
+Do not restate the formula or demand perfect wording.
 
 Preferred structure (Judge meaning, not punctuation or exact wording):
 How might we + [action / opportunity] + for [user] + so that [desired outcome / benefit]

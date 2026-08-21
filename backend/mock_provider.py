@@ -294,6 +294,7 @@ class DeterministicCoachProvider:
         evidence_block = f"{evidence_note}\n\n" if evidence_note else ""
         assessment = EducationalAssessment(
             current_stage=stage.id,
+            response_mode="coaching",
             contribution_summary=summary or "Student shared an initial contribution.",
             stage_assessment=(
                 f"The contribution is clear enough to move into {upcoming.short_label}."

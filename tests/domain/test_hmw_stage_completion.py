@@ -36,6 +36,27 @@ _SATISFACTORY_HMW = (
     "How might we improve road crossings for older pedestrians so that they can "
     "cross safely and confidently?"
 )
+_WORKING_HMW_CASES = (
+    pytest.param(
+        "How might we\n"
+        "The main issue is that some older pedestrians cannot reach the other side\n"
+        "before the pedestrian signal changes, especially those who walk more slowly.\n"
+        "+ for Older pedestrians have difficulty crossing the road near a school.\n"
+        "+ so that able to cross safely without worrying and also safely to where\n"
+        "they want to go",
+        id="live-rough-template-hmw",
+    ),
+    pytest.param(
+        "How might we make crossing easier + for elderly people near the school + "
+        "so that they can cross safely",
+        id="rough-meaningful-hmw",
+    ),
+    pytest.param(
+        "How might we improve crossing access for older pedestrians so that they "
+        "can cross safely and reach nearby destinations without worrying",
+        id="multiple-related-outcomes",
+    ),
+)
 _INCOMPLETE_CASES = (
     pytest.param(
         "How might we improve crossing safety?",
@@ -52,6 +73,15 @@ _INCOMPLETE_CASES = (
     pytest.param(
         "How might we do something for users so that it is better?",
         id="template-filling",
+    ),
+    pytest.param(
+        "How might we install a 60-second pedestrian light for older pedestrians "
+        "so that they have more time?",
+        id="solution-locked",
+    ),
+    pytest.param(
+        "How might we do something for people so that things are better?",
+        id="empty-template",
     ),
 )
 
@@ -125,6 +155,9 @@ def test_hmw_completion_criterion_lives_in_problem_identification_prompts() -> N
         assert "Do not tell the student to use the HMW formula" in collapsed
         assert "Judge meaning, not punctuation" in collapsed
         assert "valid working HMW" in collapsed
+        assert "working draft, not a polished final statement" in collapsed
+        assert "opportunity is expressed as a problem or friction" in collapsed
+        assert "refinement a progression gate" in collapsed
         assert "Equivalent prose that states user, problem, and outcome" in collapsed
         assert "recommendation=advance" in collapsed
         assert "Concept Generation" in collapsed
@@ -214,6 +247,37 @@ def test_older_pedestrians_two_of_three_is_scaffold_ready_contract() -> None:
         },
     ]
     assert hmw_scaffold_available("problem_identification", messages) is True
+
+
+@pytest.mark.parametrize("message", _WORKING_HMW_CASES)
+def test_rough_working_hmw_advances_without_polish_gate(
+    tmp_path: Path, message: str
+) -> None:
+    """A substantive but rough HMW uses the existing advance machinery."""
+    turn, store, thread_id = _submit(
+        tmp_path,
+        message,
+        recommendation=StageDecision.ADVANCE,
+        auto_advance=True,
+    )
+    assert turn.assessment.response_mode == "coaching"
+    assert turn.assessment.recommendation is StageDecision.ADVANCE
+    assert turn.assessment.hmw_scaffold_ready is False
+    assert turn.auto_advanced_to == "concept_generation"
+    metadata = (store.get_thread(thread_id) or {})["metadata"]
+    assert metadata.get("thinking_stage") == "concept_generation"
+
+
+def test_solution_locked_and_empty_hmw_remain_progression_gates() -> None:
+    """Prompt semantics keep substantive gaps and prescribed solutions at STAY."""
+    prompt = " ".join(
+        Path("agentcore_runtime/prompts/stages/problem_identification.md")
+        .read_text(encoding="utf-8")
+        .split()
+    )
+    assert "solution-locked" in prompt
+    assert "Template filling" in prompt
+    assert "meaningful desired outcome" in prompt
 
 
 def test_no_brittle_hmw_regex_evaluator() -> None:

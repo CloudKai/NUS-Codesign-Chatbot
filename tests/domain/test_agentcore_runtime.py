@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import base64
 import json
 import logging
 import sys
@@ -332,6 +333,111 @@ def test_conversation_for_invoke_keeps_history_out_of_current_prompt() -> None:
     assert len(prior) == 2
     assert prior[0]["content"][0]["text"] == "Earlier decision: raised crossing."
     assert current == _STREET
+
+
+def test_image_source_bytes_are_decoded_without_reordering_text_or_history() -> None:
+    """Runtime normalization decodes images while retaining Converse order."""
+    from agentcore_runtime.structured_coach import conversation_for_invoke
+
+    raw_image = b"\x89PNG\r\nstudent-upload"
+    encoded = base64.b64encode(raw_image).decode("ascii")
+    payload = {
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"text": "Earlier upload"},
+                    {"image": {"format": "png", "source": {"bytes": encoded}}},
+                ],
+            },
+            {"role": "assistant", "content": [{"text": "I remember it."}]},
+            {
+                "role": "user",
+                "content": [
+                    {"text": "Current upload"},
+                    {"image": {"format": "png", "source": {"bytes": encoded}}},
+                    {"text": "Keep this order."},
+                ],
+            },
+        ]
+    }
+
+    prior, current = conversation_for_invoke(payload)
+
+    assert [block.get("text", "") for block in prior[0]["content"]] == [
+        "Earlier upload",
+        "",
+    ]
+    assert prior[0]["content"][1]["image"]["source"]["bytes"] == raw_image
+    assert prior[1]["content"][0]["text"] == "I remember it."
+    assert [
+        block.get("text", "") if isinstance(block, dict) else block for block in current
+    ] == ["Current upload", "", "Keep this order."]
+    assert current[1]["image"]["source"]["bytes"] == raw_image
+    assert payload["messages"][2]["content"][1]["image"]["source"]["bytes"] == encoded
+
+
+@pytest.mark.parametrize(
+    "byte_shape",
+    ["", "not base64", b"already decoded", [], None, 42],
+)
+def test_invalid_image_source_bytes_fail_closed(byte_shape: Any) -> None:
+    """Empty, malformed, and non-string image bytes use the safe error path."""
+    from agentcore_runtime.structured_coach import conversation_for_invoke
+
+    with pytest.raises(CoachTurnExtractionError) as raised:
+        conversation_for_invoke(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"text": "Please inspect this."},
+                            {
+                                "image": {
+                                    "format": "png",
+                                    "source": {"bytes": byte_shape},
+                                }
+                            },
+                        ],
+                    }
+                ]
+            }
+        )
+    assert raised.value.category == "structured_output_failure"
+
+
+def test_invalid_image_source_bytes_return_existing_runtime_error_envelope() -> None:
+    """Malformed images do not reach Strands and return the normal envelope."""
+    import agentcore_runtime.main as runtime_main
+
+    result = asyncio.run(
+        runtime_main.fast_chat_invoke(
+            _user_payload(
+                "fast_chat",
+                output_contract="fast_chat_turn",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"text": "Please inspect this."},
+                            {
+                                "image": {
+                                    "format": "png",
+                                    "source": {"bytes": "not base64"},
+                                }
+                            },
+                        ],
+                    }
+                ],
+            )
+        )
+    )
+    assert result == {
+        "ok": False,
+        "error": True,
+        "category": "structured_output_failure",
+    }
 
 
 def test_unknown_phase_falls_closed_to_coaching_not_qa() -> None:
@@ -745,7 +851,28 @@ def test_structured_roles_pass_custom_repair_prompt_to_invoke_async(
             )
         ),
         runtime_main.fast_chat_invoke(
-            _user_payload("fast_chat", output_contract="fast_chat_turn")
+            _user_payload(
+                "fast_chat",
+                output_contract="fast_chat_turn",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"text": "Describe this upload."},
+                            {
+                                "image": {
+                                    "format": "png",
+                                    "source": {
+                                        "bytes": base64.b64encode(
+                                            b"runtime-image"
+                                        ).decode("ascii")
+                                    },
+                                }
+                            },
+                        ],
+                    }
+                ],
+            )
         ),
     )
     results = [asyncio.run(item) for item in invocations]
@@ -781,6 +908,7 @@ def test_structured_roles_pass_custom_repair_prompt_to_invoke_async(
     assert calls[3]["kwargs"]["limits"] == {"turns": 3}
     assert calls[4]["kwargs"]["limits"] == {"turns": 3}
     assert calls[5]["kwargs"]["limits"] == {"turns": 2}
+    assert calls[5]["prompt"][1]["image"]["source"]["bytes"] == b"runtime-image"
     assert calls[0]["init_kwargs"]["retry_strategy"].kwargs["max_attempts"] == 2
     assert calls[2]["init_kwargs"]["retry_strategy"].kwargs["max_attempts"] == 2
     assert calls[4]["init_kwargs"]["retry_strategy"].kwargs["max_attempts"] == 3
@@ -846,4 +974,3 @@ def test_runtime_model_provenance_fields_omit_secrets_and_missing_config() -> No
     assert "gr-secret" not in json.dumps(fields)
     assert "guardrail" not in json.dumps(fields)
     assert _STREET not in json.dumps(fields)
-

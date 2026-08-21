@@ -1,14 +1,14 @@
 {
   "baseline_commit": "a6d163668902beae4938fe552cced7ba92b15e88",
-  "note": "Updating these hashes requires explicit pedagogical review. 2026-08-21: problem_identification.md teaches the 0/1 explore → 2/3 scaffold → valid student HMW ADVANCE state machine, with no equivalent-prose auto-advance. Shared coaching and other stage files unchanged. 2026-08-20: problem_identification.md treats How Might We readiness as 2-of-3 framing signals, distinct from ADVANCE. Shared coaching and other stage files unchanged. 2026-08-17: shared_coaching.md dropped the assumptions_identified schema sentence and the Fast Chat structured-output section (contract now lives once in the runtime JSON block). RESEARCH CODING, Socratic, V&V, and assumption-check pedagogy are unchanged.",
+  "note": "Updating these hashes requires explicit pedagogical review. 2026-08-22: shared_coaching.md adds the high-priority progress-over-interrogation rule: advance usable work, and block only for substantive reasons; a question is not required on an advance. 2026-08-22: problem_identification.md clarifies that a substantive student HMW is a working draft; awkward, template-formatted, problem/friction-oriented, or multi-benefit wording advances when user, meaningful problem/opportunity, and outcome are present. 2026-08-22: synchronized the shared_coaching.md hash with the reviewed prompt. 2026-08-21: problem_identification.md teaches the 0/1 explore → 2/3 scaffold → valid student HMW ADVANCE state machine, with no equivalent-prose auto-advance. Shared coaching and other stage files unchanged. 2026-08-20: problem_identification.md treats How Might We readiness as 2-of-3 framing signals, distinct from ADVANCE. Shared coaching and other stage files unchanged. 2026-08-17: shared_coaching.md dropped the assumptions_identified schema sentence and the Fast Chat structured-output section (contract now lives once in the runtime JSON block). RESEARCH CODING, Socratic, V&V, and assumption-check pedagogy are unchanged.",
   "files": [
     {
       "path": "agentcore_runtime/prompts/shared_coaching.md",
-      "sha256": "bfb5b7f96a2117d2a10ad547d9a78623d4400456f91674e5bf108f9fc9b9a0fa"
+      "sha256": "6abbec84bdc6ddcc944848f317812f59945d60471dec768b4a887dfec04bc56e"
     },
     {
       "path": "agentcore_runtime/prompts/stages/problem_identification.md",
-      "sha256": "46933ad782bf5cbde2a6977c9b094213cb28260117affcef290bbd87d760d524"
+      "sha256": "70f873e75badb32194615c42fcfb31428082603b07d8c826e5863c1c7b0d0351"
     },
     {
       "path": "agentcore_runtime/prompts/stages/concept_generation.md",

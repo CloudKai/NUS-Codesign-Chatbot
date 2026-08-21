@@ -3,9 +3,86 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock-v2`
-**Git HEAD:** `dd7e66d` (prompt/schema fix is still uncommitted working-tree).
+**Git HEAD:** `091235c` (working-tree HMW completion fix is uncommitted).
 **Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
 **Live AgentCore:** DEFAULT → **v28 READY** (`lastUpdated` 2026-08-21T08:54:30Z).
+
+### AgentCore image upload decoding (2026-08-22)
+
+**Change.** The AgentCore companion runtime now strictly decodes JSON-safe
+base64 values in `image.source.bytes` into raw SDK bytes before Strands/Bedrock
+invocation. Text blocks, ordering, prior history, source authorization,
+image limits, Guardrails, and structured-output contracts are unchanged.
+Malformed, empty, or unsupported image byte shapes fail through the existing
+student-safe `structured_output_failure` envelope before model invocation.
+
+**Validation.** AgentCore runtime image/provider tests passed; the full runtime
+test module passed (**45 passed**). Ruff, compileall, and `git diff --check`
+passed. No AWS calls or application/API changes were made. The updated
+`agentcore_runtime` package must be republished as a new READY AgentCore
+version before production image coaching uses this fix.
+
+**Next exact action.** Publish the current runtime artifact, move `DEFAULT` only
+after it is READY, then run bounded PNG/JPEG and text-only production smoke
+tests. Keep DSQL canonical and do not change prompts or Guardrails.
+
+### Problem Identification working-HMW completion (2026-08-22)
+
+**Change.** The AgentCore and local Problem Identification prompts now treat a
+substantive student-authored HMW as a working draft. A rough, bullet/plus-sign,
+problem/friction-oriented, or multi-benefit statement advances when it still
+communicates an identifiable user, meaningful problem/need/opportunity, and
+desired outcome. Refinement is feedback rather than a progression gate. The
+existing 2/3 scaffold rule, provenance guard, server stage authority, and
+solution-locked/template-filler STAY behavior are unchanged. The deterministic
+mock now stamps normal coaching assessments with `response_mode=coaching`.
+
+**Validation.** Added the exact live rough HMW regression plus rough-format,
+multi-outcome, solution-locked, and empty-template cases. Focused HMW,
+workflow, prompt, schema, and learning tests pass (**129 passed** in the
+combined run; no AWS/model calls). No database migration or runtime service
+change was made. AgentCore must be republished and the app redeployed before
+this prompt behavior reaches production.
+
+**Next exact action.** Publish the updated AgentCore stage prompt, then run one
+production smoke with the exact working HMW and verify `recommendation=advance`,
+`hmw_scaffold_ready=false`, and Concept Generation stage authority. Do not
+change the scaffold or provenance guards.
+
+### Progress-over-interrogation pedagogy (2026-08-22)
+
+**Change.** Added one high-priority shared coaching rule in the mirrored local
+and AgentCore prompt trees: once the current stage purpose is adequately met,
+advance usable-but-imperfect work rather than probing for optional refinement.
+STAY remains appropriate for substantive blockers, and advancing responses do
+not need to end with a Socratic question. Problem Identification HMW rules,
+stage authority, Q&A isolation, RAG, and Deep Review are unchanged.
+
+**Validation.** Added deterministic behavior cases for adequate/optional
+refinement, substantive blockers, filler, misconceptions, HMW readiness and
+completion, Concept Generation, and Q&A isolation. Focused pedagogy/Fast Chat/
+HMW/workflow tests pass; Ruff, compileall, and `git diff --check` pass. No AWS
+calls or deployment was performed.
+
+**Next exact action.** Republish AgentCore before production use so the shared
+runtime prompt change is active; then run a no-cost/local smoke and one bounded
+production HMW progression check.
+
+### Unified chat feed and persistent edit history (2026-08-22)
+
+**Change.** The Streamlit chat fragment now owns a single `chat_feed` containing
+persisted history and in-flight user/Coach content, with the composer kept as a
+fixed sibling footer. Edit submission reruns only the fragment, renders the
+active prefix plus the revised prompt/status, hides the obsolete downstream
+branch, and remounts authoritative persisted state after success. Failed edits
+restore the draft and stable retry key without blanking the transcript.
+
+**Validation.** Focused Streamlit UI, scroll, progress, rerun-scope, theme,
+HMW-scaffold, and UI timing tests pass. No backend, API, persistence, or
+coaching behavior changed.
+
+**Next exact action.** Verify the feed and edit waiting/error states visually at
+desktop and narrow mobile widths with a delayed deterministic provider.
 
 ### AgentCore runtime configuration correction (2026-08-21)
 

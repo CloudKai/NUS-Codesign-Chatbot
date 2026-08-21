@@ -3,9 +3,8 @@
 Streamlit has no first-class chat-anchor API. ``sync_chat_scroll`` injects a
 zero-height helper that:
 
-- treats ``.st-key-chat_panel`` as the chat scrollport (Streamlit 1.60 hosts
-  the composer ``@st.fragment`` as a sibling of ``chat_log`` under the panel,
-  so a nested ``chat_transcript`` wrapper is not a reliable scroller)
+- treats ``.st-key-chat_feed`` as the chat scrollport (with panel/log
+  selectors retained as compatibility fallbacks for older markup)
 - snaps once on Send by assigning ``scrollTop`` (no smooth animation)
 - ignores smooth ``scrollIntoView`` / ``scrollTo`` inside the chat panel
 - stops following if the student scrolls away from the bottom
@@ -47,8 +46,9 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
 
   function scrollRoot() {
     return (
-      doc.querySelector(".st-key-chat_log") ||
+      doc.querySelector(".st-key-chat_feed") ||
       doc.querySelector(".st-key-chat_panel") ||
+      doc.querySelector(".st-key-chat_log") ||
       doc.querySelector(".st-key-chat_transcript")
     );
   }
@@ -82,7 +82,7 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
       node &&
       node.closest &&
       node.closest(
-        ".st-key-chat_panel, .st-key-chat_transcript, .st-key-chat_log, .st-key-chat_inflight, .st-key-chat_composer"
+        ".st-key-chat_panel, .st-key-chat_feed, .st-key-chat_transcript, .st-key-chat_log, .st-key-chat_inflight, .st-key-chat_composer"
       )
     );
   }

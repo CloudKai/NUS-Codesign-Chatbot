@@ -1250,3 +1250,71 @@
         display:none !important;
     }
 
+    /* One feed owns persisted history and the in-flight turn. The composer is
+       deliberately a sibling footer so the input never scrolls away. */
+    .st-key-chat_feed,
+    [data-testid="stElementContainer"].st-key-chat_feed {
+        min-height:0 !important;
+        flex:1 1 0% !important;
+        height:auto !important;
+        display:flex !important;
+        flex-direction:column !important;
+        justify-content:flex-start !important;
+        overflow-x:hidden !important;
+        overflow-y:auto !important;
+        overflow-anchor:auto;
+        overscroll-behavior:contain;
+        scroll-behavior:auto;
+        scrollbar-width:thin;
+        scrollbar-color:var(--cd-scrollbar) transparent;
+    }
+
+    .st-key-chat_feed > [data-testid="stVerticalBlock"],
+    .st-key-chat_feed > [data-testid="stLayoutWrapper"] {
+        min-height:100% !important;
+        height:auto !important;
+        display:flex !important;
+        flex-direction:column !important;
+        gap:0 !important;
+        row-gap:0 !important;
+    }
+
+    /* Keep a short transcript visually anchored at the bottom while allowing
+       the feed itself—not either child—to scroll for long conversations. */
+    .st-key-chat_feed .st-key-chat_log,
+    .st-key-chat_feed [data-testid="stElementContainer"].st-key-chat_log {
+        min-height:0 !important;
+        flex:0 0 auto !important;
+        height:auto !important;
+        overflow:visible !important;
+        margin-top:auto !important;
+    }
+
+    .st-key-chat_feed .st-key-chat_log > [data-testid="stVerticalBlock"],
+    .st-key-chat_feed .st-key-chat_log > [data-testid="stLayoutWrapper"] {
+        min-height:0 !important;
+        height:auto !important;
+        flex:0 0 auto !important;
+        margin-top:0 !important;
+    }
+
+    .st-key-chat_feed .st-key-chat_inflight,
+    .st-key-chat_feed [data-testid="stElementContainer"].st-key-chat_inflight {
+        min-height:0 !important;
+        height:auto !important;
+        flex:0 0 auto !important;
+        overflow:visible !important;
+    }
+
+    .st-key-chat_feed::-webkit-scrollbar {
+        width:6px;
+    }
+
+    .st-key-chat_feed::-webkit-scrollbar-track {
+        background:transparent;
+    }
+
+    .st-key-chat_feed::-webkit-scrollbar-thumb {
+        background:var(--cd-scrollbar);
+        border-radius:999px;
+    }

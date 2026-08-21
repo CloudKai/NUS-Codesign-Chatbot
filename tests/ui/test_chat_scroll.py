@@ -85,3 +85,30 @@ def test_fragment_submit_path_still_owns_inflight() -> None:
     assert "chat_scroll_send_ms" in send_block
     assert "stream_coach_turn_events(" in send_block
     assert "rerun_app()" in send_block
+
+
+def test_chat_feed_owns_history_and_inflight_with_composer_as_footer() -> None:
+    """The fragment keeps submitted work in one scroll region and the input outside it."""
+    chat = Path("ui/panels/chat.py").read_text(encoding="utf-8")
+    fragment = chat.split("def _render_composer_submit_fragment(", 1)[1].split(
+        "def render_chat_panel(", 1
+    )[0]
+    assert 'st.container(key="chat_feed")' in fragment
+    assert 'st.container(key="chat_log")' in fragment
+    assert 'st.container(key="chat_inflight")' in fragment
+    assert fragment.index('st.container(key="chat_feed")') < fragment.index(
+        'st.container(key="chat_log")'
+    )
+    assert fragment.index('st.container(key="chat_feed")') < fragment.index(
+        'st.container(key="chat_inflight")'
+    )
+    assert fragment.index('st.container(key="chat_feed")') < fragment.index(
+        'st.container(key="chat_composer")'
+    )
+    assert "stop_before_message_id" in fragment
+    assert "_render_inflight_user_prompt(pending_prompt" in fragment
+    assert "rerun_fragment()" in chat
+    workspace = Path("ui/assets/styles/10-workspace.css").read_text(encoding="utf-8")
+    feed_rule = workspace.split(".st-key-chat_feed,", 1)[1].split("}", 1)[0]
+    assert "overflow-y:auto" in feed_rule
+    assert ".st-key-chat_feed .st-key-chat_log" in workspace

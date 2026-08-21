@@ -16,6 +16,10 @@ def test_each_stage_prompt_encodes_the_coaching_contract() -> None:
     assert "one meaningful question" in shared
     assert "Do not use generic praise" in shared
     assert "RESEARCH CODING MUST NOT CONTROL COACHING" in shared
+    assert "PROGRESS OVER INTERROGATION" in shared
+    assert "Imperfect but usable work should normally progress" in shared
+    assert "substantive blocker" in shared
+    assert "does not need a Socratic question when it advances" in shared
     expected = {
         "problem_identification": ("assumption", "stakeholder"),
         "concept_generation": ("alternative", "compar"),
@@ -35,3 +39,42 @@ def test_behavior_cases_exist_for_every_stage() -> None:
     payload = json.loads(_CASES.read_text(encoding="utf-8"))
     stages = {item["stage"] for item in payload["cases"]}
     assert {stage.id for stage in THINKING_STAGES} <= stages
+
+
+def test_progress_over_interrogation_regression_cases_are_explicit() -> None:
+    """Keep the deterministic pedagogy matrix honest about necessary blockers."""
+    import json
+
+    payload = json.loads(_CASES.read_text(encoding="utf-8"))
+    cases = {item["id"]: item for item in payload["cases"]}
+    expected = {
+        "pi_hmw_two_of_three_scaffold_stay": ("stay", "problem_identification"),
+        "pi_rough_hmw_advance": ("advance_allowed", "concept_generation"),
+        "pi_solution_locked_hmw_stay": ("stay", "problem_identification"),
+        "pi_filler_stay": ("stay", "problem_identification"),
+        "pi_misconception_stay": ("stay", "problem_identification"),
+        "cg_adequate_imperfect_advance": (
+            "advance_allowed",
+            "design_specification",
+        ),
+        "cg_optional_refinement_advance": (
+            "advance_allowed",
+            "design_specification",
+        ),
+        "qa_isolation": ("qa", "concept_generation"),
+    }
+    assert set(expected) <= cases.keys()
+    for case_id, (decision, next_stage) in expected.items():
+        case_expected = cases[case_id]["expected"]
+        if decision == "qa":
+            assert case_expected["mode"] == "qa"
+            assert case_expected["must_remain_socratic"] is False
+            assert case_expected["must_not_recommend_stage_change"] is True
+        else:
+            assert case_expected["stay_or_advance"] == decision
+        stage_key = (
+            "stage_should_become"
+            if decision == "advance_allowed"
+            else "stage_should_remain"
+        )
+        assert case_expected[stage_key] == next_stage
