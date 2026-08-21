@@ -5,7 +5,35 @@
 **Branch:** `Integrate-Bedrock-v2`
 **Git HEAD:** `091235c` (working-tree HMW completion fix is uncommitted).
 **Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
-**Live AgentCore:** DEFAULT → **v28 READY** (`lastUpdated` 2026-08-21T08:54:30Z).
+**Live AgentCore:** DEFAULT → **v29 READY** (`lastUpdated` 2026-08-21T17:36:01Z).
+
+### AgentCore Guardrail v4 release (2026-08-22)
+
+**Change.** Published immutable AgentCore runtime **v29** on the existing
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7` runtime. `DEFAULT` is
+READY and points to v29. The runtime keeps the existing Python 3.14 artifact
+layout, IAM role, PUBLIC network, MMDSv2 requirement, gateway/memory settings,
+30-minute idle timeout, and 8-hour maximum lifetime. Its environment now uses
+`GUARDRAIL_ID=o8aipba8m129` with `GUARDRAIL_VERSION=4`.
+
+Artifact:
+`s3://cdk-hnb659fds-assets-355604674280-us-west-2/agentcore-patches/chatbot_harnessAgent-guardrail-v4-ccb388-20260822T-release.zip`
+
+**FastAPI cutover.** Tracked Compose/example configuration and the private
+local `.env` now use `GUARDRAIL_VERSION=4` and
+`AGENTCORE_SESSION_GENERATION=6`. The production EC2 container must be
+recreated with those values before existing affinity sessions can no longer
+reuse v28 assets. DSQL remains the canonical transcript/state store.
+
+**Validation.** Guardrail v4 is `READY`; AgentCore v29 is `READY`; `DEFAULT`
+routes to v29; runtime tests/config tests, Ruff, compileall, and
+`git diff --check` pass. No model inference or application database changes
+were made.
+
+**Next exact action.** Update the production host `.env` to Guardrail v4 and
+generation 6, recreate the FastAPI container, then run one text-only and one
+image-upload smoke test. Roll back by restoring the previous host generation
+and pointing `DEFAULT` to a prior READY runtime if needed.
 
 ### AgentCore image upload decoding (2026-08-22)
 

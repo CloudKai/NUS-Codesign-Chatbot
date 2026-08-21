@@ -115,13 +115,13 @@ and redeploy FastAPI, or warm sessions may keep the version you just left.
 | **Sidecars** | `course_material_id` sibling `.metadata.json` next to course objects. Generate/upload only via `scripts/sync_course_kb_metadata.py` (dry-run default; `--confirm` uploads). Never writes `users/`. |
 | **Pass** | Data source indexes `course/` (not an export prefix); last ingestion job `COMPLETE` if you synced; filter mode matches the runbook for this environment. |
 
-## 8. Guardrail version 3 (both sides)
+## 8. Guardrail version 4 (both sides)
 
 | | |
 |---|---|
-| **FastAPI** | `compose.prod.yaml` sets `GUARDRAIL_VERSION=3`. Host `.env` supplies `GUARDRAIL_ID` (not in git). |
-| **Runtime** | Same guardrail id **and version 3** on the AgentCore runtime process environment. |
-| **Pass** | Compose config shows version `3`; runtime env shows version `3`; a coach turn does not fail closed for missing guardrail config. |
+| **FastAPI** | `compose.prod.yaml` sets `GUARDRAIL_VERSION=4`. Host `.env` supplies `GUARDRAIL_ID` (not in git). |
+| **Runtime** | Same guardrail id **and version 4** on the AgentCore runtime process environment. |
+| **Pass** | Compose config shows version `4`; runtime env shows version `4`; a coach turn does not fail closed for missing guardrail config. |
 
 ## 9. Cognito callback and origins
 

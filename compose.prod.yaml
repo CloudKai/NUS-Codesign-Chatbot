@@ -45,7 +45,7 @@ services:
       AGENTCORE_SESSION_AFFINITY_ENABLED: "true"
       # Bump when publishing a new AgentCore version or changing lifecycle
       # settings so new requests cannot reuse older warm microVM sessions.
-      AGENTCORE_SESSION_GENERATION: "5"
+      AGENTCORE_SESSION_GENERATION: "6"
       AGENTCORE_MODEL_PROVIDER: "bedrock"
       AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       AGENTCORE_MODEL_REGION: "us-west-2"
@@ -67,7 +67,7 @@ services:
       FAST_CHAT_SOFT_INPUT_TOKENS: "12000"
       FAST_CHAT_MAX_INPUT_TOKENS: "16000"
       FAST_CHAT_PROMPT_CACHE_ENABLED: "false"
-      GUARDRAIL_VERSION: "3"
+      GUARDRAIL_VERSION: "4"
       # Process-local coach workflow capacity for ~100 concurrent students.
       # MAX_CONCURRENT_MODEL_CALLS is the historical name for active workflows,
       # not internal Haiku/Sonnet invokes inside one coaching turn.
@@ -87,7 +87,7 @@ services:
       # AGENTCORE_RUNTIME_ARN: set in host .env
       # AGENTCORE_QUALIFIER: DEFAULT (query liveVersion before each release).
       # AgentCore lifecycle: idle 30 minutes, max lifetime 8 hours.
-      # GUARDRAIL_ID: set in host .env; also inject the same ID and version 3 on the runtime
+      # GUARDRAIL_ID: set in host .env; also inject the same ID and version 4 on the runtime
       # KNOWLEDGE_BASE_ID: set in host .env (JUQNP8AZAZ) when course sync is on
       # Lecture notes are not bundled into the production image.
     expose:

@@ -159,7 +159,7 @@ REVIEW_DEEP_MODEL_ID=global.anthropic.claude-sonnet-4-6
 ROUTER_MIN_CONFIDENCE=0.60
 DEEP_REVIEW_INTERVAL_TURNS=3
 GUARDRAIL_ID=<configured guardrail>
-GUARDRAIL_VERSION=3
+GUARDRAIL_VERSION=4
 KNOWLEDGE_BASE_ID=<configured KB>
 MOCK_OPENAI=false
 ```
@@ -186,7 +186,7 @@ DEFAULT Haiku and Sonnet use
 `BedrockModel(model_id=..., region_name=..., guardrail_id=...,
 guardrail_version=..., guardrail_latest_message=True,
 boto_client_config=BotocoreConfig(retries={"total_max_attempts": 1, "mode": "standard"}))`
-(`GUARDRAIL_VERSION=3`). Botocore `total_max_attempts` counts the initial
+(`GUARDRAIL_VERSION=4`). Botocore `total_max_attempts` counts the initial
 call, so `1` is a single Converse attempt. The legacy `max_attempts` key is
 normalised to `value + 1` and must not be used. Strands
 `ModelRetryStrategy` is the only Converse retry layer. Do not pass
