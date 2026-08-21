@@ -113,7 +113,9 @@ def _deep_payload(
         },
     }
     if stage_reviews is not None:
-        payload["stage_reviews"] = stage_reviews
+        payload["stage_reviews"] = [
+            {"supporting_message_refs": [], **dict(item)} for item in stage_reviews
+        ]
     return payload
 
 
@@ -1210,6 +1212,38 @@ def test_first_deep_review_uses_full_history_and_maps_supporting_refs(
     assert snapshot["stage_reviews"][0]["supporting_message_ids"] == [user_id]
     assert "M1" not in json.dumps(snapshot)
     assert "UNIQUE_FIRST_PI_ANCHOR" not in json.dumps(snapshot)
+
+
+def test_frozen_source_id_deletion_fails_before_retrieval_or_sonnet(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deleted frozen source fails the job before provider execution."""
+    store = StudentStore(tmp_path / "dr-frozen-source.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    source = add_text_source(
+        store,
+        thread_id,
+        "Frozen source",
+        "Older pedestrians need more crossing time.",
+    )
+    source_id = str(source["id"])
+    _unlock(store, thread_id)
+    client = FakeAgentCoreRuntime(deep_payload=_deep_payload())
+    service = _service(store, client)
+    monkeypatch.setattr(
+        "backend.coaching.deep_review_jobs.submit_deep_review_job",
+        lambda *_args, **_kwargs: None,
+    )
+    queued = service.enqueue_deep_review(thread_id, idempotency_key="frozen-source")
+    store.delete_source(thread_id, source_id)
+
+    service.execute_deep_review_job(thread_id, queued.review_id)
+
+    finished = service.get_deep_review_job(thread_id)
+    assert finished is not None
+    assert finished.status is DeepReviewJobStatus.FAILED
+    assert client.calls == []
+    assert _snapshot(store, thread_id) is None
 
 
 def test_small_second_deep_review_keeps_full_history(

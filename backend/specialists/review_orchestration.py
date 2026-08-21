@@ -605,7 +605,6 @@ def deep_review_snapshot_payload(
         "areas_to_develop": [
             str(item).strip() for item in areas_to_develop if str(item).strip()
         ][:8],
-        "stage_reviews": normalized_reviews,
         "facione_scores": dict(facione_scores or {}),
         "working_conclusion": " ".join(str(working_conclusion or "").split()).strip()[
             :4_000
@@ -621,6 +620,12 @@ def deep_review_snapshot_payload(
         "review_depth": REVIEW_DEPTH_DEEP,
         "review_trigger": REVIEW_TRIGGER_EXPLICIT,
     }
+    # A supplied list is the new stage-aware contract, including an explicit
+    # empty list.  Omitting the argument preserves the legacy v24 snapshot
+    # shape, so projection can distinguish "no field" from "intentionally []".
+    if stage_reviews is not None:
+        payload["stage_reviews"] = normalized_reviews
+        payload["stage_reviews_contract"] = "v1"
     if checkpoint_version is not None:
         try:
             payload["checkpoint_version"] = max(1, int(checkpoint_version))

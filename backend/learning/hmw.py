@@ -42,6 +42,17 @@ _HMW_LEADING_META_RE = re.compile(
     r"^(?:what|why|when|where|who|how do|how does|can you|could you|"
     r"should i|do i|does)\b"
 )
+_HMW_CONSTRUCTION_META_RE = re.compile(
+    r"(?:\b(?:here is|this is|use|using|follow|fill in|complete|write|"
+    r"create|generate|phrase|formulate|make|draft|give me|help me)\b"
+    r"[^.?!]{0,100}\b(?:example|template|formula|scaffold|card|prompt|"
+    r"instruction)\b[^.?!]{0,100}\bhow might we\b|\b(?:write|create|"
+    r"generate|phrase|formulate|make|draft|give me|help me)\b[^.?!]{0,100}"
+    r"\bhow might we\b|\bhow might we\b[^.?!]{0,100}\b(?:as an example|"
+    r"as a template|using this formula|is a scaffold|is a prompt|is an "
+    r"instruction|assignment|question|statement)\b)",
+    re.IGNORECASE,
+)
 
 
 def _as_mapping(value: Any) -> Mapping[str, Any] | None:
@@ -148,7 +159,10 @@ def _scaffold_is_useful(assessment: Mapping[str, Any]) -> bool:
     Returns:
         True when the assessment is stay plus ready.
     """
-    return _hmw_ready(assessment) and _recommendation_stay(assessment)
+    return _recommendation_stay(assessment) and (
+        _hmw_ready(assessment)
+        or assessment.get("hmw_scaffold_guarded") is True
+    )
 
 
 def student_hmw_candidate_present(text: str | None) -> bool:
@@ -173,6 +187,8 @@ def student_hmw_candidate_present(text: str | None) -> bool:
     if _HMW_MARKER not in lower:
         return False
     if _HMW_META_RE.search(lower):
+        return False
+    if _HMW_CONSTRUCTION_META_RE.search(lower):
         return False
     if _HMW_LEADING_META_RE.match(lower):
         return False

@@ -26,6 +26,7 @@ from backend.repositories import (
     SQLiteNotebookRepository,
     SQLitePhaseTransitionRepository,
 )
+from backend.source_library import add_text_source
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
 from fake_agentcore_runtime import FakeAgentCoreRuntime
@@ -627,6 +628,34 @@ def test_student_hmw_candidate_rejects_meta_and_empty_attempts() -> None:
     assert student_hmw_candidate_present("How might we?") is False
 
 
+def test_student_hmw_candidate_rejects_construction_requests() -> None:
+    """Requests to manufacture an HMW are not student-authored attempts."""
+    for text in (
+        "How might we write an HMW statement for elderly pedestrians so that I "
+        "can finish my assignment?",
+        "Can you help me create a How Might We question?",
+        "What should my How Might We statement be?",
+        "Write a How Might We question about safer school crossings for seniors.",
+        "Create a How Might We statement for my assignment about accessibility.",
+        "Generate a How Might We formula for older pedestrians crossing roads.",
+        "Help me draft a How Might We question for the project.",
+        "How might we improve crossings as an example question for the assignment?",
+    ):
+        assert student_hmw_candidate_present(text) is False, text
+
+
+def test_student_hmw_candidate_accepts_active_framing_with_construction_words() -> None:
+    """Construction words in the student's opportunity do not imply meta text."""
+    assert student_hmw_candidate_present(
+        "How might we make school crossings safer for older pedestrians so they "
+        "can cross confidently without rushing?"
+    ) is True
+    assert student_hmw_candidate_present(
+        "How might we create calmer crossings for older pedestrians so they can "
+        "reach the other side safely?"
+    ) is True
+
+
 def test_hallucinated_advance_without_student_hmw_is_forced_stay(
     tmp_path: Path,
 ) -> None:
@@ -657,10 +686,103 @@ def test_hallucinated_advance_without_student_hmw_is_forced_stay(
     )
     assert student_hmw_candidate_present(prose) is False
     assert turn.assessment.recommendation is StageDecision.STAY
+    assert turn.assessment.hmw_scaffold_ready is False
+    assert turn.assessment.readiness_candidate is False
+    assert turn.assessment.hmw_scaffold_guarded is False
+    assert turn.response_text.startswith("**Problem identification**")
+    assert "How Might We" in turn.response_text
+    assert hmw_scaffold_available(
+        "problem_identification", store.get_messages(thread_id)
+    ) is False
     assert turn.auto_advanced_to is None
     assert turn.pending_transition is None
     metadata = (store.get_thread(thread_id) or {})["metadata"]
     assert metadata.get("thinking_stage") == "problem_identification"
+
+
+def test_guarded_advance_keeps_useful_server_scaffold_visible(
+    tmp_path: Path,
+) -> None:
+    """A rejected model ADVANCE can keep a previously useful scaffold visible."""
+    store = StudentStore(tmp_path / "hmw-guard-visible.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    turn = CoachApplicationService(
+        store,
+        notebooks,
+        CoachWorkflow(
+            DeterministicCoachProvider(
+                StageDecision.ADVANCE, hmw_scaffold_ready=True
+            ),
+            transitions,
+        ),
+        LearningProgressService(store, notebooks, transitions),
+        auto_advance_stages=True,
+    ).submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="Older pedestrians need more time at the crossing.",
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    )
+    assert turn.assessment.recommendation is StageDecision.STAY
+    assert turn.assessment.hmw_scaffold_ready is False
+    assert turn.assessment.hmw_scaffold_guarded is True
+    assert turn.auto_advanced_to is None
+    assert turn.response_text.startswith("**Problem identification**")
+    assert hmw_scaffold_available(
+        "problem_identification", store.get_messages(thread_id)
+    ) is True
+
+
+def test_guarded_advance_does_not_trigger_retrieval_retry(tmp_path: Path) -> None:
+    """The server-owned HMW response completes the turn in one provider call."""
+    store = StudentStore(tmp_path / "hmw-guard-one-call.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    source = add_text_source(store, thread_id, "Lecture", "Crossing evidence")
+    payload = {
+        "mode": "coaching",
+        "response_text": "The model response must not be persisted.",
+        "citations": [],
+        "hmw_scaffold_ready": True,
+        "needs_source_retrieval": False,
+        "recommendation": "advance",
+        "recommendation_rationale": "The model incorrectly marked the stage ready.",
+    }
+    client = FakeAgentCoreRuntime(payload=payload)
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    service = CoachApplicationService(
+        store,
+        notebooks,
+        CoachWorkflow(
+            AgentCoreCoachProvider(
+                _RUNTIME_ARN,
+                region="us-west-2",
+                qualifier="DEFAULT",
+                timeout_seconds=110.0,
+                max_retries=0,
+                client=client,
+            ),
+            transitions,
+        ),
+        LearningProgressService(store, notebooks, transitions),
+        auto_advance_stages=True,
+    )
+    turn = service.submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="Older pedestrians need more time at the crossing.",
+            current_stage="problem_identification",
+            response_detail="short",
+            source_ids=[str(source["id"])],
+        )
+    )
+    assert len(client.calls) == 1
+    assert turn.assessment.recommendation is StageDecision.STAY
+    assert turn.response_text.startswith("**Problem identification**")
 
 
 def test_valid_first_message_hmw_can_advance_immediately(tmp_path: Path) -> None:
@@ -838,4 +960,3 @@ def test_revised_away_hmw_does_not_keep_completion(tmp_path: Path) -> None:
     assert hmw_scaffold_available(
         "problem_identification", store.get_messages(thread_id)
     ) is False
-

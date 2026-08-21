@@ -3,18 +3,23 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock-v2`
-**HEAD before this work:** `9f32fb5` (HMW framing progression). The prompt's
-`a217316` SHA was stale. Live citations RC remains `64410dc`. Composer layout
-remains `711d4e6`. Previous HMW 2-of-3 card remains `89ccfed` on live AgentCore
-v24 until a future publish.
+**HEAD before this work:** `d9ac603c841de8526f163a3fef946949dc754d54`
+(`Hide the Deep Review running-status expander chevron`). The requested
+`1b130aea4eab111b9b19fe2f839943a12c989c10` SHA was stale; work used the actual
+branch head. Live citations RC remains `64410dc`. Composer layout remains
+`711d4e6`. Previous HMW 2-of-3 card remains `89ccfed` on live AgentCore v24
+until a future publish.
 **Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
 **Live AgentCore:** DEFAULT → **v24 READY**. Affinity ON. Generation 2.
 Prompt cache OFF. **Do not publish AgentCore during this phase.**
 
-**This phase:** Harden Deep Review checkpoint-delta without redesign. Keep
-checkpoint version 1. FastAPI still freezes revision, message ids, source ids,
-and prior checkpoint identity at enqueue. One Sonnet invoke. No Fast Chat
-change. No extra retrieval.
+**This phase:** Implement only the five confirmed RC blockers: fail closed
+when oversized Deep Review `full_history` would be compressed; require the
+frozen source ID set to remain intact; reject HMW construction/meta requests
+as provenance; validate new Deep Review arrays strictly while keeping an
+explicit legacy v24 boundary; and normalize rejected PI advances so response,
+scaffold, recommendation, and authoritative stage agree. Keep checkpoint
+version 1, one Sonnet invoke, existing Fast Chat/RAG behavior, and no deploy.
 
 **Behavior.** `context_plan.ref_map` is the model-exposed `M#` map for that
 invoke, not every label theoretically generable from the frozen transcript.
@@ -29,25 +34,25 @@ prior `readiness_evidence`. Compacting requires the transcript to exceed
 immutable per content version. Do not claim production cost savings.
 
 **Not changed.** AgentCore DEFAULT/generation/prompt cache; EC2 image;
-DSQL schema; RAG; citations; Fast Chat slim schema; Fast Chat `turns=2`;
-HMW visibility/progression; Review-tab stage expanders; checkpoint version.
+DSQL schema; retrieval/citations; Fast Chat slim schema and `turns=2`;
+checkpoint version; deployment or AWS state. Existing unrelated dirty
+`scripts/load_probe.py` was preserved.
 
 **Validation (local worktree, $0 AWS).** Ruff passed on touched Python.
 `compileall` passed for `backend`, `ui`, `streamlit_app.py`, `tests`, and
 `agentcore_runtime` (`scripts/load_probe.py` remains a pre-existing
-`IndentationError`; left unstaged). Targeted Deep Review context/execution/
-projection, AgentCore Deep Review schema, Fast Chat one-call/schema, HMW,
-revision, RAG/citation, and Deep Review HTTP tests passed. Full
-deterministic suite: **1538 passed**
-(`--ignore=tests/scripts/test_load_probe.py`). Synthetic 30→80 comparison
-at the new 20k threshold (expanded message bodies): full_history 24209
-estimated tokens vs checkpoint_delta 16980 (saved 7229, ratio 0.2986).
+`IndentationError`; left untouched). Focused Deep Review, AgentCore schema,
+Fast Chat, HMW, revision, RAG/citation, and HTTP tests passed. Full
+deterministic suite: **1551 passed**
+(`--ignore=tests/scripts/test_load_probe.py`). Ruff passed on all touched
+Python files; `git diff --check` passed. No paid model calls were made.
 
-**Next exact action.** A future AgentCore runtime publish is required before
-live Sonnet emits `supporting_message_refs` (and follows the exposed-label
-prompt wording). Until then, live Deep Review still uses full_history whenever
-anchors are missing. Do not move DEFAULT. Do not rebuild EC2. Do not enable
-prompt cache.
+**Next exact action.** Review and approve this local patch, then publish a
+matching AgentCore runtime before live Sonnet is expected to emit the strict
+stage-aware arrays. Do not move DEFAULT, rebuild EC2, or enable prompt cache
+in this phase. Remaining follow-ups from the RC review (same-key course-source
+fingerprints and horizontal-worker running-job claims) are intentionally
+unfixed.
 
 ### Prior: Problem Identification → How Might We progression
 

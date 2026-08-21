@@ -40,6 +40,14 @@ class AssessmentProvider(Protocol):
         """Return one provider result; legacy two-item adapters remain accepted."""
 
 
+_PI_HMW_GUARD_RESPONSE = (
+    "**Problem identification**\n\n"
+    "Let's keep refining the problem before moving on. Please draft your own "
+    "How Might We question naming the opportunity, who it is for, and the "
+    "outcome you want. What framing would you like to try?"
+)
+
+
 def _review_orchestration(
     provider_result: ProviderAssessmentResult,
 ) -> dict[str, Any]:
@@ -137,24 +145,52 @@ def _require_student_hmw_for_problem_identification_advance(
         The same assessment, or a STAY copy when Problem Identification
         ADVANCE lacks a student HMW candidate.
     """
+    # This is application-owned metadata; never carry a provider-supplied
+    # guarded marker into the persisted assessment.
+    assessment = assessment.model_copy(update={"hmw_scaffold_guarded": False})
     if request.current_stage != HMW_SCAFFOLD_STAGE_ID:
         return assessment
     if assessment.recommendation is not StageDecision.ADVANCE:
         return assessment
     if str(assessment.response_mode or "").strip().lower() == "qa":
-        return assessment.model_copy(update={"recommendation": StageDecision.STAY})
-    if student_hmw_candidate_present(request.student_message):
         return assessment
+    if student_hmw_candidate_present(request.student_message):
+        return assessment.model_copy(update={"hmw_scaffold_guarded": False})
     rationale = str(assessment.recommendation_rationale or "").strip()
+    scaffold_was_useful = assessment.hmw_scaffold_ready
     return assessment.model_copy(
         update={
             "recommendation": StageDecision.STAY,
+            "readiness_candidate": False,
+            "hmw_scaffold_ready": False,
+            # Preserve the provider's useful-scaffold signal without allowing
+            # a rejected advance to expose a false readiness candidate.
+            "hmw_scaffold_guarded": scaffold_was_useful,
             "recommendation_rationale": rationale
             or (
                 "Problem Identification advances only after a student-authored "
                 "How Might We attempt."
             ),
         }
+    )
+
+
+def _hmw_guard_applies(
+    request: CoachRequest,
+    assessment: EducationalAssessment,
+    *,
+    needs_source_retrieval: bool = False,
+) -> bool:
+    """Return whether the server rejected this PI ADVANCE recommendation."""
+    return (
+        request.current_stage == HMW_SCAFFOLD_STAGE_ID
+        and assessment.recommendation is StageDecision.ADVANCE
+        and str(assessment.response_mode or "").strip().lower() != "qa"
+        and not student_hmw_candidate_present(request.student_message)
+        # Let the existing application-owned RAG fallback run first. The
+        # final retrieval-backed pass is still normalized below, with no
+        # additional retrieval caused by the HMW guard itself.
+        and not (needs_source_retrieval and not request.retrieval_required)
     )
 
 
@@ -214,9 +250,16 @@ class CoachWorkflow:
         response_text, assessment = provider_result
         assessment = _normalize_terminal_assessment(request, assessment)
         assessment = _formative_review_stays(request, assessment)
+        hmw_guarded = _hmw_guard_applies(
+            request,
+            assessment,
+            needs_source_retrieval=provider_result.needs_source_retrieval,
+        )
         assessment = _require_student_hmw_for_problem_identification_advance(
             request, assessment
         )
+        if hmw_guarded:
+            response_text = _PI_HMW_GUARD_RESPONSE
         if assessment.current_stage != request.current_stage:
             raise ValueError("Assessment stage does not match the active journey stage")
         pending: PendingPhaseTransition | None = None
@@ -246,9 +289,12 @@ class CoachWorkflow:
         self._last_conversation_memory[request.thread_id] = (
             provider_result.conversation_memory
         )
-        self._last_review_orchestration[request.thread_id] = _review_orchestration(
-            provider_result
-        )
+        orchestration = _review_orchestration(provider_result)
+        if hmw_guarded:
+            orchestration.update(
+                {"hmw_guarded": True, "needs_source_retrieval": False}
+            )
+        self._last_review_orchestration[request.thread_id] = orchestration
         return turn
 
     def _run_graph(self, request: CoachRequest) -> CoachTurn:
@@ -375,9 +421,16 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
         response_text, assessment = provider_result
         assessment = _normalize_terminal_assessment(request, assessment)
         assessment = _formative_review_stays(request, assessment)
+        hmw_guarded = _hmw_guard_applies(
+            request,
+            assessment,
+            needs_source_retrieval=provider_result.needs_source_retrieval,
+        )
         assessment = _require_student_hmw_for_problem_identification_advance(
             request, assessment
         )
+        if hmw_guarded:
+            response_text = _PI_HMW_GUARD_RESPONSE
         if assessment.current_stage != request.current_stage:
             raise ValueError(
                 "Assessment stage does not match the active journey stage"
@@ -390,9 +443,12 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
         workflow._last_conversation_memory[request.thread_id] = (
             provider_result.conversation_memory
         )
-        workflow._last_review_orchestration[request.thread_id] = _review_orchestration(
-            provider_result
-        )
+        orchestration = _review_orchestration(provider_result)
+        if hmw_guarded:
+            orchestration.update(
+                {"hmw_guarded": True, "needs_source_retrieval": False}
+            )
+        workflow._last_review_orchestration[request.thread_id] = orchestration
         return {
             "request": request.model_dump(mode="json"),
             "response_text": response_text,

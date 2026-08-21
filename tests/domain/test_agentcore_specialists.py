@@ -147,11 +147,18 @@ def test_review_turn_from_structured_output() -> None:
 
 def test_deep_review_schema_requires_stage_reviews_array() -> None:
     schema = DeepReviewTurnOutput.model_json_schema()
-    assert "stage_reviews" in schema["required"]
-    node = schema["properties"]["stage_reviews"]
-    assert node.get("type") == "array"
-    assert "null" not in str(node.get("type"))
-    assert "anyOf" not in node
+    for field in (
+        "strengths",
+        "areas_to_develop",
+        "readiness_evidence",
+        "missing_requirements",
+        "stage_reviews",
+    ):
+        assert field in schema["required"]
+        node = schema["properties"][field]
+        assert node.get("type") == "array"
+        assert "null" not in str(node.get("type"))
+        assert "anyOf" not in node
     incremental = ReviewTurnOutput.model_json_schema()
     assert "stage_reviews" not in incremental.get("properties", {})
     defs = schema.get("$defs") or schema.get("definitions") or {}
@@ -181,6 +188,7 @@ def test_parse_review_turn_output_keeps_stage_reviews() -> None:
                     "stage_id": "problem_identification",
                     "strengths": ["Constructed a How Might We question"],
                     "areas_to_develop": [],
+                    "supporting_message_refs": [],
                 },
                 {
                     "stage_id": "not_a_stage",
@@ -191,6 +199,7 @@ def test_parse_review_turn_output_keeps_stage_reviews() -> None:
                     "stage_id": "concept_generation",
                     "strengths": [],
                     "areas_to_develop": [],
+                    "supporting_message_refs": [],
                 },
             ],
         }
@@ -203,6 +212,95 @@ def test_parse_review_turn_output_keeps_stage_reviews() -> None:
         "Constructed a How Might We question"
     ]
     assert parsed.stage_reviews[0].supporting_message_refs == []
+
+
+def test_deep_review_legacy_shape_still_defaults_stage_reviews_to_empty() -> None:
+    """Old deep payloads remain parseable while new schema requires arrays."""
+    parsed = parse_review_turn_output(
+        {
+            "response_text": "Legacy formative review.",
+            "strengths": ["Named a setting"],
+            "areas_to_develop": ["Name affected users"],
+            "synthesis": "Legacy synthesis.",
+            "review_depth": "deep",
+            "current_stage": "problem_identification",
+            "recommendation": "stay",
+            "rationale_summary": "More evidence is needed.",
+        },
+        allow_legacy=True,
+    )
+    assert isinstance(parsed, ReviewTurnOutput)
+    assert not isinstance(parsed, DeepReviewTurnOutput)
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [None, "not-an-array", {"stage_id": "problem_identification"}],
+)
+def test_deep_review_stage_reviews_rejects_non_arrays(bad_value: Any) -> None:
+    """New Deep Review validation must not normalize malformed arrays."""
+    with pytest.raises(Exception):
+        DeepReviewTurnOutput.model_validate(
+            {
+                "response_text": "Deep review.",
+                "synthesis": "Synthesis.",
+                "review_depth": "deep",
+                "stage_reviews": bad_value,
+            }
+        )
+
+
+def test_deep_review_stage_feedback_requires_explicit_child_arrays() -> None:
+    """Child arrays reject omission/null/wrong shapes while [] remains valid."""
+    base = {
+        "response_text": "Deep review.",
+        "synthesis": "Synthesis.",
+        "review_depth": "deep",
+        "stage_reviews": [],
+    }
+    assert DeepReviewTurnOutput.model_validate(base).stage_reviews == []
+    with pytest.raises(Exception):
+        DeepReviewTurnOutput.model_validate(
+            {
+                **base,
+                "stage_reviews": [
+                    {
+                        "stage_id": "problem_identification",
+                        "strengths": None,
+                        "areas_to_develop": [],
+                        "supporting_message_refs": [],
+                    }
+                ],
+            }
+        )
+    with pytest.raises(Exception):
+        DeepReviewTurnOutput.model_validate(
+            {
+                **base,
+                "stage_reviews": [
+                    {
+                        "stage_id": "problem_identification",
+                        "strengths": [],
+                        "areas_to_develop": "missing-array",
+                        "supporting_message_refs": [],
+                    }
+                ],
+            }
+        )
+    with pytest.raises(Exception):
+        DeepReviewTurnOutput.model_validate(
+            {
+                **base,
+                "stage_reviews": [
+                    {
+                        "stage_id": "problem_identification",
+                        "strengths": [],
+                        "areas_to_develop": [],
+                        "supporting_message_refs": {"ref": "M1"},
+                    }
+                ],
+            }
+        )
 
 
 def test_review_turn_output_ignores_stage_reviews_field() -> None:

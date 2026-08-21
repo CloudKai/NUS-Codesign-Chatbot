@@ -182,6 +182,55 @@ def _call_phase(call: dict[str, Any]) -> str:
     return str(_decoded_payload(call).get("phase") or "")
 
 
+def test_deep_review_full_history_compression_fails_before_runtime_invoke() -> None:
+    """An oversized full-history review cannot reach Sonnet or persistence."""
+
+    class _CompressedDeepPlanner:
+        """Return the planner shape produced after full-history compression."""
+
+        def plan(self, request: CoachRequest, **_kwargs: Any) -> ModelContextPlan:
+            del request
+            return ModelContextPlan(
+                messages=[],
+                full_history_used=False,
+                compression_used=True,
+                original_message_count=20,
+                verbatim_message_count=4,
+                compressed_message_count=16,
+                estimated_input_tokens=100,
+                history_tokens=20,
+                evidence_tokens=0,
+                prompt_tokens=40,
+                safety_margin=10,
+                model_context_limit=200,
+                max_input_tokens=180,
+            )
+
+    client = FakeAgentCoreRuntime(payload=_output(research=None))
+    provider = AgentCoreCoachProvider(
+        _RUNTIME_ARN,
+        region="us-west-2",
+        qualifier="DEFAULT",
+        timeout_seconds=110.0,
+        max_retries=0,
+        client=client,
+        deep_planner=_CompressedDeepPlanner(),
+    )
+    with pytest.raises(
+        ProviderUnavailableError,
+        match="Deep Review full history exceeds the safe context budget",
+    ) as raised:
+        provider.assess(
+            _request(
+                specialist="review",
+                deep_review_context_mode="full_history",
+                history=[{"role": "user", "content": "Earlier reasoning."}],
+            )
+        )
+    assert raised.value.category == "context_budget"
+    assert client.calls == []
+
+
 def _specialist_call(client: FakeAgentCoreRuntime) -> dict[str, Any]:
     """Return the first non-router, non-judge InvokeAgentRuntime call."""
     calls = [

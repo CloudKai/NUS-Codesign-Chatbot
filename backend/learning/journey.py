@@ -704,8 +704,8 @@ def _authoritative_stage_reviews(
 ) -> list[dict[str, Any]] | None:
     """Return validated ``stage_reviews`` when they should drive projection.
 
-    A non-empty validated list is authoritative. Missing, malformed, or
-    empty ``stage_reviews`` leave projection on the legacy frozen-stage
+    A marked stage-aware list is authoritative, including an explicit empty
+    list. Missing or unmarked ``stage_reviews`` uses the legacy frozen-stage
     lists so older snapshots keep working.
 
     Args:
@@ -716,11 +716,12 @@ def _authoritative_stage_reviews(
     """
     if not isinstance(snapshot, dict):
         return None
+    if snapshot.get("stage_reviews_contract") != "v1":
+        return None
     raw = snapshot.get("stage_reviews")
     if not isinstance(raw, list):
-        return None
-    reviews = normalize_deep_review_stage_reviews(raw)
-    return reviews or None
+        return []
+    return normalize_deep_review_stage_reviews(raw)
 
 
 def _merge_deep_review_feedback(

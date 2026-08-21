@@ -893,6 +893,12 @@ class CoachApplicationService:
         else:
             strengths = list(turn.assessment.review_strengths)
             areas = list(turn.assessment.review_improvements)
+        stage_reviews_value = (
+            stage_reviews
+            if str(getattr(turn.assessment, "review_stage_contract", "") or "")
+            == "v1"
+            else None
+        )
         return deep_review_snapshot_payload(
             conversation_revision=conversation_revision,
             created_at=created_at or datetime.now(timezone.utc).isoformat(),
@@ -909,7 +915,7 @@ class CoachApplicationService:
             model_id=str(turn.assessment.review_model or "").strip()
             or "global.anthropic.claude-sonnet-4-6",
             reviewed_stage_id=reviewed_stage_id,
-            stage_reviews=stage_reviews,
+            stage_reviews=stage_reviews_value,
             reviewed_message_ids=list(reviewed_message_ids or []),
             source_ids=list(source_ids or []),
             checkpoint_version=DEEP_REVIEW_CHECKPOINT_VERSION,
@@ -1570,6 +1576,21 @@ class CoachApplicationService:
         selected_sources = list(snapshot.selected_sources)
         authoritative_ids = [str(source["id"]) for source in selected_sources]
         authoritative_id_set = set(authoritative_ids)
+        if frozen_source_ids is not None:
+            frozen_ids = [
+                str(source_id).strip()
+                for source_id in frozen_source_ids
+                if str(source_id).strip()
+            ]
+            frozen_id_set = set(frozen_ids)
+            if len(frozen_ids) != len(frozen_id_set) or len(authoritative_ids) != len(
+                authoritative_id_set
+            ):
+                raise ValueError("Frozen source_ids contain duplicate identifiers")
+            if authoritative_id_set != frozen_id_set:
+                raise ValueError(
+                    "Frozen source_ids no longer match the notebook sources"
+                )
         if frozen_source_ids is None and request.source_ids:
             unknown = [
                 source_id

@@ -244,6 +244,8 @@ class EducationalAssessment(BaseModel):
     review_trigger: str | None = Field(default=None, max_length=64)
     response_mode: str = Field(default="", max_length=32)
     hmw_scaffold_ready: bool = False
+    hmw_scaffold_guarded: bool = False
+    review_stage_contract: str | None = Field(default=None, max_length=16)
     review_stage_feedback: list[dict[str, Any]] = Field(default_factory=list)
 
     @model_validator(mode="before")
@@ -316,6 +318,8 @@ class EducationalAssessment(BaseModel):
         """
         data = self.model_dump(mode="json")
         data.pop("review_stage_feedback", None)
+        if data.get("hmw_scaffold_guarded") is not True:
+            data.pop("hmw_scaffold_guarded", None)
         mode = str(self.response_mode or "").strip().lower()
         if mode not in {"qa", "coaching"}:
             return data
@@ -334,6 +338,8 @@ class EducationalAssessment(BaseModel):
             slim["readiness_candidate"] = True
         if data.get("hmw_scaffold_ready") is True:
             slim["hmw_scaffold_ready"] = True
+        if data.get("hmw_scaffold_guarded") is True:
+            slim["hmw_scaffold_guarded"] = True
         return slim
 
 

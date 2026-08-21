@@ -37,6 +37,7 @@ from pydantic import ValidationError
 
 from agentcore_runtime.model import HAIKU_4_5_MODEL_ID, SONNET_4_6_MODEL_ID
 from agentcore_runtime.models import (
+    DeepReviewTurnOutput,
     FastChatContractError,
     ReviewTurnOutput,
     RouterOutput,
@@ -1292,6 +1293,10 @@ def _overlay_review_fields(
             stage_feedback.append(dict(item))
     if stage_feedback:
         update["review_stage_feedback"] = stage_feedback
+    if isinstance(review, DeepReviewTurnOutput):
+        # Preserve the distinction between a new explicit [] and a legacy
+        # flat Review payload that never had stage-aware arrays.
+        update["review_stage_contract"] = "v1"
     if review_depth == REVIEW_DEPTH_DEEP and synthesis:
         update["stage_assessment"] = synthesis
     if force_stay:
@@ -1525,6 +1530,28 @@ class AgentCoreCoachProvider:
             raise ProviderUnavailableError(
                 "AgentCore context exceeds the safe token budget"
             ) from error
+        deep_review_full_history = (
+            context_policy != CONTEXT_POLICY_FAST_CHAT
+            and str(specialist or "").strip().lower() == SPECIALIST_REVIEW
+            and str(getattr(request, "deep_review_context_mode", "") or "")
+            .strip()
+            .lower()
+            in {"", "full_history"}
+        )
+        if deep_review_full_history and (
+            plan.compression_used
+            or not plan.full_history_used
+            or plan.compression_failed
+        ):
+            # Deep Review must not silently replace an oversized frozen
+            # transcript with an incomplete recent window. Fail before the
+            # Sonnet invoke so the application cannot persist a review built
+            # from partial data.
+            record_field("deep_review_context_compression_failed", True)
+            raise ProviderUnavailableError(
+                "Deep Review full history exceeds the safe context budget",
+                category="context_budget",
+            )
         record_field("context_planner_ms", elapsed_ms(plan_started))
         record_field("estimated_input_tokens", int(plan.estimated_input_tokens))
         record_field("estimated_system_prompt_tokens", int(plan.estimated_system_prompt_tokens))
@@ -1848,7 +1875,9 @@ class AgentCoreCoachProvider:
 
     def _parse_review_turn(self, parsed: dict[str, Any]) -> ReviewTurnOutput:
         """Validate Review structured output or raise."""
-        return parse_review_turn_output(parsed)
+        # The app boundary may still consume v24 Deep Review payloads that
+        # predate stage-aware arrays. The new runtime path remains strict.
+        return parse_review_turn_output(parsed, allow_legacy=True)
 
     def _with_memory(
         self,

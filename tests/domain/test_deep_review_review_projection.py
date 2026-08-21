@@ -109,7 +109,16 @@ def test_snapshot_payload_persists_reviewed_stage_id() -> None:
     assert payload["reviewed_stage_id"] == "problem_identification"
     assert payload["strengths"] == ["Deep strength"]
     assert payload["areas_to_develop"] == ["Deep improvement"]
-    assert payload["stage_reviews"] == []
+    assert "stage_reviews" not in payload
+
+
+def test_snapshot_payload_distinguishes_legacy_missing_from_explicit_empty_reviews() -> None:
+    """Omitted stage reviews retain legacy shape; [] is an explicit new result."""
+    legacy = _snapshot()
+    explicit_empty = _snapshot(stage_reviews=[])
+
+    assert "stage_reviews" not in legacy
+    assert explicit_empty["stage_reviews"] == []
 
 
 def test_deep_review_strengths_appear_under_reviewed_stage() -> None:
@@ -443,6 +452,26 @@ def test_stage_reviews_are_authoritative_and_skip_flat_lists() -> None:
     assert _items(review, "improvement_sections", "design_specification") == []
     assert _items(review, "improvement_sections", "deep_analysis") == []
     assert _items(review, "improvement_sections", "reflection") == []
+
+
+def test_explicit_empty_stage_reviews_do_not_fall_back_to_flat_lists() -> None:
+    """A valid empty per-stage result must not resurrect stale flat feedback."""
+    review = learning_review(
+        [_assistant(stage="problem_identification", strengths=["Incremental"])],
+        default_journey(),
+        deep_review_snapshot=_snapshot(
+            strengths=["Stale flat strength"],
+            areas=["Stale flat area"],
+            stage_reviews=[],
+        ),
+    )
+
+    assert "Stale flat strength" not in _items(
+        review, "strength_sections", "problem_identification"
+    )
+    assert "Stale flat area" not in _items(
+        review, "improvement_sections", "problem_identification"
+    )
 
 
 def test_hmw_strength_stays_under_problem_identification() -> None:

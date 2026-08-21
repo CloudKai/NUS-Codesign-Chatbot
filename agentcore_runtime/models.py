@@ -663,7 +663,19 @@ def _attach_deep_review_stage_feedback_schema(schema: dict[str, Any]) -> None:
 
 
 def _attach_deep_review_turn_schema(schema: dict[str, Any]) -> None:
-    """Keep ``stage_reviews`` as a required array after Strands flatten."""
+    """Keep new Deep Review collection fields required, non-null arrays.
+
+    ``ReviewTurnOutput`` remains deliberately permissive for historical
+    incremental/legacy payloads. This hook is applied only to the new Deep
+    Review structured-output contract used by the runtime.
+    """
+    for field in (
+        "strengths",
+        "areas_to_develop",
+        "readiness_evidence",
+        "missing_requirements",
+    ):
+        _force_schema_array(schema, field)
     _force_schema_array(schema, "stage_reviews")
 
 
@@ -697,19 +709,16 @@ class DeepReviewStageFeedback(BaseModel):
 
     stage_id: ThinkingPathStageId
     strengths: list[str] = Field(
-        default_factory=list,
         max_length=8,
         description="Always return an array. Use [] when this stage has no strengths.",
     )
     areas_to_develop: list[str] = Field(
-        default_factory=list,
         max_length=8,
         description=(
             "Always return an array. Use [] when this stage has no areas to develop."
         ),
     )
     supporting_message_refs: list[str] = Field(
-        default_factory=list,
         max_length=3,
         description=(
             "Always return an array of ephemeral M# labels from this request "
@@ -722,14 +731,22 @@ class DeepReviewStageFeedback(BaseModel):
     @field_validator("strengths", "areas_to_develop", mode="before")
     @classmethod
     def coerce_bullet_arrays(cls, value: Any) -> list[str]:
-        """Reject null bullet lists; keep compact unique strings."""
-        return _compact_review_bullets(value if value is not None else [])
+        """Require arrays for new Deep Review stage feedback."""
+        if not isinstance(value, list):
+            raise ValueError("Deep Review stage feedback fields must be arrays")
+        if any(not isinstance(item, str) for item in value):
+            raise ValueError("Deep Review stage feedback items must be strings")
+        return _compact_review_bullets(value)
 
     @field_validator("supporting_message_refs", mode="before")
     @classmethod
     def coerce_supporting_message_refs(cls, value: Any) -> list[str]:
-        """Reject null ref lists; keep unique ephemeral M# labels."""
-        return _compact_message_refs(value if value is not None else [])
+        """Require an array of ephemeral refs for new Deep Review output."""
+        if not isinstance(value, list):
+            raise ValueError("supporting_message_refs must be an array")
+        if any(not isinstance(item, str) for item in value):
+            raise ValueError("supporting_message_refs items must be strings")
+        return _compact_message_refs(value)
 
 
 class DeepReviewTurnOutput(ReviewTurnOutput):
@@ -747,7 +764,6 @@ class DeepReviewTurnOutput(ReviewTurnOutput):
     )
 
     stage_reviews: list[DeepReviewStageFeedback] = Field(
-        default_factory=list,
         description=(
             "Always return an array. Include only Thinking Path stages with "
             "conversation evidence. Use [] when no stage-specific items exist."
@@ -756,39 +772,27 @@ class DeepReviewTurnOutput(ReviewTurnOutput):
 
     @model_validator(mode="before")
     @classmethod
-    def coerce_stage_reviews(cls, value: Any) -> Any:
-        """Drop unknown stage ids and coerce omitted ``stage_reviews`` to []."""
-        if not isinstance(value, dict):
+    def filter_unknown_stage_ids(cls, value: Any) -> Any:
+        """Keep unknown stage ids out without weakening array validation.
+
+        Missing ``stage_reviews`` is intentionally left missing so direct
+        validation remains strict. The compatibility parser adds ``[]`` only
+        for an explicitly identified legacy payload.
+        """
+        if not isinstance(value, dict) or "stage_reviews" not in value:
             return value
-        data = dict(value)
-        raw = data.get("stage_reviews")
-        if raw is None:
-            data["stage_reviews"] = []
-            return data
+        raw = value["stage_reviews"]
         if not isinstance(raw, list):
-            data["stage_reviews"] = []
-            return data
-        cleaned: list[dict[str, Any]] = []
-        for item in raw:
-            if not isinstance(item, dict):
-                continue
-            stage_id = str(item.get("stage_id") or "").strip()
-            if stage_id not in _THINKING_PATH_STAGE_ID_SET:
-                continue
-            strengths = item.get("strengths")
-            areas = item.get("areas_to_develop")
-            refs = item.get("supporting_message_refs")
-            cleaned.append(
-                {
-                    "stage_id": stage_id,
-                    "strengths": strengths if isinstance(strengths, list) else [],
-                    "areas_to_develop": areas if isinstance(areas, list) else [],
-                    "supporting_message_refs": (
-                        refs if isinstance(refs, list) else []
-                    ),
-                }
-            )
-        data["stage_reviews"] = cleaned
+            return value
+        if any(not isinstance(item, dict) for item in raw):
+            raise ValueError("stage_reviews items must be objects")
+        data = dict(value)
+        data["stage_reviews"] = [
+            item
+            for item in raw
+            if str(item.get("stage_id") or "").strip()
+            in _THINKING_PATH_STAGE_ID_SET
+        ]
         return data
 
     @model_validator(mode="after")
@@ -953,12 +957,18 @@ def parse_fast_chat_turn_output(value: Any) -> FastChatTurnOutput:
     return FastChatTurnOutput.model_validate(value)
 
 
-def parse_review_turn_output(value: Any) -> ReviewTurnOutput:
+def parse_review_turn_output(
+    value: Any,
+    *,
+    allow_legacy: bool = False,
+) -> ReviewTurnOutput:
     """Validate one Review payload or raise ``ValidationError``.
 
-    Deep Review payloads with ``stage_reviews`` or ``review_depth=deep``
-    become :class:`DeepReviewTurnOutput` so per-stage feedback is not dropped
-    by ``extra="ignore"`` on :class:`ReviewTurnOutput`.
+    New Deep Review payloads use the strict stage-aware contract. The
+    application compatibility boundary may pass ``allow_legacy=True`` for
+    v24 payloads that have ``review_depth=deep`` but no ``stage_reviews``;
+    the runtime leaves that flag false so malformed new output triggers
+    bounded recovery.
     """
     if isinstance(value, DeepReviewTurnOutput):
         return value
@@ -975,6 +985,16 @@ def parse_review_turn_output(value: Any) -> ReviewTurnOutput:
         "stage_reviews" in data
         or str(data.get("review_depth") or "").strip().lower() == "deep"
     ):
+        if (
+            allow_legacy
+            and
+            "stage_reviews" not in data
+            and str(data.get("review_depth") or "").strip().lower() == "deep"
+        ):
+            # Keep the old flat payload as the legacy model. Do not turn it
+            # into a new stage-aware empty result, which would change review
+            # projection semantics.
+            return ReviewTurnOutput.model_validate(data)
         return DeepReviewTurnOutput.model_validate(data)
     if hasattr(value, "model_dump") and callable(value.model_dump):
         try:
