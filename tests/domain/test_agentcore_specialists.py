@@ -179,6 +179,8 @@ def test_parse_review_turn_output_keeps_stage_reviews() -> None:
             "strengths": ["Holistic strength"],
             "areas_to_develop": ["Holistic area"],
             "synthesis": "Progress is formative.",
+            "readiness_evidence": [],
+            "missing_requirements": [],
             "review_depth": "deep",
             "current_stage": "concept_generation",
             "recommendation": "stay",
@@ -250,12 +252,72 @@ def test_deep_review_stage_reviews_rejects_non_arrays(bad_value: Any) -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("field", "bad_value"),
+    [
+        (field, bad_value)
+        for field in (
+            "strengths",
+            "areas_to_develop",
+            "readiness_evidence",
+            "missing_requirements",
+        )
+        for bad_value in (None, "not-an-array", {"item": "not-an-array"})
+    ],
+)
+def test_deep_review_top_level_arrays_reject_null_and_flattened_shapes(
+    field: str, bad_value: Any
+) -> None:
+    """New Deep Review top-level arrays reject null and flattened values."""
+    base = {
+        "response_text": "Deep review.",
+        "synthesis": "Synthesis.",
+        "review_depth": "deep",
+        "strengths": [],
+        "areas_to_develop": [],
+        "readiness_evidence": [],
+        "missing_requirements": [],
+        "stage_reviews": [],
+    }
+    with pytest.raises(Exception):
+        DeepReviewTurnOutput.model_validate({**base, field: bad_value})
+
+    missing = dict(base)
+    del missing[field]
+    with pytest.raises(Exception):
+        DeepReviewTurnOutput.model_validate(missing)
+
+
+def test_deep_review_top_level_arrays_accept_explicit_empty_arrays() -> None:
+    """An explicit [] is valid for every new Deep Review collection field."""
+    parsed = DeepReviewTurnOutput.model_validate(
+        {
+            "response_text": "Deep review.",
+            "synthesis": "Synthesis.",
+            "review_depth": "deep",
+            "strengths": [],
+            "areas_to_develop": [],
+            "readiness_evidence": [],
+            "missing_requirements": [],
+            "stage_reviews": [],
+        }
+    )
+    assert parsed.strengths == []
+    assert parsed.areas_to_develop == []
+    assert parsed.readiness_evidence == []
+    assert parsed.missing_requirements == []
+
+
 def test_deep_review_stage_feedback_requires_explicit_child_arrays() -> None:
     """Child arrays reject omission/null/wrong shapes while [] remains valid."""
     base = {
         "response_text": "Deep review.",
         "synthesis": "Synthesis.",
         "review_depth": "deep",
+        "strengths": [],
+        "areas_to_develop": [],
+        "readiness_evidence": [],
+        "missing_requirements": [],
         "stage_reviews": [],
     }
     assert DeepReviewTurnOutput.model_validate(base).stage_reviews == []

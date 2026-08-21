@@ -688,12 +688,12 @@ def test_hallucinated_advance_without_student_hmw_is_forced_stay(
     assert turn.assessment.recommendation is StageDecision.STAY
     assert turn.assessment.hmw_scaffold_ready is False
     assert turn.assessment.readiness_candidate is False
-    assert turn.assessment.hmw_scaffold_guarded is False
+    assert turn.assessment.hmw_scaffold_guarded is True
     assert turn.response_text.startswith("**Problem identification**")
     assert "How Might We" in turn.response_text
     assert hmw_scaffold_available(
         "problem_identification", store.get_messages(thread_id)
-    ) is False
+    ) is True
     assert turn.auto_advanced_to is None
     assert turn.pending_transition is None
     metadata = (store.get_thread(thread_id) or {})["metadata"]
@@ -713,7 +713,7 @@ def test_guarded_advance_keeps_useful_server_scaffold_visible(
         notebooks,
         CoachWorkflow(
             DeterministicCoachProvider(
-                StageDecision.ADVANCE, hmw_scaffold_ready=True
+                StageDecision.ADVANCE, hmw_scaffold_ready=False
             ),
             transitions,
         ),

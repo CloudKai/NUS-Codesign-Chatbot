@@ -438,6 +438,8 @@ def _sample_structured_output(output_model: type[Any]) -> Any:
                 "current_stage": "problem_identification",
                 "recommendation": "stay",
                 "rationale_summary": "Stay for more evidence.",
+                "readiness_evidence": [],
+                "missing_requirements": [],
                 "stage_reviews": [],
             }
         )
@@ -844,5 +846,4 @@ def test_runtime_model_provenance_fields_omit_secrets_and_missing_config() -> No
     assert "gr-secret" not in json.dumps(fields)
     assert "guardrail" not in json.dumps(fields)
     assert _STREET not in json.dumps(fields)
-
 

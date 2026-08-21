@@ -3,18 +3,24 @@
 ## CURRENT STATUS
 
 **Branch:** `Integrate-Bedrock-v2`
-**HEAD before this work:** `d9ac603c841de8526f163a3fef946949dc754d54`
-(`Hide the Deep Review running-status expander chevron`). The requested
-`1b130aea4eab111b9b19fe2f839943a12c989c10` SHA was stale; work used the actual
-branch head. Live citations RC remains `64410dc`. Composer layout remains
-`711d4e6`. Previous HMW 2-of-3 card remains `89ccfed` on live AgentCore v24
-until a future publish.
+**HEAD before this work:** `c4a8e1f` (`Harden Deep Review contracts and HMW
+progression guards`). Live citations RC remains `64410dc`. Composer layout
+remains `711d4e6`. Previous HMW 2-of-3 card remains `89ccfed` on live
+AgentCore v24 until a future publish.
 **Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
 **Live AgentCore:** DEFAULT → **v24 READY**. Affinity ON. Generation 2.
 Prompt cache OFF. **Do not publish AgentCore during this phase.**
 
-**This phase:** Implement only the five confirmed RC blockers: fail closed
-when oversized Deep Review `full_history` would be compressed; require the
+**This phase:** Implement the two follow-up hardening items from the RC
+review: make all new Deep Review top-level arrays required at runtime, and
+force the guarded HMW scaffold visible for an active-branch rejected PI
+advance while clearing it on revision. The five blocker fixes remain intact;
+checkpoint version 1, one Sonnet invoke, existing Fast Chat/RAG behavior, and
+no deploy are preserved.
+
+**Prior blocker phase behavior:** Implemented only the five confirmed RC
+blockers: fail closed when oversized Deep Review `full_history` would be
+compressed; require the
 frozen source ID set to remain intact; reject HMW construction/meta requests
 as provenance; validate new Deep Review arrays strictly while keeping an
 explicit legacy v24 boundary; and normalize rejected PI advances so response,
@@ -43,7 +49,7 @@ checkpoint version; deployment or AWS state. Existing unrelated dirty
 `agentcore_runtime` (`scripts/load_probe.py` remains a pre-existing
 `IndentationError`; left untouched). Focused Deep Review, AgentCore schema,
 Fast Chat, HMW, revision, RAG/citation, and HTTP tests passed. Full
-deterministic suite: **1551 passed**
+deterministic suite: **1564 passed**
 (`--ignore=tests/scripts/test_load_probe.py`). Ruff passed on all touched
 Python files; `git diff --check` passed. No paid model calls were made.
 

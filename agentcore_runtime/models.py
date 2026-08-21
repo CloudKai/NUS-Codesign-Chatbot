@@ -763,12 +763,55 @@ class DeepReviewTurnOutput(ReviewTurnOutput):
         json_schema_extra=_attach_deep_review_turn_schema,
     )
 
+    # These fields are required by the new Deep Review wire contract.  Keep
+    # the defaults on ReviewTurnOutput for incremental and v24 compatibility,
+    # but do not let a missing or flattened top-level array become an empty
+    # Deep Review result.
+    strengths: list[str] = Field(
+        max_length=4,
+        description="Always return an array. Use [] when there are no strengths.",
+    )
+    areas_to_develop: list[str] = Field(
+        max_length=4,
+        description=(
+            "Always return an array. Use [] when there are no areas to develop."
+        ),
+    )
+    readiness_evidence: list[str] = Field(
+        max_length=8,
+        description=(
+            "Always return an array. Use [] when there is no readiness evidence."
+        ),
+    )
+    missing_requirements: list[str] = Field(
+        max_length=8,
+        description=(
+            "Always return an array. Use [] when there are no missing requirements."
+        ),
+    )
+
     stage_reviews: list[DeepReviewStageFeedback] = Field(
         description=(
             "Always return an array. Include only Thinking Path stages with "
             "conversation evidence. Use [] when no stage-specific items exist."
         ),
     )
+
+    @field_validator(
+        "strengths",
+        "areas_to_develop",
+        "readiness_evidence",
+        "missing_requirements",
+        mode="before",
+    )
+    @classmethod
+    def require_top_level_string_arrays(cls, value: Any) -> Any:
+        """Reject missing-shape Deep Review arrays before Pydantic coercion."""
+        if not isinstance(value, list):
+            raise ValueError("Deep Review top-level fields must be arrays")
+        if any(not isinstance(item, str) for item in value):
+            raise ValueError("Deep Review top-level array items must be strings")
+        return value
 
     @model_validator(mode="before")
     @classmethod

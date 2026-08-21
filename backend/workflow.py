@@ -157,15 +157,24 @@ def _require_student_hmw_for_problem_identification_advance(
     if student_hmw_candidate_present(request.student_message):
         return assessment.model_copy(update={"hmw_scaffold_guarded": False})
     rationale = str(assessment.recommendation_rationale or "").strip()
-    scaffold_was_useful = assessment.hmw_scaffold_ready
+    # A revision intentionally starts a fresh active branch. Do not carry the
+    # scaffold visibility marker onto that replacement when the superseded
+    # branch contained a completed HMW; the active projection must not
+    # resurrect stale completion/visibility. A subsequent fresh Coaching turn
+    # can unlock or guard the scaffold again from its own assessment.
+    scaffold_guarded = not bool(str(request.revise_user_message_id or "").strip())
     return assessment.model_copy(
         update={
             "recommendation": StageDecision.STAY,
             "readiness_candidate": False,
             "hmw_scaffold_ready": False,
-            # Preserve the provider's useful-scaffold signal without allowing
-            # a rejected advance to expose a false readiness candidate.
-            "hmw_scaffold_guarded": scaffold_was_useful,
+            # A server-rejected advance is itself the authoritative signal that
+            # the student needs the construction scaffold. Keep that
+            # application-owned visibility marker separate from model readiness:
+            # the persisted assessment remains STAY/not-ready while the active
+            # branch can safely render the scaffold even when the provider
+            # returned hmw_scaffold_ready=false.
+            "hmw_scaffold_guarded": scaffold_guarded,
             "recommendation_rationale": rationale
             or (
                 "Problem Identification advances only after a student-authored "

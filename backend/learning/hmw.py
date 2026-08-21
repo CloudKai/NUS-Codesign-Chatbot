@@ -151,13 +151,17 @@ def _scaffold_is_useful(assessment: Mapping[str, Any]) -> bool:
 
     ``hmw_scaffold_ready`` means the card is pedagogically useful now. A valid
     student HMW uses ``ready=false`` with ``recommendation=advance``, so the
-    scaffold must hide.
+    scaffold must hide. The application-owned ``hmw_scaffold_guarded`` marker
+    is the exception for a current server-rejected PI ADVANCE: it keeps the
+    active branch's scaffold visible without changing the assessment's model
+    readiness or completion candidate.
 
     Args:
         assessment: Persisted Problem Identification Coaching assessment.
 
     Returns:
-        True when the assessment is stay plus ready.
+        True when the assessment is a PI STAY with model readiness or an
+        application-owned rejected-advance scaffold marker.
     """
     return _recommendation_stay(assessment) and (
         _hmw_ready(assessment)

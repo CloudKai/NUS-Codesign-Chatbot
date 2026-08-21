@@ -101,6 +101,8 @@ def _deep_payload(
         "current_stage": current_stage,
         "recommendation": "advance",
         "rationale_summary": "Readiness information only.",
+        "readiness_evidence": [],
+        "missing_requirements": [],
         "working_conclusion": "Option B is the working concept.",
         "review_depth": "deep",
         "facione_profile": {
