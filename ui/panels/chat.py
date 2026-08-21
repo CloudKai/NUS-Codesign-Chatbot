@@ -39,6 +39,7 @@ from backend.student_journey import (
 
 from ui.coach_welcome import (
     COACH_WELCOME_KIND,
+    COACH_WELCOME_MARKDOWN,
     render_hmw_scaffold_if_needed,
     seed_coach_welcome,
     transcript_hmw_render_plan,
@@ -481,6 +482,9 @@ def render_message(
         )
         display_content = str(message["content"])
         if metadata.get("kind") == COACH_WELCOME_KIND:
+            # Existing notebooks may contain the older persisted welcome copy.
+            # Render the current shared welcome text without mutating history.
+            display_content = COACH_WELCOME_MARKDOWN
             title, _, body = display_content.partition("\n\n")
             title_text = title.removeprefix("**").removesuffix("**").strip() or title
             st.markdown(
