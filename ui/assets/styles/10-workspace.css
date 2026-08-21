@@ -738,12 +738,15 @@
     /* Inner column that owns transcript (log + inflight + composer). */
     .st-key-chat_panel [data-testid="stVerticalBlock"]:has(> .st-key-chat_transcript),
     .st-key-chat_panel [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"].st-key-chat_transcript),
+    .st-key-chat_panel [data-testid="stLayoutWrapper"]:has(> .st-key-chat_transcript),
+    .st-key-chat_panel [data-testid="stLayoutWrapper"]:has(> [data-testid="stElementContainer"].st-key-chat_transcript),
     .st-key-chat_panel [data-testid="stVerticalBlock"]:has(> .st-key-chat_log),
     .st-key-chat_panel [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"].st-key-chat_log) {
         display:flex !important;
         flex-direction:column !important;
         min-height:0 !important;
         flex:1 1 auto !important;
+        height:100% !important;
         gap:0 !important;
         row-gap:0 !important;
     }
@@ -754,7 +757,7 @@
     [data-testid="stElementContainer"].st-key-chat_transcript {
         min-height:0 !important;
         flex:1 1 auto !important;
-        height:auto !important;
+        height:100% !important;
         display:flex !important;
         flex-direction:column !important;
         overflow:visible !important;
