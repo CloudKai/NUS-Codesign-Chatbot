@@ -428,7 +428,15 @@ def _render_students(client) -> None:
     )
 
     if opened_notebook and selected_id:
-        detail = _cached_professor_student_detail(client, selected_id)
+        try:
+            detail = _cached_professor_student_detail(client, selected_id)
+        except Exception:  # noqa: BLE001 - keep notebook back control on fetch failure
+            if st.button("← Notebooks", key=f"professor_back_notebooks_{selected_id}"):
+                st.session_state.pop(f"professor_open_notebook_{selected_id}", None)
+                _clear_notebook_tab_caches(selected_id, opened_notebook)
+                st.rerun()
+            st.error("This notebook is unavailable right now. Please try again shortly.")
+            return
         student = detail.get("student") or {}
         notebook_summary = next(
             (
@@ -456,7 +464,11 @@ def _render_students(client) -> None:
             st.session_state.pop(f"professor_open_notebook_{selected_id}", None)
             _clear_notebook_tab_caches(selected_id)
             st.rerun()
-        detail = _cached_professor_student_detail(client, selected_id)
+        try:
+            detail = _cached_professor_student_detail(client, selected_id)
+        except Exception:  # noqa: BLE001 - keep the back control when one record fails
+            st.error("This student record is unavailable right now. Please try again shortly.")
+            return
         _render_student_detail(client, detail)
         return
 

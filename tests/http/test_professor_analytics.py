@@ -614,6 +614,23 @@ def test_student_roster_sql_is_dsql_portable():
     assert adapted.count("%s") == 0
 
 
+def test_student_detail_sql_is_dsql_portable():
+    """Selected-student SQL must stay parameterized and avoid ORDER BY aliases."""
+    from backend.persistence.dsql_connection import adapt_sqlite_sql
+    from backend.professor_analytics.repository import (
+        _STUDENT_NOTEBOOK_SUMMARIES_SQL,
+        _STUDENT_ROSTER_ROW_SQL,
+    )
+
+    summaries = _STUDENT_NOTEBOOK_SUMMARIES_SQL.lower()
+    assert "order by coalesce(last_active" not in summaries
+    assert "not m.is_error" not in summaries
+    assert "coalesce(m.is_error, 0) = 0" in summaries
+    assert adapt_sqlite_sql(_STUDENT_NOTEBOOK_SUMMARIES_SQL).count("%s") == 1
+    assert "where u.id = ?" in _STUDENT_ROSTER_ROW_SQL.lower()
+    assert adapt_sqlite_sql(_STUDENT_ROSTER_ROW_SQL).count("%s") == 1
+
+
 def test_student_roster_projection_is_one_row_per_student(tmp_path):
     """Roster SQL returns compact student aggregates without message bodies."""
     bootstrap, _professor, student_id, _oidc = _setup(tmp_path)

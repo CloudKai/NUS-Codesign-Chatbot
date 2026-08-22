@@ -2,6 +2,22 @@
 
 ## CURRENT STATUS
 
+### Lecturer student-detail DSQL ORDER BY (2026-08-23)
+
+**Change.** Opening one student 503'd on DSQL because notebook-summary SQL used
+``ORDER BY COALESCE(last_active, ...)``; PostgreSQL treats that alias as an
+input column. Order by the ``MAX(...)`` expression instead, reuse the proven
+roster SQL for the single-student profile, and keep the Students back control
+when one record fetch fails.
+
+**Files.** `backend/professor_analytics/repository.py`, `ui/professor.py`,
+`tests/http/test_professor_analytics.py`.
+
+**Validation.** Focused professor HTTP tests.
+
+**Next action.** Rebuild the EC2 app image so production student detail works.
+Do not republish AgentCore.
+
 ### Lecturer dashboard UX + progressive tab fetch (2026-08-23)
 
 **Change.** Lecturer shell now uses a persistent left sidebar (Overview / Students /
