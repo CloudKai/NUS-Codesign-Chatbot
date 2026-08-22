@@ -4,17 +4,20 @@
 
 ### Current authority / release state (2026-08-22)
 
-**Source code HEAD:** `aa6e076` (the source revision this release-hardening
-work targets).
+**Source code HEAD:** `1799a5b` (release-hardening, attachment relevance, professor
+access audit, and Fast Chat wire strictness are committed on
+`Integrate-Bedrock-v2`).
 **EC2 application image:** `cde2300-chatbot:ddfc3f4` (source/image status is
 unchanged; no EC2 rebuild or deployment was performed here).
-**AgentCore runtime:** last verified live mapping was DEFAULT → v29 READY
-(2026-08-21). This pass could not re-read AWS: local SSO is expired
-(`aws login` required). No AgentCore publish or runtime change was made.
-**Guardrail:** tracked configuration is Guardrail v4; live AWS Guardrail
-status is likewise unverified because the expired SSO session prevented a
-read-back.
-**Affinity generation:** tracked generation `7`; this change does not bump it.
+**AgentCore runtime:** live mapping re-read 2026-08-22 12:03 UTC:
+DEFAULT → **v31 READY**. Artifact
+`agentcore-patches/chatbot_harnessAgent-fastchat-contract-20260822T115716Z.zip`.
+Byte-for-byte match against local `agentcore_runtime/` source (33 `.py`/`.md`
+files, excluding README/`requirements.txt`/`__init__.py`). No new version
+published; overlay would have been a no-op.
+**Guardrail:** live runtime env is `GUARDRAIL_ID=o8aipba8m129` /
+`GUARDRAIL_VERSION=4`.
+**Affinity generation:** tracked Compose generation `7`; this check does not bump it.
 
 These are distinct authorities: source HEAD identifies application code, the
 EC2 image identifies the deployed FastAPI/Streamlit artifact, AgentCore
@@ -22,6 +25,27 @@ runtime identifies the generation-only model service, Guardrail identifies its
 runtime safety configuration, and affinity generation identifies the
 application/runtime session compatibility value. Historical entries below
 retain their original release observations.
+
+### AgentCore prompt overlay check (2026-08-22)
+
+**Change.** Did not create a new runtime ARN and did not upload prompt files
+onto EC2. Live DEFAULT was already **v31 READY** on
+`NUSCodesignChatbot_chatbot_harnessAgent-6ncEO79sD7`, updated 2026-08-22
+11:58 UTC. Local `agentcore_runtime/` at `1799a5b` matches that zip, so a
+second overlay was skipped.
+
+**Validation.** `get-agent-runtime` and DEFAULT endpoint both READY at
+liveVersion 31. Guardrail env remains v4. Identity was account
+`355604674280` / `us-west-2`. No model invoke. No EC2 rebuild.
+
+**Compatibility / risk.** Warm EC2 affinity sessions at generation `7` can
+still keep pre-v31 microVM assets. The student “test” toast is
+`structured_output_failure` / `malformed`, not a missing prompt file on the
+EC2 disk.
+
+**Next exact action.** If existing production notebooks must leave older
+warm runtimes, bump host `AGENTCORE_SESSION_GENERATION` to `8` and recreate
+the FastAPI container. Do not SCP prompts onto EC2.
 
 ### Lecturer dashboard progressive disclosure (2026-08-22)
 
@@ -76,21 +100,22 @@ Internal ``FastChatTurnOutput`` constructors keep Python defaults. Stale tests
 updated for Q&A retrieval evidence-gap success, compatibility-façade
 ``selected`` signature, and revise persist-before-complete durable-field replay.
 
-**Validation.** Required idempotency/concurrency/rate-limit/critical-path,
-focused modules (idempotency, rate limit, coach concurrency, fast chat schema,
-coach turn perf, architecture contracts), Ruff, compileall, and ``git diff
---check`` pass. Concurrency/idempotency tests pass 5/5 individually. Full
-suite still has unrelated pre-existing failures in dirty WIP areas (source
-hydration, student chunk security, delete idempotency); one concurrent
-idempotency test can flake when run in the full suite but passes in isolation.
+**Validation.** The previously failing idempotency/concurrency/rate-limit/
+critical-path tests pass individually and 5/5 under repeated concurrent
+reruns. Focused modules, Ruff, compileall, and ``git diff --check`` pass.
+The supported deterministic full suite is green: 1644 passed, 0 failed.
+Type checking is not configured. Lecturer analytics SQL was not changed.
 
 **Compatibility / risk.** No schema migration, AWS mutation, AgentCore publish,
 ``AGENTCORE_SESSION_GENERATION`` bump, or compose generation/guardrail change.
-Source HEAD remains ``aa6e076``; compose.prod generation ``7`` / Guardrail v4
-unchanged. Lecturer analytics SQL was not changed (would require rewriting
-``_build_students``).
+Source HEAD is ``1799a5b``; compose.prod generation ``7`` / Guardrail v4
+unchanged. FastAPI/EC2 rebuild is required to pick up the application-side
+idempotency and wire-parse fixes; AgentCore republish is not required because
+the runtime JSON Schema already required those fields.
 
-**Next exact action.** Parent review of this hardening pass before pilot.
+**Next exact action.** Rebuild/deploy the FastAPI/Streamlit app in staging/EC2
+and run the manual mobile/browser smoke checklist. No AgentCore publish or
+generation bump is required for this hardening pass.
 
 ### Private attachment relevance, scroll, and edit rendering (2026-08-22)
 
