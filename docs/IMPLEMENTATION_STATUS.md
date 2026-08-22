@@ -2,6 +2,27 @@
 
 ## CURRENT STATUS
 
+### Lecturer workspace production fix + UX polish (2026-08-22)
+
+**Change.** Professor read paths now preserve the configured database provider
+when opening student-scoped stores (no ``Path(None)`` / forced SQLite on DSQL)
+and use ``ensure_owner=False`` with ``owner_id`` taken from the verified user
+row so lecturer reads never call ``_ensure_user``.
+Citation authorization resolves against the same visible-source universe as the
+workspace Sources tab, including shared virtual Lecture Notes/Readings. UI:
+Markdown chat rendering, clickable citations, compact attachment/source rows,
+notebooks moved above analytics, explicit Refresh for session caches, simplified
+mobile drill-down CSS.
+
+**Files.** `backend/professor_analytics/{repository,service}.py`,
+`ui/professor.py`, `ui/assets/styles/70-professor.css`,
+`tests/http/test_professor_analytics.py`, `tests/ui/test_professor_ui.py`.
+
+**Validation.** Focused professor HTTP/UI tests, architecture contracts,
+`compileall`, `ruff check` on touched files.
+
+**Next action.** Visual acceptance at 1440px and 390px on staging EC2 image.
+
 ### Lecturer dashboard revamp (2026-08-22)
 
 **Change.** Professor Students now loads a compact per-student SQL roster

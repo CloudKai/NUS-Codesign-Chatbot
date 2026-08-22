@@ -229,8 +229,9 @@ def isolated_test_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
         self,
         path=None,
         identifier="cognito:test-cognito-sub",
+        **kwargs,
     ):
-        _student_store_init(self, path=path, identifier=identifier)
+        _student_store_init(self, path=path, identifier=identifier, **kwargs)
 
     monkeypatch.setattr(StudentStore, "__init__", _patched_student_store_init)
 

@@ -750,3 +750,136 @@ def test_professor_workspace_includes_virtual_course_source(tmp_path, monkeypatc
     )
     assert source_response.status_code == 200
     assert source_response.content == b"virtual-bytes"
+
+
+def test_professor_student_store_preserves_pathless_provider(
+    tmp_path, monkeypatch
+) -> None:
+    """Lecturer reads must not force SQLite via Path(None) on DSQL-shaped stores."""
+    bootstrap, _professor, student_id, _oidc = _setup(tmp_path)
+    captured: dict[str, object] = {}
+
+    class PathlessAnalyticsStore:
+        """Analytics repository view with ``path is None`` like production DSQL."""
+
+        path = None
+
+        def __init__(self, inner: StudentStore) -> None:
+            self._inner = inner
+
+        def get_user_by_id(self, user_id: str):
+            return self._inner.get_user_by_id(user_id)
+
+    def _create_student_store(*, path=None, identifier="local-student", **kwargs):
+        captured["path"] = path
+        captured["identifier"] = identifier
+        captured["ensure_owner"] = kwargs.get("ensure_owner")
+        captured["ensure_user_called"] = False
+        store = StudentStore(
+            tmp_path / "owner.sqlite3",
+            identifier=identifier,
+            ensure_owner=bool(kwargs.get("ensure_owner", True)),
+        )
+        store.path = None
+
+        def _tracked_ensure_user() -> str:
+            captured["ensure_user_called"] = True
+            raise AssertionError("_ensure_user must not run for lecturer reads")
+
+        store._ensure_user = _tracked_ensure_user  # noqa: SLF001
+        return store
+
+    monkeypatch.setattr(
+        "backend.professor_analytics.repository.create_student_store",
+        _create_student_store,
+    )
+    repository = ProfessorAnalyticsRepository(PathlessAnalyticsStore(bootstrap))
+    store = repository.student_store(student_id)
+    assert captured["path"] is None
+    assert captured["ensure_owner"] is False
+    assert captured["ensure_user_called"] is False
+    assert store is not None
+    assert getattr(store, "path", "missing") is None
+    assert store.owner_id == student_id
+
+
+def test_professor_workspace_keeps_virtual_course_citations(tmp_path, monkeypatch):
+    """Shared Lecture Notes citations stay visible in lecturer workspace chat."""
+    from backend.source_library import virtual_course_source_id
+
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    object_key = "course/lectureNotes/week1.pdf"
+    virtual_id = virtual_course_source_id(object_key)
+    virtual_source = {
+        "id": virtual_id,
+        "title": "Week 1 lecture",
+        "kind": "file",
+        "mime": "application/pdf",
+        "size": 1200,
+        "selected": True,
+        "metadata": {
+            "virtual_course_source": True,
+            "course_material_group": "Lecture Notes",
+            "shared_course_object": True,
+            "origin": "lecture_notes_folder",
+            "locked_source": True,
+            "object_key": object_key,
+        },
+    }
+    student_store.add_message(
+        notebook_id,
+        "assistant",
+        "Coach cites the lecture.",
+        metadata={
+            "source_refs": [
+                {"id": virtual_id, "label": "S1", "title": "Week 1 lecture"},
+                {"id": "random-virtual-looking-id", "label": "S9", "title": "Foreign"},
+            ]
+        },
+    )
+
+    def _visible_sources(_store, _notebook_id, *, include_extracted_text=False):
+        return [virtual_source]
+
+    monkeypatch.setattr("backend.sources.library.list_visible_sources", _visible_sources)
+    service = ProfessorAnalyticsService(ProfessorAnalyticsRepository(bootstrap))
+    workspace = service.notebook_workspace(student_id, notebook_id)
+    assert workspace is not None
+    coach_messages = [
+        message
+        for message in workspace.transcript.messages
+        if message.get("role") == "assistant"
+    ]
+    citations = coach_messages[-1]["citations"]
+    assert citations == [
+        {"id": virtual_id, "label": "S1", "title": "Week 1 lecture"}
+    ]
+
+
+def test_professor_citation_auth_rejects_other_notebook_source(tmp_path):
+    """Personal sources from another notebook are not authorized citations."""
+    bootstrap, _professor, student_id, _oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_a = student_store.list_threads()[0]["id"]
+    notebook_b = student_store.create_thread(
+        name="Notebook B", model_id="mock", support_mode="critical-thinking"
+    )
+    foreign_source = add_text_source(student_store, notebook_b, "Other notebook", "Evidence")
+    student_store.add_message(
+        notebook_a,
+        "assistant",
+        "Coach reply",
+        metadata={
+            "source_refs": [
+                {"id": foreign_source["id"], "label": "S2", "title": "Other notebook"}
+            ]
+        },
+    )
+    workspace = ProfessorAnalyticsService(
+        ProfessorAnalyticsRepository(bootstrap)
+    ).notebook_workspace(student_id, notebook_a)
+    assert workspace is not None
+    citations = workspace.transcript.messages[-1]["citations"]
+    assert citations == []

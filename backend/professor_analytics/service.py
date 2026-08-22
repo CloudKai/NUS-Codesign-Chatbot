@@ -241,7 +241,7 @@ class ProfessorAnalyticsService:
             for source_id in message.get("cited_source_ids", [])
         ]
         authorized_citations = self._repository.authorized_citation_ids(
-            notebook_id, citation_ids
+            student_id, notebook_id, citation_ids
         )
         return ConversationTranscriptResponse(
             notebook_id=notebook_id,
@@ -286,7 +286,9 @@ class ProfessorAnalyticsService:
         from backend.student_journey import DEFAULT_STAGE, normalize_journey
 
         messages = store.get_messages(notebook_id)
-        transcript_messages = self._project_transcript_messages(notebook_id, messages)
+        transcript_messages = self._project_transcript_messages(
+            student_id, notebook_id, messages
+        )
         metadata = dict(thread.get("metadata") or {})
         journey = normalize_journey(metadata.get("learning_journey"))
         snapshot = metadata.get(DEEP_REVIEW_SNAPSHOT_KEY)
@@ -361,7 +363,7 @@ class ProfessorAnalyticsService:
         )
 
     def _project_transcript_messages(
-        self, notebook_id: str, messages: list[dict[str, Any]]
+        self, student_id: str, notebook_id: str, messages: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
         """Build professor-safe transcript rows from one active message list."""
         citation_ids = [
@@ -370,7 +372,7 @@ class ProfessorAnalyticsService:
             for source_id in self._message_citation_ids(message)
         ]
         authorized_citations = self._repository.authorized_citation_ids(
-            notebook_id, citation_ids
+            student_id, notebook_id, citation_ids
         )
         projected: list[dict[str, Any]] = []
         for message in messages:

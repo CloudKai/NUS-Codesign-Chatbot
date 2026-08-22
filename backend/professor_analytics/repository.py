@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from backend.persistence.factory import create_student_store
 from backend.source_library import CHAT_ATTACHMENT_ORIGIN, get_visible_source, is_chat_attachment_source
 from backend.student_store import StudentStore
 
@@ -344,14 +345,31 @@ class ProfessorAnalyticsRepository:
         return source
 
     def student_store(self, student_id: str) -> StudentStore | None:
-        """Return an owner-scoped store for one authorised student."""
+        """Return an owner-scoped store for one authorised student.
+
+        Preserves the configured database provider: SQLite when the analytics
+        store has a path, DSQL when ``path`` is ``None``.
+        """
         user = self._store.get_user_by_id(student_id)
         if not user:
             return None
         identifier = str(user.get("identifier") or "").strip()
         if not identifier:
             return None
-        return StudentStore(Path(self._store.path), identifier=identifier)
+        store_path = getattr(self._store, "path", None)
+        if isinstance(store_path, Path) and store_path is not None:
+            store = create_student_store(
+                path=store_path,
+                identifier=identifier,
+                ensure_owner=False,
+            )
+        else:
+            store = create_student_store(
+                identifier=identifier,
+                ensure_owner=False,
+            )
+        store.owner_id = str(user.get("id") or student_id)
+        return store
 
     def notebook_owned(self, student_id: str, notebook_id: str) -> bool:
         """Return whether ``notebook_id`` belongs to ``student_id``."""
@@ -389,22 +407,32 @@ class ProfessorAnalyticsRepository:
         return source
 
     def authorized_citation_ids(
-        self, notebook_id: str, source_ids: list[str]
+        self, student_id: str, notebook_id: str, source_ids: list[str]
     ) -> set[str]:
-        """Return citation ids persisted on the selected notebook only."""
-        ids = [str(item).strip() for item in source_ids if str(item).strip()]
-        if not ids:
+        """Return citation ids visible to the selected notebook.
+
+        Personal library sources and shared/virtual course catalog sources are
+        both resolved through the same ``list_visible_sources`` universe used
+        by the workspace Sources tab.
+        """
+        ids = {str(item).strip() for item in source_ids if str(item).strip()}
+        if not ids or not self.notebook_owned(student_id, notebook_id):
             return set()
-        placeholders = ",".join("?" for _ in ids)
-        query = f"SELECT id FROM sources WHERE notebook_id=? AND id IN ({placeholders})"
-        try:
-            with self._store._connect() as connection:  # noqa: SLF001
-                rows = connection.execute(query, (notebook_id, *ids)).fetchall()
-        except Exception as error:
-            raise ProfessorAnalyticsUnavailable(
-                "Professor analytics data is temporarily unavailable"
-            ) from error
-        return {str(row["id"]) for row in rows}
+        store = self.student_store(student_id)
+        if store is None:
+            return set()
+        from backend.sources.library import list_visible_sources
+
+        visible_ids = {
+            str(source.get("id") or "")
+            for source in list_visible_sources(
+                store,
+                notebook_id,
+                include_extracted_text=False,
+            )
+            if str(source.get("id") or "").strip()
+        }
+        return ids & visible_ids
 
     @staticmethod
     def _row_dict(row: Any) -> dict[str, Any]:

@@ -286,6 +286,7 @@ def test_professor_student_and_workspace_calls_are_progressive(monkeypatch):
     assert _AnalyticsClient.workspace_calls == 0
     assert _AnalyticsClient.attachment_calls == 0
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert rendered.index("#### Notebooks") < rendered.index("#### Learning journey")
     captions = "\n".join(caption.value or "" for caption in app.caption)
     assert "class 2.5 (n=2)" in rendered
     assert "Critical-thinking trend" in rendered
@@ -305,10 +306,13 @@ def test_professor_student_and_workspace_calls_are_progressive(monkeypatch):
         radio for radio in app.radio if radio.label == "Notebook workspace"
     )
     assert workspace_tabs.value == "Chat"
-    assert any(button.label == "Open attachment" for button in app.button)
-    assert any(r"\[S1\] Lecture source" in (caption.value or "") for caption in app.caption)
+    assert _AnalyticsClient.source_calls == 0
+    assert any(button.label == "Open →" for button in app.button)
+    workspace_rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert "Sources used" in workspace_rendered
+    assert any("[S1] Lecture source" in (caption.value or "") for caption in app.caption)
     workspace_tabs.set_value("Sources").run()
-    assert any(button.label == "Open source" for button in app.button)
+    assert any(button.label == "Open →" for button in app.button)
     workspace_tabs.set_value("Journey").run()
     assert any("Thinking path" in (markdown.value or "") for markdown in app.markdown)
     workspace_tabs.set_value("Review").run()
@@ -319,6 +323,44 @@ def test_professor_citation_display_prefers_friendly_safe_reference() -> None:
     """Transcript citation labels remain friendly without rendering raw HTML."""
     assert professor._citation_display({"id": "source-1", "label": "S1", "title": "Lecture source"}) == r"\[S1\] Lecture source"
     assert "<script>" not in professor._citation_display({"id": "source-1", "title": "<script>"})
+
+
+def test_professor_chat_renders_markdown_without_html_escape() -> None:
+    """Chat message bodies use Streamlit Markdown instead of escaped HTML blobs."""
+    source = Path("ui/professor.py").read_text(encoding="utf-8")
+    assert "professor-chat-body" not in source
+    assert "st.markdown(content)" in source
+
+
+def test_professor_refresh_refetches_cached_student_detail(monkeypatch):
+    """Refresh invalidates only the selected student's cached detail."""
+    _professor_auth(monkeypatch)
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    navigation = next(radio for radio in app.radio if radio.label == "Professor dashboard navigation")
+    navigation.set_value("Students").run()
+    next(button for button in app.button if button.key == "professor_open_student_student-1").click().run()
+    assert _AnalyticsClient.student_detail_calls == 1
+    next(
+        button for button in app.button
+        if button.key == "professor_refresh_student_student-1"
+    ).click().run()
+    assert _AnalyticsClient.student_detail_calls == 2
+
+
+def test_professor_refresh_refetches_cached_workspace(monkeypatch):
+    """Refresh invalidates only the opened notebook workspace cache."""
+    _professor_auth(monkeypatch)
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    navigation = next(radio for radio in app.radio if radio.label == "Professor dashboard navigation")
+    navigation.set_value("Students").run()
+    next(button for button in app.button if button.key == "professor_open_student_student-1").click().run()
+    next(button for button in app.button if button.label == "Open →").click().run()
+    assert _AnalyticsClient.workspace_calls == 1
+    next(
+        button for button in app.button
+        if button.key == "professor_refresh_workspace_student-1_notebook-1"
+    ).click().run()
+    assert _AnalyticsClient.workspace_calls == 2
 
 
 def test_professor_workspace_ui_is_read_only() -> None:
@@ -344,7 +386,7 @@ def test_professor_research_css_has_desktop_tablet_and_mobile_contracts() -> Non
     responsive = Path("ui/assets/styles/90-responsive.css").read_text(encoding="utf-8")
     assert ".st-key-research_workspace" in component
     assert ".st-key-professor_transcript_scroll" in component
-    assert "max-width:700px" in component
+    assert "professor-mobile-detail" in component
     assert "professor-chat-student" in component
     assert "research-queue-marker" not in responsive
     assert "research-transcript-marker" not in responsive

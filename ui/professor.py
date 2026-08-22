@@ -84,6 +84,55 @@ def _clear_professor_workspace_cache(student_id: str, notebook_id: str | None = 
     cache.pop((student_id, notebook_id), None)
 
 
+def _invalidate_student_detail_cache(student_id: str) -> None:
+    """Drop one student's cached detail and workspace payloads."""
+    detail_cache = st.session_state.get(_DETAIL_CACHE_KEY) or {}
+    detail_cache.pop(student_id, None)
+    _clear_professor_workspace_cache(student_id)
+
+
+def _invalidate_workspace_cache(student_id: str, notebook_id: str) -> None:
+    """Drop one notebook workspace cache entry."""
+    workspace_cache = st.session_state.get(_WORKSPACE_CACHE_KEY) or {}
+    workspace_cache.pop((student_id, notebook_id), None)
+
+
+def _format_file_size(size: int | float | None) -> str:
+    """Render a compact human-readable byte size."""
+    value = max(0, int(size or 0))
+    if value < 1024:
+        return f"{value} B"
+    if value < 1024 * 1024:
+        return f"{value / 1024:.1f} KB"
+    return f"{value / (1024 * 1024):.1f} MB"
+
+
+def _file_type_label(mime: str | None, *, kind: str | None = None) -> str:
+    """Return a short file-type label for attachment/source rows."""
+    normalized = str(mime or "").split(";", 1)[0].strip().lower()
+    if normalized == "application/pdf" or kind == "pdf":
+        return "PDF"
+    if normalized.startswith("image/"):
+        return "Image"
+    if normalized.startswith("text/"):
+        return "Text"
+    if normalized:
+        return normalized.split("/")[-1].upper()
+    return "File"
+
+
+def _file_icon(mime: str | None, *, kind: str | None = None) -> str:
+    """Return a compact icon for one file row."""
+    label = _file_type_label(mime, kind=kind)
+    if label == "PDF":
+        return "📄"
+    if label == "Image":
+        return "🖼️"
+    if label == "Text":
+        return "📝"
+    return "📎"
+
+
 def _score(value: Any) -> str:
     """Render a nullable Facione value without fabricating a zero score."""
     return "Not assessed" if value is None else f"{float(value):.1f} / 4"
@@ -357,12 +406,13 @@ def _render_students(client) -> None:
     opened_notebook = None
     if selected_id:
         opened_notebook = st.session_state.get(f"professor_open_notebook_{selected_id}")
-        st.markdown(
-            "<style>@media (max-width:700px){"
-            ".st-key-professor_students_workspace [data-testid='stColumn']:first-child"
-            "{display:none!important;}}</style>",
-            unsafe_allow_html=True,
-        )
+
+    workspace_class = (
+        "professor-students-workspace professor-mobile-detail"
+        if selected_id
+        else "professor-students-workspace"
+    )
+    st.markdown(f'<div class="{workspace_class}"></div>', unsafe_allow_html=True)
 
     with st.container(key="professor_students_workspace"):
         list_col, detail_col = st.columns([0.82, 1.8], gap="large")
@@ -372,12 +422,19 @@ def _render_students(client) -> None:
             for row in rows:
                 student_id = str(row.get("id") or "")
                 is_selected = student_id == selected_id
+                card_class = "professor-student-card professor-student-card-selected" if is_selected else "professor-student-card"
                 with st.container(key=f"professor_student_card_{student_id}"):
-                    name_col, action_col = st.columns([0.78, 0.22], gap="small")
-                    name_col.markdown(f"**{escape(str(row.get('name') or 'Student'))}**")
-                    name_col.caption(_student_card_caption(row))
+                    st.markdown(
+                        f'<div class="{card_class}">'
+                        f'<div class="professor-student-card-name">'
+                        f"{escape(str(row.get('name') or 'Student'))}"
+                        f'<span class="professor-student-card-chevron">›</span></div>'
+                        f'<div class="professor-student-card-meta">'
+                        f"{escape(_student_card_caption(row))}</div></div>",
+                        unsafe_allow_html=True,
+                    )
                     label = "Selected" if is_selected else "Open"
-                    if action_col.button(
+                    if st.button(
                         label,
                         key=f"professor_open_student_{student_id}",
                         use_container_width=True,
@@ -431,8 +488,18 @@ def _render_student_detail(
 ) -> None:
     """Render one selected student's record and notebook cards."""
     student = data["student"]
-    st.markdown(f"### {student['name']}")
-    st.caption(student.get("email") or "Authorised student record")
+    header = st.columns([0.82, 0.18], gap="small")
+    with header[0]:
+        st.markdown(f"### {student['name']}")
+        st.caption(student.get("email") or "Authorised student record")
+    with header[1]:
+        if st.button(
+            "Refresh",
+            key=f"professor_refresh_student_{student['id']}",
+            use_container_width=True,
+        ):
+            _invalidate_student_detail_cache(student["id"])
+            st.rerun()
     metrics = st.columns(4, gap="small")
     with metrics[0]:
         _metric("Current stage", student.get("current_stage") or "Not started")
@@ -442,6 +509,37 @@ def _render_student_detail(
         _metric("Last active", _when(student.get("last_active")))
     with metrics[3]:
         _metric("Attention", "Yes" if student.get("needs_attention") else "No")
+
+    opened = st.session_state.get(f"professor_open_notebook_{student['id']}")
+    if not opened:
+        st.markdown("#### Notebooks")
+        notebooks = data.get("notebooks", [])
+        if not notebooks:
+            st.info("This student has not started a notebook yet.")
+        else:
+            for item in notebooks:
+                notebook_id = str(item.get("id") or "")
+                with st.container(key=f"professor_notebook_card_{student['id']}_{notebook_id}"):
+                    st.markdown(
+                        f'<div class="professor-notebook-card">'
+                        f'<div class="professor-notebook-card-title">'
+                        f"{escape(_notebook_card_label(item))}</div>"
+                        f'<div class="professor-notebook-card-stage">'
+                        f"{escape(str(item.get('stage') or 'Not started'))}</div>"
+                        f'<div class="professor-notebook-card-meta">'
+                        f"{escape(_notebook_card_caption(item))}</div></div>",
+                        unsafe_allow_html=True,
+                    )
+                    if st.button(
+                        "Open →",
+                        key=f"professor_open_notebook_btn_{student['id']}_{notebook_id}",
+                        use_container_width=True,
+                    ):
+                        st.session_state[f"professor_open_notebook_{student['id']}"] = notebook_id
+                        _clear_professor_workspace_cache(student["id"], notebook_id)
+                        st.rerun()
+        if not notebooks:
+            return
 
     st.markdown("#### Learning journey")
     completed = set(data.get("completed_stages", []))
@@ -497,29 +595,8 @@ def _render_student_detail(
         )
         st.caption("Assessment trend is descriptive only; it does not establish causal change.")
 
-    opened = st.session_state.get(f"professor_open_notebook_{student['id']}")
     if opened:
         return
-
-    st.markdown("#### Notebooks")
-    notebooks = data.get("notebooks", [])
-    if not notebooks:
-        st.info("This student has not started a notebook yet.")
-        return
-    for item in notebooks:
-        notebook_id = str(item.get("id") or "")
-        with st.container(key=f"professor_notebook_card_{student['id']}_{notebook_id}"):
-            title_col, action_col = st.columns([0.78, 0.22], gap="small")
-            title_col.markdown(f"**{_notebook_card_label(item)}**")
-            title_col.caption(_notebook_card_caption(item))
-            if action_col.button(
-                "Open →",
-                key=f"professor_open_notebook_btn_{student['id']}_{notebook_id}",
-                use_container_width=True,
-            ):
-                st.session_state[f"professor_open_notebook_{student['id']}"] = notebook_id
-                _clear_professor_workspace_cache(student["id"], notebook_id)
-                st.rerun()
 
 
 def _workspace_notebook(workspace: dict[str, Any], notebook: dict[str, Any]) -> dict[str, Any]:
@@ -544,14 +621,25 @@ def _render_professor_workspace(
     """Render the read-only Chat, Sources, Journey, and Review tabs."""
     notebook_meta = _workspace_notebook(workspace, notebook)
     transcript = workspace.get("transcript") or {}
-    st.markdown(
-        f"#### {notebook_meta.get('title') or _notebook_card_label(notebook)}"
-    )
-    st.caption(
-        f"{notebook_meta.get('current_stage') or notebook.get('stage') or 'Not started'} · "
-        f"Last active {_when(notebook_meta.get('last_active') or notebook.get('last_active'))} · "
-        "Read-only workspace · active conversation branch"
-    )
+    header = st.columns([0.82, 0.18], gap="small")
+    with header[0]:
+        st.markdown(
+            f"#### {notebook_meta.get('title') or _notebook_card_label(notebook)}"
+        )
+        st.caption(
+            f"{notebook_meta.get('current_stage') or notebook.get('stage') or 'Not started'} · "
+            f"Last active {_when(notebook_meta.get('last_active') or notebook.get('last_active'))} · "
+            "Read-only workspace · active conversation branch"
+        )
+    with header[1]:
+        notebook_id = str(notebook_meta.get("id") or "")
+        if st.button(
+            "Refresh",
+            key=f"professor_refresh_workspace_{student_id}_{notebook_id}",
+            use_container_width=True,
+        ):
+            _invalidate_workspace_cache(student_id, notebook_id)
+            st.rerun()
     tab = st.radio(
         "Notebook workspace",
         _WORKSPACE_TABS,
@@ -560,11 +648,17 @@ def _render_professor_workspace(
         label_visibility="collapsed",
     )
     if tab == "Chat":
+        authorized_sources = {
+            str(source.get("id") or ""): source
+            for source in workspace.get("sources") or []
+            if str(source.get("id") or "").strip()
+        }
         _render_professor_chat_tab(
             client,
             student_id,
             str(notebook_meta.get("id") or ""),
             transcript,
+            authorized_sources,
         )
     elif tab == "Sources":
         _render_professor_sources_tab(
@@ -581,6 +675,7 @@ def _render_professor_chat_tab(
     student_id: str,
     notebook_id: str,
     transcript: dict[str, Any],
+    authorized_sources: dict[str, dict[str, Any]],
 ) -> None:
     """Render the active-branch transcript inside a scroll region."""
     messages = transcript.get("messages") or []
@@ -598,33 +693,106 @@ def _render_professor_chat_tab(
                 st.markdown(
                     f'<div class="professor-chat-card professor-chat-{role_class}">'
                     f'<div class="professor-chat-meta"><strong>{escape(speaker)}</strong>'
-                    f"<span>{escape(_when(message.get('created_at')))}</span></div>"
-                    f'<div class="professor-chat-body">{escape(str(message.get("content") or ""))}</div>'
-                    f"</div>",
+                    f"<span>{escape(_when(message.get('created_at')))}</span></div></div>",
                     unsafe_allow_html=True,
                 )
+                content = str(message.get("content") or "")
+                if content:
+                    st.markdown(content)
                 for attachment in message.get("attachments") or []:
-                    attachment_id = str(attachment.get("id") or "")
-                    title = escape(str(attachment.get("title") or "Attachment"))
-                    st.caption(f"📎 {title}")
-                    if attachment_id and hasattr(client, "professor_conversation_attachment"):
-                        if st.button(
-                            "Open attachment",
-                            key=f"professor_attachment_{message.get('id')}_{attachment_id}",
-                        ):
-                            _professor_attachment_dialog(
-                                client,
-                                student_id,
-                                notebook_id,
-                                attachment_id,
-                                title,
-                            )
+                    _render_professor_attachment_row(
+                        client,
+                        student_id,
+                        notebook_id,
+                        message,
+                        attachment,
+                    )
                 citations = message.get("citations") or []
                 if citations:
-                    st.caption(
-                        "Cited source reference(s): "
-                        + ", ".join(_citation_display(item) for item in citations)
-                    )
+                    st.markdown("**Sources used**")
+                    for citation in citations:
+                        _render_professor_citation_row(
+                            client,
+                            student_id,
+                            notebook_id,
+                            citation,
+                            authorized_sources,
+                        )
+
+
+def _render_professor_attachment_row(
+    client: Any,
+    student_id: str,
+    notebook_id: str,
+    message: dict[str, Any],
+    attachment: dict[str, Any],
+) -> None:
+    """Render one compact attachment row with lazy open."""
+    attachment_id = str(attachment.get("id") or "")
+    title = str(attachment.get("title") or "Attachment")
+    mime = str(attachment.get("mime") or "application/octet-stream")
+    size_label = _format_file_size(attachment.get("size"))
+    icon = _file_icon(mime, kind=str(attachment.get("kind") or ""))
+    row = st.columns([0.78, 0.22], gap="small")
+    with row[0]:
+        st.markdown(
+            f'<div class="professor-file-row">'
+            f'<div class="professor-file-row-title">{icon} {escape(title)}</div>'
+            f'<div class="professor-file-row-meta">'
+            f"{escape(_file_type_label(mime))} · {escape(size_label)}</div></div>",
+            unsafe_allow_html=True,
+        )
+    with row[1]:
+        if attachment_id and hasattr(client, "professor_conversation_attachment"):
+            if st.button(
+                "Open →",
+                key=f"professor_attachment_{message.get('id')}_{attachment_id}",
+                use_container_width=True,
+            ):
+                _professor_attachment_dialog(
+                    client,
+                    student_id,
+                    notebook_id,
+                    attachment_id,
+                    title,
+                )
+
+
+def _render_professor_citation_row(
+    client: Any,
+    student_id: str,
+    notebook_id: str,
+    citation: dict[str, Any],
+    authorized_sources: dict[str, dict[str, Any]],
+) -> None:
+    """Render one citation row, opening sources only when authorized."""
+    citation_id = str(citation.get("id") or "").strip()
+    label = str(citation.get("label") or citation_id or "source").strip()
+    title = str(citation.get("title") or label or "Source").strip()
+    display = f"[{label}] {title}" if label and title != label else f"[{label}]"
+    source = authorized_sources.get(citation_id)
+    row = st.columns([0.78, 0.22], gap="small")
+    with row[0]:
+        st.caption(display)
+    with row[1]:
+        if (
+            citation_id
+            and source
+            and source.get("has_file")
+            and hasattr(client, "professor_notebook_source")
+        ):
+            if st.button(
+                "Open →",
+                key=f"professor_citation_{notebook_id}_{citation_id}_{label}",
+                use_container_width=True,
+            ):
+                _professor_source_dialog(
+                    client,
+                    student_id,
+                    notebook_id,
+                    citation_id,
+                    title,
+                )
 
 
 def _render_professor_sources_tab(
@@ -664,15 +832,33 @@ def _render_professor_source_row(
 ) -> None:
     """Render one read-only source row with lazy open."""
     source_id = str(source.get("id") or "")
-    title = escape(str(source.get("title") or "Source"))
-    selected = "Selected" if source.get("selected") else "Not selected"
+    title = str(source.get("title") or "Source")
     mime = str(source.get("mime") or "application/octet-stream")
-    status = "Course material" if source.get("locked") else selected
-    st.markdown(f"**{title}**")
-    st.caption(f"{status} · {mime}")
-    if source_id and source.get("has_file") and hasattr(client, "professor_notebook_source"):
-        if st.button("Open source", key=f"professor_source_{notebook_id}_{source_id}"):
-            _professor_source_dialog(client, student_id, notebook_id, source_id, title)
+    size = source.get("size")
+    status = "Course material" if source.get("locked") else (
+        "Selected" if source.get("selected") else "Not selected"
+    )
+    icon = _file_icon(mime, kind=str(source.get("kind") or ""))
+    meta_parts = [_file_type_label(mime), status]
+    if size:
+        meta_parts.append(_format_file_size(size))
+    row = st.columns([0.78, 0.22], gap="small")
+    with row[0]:
+        st.markdown(
+            f'<div class="professor-file-row">'
+            f'<div class="professor-file-row-title">{icon} {escape(title)}</div>'
+            f'<div class="professor-file-row-meta">'
+            f"{escape(' · '.join(meta_parts))}</div></div>",
+            unsafe_allow_html=True,
+        )
+    with row[1]:
+        if source_id and source.get("has_file") and hasattr(client, "professor_notebook_source"):
+            if st.button(
+                "Open →",
+                key=f"professor_source_{notebook_id}_{source_id}",
+                use_container_width=True,
+            ):
+                _professor_source_dialog(client, student_id, notebook_id, source_id, title)
 
 
 def _render_professor_journey_tab(workspace: dict[str, Any]) -> None:
