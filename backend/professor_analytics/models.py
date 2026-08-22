@@ -98,6 +98,53 @@ class ConversationTranscriptResponse(BaseModel):
     messages: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ProfessorNotebookSummary(BaseModel):
+    """Notebook header metadata for a lecturer workspace."""
+
+    id: str
+    title: str
+    current_stage: str | None = None
+    last_active: str | None = None
+
+
+class ProfessorWorkspaceTranscript(BaseModel):
+    """Active-branch transcript messages without duplicated notebook metadata."""
+
+    messages: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ProfessorSourceSummary(BaseModel):
+    """Allow-listed source metadata for lecturer workspace lists."""
+
+    id: str
+    title: str
+    kind: str | None = None
+    mime: str | None = None
+    size: int = 0
+    group: str | None = None
+    selected: bool = False
+    origin: str | None = None
+    locked: bool = False
+    has_file: bool = False
+
+
+class ProfessorLearningState(BaseModel):
+    """Read-only journey, HMW, and Review projections for one notebook."""
+
+    journey: dict[str, Any] = Field(default_factory=dict)
+    hmw_scaffold: dict[str, Any] = Field(default_factory=dict)
+    review: dict[str, Any] = Field(default_factory=dict)
+
+
+class NotebookWorkspaceResponse(BaseModel):
+    """Read-only student notebook workspace for lecturer review."""
+
+    notebook: ProfessorNotebookSummary
+    transcript: ProfessorWorkspaceTranscript
+    sources: list[ProfessorSourceSummary] = Field(default_factory=list)
+    learning: ProfessorLearningState = Field(default_factory=ProfessorLearningState)
+
+
 class CriticalThinkingResponse(BaseModel):
     """Teaching-focused assessment aggregates, not a claim of causal impact."""
 

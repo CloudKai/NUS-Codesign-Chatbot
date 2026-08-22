@@ -75,6 +75,7 @@ from backend.professor_analytics.models import (
     ConversationTranscriptResponse,
     CriticalThinkingResponse,
     EngagementResponse,
+    NotebookWorkspaceResponse,
     OverviewResponse,
     StudentDetailResponse,
     StudentsResponse,
@@ -636,6 +637,66 @@ def create_app(
         if transcript is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         return transcript
+
+    @app.get(
+        "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/workspace",
+        response_model=NotebookWorkspaceResponse,
+    )
+    def professor_notebook_workspace(
+        request: Request,
+        student_id: str,
+        notebook_id: str,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> NotebookWorkspaceResponse:
+        """Return one authorised read-only notebook workspace for lecturers."""
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.workspace",
+            scope="identifiable_workspace",
+            target_user_id=student_id,
+            notebook_id=notebook_id,
+        )
+        workspace = _professor_service(owner).notebook_workspace(
+            student_id, notebook_id
+        )
+        if workspace is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return workspace
+
+    @app.get(
+        "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/sources/{source_id}"
+    )
+    def professor_notebook_source(
+        request: Request,
+        student_id: str,
+        notebook_id: str,
+        source_id: str,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> Response:
+        """Stream one library source after lecturer ownership checks."""
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.source",
+            scope="identifiable_source",
+            target_user_id=student_id,
+            notebook_id=notebook_id,
+            metadata={"source_id": str(source_id)[:160]},
+        )
+        repository = ProfessorAnalyticsRepository(owner.store)
+        source = repository.read_library_source(student_id, notebook_id, source_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="Source not found")
+        payload = read_source_bytes(source)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Source is unavailable")
+        filename = quote(str(source.get("title") or "source"), safe="")
+        return Response(
+            content=payload,
+            media_type=str(source.get("mime") or "application/octet-stream"),
+            headers={"Content-Disposition": f"inline; filename*=UTF-8''{filename}"},
+        )
 
     @app.get(
         "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/attachments/{attachment_id}"

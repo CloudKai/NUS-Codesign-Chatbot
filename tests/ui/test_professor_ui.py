@@ -12,9 +12,12 @@ from ui import auth_gate, professor
 class _AnalyticsClient:
     """Deterministic FastAPI-client stand-in; the UI never reaches a store."""
 
+    students_calls = 0
     student_detail_calls = 0
+    workspace_calls = 0
     transcript_calls = 0
     attachment_calls = 0
+    source_calls = 0
 
     def professor_overview(self):
         return {
@@ -29,6 +32,7 @@ class _AnalyticsClient:
         }
 
     def professor_students(self, **_filters):
+        type(self).students_calls += 1
         return {"total": 1, "students": [{"id": "student-1", "name": "Student One", "email": None, "current_stage": "Concept Generation", "stage_progress": 1, "facione_overall": None, "student_messages": 4, "active_days": 2, "last_active": None, "needs_attention": []}]}
 
     def professor_student_detail(self, _student_id):
@@ -48,6 +52,59 @@ class _AnalyticsClient:
                 "citations": [{"id": "source-1", "label": "S1", "title": "Lecture source"}],
             }],
         }
+
+    def professor_notebook_workspace(self, _student_id, _notebook_id):
+        type(self).workspace_calls += 1
+        return {
+            "notebook": {
+                "id": "notebook-1",
+                "title": "Notebook",
+                "current_stage": "Concept Generation",
+                "last_active": None,
+            },
+            "transcript": {
+                "messages": [{
+                    "id": "message-1",
+                    "role": "assistant",
+                    "content": "What evidence supports this design?",
+                    "attachments": [{"id": "attachment-1", "title": "lecture.pdf"}],
+                    "citations": [{"id": "source-1", "label": "S1", "title": "Lecture source"}],
+                }],
+            },
+            "sources": [
+                {
+                    "id": "source-1",
+                    "title": "Lecture source",
+                    "selected": True,
+                    "mime": "text/plain",
+                    "has_file": True,
+                    "group": "My Sources",
+                    "locked": False,
+                    "origin": "upload",
+                    "kind": "file",
+                    "size": 12,
+                }
+            ],
+            "learning": {
+                "journey": {
+                    "current_stage": "concept_generation",
+                    "completed_stages": ["problem_identification"],
+                    "response_detail": "short",
+                },
+                "hmw_scaffold": {"available": False},
+                "review": {
+                    "summary": "The student is exploring evidence.",
+                    "facione_scores": {"analysis": 3},
+                    "strength_sections": [],
+                    "improvement_sections": [],
+                    "conclusion": "",
+                },
+            },
+        }
+
+    def professor_notebook_source(self, *_args):
+        type(self).source_calls += 1
+        raise AssertionError("source bytes must be fetched only on button click")
 
     def professor_conversation_attachment(self, *_args):
         type(self).attachment_calls += 1
@@ -146,9 +203,12 @@ def _professor_auth(monkeypatch):
     monkeypatch.setattr(auth_gate, "authenticated_user", lambda: dict(user))
     monkeypatch.setattr(auth_gate, "current_user_claims", lambda _user=None: {"sub": "lecturer-sub", "given_name": "Dr Tan"})
     monkeypatch.setattr(professor, "local_api_client", lambda: _AnalyticsClient())
+    _AnalyticsClient.students_calls = 0
     _AnalyticsClient.student_detail_calls = 0
+    _AnalyticsClient.workspace_calls = 0
     _AnalyticsClient.transcript_calls = 0
     _AnalyticsClient.attachment_calls = 0
+    _AnalyticsClient.source_calls = 0
 
 
 def test_professor_overview_uses_dashboard_shell_not_student_workspace(monkeypatch):
@@ -173,6 +233,7 @@ def test_professor_students_renders_missing_score_and_filters(monkeypatch):
     assert any(input.label == "Search students" for input in app.text_input)
     assert not app.dataframe
     assert any("Select a student to view their learning progress" in (info.value or "") for info in app.info)
+    assert _AnalyticsClient.students_calls == 1
     assert _AnalyticsClient.student_detail_calls == 0
     assert professor._score(None) == "Not assessed"
     assert professor._PHASE_LABELS == (
@@ -207,18 +268,22 @@ def test_professor_research_renders_three_step_validation_workbench(monkeypatch)
     assert not app.chat_input
 
 
-def test_professor_student_and_transcript_calls_are_progressive(monkeypatch):
-    """Student detail and transcript requests wait for their explicit selections."""
+def test_professor_student_and_workspace_calls_are_progressive(monkeypatch):
+    """Student detail waits for roster selection; workspace waits for notebook open."""
     _professor_auth(monkeypatch)
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     navigation = next(radio for radio in app.radio if radio.label == "Professor dashboard navigation")
     navigation.set_value("Students").run()
+    assert _AnalyticsClient.students_calls == 1
     assert _AnalyticsClient.student_detail_calls == 0
+    assert _AnalyticsClient.workspace_calls == 0
     assert _AnalyticsClient.attachment_calls == 0
-    selected = next(radio for radio in app.radio if radio.key == "professor_selected_student")
-    selected.set_value("student-1").run()
+    student_open = next(
+        button for button in app.button if button.key == "professor_open_student_student-1"
+    )
+    student_open.click().run()
     assert _AnalyticsClient.student_detail_calls == 1
-    assert _AnalyticsClient.transcript_calls == 0
+    assert _AnalyticsClient.workspace_calls == 0
     assert _AnalyticsClient.attachment_calls == 0
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     captions = "\n".join(caption.value or "" for caption in app.caption)
@@ -227,15 +292,27 @@ def test_professor_student_and_transcript_calls_are_progressive(monkeypatch):
     assert "Assessment trend is descriptive only" in captions
     assert "Active days" in rendered and "Sessions" in rendered
     assert "Estimated active time" in rendered
-    assert professor._notebook_label({
+    assert professor._notebook_card_caption({
         "title": "Notebook", "stage": "Concept Generation", "messages": 7,
         "student_messages": 4, "last_active": None,
-    }) == "Notebook · Concept Generation · 7 total messages · 4 student messages · No activity"
-    next(button for button in app.button if button.label == "View active transcript").click().run()
-    assert _AnalyticsClient.transcript_calls == 1
+    }) == "Concept Generation · 4 student · 3 coach · No activity"
+    next(button for button in app.button if button.label == "Open →").click().run()
+    assert _AnalyticsClient.workspace_calls == 1
+    assert _AnalyticsClient.transcript_calls == 0
     assert _AnalyticsClient.attachment_calls == 0
+    assert any(radio.label == "Notebook workspace" for radio in app.radio)
+    workspace_tabs = next(
+        radio for radio in app.radio if radio.label == "Notebook workspace"
+    )
+    assert workspace_tabs.value == "Chat"
     assert any(button.label == "Open attachment" for button in app.button)
     assert any(r"\[S1\] Lecture source" in (caption.value or "") for caption in app.caption)
+    workspace_tabs.set_value("Sources").run()
+    assert any(button.label == "Open source" for button in app.button)
+    workspace_tabs.set_value("Journey").run()
+    assert any("Thinking path" in (markdown.value or "") for markdown in app.markdown)
+    workspace_tabs.set_value("Review").run()
+    assert any("Summary" in (markdown.value or "") for markdown in app.markdown)
 
 
 def test_professor_citation_display_prefers_friendly_safe_reference() -> None:
@@ -244,11 +321,31 @@ def test_professor_citation_display_prefers_friendly_safe_reference() -> None:
     assert "<script>" not in professor._citation_display({"id": "source-1", "title": "<script>"})
 
 
+def test_professor_workspace_ui_is_read_only() -> None:
+    """Professor workspace UI does not call student mutation client methods."""
+    source = Path("ui/professor.py").read_text(encoding="utf-8")
+    forbidden = (
+        "send_message",
+        "upload_sources",
+        "upload_attachments",
+        "delete_source",
+        "rename_source",
+        "select_sources",
+        "confirm_stage",
+        "start_deep_review",
+        "revise_conversation",
+    )
+    assert not any(token in source for token in forbidden)
+
+
 def test_professor_research_css_has_desktop_tablet_and_mobile_contracts() -> None:
     """Scoped CSS keeps a two-column desktop and stacked 390 px flow."""
     component = Path("ui/assets/styles/70-professor.css").read_text(encoding="utf-8")
     responsive = Path("ui/assets/styles/90-responsive.css").read_text(encoding="utf-8")
     assert ".st-key-research_workspace" in component
+    assert ".st-key-professor_transcript_scroll" in component
+    assert "max-width:700px" in component
+    assert "professor-chat-student" in component
     assert "research-queue-marker" not in responsive
     assert "research-transcript-marker" not in responsive
     assert "research-validation-marker" not in responsive

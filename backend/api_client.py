@@ -226,6 +226,37 @@ class LocalApiClient:
             )
         return SourceContent(data=response.content, mime=mime, filename=filename)
 
+    def professor_notebook_workspace(
+        self, student_id: str, notebook_id: str
+    ) -> dict[str, Any]:
+        """Return one authorised read-only notebook workspace for lecturers."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students/{student_id}"
+            f"/conversations/{notebook_id}/workspace",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_notebook_source(
+        self, student_id: str, notebook_id: str, source_id: str
+    ) -> SourceContent:
+        """Fetch one authorised library source on explicit lecturer action."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students/{student_id}"
+            f"/conversations/{notebook_id}/sources/{source_id}",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        mime = response.headers.get("content-type", "application/octet-stream")
+        filename = "source.bin"
+        disposition = response.headers.get("content-disposition") or ""
+        if "filename*=" in disposition:
+            filename = unquote(
+                disposition.split("filename*=UTF-8''", 1)[-1].strip()
+            )
+        return SourceContent(data=response.content, mime=mime, filename=filename)
+
     def professor_critical_thinking(self) -> dict[str, Any]:
         """Return professor-authorised Facione analytics."""
         response = self._http.get(

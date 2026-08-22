@@ -2,6 +2,50 @@
 
 ## CURRENT STATUS
 
+### Lecturer dashboard revamp (2026-08-22)
+
+**Change.** Professor Students now loads a compact per-student SQL roster
+(`load_student_roster`) instead of materialising one Python row per active
+message. Student detail and notebook workspace are fetched only after explicit
+UI clicks, with session-local caches in `ui/professor.py`. Workspace API
+responses use nested `notebook`, `transcript.messages`, allow-listed
+`ProfessorSourceSummary`, and `learning.{journey,hmw_scaffold,review}`; messages
+load once per workspace request. Mobile drill-down hides the roster column below
+700px once a student is selected.
+
+**Files.** `backend/professor_analytics/{repository,models,service}.py`,
+`ui/professor.py`, `ui/assets/styles/70-professor.css`,
+`tests/http/test_professor_analytics.py`, `tests/ui/test_professor_ui.py`.
+
+**Validation.** Focused pytest on professor HTTP/UI modules and `compileall`
+on `backend` and `ui`.
+
+**Next action.** Visual check at 1440 px and 390 px if layout regressions are
+reported.
+
+### Lecturer notebook workspace (2026-08-22)
+
+**Change.** Lecturers can open a student's notebook into a read-only workspace with
+**Chat | Sources | Journey | Review** tabs. New professor routes:
+`GET .../conversations/{notebook_id}/workspace` and
+`GET .../sources/{source_id}` (library sources only; chat attachments stay on
+the existing attachment route). Sources metadata uses `professor_public_source`
+(no extracted text, paths, or bytes in the list). Learning payload includes
+`normalize_journey`, `hmw_scaffold_projection`, and `learning_review`.
+Audits: `professor.workspace`, `professor.source`.
+
+**Files.** `backend/professor_analytics/{models,repository,service}.py`,
+`backend/http/app.py`, `backend/api_client.py`, `backend/workspace_service.py`,
+`ui/professor.py`, `ui/assets/styles/70-professor.css`,
+`tests/http/test_professor_analytics.py`, `tests/ui/test_professor_ui.py`,
+`tests/test_architecture_contracts.py`.
+
+**Validation.** `tests/http/test_professor_analytics.py`,
+`tests/ui/test_professor_ui.py`, `compileall` on `backend` and `ui`.
+
+**Next action.** None for this slice unless a visual check at 1440 px / 390 px
+surfaces layout issues.
+
 ### Current authority / release state (2026-08-22)
 
 **Source code HEAD:** `1799a5b` (release-hardening, attachment relevance, professor

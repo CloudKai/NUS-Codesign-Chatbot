@@ -25,11 +25,33 @@
 .professor-step-completed { color:var(--cd-text); background:var(--cd-accent-soft); }
 .professor-step-current { color:var(--cd-text); background:var(--cd-accent); font-weight:700; }
 .professor-step-future { color:var(--cd-muted); opacity:.72; }
-.st-key-professor_selected_student [data-testid="stRadio"], [class*="st-key-professor_selected_notebook_"] [data-testid="stRadio"] { max-height:34rem; overflow-y:auto; }
-.st-key-professor_selected_student label, [class*="st-key-professor_selected_notebook_"] label { display:block; padding:.55rem .65rem; margin:.2rem 0; border:1px solid var(--cd-border); border-radius:.5rem; background:var(--cd-surface); }
-[class*="st-key-professor_message_"] { padding:.8rem; margin:.35rem 0; border:1px solid var(--cd-border); border-radius:.65rem; background:var(--cd-surface); }
+.st-key-professor_selected_student [data-testid="stRadio"], [class*="st-key-professor_notebook_card_"] { max-height:34rem; overflow-y:auto; }
+.st-key-professor_selected_student label, [class*="st-key-professor_notebook_card_"] { display:block; padding:.55rem .65rem; margin:.2rem 0; border:1px solid var(--cd-border); border-radius:.5rem; background:var(--cd-surface); }
+[class*="st-key-professor_notebook_card_"] { margin:.35rem 0; padding:.55rem .65rem; border:1px solid var(--cd-border); border-radius:.65rem; background:var(--cd-surface); }
+.st-key-professor_transcript_scroll {
+    max-height:58vh;
+    overflow-y:auto;
+    padding-right:.4rem;
+}
+.st-key-professor_transcript_scroll [class*="st-key-professor_message_"] { margin-bottom:.45rem; overflow:visible; }
+[class*="st-key-professor_message_"] { padding:0; margin:.35rem 0; border:none; background:transparent; overflow:visible; }
 .st-key-professor_students_workspace { padding:.5rem; border:1px solid var(--cd-border); border-radius:.75rem; }
+.professor-student-card,.professor-notebook-card { margin:.35rem 0; padding:.55rem .65rem; border:1px solid var(--cd-border); border-radius:.65rem; background:var(--cd-surface); }
+[class*="st-key-professor_student_card_"] { margin:.35rem 0; padding:.55rem .65rem; border:1px solid var(--cd-border); border-radius:.65rem; background:var(--cd-surface); }
+.professor-chat-card { padding:.75rem .85rem; border:1px solid var(--cd-border); border-radius:.65rem; background:var(--cd-surface); margin:.35rem 0; }
+.professor-chat-student { border-left:3px solid var(--cd-accent); }
+.professor-chat-coach { border-left:3px solid var(--cd-muted); }
+.professor-chat-meta { display:flex; justify-content:space-between; gap:.75rem; margin-bottom:.45rem; color:var(--cd-muted); font-size:.78rem; }
+.professor-chat-meta strong { color:var(--cd-text); font-size:.82rem; }
+.professor-chat-body { color:var(--cd-text); white-space:pre-wrap; line-height:1.5; }
 @media (max-width:800px) { .st-key-professor_header { padding:1rem .75rem .8rem; } .st-key-professor_header [data-testid="stRadio"] { justify-content:flex-start; max-width:100%; overflow-x:auto; } .st-key-professor_header [role="radiogroup"] { min-width:max-content; } .st-key-professor_header label { white-space:nowrap; } .professor-account { justify-content:flex-start; } .professor-bar-row { grid-template-columns:minmax(6.4rem,1fr) minmax(4rem,1.4fr) minmax(6.8rem,auto); } .st-key-professor_students_workspace [data-testid="stHorizontalBlock"] { display:block; } .st-key-professor_students_workspace [data-testid="stColumn"] { width:100% !important; min-width:0 !important; } }
+@media (max-width:700px) {
+  .st-key-professor_students_workspace:has([class*="st-key-professor_student_card_"] button[kind="primary"]) [data-testid="stColumn"]:first-child,
+  .st-key-professor_students_workspace[data-professor-mobile-detail="true"] [data-testid="stColumn"]:first-child {
+    display:none;
+  }
+  .st-key-professor_transcript_scroll { max-height:52vh; }
+}
 
 /* Research review is intentionally workbench-like: queue, transcript, validation. */
 .st-key-research_workspace {

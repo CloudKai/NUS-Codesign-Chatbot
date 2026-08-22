@@ -121,6 +121,17 @@ def public_source(source: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def professor_public_source(source: dict[str, Any]) -> dict[str, Any]:
+    """Return a source record safe for lecturer read-only workspace views.
+
+    Lecturer APIs must not expose extracted text, storage keys, or filesystem
+    paths. File bytes are served only from the dedicated source endpoint.
+    """
+    payload = public_source(source)
+    payload.pop("extracted_text", None)
+    return payload
+
+
 def public_thread(thread: dict[str, Any]) -> dict[str, Any]:
     """Return a notebook record for API/UI consumers."""
     return dict(thread)

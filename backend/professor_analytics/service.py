@@ -14,7 +14,12 @@ from .models import (
     ConversationTranscriptResponse,
     CriticalThinkingResponse,
     EngagementResponse,
+    NotebookWorkspaceResponse,
     OverviewResponse,
+    ProfessorLearningState,
+    ProfessorNotebookSummary,
+    ProfessorSourceSummary,
+    ProfessorWorkspaceTranscript,
     ScoreValue,
     StageDistributionItem,
     StudentDetailResponse,
@@ -151,7 +156,12 @@ class ProfessorAnalyticsService:
         max_score: float | None = None,
     ) -> StudentsResponse:
         """Return a searchable/filterable roster without message contents."""
-        rows = [self._student_item(value) for value in self._build_students(self._repository.load_class_rows()).values()]
+        rows = [
+            self._student_item(value)
+            for value in self._build_students_from_roster(
+                self._repository.load_student_roster()
+            ).values()
+        ]
         needle = search.strip().lower()
         selected_stage = stage.strip().lower() if stage else ""
         filtered = [
@@ -254,6 +264,251 @@ class ProfessorAnalyticsService:
                 for message in notebook["messages"]
             ],
         )
+
+    def notebook_workspace(
+        self, student_id: str, notebook_id: str
+    ) -> NotebookWorkspaceResponse | None:
+        """Return one authorised read-only notebook workspace for lecturers."""
+        if not self._repository.notebook_owned(student_id, notebook_id):
+            return None
+        store = self._repository.student_store(student_id)
+        if store is None:
+            return None
+        thread = store.get_thread(notebook_id)
+        if thread is None:
+            return None
+
+        from backend.learning.hmw import hmw_scaffold_projection
+        from backend.learning.journey import learning_review
+        from backend.settings import settings
+        from backend.sources.library import list_visible_sources
+        from backend.specialists.review_orchestration import DEEP_REVIEW_SNAPSHOT_KEY
+        from backend.student_journey import DEFAULT_STAGE, normalize_journey
+
+        messages = store.get_messages(notebook_id)
+        transcript_messages = self._project_transcript_messages(notebook_id, messages)
+        metadata = dict(thread.get("metadata") or {})
+        journey = normalize_journey(metadata.get("learning_journey"))
+        snapshot = metadata.get(DEEP_REVIEW_SNAPSHOT_KEY)
+        last_active = None
+        for message in reversed(messages):
+            if str(message.get("role") or "") == "user" and not message.get("is_error"):
+                last_active = message.get("created_at")
+                break
+        sources = [
+            self._professor_source_summary(source)
+            for source in list_visible_sources(
+                store,
+                notebook_id,
+                include_extracted_text=False,
+            )
+        ]
+        title = str(thread.get("title") or "Untitled notebook")
+        stage = _label(str(thread.get("current_stage") or ""))
+        return NotebookWorkspaceResponse(
+            notebook=ProfessorNotebookSummary(
+                id=notebook_id,
+                title=title,
+                current_stage=stage,
+                last_active=last_active,
+            ),
+            transcript=ProfessorWorkspaceTranscript(messages=transcript_messages),
+            sources=sources,
+            learning=ProfessorLearningState(
+                journey=journey,
+                hmw_scaffold=hmw_scaffold_projection(
+                    str(journey.get("current_stage") or DEFAULT_STAGE),
+                    messages,
+                    enabled=settings.hmw_scaffold_enabled,
+                ),
+                review=learning_review(
+                    messages,
+                    journey,
+                    detail=journey.get("response_detail"),
+                    deep_review_snapshot=snapshot
+                    if isinstance(snapshot, dict)
+                    else None,
+                ),
+            ),
+        )
+
+    @staticmethod
+    def _professor_source_summary(source: dict[str, Any]) -> ProfessorSourceSummary:
+        """Project one visible source into the lecturer allow-listed summary."""
+        from backend.source_library import is_locked_course_source
+
+        metadata = source.get("metadata") or {}
+        group = str(metadata.get("course_material_group") or "").strip() or None
+        if group is None and not is_locked_course_source(source):
+            group = "My Sources"
+        has_file = bool(
+            source.get("path")
+            or source.get("object_key")
+            or metadata.get("local_path")
+            or metadata.get("shared_course_object")
+        )
+        return ProfessorSourceSummary(
+            id=str(source.get("id") or ""),
+            title=str(source.get("title") or "Source"),
+            kind=str(source.get("kind") or "file") or None,
+            mime=str(source.get("mime") or source.get("content_type") or "") or None,
+            size=max(0, int(source.get("size") or source.get("byte_size") or 0)),
+            group=group,
+            selected=bool(source.get("selected")),
+            origin=str(metadata.get("origin") or "").strip() or None,
+            locked=is_locked_course_source(source),
+            has_file=has_file,
+        )
+
+    def _project_transcript_messages(
+        self, notebook_id: str, messages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Build professor-safe transcript rows from one active message list."""
+        citation_ids = [
+            str(source_id)
+            for message in messages
+            for source_id in self._message_citation_ids(message)
+        ]
+        authorized_citations = self._repository.authorized_citation_ids(
+            notebook_id, citation_ids
+        )
+        projected: list[dict[str, Any]] = []
+        for message in messages:
+            metadata = message.get("metadata") or {}
+            attachments = [
+                {
+                    "id": str(item.get("id") or ""),
+                    "title": str(item.get("title") or "Attachment"),
+                    "mime": str(item.get("mime") or "application/octet-stream"),
+                    "kind": str(item.get("kind") or "file"),
+                    "size": max(0, int(item.get("size") or 0)),
+                }
+                for item in metadata.get("attachments", [])
+                if isinstance(item, dict) and str(item.get("id") or "").strip()
+            ]
+            citations = [
+                citation
+                for citation in self._message_citations(message)
+                if str(citation.get("id")) in authorized_citations
+            ]
+            projected.append(
+                {
+                    "id": str(message.get("id") or ""),
+                    "role": str(message.get("role") or ""),
+                    "content": str(message.get("content") or ""),
+                    "created_at": message.get("created_at"),
+                    "attachments": attachments,
+                    "citations": citations,
+                }
+            )
+        return projected
+
+    @staticmethod
+    def _message_citation_ids(message: dict[str, Any]) -> list[str]:
+        """Return citation ids from one persisted message metadata blob."""
+        metadata = message.get("metadata") or {}
+        raw_refs = metadata.get("source_refs") or metadata.get("cited_source_ids") or []
+        ids: list[str] = []
+        if not isinstance(raw_refs, list):
+            return ids
+        for raw_citation in raw_refs:
+            if isinstance(raw_citation, dict):
+                citation_id = str(
+                    raw_citation.get("id")
+                    or raw_citation.get("source_id")
+                    or raw_citation.get("sourceId")
+                    or ""
+                ).strip()
+            else:
+                citation_id = str(raw_citation or "").strip()
+            if citation_id:
+                ids.append(citation_id)
+        return ids
+
+    @staticmethod
+    def _message_citations(message: dict[str, Any]) -> list[dict[str, str]]:
+        """Return citation descriptors from one persisted message metadata blob."""
+        metadata = message.get("metadata") or {}
+        raw_refs = metadata.get("source_refs") or metadata.get("cited_source_ids") or []
+        citations: list[dict[str, str]] = []
+        if not isinstance(raw_refs, list):
+            return citations
+        for raw_citation in raw_refs:
+            if isinstance(raw_citation, dict):
+                citation_id = str(
+                    raw_citation.get("id")
+                    or raw_citation.get("source_id")
+                    or raw_citation.get("sourceId")
+                    or ""
+                ).strip()
+                label = str(raw_citation.get("label") or "").strip()
+                title = str(
+                    raw_citation.get("title")
+                    or raw_citation.get("source_title")
+                    or raw_citation.get("sourceTitle")
+                    or ""
+                ).strip()
+            else:
+                citation_id = str(raw_citation or "").strip()
+                label = ""
+                title = ""
+            if not citation_id:
+                continue
+            citations.append(
+                {
+                    "id": citation_id,
+                    **({"label": label} if label else {}),
+                    **({"title": title} if title else {}),
+                }
+            )
+        return citations
+
+    def _build_students_from_roster(
+        self, rows: list[dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        """Convert compact roster rows into the internal student aggregate shape."""
+        students: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            user_id = str(row["user_id"])
+            progress = self._json(row.get("progress_text"))
+            completed = progress.get("completed_stages") if isinstance(progress, dict) else []
+            if not isinstance(completed, list):
+                completed = []
+            stage = str(row.get("current_stage") or "").lower() or None
+            assessment = self._json(row.get("latest_assessment_text"))
+            dimensions: dict[str, float] = {}
+            overall: float | None = None
+            if assessment:
+                raw_scores = assessment.get("facione_scores")
+                dimensions = {
+                    key: self._dimension_score(raw_scores, key) for key, _ in DIMENSIONS
+                }
+                valid = [score for score in dimensions.values() if score > 0]
+                overall = round(sum(valid) / len(valid), 2) if valid else None
+            last_activity = row.get("last_activity")
+            active_days_count = int(row.get("active_days") or 0)
+            students[user_id] = {
+                "id": user_id,
+                "name": str(row.get("display_name") or "Student"),
+                "email": row.get("email"),
+                "created_at": row.get("user_created_at"),
+                "stage": stage,
+                "completed_stages": [
+                    str(item).lower() for item in completed if str(item).lower() in STAGES
+                ],
+                "primary_student_messages": int(row.get("primary_student_messages") or 0),
+                "student_messages": int(row.get("student_messages") or 0),
+                "active_days_count": active_days_count,
+                "active_days": set(),
+                "last_activity": last_activity,
+                "latest_assessment": (
+                    {"dimensions": dimensions, "overall": overall} if assessment else None
+                ),
+                "overall": overall,
+                "notebooks": {},
+                "assessments": [],
+            }
+        return students
 
     def _build_benchmark_students(
         self, rows: list[dict[str, Any]]
@@ -644,7 +899,21 @@ class ProfessorAnalyticsService:
         return signals
 
     def _student_item(self, value: dict[str, Any]) -> StudentListItem:
-        return StudentListItem(id=value["id"], name=value["name"], email=value["email"], current_stage=_label(value["stage"]), stage_progress=len(value["completed_stages"]), facione_overall=value["overall"], student_messages=value["student_messages"], active_days=len(value["active_days"]), last_active=value["last_activity"], needs_attention=self._attention(value))
+        active_days = value.get("active_days_count")
+        if active_days is None:
+            active_days = len(value.get("active_days") or [])
+        return StudentListItem(
+            id=value["id"],
+            name=value["name"],
+            email=value["email"],
+            current_stage=_label(value["stage"]),
+            stage_progress=len(value["completed_stages"]),
+            facione_overall=value["overall"],
+            student_messages=value["student_messages"],
+            active_days=int(active_days),
+            last_active=value["last_activity"],
+            needs_attention=self._attention(value),
+        )
 
     def _dimension_profile(self, values: Iterable[dict[str, Any]]) -> dict[str, ScoreValue]:
         result: dict[str, list[float]] = {label: [] for _, label in DIMENSIONS}

@@ -76,6 +76,27 @@ def _seed_student_activity(store: StudentStore, *, sub: str, now: datetime, mess
     return str(profile["id"])
 
 
+_FORBIDDEN_WORKSPACE_KEYS = frozenset({
+    "extractedText",
+    "extracted_text",
+    "path",
+    "object_key",
+    "local_path",
+    "extracted_text_key",
+})
+
+
+def _assert_no_forbidden_workspace_fields(value: object, *, path: str = "workspace") -> None:
+    """Recursively reject data-minimization leaks in professor workspace JSON."""
+    if isinstance(value, dict):
+        for key, child in value.items():
+            assert key not in _FORBIDDEN_WORKSPACE_KEYS, f"{path}.{key}"
+            _assert_no_forbidden_workspace_fields(child, path=f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _assert_no_forbidden_workspace_fields(child, path=f"{path}[{index}]")
+
+
 def _setup(tmp_path):
     db = tmp_path / "analytics.sqlite3"
     bootstrap = StudentStore(db, identifier="local-student")
@@ -463,3 +484,269 @@ def test_professor_attachment_route_requires_message_association(tmp_path, monke
         f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/attachments/not-related",
         cookies=cookies,
     ).status_code == 404
+
+
+def test_professor_workspace_returns_read_only_payload(tmp_path, monkeypatch):
+    """Workspace bundles transcript, library sources, and learning projections."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    library_source = WorkspaceService(student_store).upload_sources(
+        notebook_id, [("lecture.txt", b"Evidence", "text/plain")]
+    )[0]
+    attachment = WorkspaceService(student_store).upload_attachments(
+        notebook_id, [("private.txt", b"private", "text/plain")]
+    )[0]
+    student_store.add_message(
+        notebook_id,
+        "user",
+        "Attached.",
+        metadata={"attachments": [attachment]},
+    )
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    token = oidc.add("prof")
+    cookies = {settings.cognito_id_token_cookie_name: token}
+    response = client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/workspace",
+        cookies=cookies,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["notebook"]["id"] == notebook_id
+    assert payload["transcript"]["messages"]
+    source_ids = {item["id"] for item in payload["sources"]}
+    assert library_source["id"] in source_ids
+    assert attachment["id"] not in source_ids
+    for source in payload["sources"]:
+        assert set(source) <= {
+            "id",
+            "title",
+            "kind",
+            "mime",
+            "size",
+            "group",
+            "selected",
+            "origin",
+            "locked",
+            "has_file",
+        }
+    assert "journey" in payload["learning"]
+    assert "hmw_scaffold" in payload["learning"]
+    assert "review" in payload["learning"]
+    _assert_no_forbidden_workspace_fields(payload)
+    with bootstrap._connect() as connection:  # noqa: SLF001
+        audit = connection.execute(
+            "SELECT action FROM research_access_events ORDER BY created_at DESC, id DESC LIMIT 1"
+        ).fetchone()
+    assert audit["action"] == "professor.workspace"
+
+
+def test_professor_workspace_enforces_ownership_and_role(tmp_path, monkeypatch):
+    """Workspace and library source routes reject cross-student and student callers."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    library_source = WorkspaceService(student_store).upload_sources(
+        notebook_id, [("lecture.txt", b"Evidence", "text/plain")]
+    )[0]
+    other_student_id = _seed_student_activity(
+        bootstrap, sub="student-b", now=datetime.now(timezone.utc), messages=1
+    )
+    other_notebook_id = StudentStore(
+        Path(bootstrap.path), identifier="cognito:student-b"
+    ).list_threads()[0]["id"]
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    professor_token = oidc.add("prof")
+    student_token = oidc.add("student-a")
+    professor_cookies = {settings.cognito_id_token_cookie_name: professor_token}
+    student_cookies = {settings.cognito_id_token_cookie_name: student_token}
+    workspace_url = (
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/workspace"
+    )
+    source_url = (
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}"
+        f"/sources/{library_source['id']}"
+    )
+    assert client.get(workspace_url, cookies=student_cookies).status_code == 403
+    assert client.get(source_url, cookies=student_cookies).status_code == 403
+    assert client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{other_notebook_id}/workspace",
+        cookies=professor_cookies,
+    ).status_code == 404
+    assert client.get(
+        f"/api/v1/professor/students/{other_student_id}/conversations/{notebook_id}/workspace",
+        cookies=professor_cookies,
+    ).status_code == 404
+    source_response = client.get(source_url, cookies=professor_cookies)
+    assert source_response.status_code == 200
+    assert source_response.content
+    attachment = WorkspaceService(student_store).upload_attachments(
+        notebook_id, [("private.txt", b"private", "text/plain")]
+    )[0]
+    assert client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/sources/{attachment['id']}",
+        cookies=professor_cookies,
+    ).status_code == 404
+
+
+def test_student_roster_projection_is_one_row_per_student(tmp_path):
+    """Roster SQL returns compact student aggregates without message bodies."""
+    bootstrap, _professor, student_id, _oidc = _setup(tmp_path)
+    rows = ProfessorAnalyticsRepository(bootstrap).load_student_roster()
+    assert rows
+    for row in rows:
+        assert "message_content" not in row
+        assert "messages" not in row
+    assert sum(1 for row in rows if str(row["user_id"]) == student_id) == 1
+    service_rows = ProfessorAnalyticsService(
+        ProfessorAnalyticsRepository(bootstrap)
+    ).students().students
+    assert len(service_rows) == len(rows)
+
+
+def test_professor_workspace_chat_reflects_active_branch_revision(tmp_path, monkeypatch):
+    """Workspace chat includes revised user turns and drops superseded suffixes."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    original = student_store.get_messages(notebook_id)[0]
+    student_store.revise_conversation_from_user_message(
+        notebook_id, original["id"], "Revised workspace thought"
+    )
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    payload = client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/workspace",
+        cookies=cookies,
+    ).json()
+    contents = [message["content"] for message in payload["transcript"]["messages"]]
+    assert "Revised workspace thought" in contents
+    assert original["content"] not in contents
+
+
+def test_professor_library_source_rejects_other_notebook_scope(tmp_path, monkeypatch):
+    """A library source uploaded to notebook B cannot be read via notebook A."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_a = student_store.list_threads()[0]["id"]
+    notebook_b = student_store.create_thread(
+        name="Notebook B", model_id="mock", support_mode="critical-thinking"
+    )
+    library_source = WorkspaceService(student_store).upload_sources(
+        notebook_b, [("other.txt", b"scoped", "text/plain")]
+    )[0]
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    assert client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_a}"
+        f"/sources/{library_source['id']}",
+        cookies=cookies,
+    ).status_code == 404
+
+
+def test_professor_attachment_route_rejects_superseded_only_association(tmp_path, monkeypatch):
+    """Attachments referenced only on superseded turns stay unavailable."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    attachment = WorkspaceService(student_store).upload_attachments(
+        notebook_id, [("private.txt", b"private", "text/plain")]
+    )[0]
+    student_store.add_message(
+        notebook_id,
+        "user",
+        "Attached on superseded turn.",
+        metadata={"attachments": [attachment]},
+    )
+    original = student_store.get_messages(notebook_id)[0]
+    student_store.revise_conversation_from_user_message(
+        notebook_id, original["id"], "Revision without attachment"
+    )
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    assert client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}"
+        f"/attachments/{attachment['id']}",
+        cookies=cookies,
+    ).status_code == 404
+
+
+def test_professor_workspace_includes_virtual_course_source(tmp_path, monkeypatch):
+    """Virtual course sources appear in workspace lists and can be opened."""
+    from backend.source_library import virtual_course_source_id
+
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    object_key = "course/lectureNotes/week1.pdf"
+    virtual_id = virtual_course_source_id(object_key)
+    virtual_source = {
+        "id": virtual_id,
+        "title": "Week 1 lecture",
+        "kind": "file",
+        "mime": "application/pdf",
+        "size": 1200,
+        "selected": True,
+        "path": "/secret/local.pdf",
+        "extractedText": "secret",
+        "metadata": {
+            "virtual_course_source": True,
+            "course_material_group": "Lecture Notes",
+            "shared_course_object": True,
+            "origin": "lecture_notes_folder",
+            "locked_source": True,
+            "object_key": object_key,
+        },
+    }
+
+    uploaded = WorkspaceService(student_store).upload_sources(
+        notebook_id, [("lecture.txt", b"Evidence", "text/plain")]
+    )
+    library_sources = uploaded
+
+    def _visible_sources(_store, _notebook_id, *, include_extracted_text=False):
+        return [*library_sources, virtual_source]
+
+    monkeypatch.setattr(
+        "backend.sources.library.list_visible_sources",
+        _visible_sources,
+    )
+    monkeypatch.setattr(
+        "backend.professor_analytics.repository.get_visible_source",
+        lambda _store, _notebook_id, source_id, **kwargs: virtual_source
+        if source_id == virtual_id
+        else next((item for item in library_sources if item["id"] == source_id), None),
+    )
+
+    def _read_bytes(source):
+        if str(source.get("id")) == virtual_id:
+            return b"virtual-bytes"
+        from backend.source_library import read_source_bytes as original_read
+
+        return original_read(source)
+
+    monkeypatch.setattr("backend.http.app.read_source_bytes", _read_bytes)
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    workspace = client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/workspace",
+        cookies=cookies,
+    )
+    assert workspace.status_code == 200
+    payload = workspace.json()
+    virtual = next(item for item in payload["sources"] if item["id"] == virtual_id)
+    assert virtual["group"] == "Lecture Notes"
+    assert virtual["locked"] is True
+    _assert_no_forbidden_workspace_fields(payload)
+    source_response = client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/sources/{virtual_id}",
+        cookies=cookies,
+    )
+    assert source_response.status_code == 200
+    assert source_response.content == b"virtual-bytes"
