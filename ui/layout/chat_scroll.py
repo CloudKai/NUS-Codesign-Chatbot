@@ -6,7 +6,6 @@ zero-height helper that:
 - treats ``.st-key-chat_feed`` as the chat scrollport (with panel/log
   selectors retained as compatibility fallbacks for older markup)
 - snaps once on Send by assigning ``scrollTop`` (no smooth animation)
-- ignores smooth ``scrollIntoView`` / ``scrollTo`` inside the chat panel
 - stops following if the student scrolls away from the bottom
 - does not poll, observe the whole app, or chase Thinking height changes
 
@@ -57,7 +56,6 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     if (!win.__cdChatScroll) {
       win.__cdChatScroll = {
         follow: true,
-        interceptInstalled: false,
         listenersInstalled: false,
       };
     }
@@ -75,43 +73,6 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
   function snapToBottom(root) {
     if (!root) return;
     root.scrollTop = root.scrollHeight - root.clientHeight;
-  }
-
-  function inChat(node) {
-    return !!(
-      node &&
-      node.closest &&
-      node.closest(
-        ".st-key-chat_panel, .st-key-chat_feed, .st-key-chat_transcript, .st-key-chat_log, .st-key-chat_inflight, .st-key-chat_composer"
-      )
-    );
-  }
-
-  function installIntercept() {
-    const current = state();
-    if (current.interceptInstalled) return;
-    current.interceptInstalled = true;
-    const nativeIntoView = win.Element.prototype.scrollIntoView;
-    win.Element.prototype.scrollIntoView = function (arg) {
-      if (inChat(this)) {
-        const behavior =
-          arg && typeof arg === "object" ? arg.behavior : undefined;
-        if (behavior === "smooth") return;
-        return;
-      }
-      return nativeIntoView.apply(this, arguments);
-    };
-    const nativeScrollTo = win.Element.prototype.scrollTo;
-    if (typeof nativeScrollTo === "function") {
-      win.Element.prototype.scrollTo = function (arg0, arg1) {
-        if (this === scrollRoot() || inChat(this)) {
-          const behavior =
-            arg0 && typeof arg0 === "object" ? arg0.behavior : undefined;
-          if (behavior === "smooth") return;
-        }
-        return nativeScrollTo.apply(this, arguments);
-      };
-    }
   }
 
   function markUserScroll(event) {
@@ -139,7 +100,6 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     });
   }
 
-  installIntercept();
   installListeners();
   const root = scrollRoot();
   if (!root) return;

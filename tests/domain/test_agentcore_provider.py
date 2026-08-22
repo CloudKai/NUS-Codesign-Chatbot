@@ -122,7 +122,9 @@ def _output(
         "citations": [
             item.model_dump(mode="json") for item in (citations or [])
         ],
+        "hmw_scaffold_ready": False,
         "needs_source_retrieval": False,
+        "out_of_scope": False,
     }
     return dumped
 

@@ -30,7 +30,9 @@ def _output(*, recommendation: StageDecision = StageDecision.STAY) -> dict[str, 
         "citations": [
             {"source_id": "s1", "label": "S1", "title": "Notes", "excerpt": ""}
         ],
+        "hmw_scaffold_ready": False,
         "needs_source_retrieval": False,
+        "out_of_scope": False,
     }
 
 

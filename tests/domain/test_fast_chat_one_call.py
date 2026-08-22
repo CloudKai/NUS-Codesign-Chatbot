@@ -61,7 +61,9 @@ def _coaching_output(
             else "The stage readiness bar is met."
         ),
         "citations": [],
+        "hmw_scaffold_ready": False,
         "needs_source_retrieval": False,
+        "out_of_scope": False,
     }
 
 
@@ -159,6 +161,9 @@ def test_normal_qa_invokes_agentcore_once() -> None:
             "mode": "qa",
             "response_text": "Week 2 covers stakeholder mapping [S1].",
             "citations": [],
+            "hmw_scaffold_ready": False,
+            "needs_source_retrieval": False,
+            "out_of_scope": False,
         }
     )
     result = _provider(client).assess(
@@ -309,6 +314,9 @@ def test_qa_foreign_citations_are_dropped() -> None:
                     "excerpt": "secret",
                 }
             ],
+            "hmw_scaffold_ready": False,
+            "needs_source_retrieval": False,
+            "out_of_scope": False,
         }
     )
     result = _provider(client).assess(_request())
@@ -336,6 +344,9 @@ def test_qa_keeps_supplied_s1_and_drops_foreign_s9() -> None:
                     "excerpt": "secret",
                 },
             ],
+            "hmw_scaffold_ready": False,
+            "needs_source_retrieval": False,
+            "out_of_scope": False,
         }
     )
     result = _provider(client).assess(

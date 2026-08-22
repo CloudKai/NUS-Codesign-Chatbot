@@ -41,7 +41,10 @@ _VALID_OUTPUT = {
     "mode": "coaching",
     "response_text": "Which constraint is actually binding?",
     "recommendation": "stay",
+    "citations": [],
+    "hmw_scaffold_ready": False,
     "needs_source_retrieval": False,
+    "out_of_scope": False,
 }
 
 

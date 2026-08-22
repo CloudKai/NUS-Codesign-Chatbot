@@ -90,7 +90,9 @@ def _coaching_payload() -> dict[str, Any]:
         "recommendation": "stay",
         "recommendation_rationale": "More evidence is still needed.",
         "citations": [],
+        "hmw_scaffold_ready": False,
         "needs_source_retrieval": False,
+        "out_of_scope": False,
     }
 
 

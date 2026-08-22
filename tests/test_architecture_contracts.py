@@ -155,7 +155,7 @@ def test_compatibility_facade_exports_and_signatures_are_stable() -> None:
             "learning_review": "(messages: 'Iterable[dict[str, Any]]', journey: 'dict[str, Any]', *, detail: 'str | None' = None, deep_review_snapshot: 'dict[str, Any] | None' = None) -> 'dict[str, Any]'",
         },
         "backend.source_library": {
-            "add_file_sources": "(store: 'StudentStore', thread_id: 'str', uploads: 'Iterable[tuple[str, bytes, str | None]]', *, origin: 'str' = 'source_panel', extra_metadata: 'dict[str, Any] | None' = None, max_file_size_mb: 'int | None' = None, preserve_display_names: 'bool' = False, compress: 'bool' = True) -> 'list[dict[str, Any]]'",
+            "add_file_sources": "(store: 'StudentStore', thread_id: 'str', uploads: 'Iterable[tuple[str, bytes, str | None]]', *, origin: 'str' = 'source_panel', extra_metadata: 'dict[str, Any] | None' = None, max_file_size_mb: 'int | None' = None, preserve_display_names: 'bool' = False, compress: 'bool' = True, selected: 'bool' = True) -> 'list[dict[str, Any]]'",
             "selected_source_context": "(sources: 'Iterable[dict[str, Any]]', *, limit: 'int' = 160000) -> 'tuple[str, list[dict[str, Any]]]'",
             "image_inputs_for_source_ids": "(store: 'StudentStore', thread_id: 'str', source_ids: 'Iterable[str]') -> 'list[dict[str, str]]'",
         },

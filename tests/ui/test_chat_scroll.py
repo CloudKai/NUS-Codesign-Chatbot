@@ -13,7 +13,9 @@ def test_chat_scroll_helper_uses_near_bottom_gating() -> None:
     assert "NEAR_BOTTOM_PX = 120" in helper
     assert NEAR_BOTTOM_PX == 120
     assert 'querySelector(".st-key-chat_log")' in helper
-    assert 'behavior === "smooth"' in helper
+    assert "Element.prototype" not in helper
+    assert "scrollIntoView" not in helper
+    assert "scrollTo(" not in helper
     assert "state().follow = false" in helper
     assert 'MODE === "send"' in helper
     assert 'MODE === "settle"' in helper

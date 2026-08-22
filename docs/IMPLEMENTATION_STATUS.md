@@ -2,10 +2,26 @@
 
 ## CURRENT STATUS
 
-**Branch:** `Integrate-Bedrock-v2`
-**Git HEAD:** `091235c` (working-tree HMW completion fix is uncommitted).
-**Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
-**Live AgentCore:** DEFAULT → **v29 READY** (`lastUpdated` 2026-08-21T17:36:01Z).
+### Current authority / release state (2026-08-22)
+
+**Source code HEAD:** `aa6e076` (the source revision this release-hardening
+work targets).
+**EC2 application image:** `cde2300-chatbot:ddfc3f4` (source/image status is
+unchanged; no EC2 rebuild or deployment was performed here).
+**AgentCore runtime:** last verified live mapping was DEFAULT → v29 READY
+(2026-08-21). This pass could not re-read AWS: local SSO is expired
+(`aws login` required). No AgentCore publish or runtime change was made.
+**Guardrail:** tracked configuration is Guardrail v4; live AWS Guardrail
+status is likewise unverified because the expired SSO session prevented a
+read-back.
+**Affinity generation:** tracked generation `7`; this change does not bump it.
+
+These are distinct authorities: source HEAD identifies application code, the
+EC2 image identifies the deployed FastAPI/Streamlit artifact, AgentCore
+runtime identifies the generation-only model service, Guardrail identifies its
+runtime safety configuration, and affinity generation identifies the
+application/runtime session compatibility value. Historical entries below
+retain their original release observations.
 
 ### Lecturer dashboard progressive disclosure (2026-08-22)
 
@@ -45,6 +61,36 @@ republish and generation bump are not required.
 and smoke-test lecturer auth, one selected student/notebook, and one
 attachment. No AgentCore publish or generation bump is required for this
 dashboard change.
+
+### Release hardening pass (2026-08-22)
+
+**Change.** Fixed idempotency replay to prefer the durable marker ``turn`` dict
+over slim message reconstruction in ``claim_coach_request``, and to stamp that
+exact turn onto the pending marker in the same ``persist_coach_turn``
+transaction so same-key waiters cannot observe a slim reconstruction in the
+persist-before-complete window. Fast Chat wire adaptation now requires
+``citations``, ``hmw_scaffold_ready``, ``needs_source_retrieval``, and
+``out_of_scope`` on slim ``mode`` payloads that do not carry a nested
+``assessment``; legacy synthesis paths still fill those keys explicitly.
+Internal ``FastChatTurnOutput`` constructors keep Python defaults. Stale tests
+updated for Q&A retrieval evidence-gap success, compatibility-façade
+``selected`` signature, and revise persist-before-complete durable-field replay.
+
+**Validation.** Required idempotency/concurrency/rate-limit/critical-path,
+focused modules (idempotency, rate limit, coach concurrency, fast chat schema,
+coach turn perf, architecture contracts), Ruff, compileall, and ``git diff
+--check`` pass. Concurrency/idempotency tests pass 5/5 individually. Full
+suite still has unrelated pre-existing failures in dirty WIP areas (source
+hydration, student chunk security, delete idempotency); one concurrent
+idempotency test can flake when run in the full suite but passes in isolation.
+
+**Compatibility / risk.** No schema migration, AWS mutation, AgentCore publish,
+``AGENTCORE_SESSION_GENERATION`` bump, or compose generation/guardrail change.
+Source HEAD remains ``aa6e076``; compose.prod generation ``7`` / Guardrail v4
+unchanged. Lecturer analytics SQL was not changed (would require rewriting
+``_build_students``).
+
+**Next exact action.** Parent review of this hardening pass before pilot.
 
 ### Private attachment relevance, scroll, and edit rendering (2026-08-22)
 

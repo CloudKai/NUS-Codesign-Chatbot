@@ -92,7 +92,9 @@ def _qa_payload(*, text: str = "Week 1 covers stakeholder mapping [S1].") -> dic
         "mode": "qa",
         "response_text": text,
         "citations": [],
+        "hmw_scaffold_ready": False,
         "needs_source_retrieval": False,
+        "out_of_scope": False,
     }
 
 
@@ -112,7 +114,9 @@ def _coaching_payload(
             else "The stage readiness bar is met."
         ),
         "citations": [],
+        "hmw_scaffold_ready": False,
         "needs_source_retrieval": False,
+        "out_of_scope": False,
     }
 
 
@@ -334,6 +338,26 @@ def test_private_attachment_questions_scope_retrieval_to_attachment(
     assert is_private_attachment_question(message, attachment_count=1) is True
 
 
+@pytest.mark.parametrize(
+    "message",
+    (
+        "Can you outline the attached file",
+        "Could you extract the key points from this PDF",
+        "Please list the main claims in the upload",
+        "Identify the assumptions in the document",
+        "Review this attachment",
+        "Analyze the image",
+        "Summarize the attached file",
+        "Outline this",
+    ),
+)
+def test_private_attachment_file_action_phrasings_are_scoped(
+    message: str,
+) -> None:
+    """Common polite and imperative file requests use current attachment evidence."""
+    assert is_private_attachment_question(message, attachment_count=1) is True
+
+
 def test_private_attachment_course_comparison_keeps_combined_retrieval() -> None:
     """Explicit course comparisons retain normal attachment + course RAG."""
     assert (
@@ -347,13 +371,12 @@ def test_private_attachment_course_comparison_keeps_combined_retrieval() -> None
 
 def test_private_attachment_project_reasoning_is_not_forced_to_attachment_rag() -> None:
     """Ordinary project coaching remains on its existing path."""
-    assert (
-        is_private_attachment_question(
-            "Would this idea solve the problem?",
-            attachment_count=1,
-        )
-        is False
-    )
+    for message in (
+        "Would this idea solve the problem?",
+        "Analyze my idea and tell me whether it solves the problem",
+        "Please review our concept before I submit it",
+    ):
+        assert is_private_attachment_question(message, attachment_count=1) is False
 
 
 def test_personal_reflection_phrased_as_a_question_is_not_qa() -> None:

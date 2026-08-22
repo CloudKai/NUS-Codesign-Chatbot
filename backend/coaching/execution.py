@@ -22,6 +22,7 @@ from backend.coaching.deep_review_context import (
 )
 from backend.coaching.mode_policy import (
     is_private_attachment_question,
+    looks_like_information_request,
     qa_evidence_gap_turn,
     resolve_mode_policy,
     should_author_qa_evidence_gap,
@@ -1200,6 +1201,9 @@ class CoachApplicationService:
             idempotency_key=prepared_request.idempotency_key,
             idempotency_lease_token=idempotency_lease_token,
             idempotency_fingerprint=idempotency_fingerprint,
+            idempotency_turn_payload=(
+                turn.model_dump(mode="json") if idempotency_marker_id else None
+            ),
             research_observation=research_observation,
             auto_advance=auto_advance,
             review_counter_qualifying=bool(
@@ -1691,6 +1695,25 @@ class CoachApplicationService:
             CoachImageInput.model_validate(item)
             for item in image_inputs_for_sources(selected_image_sources)
         ]
+        resolved_image_ids = {str(item.source_id) for item in image_inputs}
+        unresolved_image_ids = {
+            str(source.get("id") or "")
+            for source in selected_image_sources
+            if str(source.get("id") or "") not in resolved_image_ids
+        }
+        if unresolved_image_ids:
+            # An image row with missing bytes is not evidence. Keep the
+            # authoritative source ids for validation/citation ordering, but
+            # remove unresolved image rows from the retrieval snapshot so the
+            # generic image marker cannot satisfy a Q&A turn.
+            snapshot = replace(
+                snapshot,
+                selected_sources=tuple(
+                    source
+                    for source in snapshot.selected_sources
+                    if str(source.get("id") or "") not in unresolved_image_ids
+                ),
+            )
         selected_model = get_model(
             str(metadata.get("selected_model") or request.model_id or DEFAULT_CHAT_MODEL_ID)
         )
@@ -1720,6 +1743,30 @@ class CoachApplicationService:
             request.student_message,
             attachment_count=len(attachment_ids),
         )
+        if attachment_only_question:
+            # Keep the request-scoped snapshot itself attachment-only.  The
+            # first retrieval pass and the later needs_source_retrieval
+            # fallback both hydrate from this snapshot; filtering only a local
+            # tuple here would let fallback reintroduce selected course rows.
+            attachment_id_set = set(attachment_ids)
+            snapshot = replace(
+                snapshot,
+                selected_sources=tuple(
+                    source
+                    for source in snapshot.selected_sources
+                    if str(source.get("id") or "") in attachment_id_set
+                ),
+                retrieval_sources=tuple(
+                    source
+                    for source in snapshot.retrieval_sources
+                    if source.source_id in attachment_id_set
+                ),
+            )
+        missing_image_qa = bool(selected_image_sources) and (
+            len(selected_image_sources) == len(selected_sources)
+            and not image_inputs
+            and looks_like_information_request(request.student_message)
+        )
         needs_retrieval = bool(mode_policy.retrieve)
         # A question about the current private attachment must use that
         # turn-scoped evidence first.  Keep the normal one-call model decision
@@ -1737,14 +1784,26 @@ class CoachApplicationService:
         retrieval_result_context = ""
         if needs_retrieval:
             snapshot = self._hydrate_retrieval_sources(snapshot)
-        retrieval_sources = snapshot.retrieval_sources
+        if unresolved_image_ids and snapshot.retrieval_sources:
+            snapshot = replace(
+                snapshot,
+                retrieval_sources=tuple(
+                    source
+                    for source in snapshot.retrieval_sources
+                    if source.source_id not in unresolved_image_ids
+                ),
+            )
         if attachment_only_question:
             attachment_id_set = set(attachment_ids)
-            retrieval_sources = tuple(
-                source
-                for source in retrieval_sources
-                if source.source_id in attachment_id_set
+            snapshot = replace(
+                snapshot,
+                retrieval_sources=tuple(
+                    source
+                    for source in snapshot.retrieval_sources
+                    if source.source_id in attachment_id_set
+                ),
             )
+        retrieval_sources = snapshot.retrieval_sources
         if needs_retrieval and retrieval_sources:
             emit_coach_progress(PROGRESS_RETRIEVING)
             try:
@@ -1830,7 +1889,9 @@ class CoachApplicationService:
                 # server-owned specialist is stamped after this method.
                 "specialist": None,
                 "retrieval_required": bool(needs_retrieval),
-                "expected_response_mode": mode_policy.expected_mode,
+                "expected_response_mode": (
+                    "qa" if missing_image_qa else mode_policy.expected_mode
+                ),
                 "mode_policy_intent": mode_policy.intent,
                 COUNTER_SETTINGS_KEY: parse_coaching_turns_since_deep_review(
                     metadata.get(COUNTER_SETTINGS_KEY)

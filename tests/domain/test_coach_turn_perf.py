@@ -47,7 +47,9 @@ def _output() -> dict:
         "recommendation": "stay",
         "recommendation_rationale": "More evidence is still needed.",
         "citations": [],
+        "hmw_scaffold_ready": False,
         "needs_source_retrieval": False,
+        "out_of_scope": False,
     }
 
 
@@ -194,16 +196,16 @@ def test_retrieval_failure_still_emits_timing(caplog, tmp_path) -> None:
         ),
         retriever=_FailingRetriever(),
     )
-    with pytest.raises(Exception):
-        service.submit(
-            CoachRequest(
-                thread_id=thread_id,
-                student_message="What does the lecture say about accessibility?",
-                current_stage="problem_identification",
-                response_detail="short",
-                idempotency_key="retrieval-fail",
-            )
+    turn = service.submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="What does the lecture say about accessibility?",
+            current_stage="problem_identification",
+            response_detail="short",
+            idempotency_key="retrieval-fail",
         )
+    )
+    assert turn.response_text
     events = [
         json.loads(record.message)
         for record in caplog.records
@@ -211,9 +213,12 @@ def test_retrieval_failure_still_emits_timing(caplog, tmp_path) -> None:
     ]
     assert events
     payload = events[-1]
-    assert payload["success"] is False
+    assert payload["success"] is True
+    assert payload["failure_category"] == "unavailable"
     assert payload["retrieval_total_ms"] >= 0
-    assert payload["failure_category"]
+    assert payload["qa_evidence_gap_authored"] is True
+    assert payload["agentcore_call_count"] == 0
+    assert len(client.calls) == 0
 
 
 def test_configure_operational_loggers_enables_info_without_root_debug():

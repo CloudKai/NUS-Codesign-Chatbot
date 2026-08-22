@@ -391,6 +391,9 @@ def test_agentcore_payload_uses_fast_chat_for_week_question() -> None:
             "mode": "qa",
             "response_text": "Week 1 covers the course introduction [S1].",
             "citations": [],
+            "hmw_scaffold_ready": False,
+            "needs_source_retrieval": False,
+            "out_of_scope": False,
         }
     )
     result = _provider(client).assess(
@@ -417,7 +420,9 @@ def test_agentcore_free_text_review_stays_on_fast_chat() -> None:
             "recommendation": "stay",
             "recommendation_rationale": "Stay and name who is affected.",
             "citations": [],
+            "hmw_scaffold_ready": False,
             "needs_source_retrieval": False,
+            "out_of_scope": False,
         }
     )
     result = _provider(client).assess(

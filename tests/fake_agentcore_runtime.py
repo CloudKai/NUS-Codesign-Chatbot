@@ -123,7 +123,12 @@ def _default_deep_body(payload: dict[str, Any]) -> bytes:
 
 
 def _with_fast_chat_mode(body: bytes) -> bytes:
-    """Default missing mode so legacy coach_turn fixtures keep working."""
+    """Default missing Fast Chat wire fields so legacy fixtures keep working.
+
+    Production AgentCore output is still validated by
+    ``adapt_fast_chat_turn_payload``. This helper only completes injected
+    fake responses that omit keys the runtime schema now requires.
+    """
     try:
         parsed = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -134,14 +139,24 @@ def _with_fast_chat_mode(body: bytes) -> bytes:
     nested = parsed.get("result")
     if isinstance(nested, dict) and not parsed.get("mode"):
         target = nested
-    if target.get("mode"):
-        return body
-    if isinstance(target.get("assessment"), dict):
-        target["mode"] = "coaching"
-    elif target.get("response_text"):
-        target["mode"] = "qa"
-    else:
-        return body
+    if not target.get("mode"):
+        if isinstance(target.get("assessment"), dict):
+            target["mode"] = "coaching"
+        elif target.get("response_text"):
+            target["mode"] = "qa"
+        else:
+            return body
+    mode = str(target.get("mode") or "").strip().lower()
+    if mode not in {"qa", "coaching"}:
+        return json.dumps(parsed).encode("utf-8") if target is not parsed else body
+    if "citations" not in target:
+        target["citations"] = []
+    if "hmw_scaffold_ready" not in target:
+        target["hmw_scaffold_ready"] = False
+    if "needs_source_retrieval" not in target:
+        target["needs_source_retrieval"] = False
+    if "out_of_scope" not in target:
+        target["out_of_scope"] = False
     return json.dumps(parsed).encode("utf-8")
 
 

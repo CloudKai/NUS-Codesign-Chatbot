@@ -464,6 +464,7 @@ def test_fast_chat_payload_persists_ready_without_advancing(tmp_path: Path) -> N
         "citations": [],
         "hmw_scaffold_ready": True,
         "needs_source_retrieval": False,
+        "out_of_scope": False,
     }
     service = CoachApplicationService(
         store,
@@ -748,6 +749,7 @@ def test_guarded_advance_does_not_trigger_retrieval_retry(tmp_path: Path) -> Non
         "citations": [],
         "hmw_scaffold_ready": True,
         "needs_source_retrieval": False,
+        "out_of_scope": False,
         "recommendation": "advance",
         "recommendation_rationale": "The model incorrectly marked the stage ready.",
     }
@@ -871,6 +873,7 @@ def test_qa_hmw_question_does_not_unlock_or_advance(tmp_path: Path) -> None:
         "citations": [],
         "hmw_scaffold_ready": True,
         "needs_source_retrieval": False,
+        "out_of_scope": False,
         "recommendation": "advance",
     }
     service = CoachApplicationService(

@@ -86,7 +86,9 @@ def _output(
         "recommendation": recommendation.value,
         "recommendation_rationale": "More evidence is still needed.",
         "citations": [],
+        "hmw_scaffold_ready": False,
         "needs_source_retrieval": False,
+        "out_of_scope": False,
     }
 
 
@@ -274,6 +276,9 @@ def test_qa_does_not_call_incremental_or_deep_review() -> None:
             "mode": "qa",
             "response_text": "Week 2 covers stakeholder mapping [S1].",
             "citations": [],
+            "hmw_scaffold_ready": False,
+            "needs_source_retrieval": False,
+            "out_of_scope": False,
         }
     )
     result = _provider(client).assess(_request(student_message="What is Week 2 about?"))
@@ -491,6 +496,9 @@ def test_qa_does_not_increment_counter_and_free_text_review_is_not_deep(
             "mode": "qa",
             "response_text": "Week 2 covers mapping [S1].",
             "citations": [],
+            "hmw_scaffold_ready": False,
+            "needs_source_retrieval": False,
+            "out_of_scope": False,
         }
     )
     _service(store, qa_client).submit(

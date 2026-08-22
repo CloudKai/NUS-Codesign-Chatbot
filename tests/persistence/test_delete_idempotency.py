@@ -444,7 +444,9 @@ def _coach_service(store: StudentStore) -> CoachApplicationService:
                         "recommendation": "stay",
                         "recommendation_rationale": "More evidence is still needed.",
                         "citations": [],
+                        "hmw_scaffold_ready": False,
                         "needs_source_retrieval": False,
+                        "out_of_scope": False,
                     }
                 ),
             ),

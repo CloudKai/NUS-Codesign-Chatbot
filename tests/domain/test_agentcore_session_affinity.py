@@ -50,7 +50,9 @@ def _output(*, needs_source_retrieval: bool = False, **overrides: Any) -> dict[s
         "recommendation": "stay",
         "recommendation_rationale": "More evidence is still needed.",
         "citations": [],
+        "hmw_scaffold_ready": False,
         "needs_source_retrieval": needs_source_retrieval,
+        "out_of_scope": False,
     }
     payload.update(overrides)
     return payload

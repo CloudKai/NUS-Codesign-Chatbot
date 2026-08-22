@@ -382,15 +382,33 @@ def _legacy_coach_turn(*, recommendation: str = "stay") -> dict:
 
 def test_adapt_slim_fast_chat_payload() -> None:
     parsed = adapt_fast_chat_turn_payload(
-        {
-            "mode": "coaching",
-            "response_text": "What specifically prevents noon booking?",
-            "recommendation": "stay",
-            "schema_id": FAST_CHAT_SCHEMA_ID,
-        }
+        _schema_instance(
+            mode="coaching",
+            response_text="What specifically prevents noon booking?",
+            recommendation="stay",
+            schema_id=FAST_CHAT_SCHEMA_ID,
+        )
     )
     assert parsed.mode == "coaching"
     assert parsed.recommendation == "stay"
+
+
+def test_adapt_wire_payload_missing_required_fields_fails() -> None:
+    with pytest.raises(FastChatContractError) as raised:
+        adapt_fast_chat_turn_payload({"mode": "qa", "response_text": "Week 1."})
+    assert raised.value.reason == "slim_invalid"
+
+
+def test_adapt_full_wire_payload_passes() -> None:
+    parsed = adapt_fast_chat_turn_payload(
+        _schema_instance(
+            mode="qa",
+            response_text="Week 1 covers Innovation-driven economy [S1].",
+            citations=[{"label": "S1", "title": "Week 1"}],
+        )
+    )
+    assert parsed.mode == "qa"
+    assert parsed.citations
 
 
 def test_adapt_legacy_coach_turn_keeps_assessment_recommendation() -> None:
@@ -430,11 +448,11 @@ def test_adapt_recommendation_without_mode_fails() -> None:
 
 def test_adapt_qa_mode_ignores_nested_assessment_advance() -> None:
     parsed = adapt_fast_chat_turn_payload(
-        {
-            "mode": "qa",
-            "response_text": "The lecture names stakeholders.",
-            "assessment": _legacy_coach_turn(recommendation="advance")["assessment"],
-        }
+        _schema_instance(
+            mode="qa",
+            response_text="The lecture names stakeholders.",
+            assessment=_legacy_coach_turn(recommendation="advance")["assessment"],
+        )
     )
     assert parsed.mode == "qa"
     assert parsed.recommendation is None

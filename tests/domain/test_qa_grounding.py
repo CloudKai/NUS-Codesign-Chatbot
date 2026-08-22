@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from backend.agentcore_provider import AgentCoreCoachProvider
@@ -140,7 +141,9 @@ def test_failed_qa_does_not_use_prior_assistant_as_course_evidence(tmp_path) -> 
             "mode": "qa",
             "response_text": "Week 1 covers Innovation-driven economy [S1].",
             "citations": [],
+            "hmw_scaffold_ready": False,
             "needs_source_retrieval": False,
+            "out_of_scope": False,
         }
     )
     service = _service(store, client, retriever=_EmptyCourseRetriever())
@@ -189,7 +192,9 @@ def test_successful_qa_cites_retrieved_week_one_and_does_not_coach(tmp_path) -> 
                 "metaphor in design. [S1]"
             ),
             "citations": [{"label": "S1", "source_id": source_id}],
+            "hmw_scaffold_ready": False,
             "needs_source_retrieval": False,
+            "out_of_scope": False,
         }
     )
     service = _service(store, client, retriever=_Week1Retriever())
@@ -230,7 +235,9 @@ def test_qa_retrieval_error_fails_closed_without_agentcore_or_citation(tmp_path)
             "mode": "qa",
             "response_text": "The lecture covers ARP and DHCP. [S1]",
             "citations": [{"label": "S1"}],
+            "hmw_scaffold_ready": False,
             "needs_source_retrieval": False,
+            "out_of_scope": False,
         }
     )
     service = _service(store, client, retriever=_FailingCourseRetriever())
@@ -251,6 +258,52 @@ def test_qa_retrieval_error_fails_closed_without_agentcore_or_citation(tmp_path)
     assert "DHCP" not in turn.response_text
     assert turn.assessment.citations == []
     assert turn.assessment.recommendation is None
+
+
+def test_missing_selected_image_is_evidence_gap_without_agentcore_call(
+    tmp_path, monkeypatch
+) -> None:
+    """A selected image whose bytes vanished cannot become placeholder evidence."""
+    from backend import file_processing, source_library
+    from backend.source_library import add_file_sources
+
+    files_dir = tmp_path / "files"
+    monkeypatch.setattr(file_processing.settings, "files_dir", files_dir)
+    monkeypatch.setattr(source_library.settings, "files_dir", files_dir)
+    store = StudentStore(tmp_path / "missing-image.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    image = add_file_sources(
+        store,
+        thread_id,
+        [("diagram.png", b"not-a-real-image", "image/png")],
+    )[0]
+    Path(str(image["path"])).unlink()
+    client = FakeAgentCoreRuntime(
+        payload={
+            "mode": "qa",
+            "response_text": "The image shows a diagram.",
+            "citations": [],
+            "hmw_scaffold_ready": False,
+            "needs_source_retrieval": False,
+            "out_of_scope": False,
+        }
+    )
+    service = _service(store, client, retriever=_EmptyCourseRetriever())
+
+    turn = service.submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="What does this image show?",
+            current_stage="problem_identification",
+            response_detail="long",
+            idempotency_key="missing-image-gap",
+        )
+    )
+
+    assert client.calls == []
+    assert turn.response_text == QA_EVIDENCE_GAP_RESPONSE
+    assert turn.assessment.response_mode == "qa"
+    assert turn.assessment.citations == []
 
 
 def test_composer_empty_qa_forbids_history_as_evidence() -> None:

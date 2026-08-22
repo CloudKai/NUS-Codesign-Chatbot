@@ -290,6 +290,15 @@ def adapt_fast_chat_turn_payload(value: Any) -> FastChatTurnOutput:
                 and top_rec != nested_rec
             ):
                 raise FastChatContractError("recommendation_conflict")
+        if not has_assessment:
+            for wire_key in (
+                "citations",
+                "hmw_scaffold_ready",
+                "needs_source_retrieval",
+                "out_of_scope",
+            ):
+                if wire_key not in payload:
+                    raise FastChatContractError("slim_invalid")
         try:
             return parse_fast_chat_turn_output(payload)
         except (ValidationError, TypeError, ValueError) as error:
@@ -315,9 +324,11 @@ def adapt_fast_chat_turn_payload(value: Any) -> FastChatTurnOutput:
                         "recommendation_rationale"
                     ),
                     "citations": citations,
+                    "hmw_scaffold_ready": bool(payload.get("hmw_scaffold_ready")),
                     "needs_source_retrieval": bool(
                         payload.get("needs_source_retrieval")
                     ),
+                    "out_of_scope": bool(payload.get("out_of_scope")),
                 }
             )
     if has_assessment:
@@ -344,7 +355,9 @@ def adapt_fast_chat_turn_payload(value: Any) -> FastChatTurnOutput:
                 "recommendation": rec,
                 "recommendation_rationale": assessment.get("recommendation_rationale"),
                 "citations": citations,
+                "hmw_scaffold_ready": bool(payload.get("hmw_scaffold_ready")),
                 "needs_source_retrieval": bool(payload.get("needs_source_retrieval")),
+                "out_of_scope": bool(payload.get("out_of_scope")),
             }
         )
     text = payload.get("response_text")
@@ -363,7 +376,9 @@ def adapt_fast_chat_turn_payload(value: Any) -> FastChatTurnOutput:
             "mode": "qa",
             "response_text": text,
             "citations": citations,
+            "hmw_scaffold_ready": bool(payload.get("hmw_scaffold_ready")),
             "needs_source_retrieval": bool(payload.get("needs_source_retrieval")),
+            "out_of_scope": bool(payload.get("out_of_scope")),
         }
     )
 

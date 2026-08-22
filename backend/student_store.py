@@ -1980,6 +1980,19 @@ class StudentStore:
                 raise CoachIdempotencyConflictError(
                     "Idempotency key was already used for a different coach request"
                 )
+            completed = metadata.get("turn")
+            if isinstance(completed, dict):
+                if metadata.get("status") != "completed":
+                    metadata.update({"status": "completed"})
+                    metadata.pop("lease_token", None)
+                    metadata.pop("lease_expires_at", None)
+                    connection.execute(
+                        "UPDATE messages SET metadata_text=? WHERE id=? AND notebook_id=?",
+                        (_dump(metadata), marker_id, thread_id),
+                    )
+                return CoachRequestReservation(
+                    "completed", marker_id, turn_payload=completed
+                )
             recorded = self._recorded_coach_turn(
                 connection,
                 thread_id,
@@ -1996,11 +2009,6 @@ class StudentStore:
                 )
                 return CoachRequestReservation(
                     "completed", marker_id, turn_payload=recorded
-                )
-            completed = metadata.get("turn")
-            if metadata.get("status") == "completed" and isinstance(completed, dict):
-                return CoachRequestReservation(
-                    "completed", marker_id, turn_payload=completed
                 )
             if (
                 metadata.get("status") == "pending"
@@ -2134,6 +2142,7 @@ class StudentStore:
         idempotency_key: str | None = None,
         idempotency_lease_token: str | None = None,
         idempotency_fingerprint: str | None = None,
+        idempotency_turn_payload: dict[str, Any] | None = None,
         research_observation: ResearchObservationCreate | None = None,
         auto_advance: AtomicAutoAdvance | None = None,
         review_counter_qualifying: bool | None = None,
@@ -2160,6 +2169,11 @@ class StudentStore:
         in the UPDATE predicate so a concurrent replica cannot last-write-wins
         overwrite ``coaching_turns_since_deep_review`` (or the rest of
         settings) while ``conversation_revision`` stays unchanged.
+
+        When ``idempotency_turn_payload`` is provided, the exact completed
+        turn is written onto the pending marker in this same transaction.
+        Waiters can then replay that payload instead of reconstructing a slim
+        assessment from message rows before ``complete_coach_request``.
         """
         cleaned_user = user_content.strip()
         cleaned_assistant = assistant_content.strip()
@@ -2257,6 +2271,7 @@ class StudentStore:
                 raise ConversationRevisionConflictError(
                     "The conversation was revised before the coaching turn was saved"
                 )
+            marker_metadata: dict[str, Any] | None = None
             if idempotency_marker_id is not None:
                 marker = connection.execute(
                     "SELECT metadata_text FROM messages WHERE id=? AND notebook_id=?",
@@ -2488,6 +2503,24 @@ class StudentStore:
             if int(getattr(updated, "rowcount", 0) or 0) == 0:
                 raise ConversationRevisionConflictError(
                     "The conversation was revised before the coaching turn was saved"
+                )
+            if (
+                idempotency_marker_id is not None
+                and isinstance(marker_metadata, dict)
+                and isinstance(idempotency_turn_payload, dict)
+            ):
+                # Same transaction as the durable user/assistant rows so a
+                # waiter cannot reconstruct a slim assessment from messages
+                # before complete_coach_request stores the exact turn.
+                marker_metadata = dict(marker_metadata)
+                marker_metadata["turn"] = idempotency_turn_payload
+                connection.execute(
+                    "UPDATE messages SET metadata_text=? WHERE id=? AND notebook_id=?",
+                    (
+                        _dump(marker_metadata),
+                        idempotency_marker_id,
+                        thread_id,
+                    ),
                 )
         return user_id, assistant_id
 

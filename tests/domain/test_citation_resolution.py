@@ -180,7 +180,9 @@ def test_citation_resolution_is_bounded_and_keeps_selected_list_labels(
             "recommendation": "stay",
             "recommendation_rationale": "More evidence is still needed.",
             "citations": [],
+            "hmw_scaffold_ready": False,
             "needs_source_retrieval": False,
+            "out_of_scope": False,
         }
     )
     notebooks = SQLiteNotebookRepository(store)  # type: ignore[arg-type]

@@ -26,7 +26,12 @@ from backend.retrieval import (
     RetrievalResult,
     retrieval_sources_from_notebook,
 )
-from backend.source_library import add_text_source, list_visible_sources
+from backend.source_library import (
+    CHAT_ATTACHMENT_ORIGIN,
+    add_file_sources,
+    add_text_source,
+    list_visible_sources,
+)
 from backend.sources.chunk_cache import reset_student_source_chunk_cache
 from backend.specialists.review_orchestration import COUNTER_SETTINGS_KEY
 from backend.student_store import StudentStore
@@ -82,7 +87,9 @@ def _coaching_payload(
             else "The stage readiness bar is met."
         ),
         "citations": [],
+        "hmw_scaffold_ready": False,
         "needs_source_retrieval": needs_source_retrieval,
+        "out_of_scope": False,
     }
     if research_quote:
         payload["research_coding"] = {
@@ -236,6 +243,54 @@ def test_gate_false_needs_retrieval_retries_once_and_persists_second(tmp_path) -
     assert "lecture excerpt first" not in assistants[0]["content"]
     users = [item for item in store.get_messages(thread_id) if item["role"] == "user"]
     assert len(users) == 1
+
+
+def test_attachment_fallback_snapshot_excludes_selected_course_sources(tmp_path) -> None:
+    """A retrieval-requesting first pass cannot broaden attachment-only fallback."""
+    store = StudentStore(tmp_path / "fallback-attachment-scope.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    add_text_source(store, thread_id, "Lecture 3", "Unrelated course material")
+    attachment = add_file_sources(
+        store,
+        thread_id,
+        [("notes.pdf", b"Private attachment evidence", "application/pdf")],
+        origin=CHAT_ATTACHMENT_ORIGIN,
+        selected=False,
+    )[0]
+    retriever = RecordingRetriever()
+    client = FakeAgentCoreRuntime(
+        payloads=[
+            _coaching_payload(
+                response_text="I need the attached excerpt first.",
+                needs_source_retrieval=True,
+            ),
+            _coaching_payload(
+                response_text="The attachment supports this summary.",
+                needs_source_retrieval=False,
+            ),
+        ]
+    )
+    service = _service(store, client, retriever)
+    request = CoachRequest(
+        thread_id=thread_id,
+        student_message="Could you outline the attached PDF",
+        current_stage="problem_identification",
+        response_detail="short",
+        attachment_source_ids=[attachment["id"]],
+    )
+    prepared, snapshot = service._prepare_authoritative_turn(request)
+    first_request = prepared.model_copy(
+        update={"retrieval_required": False, "retrieved_chunks": []}
+    )
+    first_turn = service._workflow.run(first_request)
+    retriever.calls.clear()
+
+    service._maybe_rag_fallback(first_request, first_turn, snapshot)
+
+    assert len(retriever.calls) == 1
+    assert [source.source_id for source in retriever.calls[0].sources] == [
+        attachment["id"]
+    ]
 
 
 def test_gate_true_does_not_duplicate_retrieval_or_haiku(tmp_path) -> None:

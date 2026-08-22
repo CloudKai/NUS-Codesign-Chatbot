@@ -245,6 +245,70 @@ def test_professor_endpoints_are_read_only(tmp_path, monkeypatch):
     reset_file_storage_cache()
 
 
+def test_identifiable_professor_reads_audit_before_returning_data(tmp_path, monkeypatch):
+    """Each ordinary identifiable analytics read writes an attributable event."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    headers = {"x-request-id": "analytics-read-1"}
+
+    requests = (
+        ("/api/v1/professor/overview", "professor.overview"),
+        ("/api/v1/professor/students?search=student", "professor.students"),
+        (f"/api/v1/professor/students/{student_id}", "professor.student_detail"),
+        (
+            f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}",
+            "professor.transcript",
+        ),
+        ("/api/v1/professor/engagement", "professor.engagement"),
+    )
+    for path, _action in requests:
+        assert client.get(path, cookies=cookies, headers=headers).status_code == 200
+
+    with bootstrap._connect() as connection:  # noqa: SLF001 - audit assertion
+        rows = connection.execute(
+            "SELECT action, actor_user_id, request_id, target_user_id, notebook_id, filters_text "
+            "FROM research_access_events ORDER BY created_at, id"
+        ).fetchall()
+    assert [row["action"] for row in rows] == [action for _, action in requests]
+    assert all(row["actor_user_id"] for row in rows)
+    assert all(row["request_id"] == "analytics-read-1" for row in rows)
+    assert rows[1]["filters_text"] and "student" in rows[1]["filters_text"]
+    assert rows[2]["target_user_id"] == student_id
+    assert rows[3]["target_user_id"] == student_id
+    assert rows[3]["notebook_id"] == notebook_id
+
+
+def test_professor_read_fails_closed_when_access_audit_fails(tmp_path, monkeypatch):
+    """An audit persistence error prevents the identifiable query."""
+    bootstrap, _professor, _student_id, oidc = _setup(tmp_path)
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+
+    def fail_audit(_value):
+        raise RuntimeError("audit database unavailable")
+
+    monkeypatch.setattr(StudentStore, "record_research_access_event", fail_audit)
+    monkeypatch.setattr(
+        ProfessorAnalyticsRepository,
+        "load_class_rows",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("analytics read occurred before audit")
+        ),
+    )
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    response = client.get(
+        "/api/v1/professor/overview",
+        cookies={settings.cognito_id_token_cookie_name: oidc.add("prof")},
+    )
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Professor analytics is temporarily unavailable"
+    }
+
+
 def test_selected_student_detail_uses_scoped_rows_and_compact_benchmark(tmp_path):
     """Detail does not rebuild detailed notebook rows for the whole class."""
     bootstrap, _professor, student_id, _oidc = _setup(tmp_path)
@@ -367,6 +431,15 @@ def test_professor_attachment_route_requires_message_association(tmp_path, monke
     )
     assert response.status_code == 200
     assert response.content == b"private"
+    with bootstrap._connect() as connection:  # noqa: SLF001 - audit assertion
+        audit = connection.execute(
+            "SELECT action, target_user_id, notebook_id, metadata_text FROM research_access_events "
+            "ORDER BY created_at DESC, id DESC LIMIT 1"
+        ).fetchone()
+    assert audit["action"] == "professor.attachment"
+    assert audit["target_user_id"] == student_id
+    assert audit["notebook_id"] == notebook_id
+    assert attachment["id"] in audit["metadata_text"]
     ordinary = add_text_source(student_store, notebook_id, "Reusable source", "Not an attachment")
     assert client.get(
         f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/attachments/{ordinary['id']}",

@@ -134,6 +134,24 @@ def test_completed_key_replays_exact_turn_after_service_restart(tmp_path):
     ]
 
 
+def test_completed_key_replays_full_assessment_fields(tmp_path):
+    """Replay must return the durable marker turn, not a slim message reconstruction."""
+    store = StudentStore(tmp_path / "idempotent-assessment-replay.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    provider = CountingProvider()
+    request = _request(thread_id, key="assessment-replay-key")
+
+    first = _service(store, provider).submit(request)
+    replay = _service(store, provider).submit(request)
+
+    assert replay.assessment.confidence == first.assessment.confidence
+    assert (
+        replay.assessment.contribution_summary
+        == first.assessment.contribution_summary
+    )
+    assert provider.calls == 1
+
+
 def test_reused_key_with_different_payload_fails_closed(tmp_path):
     """A key cannot silently return an answer for a different student message."""
     store = StudentStore(tmp_path / "idempotent-conflict.sqlite3")
@@ -718,7 +736,11 @@ def test_revise_retry_replays_when_persist_committed_before_marker_complete(tmp_
         idempotency_key=revise_key,
     )
 
-    assert replay == first
+    assert replay.response_text == first.response_text
+    assert replay.pending_transition == first.pending_transition
+    assert replay.auto_advanced_to == first.auto_advanced_to
+    assert replay.assessment.recommendation == first.assessment.recommendation
+    assert replay.assessment.response_mode == first.assessment.response_mode
     assert provider.calls == 1
     assert revise_calls == []
     assert int(

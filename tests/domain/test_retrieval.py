@@ -741,7 +741,7 @@ def test_private_attachment_question_does_not_broaden_to_course_sources(tmp_path
     service.submit(
         CoachRequest(
             thread_id=notebook,
-            student_message="what is this pdf i attached about",
+            student_message="Could you outline the attached PDF",
             current_stage="problem_identification",
             response_detail="short",
             attachment_source_ids=[attachment["id"]],

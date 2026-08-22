@@ -77,7 +77,9 @@ def _output(*, recommendation: StageDecision = StageDecision.STAY) -> dict[str, 
             else "The stage readiness bar is met."
         ),
         "citations": [],
+        "hmw_scaffold_ready": False,
         "needs_source_retrieval": False,
+        "out_of_scope": False,
     }
 
 
@@ -136,6 +138,9 @@ def test_fast_chat_qa_mode_is_one_call() -> None:
             "mode": "qa",
             "response_text": "Week 2 covers stakeholder mapping [S1].",
             "citations": [],
+            "hmw_scaffold_ready": False,
+            "needs_source_retrieval": False,
+            "out_of_scope": False,
         }
     )
     result = _provider(client).assess(_request(student_message="What is Week 2 about?"))

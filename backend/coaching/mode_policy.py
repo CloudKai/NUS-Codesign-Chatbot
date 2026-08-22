@@ -154,6 +154,15 @@ _ATTACHMENT_REFERENCE = re.compile(
     r"diagram|scan)\b",
     re.IGNORECASE,
 )
+_ATTACHMENT_ACTION = re.compile(
+    r"\b(outline|extract|list|identify|review|analy[sz]e|summar(?:y|ise|ize))\b",
+    re.IGNORECASE,
+)
+_ATTACHMENT_DIRECTIVE = re.compile(
+    r"^\s*(?:(?:can|could|would)\s+(?:you\s+)?(?:please\s+)?|please\s+)?"
+    r"(?:outline|extract|list|identify|review|analy[sz]e|summar(?:y|ise|ize))\b",
+    re.IGNORECASE,
+)
 _COURSE_REFERENCE = re.compile(
     r"\b(lecture|lectures|week|weeks|course|cde2300|product\s+design|"
     r"design\s+thinking|jtbd|how\s+might\s+we|reading|readings|syllabus|"
@@ -252,16 +261,23 @@ def is_private_attachment_question(
     if int(attachment_count or 0) <= 0:
         return False
     text = _normalized_text(student_message)
-    if not looks_like_information_request(text):
+    asks_for_information = looks_like_information_request(text)
+    # Attached-file verbs are commonly written as polite requests without a
+    # question mark ("Could you outline…", "Please analyze…") or as direct
+    # imperatives ("List the claims"). Keep this narrow and retain the
+    # project-reasoning guard below so "analyze my idea" is not re-scoped.
+    if not asks_for_information and not _ATTACHMENT_DIRECTIVE.search(text):
         return False
     if _COURSE_REFERENCE.search(text):
         return False
-    if _ATTACHMENT_REFERENCE.search(text):
+    if looks_like_project_reasoning(text):
+        return False
+    if _ATTACHMENT_REFERENCE.search(text) or _ATTACHMENT_ACTION.search(text):
         return True
     # Short questions such as "what themes do you notice?" implicitly refer
     # to the only newly supplied evidence. Project deliberation remains on the
     # normal path unless it explicitly names the attachment.
-    return not looks_like_project_reasoning(text)
+    return True
 
 
 def overlay_mode_policy(

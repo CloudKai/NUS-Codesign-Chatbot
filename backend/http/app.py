@@ -92,7 +92,11 @@ from backend.professor_analytics.research import (
     ResearchReviewRequest,
     ResearchSummaryResponse,
 )
-from backend.research.models import ResearchAdjudication, ResearchReview
+from backend.research.models import (
+    ResearchAccessEventCreate,
+    ResearchAdjudication,
+    ResearchReview,
+)
 
 logger = logging.getLogger("backend.api")
 
@@ -482,6 +486,52 @@ def create_app(
         profile = owner.store.get_user_by_id(owner.user_id) or {}
         return str(profile.get("role") or "student").strip().lower()
 
+    def _audit_professor_read(
+        request: Request,
+        owner: OwnerServices,
+        *,
+        action: str,
+        scope: str,
+        target_user_id: str | None = None,
+        notebook_id: str | None = None,
+        filters: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Persist an attributable analytics-read audit before loading data.
+
+        The access-audit repository is synchronous by design: an identifiable
+        lecturer read must fail closed when its audit insert cannot commit.
+        Only bounded route filters and stable identifiers cross this boundary;
+        prompt text, source contents, and storage paths never do.
+        """
+        safe_filters = dict(filters or {})
+        safe_metadata = dict(metadata or {})
+        try:
+            from backend import api as api_facade
+
+            api_facade.StudentStoreResearchRepository(owner.store).record_access_event(
+                ResearchAccessEventCreate(
+                    actor_user_id=str(owner.user_id),
+                    action=action,
+                    scope=scope,
+                    request_id=str(getattr(request.state, "request_id", "unknown")),
+                    target_user_id=(str(target_user_id) if target_user_id else None),
+                    notebook_id=(str(notebook_id) if notebook_id else None),
+                    filters=safe_filters,
+                    metadata={"actor_role": _professor_role(owner), **safe_metadata},
+                )
+            )
+        except Exception as error:
+            logger.warning(
+                "Professor analytics access audit unavailable request_id=%s action=%s",
+                getattr(request.state, "request_id", "unknown"),
+                action,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Professor analytics is temporarily unavailable",
+            ) from error
+
     def _research_unavailable(request: Request) -> HTTPException:
         """Log only correlation context and return a privacy-safe 503."""
         logger.warning(
@@ -495,13 +545,21 @@ def create_app(
 
     @app.get("/api/v1/professor/overview", response_model=OverviewResponse)
     def professor_overview(
+        request: Request,
         owner: OwnerServices = Depends(current_professor),
     ) -> OverviewResponse:
         """Return a compact class snapshot for teaching staff only."""
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.overview",
+            scope="identifiable_overview",
+        )
         return _professor_service(owner).overview()
 
     @app.get("/api/v1/professor/students", response_model=StudentsResponse)
     def professor_students(
+        request: Request,
         search: str = "",
         stage: str | None = None,
         attention_only: bool = False,
@@ -510,6 +568,19 @@ def create_app(
         owner: OwnerServices = Depends(current_professor),
     ) -> StudentsResponse:
         """List privacy-minimised student rows with safe server-side filters."""
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.students",
+            scope="identifiable_roster",
+            filters={
+                "search": str(search or "").strip()[:120] or None,
+                "stage": str(stage or "").strip()[:80] or None,
+                "attention_only": bool(attention_only),
+                "min_score": min_score,
+                "max_score": max_score,
+            },
+        )
         return _professor_service(owner).students(
             search=search,
             stage=stage,
@@ -523,10 +594,18 @@ def create_app(
         response_model=StudentDetailResponse,
     )
     def professor_student_detail(
+        request: Request,
         student_id: str,
         owner: OwnerServices = Depends(current_professor),
     ) -> StudentDetailResponse:
         """Return one student's active learning journey and authorised transcript."""
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.student_detail",
+            scope="identifiable_student",
+            target_user_id=student_id,
+        )
         detail = _professor_service(owner).student_detail(student_id)
         if detail is None:
             raise HTTPException(status_code=404, detail="Student not found")
@@ -537,11 +616,20 @@ def create_app(
         response_model=ConversationTranscriptResponse,
     )
     def professor_conversation_transcript(
+        request: Request,
         student_id: str,
         notebook_id: str,
         owner: OwnerServices = Depends(current_professor),
     ) -> ConversationTranscriptResponse:
         """Return one selected student's active notebook transcript only."""
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.transcript",
+            scope="identifiable_transcript",
+            target_user_id=student_id,
+            notebook_id=notebook_id,
+        )
         transcript = _professor_service(owner).conversation_transcript(
             student_id, notebook_id
         )
@@ -553,12 +641,22 @@ def create_app(
         "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/attachments/{attachment_id}"
     )
     def professor_conversation_attachment(
+        request: Request,
         student_id: str,
         notebook_id: str,
         attachment_id: str,
         owner: OwnerServices = Depends(current_professor),
     ) -> Response:
         """Stream one message-associated attachment after lecturer checks."""
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.attachment",
+            scope="identifiable_attachment",
+            target_user_id=student_id,
+            notebook_id=notebook_id,
+            metadata={"attachment_id": str(attachment_id)[:160]},
+        )
         repository = ProfessorAnalyticsRepository(owner.store)
         source = repository.read_attachment(student_id, notebook_id, attachment_id)
         if source is None:
@@ -588,9 +686,16 @@ def create_app(
         response_model=EngagementResponse,
     )
     def professor_engagement(
+        request: Request,
         owner: OwnerServices = Depends(current_professor),
     ) -> EngagementResponse:
         """Return usage/session analytics, kept distinct from performance."""
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.engagement",
+            scope="identifiable_engagement",
+        )
         return _professor_service(owner).engagement()
 
     @app.get(
