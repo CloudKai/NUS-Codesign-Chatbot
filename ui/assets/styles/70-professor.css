@@ -1,4 +1,44 @@
 /* Professor analytics: dense, academic, and deliberately free of dashboard gloss. */
+/*
+ * Course Analytics is a document, not the student studio viewport.
+ * 00-foundations.css locks html/body/.stApp/.block-container to 100vh +
+ * overflow:hidden so Journey/Chat fill the window. That clips Students,
+ * Research, and long Overview pages unless every ancestor can scroll.
+ */
+html:has(.st-key-professor_header),
+html:has(.st-key-professor_header) body,
+.stApp:has(.st-key-professor_header),
+[data-testid="stAppViewContainer"]:has(.st-key-professor_header),
+[data-testid="stAppViewContainer"]:has(.st-key-professor_header) > .main,
+[data-testid="stAppViewContainer"]:has(.st-key-professor_header) [data-testid="stMain"],
+[data-testid="stAppViewContainer"]:has(.st-key-professor_header) .stMain {
+    height:auto !important;
+    min-height:100vh !important;
+    max-height:none !important;
+    overflow-x:hidden !important;
+    overflow-y:auto !important;
+    position:relative !important;
+    inset:auto !important;
+}
+.block-container:has(.st-key-professor_header),
+.block-container:has(.st-key-professor_header).stMainBlockContainer {
+    height:auto !important;
+    min-height:100vh !important;
+    max-height:none !important;
+    display:block !important;
+    overflow-x:hidden !important;
+    overflow-y:visible !important;
+    padding-bottom:2.5rem;
+}
+.block-container:has(.st-key-professor_header) > [data-testid="stVerticalBlockBorderWrapper"],
+.block-container:has(.st-key-professor_header) > [data-testid="stVerticalBlock"],
+.block-container:has(.st-key-professor_header) > [data-testid="stVerticalBlockBorderWrapper"]
+> [data-testid="stVerticalBlock"] {
+    height:auto !important;
+    min-height:0 !important;
+    max-height:none !important;
+    overflow:visible !important;
+}
 .st-key-professor_header { padding:1.25rem 1.5rem .9rem; border-bottom:1px solid var(--cd-border); background:var(--cd-surface); }
 .professor-course-heading h1 { margin:.12rem 0 .22rem; color:var(--cd-text); font-size:1.35rem; letter-spacing:-.02em; }
 .professor-course-heading p { margin:0; color:var(--cd-muted); font-size:.86rem; }
@@ -48,10 +88,59 @@
 .professor-file-row { padding:.45rem 0; }
 .professor-file-row-title { color:var(--cd-text); font-size:.86rem; font-weight:600; line-height:1.35; }
 .professor-file-row-meta { margin-top:.12rem; color:var(--cd-muted); font-size:.76rem; }
-.st-key-professor_transcript_scroll {
-    max-height:60vh;
-    overflow-y:auto;
+.st-key-professor_students_workspace [data-testid="stHorizontalBlock"] {
+    align-items:stretch;
+}
+.st-key-professor_students_workspace [data-testid="stColumn"] {
+    min-width:0;
+    min-height:0;
+    overflow:visible;
+}
+.st-key-professor_student_list_scroll,
+[data-testid="stElementContainer"].st-key-professor_student_list_scroll,
+.st-key-professor_transcript_scroll,
+[data-testid="stElementContainer"].st-key-professor_transcript_scroll,
+.st-key-research_transcript_scroll,
+[data-testid="stElementContainer"].st-key-research_transcript_scroll {
+    display:flex !important;
+    flex-direction:column !important;
+    min-height:0 !important;
+    overflow-x:hidden !important;
+    overflow-y:auto !important;
     padding-right:.4rem;
+}
+.st-key-professor_student_list_scroll,
+[data-testid="stElementContainer"].st-key-professor_student_list_scroll {
+    max-height:min(34rem, calc(100vh - 16rem));
+}
+.st-key-professor_transcript_scroll,
+[data-testid="stElementContainer"].st-key-professor_transcript_scroll {
+    max-height:min(60vh, calc(100vh - 14rem));
+}
+.st-key-research_transcript_scroll,
+[data-testid="stElementContainer"].st-key-research_transcript_scroll {
+    max-height:58vh;
+}
+.st-key-professor_student_list_scroll [data-testid="stVerticalBlockBorderWrapper"],
+.st-key-professor_transcript_scroll [data-testid="stVerticalBlockBorderWrapper"],
+.st-key-research_transcript_scroll [data-testid="stVerticalBlockBorderWrapper"] {
+    flex:1 1 auto !important;
+    min-height:0 !important;
+    max-height:inherit;
+    overflow-x:hidden !important;
+    overflow-y:auto !important;
+    overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
+}
+.st-key-professor_transcript_scroll > [data-testid="stVerticalBlock"],
+.st-key-professor_transcript_scroll > [data-testid="stLayoutWrapper"],
+.st-key-professor_student_list_scroll > [data-testid="stVerticalBlock"],
+.st-key-professor_student_list_scroll > [data-testid="stLayoutWrapper"],
+.st-key-research_transcript_scroll > [data-testid="stVerticalBlock"],
+.st-key-research_transcript_scroll > [data-testid="stLayoutWrapper"] {
+    height:auto !important;
+    max-height:none !important;
+    overflow:visible !important;
 }
 .st-key-professor_transcript_scroll [class*="st-key-professor_message_"] { margin-bottom:.45rem; overflow:visible; }
 @media (max-width:800px) { .st-key-professor_header { padding:1rem .75rem .8rem; } .st-key-professor_header [data-testid="stRadio"] { justify-content:flex-start; max-width:100%; overflow-x:auto; } .st-key-professor_header [role="radiogroup"] { min-width:max-content; } .st-key-professor_header label { white-space:nowrap; } .professor-account { justify-content:flex-start; } .professor-bar-row { grid-template-columns:minmax(6.4rem,1fr) minmax(4rem,1.4fr) minmax(6.8rem,auto); } .st-key-professor_students_workspace [data-testid="stHorizontalBlock"] { display:block; } .st-key-professor_students_workspace [data-testid="stColumn"] { width:100% !important; min-width:0 !important; } }
@@ -94,11 +183,6 @@
     font-weight:700;
     letter-spacing:.035em;
     text-transform:uppercase;
-}
-.st-key-research_transcript_scroll {
-    max-height:58vh;
-    overflow-y:auto;
-    padding-right:.4rem;
 }
 .st-key-research_transcript_scroll [data-testid="stMarkdownContainer"] {
     margin:0 0 .55rem;

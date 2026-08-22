@@ -2,6 +2,22 @@
 
 ## CURRENT STATUS
 
+### Lecturer Course Analytics scroll (2026-08-23)
+
+**Change.** The student studio viewport lock (`html`/`body`/`.stApp`/
+`.block-container` at `100vh` + `overflow:hidden`) clipped the Students
+roster and notebook chat with no scrollbar. Course Analytics now opts out of
+that lock when `.st-key-professor_header` is present, and the student list
+plus chat/research transcripts are real inner scrollports.
+
+**Files.** `ui/professor.py`, `ui/assets/styles/70-professor.css`,
+`tests/ui/test_professor_ui.py`.
+
+**Validation.** Focused professor UI tests plus compileall on `ui`.
+
+**Next action.** Rebuild the EC2 app image so production Students can scroll.
+Do not republish AgentCore.
+
 ### Lecturer Students roster DSQL fix (2026-08-23)
 
 **Change.** ``load_student_roster()`` compared INTEGER ``is_error`` with

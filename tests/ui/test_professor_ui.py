@@ -385,7 +385,10 @@ def test_professor_research_css_has_desktop_tablet_and_mobile_contracts() -> Non
     component = Path("ui/assets/styles/70-professor.css").read_text(encoding="utf-8")
     responsive = Path("ui/assets/styles/90-responsive.css").read_text(encoding="utf-8")
     assert ".st-key-research_workspace" in component
+    assert "html:has(.st-key-professor_header)" in component
+    assert ".st-key-professor_student_list_scroll" in component
     assert ".st-key-professor_transcript_scroll" in component
+    assert "overflow-y:auto !important" in component
     assert "professor-mobile-detail" in component
     assert "professor-chat-student" in component
     assert "research-queue-marker" not in responsive

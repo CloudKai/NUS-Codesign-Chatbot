@@ -419,30 +419,31 @@ def _render_students(client) -> None:
         with list_col:
             st.markdown("#### Student list")
             st.caption(f"{len(rows)} student{'s' if len(rows) != 1 else ''}")
-            for row in rows:
-                student_id = str(row.get("id") or "")
-                is_selected = student_id == selected_id
-                card_class = "professor-student-card professor-student-card-selected" if is_selected else "professor-student-card"
-                with st.container(key=f"professor_student_card_{student_id}"):
-                    st.markdown(
-                        f'<div class="{card_class}">'
-                        f'<div class="professor-student-card-name">'
-                        f"{escape(str(row.get('name') or 'Student'))}"
-                        f'<span class="professor-student-card-chevron">›</span></div>'
-                        f'<div class="professor-student-card-meta">'
-                        f"{escape(_student_card_caption(row))}</div></div>",
-                        unsafe_allow_html=True,
-                    )
-                    label = "Selected" if is_selected else "Open"
-                    if st.button(
-                        label,
-                        key=f"professor_open_student_{student_id}",
-                        use_container_width=True,
-                    ):
-                        st.session_state["professor_selected_student_id"] = student_id
-                        st.session_state.pop(f"professor_open_notebook_{student_id}", None)
-                        _clear_professor_workspace_cache(student_id)
-                        st.rerun()
+            with st.container(key="professor_student_list_scroll"):
+                for row in rows:
+                    student_id = str(row.get("id") or "")
+                    is_selected = student_id == selected_id
+                    card_class = "professor-student-card professor-student-card-selected" if is_selected else "professor-student-card"
+                    with st.container(key=f"professor_student_card_{student_id}"):
+                        st.markdown(
+                            f'<div class="{card_class}">'
+                            f'<div class="professor-student-card-name">'
+                            f"{escape(str(row.get('name') or 'Student'))}"
+                            f'<span class="professor-student-card-chevron">›</span></div>'
+                            f'<div class="professor-student-card-meta">'
+                            f"{escape(_student_card_caption(row))}</div></div>",
+                            unsafe_allow_html=True,
+                        )
+                        label = "Selected" if is_selected else "Open"
+                        if st.button(
+                            label,
+                            key=f"professor_open_student_{student_id}",
+                            use_container_width=True,
+                        ):
+                            st.session_state["professor_selected_student_id"] = student_id
+                            st.session_state.pop(f"professor_open_notebook_{student_id}", None)
+                            _clear_professor_workspace_cache(student_id)
+                            st.rerun()
         with detail_col:
             if not selected_id:
                 st.info("Select a student to view their learning progress and notebooks.")
