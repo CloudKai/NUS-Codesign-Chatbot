@@ -332,9 +332,11 @@ def create_app(
         request: Request, _error: ProfessorAnalyticsUnavailable
     ) -> JSONResponse:
         """Return a privacy-safe temporary failure without driver or SQL detail."""
+        cause = _error.__cause__ or _error
         logger.warning(
-            "Professor analytics snapshot unavailable request_id=%s",
+            "Professor analytics snapshot unavailable request_id=%s error_type=%s",
             getattr(request.state, "request_id", "unknown"),
+            type(cause).__name__,
         )
         return JSONResponse(
             status_code=503,

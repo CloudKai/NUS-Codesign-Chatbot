@@ -2,6 +2,22 @@
 
 ## CURRENT STATUS
 
+### Lecturer Students roster DSQL fix (2026-08-23)
+
+**Change.** ``load_student_roster()`` compared INTEGER ``is_error`` with
+``NOT column``, which SQLite accepts and PostgreSQL/DSQL rejects
+(``argument of NOT must be type boolean, not type integer``). The Students
+page therefore returned 503 in production while Overview (``load_class_rows``)
+still worked. Predicates now use ``COALESCE(is_error, 0) = 0``.
+
+**Files.** `backend/professor_analytics/repository.py`,
+`backend/http/app.py`, `tests/http/test_professor_analytics.py`.
+
+**Validation.** Focused professor HTTP tests plus compileall.
+
+**Next action.** Rebuild the EC2 app image so production Students uses the
+portable roster SQL. Do not republish AgentCore.
+
 ### Lecturer workspace production fix + UX polish (2026-08-22)
 
 **Change.** Professor read paths now preserve the configured database provider

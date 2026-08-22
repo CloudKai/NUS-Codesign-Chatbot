@@ -591,6 +591,19 @@ def test_professor_workspace_enforces_ownership_and_role(tmp_path, monkeypatch):
     ).status_code == 404
 
 
+def test_student_roster_sql_is_dsql_portable():
+    """Roster SQL must not use SQLite-only NOT-integer predicates."""
+    from backend.persistence.dsql_connection import adapt_sqlite_sql
+    from backend.professor_analytics.repository import _STUDENT_ROSTER_SQL
+
+    sql = _STUDENT_ROSTER_SQL.lower()
+    assert "not message_is_error" not in sql
+    assert "not am.message_is_error" not in sql
+    assert "coalesce(message_is_error, 0) = 0" in sql
+    adapted = adapt_sqlite_sql(_STUDENT_ROSTER_SQL)
+    assert adapted.count("%s") == 0
+
+
 def test_student_roster_projection_is_one_row_per_student(tmp_path):
     """Roster SQL returns compact student aggregates without message bodies."""
     bootstrap, _professor, student_id, _oidc = _setup(tmp_path)
