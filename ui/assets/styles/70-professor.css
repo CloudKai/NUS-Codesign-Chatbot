@@ -39,16 +39,47 @@ html:has(.st-key-professor_header) body,
     max-height:none !important;
     overflow:visible !important;
 }
-.st-key-professor_header { padding:1.25rem 1.5rem .9rem; border-bottom:1px solid var(--cd-border); background:var(--cd-surface); }
+.st-key-professor_header {
+    position:sticky; top:0; padding:.85rem .85rem 1rem 0;
+    border-bottom:none; border-right:1px solid var(--cd-border); background:transparent;
+}
+.st-key-professor_header [data-testid="stRadio"] { justify-content:flex-start; margin-top:.7rem; }
+.st-key-professor_header [data-testid="stRadio"] > div,
+.st-key-professor_shell .st-key-professor_header [data-testid="stRadio"] > div {
+    flex-direction:column; flex-wrap:nowrap; align-items:stretch; gap:.08rem;
+    padding:0; border:none; border-radius:0; background:transparent;
+}
+.st-key-professor_header label {
+    display:block; margin:0 !important; padding:.42rem .55rem; border-radius:.45rem;
+    color:var(--cd-muted); font-size:.82rem; white-space:normal;
+}
+.st-key-professor_header label p { white-space:normal; }
+.st-key-professor_header label:has(input:checked) {
+    color:var(--cd-text); background:var(--cd-accent-soft); box-shadow:none;
+}
+.professor-sidebar-brand h1 { font-size:1.05rem; }
+.professor-sidebar-account { justify-content:flex-start; margin-top:1rem; padding-top:.75rem; border-top:1px solid var(--cd-border); }
+.professor-chat-divider { margin:.55rem 0 .7rem; border-bottom:1px solid var(--cd-border); }
+.professor-timeline-step.professor-step {
+    display:flex; flex-direction:column; align-items:flex-start; gap:.08rem;
+    margin:.2rem 0 .55rem; padding:.1rem 0 .55rem .7rem;
+    border:none; border-left:1px solid var(--cd-border); border-radius:0; background:transparent;
+}
+.professor-timeline-step span { color:var(--cd-muted); font-size:.75rem; font-weight:500; }
+.professor-step-not_completed { color:var(--cd-muted); opacity:.85; }
 .professor-course-heading h1 { margin:.12rem 0 .22rem; color:var(--cd-text); font-size:1.35rem; letter-spacing:-.02em; }
 .professor-course-heading p { margin:0; color:var(--cd-muted); font-size:.86rem; }
 .professor-course-heading .professor-eyebrow { font-size:.72rem; font-weight:700; color:var(--cd-accent); }
-.st-key-professor_header [data-testid="stRadio"] { justify-content:flex-end; margin-top:.55rem; }
-.st-key-professor_header [data-testid="stRadio"] > div { flex-wrap:nowrap; gap:.12rem; padding:.22rem; border:1px solid var(--cd-border); border-radius:.65rem; background:var(--cd-surface-muted); }
-.st-key-professor_header label { margin:0 !important; padding:.35rem .48rem; border-radius:.45rem; color:var(--cd-muted); font-size:.78rem; white-space:nowrap; }
-.st-key-professor_header label p { white-space:nowrap; }
-.st-key-professor_header label:has(input:checked) { color:var(--cd-text); background:var(--cd-surface); box-shadow:0 1px 2px rgba(21,32,43,.08); }
-.professor-metric { min-height:5.2rem; padding:.75rem .8rem; border:1px solid var(--cd-border); border-radius:.65rem; background:var(--cd-surface); }
+[class*="st-key-professor_open_student_"] button,
+[class*="st-key-professor_open_notebook_btn_"] button {
+    width:100%; min-height:3.15rem; padding:.48rem .15rem; border:none;
+    border-bottom:1px solid var(--cd-border); border-radius:0; background:transparent;
+    color:var(--cd-text); text-align:left; justify-content:flex-start;
+    white-space:pre-line; font-weight:600; line-height:1.35;
+}
+[class*="st-key-professor_open_student_"] button:hover,
+[class*="st-key-professor_open_notebook_btn_"] button:hover { background:var(--cd-surface-muted); }
+.professor-metric { min-height:auto; padding:.55rem 0 .7rem; border:none; border-radius:0; background:transparent; }
 .professor-metric p,.professor-metric span { display:block; margin:0; color:var(--cd-muted); font-size:.72rem; line-height:1.25; }
 .professor-metric strong { display:block; margin:.26rem 0; color:var(--cd-text); font-size:1.12rem; letter-spacing:-.02em; }
 .professor-summary { margin:1rem 0; padding:.72rem .86rem; border-left:3px solid var(--cd-accent); color:var(--cd-text); background:var(--cd-accent-soft); font-size:.9rem; line-height:1.5; }
@@ -143,11 +174,25 @@ html:has(.st-key-professor_header) body,
     overflow:visible !important;
 }
 .st-key-professor_transcript_scroll [class*="st-key-professor_message_"] { margin-bottom:.45rem; overflow:visible; }
-@media (max-width:800px) { .st-key-professor_header { padding:1rem .75rem .8rem; } .st-key-professor_header [data-testid="stRadio"] { justify-content:flex-start; max-width:100%; overflow-x:auto; } .st-key-professor_header [role="radiogroup"] { min-width:max-content; } .st-key-professor_header label { white-space:nowrap; } .professor-account { justify-content:flex-start; } .professor-bar-row { grid-template-columns:minmax(6.4rem,1fr) minmax(4rem,1.4fr) minmax(6.8rem,auto); } .st-key-professor_students_workspace [data-testid="stHorizontalBlock"] { display:block; } .st-key-professor_students_workspace [data-testid="stColumn"] { width:100% !important; min-width:0 !important; } }
-@media (max-width:700px) {
-  .professor-mobile-detail ~ .st-key-professor_students_workspace [data-testid="stColumn"]:first-child {
-    display:none !important;
+@media (max-width:800px) {
+  .st-key-professor_header {
+    position:static; padding:.75rem 0 .65rem; border-right:none;
+    border-bottom:1px solid var(--cd-border);
   }
+  .st-key-professor_shell [data-testid="stHorizontalBlock"] { display:block; }
+  .st-key-professor_shell [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+    width:100% !important; max-width:none !important; min-width:0 !important;
+  }
+  .st-key-professor_header [data-testid="stRadio"] > div {
+    flex-direction:row; flex-wrap:wrap; overflow-x:auto; gap:.12rem;
+    border:1px solid var(--cd-border); border-radius:.65rem;
+    background:var(--cd-surface-muted); padding:.22rem;
+  }
+  .st-key-professor_header label { white-space:nowrap; }
+  .professor-account { justify-content:flex-start; }
+  .professor-bar-row { grid-template-columns:minmax(6.4rem,1fr) minmax(4rem,1.4fr) minmax(6.8rem,auto); }
+}
+@media (max-width:700px) {
   .st-key-professor_transcript_scroll { max-height:52vh; }
 }
 

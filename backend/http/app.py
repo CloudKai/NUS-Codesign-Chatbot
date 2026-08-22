@@ -77,6 +77,10 @@ from backend.professor_analytics.models import (
     EngagementResponse,
     NotebookWorkspaceResponse,
     OverviewResponse,
+    ProfessorJourneyProjection,
+    ProfessorMessagePage,
+    ProfessorReviewProjection,
+    ProfessorSourcesResponse,
     StudentDetailResponse,
     StudentsResponse,
 )
@@ -665,6 +669,113 @@ def create_app(
         if workspace is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         return workspace
+
+    @app.get(
+        "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/messages",
+        response_model=ProfessorMessagePage,
+    )
+    def professor_notebook_messages(
+        request: Request,
+        student_id: str,
+        notebook_id: str,
+        limit: int = Query(default=30, ge=1),
+        cursor: str | None = None,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> ProfessorMessagePage:
+        """Return one paginated active-branch transcript page for lecturers."""
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.transcript",
+            scope="identifiable_transcript",
+            target_user_id=student_id,
+            notebook_id=notebook_id,
+            metadata={"paginated": True, "limit": limit, "cursor": bool(cursor)},
+        )
+        try:
+            page = _professor_service(owner).notebook_messages(
+                student_id,
+                notebook_id,
+                limit=limit,
+                cursor=cursor,
+            )
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid cursor") from None
+        if page is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return page
+
+    @app.get(
+        "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/sources",
+        response_model=ProfessorSourcesResponse,
+    )
+    def professor_notebook_sources(
+        request: Request,
+        student_id: str,
+        notebook_id: str,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> ProfessorSourcesResponse:
+        """Return allow-listed library sources for one owned notebook."""
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.sources",
+            scope="identifiable_sources",
+            target_user_id=student_id,
+            notebook_id=notebook_id,
+        )
+        payload = _professor_service(owner).notebook_sources(student_id, notebook_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return payload
+
+    @app.get(
+        "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/journey",
+        response_model=ProfessorJourneyProjection,
+    )
+    def professor_notebook_journey(
+        request: Request,
+        student_id: str,
+        notebook_id: str,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> ProfessorJourneyProjection:
+        """Return persisted journey state without transcript bodies."""
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.journey",
+            scope="identifiable_journey",
+            target_user_id=student_id,
+            notebook_id=notebook_id,
+        )
+        payload = _professor_service(owner).notebook_journey(student_id, notebook_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return payload
+
+    @app.get(
+        "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/review",
+        response_model=ProfessorReviewProjection,
+    )
+    def professor_notebook_review(
+        request: Request,
+        student_id: str,
+        notebook_id: str,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> ProfessorReviewProjection:
+        """Return persisted review projection without regeneration."""
+        _audit_professor_read(
+            request,
+            owner,
+            action="professor.review",
+            scope="identifiable_review",
+            target_user_id=student_id,
+            notebook_id=notebook_id,
+        )
+        payload = _professor_service(owner).notebook_review(student_id, notebook_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return payload
 
     @app.get(
         "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/sources/{source_id}"

@@ -105,6 +105,83 @@ class ProfessorNotebookSummary(BaseModel):
     title: str
     current_stage: str | None = None
     last_active: str | None = None
+    student_messages: int = 0
+    coach_messages: int = 0
+    assistant_messages: int = 0
+    completed_stage_count: int = 0
+
+
+class ProfessorMessageAttachment(BaseModel):
+    """Allow-listed attachment descriptor on one transcript message."""
+
+    id: str
+    title: str
+    mime: str
+    kind: str
+    size: int = 0
+
+
+class ProfessorMessageCitation(BaseModel):
+    """Allow-listed citation descriptor on one transcript message."""
+
+    id: str
+    label: str | None = None
+    title: str | None = None
+
+
+class ProfessorTranscriptMessage(BaseModel):
+    """One active-branch transcript row for lecturer pagination."""
+
+    id: str
+    role: str
+    content: str
+    created_at: str | None = None
+    attachments: list[ProfessorMessageAttachment] = Field(default_factory=list)
+    citations: list[ProfessorMessageCitation] = Field(default_factory=list)
+
+
+class ProfessorMessagePage(BaseModel):
+    """One paginated active-branch transcript page for lecturers."""
+
+    notebook: ProfessorNotebookSummary
+    messages: list[ProfessorTranscriptMessage] = Field(default_factory=list)
+    next_cursor: str | None = None
+
+
+class ProfessorSourcesResponse(BaseModel):
+    """Grouped library sources for one authorised notebook."""
+
+    notebook: ProfessorNotebookSummary
+    sources: list[ProfessorSourceSummary] = Field(default_factory=list)
+
+
+class ProfessorJourneyStage(BaseModel):
+    """One thinking-path stage with persisted completion state."""
+
+    id: str
+    label: str
+    state: str
+
+
+class ProfessorJourneyProjection(BaseModel):
+    """Read-only journey projection without transcript bodies."""
+
+    notebook: ProfessorNotebookSummary
+    current_stage: str | None = None
+    completed_stages: list[str] = Field(default_factory=list)
+    stages: list[ProfessorJourneyStage] = Field(default_factory=list)
+    hmw_scaffold: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProfessorReviewProjection(BaseModel):
+    """Persisted Deep Review / learning review fields for lecturer display."""
+
+    notebook: ProfessorNotebookSummary
+    summary: str = ""
+    facione_scores: dict[str, Any] = Field(default_factory=dict)
+    strength_sections: list[dict[str, Any]] = Field(default_factory=list)
+    improvement_sections: list[dict[str, Any]] = Field(default_factory=list)
+    conclusion: str = ""
 
 
 class ProfessorWorkspaceTranscript(BaseModel):

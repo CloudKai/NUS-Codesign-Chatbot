@@ -16,18 +16,20 @@ from ui.auth_gate import app_logout_url, logout_user
 from ui.coach_welcome import render_hmw_scaffold
 from ui.components import (
     facione_scores_table_html,
-    progress_bar_html,
     review_card_html,
     review_stage_sections_html,
 )
 from ui.runtime import local_api_client
 
-_PAGES = ("Overview", "Students", "Learning Progress", "Engagement", "Research Review")
+_PAGES = ("Overview", "Students", "Learning", "Engagement", "Research")
 _PHASE_LABELS = tuple(stage.label.title() for stage in THINKING_STAGES)
 _WORKSPACE_TABS = ("Chat", "Sources", "Journey", "Review")
 _ROSTER_CACHE_KEY = "professor_roster_cache"
 _DETAIL_CACHE_KEY = "professor_student_detail_cache"
-_WORKSPACE_CACHE_KEY = "professor_workspace_cache"
+_CHAT_CACHE_KEY = "professor_chat_cache"
+_SOURCES_CACHE_KEY = "professor_sources_cache"
+_JOURNEY_CACHE_KEY = "professor_journey_cache"
+_REVIEW_CACHE_KEY = "professor_review_cache"
 
 
 def _roster_cache_key(search: str, stage: str | None, attention_only: bool) -> tuple[str, str, bool]:
@@ -62,39 +64,96 @@ def _cached_professor_student_detail(client: Any, student_id: str) -> dict[str, 
     return cache[student_id]
 
 
-def _cached_professor_workspace(
-    client: Any, student_id: str, notebook_id: str
+def _cached_professor_chat(
+    client: Any, student_id: str, notebook_id: str, *, refresh: bool = False
 ) -> dict[str, Any]:
-    """Fetch or reuse one notebook workspace payload."""
-    cache = st.session_state.setdefault(_WORKSPACE_CACHE_KEY, {})
+    """Fetch or reuse one notebook chat page (newest messages only)."""
+    cache = st.session_state.setdefault(_CHAT_CACHE_KEY, {})
     key = (student_id, notebook_id)
-    if key not in cache:
-        cache[key] = client.professor_notebook_workspace(student_id, notebook_id)
+    if refresh or key not in cache:
+        cache[key] = client.professor_notebook_messages(student_id, notebook_id)
     return cache[key]
 
 
-def _clear_professor_workspace_cache(student_id: str, notebook_id: str | None = None) -> None:
-    """Drop cached workspace payloads after navigation changes."""
-    cache = st.session_state.get(_WORKSPACE_CACHE_KEY) or {}
-    if notebook_id is None:
-        for key in list(cache):
-            if key[0] == student_id:
-                cache.pop(key, None)
-        return
-    cache.pop((student_id, notebook_id), None)
+def _cached_professor_sources(
+    client: Any, student_id: str, notebook_id: str, *, refresh: bool = False
+) -> dict[str, Any]:
+    """Fetch or reuse one notebook sources list."""
+    cache = st.session_state.setdefault(_SOURCES_CACHE_KEY, {})
+    key = (student_id, notebook_id)
+    if refresh or key not in cache:
+        cache[key] = client.professor_notebook_sources(student_id, notebook_id)
+    return cache[key]
+
+
+def _cached_professor_journey(
+    client: Any, student_id: str, notebook_id: str, *, refresh: bool = False
+) -> dict[str, Any]:
+    """Fetch or reuse one notebook journey projection."""
+    cache = st.session_state.setdefault(_JOURNEY_CACHE_KEY, {})
+    key = (student_id, notebook_id)
+    if refresh or key not in cache:
+        cache[key] = client.professor_notebook_journey(student_id, notebook_id)
+    return cache[key]
+
+
+def _cached_professor_review(
+    client: Any, student_id: str, notebook_id: str, *, refresh: bool = False
+) -> dict[str, Any]:
+    """Fetch or reuse one notebook review projection."""
+    cache = st.session_state.setdefault(_REVIEW_CACHE_KEY, {})
+    key = (student_id, notebook_id)
+    if refresh or key not in cache:
+        cache[key] = client.professor_notebook_review(student_id, notebook_id)
+    return cache[key]
+
+
+def _clear_notebook_tab_caches(student_id: str, notebook_id: str | None = None) -> None:
+    """Drop cached notebook tab payloads for one student."""
+    for cache_key in (
+        _CHAT_CACHE_KEY,
+        _SOURCES_CACHE_KEY,
+        _JOURNEY_CACHE_KEY,
+        _REVIEW_CACHE_KEY,
+    ):
+        cache = st.session_state.get(cache_key) or {}
+        if notebook_id is None:
+            for key in list(cache):
+                if key[0] == student_id:
+                    cache.pop(key, None)
+        else:
+            cache.pop((student_id, notebook_id), None)
 
 
 def _invalidate_student_detail_cache(student_id: str) -> None:
-    """Drop one student's cached detail and workspace payloads."""
+    """Drop one student's cached detail and notebook tab payloads."""
     detail_cache = st.session_state.get(_DETAIL_CACHE_KEY) or {}
     detail_cache.pop(student_id, None)
-    _clear_professor_workspace_cache(student_id)
+    _clear_notebook_tab_caches(student_id)
 
 
-def _invalidate_workspace_cache(student_id: str, notebook_id: str) -> None:
-    """Drop one notebook workspace cache entry."""
-    workspace_cache = st.session_state.get(_WORKSPACE_CACHE_KEY) or {}
-    workspace_cache.pop((student_id, notebook_id), None)
+def _invalidate_chat_cache(student_id: str, notebook_id: str) -> None:
+    """Drop one notebook chat cache entry."""
+    cache = st.session_state.get(_CHAT_CACHE_KEY) or {}
+    cache.pop((student_id, notebook_id), None)
+
+
+def _invalidate_sources_cache(student_id: str, notebook_id: str) -> None:
+    """Drop one notebook sources cache entry."""
+    cache = st.session_state.get(_SOURCES_CACHE_KEY) or {}
+    cache.pop((student_id, notebook_id), None)
+
+
+def _invalidate_journey_cache(student_id: str, notebook_id: str) -> None:
+    """Drop one notebook journey cache entry."""
+    cache = st.session_state.get(_JOURNEY_CACHE_KEY) or {}
+    cache.pop((student_id, notebook_id), None)
+
+
+def _invalidate_review_cache(student_id: str, notebook_id: str) -> None:
+    """Drop one notebook review cache entry."""
+    cache = st.session_state.get(_REVIEW_CACHE_KEY) or {}
+    cache.pop((student_id, notebook_id), None)
 
 
 def _format_file_size(size: int | float | None) -> str:
@@ -143,25 +202,61 @@ def _notebook_card_label(item: dict[str, Any]) -> str:
     return str(item.get("title") or "Untitled notebook")
 
 
-def _notebook_card_caption(item: dict[str, Any]) -> str:
-    """Render notebook metadata beneath the title."""
-    total_messages = int(item.get("messages") or 0)
+def _notebook_row_caption(item: dict[str, Any]) -> str:
+    """Render compact notebook list metadata."""
     student_messages = int(item.get("student_messages") or 0)
-    coach_messages = max(total_messages - student_messages, 0)
+    coach_messages = int(item.get("coach_messages") or item.get("assistant_messages") or 0)
     return (
-        f"{item.get('stage') or 'Not started'} · "
+        f"{item.get('stage') or item.get('current_stage') or 'Not started'} · "
         f"{student_messages} student · {coach_messages} coach · "
         f"{_when(item.get('last_active'))}"
     )
 
 
-def _student_card_caption(row: dict[str, Any]) -> str:
+def _student_row_caption(row: dict[str, Any]) -> str:
     """Render compact roster metadata beneath the student name."""
-    attention = " · Needs attention" if row.get("needs_attention") else ""
-    return (
-        f"{row.get('current_stage') or 'Not started'} · "
-        f"{_when(row.get('last_active'))}{attention}"
-    )
+    parts = [str(row.get("current_stage") or "Not started")]
+    if row.get("last_active"):
+        parts.append(_when(row.get("last_active")))
+    parts.append(f"{int(row.get('student_messages') or 0)} messages")
+    attention = row.get("needs_attention") or []
+    if attention:
+        parts.append("Needs attention")
+    return " · ".join(parts)
+
+
+def _render_sidebar() -> str:
+    """Render persistent left navigation and return the selected page."""
+    with st.container(key="professor_header"):
+        st.markdown(
+            """
+            <div class="professor-course-heading professor-sidebar-brand">
+              <p class="professor-eyebrow">CDE2300</p>
+              <h1>Course Analytics</h1>
+              <p>Product Design and Innovation</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        page = st.radio(
+            "Professor dashboard navigation",
+            _PAGES,
+            label_visibility="collapsed",
+            key="professor_page",
+        )
+        professor_name = escape(str(st.session_state.get("display_name") or "Teaching staff"))
+        logout_url = app_logout_url()
+        if logout_url:
+            st.markdown(
+                '<div class="professor-account professor-sidebar-account">'
+                f"<span>{professor_name}</span>"
+                f'<a href="{escape(logout_url, quote=True)}" target="_self" '
+                'rel="noopener">Sign out</a></div>',
+                unsafe_allow_html=True,
+            )
+        elif st.button("Sign out", key="professor_sign_out", type="tertiary"):
+            logout_user()
+    return page
 
 
 def _when(value: str | None) -> str:
@@ -172,45 +267,6 @@ def _when(value: str | None) -> str:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime("%d %b, %H:%M")
     except ValueError:
         return value
-
-
-def _render_header() -> str:
-    """Render the course identity and restrained analytics navigation."""
-    with st.container(key="professor_header"):
-        heading, navigation = st.columns([1.55, 1], gap="large")
-        heading.markdown(
-            """
-            <div class="professor-course-heading">
-              <p class="professor-eyebrow">Course Analytics</p>
-              <h1>CDE2300 · Product Design and Innovation</h1>
-              <p>Class learning activity and critical-thinking progress</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        with navigation:
-            page = st.radio(
-                "Professor dashboard navigation",
-                _PAGES,
-                horizontal=True,
-                label_visibility="collapsed",
-                key="professor_page",
-            )
-            logout_url = app_logout_url()
-            professor_name = escape(
-                str(st.session_state.get("display_name") or "Teaching staff")
-            )
-            if logout_url:
-                navigation.markdown(
-                    '<div class="professor-account">'
-                    f"<span>{professor_name}</span>"
-                    f'<a href="{escape(logout_url, quote=True)}" target="_self" '
-                    'rel="noopener">Sign out</a></div>',
-                    unsafe_allow_html=True,
-                )
-            elif st.button("Sign out", key="professor_sign_out", type="tertiary"):
-                logout_user()
-    return page
 
 
 def _metric(label: str, value: str, detail: str = "") -> None:
@@ -320,7 +376,7 @@ def _render_overview(client) -> None:
     data = client.professor_overview()
     updated = _when(data.get("generated_at"))
     st.caption(f"Last updated {updated}")
-    metrics = st.columns(5, gap="small")
+    metrics = st.columns(3, gap="small")
     with metrics[0]:
         _metric("Students", str(data["students"]))
     with metrics[1]:
@@ -330,17 +386,7 @@ def _render_overview(client) -> None:
         )
     with metrics[2]:
         _metric(
-            "Assessed students",
-            str(data["median_facione"].get("sample_size", 0)),
-            "Latest critical-thinking indicator"
-            if data["median_facione"].get("sample_size", 0)
-            else "Not assessed yet",
-        )
-    with metrics[3]:
-        _metric("Median stage", data.get("median_stage") or "Not started")
-    with metrics[4]:
-        _metric(
-            "Students needing attention",
+            "Need follow-up",
             str(data.get("attention_students_count", len(data.get("attention_students", [])))),
         )
     summary = escape(str(data.get("summary") or "No class summary is available yet."))
@@ -373,7 +419,47 @@ def _render_overview(client) -> None:
 
 
 def _render_students(client) -> None:
-    """Render a progressive roster → student → notebook workspace."""
+    """Render full-width roster → student → notebook drill-down."""
+    selected_id = st.session_state.get("professor_selected_student_id", "")
+    opened_notebook = (
+        st.session_state.get(f"professor_open_notebook_{selected_id}")
+        if selected_id
+        else None
+    )
+
+    if opened_notebook and selected_id:
+        detail = _cached_professor_student_detail(client, selected_id)
+        student = detail.get("student") or {}
+        notebook_summary = next(
+            (
+                item
+                for item in detail.get("notebooks", [])
+                if str(item.get("id")) == str(opened_notebook)
+            ),
+            {"id": opened_notebook, "title": "Notebook"},
+        )
+        breadcrumb = (
+            f"Students / {student.get('name') or 'Student'} / "
+            f"{_notebook_card_label(notebook_summary)}"
+        )
+        if st.button("← Notebooks", key=f"professor_back_notebooks_{selected_id}"):
+            st.session_state.pop(f"professor_open_notebook_{selected_id}", None)
+            _clear_notebook_tab_caches(selected_id, opened_notebook)
+            st.rerun()
+        st.caption(breadcrumb)
+        _render_professor_workspace(client, selected_id, notebook_summary)
+        return
+
+    if selected_id:
+        if st.button("← Students", key=f"professor_back_students_{selected_id}"):
+            st.session_state.pop("professor_selected_student_id", None)
+            st.session_state.pop(f"professor_open_notebook_{selected_id}", None)
+            _clear_notebook_tab_caches(selected_id)
+            st.rerun()
+        detail = _cached_professor_student_detail(client, selected_id)
+        _render_student_detail(client, detail)
+        return
+
     st.markdown("### Students")
     st.caption("Start with a lightweight roster. Select one student to load their learning record.")
     filters = st.columns([2.2, 1.2, 1.2], gap="small")
@@ -401,98 +487,39 @@ def _render_students(client) -> None:
     if not rows:
         st.info("No students match these filters.")
         return
-
-    selected_id = st.session_state.get("professor_selected_student_id", "")
-    opened_notebook = None
-    if selected_id:
-        opened_notebook = st.session_state.get(f"professor_open_notebook_{selected_id}")
-
-    workspace_class = (
-        "professor-students-workspace professor-mobile-detail"
-        if selected_id
-        else "professor-students-workspace"
-    )
-    st.markdown(f'<div class="{workspace_class}"></div>', unsafe_allow_html=True)
-
-    with st.container(key="professor_students_workspace"):
-        list_col, detail_col = st.columns([0.82, 1.8], gap="large")
-        with list_col:
-            st.markdown("#### Student list")
-            st.caption(f"{len(rows)} student{'s' if len(rows) != 1 else ''}")
-            with st.container(key="professor_student_list_scroll"):
-                for row in rows:
-                    student_id = str(row.get("id") or "")
-                    is_selected = student_id == selected_id
-                    card_class = "professor-student-card professor-student-card-selected" if is_selected else "professor-student-card"
-                    with st.container(key=f"professor_student_card_{student_id}"):
-                        st.markdown(
-                            f'<div class="{card_class}">'
-                            f'<div class="professor-student-card-name">'
-                            f"{escape(str(row.get('name') or 'Student'))}"
-                            f'<span class="professor-student-card-chevron">›</span></div>'
-                            f'<div class="professor-student-card-meta">'
-                            f"{escape(_student_card_caption(row))}</div></div>",
-                            unsafe_allow_html=True,
-                        )
-                        label = "Selected" if is_selected else "Open"
-                        if st.button(
-                            label,
-                            key=f"professor_open_student_{student_id}",
-                            use_container_width=True,
-                        ):
-                            st.session_state["professor_selected_student_id"] = student_id
-                            st.session_state.pop(f"professor_open_notebook_{student_id}", None)
-                            _clear_professor_workspace_cache(student_id)
-                            st.rerun()
-        with detail_col:
-            if not selected_id:
-                st.info("Select a student to view their learning progress and notebooks.")
-            else:
-                if opened_notebook:
-                    if st.button(
-                        "← Back to notebooks",
-                        key=f"professor_back_notebooks_{selected_id}",
-                    ):
-                        st.session_state.pop(f"professor_open_notebook_{selected_id}", None)
-                        _clear_professor_workspace_cache(selected_id, opened_notebook)
-                        st.rerun()
-                elif st.button(
-                    "← Students",
-                    key=f"professor_back_students_{selected_id}",
-                ):
-                    st.session_state.pop("professor_selected_student_id", None)
-                    st.session_state.pop(f"professor_open_notebook_{selected_id}", None)
-                    _clear_professor_workspace_cache(selected_id)
-                    st.rerun()
-                detail = _cached_professor_student_detail(client, selected_id)
-                if opened_notebook:
-                    workspace = _cached_professor_workspace(
-                        client, selected_id, opened_notebook
-                    )
-                    notebook_summary = next(
-                        (
-                            item
-                            for item in detail.get("notebooks", [])
-                            if item.get("id") == opened_notebook
-                        ),
-                        {},
-                    )
-                    _render_professor_workspace(
-                        client, selected_id, workspace, notebook_summary
-                    )
-                else:
-                    _render_student_detail(client, detail, show_back=False)
+    st.caption(f"{len(rows)} student{'s' if len(rows) != 1 else ''}")
+    with st.container(key="professor_student_list_scroll"):
+        for row in rows:
+            student_id = str(row.get("id") or "")
+            label = (
+                f"{row.get('name') or 'Student'}  ›\n"
+                f"{_student_row_caption(row)}"
+            )
+            if st.button(
+                label,
+                key=f"professor_open_student_{student_id}",
+                use_container_width=True,
+            ):
+                st.session_state["professor_selected_student_id"] = student_id
+                st.session_state.pop(f"professor_open_notebook_{student_id}", None)
+                _clear_notebook_tab_caches(student_id)
+                st.rerun()
 
 
 def _render_student_detail(
-    client: Any, data: dict[str, Any], *, show_back: bool = True
+    client: Any, data: dict[str, Any]
 ) -> None:
-    """Render one selected student's record and notebook cards."""
+    """Render one selected student's record and notebook rows."""
     student = data["student"]
     header = st.columns([0.82, 0.18], gap="small")
     with header[0]:
         st.markdown(f"### {student['name']}")
-        st.caption(student.get("email") or "Authorised student record")
+        st.caption(
+            f"{student.get('email') or 'Authorised student record'} · "
+            f"{student.get('current_stage') or 'Not started'} · "
+            f"Last active {_when(student.get('last_active'))} · "
+            f"{int(student.get('student_messages') or 0)} messages"
+        )
     with header[1]:
         if st.button(
             "Refresh",
@@ -501,62 +528,48 @@ def _render_student_detail(
         ):
             _invalidate_student_detail_cache(student["id"])
             st.rerun()
-    metrics = st.columns(4, gap="small")
-    with metrics[0]:
-        _metric("Current stage", student.get("current_stage") or "Not started")
-    with metrics[1]:
-        _metric("Progress", f"{student.get('stage_progress', 0)} / {len(_PHASE_LABELS)}")
-    with metrics[2]:
-        _metric("Last active", _when(student.get("last_active")))
-    with metrics[3]:
-        _metric("Attention", "Yes" if student.get("needs_attention") else "No")
 
-    opened = st.session_state.get(f"professor_open_notebook_{student['id']}")
-    if not opened:
-        st.markdown("#### Notebooks")
-        notebooks = data.get("notebooks", [])
-        if not notebooks:
-            st.info("This student has not started a notebook yet.")
-        else:
-            for item in notebooks:
-                notebook_id = str(item.get("id") or "")
-                with st.container(key=f"professor_notebook_card_{student['id']}_{notebook_id}"):
-                    st.markdown(
-                        f'<div class="professor-notebook-card">'
-                        f'<div class="professor-notebook-card-title">'
-                        f"{escape(_notebook_card_label(item))}</div>"
-                        f'<div class="professor-notebook-card-stage">'
-                        f"{escape(str(item.get('stage') or 'Not started'))}</div>"
-                        f'<div class="professor-notebook-card-meta">'
-                        f"{escape(_notebook_card_caption(item))}</div></div>",
-                        unsafe_allow_html=True,
-                    )
-                    if st.button(
-                        "Open →",
-                        key=f"professor_open_notebook_btn_{student['id']}_{notebook_id}",
-                        use_container_width=True,
-                    ):
-                        st.session_state[f"professor_open_notebook_{student['id']}"] = notebook_id
-                        _clear_professor_workspace_cache(student["id"], notebook_id)
-                        st.rerun()
-        if not notebooks:
-            return
+    notebooks = data.get("notebooks", [])
+    st.markdown(f"#### Notebooks ({len(notebooks)})")
+    if not notebooks:
+        st.info("This student has not started a notebook yet.")
+    else:
+        for item in notebooks:
+            notebook_id = str(item.get("id") or "")
+            row_label = (
+                f"{_notebook_card_label(item)}  ›\n{_notebook_row_caption(item)}"
+            )
+            if st.button(
+                row_label,
+                key=f"professor_open_notebook_btn_{student['id']}_{notebook_id}",
+                use_container_width=True,
+            ):
+                st.session_state[f"professor_open_notebook_{student['id']}"] = notebook_id
+                _clear_notebook_tab_caches(student["id"], notebook_id)
+                st.rerun()
 
-    st.markdown("#### Learning journey")
-    completed = set(data.get("completed_stages", []))
+    st.markdown("#### Learning snapshot")
+    completed_labels = set(data.get("completed_stages", []))
+    current_stage = student.get("current_stage")
     steps = []
     for stage in _PHASE_LABELS:
-        status = "completed" if stage in completed else "current" if stage == student.get("current_stage") else "future"
+        if stage in completed_labels and stage != current_stage:
+            status = "completed"
+        elif stage == current_stage:
+            status = "current"
+        elif stage in completed_labels:
+            status = "completed"
+        else:
+            status = "not_completed"
         marker = "✓" if status == "completed" else "●" if status == "current" else "○"
-        steps.append(f'<span class="professor-step professor-step-{status}"><b>{marker}</b> {escape(stage)}</span>')
+        steps.append(
+            f'<span class="professor-step professor-step-{status}">'
+            f"<b>{marker}</b> {escape(stage)}</span>"
+        )
     st.markdown(f'<div class="professor-progress">{"".join(steps)}</div>', unsafe_allow_html=True)
-    reasons = student.get("needs_attention") or []
-    if reasons:
-        st.caption("Needs attention: " + "; ".join(item.get("reason", "") for item in reasons))
-
     overview_left, overview_right = st.columns(2, gap="large")
     with overview_left:
-        st.markdown("#### Critical-thinking profile")
+        st.markdown("#### Critical thinking")
         profile_rows = []
         class_profile = data.get("class_facione_profile", {})
         for key, value in data.get("facione_profile", {}).items():
@@ -596,90 +609,80 @@ def _render_student_detail(
         )
         st.caption("Assessment trend is descriptive only; it does not establish causal change.")
 
-    if opened:
-        return
-
-
-def _workspace_notebook(workspace: dict[str, Any], notebook: dict[str, Any]) -> dict[str, Any]:
-    """Return notebook header metadata from the workspace or detail fallback."""
-    header = workspace.get("notebook") or {}
-    if header:
-        return header
-    return {
-        "id": notebook.get("id"),
-        "title": notebook.get("title"),
-        "current_stage": notebook.get("stage"),
-        "last_active": notebook.get("last_active"),
-    }
-
 
 def _render_professor_workspace(
     client: Any,
     student_id: str,
-    workspace: dict[str, Any],
     notebook: dict[str, Any],
 ) -> None:
     """Render the read-only Chat, Sources, Journey, and Review tabs."""
-    notebook_meta = _workspace_notebook(workspace, notebook)
-    transcript = workspace.get("transcript") or {}
+    notebook_id = str(notebook.get("id") or "")
     header = st.columns([0.82, 0.18], gap="small")
     with header[0]:
-        st.markdown(
-            f"#### {notebook_meta.get('title') or _notebook_card_label(notebook)}"
-        )
+        st.markdown(f"#### {_notebook_card_label(notebook)}")
         st.caption(
-            f"{notebook_meta.get('current_stage') or notebook.get('stage') or 'Not started'} · "
-            f"Last active {_when(notebook_meta.get('last_active') or notebook.get('last_active'))} · "
-            "Read-only workspace · active conversation branch"
+            f"{notebook.get('stage') or notebook.get('current_stage') or 'Not started'} · "
+            f"Active {_when(notebook.get('last_active'))} · "
+            "Read-only student workspace"
         )
     with header[1]:
-        notebook_id = str(notebook_meta.get("id") or "")
-        if st.button(
-            "Refresh",
-            key=f"professor_refresh_workspace_{student_id}_{notebook_id}",
-            use_container_width=True,
-        ):
-            _invalidate_workspace_cache(student_id, notebook_id)
-            st.rerun()
+        pass
     tab = st.radio(
         "Notebook workspace",
         _WORKSPACE_TABS,
         horizontal=True,
-        key=f"professor_workspace_tab_{student_id}_{notebook_meta.get('id')}",
+        key=f"professor_workspace_tab_{student_id}_{notebook_id}",
         label_visibility="collapsed",
     )
+    refresh_key = f"professor_refresh_{tab.lower()}_{student_id}_{notebook_id}"
+    if st.button("Refresh", key=refresh_key, use_container_width=True):
+        if tab == "Chat":
+            _invalidate_chat_cache(student_id, notebook_id)
+        elif tab == "Sources":
+            _invalidate_sources_cache(student_id, notebook_id)
+        elif tab == "Journey":
+            _invalidate_journey_cache(student_id, notebook_id)
+        else:
+            _invalidate_review_cache(student_id, notebook_id)
+        st.rerun()
     if tab == "Chat":
-        authorized_sources = {
-            str(source.get("id") or ""): source
-            for source in workspace.get("sources") or []
-            if str(source.get("id") or "").strip()
-        }
+        chat_payload = _cached_professor_chat(client, student_id, notebook_id)
         _render_professor_chat_tab(
             client,
             student_id,
-            str(notebook_meta.get("id") or ""),
-            transcript,
-            authorized_sources,
+            notebook_id,
+            chat_payload,
         )
     elif tab == "Sources":
-        _render_professor_sources_tab(
-            client, student_id, str(notebook_meta.get("id") or ""), workspace
-        )
+        sources_payload = _cached_professor_sources(client, student_id, notebook_id)
+        _render_professor_sources_tab(client, student_id, notebook_id, sources_payload)
     elif tab == "Journey":
-        _render_professor_journey_tab(workspace)
+        journey_payload = _cached_professor_journey(client, student_id, notebook_id)
+        _render_professor_journey_tab(journey_payload)
     else:
-        _render_professor_review_tab(workspace)
+        review_payload = _cached_professor_review(client, student_id, notebook_id)
+        _render_professor_review_tab(review_payload)
 
 
 def _render_professor_chat_tab(
     client: Any,
     student_id: str,
     notebook_id: str,
-    transcript: dict[str, Any],
-    authorized_sources: dict[str, dict[str, Any]],
+    chat_payload: dict[str, Any],
 ) -> None:
     """Render the active-branch transcript inside a scroll region."""
-    messages = transcript.get("messages") or []
+    messages = list(chat_payload.get("messages") or [])
+    cache = st.session_state.setdefault(_CHAT_CACHE_KEY, {})
+    cache_entry = cache.setdefault((student_id, notebook_id), chat_payload)
+    next_cursor = cache_entry.get("next_cursor")
+    if next_cursor and st.button("Load earlier messages", key=f"professor_load_earlier_{notebook_id}"):
+        older = client.professor_notebook_messages(
+            student_id, notebook_id, cursor=next_cursor
+        )
+        cache_entry["messages"] = list(older.get("messages") or []) + messages
+        cache_entry["next_cursor"] = older.get("next_cursor")
+        st.rerun()
+        return
     if not messages:
         st.caption("No conversation has been recorded in this notebook.")
         return
@@ -688,37 +691,34 @@ def _render_professor_chat_tab(
             role = str(message.get("role") or "")
             speaker = "Student" if role == "user" else "Coach"
             role_class = "student" if role == "user" else "coach"
-            with st.container(
-                key=f"professor_message_{message.get('id') or message.get('created_at')}"
-            ):
-                st.markdown(
-                    f'<div class="professor-chat-card professor-chat-{role_class}">'
-                    f'<div class="professor-chat-meta"><strong>{escape(speaker)}</strong>'
-                    f"<span>{escape(_when(message.get('created_at')))}</span></div></div>",
-                    unsafe_allow_html=True,
+            st.markdown(
+                f'<div class="professor-chat-meta professor-chat-{role_class}">'
+                f"<strong>{escape(speaker)}</strong>"
+                f"<span>{escape(_when(message.get('created_at')))}</span></div>",
+                unsafe_allow_html=True,
+            )
+            content = str(message.get("content") or "")
+            if content:
+                st.markdown(content)
+            for attachment in message.get("attachments") or []:
+                _render_professor_attachment_row(
+                    client,
+                    student_id,
+                    notebook_id,
+                    message,
+                    attachment,
                 )
-                content = str(message.get("content") or "")
-                if content:
-                    st.markdown(content)
-                for attachment in message.get("attachments") or []:
-                    _render_professor_attachment_row(
+            citations = message.get("citations") or []
+            if citations:
+                st.markdown("**Sources used**")
+                for citation in citations:
+                    _render_professor_citation_row(
                         client,
                         student_id,
                         notebook_id,
-                        message,
-                        attachment,
+                        citation,
                     )
-                citations = message.get("citations") or []
-                if citations:
-                    st.markdown("**Sources used**")
-                    for citation in citations:
-                        _render_professor_citation_row(
-                            client,
-                            student_id,
-                            notebook_id,
-                            citation,
-                            authorized_sources,
-                        )
+            st.markdown('<div class="professor-chat-divider"></div>', unsafe_allow_html=True)
 
 
 def _render_professor_attachment_row(
@@ -764,24 +764,17 @@ def _render_professor_citation_row(
     student_id: str,
     notebook_id: str,
     citation: dict[str, Any],
-    authorized_sources: dict[str, dict[str, Any]],
 ) -> None:
-    """Render one citation row, opening sources only when authorized."""
+    """Render one citation row; open bytes only on explicit click."""
     citation_id = str(citation.get("id") or "").strip()
     label = str(citation.get("label") or citation_id or "source").strip()
     title = str(citation.get("title") or label or "Source").strip()
     display = f"[{label}] {title}" if label and title != label else f"[{label}]"
-    source = authorized_sources.get(citation_id)
     row = st.columns([0.78, 0.22], gap="small")
     with row[0]:
         st.caption(display)
     with row[1]:
-        if (
-            citation_id
-            and source
-            and source.get("has_file")
-            and hasattr(client, "professor_notebook_source")
-        ):
+        if citation_id and hasattr(client, "professor_notebook_source"):
             if st.button(
                 "Open →",
                 key=f"professor_citation_{notebook_id}_{citation_id}_{label}",
@@ -800,29 +793,29 @@ def _render_professor_sources_tab(
     client: Any,
     student_id: str,
     notebook_id: str,
-    workspace: dict[str, Any],
+    sources_payload: dict[str, Any],
 ) -> None:
-    """Render grouped library sources without upload or selection controls."""
-    sources = list(workspace.get("sources") or [])
+    """Render grouped library sources as visible sections."""
+    sources = list(sources_payload.get("sources") or [])
     grouped: dict[str, list[dict[str, Any]]] = {group: [] for group in COURSE_MATERIAL_GROUPS}
     grouped["My Sources"] = []
     for source in sources:
         group = str(source.get("group") or "My Sources")
         grouped.setdefault(group, []).append(source)
-    with st.expander(f"My Sources · {len(grouped['My Sources'])}", expanded=True):
-        if grouped["My Sources"]:
-            for source in grouped["My Sources"]:
-                _render_professor_source_row(client, student_id, notebook_id, source)
-        else:
-            st.caption("No personal sources in this notebook.")
+    st.markdown("#### My Sources")
+    if grouped["My Sources"]:
+        for source in grouped["My Sources"]:
+            _render_professor_source_row(client, student_id, notebook_id, source)
+    else:
+        st.caption("No personal sources in this notebook.")
     for group in COURSE_MATERIAL_GROUPS:
         group_sources = grouped.get(group) or []
-        with st.expander(f"{group} · {len(group_sources)}", expanded=False):
-            if group_sources:
-                for source in group_sources:
-                    _render_professor_source_row(client, student_id, notebook_id, source)
-            else:
-                st.caption(f"No {group.lower()} in this notebook.")
+        st.markdown(f"#### {group}")
+        if group_sources:
+            for source in group_sources:
+                _render_professor_source_row(client, student_id, notebook_id, source)
+        else:
+            st.caption(f"No {group.lower()} in this notebook.")
 
 
 def _render_professor_source_row(
@@ -862,52 +855,58 @@ def _render_professor_source_row(
                 _professor_source_dialog(client, student_id, notebook_id, source_id, title)
 
 
-def _render_professor_journey_tab(workspace: dict[str, Any]) -> None:
-    """Render the Thinking Path and optional HMW scaffold read-only."""
-    learning = workspace.get("learning") or {}
-    journey = normalize_journey(learning.get("journey") or learning.get("learning_journey"))
-    completed = set(journey.get("completed_stages") or [])
-    current_id = str(journey.get("current_stage") or THINKING_STAGES[0].id)
-    stage_index = next(
-        index
-        for index, item in enumerate(THINKING_STAGES, start=1)
-        if item.id == current_id
+def _render_journey_stage_row(label: str, state: str) -> None:
+    """Render one persisted journey stage without inferring completion."""
+    marker = "✓" if state == "completed" else "●" if state == "current" else "○"
+    status = (
+        "Completed"
+        if state == "completed"
+        else "Current focus"
+        if state == "current"
+        else "Not completed"
     )
-    completed_count = len(completed)
-    if current_id not in completed:
-        completed_count = max(completed_count, stage_index - 1)
     st.markdown(
-        progress_bar_html(
-            completed=completed_count,
-            total=len(THINKING_STAGES),
-            label="Thinking path",
-            heading="Current focus",
-        ),
+        f'<div class="professor-timeline-step professor-step professor-step-{escape(state)}">'
+        f"<b>{marker}</b> {escape(label)}"
+        f"<span>{escape(status)}</span></div>",
         unsafe_allow_html=True,
     )
-    for stage in THINKING_STAGES:
-        state = (
-            "current"
-            if stage.id == current_id
-            else "completed"
-            if stage.id in completed
-            else "future"
-        )
-        marker = "✓" if state == "completed" else "●" if state == "current" else "○"
-        st.markdown(
-            f'<span class="professor-step professor-step-{state}">'
-            f"<b>{marker}</b> {escape(stage.label)}</span>",
-            unsafe_allow_html=True,
-        )
-    hmw = learning.get("hmw_scaffold") or {}
+
+
+def _render_professor_journey_tab(journey_payload: dict[str, Any]) -> None:
+    """Render the Thinking Path from persisted completion state."""
+    stages = list(journey_payload.get("stages") or [])
+    if not stages:
+        journey = normalize_journey(journey_payload.get("journey") or {})
+        completed = {
+            str(item).lower() for item in (journey.get("completed_stages") or [])
+        }
+        current_id = str(journey.get("current_stage") or THINKING_STAGES[0].id)
+        for stage in THINKING_STAGES:
+            if stage.id in completed and stage.id != current_id:
+                state = "completed"
+            elif stage.id == current_id:
+                state = "current"
+            elif stage.id in completed:
+                state = "completed"
+            else:
+                state = "not_completed"
+            _render_journey_stage_row(stage.label, state)
+    else:
+        for stage in stages:
+            state = str(stage.get("state") or "not_completed")
+            _render_journey_stage_row(
+                str(stage.get("label") or stage.get("id") or ""),
+                state,
+            )
+    hmw = journey_payload.get("hmw_scaffold") or {}
     if hmw.get("available"):
         render_hmw_scaffold()
 
 
-def _render_professor_review_tab(workspace: dict[str, Any]) -> None:
+def _render_professor_review_tab(review_payload: dict[str, Any]) -> None:
     """Render the Review projection without Deep Review controls."""
-    learning = workspace.get("learning") or {}
-    review = dict(learning.get("review") or {})
+    review = dict(review_payload)
     st.markdown(
         review_card_html(
             label="Summary",
@@ -1487,18 +1486,22 @@ def render_professor_dashboard() -> None:
     access.  A backend 403/401 remains authoritative if a role changes after
     the navigation has rendered.
     """
-    page = _render_header()
-    try:
-        client = local_api_client()
-        if page == "Overview":
-            _render_overview(client)
-        elif page == "Students":
-            _render_students(client)
-        elif page == "Learning Progress":
-            _render_critical_thinking(client)
-        elif page == "Engagement":
-            _render_engagement(client)
-        else:
-            _render_research(client)
-    except Exception:  # noqa: BLE001 - do not expose backend/student data in UI errors
-        st.error("Professor analytics is unavailable right now. Please try again shortly.")
+    with st.container(key="professor_shell"):
+        nav_col, content_col = st.columns([0.24, 0.76], gap="large")
+        with nav_col:
+            page = _render_sidebar()
+        with content_col:
+            try:
+                client = local_api_client()
+                if page == "Overview":
+                    _render_overview(client)
+                elif page == "Students":
+                    _render_students(client)
+                elif page == "Learning":
+                    _render_critical_thinking(client)
+                elif page == "Engagement":
+                    _render_engagement(client)
+                else:
+                    _render_research(client)
+            except Exception:  # noqa: BLE001 - do not expose backend/student data in UI errors
+                st.error("Professor analytics is unavailable right now. Please try again shortly.")

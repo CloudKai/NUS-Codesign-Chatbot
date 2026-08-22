@@ -18,9 +18,23 @@ from backend.student_store import StudentStore
 
 logger = logging.getLogger(__name__)
 
-# ``messages.is_error`` is INTEGER on SQLite and DSQL. SQLite treats ``NOT 0`` as
-# true; PostgreSQL/DSQL rejects ``NOT integer``. Compare with ``= 0`` instead.
+_ACTIVE_BRANCH_JOIN = """
+                AND COALESCE(m.conversation_revision, 0) <=
+                    COALESCE(n.conversation_revision, 0)
+                AND (
+                    m.superseded_at_revision IS NULL
+                    OR m.superseded_at_revision >
+                       COALESCE(n.conversation_revision, 0)
+                )
+                AND COALESCE(m.metadata_text, '') NOT LIKE
+                    '%"_internal_type": "coach_idempotency"%'
+"""
+
 _ACTIVE_USER_TURN = "message_role = 'user' AND COALESCE(message_is_error, 0) = 0"
+_STUDENT_ROLE_FILTER = """
+              AND COALESCE(u.role, 'student') NOT IN ('lecturer', 'admin')
+              AND (u.identifier <> 'local-student' OR u.cognito_sub IS NOT NULL)
+"""
 _STUDENT_ROSTER_SQL = f"""
             WITH eligible_users AS (
                 SELECT id, display_name, email, created_at
@@ -236,6 +250,302 @@ class ProfessorAnalyticsRepository:
                 rows = connection.execute(_STUDENT_ROSTER_SQL).fetchall()
         except Exception as error:
             logger.warning("Professor student roster query failed: %s", error)
+            raise ProfessorAnalyticsUnavailable(
+                "Professor analytics data is temporarily unavailable"
+            ) from error
+        return [self._row_dict(row) for row in rows]
+
+    def load_student_roster_row(self, student_id: str) -> dict[str, Any] | None:
+        """Return one compact roster aggregate row for ``student_id``."""
+        query = f"""
+            WITH eligible_users AS (
+                SELECT id, display_name, email, created_at
+                FROM users u
+                WHERE u.id = ?
+                  {_STUDENT_ROLE_FILTER.replace('u.', '')}
+            ),
+            active_messages AS (
+                SELECT
+                    n.user_id,
+                    n.id AS notebook_id,
+                    n.current_stage,
+                    n.progress_text,
+                    n.updated_at AS notebook_updated_at,
+                    m.id AS message_id,
+                    m.role AS message_role,
+                    m.is_error AS message_is_error,
+                    m.assessment_text,
+                    m.created_at AS message_created_at
+                FROM notebooks n
+                JOIN eligible_users u ON u.id = n.user_id
+                LEFT JOIN messages m ON m.notebook_id = n.id
+                    {_ACTIVE_BRANCH_JOIN}
+            ),
+            notebook_stats AS (
+                SELECT
+                    user_id,
+                    notebook_id,
+                    current_stage,
+                    progress_text,
+                    notebook_updated_at,
+                    MAX(
+                        CASE
+                            WHEN {_ACTIVE_USER_TURN}
+                            THEN message_created_at
+                        END
+                    ) AS last_user_at,
+                    SUM(
+                        CASE
+                            WHEN {_ACTIVE_USER_TURN}
+                            THEN 1 ELSE 0
+                        END
+                    ) AS notebook_student_messages
+                FROM active_messages
+                GROUP BY user_id, notebook_id, current_stage, progress_text,
+                         notebook_updated_at
+            ),
+            ranked_notebooks AS (
+                SELECT
+                    ns.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY user_id
+                        ORDER BY
+                            COALESCE(last_user_at, notebook_updated_at, '') DESC,
+                            notebook_id DESC
+                    ) AS notebook_rank
+                FROM notebook_stats ns
+            ),
+            current_notebook AS (
+                SELECT * FROM ranked_notebooks WHERE notebook_rank = 1
+            ),
+            latest_assessment AS (
+                SELECT
+                    am.user_id,
+                    am.notebook_id,
+                    am.assessment_text,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY am.user_id, am.notebook_id
+                        ORDER BY am.message_created_at DESC, am.message_id DESC
+                    ) AS assessment_rank
+                FROM active_messages am
+                WHERE am.message_role = 'assistant'
+                  AND COALESCE(am.message_is_error, 0) = 0
+                  AND COALESCE(am.assessment_text, '') <> ''
+            ),
+            student_totals AS (
+                SELECT
+                    user_id,
+                    SUM(
+                        CASE
+                            WHEN {_ACTIVE_USER_TURN}
+                            THEN 1 ELSE 0
+                        END
+                    ) AS student_messages,
+                    COUNT(
+                        DISTINCT CASE
+                            WHEN {_ACTIVE_USER_TURN}
+                            THEN substr(message_created_at, 1, 10)
+                        END
+                    ) AS active_days,
+                    MAX(
+                        CASE
+                            WHEN {_ACTIVE_USER_TURN}
+                            THEN message_created_at
+                        END
+                    ) AS last_activity
+                FROM active_messages
+                GROUP BY user_id
+            )
+            SELECT
+                u.id AS user_id,
+                u.display_name,
+                u.email,
+                u.created_at AS user_created_at,
+                cn.notebook_id AS current_notebook_id,
+                cn.current_stage,
+                cn.progress_text,
+                COALESCE(cn.notebook_student_messages, 0) AS primary_student_messages,
+                COALESCE(st.student_messages, 0) AS student_messages,
+                COALESCE(st.active_days, 0) AS active_days,
+                st.last_activity,
+                la.assessment_text AS latest_assessment_text
+            FROM eligible_users u
+            LEFT JOIN current_notebook cn ON cn.user_id = u.id
+            LEFT JOIN student_totals st ON st.user_id = u.id
+            LEFT JOIN latest_assessment la
+                ON la.user_id = u.id
+               AND la.notebook_id = cn.notebook_id
+               AND la.assessment_rank = 1
+        """
+        try:
+            with self._store._connect() as connection:  # noqa: SLF001
+                row = connection.execute(query, (student_id,)).fetchone()
+        except Exception as error:
+            raise ProfessorAnalyticsUnavailable(
+                "Professor analytics data is temporarily unavailable"
+            ) from error
+        return self._row_dict(row) if row else None
+
+    def load_student_notebook_summaries(self, student_id: str) -> list[dict[str, Any]]:
+        """Return per-notebook aggregates for one student without message bodies."""
+        query = f"""
+            SELECT
+                n.id AS notebook_id,
+                n.title,
+                n.current_stage,
+                n.progress_text,
+                n.updated_at AS notebook_updated_at,
+                SUM(
+                    CASE
+                        WHEN m.role = 'user' AND COALESCE(m.is_error, 0) = 0
+                        THEN 1 ELSE 0
+                    END
+                ) AS student_messages,
+                SUM(
+                    CASE
+                        WHEN m.role = 'assistant' AND COALESCE(m.is_error, 0) = 0
+                        THEN 1 ELSE 0
+                    END
+                ) AS coach_messages,
+                MAX(
+                    CASE
+                        WHEN m.role = 'user' AND COALESCE(m.is_error, 0) = 0
+                        THEN m.created_at
+                    END
+                ) AS last_active
+            FROM notebooks n
+            JOIN users u ON u.id = n.user_id
+            LEFT JOIN messages m ON m.notebook_id = n.id
+                {_ACTIVE_BRANCH_JOIN}
+            WHERE u.id = ?
+              {_STUDENT_ROLE_FILTER}
+            GROUP BY n.id, n.title, n.current_stage, n.progress_text, n.updated_at
+            ORDER BY COALESCE(last_active, n.updated_at, '') DESC, n.id DESC
+        """
+        try:
+            with self._store._connect() as connection:  # noqa: SLF001
+                rows = connection.execute(query, (student_id,)).fetchall()
+        except Exception as error:
+            raise ProfessorAnalyticsUnavailable(
+                "Professor analytics data is temporarily unavailable"
+            ) from error
+        return [self._row_dict(row) for row in rows]
+
+    def load_student_activity_rows(self, student_id: str) -> list[dict[str, Any]]:
+        """Return compact per-message rows for one student without bodies."""
+        query = f"""
+            SELECT
+                n.id AS notebook_id,
+                m.id AS message_id,
+                m.role AS message_role,
+                m.is_error AS message_is_error,
+                m.assessment_text,
+                m.cited_source_ids_text,
+                m.created_at AS message_created_at
+            FROM notebooks n
+            JOIN users u ON u.id = n.user_id
+            JOIN messages m ON m.notebook_id = n.id
+                {_ACTIVE_BRANCH_JOIN}
+            WHERE u.id = ?
+              {_STUDENT_ROLE_FILTER}
+            ORDER BY m.created_at ASC, m.id ASC
+        """
+        try:
+            with self._store._connect() as connection:  # noqa: SLF001
+                rows = connection.execute(query, (student_id,)).fetchall()
+        except Exception as error:
+            raise ProfessorAnalyticsUnavailable(
+                "Professor analytics data is temporarily unavailable"
+            ) from error
+        return [self._row_dict(row) for row in rows]
+
+    def load_notebook_header(
+        self, student_id: str, notebook_id: str
+    ) -> dict[str, Any] | None:
+        """Return one owned notebook summary row after ownership checks."""
+        query = f"""
+            SELECT
+                n.id AS notebook_id,
+                n.title,
+                n.current_stage,
+                n.progress_text,
+                n.updated_at AS notebook_updated_at,
+                SUM(
+                    CASE
+                        WHEN m.role = 'user' AND COALESCE(m.is_error, 0) = 0
+                        THEN 1 ELSE 0
+                    END
+                ) AS student_messages,
+                SUM(
+                    CASE
+                        WHEN m.role = 'assistant' AND COALESCE(m.is_error, 0) = 0
+                        THEN 1 ELSE 0
+                    END
+                ) AS coach_messages,
+                MAX(
+                    CASE
+                        WHEN m.role = 'user' AND COALESCE(m.is_error, 0) = 0
+                        THEN m.created_at
+                    END
+                ) AS last_active
+            FROM notebooks n
+            JOIN users u ON u.id = n.user_id
+            LEFT JOIN messages m ON m.notebook_id = n.id
+                {_ACTIVE_BRANCH_JOIN}
+            WHERE u.id = ? AND n.id = ?
+              {_STUDENT_ROLE_FILTER}
+            GROUP BY n.id, n.title, n.current_stage, n.progress_text, n.updated_at
+        """
+        try:
+            with self._store._connect() as connection:  # noqa: SLF001
+                row = connection.execute(query, (student_id, notebook_id)).fetchone()
+        except Exception as error:
+            raise ProfessorAnalyticsUnavailable(
+                "Professor analytics data is temporarily unavailable"
+            ) from error
+        return self._row_dict(row) if row else None
+
+    def load_notebook_message_page(
+        self,
+        student_id: str,
+        notebook_id: str,
+        *,
+        limit: int,
+        cursor_created_at: str | None = None,
+        cursor_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return one newest-first page of active-branch messages for a notebook."""
+        cursor_clause = ""
+        params: list[Any] = [student_id, notebook_id]
+        if cursor_created_at and cursor_id:
+            cursor_clause = (
+                "AND (m.created_at < ? OR (m.created_at = ? AND m.id < ?))"
+            )
+            params.extend([cursor_created_at, cursor_created_at, cursor_id])
+        query = f"""
+            SELECT
+                m.id AS message_id,
+                m.role AS message_role,
+                m.content AS message_content,
+                m.metadata_text AS message_metadata,
+                m.cited_source_ids_text,
+                m.created_at AS message_created_at
+            FROM notebooks n
+            JOIN users u ON u.id = n.user_id
+            JOIN messages m ON m.notebook_id = n.id
+                {_ACTIVE_BRANCH_JOIN}
+            WHERE u.id = ? AND n.id = ?
+              {_STUDENT_ROLE_FILTER}
+              AND COALESCE(m.is_error, 0) = 0
+              {cursor_clause}
+            ORDER BY m.created_at DESC, m.id DESC
+            LIMIT ?
+        """
+        params.append(limit)
+        try:
+            with self._store._connect() as connection:  # noqa: SLF001
+                rows = connection.execute(query, tuple(params)).fetchall()
+        except Exception as error:
             raise ProfessorAnalyticsUnavailable(
                 "Professor analytics data is temporarily unavailable"
             ) from error

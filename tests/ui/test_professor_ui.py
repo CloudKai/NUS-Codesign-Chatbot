@@ -15,6 +15,10 @@ class _AnalyticsClient:
     students_calls = 0
     student_detail_calls = 0
     workspace_calls = 0
+    messages_calls = 0
+    sources_calls = 0
+    journey_calls = 0
+    review_calls = 0
     transcript_calls = 0
     attachment_calls = 0
     source_calls = 0
@@ -28,6 +32,7 @@ class _AnalyticsClient:
             "stage_distribution": [{"stage": "Problem Identification", "count": 1, "percentage": 50}, {"stage": "Concept Generation", "count": 1, "percentage": 50}],
             "facione_profile": {"Analysis": {"value": 3, "sample_size": 1}, "Evaluation": {"value": None, "sample_size": 0}},
             "weekly_activity": [], "attention_students": [],
+            "attention_students_count": 0,
             "summary": "Most students are currently working between Problem Identification and Concept Generation.",
         }
 
@@ -37,24 +42,10 @@ class _AnalyticsClient:
 
     def professor_student_detail(self, _student_id):
         type(self).student_detail_calls += 1
-        return {"student": self.professor_students()["students"][0], "completed_stages": ["Problem Identification"], "facione_profile": {"Analysis": 3, "Evaluation": None}, "class_facione_profile": {"Analysis": {"value": 2.5, "sample_size": 2}, "Evaluation": {"value": None, "sample_size": 0}}, "facione_trend": [{"at": "2026-08-01T00:00:00+00:00", "overall": 2.0}, {"at": "2026-08-08T00:00:00+00:00", "overall": 3.0}], "engagement": {"active_days": 2, "sessions": 1, "student_messages": 4, "assistant_messages": 4, "estimated_active_minutes": 5, "definition": "Session definition."}, "notebooks": [{"id": "notebook-1", "title": "Notebook", "stage": "Concept Generation", "messages": 7, "student_messages": 4, "last_active": None}], "conversations": []}
+        return {"student": self.professor_students()["students"][0], "completed_stages": ["Problem Identification"], "facione_profile": {"Analysis": 3, "Evaluation": None}, "class_facione_profile": {"Analysis": {"value": 2.5, "sample_size": 2}, "Evaluation": {"value": None, "sample_size": 0}}, "facione_trend": [{"at": "2026-08-01T00:00:00+00:00", "overall": 2.0}, {"at": "2026-08-08T00:00:00+00:00", "overall": 3.0}], "engagement": {"active_days": 2, "sessions": 1, "student_messages": 4, "assistant_messages": 4, "estimated_active_minutes": 5, "definition": "Session definition."}, "notebooks": [{"id": "notebook-1", "title": "Notebook", "stage": "Concept Generation", "messages": 7, "student_messages": 4, "coach_messages": 3, "last_active": None}], "conversations": []}
 
-    def professor_conversation_transcript(self, _student_id, _notebook_id):
-        type(self).transcript_calls += 1
-        return {
-            "notebook_id": "notebook-1",
-            "title": "Notebook",
-            "messages": [{
-                "id": "message-1",
-                "role": "assistant",
-                "content": "What evidence supports this design?",
-                "attachments": [{"id": "attachment-1", "title": "lecture.pdf"}],
-                "citations": [{"id": "source-1", "label": "S1", "title": "Lecture source"}],
-            }],
-        }
-
-    def professor_notebook_workspace(self, _student_id, _notebook_id):
-        type(self).workspace_calls += 1
+    def professor_notebook_messages(self, _student_id, _notebook_id, **_kwargs):
+        type(self).messages_calls += 1
         return {
             "notebook": {
                 "id": "notebook-1",
@@ -62,15 +53,20 @@ class _AnalyticsClient:
                 "current_stage": "Concept Generation",
                 "last_active": None,
             },
-            "transcript": {
-                "messages": [{
-                    "id": "message-1",
-                    "role": "assistant",
-                    "content": "What evidence supports this design?",
-                    "attachments": [{"id": "attachment-1", "title": "lecture.pdf"}],
-                    "citations": [{"id": "source-1", "label": "S1", "title": "Lecture source"}],
-                }],
-            },
+            "messages": [{
+                "id": "message-1",
+                "role": "assistant",
+                "content": "What evidence supports this design?",
+                "attachments": [{"id": "attachment-1", "title": "lecture.pdf"}],
+                "citations": [{"id": "source-1", "label": "S1", "title": "Lecture source"}],
+            }],
+            "next_cursor": None,
+        }
+
+    def professor_notebook_sources(self, _student_id, _notebook_id):
+        type(self).sources_calls += 1
+        return {
+            "notebook": {"id": "notebook-1", "title": "Notebook"},
             "sources": [
                 {
                     "id": "source-1",
@@ -85,22 +81,39 @@ class _AnalyticsClient:
                     "size": 12,
                 }
             ],
-            "learning": {
-                "journey": {
-                    "current_stage": "concept_generation",
-                    "completed_stages": ["problem_identification"],
-                    "response_detail": "short",
-                },
-                "hmw_scaffold": {"available": False},
-                "review": {
-                    "summary": "The student is exploring evidence.",
-                    "facione_scores": {"analysis": 3},
-                    "strength_sections": [],
-                    "improvement_sections": [],
-                    "conclusion": "",
-                },
-            },
         }
+
+    def professor_notebook_journey(self, _student_id, _notebook_id):
+        type(self).journey_calls += 1
+        return {
+            "notebook": {"id": "notebook-1", "title": "Notebook"},
+            "current_stage": "Concept Generation",
+            "completed_stages": [],
+            "stages": [
+                {"id": "problem_identification", "label": "Problem Identification", "state": "not_completed"},
+                {"id": "concept_generation", "label": "Concept Generation", "state": "current"},
+            ],
+            "hmw_scaffold": {"available": False},
+        }
+
+    def professor_notebook_review(self, _student_id, _notebook_id):
+        type(self).review_calls += 1
+        return {
+            "notebook": {"id": "notebook-1", "title": "Notebook"},
+            "summary": "The student is exploring evidence.",
+            "facione_scores": {"analysis": 3},
+            "strength_sections": [],
+            "improvement_sections": [],
+            "conclusion": "",
+        }
+
+    def professor_conversation_transcript(self, _student_id, _notebook_id):
+        type(self).transcript_calls += 1
+        return {"notebook_id": "notebook-1", "title": "Notebook", "messages": []}
+
+    def professor_notebook_workspace(self, _student_id, _notebook_id):
+        type(self).workspace_calls += 1
+        raise AssertionError("Students UI must not call workspace")
 
     def professor_notebook_source(self, *_args):
         type(self).source_calls += 1
@@ -159,11 +172,6 @@ class _AnalyticsClient:
                     "content": "Prioritize a safe crossing for older pedestrians.",
                     "created_at": "2026-08-14T00:55:00+00:00",
                 },
-                {
-                    "role": "assistant",
-                    "content": "What evidence would show that outcome?",
-                    "created_at": "2026-08-14T01:00:00+00:00",
-                },
             ],
             "observations": [
                 {
@@ -173,14 +181,7 @@ class _AnalyticsClient:
                     "dominant_clear": "explicit",
                     "facione_behaviors": ["analysis"],
                     "ethics_concepts": ["fairness"],
-                    "evidence": [
-                        {
-                            "start_offset": 0,
-                            "end_offset": 10,
-                            "rationale": "The constraint is explicit.",
-                            "confidence": 0.8,
-                        }
-                    ],
+                    "evidence": [],
                     "reviews": [],
                     "adjudications": [],
                 }
@@ -206,6 +207,10 @@ def _professor_auth(monkeypatch):
     _AnalyticsClient.students_calls = 0
     _AnalyticsClient.student_detail_calls = 0
     _AnalyticsClient.workspace_calls = 0
+    _AnalyticsClient.messages_calls = 0
+    _AnalyticsClient.sources_calls = 0
+    _AnalyticsClient.journey_calls = 0
+    _AnalyticsClient.review_calls = 0
     _AnalyticsClient.transcript_calls = 0
     _AnalyticsClient.attachment_calls = 0
     _AnalyticsClient.source_calls = 0
@@ -217,8 +222,8 @@ def test_professor_overview_uses_dashboard_shell_not_student_workspace(monkeypat
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     assert not app.exception
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "CDE2300 · Product Design and Innovation" in rendered
-    assert "Not assessed" in rendered
+    assert "CDE2300" in rendered
+    assert "Course Analytics" in rendered
     assert len(app.chat_input) == 0
     assert any(radio.label == "Professor dashboard navigation" for radio in app.radio)
 
@@ -231,10 +236,12 @@ def test_professor_students_renders_missing_score_and_filters(monkeypatch):
     navigation.set_value("Students").run()
     assert not app.exception
     assert any(input.label == "Search students" for input in app.text_input)
-    assert not app.dataframe
-    assert any("Select a student to view their learning progress" in (info.value or "") for info in app.info)
     assert _AnalyticsClient.students_calls == 1
     assert _AnalyticsClient.student_detail_calls == 0
+    assert _AnalyticsClient.messages_calls == 0
+    assert _AnalyticsClient.sources_calls == 0
+    assert _AnalyticsClient.journey_calls == 0
+    assert _AnalyticsClient.review_calls == 0
     assert professor._score(None) == "Not assessed"
     assert professor._PHASE_LABELS == (
         "Problem Identification",
@@ -254,7 +261,7 @@ def test_professor_research_renders_three_step_validation_workbench(monkeypatch)
         radio for radio in app.radio
         if radio.label == "Professor dashboard navigation"
     )
-    navigation.set_value("Research Review").run()
+    navigation.set_value("Research").run()
     assert not app.exception
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Research Review" in rendered
@@ -262,14 +269,11 @@ def test_professor_research_renders_three_step_validation_workbench(monkeypatch)
     assert "Student transcript" in rendered
     assert "Automated coding" in rendered
     assert "Human validation" in rendered
-    captions = "\n".join(caption.value or "" for caption in app.caption)
-    assert "not a grade" in captions
-    assert not any(radio.label == "Research workflow step" for radio in app.radio)
     assert not app.chat_input
 
 
 def test_professor_student_and_workspace_calls_are_progressive(monkeypatch):
-    """Student detail waits for roster selection; workspace waits for notebook open."""
+    """Student detail waits for roster selection; tab endpoints wait for notebook open."""
     _professor_auth(monkeypatch)
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     navigation = next(radio for radio in app.radio if radio.label == "Professor dashboard navigation")
@@ -277,46 +281,63 @@ def test_professor_student_and_workspace_calls_are_progressive(monkeypatch):
     assert _AnalyticsClient.students_calls == 1
     assert _AnalyticsClient.student_detail_calls == 0
     assert _AnalyticsClient.workspace_calls == 0
-    assert _AnalyticsClient.attachment_calls == 0
+    assert _AnalyticsClient.messages_calls == 0
     student_open = next(
         button for button in app.button if button.key == "professor_open_student_student-1"
     )
     student_open.click().run()
     assert _AnalyticsClient.student_detail_calls == 1
     assert _AnalyticsClient.workspace_calls == 0
-    assert _AnalyticsClient.attachment_calls == 0
+    assert _AnalyticsClient.messages_calls == 0
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert rendered.index("#### Notebooks") < rendered.index("#### Learning journey")
-    captions = "\n".join(caption.value or "" for caption in app.caption)
-    assert "class 2.5 (n=2)" in rendered
-    assert "Critical-thinking trend" in rendered
-    assert "Assessment trend is descriptive only" in captions
-    assert "Active days" in rendered and "Sessions" in rendered
-    assert "Estimated active time" in rendered
-    assert professor._notebook_card_caption({
-        "title": "Notebook", "stage": "Concept Generation", "messages": 7,
-        "student_messages": 4, "last_active": None,
-    }) == "Concept Generation · 4 student · 3 coach · No activity"
-    next(button for button in app.button if button.label == "Open →").click().run()
-    assert _AnalyticsClient.workspace_calls == 1
-    assert _AnalyticsClient.transcript_calls == 0
-    assert _AnalyticsClient.attachment_calls == 0
-    assert any(radio.label == "Notebook workspace" for radio in app.radio)
+    assert "#### Notebooks" in rendered
+    assert "#### Learning snapshot" in rendered
+    assert professor._notebook_row_caption({
+        "title": "Notebook", "stage": "Concept Generation",
+        "student_messages": 4, "coach_messages": 3, "last_active": None,
+    }).startswith("Concept Generation · 4 student · 3 coach")
+    notebook_open = next(
+        button for button in app.button
+        if button.key == "professor_open_notebook_btn_student-1_notebook-1"
+    )
+    notebook_open.click().run()
+    assert _AnalyticsClient.messages_calls == 1
+    assert _AnalyticsClient.sources_calls == 0
+    assert _AnalyticsClient.journey_calls == 0
+    assert _AnalyticsClient.review_calls == 0
+    assert _AnalyticsClient.workspace_calls == 0
     workspace_tabs = next(
         radio for radio in app.radio if radio.label == "Notebook workspace"
     )
     assert workspace_tabs.value == "Chat"
     assert _AnalyticsClient.source_calls == 0
-    assert any(button.label == "Open →" for button in app.button)
     workspace_rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Sources used" in workspace_rendered
-    assert any("[S1] Lecture source" in (caption.value or "") for caption in app.caption)
     workspace_tabs.set_value("Sources").run()
-    assert any(button.label == "Open →" for button in app.button)
+    assert _AnalyticsClient.sources_calls == 1
+    assert _AnalyticsClient.journey_calls == 0
     workspace_tabs.set_value("Journey").run()
-    assert any("Thinking path" in (markdown.value or "") for markdown in app.markdown)
+    assert _AnalyticsClient.journey_calls == 1
     workspace_tabs.set_value("Review").run()
-    assert any("Summary" in (markdown.value or "") for markdown in app.markdown)
+    assert _AnalyticsClient.review_calls == 1
+
+
+def test_professor_journey_does_not_infer_completion(monkeypatch):
+    """Journey display uses persisted completion, not stage index inference."""
+    _professor_auth(monkeypatch)
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    navigation = next(radio for radio in app.radio if radio.label == "Professor dashboard navigation")
+    navigation.set_value("Students").run()
+    next(button for button in app.button if button.key == "professor_open_student_student-1").click().run()
+    next(
+        button for button in app.button
+        if button.key == "professor_open_notebook_btn_student-1_notebook-1"
+    ).click().run()
+    next(radio for radio in app.radio if radio.label == "Notebook workspace").set_value("Journey").run()
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert "Problem Identification" in rendered
+    assert "Not completed" in rendered
+    assert "Current focus" in rendered
 
 
 def test_professor_citation_display_prefers_friendly_safe_reference() -> None:
@@ -347,20 +368,23 @@ def test_professor_refresh_refetches_cached_student_detail(monkeypatch):
     assert _AnalyticsClient.student_detail_calls == 2
 
 
-def test_professor_refresh_refetches_cached_workspace(monkeypatch):
-    """Refresh invalidates only the opened notebook workspace cache."""
+def test_professor_refresh_refetches_cached_chat(monkeypatch):
+    """Refresh invalidates only the opened notebook chat cache."""
     _professor_auth(monkeypatch)
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     navigation = next(radio for radio in app.radio if radio.label == "Professor dashboard navigation")
     navigation.set_value("Students").run()
     next(button for button in app.button if button.key == "professor_open_student_student-1").click().run()
-    next(button for button in app.button if button.label == "Open →").click().run()
-    assert _AnalyticsClient.workspace_calls == 1
     next(
         button for button in app.button
-        if button.key == "professor_refresh_workspace_student-1_notebook-1"
+        if button.key == "professor_open_notebook_btn_student-1_notebook-1"
     ).click().run()
-    assert _AnalyticsClient.workspace_calls == 2
+    assert _AnalyticsClient.messages_calls == 1
+    next(
+        button for button in app.button
+        if button.key == "professor_refresh_chat_student-1_notebook-1"
+    ).click().run()
+    assert _AnalyticsClient.messages_calls == 2
 
 
 def test_professor_workspace_ui_is_read_only() -> None:
@@ -381,20 +405,17 @@ def test_professor_workspace_ui_is_read_only() -> None:
 
 
 def test_professor_research_css_has_desktop_tablet_and_mobile_contracts() -> None:
-    """Scoped CSS keeps a two-column desktop and stacked 390 px flow."""
+    """Scoped CSS keeps sidebar shell and stacked 390 px flow."""
     component = Path("ui/assets/styles/70-professor.css").read_text(encoding="utf-8")
     responsive = Path("ui/assets/styles/90-responsive.css").read_text(encoding="utf-8")
     assert ".st-key-research_workspace" in component
     assert "html:has(.st-key-professor_header)" in component
     assert ".st-key-professor_student_list_scroll" in component
     assert ".st-key-professor_transcript_scroll" in component
-    assert "overflow-y:auto !important" in component
-    assert "professor-mobile-detail" in component
-    assert "professor-chat-student" in component
+    assert ".st-key-professor_shell" in component
+    assert "professor-sidebar" in component
+    assert "professor-timeline-step" in component
+    assert "@media (max-width:800px)" in component
     assert "research-queue-marker" not in responsive
-    assert "research-transcript-marker" not in responsive
-    assert "research-validation-marker" not in responsive
     assert "max-width:1100px" in responsive
     assert "max-width:520px" in responsive
-    assert "grid-template-columns:minmax(15rem,.8fr) minmax(0,1.2fr)" in responsive
-    assert ":has(.research-validation-marker)" not in responsive

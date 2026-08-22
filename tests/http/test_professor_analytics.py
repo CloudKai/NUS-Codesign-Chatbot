@@ -337,9 +337,17 @@ def test_selected_student_detail_uses_scoped_rows_and_compact_benchmark(tmp_path
     class TrackingRepository(ProfessorAnalyticsRepository):
         calls: list[tuple[str, dict]] = []
 
-        def load_student_rows(self, selected_id, **kwargs):
-            self.calls.append(("student", {"student_id": selected_id, **kwargs}))
-            return super().load_student_rows(selected_id, **kwargs)
+        def load_student_roster_row(self, selected_id):
+            self.calls.append(("profile", {"student_id": selected_id}))
+            return super().load_student_roster_row(selected_id)
+
+        def load_student_notebook_summaries(self, selected_id):
+            self.calls.append(("notebooks", {"student_id": selected_id}))
+            return super().load_student_notebook_summaries(selected_id)
+
+        def load_student_activity_rows(self, selected_id):
+            self.calls.append(("activity", {"student_id": selected_id}))
+            return super().load_student_activity_rows(selected_id)
 
         def load_class_benchmark_rows(self):
             self.calls.append(("benchmark", {}))
@@ -348,8 +356,10 @@ def test_selected_student_detail_uses_scoped_rows_and_compact_benchmark(tmp_path
     repository = TrackingRepository(bootstrap)
     detail = ProfessorAnalyticsService(repository).student_detail(student_id)
     assert detail is not None
-    assert repository.calls[0] == ("student", {"student_id": student_id})
-    assert repository.calls[1] == ("benchmark", {})
+    assert repository.calls[0] == ("profile", {"student_id": student_id})
+    assert ("notebooks", {"student_id": student_id}) in repository.calls
+    assert ("activity", {"student_id": student_id}) in repository.calls
+    assert ("benchmark", {}) in repository.calls
 
 
 def test_multiple_notebooks_detail_lists_all_but_transcript_scopes_one(tmp_path):
@@ -896,3 +906,121 @@ def test_professor_citation_auth_rejects_other_notebook_source(tmp_path):
     assert workspace is not None
     citations = workspace.transcript.messages[-1]["citations"]
     assert citations == []
+
+
+def test_professor_tab_routes_enforce_auth_and_ownership(tmp_path, monkeypatch):
+    """New tab-scoped routes reject students, foreign notebooks, and unauthenticated callers."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    other_student_id = _seed_student_activity(
+        bootstrap, sub="student-b", now=datetime.now(timezone.utc), messages=1
+    )
+    other_notebook_id = StudentStore(
+        Path(bootstrap.path), identifier="cognito:student-b"
+    ).list_threads()[0]["id"]
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    professor_cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    student_cookies = {settings.cognito_id_token_cookie_name: oidc.add("student-a")}
+    routes = (
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/messages",
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/sources",
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/journey",
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/review",
+    )
+    for route in routes:
+        assert client.get(route).status_code == 401
+        assert client.get(route, cookies=student_cookies).status_code == 403
+        assert client.get(route, cookies=professor_cookies).status_code == 200
+        assert client.get(
+            route.replace(student_id, other_student_id),
+            cookies=professor_cookies,
+        ).status_code == 404
+        assert client.get(
+            route.replace(notebook_id, other_notebook_id),
+            cookies=professor_cookies,
+        ).status_code == 404
+
+
+def test_professor_messages_pagination_and_cursor(tmp_path, monkeypatch):
+    """Messages endpoint paginates newest-first and rejects malformed cursors."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    for index in range(40):
+        student_store.add_message(notebook_id, "user", f"Turn {index}")
+    messages = student_store.get_messages(notebook_id)
+    last = messages[-1]
+    original_content = str(last["content"])
+    student_store.revise_conversation_from_user_message(
+        notebook_id, last["id"], "Revised last turn"
+    )
+    assert len(student_store.get_messages(notebook_id)) > 30
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    base = f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/messages"
+    first = client.get(base, cookies=cookies)
+    assert first.status_code == 200
+    payload = first.json()
+    assert len(payload["messages"]) <= 30
+    assert payload["next_cursor"]
+    assert all("extracted_text" not in message for message in payload["messages"])
+    assert all(message["content"] != original_content for message in payload["messages"])
+    first_ids = {message["id"] for message in payload["messages"]}
+    first_oldest = payload["messages"][0]["created_at"]
+    second = client.get(
+        base, cookies=cookies, params={"cursor": payload["next_cursor"]}
+    )
+    assert second.status_code == 200
+    older_page = second.json()["messages"]
+    assert older_page
+    assert not first_ids & {message["id"] for message in older_page}
+    assert older_page[-1]["created_at"] <= first_oldest
+    assert all(message["content"] != original_content for message in older_page)
+    clamped = client.get(base, cookies=cookies, params={"limit": 1_000_000}).json()
+    assert len(clamped["messages"]) <= 50
+    assert client.get(base, cookies=cookies, params={"cursor": "not-valid"}).status_code == 400
+
+
+def test_professor_sources_list_has_no_forbidden_fields(tmp_path, monkeypatch):
+    """Source list responses remain allow-listed and path-free."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    WorkspaceService(student_store).upload_sources(
+        notebook_id, [("lecture.txt", b"Evidence", "text/plain")]
+    )
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    response = client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/sources",
+        cookies=cookies,
+    )
+    assert response.status_code == 200
+    _assert_no_forbidden_workspace_fields(response.json())
+
+
+def test_professor_tab_routes_record_audit_actions(tmp_path, monkeypatch):
+    """Tab-scoped reads write attributable audit events."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    requests = (
+        (f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/messages", "professor.transcript"),
+        (f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/sources", "professor.sources"),
+        (f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/journey", "professor.journey"),
+        (f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/review", "professor.review"),
+    )
+    for path, _action in requests:
+        assert client.get(path, cookies=cookies).status_code == 200
+    with bootstrap._connect() as connection:  # noqa: SLF001
+        rows = connection.execute(
+            "SELECT action FROM research_access_events ORDER BY created_at, id"
+        ).fetchall()
+    assert [row["action"] for row in rows][-4:] == [action for _, action in requests]

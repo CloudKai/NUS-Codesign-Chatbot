@@ -2,6 +2,34 @@
 
 ## CURRENT STATUS
 
+### Lecturer dashboard UX + progressive tab fetch (2026-08-23)
+
+**Change.** Lecturer shell now uses a persistent left sidebar (Overview / Students /
+Learning / Engagement / Research) with full-width drill-down for Students → student
+→ notebook workspace. Students UI fetches tab-scoped endpoints only (messages,
+sources, journey, review) with session caches and per-tab Refresh; workspace
+all-in-one remains for compatibility. Student detail uses bounded SQL snapshots
+(no transcript bodies). New paginated messages endpoint uses keyset cursors
+(newest page first, load-earlier for older active-branch turns).
+
+**Files.** `backend/professor_analytics/{models,repository,service}.py`,
+`backend/http/app.py`, `backend/api_client.py`, `ui/professor.py`,
+`ui/assets/styles/70-professor.css`, `tests/http/test_professor_analytics.py`,
+`tests/ui/test_professor_ui.py`, `tests/test_architecture_contracts.py`.
+
+**Validation.** Focused professor HTTP/UI tests, architecture route inventory,
+`ruff check` on touched files, `compileall` on `backend` / `ui` / `tests`.
+
+**Migration.** None. Existing `/workspace`, full transcript, source/attachment
+bytes routes unchanged.
+
+**Risks.** Staging visual pass still required at 1440px and 390px. Dedicated
+DSQL SELECT-only professor DB role is optional defense-in-depth (new pool) and
+remains out of scope.
+
+**Next action.** Staging visual check of sidebar shell and Students drill-down;
+do not republish AgentCore.
+
 ### Lecturer Course Analytics scroll (2026-08-23)
 
 **Change.** The student studio viewport lock (`html`/`body`/`.stApp`/

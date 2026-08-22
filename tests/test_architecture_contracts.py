@@ -407,6 +407,26 @@ def test_complete_fastapi_route_inventory_is_stable(tmp_path: Path) -> None:
             ),
             (
                 "GET",
+                "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/messages",
+                "professor_notebook_messages",
+            ),
+            (
+                "GET",
+                "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/sources",
+                "professor_notebook_sources",
+            ),
+            (
+                "GET",
+                "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/journey",
+                "professor_notebook_journey",
+            ),
+            (
+                "GET",
+                "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/review",
+                "professor_notebook_review",
+            ),
+            (
+                "GET",
                 "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/sources/{source_id}",
                 "professor_notebook_source",
             ),

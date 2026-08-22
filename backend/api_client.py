@@ -238,6 +238,63 @@ class LocalApiClient:
         response.raise_for_status()
         return response.json()
 
+    def professor_notebook_messages(
+        self,
+        student_id: str,
+        notebook_id: str,
+        *,
+        limit: int = 30,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Return one paginated active-branch transcript page for lecturers."""
+        params: dict[str, Any] = {"limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students/{student_id}"
+            f"/conversations/{notebook_id}/messages",
+            params=params,
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_notebook_sources(
+        self, student_id: str, notebook_id: str
+    ) -> dict[str, Any]:
+        """Return allow-listed library sources for one owned notebook."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students/{student_id}"
+            f"/conversations/{notebook_id}/sources",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_notebook_journey(
+        self, student_id: str, notebook_id: str
+    ) -> dict[str, Any]:
+        """Return persisted journey state for one owned notebook."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students/{student_id}"
+            f"/conversations/{notebook_id}/journey",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def professor_notebook_review(
+        self, student_id: str, notebook_id: str
+    ) -> dict[str, Any]:
+        """Return persisted review projection for one owned notebook."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students/{student_id}"
+            f"/conversations/{notebook_id}/review",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return response.json()
+
     def professor_notebook_source(
         self, student_id: str, notebook_id: str, source_id: str
     ) -> SourceContent:
