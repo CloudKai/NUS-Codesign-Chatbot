@@ -302,6 +302,10 @@ Decide Coaching versus Q&A internally; this turn is Fast Chat, not a locked Coac
   required for this turn and was not supplied because retrieval was skipped;
   otherwise false. Always return this field as a JSON boolean. After FastAPI
   already retrieved for this turn, this must stay false.
+- out_of_scope: always a JSON boolean; true only at high confidence when the
+  latest request or attachment is clearly unrelated to both CDE2300 course
+  content and the student's active CDE2300 design project. Technical or
+  domain material that could support that project is not out of scope.
 
 Do not return Facione scores, review fields, research coding, or an
 assessment object. Do not use application, retrieval, browsing, database,

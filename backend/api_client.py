@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Callable, Iterator, Mapping, Protocol
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import httpx
 
@@ -206,6 +206,25 @@ class LocalApiClient:
         )
         response.raise_for_status()
         return response.json()
+
+    def professor_conversation_attachment(
+        self, student_id: str, notebook_id: str, attachment_id: str
+    ) -> SourceContent:
+        """Fetch one authorized transcript attachment on explicit user action."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/professor/students/{student_id}"
+            f"/conversations/{notebook_id}/attachments/{attachment_id}",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        mime = response.headers.get("content-type", "application/octet-stream")
+        filename = "attachment.bin"
+        disposition = response.headers.get("content-disposition") or ""
+        if "filename*=" in disposition:
+            filename = unquote(
+                disposition.split("filename*=UTF-8''", 1)[-1].strip()
+            )
+        return SourceContent(data=response.content, mime=mime, filename=filename)
 
     def professor_critical_thinking(self) -> dict[str, Any]:
         """Return professor-authorised Facione analytics."""

@@ -315,6 +315,7 @@ def test_complete_fastapi_route_inventory_is_stable(tmp_path: Path) -> None:
             ("DELETE", "/api/v1/threads/{thread_id}", "delete_thread"),
             ("GET", "/api/v1/threads/{thread_id}/messages", "list_messages"),
             ("POST", "/api/v1/threads/{thread_id}/messages", "create_message"),
+            ("POST", "/api/v1/threads/{thread_id}/attachments", "upload_attachments"),
             (
                 "GET",
                 "/api/v1/threads/{thread_id}/transcript.txt",
@@ -398,6 +399,11 @@ def test_complete_fastapi_route_inventory_is_stable(tmp_path: Path) -> None:
                 "GET",
                 "/api/v1/professor/students/{student_id}/conversations/{notebook_id}",
                 "professor_conversation_transcript",
+            ),
+            (
+                "GET",
+                "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/attachments/{attachment_id}",
+                "professor_conversation_attachment",
             ),
             (
                 "GET",

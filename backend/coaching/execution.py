@@ -21,6 +21,7 @@ from backend.coaching.deep_review_context import (
     record_deep_review_context_telemetry,
 )
 from backend.coaching.mode_policy import (
+    is_private_attachment_question,
     qa_evidence_gap_turn,
     resolve_mode_policy,
     should_author_qa_evidence_gap,
@@ -1715,7 +1716,18 @@ class CoachApplicationService:
             ],
             has_selected_sources=bool(selected_sources),
         )
+        attachment_only_question = is_private_attachment_question(
+            request.student_message,
+            attachment_count=len(attachment_ids),
+        )
         needs_retrieval = bool(mode_policy.retrieve)
+        # A question about the current private attachment must use that
+        # turn-scoped evidence first.  Keep the normal one-call model decision
+        # (including out_of_scope) but do not send unrelated selected course
+        # sources through the retriever for this case.
+        if attachment_only_question:
+            needs_retrieval = True
+            record_field("attachment_retrieval_scoped", True)
         if force_retrieval and selected_sources:
             needs_retrieval = True
         record_field("retrieval_gate_ms", elapsed_ms(gate_started))
@@ -1726,6 +1738,13 @@ class CoachApplicationService:
         if needs_retrieval:
             snapshot = self._hydrate_retrieval_sources(snapshot)
         retrieval_sources = snapshot.retrieval_sources
+        if attachment_only_question:
+            attachment_id_set = set(attachment_ids)
+            retrieval_sources = tuple(
+                source
+                for source in retrieval_sources
+                if source.source_id in attachment_id_set
+            )
         if needs_retrieval and retrieval_sources:
             emit_coach_progress(PROGRESS_RETRIEVING)
             try:

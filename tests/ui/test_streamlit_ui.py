@@ -72,7 +72,7 @@ def test_chat_composer_attachment_error_is_recoverable(monkeypatch):
         "normalize_composer_value",
         lambda _value: ("Please review this attachment.", [FailedUpload()]),
     )
-    monkeypatch.setattr(chat.store, "upload_sources", reject_upload)
+    monkeypatch.setattr(chat.store, "upload_attachments", reject_upload)
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
 

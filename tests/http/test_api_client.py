@@ -34,6 +34,28 @@ def _client_for_store(store: StudentStore, *, auto_advance: bool) -> LocalApiCli
     return LocalApiClient("http://testserver", session=TestClient(app))
 
 
+def test_professor_attachment_filename_decodes_rfc5987_value():
+    """Attachment downloads expose a browser-friendly decoded filename."""
+    class Response:
+        content = b"attachment"
+        headers = {
+            "content-type": "text/plain",
+            "content-disposition": "inline; filename*=UTF-8''site-analysis%20%C3%A9.pdf",
+        }
+
+        def raise_for_status(self):
+            return None
+
+    class Session:
+        def get(self, _url, **_kwargs):
+            return Response()
+
+    client = LocalApiClient("http://127.0.0.1:8000", session=Session())
+    content = client.professor_conversation_attachment("student", "notebook", "attachment")
+    assert content.filename == "site-analysis é.pdf"
+    assert content.data == b"attachment"
+
+
 def test_api_client_health_and_confirmation_round_trip(tmp_path):
     store = StudentStore(tmp_path / "client.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")

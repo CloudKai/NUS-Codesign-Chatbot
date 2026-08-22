@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -15,6 +16,8 @@ from backend.professor_analytics.repository import ProfessorAnalyticsRepository
 from backend.professor_analytics.service import ProfessorAnalyticsService
 from backend.settings import settings
 from backend.student_store import StudentStore
+from backend.workspace_service import WorkspaceService
+from backend.source_library import add_text_source
 
 
 class FakeOIDC(CognitoOIDCClient):
@@ -240,3 +243,150 @@ def test_professor_endpoints_are_read_only(tmp_path, monkeypatch):
         }
     assert after == before
     reset_file_storage_cache()
+
+
+def test_selected_student_detail_uses_scoped_rows_and_compact_benchmark(tmp_path):
+    """Detail does not rebuild detailed notebook rows for the whole class."""
+    bootstrap, _professor, student_id, _oidc = _setup(tmp_path)
+
+    class TrackingRepository(ProfessorAnalyticsRepository):
+        calls: list[tuple[str, dict]] = []
+
+        def load_student_rows(self, selected_id, **kwargs):
+            self.calls.append(("student", {"student_id": selected_id, **kwargs}))
+            return super().load_student_rows(selected_id, **kwargs)
+
+        def load_class_benchmark_rows(self):
+            self.calls.append(("benchmark", {}))
+            return super().load_class_benchmark_rows()
+
+    repository = TrackingRepository(bootstrap)
+    detail = ProfessorAnalyticsService(repository).student_detail(student_id)
+    assert detail is not None
+    assert repository.calls[0] == ("student", {"student_id": student_id})
+    assert repository.calls[1] == ("benchmark", {})
+
+
+def test_multiple_notebooks_detail_lists_all_but_transcript_scopes_one(tmp_path):
+    """Selecting notebook B never hydrates notebook A's transcript content."""
+    bootstrap, _professor, student_id, _oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_a = student_store.list_threads()[0]["id"]
+    notebook_b = student_store.create_thread(
+        name="Notebook B", model_id="mock", support_mode="critical-thinking"
+    )
+    student_store.add_message(notebook_b, "user", "Only notebook B")
+    detail = ProfessorAnalyticsService(
+        ProfessorAnalyticsRepository(bootstrap)
+    ).student_detail(student_id)
+    assert detail is not None
+    assert {item["id"] for item in detail.notebooks} == {notebook_a, notebook_b}
+    transcript = ProfessorAnalyticsService(
+        ProfessorAnalyticsRepository(bootstrap)
+    ).conversation_transcript(student_id, notebook_b)
+    assert transcript is not None
+    assert any(message["content"] == "Only notebook B" for message in transcript.messages)
+    assert all(message["content"] != "Student idea 1" for message in transcript.messages)
+
+
+def test_transcript_projection_includes_safe_message_attachment_metadata(tmp_path):
+    """Transcript attachment descriptors stay message-associated and path-free."""
+    bootstrap, _professor, student_id, _oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    attachment = WorkspaceService(student_store).upload_attachments(
+        notebook_id, [("private.txt", b"private", "text/plain")]
+    )[0]
+    student_store.add_message(
+        notebook_id,
+        "user",
+        "Here is my private file.",
+        metadata={"attachments": [attachment], "attachment_source_ids": [attachment["id"]]},
+    )
+    transcript = ProfessorAnalyticsService(
+        ProfessorAnalyticsRepository(bootstrap)
+    ).conversation_transcript(student_id, notebook_id)
+    assert transcript is not None
+    descriptor = transcript.messages[-1]["attachments"][0]
+    assert descriptor["title"] == "private.txt"
+    assert "path" not in descriptor
+    assert "object_key" not in descriptor
+
+
+def test_transcript_normalizes_and_authorizes_current_citation_refs(tmp_path):
+    """Current dict source refs and legacy ids are safe, notebook-scoped citations."""
+    bootstrap, _professor, student_id, _oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    source = add_text_source(student_store, notebook_id, "Lecture source", "Evidence")
+    with bootstrap._connect() as connection:  # noqa: SLF001
+        assistant = connection.execute(
+            "SELECT id FROM messages WHERE notebook_id=? AND role='assistant' ORDER BY created_at DESC LIMIT 1",
+            (notebook_id,),
+        ).fetchone()
+        connection.execute(
+            "UPDATE messages SET cited_source_ids_text=? WHERE id=?",
+            (
+                json.dumps([
+                    {"id": source["id"], "label": "S1", "title": "Lecture source"},
+                    {"id": "foreign-source", "label": "S9", "title": "Private"},
+                    "legacy-source",
+                ]),
+                assistant["id"],
+            ),
+        )
+    transcript = ProfessorAnalyticsService(
+        ProfessorAnalyticsRepository(bootstrap)
+    ).conversation_transcript(student_id, notebook_id)
+    assert transcript is not None
+    citations = transcript.messages[-1]["citations"]
+    assert citations == [{"id": source["id"], "label": "S1", "title": "Lecture source"}]
+
+
+def test_professor_attachment_route_requires_message_association(tmp_path, monkeypatch):
+    """Lecturers can open only the selected student's message attachment."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    attachment = WorkspaceService(student_store).upload_attachments(
+        notebook_id, [("private.txt", b"private", "text/plain")]
+    )[0]
+    student_store.add_message(
+        notebook_id,
+        "user",
+        "Attached.",
+        metadata={"attachments": [attachment]},
+    )
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    token = oidc.add("prof")
+    cookies = {settings.cognito_id_token_cookie_name: token}
+    response = client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/attachments/{attachment['id']}",
+        cookies=cookies,
+    )
+    assert response.status_code == 200
+    assert response.content == b"private"
+    ordinary = add_text_source(student_store, notebook_id, "Reusable source", "Not an attachment")
+    assert client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/attachments/{ordinary['id']}",
+        cookies=cookies,
+    ).status_code == 404
+    other_student_id = _seed_student_activity(
+        bootstrap, sub="student-b", now=datetime.now(timezone.utc), messages=1
+    )
+    other_notebook_id = StudentStore(
+        Path(bootstrap.path), identifier="cognito:student-b"
+    ).list_threads()[0]["id"]
+    assert client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{other_notebook_id}/attachments/{attachment['id']}",
+        cookies=cookies,
+    ).status_code == 404
+    assert client.get(
+        f"/api/v1/professor/students/{other_student_id}/conversations/{notebook_id}/attachments/{attachment['id']}",
+        cookies=cookies,
+    ).status_code == 404
+    assert client.get(
+        f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}/attachments/not-related",
+        cookies=cookies,
+    ).status_code == 404

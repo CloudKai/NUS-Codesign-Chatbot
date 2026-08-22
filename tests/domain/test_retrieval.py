@@ -34,7 +34,12 @@ from backend.retrieval import (
     prefer_session_matching_sources,
     retrieval_sources_from_notebook,
 )
-from backend.source_library import add_file_sources, add_text_source, image_inputs_for_source_ids
+from backend.source_library import (
+    CHAT_ATTACHMENT_ORIGIN,
+    add_file_sources,
+    add_text_source,
+    image_inputs_for_source_ids,
+)
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
 
@@ -678,6 +683,73 @@ def test_course_question_uses_selected_source_retrieval(tmp_path):
         )
     )
     assert counting.calls == 1
+
+
+def test_private_attachment_question_does_not_broaden_to_course_sources(tmp_path):
+    """Current attachment questions retrieve only their private turn evidence."""
+
+    class _CapturingRetriever:
+        def __init__(self) -> None:
+            self.source_ids: list[str] = []
+
+        def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
+            self.source_ids = [source.source_id for source in query.sources]
+            return RetrievalResult(context="", chunks=())
+
+    class _CourseKnowledgeBase(_CapturingRetriever):
+        pass
+
+    store = StudentStore(tmp_path / "attachment-scope.sqlite3")
+    notebook = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _course_source_id = store.add_source(
+        notebook,
+        kind="file",
+        title="Lecture 4",
+        mime="application/pdf",
+        path="course/lectureNotes/week4.pdf",
+        selected=True,
+        metadata={
+            "origin": "course_sync",
+            "object_key": "course/lectureNotes/week4.pdf",
+            "course_material_group": "lectureNotes",
+            "course_material_id": "lecture_week4",
+        },
+    )
+    attachment = add_file_sources(
+        store,
+        notebook,
+        [("L2-Network Bootstrapping-ARP-DHCP.pdf", b"ARP and DHCP networking", "application/pdf")],
+        origin=CHAT_ATTACHMENT_ORIGIN,
+        selected=False,
+        extra_metadata={"hidden_from_sources": True},
+    )[0]
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    capturing = _CapturingRetriever()
+    course_kb = _CourseKnowledgeBase()
+    service = CoachApplicationService(
+        store,
+        notebooks,
+        CoachWorkflow(DeterministicCoachProvider(), transitions),
+        LearningProgressService(store, notebooks, transitions),
+        retriever=CompositeContextRetriever(
+            knowledge_base=course_kb,
+            local=capturing,
+        ),
+    )
+
+    service.submit(
+        CoachRequest(
+            thread_id=notebook,
+            student_message="what is this pdf i attached about",
+            current_stage="problem_identification",
+            response_detail="short",
+            attachment_source_ids=[attachment["id"]],
+        )
+    )
+
+    assert capturing.source_ids == [attachment["id"]]
+    assert course_kb.source_ids == []
 
 
 def test_application_rejects_out_of_scope_retriever_result(tmp_path):

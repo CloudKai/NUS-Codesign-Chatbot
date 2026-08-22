@@ -65,3 +65,6 @@ def test_fast_chat_markers_occur_exactly_once() -> None:
     assert "The application, not the model, controls" in system
     assert "Always include the `hmw_scaffold_ready` field as a JSON boolean" in system
     assert "needs_source_retrieval: false" in system
+    assert "Set `out_of_scope: true` only at high confidence" in system
+    assert "Technical or domain-specific material can still be relevant" in system
+    assert "out_of_scope: always a JSON boolean" in system

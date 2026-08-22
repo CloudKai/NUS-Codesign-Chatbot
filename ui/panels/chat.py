@@ -68,6 +68,62 @@ def _duration_ms(started: float) -> float:
     return round(max(0.0, (time.perf_counter() - started) * 1000.0), 1)
 
 
+def _attachment_kind_label(attachment: dict[str, Any]) -> str:
+    """Return a compact, student-facing type label for one attachment."""
+    mime = str(
+        attachment.get("mime_type")
+        or attachment.get("mime")
+        or attachment.get("type")
+        or ""
+    ).lower()
+    kind = str(attachment.get("kind") or "").lower()
+    title = str(attachment.get("title") or attachment.get("name") or "").lower()
+    if mime == "application/pdf" or title.endswith(".pdf"):
+        return "PDF"
+    if kind == "image" or mime.startswith("image/"):
+        return "Image"
+    if mime.startswith("text/") or title.endswith((".txt", ".md", ".csv")):
+        return "Text"
+    if "word" in mime or title.endswith((".doc", ".docx")):
+        return "Document"
+    if "sheet" in mime or title.endswith((".xls", ".xlsx")):
+        return "Spreadsheet"
+    if "presentation" in mime or title.endswith((".ppt", ".pptx")):
+        return "Presentation"
+    return "File"
+
+
+def _attachment_icon(attachment: dict[str, Any]) -> str:
+    """Return a Material icon name appropriate for one attachment."""
+    return {
+        "PDF": ":material/picture_as_pdf:",
+        "Image": ":material/image:",
+        "Document": ":material/description:",
+        "Spreadsheet": ":material/table_chart:",
+        "Presentation": ":material/slideshow:",
+        "Text": ":material/article:",
+    }.get(_attachment_kind_label(attachment), ":material/attach_file:")
+
+
+def _attachment_size_label(attachment: dict[str, Any]) -> str:
+    """Return a compact byte-size label without exposing storage details."""
+    try:
+        size = max(0, int(attachment.get("size") or 0))
+    except (TypeError, ValueError):
+        size = 0
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KB"
+    return f"{size / (1024 * 1024):.1f} MB"
+
+
+def _attachment_button_label(attachment: dict[str, Any]) -> str:
+    """Return a concise attachment label for the compact open control."""
+    title = str(attachment.get("title") or attachment.get("name") or "Attachment").strip()
+    return f"{title} · {_attachment_kind_label(attachment)} · {_attachment_size_label(attachment)}"
+
+
 class CoachTurnStreamError(RuntimeError):
     """Raised when a streamed coaching turn ends with a structured error event."""
 
@@ -362,6 +418,28 @@ def render_message(
                 if edit_key not in st.session_state:
                     text_area_kwargs["value"] = message["content"]
                 revised = st.text_area("Edit message", **text_area_kwargs)
+                edit_attachments = [
+                    item
+                    for item in (metadata.get("attachments") or [])
+                    if isinstance(item, dict)
+                ]
+                for attachment in edit_attachments:
+                    attachment_id = str(attachment.get("id") or "").strip()
+                    if not attachment_id:
+                        continue
+                    with st.container(
+                        key=f"user_edit_attachment_card_{safe_id}_{attachment_id.replace('-', '_')}"
+                    ):
+                        label = _attachment_button_label(attachment)
+                        if st.button(
+                            label,
+                            key=f"open-edit-attachment-{message['id']}-{attachment_id}",
+                            icon=_attachment_icon(attachment),
+                            help=f"Open {label}",
+                            type="tertiary",
+                            width="content",
+                        ):
+                            source_viewer_dialog(attachment_id)
                 sync_user_message_edit_layout()
                 with st.container(key=f"user_message_edit_actions_{safe_id}"):
                     cancel_column, send_column = st.columns(2, gap="small")
@@ -410,6 +488,13 @@ def render_message(
                             "message_id": message["id"],
                             "prompt": draft,
                             "idempotency_key": idempotency_key,
+                            # Keep the authoritative descriptor with the one
+                            # transient revised row while the suffix is hidden.
+                            "attachments": [
+                                item
+                                for item in (metadata.get("attachments") or [])
+                                if isinstance(item, dict)
+                            ],
                             "render_prefix": prefix_messages,
                             "render_target_found": target_found,
                         }
@@ -434,19 +519,23 @@ def render_message(
                 attachments = metadata.get("attachments") or []
                 if attachments:
                     attachment_items = [item for item in attachments if isinstance(item, dict)]
-                    labels = [str(item.get("title") or "Attachment") for item in attachment_items]
-                    if labels:
-                        st.caption("Attached · " + ", ".join(labels))
                     for attachment in attachment_items:
                         attachment_id = str(attachment.get("id") or "")
                         if not attachment_id:
                             continue
-                        if st.button(
-                            f"Open attachment · {attachment.get('title') or 'Attachment'}",
-                            key=f"open-attachment-{message['id']}-{attachment_id}",
-                            type="tertiary",
+                        with st.container(
+                            key=f"message_attachment_card_{safe_id}_{attachment_id.replace('-', '_')}"
                         ):
-                            source_viewer_dialog(attachment_id)
+                            label = _attachment_button_label(attachment)
+                            if st.button(
+                                label,
+                                key=f"open-attachment-{message['id']}-{attachment_id}",
+                                icon=_attachment_icon(attachment),
+                                help=f"Open {label}",
+                                type="tertiary",
+                                width="content",
+                            ):
+                                source_viewer_dialog(attachment_id)
                 with st.container(key=f"user_message_actions_{safe_id}"):
                     _, copy_column, edit_column = st.columns(
                         [0.76, 0.12, 0.12],
@@ -646,7 +735,9 @@ def _render_inflight_user_prompt(prompt: str, uploads: list[Any]) -> None:
     """Paint the in-flight student prompt with history bubble markup.
 
     The pending row has no persisted message id, so it omits edit/copy
-    actions. Uploads are named only; they are not source ids.
+    actions. Before storage, uploads are local file objects; after storage,
+    sanitized attachment descriptors retain their authorized source IDs so
+    the current turn can display and reopen them.
     """
     with st.chat_message("user", avatar=":material/person:"):
         escaped = html.escape(prompt).replace("\n", "<br />")
@@ -655,8 +746,25 @@ def _render_inflight_user_prompt(prompt: str, uploads: list[Any]) -> None:
                 f'<div class="cd-user-bubble-text">{escaped}</div>',
                 unsafe_allow_html=True,
             )
-            if uploads:
-                st.caption("Attached · " + ", ".join(upload.name for upload in uploads))
+            for index, upload in enumerate(uploads):
+                if isinstance(upload, dict):
+                    attachment_id = str(upload.get("id") or "").strip()
+                    if not attachment_id:
+                        continue
+                    with st.container(key=f"inflight_attachment_card_{attachment_id.replace('-', '_')}"):
+                        label = _attachment_button_label(upload)
+                        if st.button(
+                            label,
+                            key=f"open-inflight-attachment-{attachment_id}",
+                            icon=_attachment_icon(upload),
+                            help=f"Open {label}",
+                            type="tertiary",
+                            width="content",
+                        ):
+                            source_viewer_dialog(attachment_id)
+                else:
+                    name = str(getattr(upload, "name", "Attachment") or "Attachment")
+                    st.caption(("Attached · " if index == 0 else "") + name)
 
 
 def _edit_render_plan(
@@ -1224,7 +1332,10 @@ def _render_composer_submit_fragment(
             with chat_inflight:
                 if pending_message_id and found_edit:
                     if pending_prompt:
-                        _render_inflight_user_prompt(pending_prompt, [])
+                        _render_inflight_user_prompt(
+                            pending_prompt,
+                            list(pending.get("attachments") or []),
+                        )
                     _submit_pending_edit(
                         model_id=model_id,
                         reasoning_effort=reasoning_effort,

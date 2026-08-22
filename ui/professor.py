@@ -14,13 +14,22 @@ from backend.student_journey import THINKING_STAGES
 from ui.auth_gate import app_logout_url, logout_user
 from ui.runtime import local_api_client
 
-_PAGES = ("Overview", "Students", "Critical Thinking", "Engagement", "Research")
+_PAGES = ("Overview", "Students", "Learning Progress", "Engagement", "Research Review")
 _PHASE_LABELS = tuple(stage.label.title() for stage in THINKING_STAGES)
 
 
 def _score(value: Any) -> str:
     """Render a nullable Facione value without fabricating a zero score."""
     return "Not assessed" if value is None else f"{float(value):.1f} / 4"
+
+
+def _notebook_label(item: dict[str, Any]) -> str:
+    """Render a compact notebook choice with total and student message counts."""
+    return (
+        f"{item['title']} · {item.get('stage') or 'Not started'} · "
+        f"{item.get('messages', 0)} total messages · "
+        f"{item.get('student_messages', 0)} student messages · {_when(item.get('last_active'))}"
+    )
 
 
 def _when(value: str | None) -> str:
@@ -168,16 +177,10 @@ def _line_chart(
                 alt.Tooltip(f"{y}:Q", title=y_label),
             ],
         )
-        .properties(height=220, background="#FFFFFF")
+        .properties(height=220)
         .configure_view(strokeWidth=0)
-        .configure_axis(
-            domainColor="#CBD5DF",
-            gridColor="#E7EBEF",
-            labelColor="#52606D",
-            titleColor="#334155",
-        )
     )
-    st.altair_chart(chart, width="stretch", theme=None)
+    st.altair_chart(chart, width="stretch")
 
 
 def _render_overview(client) -> None:
@@ -195,14 +198,19 @@ def _render_overview(client) -> None:
         )
     with metrics[2]:
         _metric(
-            "Median critical-thinking score",
-            _score(data["median_facione"].get("value")),
-            "Latest profile per assessed student",
+            "Assessed students",
+            str(data["median_facione"].get("sample_size", 0)),
+            "Latest critical-thinking indicator"
+            if data["median_facione"].get("sample_size", 0)
+            else "Not assessed yet",
         )
     with metrics[3]:
         _metric("Median stage", data.get("median_stage") or "Not started")
     with metrics[4]:
-        _metric("Conversations started", str(data.get("total_conversations", 0)))
+        _metric(
+            "Students needing attention",
+            str(data.get("attention_students_count", len(data.get("attention_students", [])))),
+        )
     summary = escape(str(data.get("summary") or "No class summary is available yet."))
     st.markdown(
         f'<div class="professor-summary">{summary}</div>',
@@ -218,24 +226,9 @@ def _render_overview(client) -> None:
         ]
         _bar_rows(stages, value_key="count", display_key="display")
     with right:
-        st.markdown("#### Facione class profile")
-        st.caption("Median dimension scores from each student’s latest assessed response.")
-        dimensions = [
-            {
-                "dimension": label,
-                "score": value.get("value"),
-                "display": (
-                    "Not assessed"
-                    if value.get("value") is None
-                    else f"{value['value']:.1f} / 4 · n={value['sample_size']}"
-                ),
-            }
-            for label, value in data.get("facione_profile", {}).items()
-        ]
-        _bar_rows(
-            dimensions, value_key="score", label_key="dimension",
-            fixed_maximum=4, display_key="display",
-        )
+        st.markdown("#### Follow-up queue")
+        st.caption("Deterministic follow-up signals, not judgements of ability.")
+        _attention_table(data.get("attention_students", []))
     st.markdown("#### Activity over time")
     activity = data.get("weekly_activity", [])
     if activity:
@@ -245,210 +238,266 @@ def _render_overview(client) -> None:
         )
     else:
         st.info("Weekly activity will appear after students begin using the coach.")
-    st.markdown("#### Students needing attention")
-    st.caption(
-        "Signals are deterministic prompts for follow-up, not a judgement of "
-        "student ability."
-    )
-    _attention_table(data.get("attention_students", []))
 
 
 def _render_students(client) -> None:
-    """Render an intentionally compact filterable roster and selected detail view."""
-    filters = st.columns([2, 1, 1, 1], gap="small")
+    """Render a progressive roster → student → notebook workspace."""
+    st.markdown("### Students")
+    st.caption("Start with a lightweight roster. Select one student to load their learning record.")
+    filters = st.columns([2.2, 1.2, 1.2], gap="small")
     with filters[0]:
         search = st.text_input(
-            "Search students",
-            placeholder="Search name or email",
-            key="professor_student_search",
+            "Search students", placeholder="Name or email", key="professor_student_search"
         )
     with filters[1]:
         stage = st.selectbox(
-            "Stage",
-            [
-                "All",
-                "Not started",
-                *_PHASE_LABELS,
-            ],
-            key="professor_stage_filter",
+            "Stage", ["All", "Not started", *_PHASE_LABELS], key="professor_stage_filter"
         )
     with filters[2]:
         attention = st.selectbox(
-            "Attention",
-            ["All", "Needs attention"],
-            key="professor_attention_filter",
+            "Attention", ["All", "Needs attention"], key="professor_attention_filter"
         )
-    with filters[3]:
-        score_band = st.selectbox(
-            "Score",
-            ["All", "Below 2.0", "2.0–3.0", "3.0+"],
-            key="professor_score_filter",
-        )
-    minimum, maximum = {
-        "Below 2.0": (None, 1.99),
-        "2.0–3.0": (2.0, 3.0),
-        "3.0+": (3.0, None),
-    }.get(score_band, (None, None))
     data = client.professor_students(
         search=search,
         stage=None if stage == "All" else stage,
         attention_only=attention == "Needs attention",
-        min_score=minimum,
-        max_score=maximum,
     )
     rows = data.get("students", [])
     if not rows:
         st.info("No students match these filters.")
         return
-    table = [
-        {
-            "Student": row["name"],
-            "Email": row.get("email") or "—",
-            "Stage": row.get("current_stage") or "Not started",
-            "Progress": f"{row['stage_progress']} / {len(_PHASE_LABELS)}",
-            "Facione": _score(row.get("facione_overall")),
-            "Messages": row["student_messages"],
-            "Active days": row["active_days"],
-            "Last active": _when(row.get("last_active")),
-            "Needs attention": "Yes" if row.get("needs_attention") else "",
-        }
+    labels = {"": "Select a student"}
+    labels.update({
+        row["id"]: (
+            f"{row['name']} · {row.get('current_stage') or 'Not started'} · "
+            f"{_when(row.get('last_active'))}"
+            + (" · Needs attention" if row.get("needs_attention") else "")
+        )
         for row in rows
-    ]
-    st.dataframe(table, width="stretch", hide_index=True)
-    labels: dict[str, str] = {"": "Select a student"}
-    seen: dict[str, int] = {}
-    for row in rows:
-        base = f"{row['name']} · {row.get('email') or row.get('current_stage') or 'Not started'}"
-        seen[base] = seen.get(base, 0) + 1
-        labels[row["id"]] = base if seen[base] == 1 else f"{base} ({seen[base]})"
-    selected_id = st.selectbox(
-        "Open student detail", [""] + [row["id"] for row in rows],
-        format_func=lambda value: labels[value], key="professor_student_detail",
-    )
-    if selected_id:
-        _render_student_detail(client, client.professor_student_detail(selected_id))
+    })
+    with st.container(key="professor_students_workspace"):
+        list_col, detail_col = st.columns([0.82, 1.8], gap="large")
+        with list_col:
+            st.markdown("#### Student list")
+            st.caption(f"{len(rows)} student{'s' if len(rows) != 1 else ''}")
+            selected_id = st.radio(
+                "Select a student", [""] + [row["id"] for row in rows],
+                format_func=lambda value: labels[value],
+                key="professor_selected_student", label_visibility="collapsed",
+            )
+        with detail_col:
+            if selected_id:
+                _render_student_detail(client, client.professor_student_detail(selected_id))
+            else:
+                st.info("Select a student to view their learning progress and notebooks.")
 
 
 def _render_student_detail(client: Any, data: dict[str, Any]) -> None:
-    """Render a professor-readable individual journey without defaulting to transcript text."""
+    """Render one selected student's record and one optional active transcript."""
     student = data["student"]
-    st.divider()
     st.markdown(f"### {student['name']}")
-    identity = f" · {student['email']}" if student.get("email") else ""
-    class_median = data.get("class_median_facione", {}).get("value")
-    comparison = f" · Class median {_score(class_median)}" if class_median is not None else ""
-    st.caption(
-        f"{student.get('current_stage') or 'Not started'} · "
-        f"{_score(student.get('facione_overall'))}{comparison}{identity} · "
-        f"Last active {_when(student.get('last_active'))}"
-    )
-    st.markdown("#### Learning progress")
+    st.caption(student.get("email") or "Authorised student record")
+    metrics = st.columns(4, gap="small")
+    with metrics[0]:
+        _metric("Current stage", student.get("current_stage") or "Not started")
+    with metrics[1]:
+        _metric("Progress", f"{student.get('stage_progress', 0)} / {len(_PHASE_LABELS)}")
+    with metrics[2]:
+        _metric("Last active", _when(student.get("last_active")))
+    with metrics[3]:
+        _metric("Attention", "Yes" if student.get("needs_attention") else "No")
+
+    st.markdown("#### Learning journey")
     completed = set(data.get("completed_stages", []))
-    progress_parts: list[str] = []
+    steps = []
     for stage in _PHASE_LABELS:
-        if stage in completed:
-            marker = "✓"
-        elif stage == student.get("current_stage"):
-            marker = "●"
-        else:
-            marker = "○"
-        progress_parts.append(f"{marker} {stage}")
-    progress = " · ".join(progress_parts)
-    st.markdown(
-        f'<p class="professor-progress">{escape(progress)}</p>',
-        unsafe_allow_html=True,
-    )
-    left, right = st.columns(2, gap="large")
-    with left:
-        st.markdown("#### Facione profile")
-        class_profile = data.get("class_facione_profile", {})
+        status = "completed" if stage in completed else "current" if stage == student.get("current_stage") else "future"
+        marker = "✓" if status == "completed" else "●" if status == "current" else "○"
+        steps.append(f'<span class="professor-step professor-step-{status}"><b>{marker}</b> {escape(stage)}</span>')
+    st.markdown(f'<div class="professor-progress">{"".join(steps)}</div>', unsafe_allow_html=True)
+    reasons = student.get("needs_attention") or []
+    if reasons:
+        st.caption("Needs attention: " + "; ".join(item.get("reason", "") for item in reasons))
+
+    overview_left, overview_right = st.columns(2, gap="large")
+    with overview_left:
+        st.markdown("#### Critical-thinking profile")
         profile_rows = []
+        class_profile = data.get("class_facione_profile", {})
         for key, value in data.get("facione_profile", {}).items():
-            class_value = class_profile.get(key, {})
             display = "Not assessed" if value is None else f"{value:.1f} / 4"
+            class_value = class_profile.get(key, {})
             if class_value.get("value") is not None:
-                display += f" · class {class_value['value']:.1f} (n={class_value['sample_size']})"
+                display += (
+                    f" · class {class_value['value']:.1f} "
+                    f"(n={class_value.get('sample_size', 0)})"
+                )
             profile_rows.append({"dimension": key, "score": value, "display": display})
-        _bar_rows(
-            profile_rows, value_key="score", label_key="dimension",
-            fixed_maximum=4, display_key="display",
-        )
-    with right:
+        if profile_rows:
+            _bar_rows(profile_rows, value_key="score", label_key="dimension", fixed_maximum=4, display_key="display")
+        else:
+            st.caption("No critical-thinking assessment is available yet.")
+    with overview_right:
         st.markdown("#### Engagement")
         engagement = data.get("engagement", {})
-        st.dataframe(
-            [
-                {
-                    "Active days": engagement.get("active_days", 0),
-                    "Sessions": engagement.get("sessions", 0),
-                    "Student messages": engagement.get("student_messages", 0),
-                    "Assistant messages": engagement.get("assistant_messages", 0),
-                    "Estimated active time": (
-                        f"{engagement.get('estimated_active_minutes', 0)} min"
-                    ),
-                }
-            ],
-            hide_index=True,
-            width="stretch",
-        )
+        engagement_metrics = st.columns(2, gap="small")
+        with engagement_metrics[0]:
+            _metric("Active days", str(engagement.get("active_days", 0)))
+            _metric("Student messages", str(engagement.get("student_messages", 0)))
+        with engagement_metrics[1]:
+            _metric("Sessions", str(engagement.get("sessions", 0)))
+            _metric(
+                "Estimated active time",
+                f"{engagement.get('estimated_active_minutes', 0)} min",
+            )
         st.caption(engagement.get("definition", ""))
-    if len(data.get("facione_trend", [])) >= 2:
+
+    trend = data.get("facione_trend", [])
+    if len(trend) >= 2:
         st.markdown("#### Critical-thinking trend")
         _line_chart(
-            data["facione_trend"], x="at", y="overall",
+            trend, x="at", y="overall",
             x_label="Assessment", y_label="Overall score (0–4)", y_domain=(0, 4),
         )
-    st.markdown("#### Notebooks and discussion topics")
-    st.dataframe(
-        [
-            {
-                "Notebook": item["title"],
-                "Stage": item.get("stage") or "Not started",
-                "Student messages": item["student_messages"],
-                "Last active": _when(item.get("last_active")),
-            }
-            for item in data.get("notebooks", [])
-        ],
-        hide_index=True,
-        width="stretch",
+        st.caption("Assessment trend is descriptive only; it does not establish causal change.")
+
+    opened = st.session_state.get(f"professor_open_notebook_{student['id']}")
+    if opened:
+        if st.button("← Back to notebooks", key=f"professor_back_notebooks_{student['id']}"):
+            st.session_state.pop(f"professor_open_notebook_{student['id']}", None)
+            st.rerun()
+        notebook_summary = next((item for item in data.get("notebooks", []) if item.get("id") == opened), {})
+        transcript = client.professor_conversation_transcript(student["id"], opened)
+        _render_professor_transcript(client, student["id"], transcript, notebook_summary)
+        return
+
+    st.markdown("#### Notebooks")
+    notebooks = data.get("notebooks", [])
+    if not notebooks:
+        st.info("This student has not started a notebook yet.")
+        return
+    notebook_labels = {item["id"]: _notebook_label(item) for item in notebooks}
+    selected_notebook = st.radio(
+        "Select a notebook", [item["id"] for item in notebooks],
+        format_func=lambda value: notebook_labels[value],
+        key=f"professor_selected_notebook_{student['id']}",
+        label_visibility="collapsed",
     )
-    with st.expander("View active conversation history"):
-        st.caption(
-            "Only the active conversation branch is shown. Superseded revisions "
-            "are excluded."
+    st.button(
+        "View active transcript",
+        key=f"professor_view_transcript_{student['id']}",
+        on_click=_open_professor_notebook,
+        args=(student["id"], selected_notebook),
+    )
+
+
+def _open_professor_notebook(student_id: str, notebook_id: str) -> None:
+    """Persist the lecturer's selected notebook after an explicit view click."""
+    st.session_state[f"professor_open_notebook_{student_id}"] = notebook_id
+
+
+def _render_professor_transcript(
+    client: Any,
+    student_id: str,
+    transcript: dict[str, Any],
+    notebook: dict[str, Any],
+) -> None:
+    """Render one active-branch transcript as readable message cards."""
+    st.markdown(f"#### {transcript.get('title') or notebook.get('title') or 'Notebook'}")
+    st.caption(
+        f"{transcript.get('stage') or notebook.get('stage') or 'Not started'} · "
+        f"Last active {_when(transcript.get('last_active') or notebook.get('last_active'))} · "
+        "Active conversation branch · superseded revisions are excluded"
+    )
+    messages = transcript.get("messages") or []
+    if not messages:
+        st.caption("No conversation has been recorded in this notebook.")
+        return
+    for message in messages:
+        speaker = "Student" if message.get("role") == "user" else "Coach"
+        with st.container(key=f"professor_message_{message.get('id') or message.get('created_at')}"):
+            st.markdown(f"**{speaker}** · {_when(message.get('created_at'))}")
+            st.markdown(message.get("content") or "")
+            for attachment in message.get("attachments") or []:
+                attachment_id = str(attachment.get("id") or "")
+                title = escape(str(attachment.get("title") or "Attachment"))
+                st.caption(f"📎 {title}")
+                if attachment_id and hasattr(client, "professor_conversation_attachment"):
+                    if st.button("Open attachment", key=f"professor_attachment_{message.get('id')}_{attachment_id}"):
+                        _professor_attachment_dialog(
+                            client, student_id, transcript["notebook_id"], attachment_id, title
+                        )
+            citations = message.get("citations") or []
+            if citations:
+                st.caption("Cited source reference(s): " + ", ".join(_citation_display(item) for item in citations))
+            st.divider()
+
+
+def _citation_display(citation: Any) -> str:
+    """Render one persisted citation as a safe, friendly reference label."""
+    if isinstance(citation, dict):
+        identifier = str(citation.get("label") or citation.get("id") or "source").strip()
+        title = str(citation.get("title") or citation.get("label") or citation.get("id") or "Source").strip()
+    else:
+        identifier = title = str(citation or "Source").strip()
+    value = f"[{identifier}] {title}" if identifier and title != identifier else f"[{identifier}]"
+    escaped = escape(value)
+    for character in ("\\", "`", "*", "_", "{", "}", "[", "]", "(", ")", "#", "+", "-", ".", "!", "|", ">"):
+        escaped = escaped.replace(character, f"\\{character}")
+    return escaped
+
+
+@st.dialog("Attachment", width="large")
+def _professor_attachment_dialog(
+    client: Any,
+    student_id: str,
+    notebook_id: str,
+    attachment_id: str,
+    title: str,
+) -> None:
+    """Fetch and preview one authorized attachment only after a click."""
+    try:
+        content = client.professor_conversation_attachment(
+            student_id, notebook_id, attachment_id
         )
-        conversations = data.get("conversations", [])
-        if not conversations:
-            st.caption("No conversations have been recorded for this student.")
-        else:
-            conversation_labels = {
-                item["id"]: f"{item['title']} · {_when(item.get('last_active'))}"
-                for item in conversations
-            }
-            notebook_id = st.selectbox(
-                "Conversation", [item["id"] for item in conversations],
-                format_func=lambda value: conversation_labels[value],
-                key=f"professor_conversation_{student['id']}",
-            )
-            if st.button(
-                "View conversation", key=f"professor_view_conversation_{student['id']}"
-            ):
-                transcript = client.professor_conversation_transcript(
-                    student["id"], notebook_id
-                )
-                st.markdown(f"**{transcript['title']}**")
-                for message in transcript.get("messages", []):
-                    speaker = "Student" if message["role"] == "user" else "Coach"
-                    st.markdown(
-                        f"**{speaker}** · {_when(message.get('created_at'))}\n\n"
-                        f"{message.get('content') or ''}"
-                    )
+    except Exception:  # noqa: BLE001 - safe lecturer-facing error
+        st.error("This attachment is unavailable or no longer authorized.")
+        return
+    st.markdown(f"### {title}")
+    mime = str(content.mime or "application/octet-stream").split(";", 1)[0].lower()
+    if mime == "application/pdf" or content.filename.lower().endswith(".pdf"):
+        st.pdf(content.data, height=560, key=f"professor_pdf_{attachment_id}")
+    elif mime.startswith("image/"):
+        st.image(content.data, use_container_width=True)
+    elif mime.startswith("text/"):
+        st.text(content.data.decode("utf-8", errors="replace"))
+    else:
+        st.info("Preview is not available for this file type.")
+    st.download_button(
+        "Download attachment",
+        data=content.data,
+        file_name=content.filename or title,
+        mime=content.mime,
+        key=f"professor_download_{attachment_id}",
+    )
 
 
 def _render_critical_thinking(client) -> None:
     """Render teaching-relevant Facione distributions and non-causal comparisons."""
     data = client.professor_critical_thinking()
-    st.markdown("#### Facione dimensions")
+    st.markdown("#### Stage distribution")
+    st.caption("Students are counted at the most recently active notebook stage.")
+    stage_rows = data.get("stage_distribution") or []
+    if stage_rows:
+        _bar_rows(
+            stage_rows,
+            value_key="count",
+            label_key="stage",
+            suffix=" students",
+        )
+    else:
+        st.info("Stage distribution will appear after students begin a notebook.")
+    st.markdown("#### Critical-thinking class profile")
     st.caption(
         "Medians use each student’s latest assessed response; not-started "
         "dimensions are excluded."
@@ -469,6 +518,8 @@ def _render_critical_thinking(client) -> None:
         dimensions, value_key="score", label_key="dimension",
         fixed_maximum=4, display_key="display",
     )
+    if not any(item.get("value") is not None for item in data.get("dimensions", {}).values()):
+        st.caption("Not enough assessed students yet.")
     left, right = st.columns(2, gap="large")
     with left:
         st.markdown("#### Score distribution")
@@ -751,7 +802,7 @@ def _render_research_validation(client: Any, observation: dict[str, Any]) -> Non
 def _render_research(client: Any) -> None:
     """Render an audited queue-to-transcript-to-validation research workflow."""
     summary = client.professor_research_summary()
-    st.markdown("### Research coding review")
+    st.markdown("### Research Review")
     st.caption(
         "Review immutable automated observations against student utterances, then "
         "record independent human validation."
@@ -831,19 +882,9 @@ def _render_research(client: Any) -> None:
         offset=0,
     )
     items = list(queue.get("items") or [])
-    st.radio(
-        "Research workflow step",
-        ["Queue", "Transcript", "Validate"],
-        horizontal=True,
-        label_visibility="collapsed",
-        key="research_mobile_step",
-    )
     with st.container(key="research_workspace"):
-        queue_pane, transcript_pane, coding_pane = st.columns(
-            [0.9, 1.2, 1.05], gap="medium"
-        )
+        queue_pane, detail_pane = st.columns([0.72, 2.05], gap="large")
         with queue_pane:
-            st.markdown('<div class="research-pane-marker research-queue-marker"></div>', unsafe_allow_html=True)
             st.markdown("#### Validation queue")
             st.caption(f"{queue.get('total', 0)} active observation(s)")
             if not items:
@@ -875,8 +916,7 @@ def _render_research(client: Any) -> None:
             (item for item in observations if str(item.get("id")) == selected_id),
             observations[0] if observations else {},
         )
-        with transcript_pane:
-            st.markdown('<div class="research-pane-marker research-transcript-marker"></div>', unsafe_allow_html=True)
+        with detail_pane:
             st.markdown("#### Student transcript")
             student = detail.get("student") or {}
             st.caption(
@@ -889,8 +929,6 @@ def _render_research(client: Any) -> None:
                         f"**{speaker}** · {_when(message.get('created_at'))}\n\n"
                         f"{message.get('content') or ''}"
                     )
-        with coding_pane:
-            st.markdown('<div class="research-pane-marker research-validation-marker"></div>', unsafe_allow_html=True)
             st.markdown("#### Automated coding")
             if observation:
                 _render_research_observation(observation)
@@ -913,7 +951,7 @@ def render_professor_dashboard() -> None:
             _render_overview(client)
         elif page == "Students":
             _render_students(client)
-        elif page == "Critical Thinking":
+        elif page == "Learning Progress":
             _render_critical_thinking(client)
         elif page == "Engagement":
             _render_engagement(client)

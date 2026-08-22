@@ -140,7 +140,24 @@ _PROJECT_REASONING = (
 # lookup, so it must keep its coaching semantics.
 _INFORMATION_REQUEST = re.compile(
     r"\?|^\s*(what|why|how|when|where|which|who|explain|describe|define|list|"
-    r"summar(?:y|ise|ize)|tell me|show me|give me|walk me through)\b",
+    r"summar(?:y|ise|ize)|tell me|show me|give me|walk me through|"
+    r"help me (?:understand|interpret|analy[sz]e))\b",
+    re.IGNORECASE,
+)
+
+# A current-turn attachment is evidence for the student's request, not an
+# implicit request to search the whole course catalogue.  Keep this matcher
+# deliberately small and deterministic; the model still decides whether the
+# attachment is in scope in the same Fast Chat call.
+_ATTACHMENT_REFERENCE = re.compile(
+    r"\b(attached|attachment|uploaded|upload|file|pdf|document|image|photo|"
+    r"diagram|scan)\b",
+    re.IGNORECASE,
+)
+_COURSE_REFERENCE = re.compile(
+    r"\b(lecture|lectures|week|weeks|course|cde2300|product\s+design|"
+    r"design\s+thinking|jtbd|how\s+might\s+we|reading|readings|syllabus|"
+    r"class\s+materials?)\b",
     re.IGNORECASE,
 )
 
@@ -217,6 +234,34 @@ def looks_like_information_request(student_message: str) -> bool:
     if not text:
         return False
     return bool(_INFORMATION_REQUEST.search(text))
+
+
+def is_private_attachment_question(
+    student_message: str,
+    *,
+    attachment_count: int = 0,
+) -> bool:
+    """Return whether this turn should retrieve only current attachments.
+
+    This is a retrieval-scope hint, not a relevance classifier.  It applies
+    only to a turn with private attachments, an information request, and no
+    explicit course reference.  The existing Fast Chat result still owns the
+    semantic out-of-scope decision, and explicit course comparisons continue
+    through the normal combined attachment + course retrieval path.
+    """
+    if int(attachment_count or 0) <= 0:
+        return False
+    text = _normalized_text(student_message)
+    if not looks_like_information_request(text):
+        return False
+    if _COURSE_REFERENCE.search(text):
+        return False
+    if _ATTACHMENT_REFERENCE.search(text):
+        return True
+    # Short questions such as "what themes do you notice?" implicitly refer
+    # to the only newly supplied evidence. Project deliberation remains on the
+    # normal path unless it explicitly names the attachment.
+    return not looks_like_project_reasoning(text)
 
 
 def overlay_mode_policy(

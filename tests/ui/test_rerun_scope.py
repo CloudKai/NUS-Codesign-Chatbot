@@ -201,7 +201,11 @@ def test_edit_send_stays_in_chat_fragment_until_revision_completes() -> None:
         "def render_chat_panel(", 1
     )[0]
     assert "stop_before_message_id=pending_message_id or None" in composer_block
-    assert "_render_inflight_user_prompt(pending_prompt, [])" in composer_block
+    assert "_render_inflight_user_prompt(" in composer_block
+    assert "list(pending.get(\"attachments\") or [])" in composer_block
+    assert '"attachments": [' in edit_block
+    assert "inflight_attachment_card_" in chat
+    assert "user_edit_attachment_card_" in chat
 
     revise_block = chat.split("def _submit_pending_edit(", 1)[1].split(
         "def _render_chat_history(", 1

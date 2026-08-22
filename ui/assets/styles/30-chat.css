@@ -91,6 +91,52 @@
         overflow:hidden !important;
     }
 
+    /* Compact file cards keep attachment actions readable without turning a
+       user bubble into a full-width panel. */
+    [class*="st-key-message_attachment_card_"],
+    [class*="st-key-user_edit_attachment_card_"],
+    [class*="st-key-inflight_attachment_card_"] {
+        max-width:100% !important;
+        margin:.35rem 0 0 !important;
+        padding:.28rem !important;
+        border:1px solid color-mix(in srgb, var(--cd-border) 82%, var(--cd-accent));
+        border-radius:.7rem;
+        background:color-mix(in srgb, var(--cd-surface-muted) 72%, transparent);
+        overflow:hidden !important;
+    }
+
+    [class*="st-key-message_attachment_card_"] [data-testid="stButton"],
+    [class*="st-key-user_edit_attachment_card_"] [data-testid="stButton"],
+    [class*="st-key-inflight_attachment_card_"] [data-testid="stButton"] {
+        max-width:100% !important;
+        margin:0 !important;
+    }
+
+    [class*="st-key-message_attachment_card_"] button,
+    [class*="st-key-user_edit_attachment_card_"] button,
+    [class*="st-key-inflight_attachment_card_"] button {
+        max-width:100% !important;
+        min-height:2.15rem !important;
+        justify-content:flex-start !important;
+        padding:.35rem .55rem !important;
+        border:0 !important;
+        border-radius:.48rem !important;
+        background:transparent !important;
+        color:var(--cd-text) !important;
+        font-size:.78rem !important;
+        font-weight:650 !important;
+        text-align:left !important;
+        white-space:nowrap !important;
+        overflow:hidden !important;
+        text-overflow:ellipsis !important;
+    }
+
+    [class*="st-key-message_attachment_card_"] button:hover,
+    [class*="st-key-user_edit_attachment_card_"] button:hover,
+    [class*="st-key-inflight_attachment_card_"] button:hover {
+        background:color-mix(in srgb, var(--cd-accent) 13%, transparent) !important;
+    }
+
     .cd-inflight-error {
         overflow-anchor:none;
         width:100%;
@@ -1385,4 +1431,3 @@
         font-size:.88rem;
         line-height:1.55;
     }
-

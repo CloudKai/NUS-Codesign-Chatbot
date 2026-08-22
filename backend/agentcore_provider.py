@@ -100,6 +100,16 @@ _TRUNCATED_FAILURE = "AgentCore truncated the coaching turn"
 _MALFORMED_FAILURE = "The coach reply could not be completed"
 _BLOCKED_FAILURE = "AgentCore blocked this turn"
 _IMAGE_FAILURE = "AgentCore does not support this image type"
+_CDE2300_SCOPE_RESPONSE = (
+    "This companion is only for CDE2300 course content and materials relevant "
+    "to your CDE2300 design project. Please ask a CDE2300 question or attach "
+    "material connected to your project."
+)
+_ATTACHMENT_SCOPE_RESPONSE = (
+    "This file appears to be outside the scope of CDE2300 and your current "
+    "design project, so I won't use it for the coaching session. If you meant "
+    "to attach a design/project-related file, upload that instead."
+)
 _OUTPUT_CONTRACT = "coach_turn"
 _FAST_CHAT_CONTRACT = "fast_chat_turn"
 _FAST_CHAT_PHASE = "fast_chat"
@@ -944,6 +954,31 @@ def _validated_fast_chat(
             fast_chat_payload_shape_log(payload),
         )
         raise _malformed_error() from error
+    if output.out_of_scope:
+        record_field("fast_chat_out_of_scope", True)
+        record_field("mode_returned", SPECIALIST_QA)
+        record_field("hmw_scaffold_ready_model", False)
+        return ProviderAssessmentResult(
+            response_text=(
+                _ATTACHMENT_SCOPE_RESPONSE
+                if request.attachment_source_ids
+                else _CDE2300_SCOPE_RESPONSE
+            ),
+            assessment=_fast_chat_assessment(
+                request,
+                mode="qa",
+                recommendation=None,
+                recommendation_rationale="",
+                citations=[],
+                hmw_scaffold_ready=False,
+            ),
+            research_coding=None,
+            specialist=SPECIALIST_QA,
+            qualifying_coaching_turn=False,
+            deep_review_succeeded=False,
+            review_trigger=None,
+            needs_source_retrieval=False,
+        )
     allowed = _allowed_citation_labels(request)
     citations = [
         item

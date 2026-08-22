@@ -414,15 +414,15 @@ def test_agentcore_payload_sends_bounded_history_and_owner_student_id():
 def test_agentcore_compression_keeps_early_decision_out_of_recent_messages():
     from backend.context_planner import ContextBudget, HistoryContextPlanner
 
-    # The current Fast Chat contract is intentionally sizeable (~5.5k tokens
-    # before history).  A 6k synthetic ceiling leaves no room for the
-    # extractive memory this test is meant to exercise, so use a small rounded
-    # constrained budget that can carry both the contract and that memory.
+    # The current Fast Chat contract is intentionally sizeable (over 5.5k
+    # tokens before history). A 6k synthetic ceiling leaves no room for the
+    # extractive memory this test is meant to exercise, so use a constrained
+    # budget that can carry both the contract and that memory.
     client = FakeAgentCoreRuntime(payload=_output())
     planner = HistoryContextPlanner(
         ContextBudget(
-            model_context_limit_tokens=7_500,
-            max_input_tokens=6_500,
+            model_context_limit_tokens=9_000,
+            max_input_tokens=8_000,
             output_reserve_tokens=500,
             safety_margin_tokens=500,
             recent_verbatim_messages=4,
@@ -945,6 +945,48 @@ def test_malformed_fast_chat_payload_fails_closed(caplog):
     assert "expected=fast_chat_turn_v1" in joined
     assert "What trade-off" not in joined
     assert _STUDENT_MESSAGE not in joined
+
+
+def test_out_of_scope_fast_chat_uses_fixed_non_mutating_course_boundary():
+    """A high-confidence scope decision cannot summarize, cite, or advance."""
+    client = FakeAgentCoreRuntime(
+        payload=_output(
+            response_text="Untrusted summary of unrelated material [S1].",
+            recommendation=StageDecision.ADVANCE,
+        )
+        | {
+            "out_of_scope": True,
+            "citations": [{"label": "S1", "title": "Unrelated file"}],
+            "hmw_scaffold_ready": True,
+            "needs_source_retrieval": True,
+        }
+    )
+    result = _provider(client).assess(_request())
+    assert result.response_text.startswith(
+        "This companion is only for CDE2300 course content"
+    )
+    assert "Untrusted summary" not in result.response_text
+    assert result.specialist == "qa"
+    assert result.qualifying_coaching_turn is False
+    assert result.needs_source_retrieval is False
+    assert result.assessment.recommendation is None
+    assert result.assessment.hmw_scaffold_ready is False
+    assert result.assessment.citations == []
+
+
+def test_out_of_scope_private_attachment_uses_short_attachment_boundary():
+    """Attachment scope failures do not expose unrelated file content."""
+    client = FakeAgentCoreRuntime(
+        payload=_output(response_text="Untrusted attachment summary.")
+        | {"out_of_scope": True}
+    )
+    result = _provider(client).assess(
+        _request(attachment_source_ids=["private-attachment"])
+    )
+    assert result.response_text.startswith(
+        "This file appears to be outside the scope of CDE2300"
+    )
+    assert "Untrusted attachment summary" not in result.response_text
 
 
 def test_conflicting_slim_and_nested_recommendations_fail_closed():

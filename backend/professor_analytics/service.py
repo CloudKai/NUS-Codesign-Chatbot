@@ -137,6 +137,7 @@ class ProfessorAnalyticsService:
             facione_profile=profile,
             weekly_activity=self._weekly_activity(students.values()),
             attention_students=attention[:8],
+            attention_students_count=len(attention),
             summary=self._summary(students.values(), profile, attention),
         )
 
@@ -166,10 +167,14 @@ class ProfessorAnalyticsService:
 
     def student_detail(self, student_id: str) -> StudentDetailResponse | None:
         """Return one authorised learner's journey and active transcript only."""
-        class_students = self._build_students(self._repository.load_class_rows())
-        value = class_students.get(student_id)
+        value = self._build_students(
+            self._repository.load_student_rows(student_id)
+        ).get(student_id)
         if value is None:
             return None
+        benchmark = self._build_benchmark_students(
+            self._repository.load_class_benchmark_rows()
+        )
         trend = [
             {"at": item["at"], "overall": item["overall"], "stage": _label(item["stage"])}
             for item in value["assessments"] if item["overall"] is not None
@@ -187,10 +192,10 @@ class ProfessorAnalyticsService:
             student=self._student_item(value),
             completed_stages=[_label(stage) or stage for stage in value["completed_stages"]],
             facione_profile=dimensions,
-            class_facione_profile=self._dimension_profile(class_students.values()),
+            class_facione_profile=self._dimension_profile(benchmark.values()),
             class_median_facione=_score(
                 student["overall"]
-                for student in class_students.values()
+                for student in benchmark.values()
                 if student["overall"] is not None
             ),
             facione_trend=trend,
@@ -210,7 +215,7 @@ class ProfessorAnalyticsService:
     ) -> ConversationTranscriptResponse | None:
         """Return one selected active transcript without loading other students' text."""
         students = self._build_students(
-            self._repository.load_class_rows(
+            self._repository.load_student_rows(
                 include_content=True,
                 student_id=student_id,
                 notebook_id=notebook_id,
@@ -220,24 +225,113 @@ class ProfessorAnalyticsService:
         notebook = student["notebooks"].get(notebook_id) if student else None
         if notebook is None:
             return None
+        citation_ids = [
+            str(source_id)
+            for message in notebook["messages"]
+            for source_id in message.get("cited_source_ids", [])
+        ]
+        authorized_citations = self._repository.authorized_citation_ids(
+            notebook_id, citation_ids
+        )
         return ConversationTranscriptResponse(
             notebook_id=notebook_id,
             title=notebook["title"],
+            stage=_label(notebook.get("stage")),
+            last_active=notebook.get("last_activity"),
             messages=[
                 {
+                    "id": message["id"],
                     "role": message["role"],
                     "content": message["content"],
                     "created_at": message["created_at"],
+                    "attachments": message.get("attachments", []),
+                    "citations": [
+                        citation
+                        for citation in message.get("citations", [])
+                        if str(citation.get("id")) in authorized_citations
+                    ],
                 }
                 for message in notebook["messages"]
             ],
         )
+
+    def _build_benchmark_students(
+        self, rows: list[dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        """Build latest assessment summaries from compact benchmark rows."""
+        values: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            if str(row.get("message_role") or "") != "assistant" or row.get("message_is_error"):
+                continue
+            assessment = self._json(row.get("assessment_text"))
+            if not assessment:
+                continue
+            user_id = str(row.get("user_id") or "")
+            if not user_id:
+                continue
+            raw_scores = assessment.get("facione_scores")
+            dimensions = {
+                key: self._dimension_score(raw_scores, key) for key, _ in DIMENSIONS
+            }
+            valid = [score for score in dimensions.values() if score > 0]
+            value = values.setdefault(
+                user_id,
+                {
+                    "id": user_id,
+                    "name": str(row.get("display_name") or "Student"),
+                    "email": row.get("email"),
+                    "assessments": [],
+                    "latest_assessment": None,
+                    "overall": None,
+                    "notebooks": {},
+                },
+            )
+            value["assessments"].append(
+                {
+                    "id": str(row.get("message_id") or ""),
+                    "at": row.get("message_created_at"),
+                    "dimensions": dimensions,
+                    "overall": round(sum(valid) / len(valid), 2) if valid else None,
+                    "stage": assessment.get("current_stage"),
+                }
+            )
+        for value in values.values():
+            value["assessments"].sort(
+                key=lambda item: (str(item["at"] or ""), item["id"])
+            )
+            value["latest_assessment"] = value["assessments"][-1]
+            value["overall"] = value["latest_assessment"]["overall"]
+        return values
 
     def critical_thinking(self) -> CriticalThinkingResponse:
         """Return assessment aggregates that support teaching intervention."""
         students = self._build_students(self._repository.load_class_rows())
         values = list(students.values())
         scores = [student["overall"] for student in values if student["overall"] is not None]
+        stage_counts = Counter(student["stage"] for student in values if student["stage"])
+        total_students = len(values)
+        stage_distribution = [
+            StageDistributionItem(
+                stage=_label(stage) or stage,
+                count=stage_counts[stage],
+                percentage=round(stage_counts[stage] / total_students * 100, 1)
+                if total_students
+                else 0,
+            )
+            for stage in STAGES
+        ]
+        stage_distribution.append(
+            StageDistributionItem(
+                stage="Not started",
+                count=total_students - sum(stage_counts.values()),
+                percentage=round(
+                    (total_students - sum(stage_counts.values())) / total_students * 100,
+                    1,
+                )
+                if total_students
+                else 0,
+            )
+        )
         bands = [(1.0, 1.5), (1.5, 2.0), (2.0, 2.5), (2.5, 3.0), (3.0, 3.5), (3.5, 4.01)]
         distribution = [{"band": f"{low:.1f}–{high if high < 4 else 4.0:.1f}", "count": sum(low <= score < high for score in scores)} for low, high in bands]
         comparisons = []
@@ -257,7 +351,9 @@ class ProfessorAnalyticsService:
             for week, assessment in latest_by_week.items():
                 trend_groups[week].append(assessment["overall"])
         return CriticalThinkingResponse(
-            dimensions=self._dimension_profile(values), distribution=distribution,
+            dimensions=self._dimension_profile(values),
+            stage_distribution=stage_distribution,
+            distribution=distribution,
             stage_comparison=comparisons,
             trend=[{"date": date, "median": round(float(median(group)), 2), "sample_size": len(group)} for date, group in sorted(trend_groups.items())],
         )
@@ -313,14 +409,59 @@ class ProfessorAnalyticsService:
             })
             if not row.get("message_id"):
                 continue
+            raw_citations = self._json_list(row.get("cited_source_ids_text"))
+            citations: list[dict[str, str]] = []
+            citation_ids: list[str] = []
+            for raw_citation in raw_citations:
+                if isinstance(raw_citation, dict):
+                    citation_id = str(
+                        raw_citation.get("id")
+                        or raw_citation.get("source_id")
+                        or raw_citation.get("sourceId")
+                        or ""
+                    ).strip()
+                    label = str(raw_citation.get("label") or "").strip()
+                    title = str(
+                        raw_citation.get("title")
+                        or raw_citation.get("source_title")
+                        or raw_citation.get("sourceTitle")
+                        or ""
+                    ).strip()
+                else:
+                    citation_id = str(raw_citation or "").strip()
+                    label = ""
+                    title = ""
+                if not citation_id:
+                    continue
+                citation_ids.append(citation_id)
+                citations.append(
+                    {
+                        "id": citation_id,
+                        **({"label": label} if label else {}),
+                        **({"title": title} if title else {}),
+                    }
+                )
             message = {
                 "id": str(row["message_id"]),
                 "role": str(row.get("message_role") or ""),
                 "created_at": row.get("message_created_at"),
                 "content": str(row.get("message_content") or ""),
                 "is_error": bool(row.get("message_is_error")),
-                "cited_source_ids": self._json_list(row.get("cited_source_ids_text")),
+                "cited_source_ids": citation_ids,
+                "citations": citations,
             }
+            metadata = self._json(row.get("message_metadata"))
+            message["attachments"] = [
+                {
+                    "id": str(item.get("id") or ""),
+                    "title": str(item.get("title") or "Attachment"),
+                    "mime": str(item.get("mime") or "application/octet-stream"),
+                    "kind": str(item.get("kind") or "file"),
+                    "size": max(0, int(item.get("size") or 0)),
+                }
+                for item in metadata.get("attachments", [])
+                if isinstance(item, dict) and str(item.get("id") or "").strip()
+            ]
             notebook["messages"].append(message)
             if not message["is_error"] and (
                 not notebook["last_activity"]

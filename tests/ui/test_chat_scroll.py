@@ -106,9 +106,97 @@ def test_chat_feed_owns_history_and_inflight_with_composer_as_footer() -> None:
         'st.container(key="chat_composer")'
     )
     assert "stop_before_message_id" in fragment
-    assert "_render_inflight_user_prompt(pending_prompt" in fragment
+    assert "_render_inflight_user_prompt(" in fragment
+    assert "list(pending.get(\"attachments\") or [])" in fragment
     assert "rerun_fragment()" in chat
     workspace = Path("ui/assets/styles/10-workspace.css").read_text(encoding="utf-8")
     feed_rule = workspace.split(".st-key-chat_feed,", 1)[1].split("}", 1)[0]
     assert "overflow-y:auto" in feed_rule
+    assert "height:0" in feed_rule
+    assert "max-height:100%" in feed_rule
+    assert ".st-key-chat_feed > div" not in workspace
+    legacy_selector = (
+        '.st-key-chat_panel [data-testid="stLayoutWrapper"]:has(> .st-key-chat_log)'
+        ':not(:has(> .st-key-chat_inflight))'
+        ':not(:has(> [data-testid="stElementContainer"].st-key-chat_inflight))'
+    )
+    override_selector = (
+        '.st-key-chat_panel .st-key-chat_feed > [data-testid="stLayoutWrapper"]'
+        ':has(> .st-key-chat_log)'
+        ':not(:has(> .st-key-chat_inflight))'
+        ':not(:has(> [data-testid="stElementContainer"].st-key-chat_inflight))'
+    )
+    override_element_container_selector = (
+        '.st-key-chat_panel .st-key-chat_feed > [data-testid="stLayoutWrapper"]'
+        ':has(> [data-testid="stElementContainer"].st-key-chat_log)'
+        ':not(:has(> .st-key-chat_inflight))'
+        ':not(:has(> [data-testid="stElementContainer"].st-key-chat_inflight))'
+    )
+    assert legacy_selector in workspace
+    assert override_selector in workspace
+    assert override_element_container_selector in workspace
+    legacy = workspace.index(legacy_selector)
+    override = workspace.index(override_selector)
+    assert override > legacy
+    override_block = workspace[override:].split("}", 1)[0]
+    assert "flex:0 0 auto" in override_block
+    assert "overflow:visible" in override_block
     assert ".st-key-chat_feed .st-key-chat_log" in workspace
+
+
+def test_message_attachments_render_as_compact_authorized_file_cards() -> None:
+    """Persisted turn attachments use a compact card and existing viewer path."""
+    chat = Path("ui/panels/chat.py").read_text(encoding="utf-8")
+    styles = Path("ui/assets/styles/30-chat.css").read_text(encoding="utf-8")
+    assert "message_attachment_card_" in chat
+    assert "_attachment_kind_label(attachment)" in chat
+    assert "_attachment_button_label(attachment)" in chat
+    assert "source_viewer_dialog(attachment_id)" in chat
+    assert "Open attachment ·" not in chat
+    assert '[class*="st-key-message_attachment_card_"]' in styles
+    assert '[class*="st-key-user_edit_attachment_card_"]' in styles
+    assert '[class*="st-key-inflight_attachment_card_"]' in styles
+    assert "text-overflow:ellipsis" in styles
+
+
+def test_narrow_chat_feed_owns_touch_scroll_without_changing_textarea_ownership() -> None:
+    """Tablet/mobile feed scrolling does not steal edit or composer scrolling."""
+    responsive = Path("ui/assets/styles/90-responsive.css").read_text(encoding="utf-8")
+    mobile_tablet = responsive.split("@media (max-width:1050px)", 1)[1].split(
+        "/* Mid-width desktop", 1
+    )[0]
+    feed_rule = mobile_tablet.split(".st-key-chat_feed,", 1)[1].split("}", 1)[0]
+    bubble_rule = mobile_tablet.split(".cd-user-bubble-text", 1)[1].split("}", 1)[0]
+
+    assert "touch-action:pan-y" in feed_rule
+    assert "-webkit-overflow-scrolling:touch" in feed_rule
+    assert "overscroll-behavior-y:contain" in feed_rule
+    assert "max-height:none !important" in bubble_rule
+    assert "overflow-y:visible !important" in bubble_rule
+    assert "overflow-y:auto" not in bubble_rule
+    assert "attachment" not in mobile_tablet.lower()
+    assert "citation" not in mobile_tablet.lower()
+
+    chat = Path("ui/assets/styles/30-chat.css").read_text(encoding="utf-8")
+    desktop_bubble = chat.split(".cd-user-bubble-text {", 1)[1].split("}", 1)[0]
+    edit_textarea = chat.split(
+        '[class*="st-key-user_message_edit_"] textarea {', 1
+    )[1].split("}", 1)[0]
+    composer_textarea = chat.split(
+        ".st-key-chat_composer [data-testid=\"stChatInput\"] textarea,", 1
+    )[1].split("}", 1)[0]
+    assert "max-height:var(--cd-user-bubble-max-height)" in desktop_bubble
+    assert "overflow-y:auto" in desktop_bubble
+    assert "max-height:var(--cd-user-bubble-max-height) !important" in edit_textarea
+    assert "overflow-y:auto !important" in edit_textarea
+    assert "max-height:calc(1em * 1.45 * 5) !important" in composer_textarea
+    assert "overflow-y:auto !important" in composer_textarea
+
+    attachment_cards = chat.split(
+        '[class*="st-key-message_attachment_card_"],', 1
+    )[1].split("}", 1)[0]
+    assert "overflow:hidden !important" in attachment_cards
+    chat_panel = Path("ui/panels/chat.py").read_text(encoding="utf-8")
+    assert "citation_" in chat_panel
+    assert "render_citations(message, visible_source_ids=visible_source_ids)" in chat_panel
+    assert "citation" not in bubble_rule.lower()

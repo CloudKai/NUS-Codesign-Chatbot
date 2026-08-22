@@ -7,6 +7,73 @@
 **Live app image:** `cde2300-chatbot:ddfc3f4` (unchanged; no EC2 rebuild)
 **Live AgentCore:** DEFAULT → **v29 READY** (`lastUpdated` 2026-08-21T17:36:01Z).
 
+### Lecturer dashboard progressive disclosure (2026-08-22)
+
+**Change.** Professor Students now follows a roster → selected student →
+selected notebook transcript flow. `student_detail()` uses a student-scoped
+active-row query plus a compact body-free class assessment benchmark instead
+of rebuilding every student’s detailed rows. Notebook summaries remain
+transcript-free; transcript responses contain only the selected active branch,
+safe message attachment descriptors, and citation references. An authorized
+professor attachment endpoint verifies student, notebook, active message
+association, and attachment origin before streaming bytes. Top-level tabs are
+Overview, Students, Learning Progress, Engagement, and Research Review.
+
+The release pass moved attachment opening to a lazy authenticated API-client
+fetch inside a lecturer-owned preview/download dialog; no browser-facing URL
+is constructed from the API base URL. Citation refs now normalize current dict
+records and legacy ids, then filter to notebook-owned sources. Source origin is
+checked exactly after projection. Overview, Learning Progress, Research Review,
+responsive Students master-detail, transcript stage metadata, and keyed message
+cards now match the lecturer UX brief.
+
+**Validation.** The focused lecturer-dashboard acceptance run passes 87 tests,
+including scoped detail, attachment metadata separation, active transcript
+projection, lecturer authorization, and authorized attachment access. Sol
+completed local visual verification at 1440 px and 390 px: Students stacks
+without horizontal overflow; Research Review uses two desktop columns and a
+stacked mobile layout. Ruff, backend/UI compileall, and `git diff --check` pass.
+The broader repository suite still has unrelated failures in the existing dirty
+Fast Chat/idempotency and architecture-contract changes.
+
+**Compatibility / risk.** No schema or persisted-data migration. Existing
+Sources remain separate from chat attachments, and no model/AWS/deployment
+change was made. FastAPI/EC2 rebuild is required for the new route; AgentCore
+republish and generation bump are not required.
+
+**Next exact action.** Rebuild/deploy the FastAPI/Streamlit app in staging/EC2
+and smoke-test lecturer auth, one selected student/notebook, and one
+attachment. No AgentCore publish or generation bump is required for this
+dashboard change.
+
+### Private attachment relevance, scroll, and edit rendering (2026-08-22)
+
+**Change.** Current-turn attachment questions now scope deterministic retrieval
+to the private attachment when the request is informational and does not name
+course material. Explicit course comparisons retain combined attachment plus
+course retrieval, while the existing single Fast Chat `out_of_scope` decision
+still owns the semantic scope boundary. Attachment edit rows and pending
+revisions preserve the authoritative attachment descriptor exactly once; the
+obsolete suffix remains hidden. The existing bounded `chat_feed` remains the
+only transcript scrollport.
+
+**Validation.** Added deterministic retrieval-scope, composite Knowledge Base
+exclusion, attachment boundary-copy, and edit-attachment render assertions.
+Focused attachment/retrieval/provider/schema/UI regressions, Ruff, compileall,
+and `git diff --check` pass. No AWS, paid model calls, persistence migration,
+or AgentCore changes were made.
+
+**Compatibility / risk.** Private attachments remain hidden from reusable
+Sources and continue through the existing authorization and one-call provider
+path. Project evidence is not rejected merely because it is not official
+course material. FastAPI/Streamlit must be rebuilt for this change; AgentCore
+republish and affinity generation bump are not required.
+
+**Next exact action.** Run the bounded staging/EC2 smoke: ARP/DHCP attachment
+question (no course KB retrieval), relevant project PDF/image, explicit
+attachment-plus-Lecture comparison, long attachment chat scroll, and attached
+message edit success/failure.
+
 ### Direct image source attribution (2026-08-22)
 
 **Change.** Citation resolution now keeps the existing retrieved-chunk rule for
@@ -151,6 +218,25 @@ coaching behavior changed.
 
 **Next exact action.** Verify the feed and edit waiting/error states visually at
 desktop and narrow mobile widths with a delayed deterministic provider.
+
+### Narrow mobile chat feed scrolling (2026-08-22)
+
+**Change.** Existing tablet/mobile breakpoints now make `chat_feed` the touch
+scroll owner with vertical overscroll containment and remove nested scrolling
+from ordinary user bubbles. Desktop bubble limits and edit/composer textarea
+scrolling remain unchanged; attachment cards and citation controls retain their
+existing ownership.
+
+**Files.** `ui/assets/styles/90-responsive.css` and
+`tests/ui/test_chat_scroll.py`.
+
+**Validation.** The focused Streamlit UI, chat-scroll, and theme suite passes
+(34 tests). Ruff, UI/entrypoint compileall, and `git diff --check` pass. No
+backend, API, persistence, or AgentCore change was made.
+
+**Next exact action.** Verify the feed at desktop and 390 px widths with a
+long ordinary user message, attachment, citation, edit draft, and long
+composer draft.
 
 ### AgentCore runtime configuration correction (2026-08-21)
 
@@ -4811,3 +4897,24 @@ object cleanup, ownership-in-write checks, `ca-certificates` in image.
 - No coaching, HMW detection, stage, persistence, or AgentCore behavior changed.
 - Validation: welcome/HMW/context-planner focused tests, Ruff, compileall, and
   `git diff --check` passed.
+
+**Attachment UX, scrolling, and CDE2300 scope boundary** — Current working-tree phase
+
+- The chat feed is now a bounded flex scrollport, keeping the composer outside
+  the scroll region while long attachment turns remain scrollable.
+- Persisted turn attachments render as compact, type-aware file cards with
+  filename, type, size, and the existing authorized viewer action.
+- Fast Chat now carries a strict model-facing `out_of_scope` boolean. At high
+  confidence only, clearly unrelated content is replaced by fixed server-owned
+  CDE2300 boundary copy with no citations, HMW readiness, stage recommendation,
+  retrieval retry, or qualifying coaching increment. Plausibly project-relevant
+  technical/domain material remains in normal coaching/Q&A.
+- No new model/retrieval call, API/persistence schema, source authorization,
+  citation, HMW, or stage rule was added. The stale attachment AppTest mock was
+  updated to target the current `upload_attachments` path.
+- Compatibility: publish the changed AgentCore prompt/schema as a new
+  immutable runtime version, wait for `READY`, then rebuild the app and bump
+  `AGENTCORE_SESSION_GENERATION` so affinity sessions do not retain the old
+  runtime contract. No database migration is required.
+- Next action: run the focused deterministic suite and a desktop/390 px smoke
+  test with one CDE2300 attachment and one clearly unrelated attachment.

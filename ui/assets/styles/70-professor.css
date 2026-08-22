@@ -20,10 +20,18 @@
 .professor-account { display:flex; justify-content:flex-end; gap:.65rem; margin-top:.45rem; color:var(--cd-muted); font-size:.75rem; }
 .professor-account a { color:var(--cd-accent); font-weight:600; text-decoration:none; }
 .professor-account a:hover { text-decoration:underline; }
-@media (max-width:800px) { .st-key-professor_header { padding:1rem .75rem .8rem; } .st-key-professor_header [data-testid="stRadio"] { justify-content:flex-start; max-width:100%; overflow-x:auto; } .st-key-professor_header [role="radiogroup"] { min-width:max-content; } .st-key-professor_header label { white-space:nowrap; } .professor-account { justify-content:flex-start; } .professor-bar-row { grid-template-columns:minmax(6.4rem,1fr) minmax(4rem,1.4fr) minmax(6.8rem,auto); } }
+.professor-progress { display:flex; flex-wrap:wrap; gap:.45rem .7rem; padding:.65rem .8rem; border:1px solid var(--cd-border); border-radius:.65rem; background:var(--cd-surface); }
+.professor-step { display:inline-flex; align-items:center; gap:.28rem; padding:.22rem .42rem; border-radius:.4rem; color:var(--cd-muted); font-size:.82rem; }
+.professor-step-completed { color:var(--cd-text); background:var(--cd-accent-soft); }
+.professor-step-current { color:var(--cd-text); background:var(--cd-accent); font-weight:700; }
+.professor-step-future { color:var(--cd-muted); opacity:.72; }
+.st-key-professor_selected_student [data-testid="stRadio"], [class*="st-key-professor_selected_notebook_"] [data-testid="stRadio"] { max-height:34rem; overflow-y:auto; }
+.st-key-professor_selected_student label, [class*="st-key-professor_selected_notebook_"] label { display:block; padding:.55rem .65rem; margin:.2rem 0; border:1px solid var(--cd-border); border-radius:.5rem; background:var(--cd-surface); }
+[class*="st-key-professor_message_"] { padding:.8rem; margin:.35rem 0; border:1px solid var(--cd-border); border-radius:.65rem; background:var(--cd-surface); }
+.st-key-professor_students_workspace { padding:.5rem; border:1px solid var(--cd-border); border-radius:.75rem; }
+@media (max-width:800px) { .st-key-professor_header { padding:1rem .75rem .8rem; } .st-key-professor_header [data-testid="stRadio"] { justify-content:flex-start; max-width:100%; overflow-x:auto; } .st-key-professor_header [role="radiogroup"] { min-width:max-content; } .st-key-professor_header label { white-space:nowrap; } .professor-account { justify-content:flex-start; } .professor-bar-row { grid-template-columns:minmax(6.4rem,1fr) minmax(4rem,1.4fr) minmax(6.8rem,auto); } .st-key-professor_students_workspace [data-testid="stHorizontalBlock"] { display:block; } .st-key-professor_students_workspace [data-testid="stColumn"] { width:100% !important; min-width:0 !important; } }
 
 /* Research review is intentionally workbench-like: queue, transcript, validation. */
-.st-key-research_mobile_step { display:none; }
 .st-key-research_workspace {
     margin-top:.8rem;
     padding:.75rem;
@@ -41,7 +49,6 @@
     border-radius:.65rem;
     background:var(--cd-surface);
 }
-.research-pane-marker { display:none; }
 .research-coding-card {
     margin:.35rem 0 .75rem;
     padding:.72rem;

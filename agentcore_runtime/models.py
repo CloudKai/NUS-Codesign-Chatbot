@@ -424,6 +424,8 @@ def _attach_fast_chat_mode_conditions(schema: dict[str, Any]) -> None:
         required.append("hmw_scaffold_ready")
     if "needs_source_retrieval" not in required:
         required.append("needs_source_retrieval")
+    if "out_of_scope" not in required:
+        required.append("out_of_scope")
     schema["required"] = required
     properties = schema.get("properties")
     citations = properties.get("citations") if isinstance(properties, dict) else None
@@ -445,6 +447,11 @@ def _attach_fast_chat_mode_conditions(schema: dict[str, Any]) -> None:
         needs_retrieval["type"] = "boolean"
         needs_retrieval.pop("anyOf", None)
         needs_retrieval.pop("oneOf", None)
+    out_of_scope = properties.get("out_of_scope") if isinstance(properties, dict) else None
+    if isinstance(out_of_scope, dict):
+        out_of_scope["type"] = "boolean"
+        out_of_scope.pop("anyOf", None)
+        out_of_scope.pop("oneOf", None)
 
 
 class FastChatTurnOutput(BaseModel):
@@ -489,6 +496,14 @@ class FastChatTurnOutput(BaseModel):
         ),
     )
     needs_source_retrieval: bool = False
+    out_of_scope: bool = Field(
+        default=False,
+        description=(
+            "Return true only when the student's request or supplied material is "
+            "clearly unrelated to CDE2300 course content and the active CDE2300 "
+            "design project. Return false when relevance is plausible or uncertain."
+        ),
+    )
 
     @field_validator("mode", mode="before")
     @classmethod
@@ -523,6 +538,12 @@ class FastChatTurnOutput(BaseModel):
         """Accept only JSON true; omit, null, and malformed values are false."""
         return value is True
 
+    @field_validator("out_of_scope", mode="before")
+    @classmethod
+    def coerce_out_of_scope(cls, value: Any) -> bool:
+        """Accept only JSON true; malformed values fail closed to in-scope."""
+        return value is True
+
     @model_validator(mode="after")
     def coaching_requires_recommendation(self) -> "FastChatTurnOutput":
         """Coaching must recommend stay or advance; Q&A must not.
@@ -530,6 +551,17 @@ class FastChatTurnOutput(BaseModel):
         Q&A also forces ``hmw_scaffold_ready`` false so a course question
         cannot unlock Problem Identification UI guidance.
         """
+        if self.out_of_scope:
+            return self.model_copy(
+                update={
+                    "mode": "qa",
+                    "recommendation": None,
+                    "recommendation_rationale": None,
+                    "citations": [],
+                    "hmw_scaffold_ready": False,
+                    "needs_source_retrieval": False,
+                }
+            )
         if self.mode == "coaching":
             if self.recommendation not in {"stay", "advance"}:
                 raise ValueError("coaching mode requires recommendation stay or advance")

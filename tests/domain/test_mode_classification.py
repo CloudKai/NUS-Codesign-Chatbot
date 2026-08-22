@@ -20,6 +20,7 @@ from backend.coaching.mode_policy import (
     ModePolicy,
     enforce_model_mode,
     looks_like_project_reasoning,
+    is_private_attachment_question,
     resolve_mode_policy,
     runtime_mode_hint,
 )
@@ -315,6 +316,44 @@ def test_hyphenated_selected_source_title_matches_spaced_question() -> None:
     assert policy.intent == INTENT_HIGH_CONFIDENCE_SOURCE
     assert policy.expected_mode == "qa"
     assert policy.retrieve is True
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "what is this pdf i attached about",
+        "summarise the uploaded file",
+        "help me understand this diagram",
+        "what themes do you notice?",
+    ),
+)
+def test_private_attachment_questions_scope_retrieval_to_attachment(
+    message: str,
+) -> None:
+    """Attachment questions do not implicitly broaden to course retrieval."""
+    assert is_private_attachment_question(message, attachment_count=1) is True
+
+
+def test_private_attachment_course_comparison_keeps_combined_retrieval() -> None:
+    """Explicit course comparisons retain normal attachment + course RAG."""
+    assert (
+        is_private_attachment_question(
+            "compare this attachment with Lecture 4",
+            attachment_count=1,
+        )
+        is False
+    )
+
+
+def test_private_attachment_project_reasoning_is_not_forced_to_attachment_rag() -> None:
+    """Ordinary project coaching remains on its existing path."""
+    assert (
+        is_private_attachment_question(
+            "Would this idea solve the problem?",
+            attachment_count=1,
+        )
+        is False
+    )
 
 
 def test_personal_reflection_phrased_as_a_question_is_not_qa() -> None:

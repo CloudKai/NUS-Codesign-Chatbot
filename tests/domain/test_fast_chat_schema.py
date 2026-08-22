@@ -48,6 +48,7 @@ def _schema_instance(**fields: Any) -> dict[str, Any]:
         "citations": [],
         "hmw_scaffold_ready": False,
         "needs_source_retrieval": False,
+        "out_of_scope": False,
     }
     payload.update(fields)
     return payload
@@ -182,6 +183,7 @@ def test_generated_schema_is_single_object_not_union() -> None:
     assert "citations" in (schema.get("required") or [])
     assert "hmw_scaffold_ready" in (schema.get("required") or [])
     assert "needs_source_retrieval" in (schema.get("required") or [])
+    assert "out_of_scope" in (schema.get("required") or [])
     citations = (schema.get("properties") or {}).get("citations") or {}
     assert citations.get("type") == "array"
     assert "null" not in str(citations.get("type"))
@@ -204,6 +206,9 @@ def test_generated_schema_is_single_object_not_union() -> None:
     assert "null" not in str(needs_retrieval.get("type"))
     assert needs_retrieval.get("anyOf") is None
     assert needs_retrieval.get("oneOf") is None
+    out_of_scope = (schema.get("properties") or {}).get("out_of_scope") or {}
+    assert out_of_scope.get("type") == "boolean"
+    assert "null" not in str(out_of_scope.get("type"))
 
 
 def test_generated_schema_rejects_coaching_null_and_keeps_qa_null() -> None:
@@ -247,6 +252,31 @@ def test_generated_schema_rejects_null_boolean_contract_fields() -> None:
     base = _schema_instance(mode="qa", response_text="Week 1.")
     assert not _schema_allows(schema, {**base, "hmw_scaffold_ready": None})
     assert not _schema_allows(schema, {**base, "needs_source_retrieval": None})
+    assert not _schema_allows(schema, {**base, "out_of_scope": None})
+
+
+def test_out_of_scope_normalizes_to_non_mutating_qa() -> None:
+    """A scope boundary cannot cite, advance, or unlock HMW guidance."""
+    parsed = FastChatTurnOutput.model_validate(
+        _coaching(
+            recommendation="advance",
+            citations=[{"label": "S1", "title": "Unrelated file"}],
+            hmw_scaffold_ready=True,
+            needs_source_retrieval=True,
+            out_of_scope=True,
+        )
+    )
+    assert parsed.mode == "qa"
+    assert parsed.recommendation is None
+    assert parsed.citations == []
+    assert parsed.hmw_scaffold_ready is False
+    assert parsed.needs_source_retrieval is False
+
+
+def test_out_of_scope_missing_or_malformed_is_in_scope() -> None:
+    """Older runtimes and malformed flags fail closed to normal handling."""
+    assert FastChatTurnOutput.model_validate(_qa()).out_of_scope is False
+    assert FastChatTurnOutput.model_validate(_qa(out_of_scope="true")).out_of_scope is False
 
 
 def test_coaching_schema_requires_stay_or_advance_and_omits_assessment() -> None:

@@ -63,6 +63,7 @@ class OverviewResponse(BaseModel):
     facione_profile: dict[str, ScoreValue] = Field(default_factory=dict)
     weekly_activity: list[dict[str, Any]] = Field(default_factory=list)
     attention_students: list[StudentListItem] = Field(default_factory=list)
+    attention_students_count: int = 0
     summary: str
 
 
@@ -92,6 +93,8 @@ class ConversationTranscriptResponse(BaseModel):
 
     notebook_id: str
     title: str
+    stage: str | None = None
+    last_active: str | None = None
     messages: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -99,6 +102,7 @@ class CriticalThinkingResponse(BaseModel):
     """Teaching-focused assessment aggregates, not a claim of causal impact."""
 
     dimensions: dict[str, ScoreValue] = Field(default_factory=dict)
+    stage_distribution: list[StageDistributionItem] = Field(default_factory=list)
     distribution: list[dict[str, Any]] = Field(default_factory=list)
     stage_comparison: list[dict[str, Any]] = Field(default_factory=list)
     trend: list[dict[str, Any]] = Field(default_factory=list)

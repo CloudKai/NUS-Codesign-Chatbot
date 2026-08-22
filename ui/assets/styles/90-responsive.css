@@ -242,6 +242,20 @@
             overflow:hidden !important;
         }
 
+        /* On touch devices the transcript feed owns vertical scrolling. Keep
+           ordinary user bubbles from becoming competing nested scrollports. */
+        .st-key-chat_feed,
+        [data-testid="stElementContainer"].st-key-chat_feed {
+            touch-action:pan-y;
+            -webkit-overflow-scrolling:touch;
+            overscroll-behavior-y:contain;
+        }
+
+        .cd-user-bubble-text {
+            max-height:none !important;
+            overflow-y:visible !important;
+        }
+
         [data-testid="stChatMessage"]:has([aria-label="Chat message from user"]) {
             max-width:88%;
         }
@@ -350,42 +364,20 @@
             flex:none !important;
         }
 
-        .st-key-research_workspace > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.research-validation-marker) {
-            grid-column:2;
-        }
-
         .st-key-research_transcript_scroll { max-height:34rem; }
     }
 
-    /* 390 px flow: one explicit Queue → Transcript → Validate step at a time. */
+    /* 390 px flow: queue first, then the combined transcript/coding detail lane. */
     @media (max-width:520px) {
-        .st-key-research_mobile_step { display:block; }
-        .st-key-research_mobile_step [role="radiogroup"] {
-            display:grid;
-            grid-template-columns:repeat(3,minmax(0,1fr));
-            gap:.2rem;
-        }
-
         .st-key-research_workspace { padding:.5rem; }
         .st-key-research_workspace > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] { display:block !important; }
         .st-key-research_workspace > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
-            display:none;
+            display:block;
             width:100% !important;
             min-width:0 !important;
             padding:.65rem;
         }
-
-        body:has(.st-key-research_mobile_step label:nth-child(1) input:checked)
-        .st-key-research_workspace [data-testid="stColumn"]:has(.research-queue-marker),
-        body:has(.st-key-research_mobile_step label:nth-child(2) input:checked)
-        .st-key-research_workspace [data-testid="stColumn"]:has(.research-transcript-marker),
-        body:has(.st-key-research_mobile_step label:nth-child(3) input:checked)
-        .st-key-research_workspace [data-testid="stColumn"]:has(.research-validation-marker) {
-            display:block;
-        }
-
         .st-key-research_transcript_scroll { max-height:none; }
     }

@@ -57,7 +57,11 @@ from backend.rate_limit import RateLimitExceeded
 from backend.settings import settings, validate_production_configuration
 from backend.learning.hmw import hmw_scaffold_projection
 from backend.student_journey import DEFAULT_STAGE, normalize_journey
-from backend.source_library import CourseMaterialSyncCoordinator, list_visible_sources
+from backend.source_library import (
+    CourseMaterialSyncCoordinator,
+    list_visible_sources,
+    read_source_bytes,
+)
 from backend.turn_perf import begin_coach_turn_perf, record_field
 from backend.student_store import (
     CoachIdempotencyConflictError,
@@ -544,6 +548,30 @@ def create_app(
         if transcript is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         return transcript
+
+    @app.get(
+        "/api/v1/professor/students/{student_id}/conversations/{notebook_id}/attachments/{attachment_id}"
+    )
+    def professor_conversation_attachment(
+        student_id: str,
+        notebook_id: str,
+        attachment_id: str,
+        owner: OwnerServices = Depends(current_professor),
+    ) -> Response:
+        """Stream one message-associated attachment after lecturer checks."""
+        repository = ProfessorAnalyticsRepository(owner.store)
+        source = repository.read_attachment(student_id, notebook_id, attachment_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="Attachment not found")
+        payload = read_source_bytes(source)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="Attachment is unavailable")
+        filename = quote(str(source.get("title") or "attachment"), safe="")
+        return Response(
+            content=payload,
+            media_type=str(source.get("mime") or "application/octet-stream"),
+            headers={"Content-Disposition": f"inline; filename*=UTF-8''{filename}"},
+        )
 
     @app.get(
         "/api/v1/professor/critical-thinking",
