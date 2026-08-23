@@ -16,12 +16,12 @@ from backend.student_journey import (
 )
 
 
-def test_default_journey_uses_strict_coaching_style():
+def test_default_journey_uses_quick_coaching_style():
     journey = default_journey()
-    assert journey["response_detail"] == "long"
-    assert normalize_journey({})["response_detail"] == "long"
-    assert normalize_journey({"response_detail": "short"})["response_detail"] == "short"
-    assert normalize_journey({"response_detail": "unknown"})["response_detail"] == "long"
+    assert journey["response_detail"] == "short"
+    assert normalize_journey({})["response_detail"] == "short"
+    assert normalize_journey({"response_detail": "long"})["response_detail"] == "long"
+    assert normalize_journey({"response_detail": "unknown"})["response_detail"] == "short"
 
 
 def test_thinking_path_keeps_five_stages_and_ethics_critical_thinking_label():

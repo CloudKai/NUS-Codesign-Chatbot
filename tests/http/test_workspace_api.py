@@ -37,7 +37,7 @@ def test_workspace_api_notebook_and_preference_crud(tmp_path):
         },
     )
     assert defaulted.status_code == 200
-    assert defaulted.json()["metadata"]["response_detail"] == "long"
+    assert defaulted.json()["metadata"]["response_detail"] == "short"
 
     listed = client.get("/api/v1/threads")
     assert listed.status_code == 200

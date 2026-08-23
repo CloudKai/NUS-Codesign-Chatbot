@@ -30,6 +30,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend.domain import CoachRequest
+from backend.learning.journey import DEFAULT_RESPONSE_DETAIL
 from backend.retrieval import (
     COURSE_RETRIEVAL_EMPTY_CONTEXT,
     COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT,
@@ -80,7 +81,7 @@ class PromptContext(BaseModel):
     conversation_memory: str = ""
     recent_messages: list[dict[str, Any]] = Field(default_factory=list)
     student_message: str = ""
-    response_detail: str = "long"
+    response_detail: str = DEFAULT_RESPONSE_DETAIL
     allow_model_knowledge: bool = False
     response_language: str = "English"
     image_note: str = ""

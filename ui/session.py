@@ -121,11 +121,11 @@ def _persist_active_thread(thread_id: str | None) -> None:
 
 
 def new_notebook(should_rerun: bool = True) -> None:
-    """Create an untitled notebook with a fresh Strict coaching journey.
+    """Create an untitled notebook with a fresh Quick coaching journey.
 
     User-initiated creates stay on Chat with Sources open so course materials
     can load. Shows a short loading toast, then reruns the app. The profile
-    Coaching style widget is reset to Strict so a prior Quick choice cannot
+    Coaching style widget is reset to Quick so a prior Strict choice cannot
     leak onto the new notebook.
 
     Args:

@@ -212,18 +212,159 @@
         font-size:.72rem !important;
     }
 
-    /* Coaching style: selected Strict (or Quick) is the filled accent chip. */
-    .st-key-profile_coaching_style [data-testid="stButtonGroup"] button,
-    .st-key-profile_coaching_style [role="radiogroup"] > [role="radio"] {
-        font-weight:600 !important;
+    /* Coaching style: vertical block selector (native radio, Appearance-like fill). */
+    .st-key-profile_coaching_style [data-testid="stRadio"],
+    .st-key-profile_coaching_style [data-testid="stRadioGroup"],
+    .st-key-profile_coaching_style [role="radiogroup"] {
+        width:100% !important;
+        max-width:100% !important;
+        min-width:0 !important;
+        box-sizing:border-box !important;
     }
 
-    .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-    button[aria-checked="true"],
-    .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-    button[aria-pressed="true"],
-    .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-    button[kind="primary"],
+    .st-key-profile_coaching_style [data-testid="stRadioGroup"],
+    .st-key-profile_coaching_style [role="radiogroup"] {
+        display:flex !important;
+        flex-direction:column !important;
+        gap:0 !important;
+        padding:0 !important;
+        overflow:hidden !important;
+        border:1px solid var(--cd-border) !important;
+        border-radius:.62rem !important;
+        background:var(--cd-surface) !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadioOption"],
+    .st-key-profile_coaching_style [role="radiogroup"] > [role="radio"],
+    .st-key-profile_coaching_style [role="radiogroup"] > label {
+        display:block !important;
+        align-items:stretch !important;
+        width:100% !important;
+        max-width:100% !important;
+        min-width:0 !important;
+        min-height:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+        border:0 !important;
+        border-right:0 !important;
+        border-radius:0 !important;
+        border-bottom:1px solid var(--cd-border) !important;
+        background:var(--cd-surface) !important;
+        color:var(--cd-text) !important;
+        cursor:pointer !important;
+        white-space:normal !important;
+        box-shadow:none !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]:last-child,
+    .st-key-profile_coaching_style [role="radiogroup"] > [role="radio"]:last-child,
+    .st-key-profile_coaching_style [role="radiogroup"] > label:last-child {
+        border-bottom:0 !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadioOption"] > div,
+    .st-key-profile_coaching_style [role="radiogroup"] > [role="radio"] > div {
+        width:100% !important;
+        min-width:0 !important;
+        padding:.7rem .78rem .72rem !important;
+        box-sizing:border-box !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadioOption"] > div > div:first-child {
+        display:flex !important;
+        align-items:flex-start !important;
+        gap:0 !important;
+        min-width:0 !important;
+    }
+
+    /* Keep the native radio for keyboard/AT, but let the whole block be the face. */
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]
+    > div > div:first-child > div:first-child {
+        position:absolute !important;
+        width:1px !important;
+        height:1px !important;
+        margin:-1px !important;
+        padding:0 !important;
+        overflow:hidden !important;
+        clip:rect(0,0,0,0) !important;
+        border:0 !important;
+        opacity:0 !important;
+        pointer-events:none !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadio"] label,
+    .st-key-profile_coaching_style [role="radiogroup"] > label,
+    .st-key-profile_coaching_style [role="radiogroup"] > [role="radio"] {
+        white-space:normal !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadio"] label p,
+    .st-key-profile_coaching_style [data-testid="stRadioOption"] p,
+    .st-key-profile_coaching_style [role="radiogroup"] > label p,
+    .st-key-profile_coaching_style [role="radiogroup"] > [role="radio"] p {
+        margin:0 !important;
+        color:var(--cd-text) !important;
+        -webkit-text-fill-color:var(--cd-text) !important;
+        font-size:.82rem !important;
+        font-weight:700 !important;
+        line-height:1.25 !important;
+        white-space:normal !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadio"]
+    [data-testid="stCaptionContainer"],
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]
+    [data-testid="stCaptionContainer"],
+    .st-key-profile_coaching_style [role="radiogroup"]
+    [data-testid="stCaptionContainer"] {
+        margin:.12rem 0 0 !important;
+        padding-left:0 !important;
+        max-width:100% !important;
+        min-width:0 !important;
+        overflow:visible !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadio"]
+    [data-testid="stCaptionContainer"] p,
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]
+    [data-testid="stCaptionContainer"] p,
+    .st-key-profile_coaching_style [role="radiogroup"]
+    [data-testid="stCaptionContainer"] p {
+        margin:0 !important;
+        color:var(--cd-muted) !important;
+        -webkit-text-fill-color:var(--cd-muted) !important;
+        font-size:.68rem !important;
+        font-weight:450 !important;
+        line-height:1.35 !important;
+        white-space:pre-line !important;
+        overflow-wrap:anywhere !important;
+        word-break:break-word !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadio"]
+    [data-testid="stCaptionContainer"] p::first-line,
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]
+    [data-testid="stCaptionContainer"] p::first-line,
+    .st-key-profile_coaching_style [role="radiogroup"]
+    [data-testid="stCaptionContainer"] p::first-line {
+        color:var(--cd-text) !important;
+        -webkit-text-fill-color:var(--cd-text) !important;
+        font-weight:650 !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]:hover,
+    .st-key-profile_coaching_style [role="radiogroup"] > [role="radio"]:hover {
+        background:var(--cd-subtle) !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected],
+    .st-key-profile_coaching_style [data-testid="stRadioOption"][aria-checked="true"],
+    .st-key-profile_coaching_style [data-testid="stRadioOption"][aria-pressed="true"],
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked),
+    .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected]:hover,
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked):hover,
+    .st-key-profile_coaching_style [role="radiogroup"] > label[data-selected],
+    .st-key-profile_coaching_style [role="radiogroup"] > label:has(input:checked),
     .st-key-profile_coaching_style [role="radiogroup"]
     > [role="radio"][aria-checked="true"],
     .st-key-profile_coaching_style [role="radiogroup"]
@@ -231,21 +372,44 @@
         background:var(--cd-accent) !important;
         border-color:var(--cd-accent) !important;
         color:#fff !important;
-        -webkit-text-fill-color:#fff !important;
-        font-weight:700 !important;
-        box-shadow:0 0 0 1px var(--cd-accent) !important;
     }
 
+    .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected] p,
+    .st-key-profile_coaching_style [data-testid="stRadioOption"][aria-checked="true"] p,
+    .st-key-profile_coaching_style [data-testid="stRadioOption"][aria-pressed="true"] p,
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked) p,
+    .st-key-profile_coaching_style [role="radiogroup"] > label[data-selected] p,
+    .st-key-profile_coaching_style [role="radiogroup"] > label:has(input:checked) p,
     .st-key-profile_coaching_style [role="radiogroup"]
     > [role="radio"][aria-checked="true"] p,
     .st-key-profile_coaching_style [role="radiogroup"]
     > [role="radio"][aria-pressed="true"] p,
-    .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-    button[aria-checked="true"] p,
-    .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-    button[kind="primary"] p {
+    .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected]
+    [data-testid="stCaptionContainer"] p,
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked)
+    [data-testid="stCaptionContainer"] p,
+    .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected]
+    [data-testid="stCaptionContainer"] p::first-line,
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked)
+    [data-testid="stCaptionContainer"] p::first-line {
         color:#fff !important;
         -webkit-text-fill-color:#fff !important;
+        font-weight:700 !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected]
+    [data-testid="stCaptionContainer"] p,
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked)
+    [data-testid="stCaptionContainer"] p {
+        font-weight:450 !important;
+        opacity:.92 !important;
+    }
+
+    .st-key-profile_coaching_style [data-testid="stRadioOption"]:focus-visible,
+    .st-key-profile_coaching_style [role="radiogroup"] > [role="radio"]:focus-visible {
+        box-shadow:inset 0 0 0 2px var(--cd-accent) !important;
+        outline:none !important;
+        z-index:1 !important;
     }
 
     [data-testid="stPopoverBody"][aria-label="Setting"] {

@@ -59,7 +59,16 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     profile_css = Path(_STYLES_DIR / "60-profile-topbar.css").read_text(encoding="utf-8")
     assert ".st-key-profile_menu_root" in profile_css
     assert ".st-key-profile_coaching_style" in profile_css
-    assert "button[aria-checked=\"true\"]" in profile_css
+    assert "[data-testid=\"stRadio\"]" in profile_css
+    assert "[data-testid=\"stRadioGroup\"]" in profile_css
+    assert "[data-testid=\"stRadioOption\"]" in profile_css
+    assert "border-bottom:1px solid var(--cd-border)" in profile_css
+    assert "[data-selected]" in profile_css
+    assert ":has(input:checked)" in profile_css
+    assert "clip:rect(0,0,0,0)" in profile_css
+    assert "white-space:pre-line" in profile_css
+    assert "overflow-wrap:anywhere" in profile_css
+    assert "p::first-line" in profile_css
     assert "background:var(--cd-accent)" in profile_css
 
     sources_css = Path(_STYLES_DIR / "40-sources.css").read_text(encoding="utf-8")

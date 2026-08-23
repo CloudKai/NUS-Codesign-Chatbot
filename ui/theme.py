@@ -266,29 +266,42 @@ def render_theme_css() -> None:
                 color:inherit !important;
                 -webkit-text-fill-color:currentColor !important;
             }}
+            .st-key-profile_coaching_style [data-testid="stRadioOption"],
+            .st-key-profile_coaching_style [role="radiogroup"] > [role="radio"] {{
+                border-right:0 !important;
+                min-height:0 !important;
+                color:var(--cd-text) !important;
+                background:var(--cd-surface) !important;
+            }}
+            .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected],
+            .st-key-profile_coaching_style [data-testid="stRadioOption"][aria-checked="true"],
+            .st-key-profile_coaching_style [data-testid="stRadioOption"][aria-pressed="true"],
+            .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked),
+            .st-key-profile_coaching_style [role="radiogroup"] > label[data-selected],
+            .st-key-profile_coaching_style [role="radiogroup"] > label:has(input:checked),
             .st-key-profile_coaching_style [role="radiogroup"]
             > [role="radio"][aria-checked="true"],
             .st-key-profile_coaching_style [role="radiogroup"]
-            > [role="radio"][aria-pressed="true"],
-            .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-            button[aria-checked="true"],
-            .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-            button[aria-pressed="true"],
-            .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-            button[kind="primary"] {{
+            > [role="radio"][aria-pressed="true"] {{
                 color:#fff !important;
                 background:var(--cd-accent) !important;
                 border-color:var(--cd-accent) !important;
                 font-weight:700 !important;
             }}
+            .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected] p,
+            .st-key-profile_coaching_style [data-testid="stRadioOption"][aria-checked="true"] p,
+            .st-key-profile_coaching_style [data-testid="stRadioOption"][aria-pressed="true"] p,
+            .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked) p,
+            .st-key-profile_coaching_style [role="radiogroup"] > label[data-selected] p,
+            .st-key-profile_coaching_style [role="radiogroup"] > label:has(input:checked) p,
             .st-key-profile_coaching_style [role="radiogroup"]
             > [role="radio"][aria-checked="true"] p,
             .st-key-profile_coaching_style [role="radiogroup"]
             > [role="radio"][aria-pressed="true"] p,
-            .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-            button[aria-checked="true"] p,
-            .st-key-profile_coaching_style [data-testid="stButtonGroup"]
-            button[kind="primary"] p {{
+            .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected]
+            [data-testid="stCaptionContainer"] p,
+            .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked)
+            [data-testid="stCaptionContainer"] p {{
                 color:#fff !important;
                 -webkit-text-fill-color:#fff !important;
             }}

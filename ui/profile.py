@@ -25,6 +25,16 @@ COACHING_STYLE_LABELS = {
 COACHING_STYLE_VALUES = {
     label: detail for detail, label in COACHING_STYLE_LABELS.items()
 }
+COACHING_STYLE_COPY = {
+    "short": {
+        "tagline": "Keep me moving",
+        "explanation": "Lighter guidance; progress once your thinking is workable.",
+    },
+    "long": {
+        "tagline": "Challenge my thinking",
+        "explanation": "More rigorous guidance; address important gaps before moving on.",
+    },
+}
 
 
 def persist_display_name() -> None:
@@ -91,6 +101,12 @@ def _persist_coaching_style() -> None:
         _select_coaching_style(detail)
 
 
+def _coaching_style_caption(detail: str) -> str:
+    """Return the visible tagline and explanation for one persisted detail."""
+    copy = COACHING_STYLE_COPY[detail]
+    return f"{copy['tagline']}\n{copy['explanation']}"
+
+
 @st.fragment
 def _render_coaching_style_fragment() -> None:
     """Render response-detail preferences without redrawing the workspace."""
@@ -100,13 +116,16 @@ def _render_coaching_style_fragment() -> None:
     journey = normalize_journey(st.session_state.learning_journey)
     current_detail = journey["response_detail"]
     labels = [COACHING_STYLE_LABELS[detail] for detail in RESPONSE_DETAILS]
+    captions = [_coaching_style_caption(detail) for detail in RESPONSE_DETAILS]
     st.session_state.setting_coaching_style = COACHING_STYLE_LABELS[current_detail]
     with st.container(key="profile_coaching_style"):
-        st.segmented_control(
+        st.radio(
             "Coaching style",
             labels,
+            captions=captions,
             key="setting_coaching_style",
             on_change=_persist_coaching_style,
+            width="stretch",
         )
 
 

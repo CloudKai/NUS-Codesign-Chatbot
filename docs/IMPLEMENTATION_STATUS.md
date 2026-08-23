@@ -2,6 +2,22 @@
 
 ## CURRENT STATUS
 
+### Default coaching style is Quick (2026-08-23)
+
+**Change.** New notebooks and empty progress blobs now default to Quick
+coaching (`response_detail=short`). Quick/Strict mapping and coaching logic
+are unchanged. Notebooks that already persisted Strict stay Strict.
+
+**Files.** `backend/learning/journey.py`, `backend/prompts/composer.py`,
+`backend/student_store.py`, `ui/session.py`, plus default-assertion tests and
+docs that named the previous Strict default.
+
+**Validation.** Focused journey, store, workspace API, and Streamlit profile tests.
+
+**Next action.** Existing saved Strict notebooks are untouched. Rebuild the
+EC2 app image if this default should apply in production. Do not republish
+AgentCore.
+
 ### Lecturer student-detail DSQL ORDER BY (2026-08-23)
 
 **Change.** Opening one student 503'd on DSQL because notebook-summary SQL used

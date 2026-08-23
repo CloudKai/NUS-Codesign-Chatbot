@@ -289,6 +289,9 @@ def test_topbar_guidance_and_profile_use_correct_rerun_scope() -> None:
         "def render_profile_menu", 1
     )[0]
     assert "save_journey(journey)" in profile
+    assert "st.radio(" in coaching_block
+    assert "captions=captions" in coaching_block
+    assert "st.segmented_control(" not in coaching_block
     assert "rerun_app()" not in coaching_block
 
 

@@ -72,7 +72,7 @@ Top bar
 ├── Product identity
 ├── Current notebook title
 ├── Section switcher: Journey | Review | Chat | Sources | Notebooks
-├── Coaching style (Quick / Strict; new notebooks default to Strict)
+├── Coaching style (Quick / Strict; new notebooks default to Quick)
 └── Profile avatar
     ├── Display name
     ├── Appearance

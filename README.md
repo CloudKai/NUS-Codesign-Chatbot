@@ -243,7 +243,7 @@ Default: `AUTO_ADVANCE_STAGES=false`. After the coach recommends the next stage:
 2. Read the warning that confirming early can make the process less critical.
 3. Press **Next** again in the dialog to confirm (or Cancel).
 
-New notebooks default to Strict coaching. Quick uses the practical evidence
+New notebooks default to Quick coaching. Quick uses the practical evidence
 threshold; Strict requires clearer, more consistently demonstrated reasoning
 before recommending advancement. The profiles retain separate cumulative Review
 evidence. To restore silent auto-advance:

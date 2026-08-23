@@ -39,7 +39,7 @@ FastAPI (`api.py` façade → `http/app.py`)
 | `api_client.py` | Typed client used by Streamlit when `USE_LOCAL_API=true` |
 | `workspace_service.py` | Notebook/history/source/preference CRUD application service; student transcript export |
 | `workflow.py` | Single LangGraph coach workflow wrapper (not one agent per phase) |
-| `student_journey.py` / `learning/` | Compatibility imports plus the five research-aligned phases, journey normalization, review helpers, questions, and the How Might We scaffold projection (`learning/hmw.py`). New journeys default to Strict (`response_detail=long`). |
+| `student_journey.py` / `learning/` | Compatibility imports plus the five research-aligned phases, journey normalization, review helpers, questions, and the How Might We scaffold projection (`learning/hmw.py`). New journeys default to Quick (`response_detail=short`). |
 | `learning_service.py` | Confirmation-gated phase transitions and learning progression |
 | `student_store.py` | SQLite/DSQL-compatible student, conversation, source, research, review, and audit persistence |
 | `research/` | Provider-neutral research observations, human review/adjudication models, and repository adapter |

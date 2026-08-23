@@ -819,7 +819,7 @@ class StudentStore:
     ) -> str:
         """Create a notebook and return its id (``thread_id`` compatibility).
 
-        New notebooks start on Strict coaching (``response_detail=long``).
+        New notebooks start on Quick coaching (``response_detail=short``).
         """
         from backend.student_journey import DEFAULT_STAGE
 

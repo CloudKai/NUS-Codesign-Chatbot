@@ -16,7 +16,7 @@ from backend.specialists.review_orchestration import (
 )
 
 RESPONSE_DETAILS = ("short", "long")
-DEFAULT_RESPONSE_DETAIL = "long"
+DEFAULT_RESPONSE_DETAIL = "short"
 _STAGE_DECISION = re.compile(
     r"<!--\s*stage\s*:\s*(advance|stay)\s*-->",
     re.IGNORECASE,
