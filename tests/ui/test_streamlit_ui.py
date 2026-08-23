@@ -130,6 +130,50 @@ def test_composer_typing_path_stays_local_and_structural() -> None:
     assert "native_tooltip_scan_calls" in composer_layout
 
 
+def test_composer_observes_native_send_stop_state_and_cleans_stopped_turn() -> None:
+    """Send-to-Stop must not depend on a viewport resize or a custom rerun."""
+    composer_layout = Path("ui/layout/composer_layout.py").read_text(
+        encoding="utf-8"
+    )
+    observer = composer_layout.split("const observer = new win.MutationObserver", 1)[
+        1
+    ].split("let overlayFrame", 1)[0]
+    assert 'record.attributeName === "data-testid"' in observer
+    assert 'current === "stChatInputSubmitButton"' in observer
+    assert 'current === "stChatInputStopButton"' in observer
+    assert 'record.attributeName === "disabled"' in observer
+    assert "if (structural || controlStateChanged) scheduleApply();" in observer
+    assert 'attributeFilter: ["data-testid", "disabled"]' in observer
+    assert "attributeOldValue: true" in observer
+    assert 'attributeFilter: ["style"' not in observer
+    assert 'attributeFilter: ["value"' not in observer
+
+    cleanup = composer_layout.split("function bindNativeStopCleanup", 1)[1].split(
+        "function apply", 1
+    )[0]
+    assert 'stChatInputStopButton' in cleanup
+    assert 'stChatInputSubmitButton' in cleanup
+    assert "hideStoppedInflightUi();" in cleanup
+    assert "clearStoppedInflightUi();" in cleanup
+    assert "scheduleApply();" in cleanup
+    assert 'input.addEventListener(' in cleanup
+    assert '"click"' in cleanup
+    assert "preventDefault" not in cleanup
+    assert "stopPropagation" not in cleanup
+    assert "function setBusyComposer" not in composer_layout
+    assert "cdComposerBusy" not in composer_layout
+
+    styles = Path("ui/assets/styles/30-chat.css").read_text(encoding="utf-8")
+    assert ".st-key-chat_inflight.cd-turn-stopped" in styles
+    assert "stStatusWidget" in styles
+    assert "inflight_user_message_row" in styles
+    assert "Collapse it to a single stop row" not in styles
+
+    chat = _implementation_source(chat_module)
+    composer_fragment = chat.split("def _render_composer_submit_fragment", 1)[1]
+    assert "StopException" not in composer_fragment
+
+
 def test_chat_composer_attachment_error_is_recoverable(monkeypatch):
     """Rejecting a chat attachment leaves the notebook usable and unsent."""
     from ui import chat
@@ -315,7 +359,7 @@ def test_streamlit_notebook_workspace_smoke():
     assert "if (applyFrame) return;" in composer_layout
     assert "full_apply_calls" in composer_layout
     assert "textarea_resize_calls" in composer_layout
-    assert "observer.observe(input, { childList: true, subtree: true });" in composer_layout
+    assert 'attributeFilter: ["data-testid", "disabled"]' in composer_layout
     assert "characterData: true" not in composer_layout
     assert "CO_DESIGN_COMPOSER_PROFILE" in composer_layout
     assert "MAX_COLS" not in composer_layout
@@ -365,7 +409,7 @@ def test_streamlit_notebook_workspace_smoke():
     assert "stChatInputTextArea" in rendered
     assert "arrow_upward" in rendered
     assert "stChatInputStopButton" in rendered
-    assert "textarea:disabled" in rendered
+    assert "content:\"stop\"" in rendered
     assert 'type="compact"' in _implementation_source(chat_module)
     assert "cd-composer-card" in Path("ui/layout/composer_layout.py").read_text(encoding="utf-8")
     assert (

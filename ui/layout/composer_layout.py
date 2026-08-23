@@ -552,67 +552,6 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
     if (textarea) delete textarea.dataset.cdComposerSizeState;
   }
 
-  function isComposerBusy(input, textarea) {
-    return !!(
-      profileSelector(
-        input.querySelector('[data-testid="stChatInputStopButton"]')
-      ) ||
-      (textarea && textarea.disabled)
-    );
-  }
-
-  function setBusyComposer(input, textarea, busy) {
-    const inner = input.querySelector(":scope > div");
-    const hideNodes = [];
-    if (textarea) {
-      hideNodes.push(textarea);
-      let node = textarea.parentElement;
-      for (let depth = 0; depth < 5 && node && node !== input; depth += 1) {
-        if (
-          node.querySelector(
-            '[data-testid="stChatInputStopButton"], [data-testid="stChatInputSubmitButton"]'
-          )
-        ) {
-          break;
-        }
-        hideNodes.push(node);
-        node = node.parentElement;
-      }
-    }
-    const attach = fileUpload(input);
-    if (busy) {
-      input.dataset.cdComposerBusy = "1";
-      input.style.setProperty("min-height", "3.05rem", "important");
-      input.style.setProperty("height", "auto", "important");
-      if (inner) {
-        inner.style.setProperty("min-height", "0", "important");
-        inner.style.setProperty("height", "auto", "important");
-      }
-      for (const node of hideNodes) {
-        node.style.setProperty("display", "none", "important");
-        node.style.setProperty("height", "0", "important");
-        node.style.setProperty("min-height", "0", "important");
-      }
-      if (attach) attach.style.setProperty("display", "none", "important");
-      return;
-    }
-    if (input.dataset.cdComposerBusy !== "1") return;
-    delete input.dataset.cdComposerBusy;
-    input.style.removeProperty("min-height");
-    input.style.removeProperty("height");
-    if (inner) {
-      inner.style.removeProperty("min-height");
-      inner.style.removeProperty("height");
-    }
-    for (const node of hideNodes) {
-      node.style.removeProperty("display");
-      node.style.removeProperty("height");
-      node.style.removeProperty("min-height");
-    }
-    if (attach) attach.style.removeProperty("display");
-    if (textarea) invalidateTextareaLayout(textarea);
-  }
-
   let applyFrame = 0;
   let resizeFrame = 0;
   let modelPlacementFrame = 0;
@@ -732,6 +671,52 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
     return changed;
   }
 
+  function clearStoppedInflightUi() {
+    const inflight = doc.querySelector(".st-key-chat_inflight");
+    if (inflight) inflight.classList.remove("cd-turn-stopped");
+  }
+
+  function hideStoppedInflightUi() {
+    // Native Streamlit Stop interrupts the script, but cannot retract output
+    // that has already been rendered during that script run. Mark only the
+    // transient in-flight region; persisted history remains authoritative.
+    const inflight = doc.querySelector(".st-key-chat_inflight");
+    if (inflight) inflight.classList.add("cd-turn-stopped");
+  }
+
+  function bindNativeStopCleanup(input) {
+    if (!input || input.dataset.cdNativeStopCleanupBound === "1") return;
+    input.dataset.cdNativeStopCleanupBound = "1";
+    // Delegate from the stable composer root because Streamlit changes the
+    // same button node from Send to Stop. The native click must still reach
+    // Streamlit, which owns cancellation of the current script run.
+    input.addEventListener(
+      "click",
+      (event) => {
+        const target = event.target;
+        const stop = target && target.closest
+          ? target.closest('[data-testid="stChatInputStopButton"]')
+          : null;
+        if (stop && input.contains(stop)) {
+          hideStoppedInflightUi();
+          return;
+        }
+        const submit = target && target.closest
+          ? target.closest('[data-testid="stChatInputSubmitButton"]')
+          : null;
+        if (submit && input.contains(submit)) {
+          clearStoppedInflightUi();
+          // This capture handler runs before Streamlit swaps Send to Stop.
+          // Queue the existing coalesced pass now so the next paint sees the
+          // busy control even if the later attribute mutation is skipped when
+          // a native Stop previously ended the script run.
+          scheduleApply();
+        }
+      },
+      true
+    );
+  }
+
   function apply() {
     const started = now();
     profileCount("full_apply_calls");
@@ -741,10 +726,9 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
     composer.classList.add("cd-composer-card");
     input.classList.add("cd-composer-card");
     const textarea = input.querySelector('[data-testid="stChatInputTextArea"], textarea');
+    bindNativeStopCleanup(input);
     observeTextareaWidth(textarea);
-    const busy = isComposerBusy(input, textarea);
-    setBusyComposer(input, textarea, busy);
-    if (textarea && !busy) capTextarea(textarea, true);
+    if (textarea && !textarea.disabled) capTextarea(textarea, true);
     annotateAttach(input);
     bindAttachTooltip(input);
     rewriteDropOverlay();
@@ -772,6 +756,7 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
       return true;
     }
     composer.dataset.cdComposerBound = "1";
+    bindNativeStopCleanup(input);
 
     const onComposerDraft = (event) => {
       const started = now();
@@ -807,8 +792,9 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
       const started = now();
       profileCount("mutation_callbacks");
       profileCount("mutation_records", records.length);
-      // Typing changes a textarea value, not its structural controls. Only a
-      // remount or a submit/stop/file control change needs full layout work.
+      // Typing changes a textarea value, not its structural controls. Streamlit
+      // changes Send to Stop in place, so that requires narrow attribute
+      // observation as well as structural file/popover control changes.
       const structural = records.some((record) =>
         Array.from(record.addedNodes).concat(Array.from(record.removedNodes)).some(
           (node) =>
@@ -821,10 +807,36 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
               ))
         )
       );
-      if (structural) scheduleApply();
+      const controlStateChanged = records.some((record) => {
+        if (record.type !== "attributes" || record.target.nodeType !== 1) {
+          return false;
+        }
+        if (record.attributeName === "data-testid") {
+          const current = record.target.getAttribute("data-testid");
+          return (
+            current === "stChatInputSubmitButton" ||
+            current === "stChatInputStopButton" ||
+            record.oldValue === "stChatInputSubmitButton" ||
+            record.oldValue === "stChatInputStopButton"
+          );
+        }
+        return (
+          record.attributeName === "disabled" &&
+          record.target.matches(
+            '[data-testid="stChatInputTextArea"], textarea'
+          )
+        );
+      });
+      if (structural || controlStateChanged) scheduleApply();
       if (profile) profileCount("mutation_ms", now() - started);
     });
-    observer.observe(input, { childList: true, subtree: true });
+    observer.observe(input, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeOldValue: true,
+      attributeFilter: ["data-testid", "disabled"],
+    });
     let overlayFrame = 0;
     const overlayObserver = new win.MutationObserver((records) => {
       const started = now();

@@ -2,6 +2,24 @@
 
 ## CURRENT STATUS
 
+### Native Stop button and clean in-flight cancellation (2026-08-24)
+
+**Change.** The composer now observes Streamlit's in-place Send/Stop
+``data-testid`` swap and textarea ``disabled`` state, so Stop is laid out on
+the next animation frame without requiring a viewport resize. A capture-phase
+handler marks only the temporary in-flight prompt and status as stopped when
+the native Stop control is clicked; Streamlit still owns cancellation and
+resets its own trigger widget. A later Send also schedules the existing
+coalesced layout pass directly, so a Stop → Send → Stop sequence does not rely
+on a previous fragment's mutation observer remaining alive. The previous
+custom busy-state collapse was removed: it could hide the native Stop control
+itself, while Streamlit's normal disabled composer keeps that control visible.
+
+**Compatibility / deployment.** The client does not destructively cancel an
+already-persisted backend turn. If that rare race completes atomically, the
+authoritative turn appears on a later normal render. Application rebuild only;
+no AgentCore, session-generation, Guardrail, or AWS change is required.
+
 ### Heavy-notebook composer typing responsiveness (2026-08-24)
 
 **Evidence.** An unsent browser comparison on the same authenticated session

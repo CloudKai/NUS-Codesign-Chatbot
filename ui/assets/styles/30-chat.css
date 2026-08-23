@@ -91,6 +91,19 @@
         overflow:hidden !important;
     }
 
+    /* Native Stop leaves already-emitted Streamlit elements in the DOM. Hide
+       only the temporary turn while keeping saved transcript history intact. */
+    .st-key-chat_inflight.cd-turn-stopped [data-testid="stChatMessage"],
+    .st-key-chat_inflight.cd-turn-stopped [class*="st-key-inflight_user_message_row"],
+    .st-key-chat_inflight.cd-turn-stopped [data-testid="stStatusWidget"],
+    .st-key-chat_inflight.cd-turn-stopped [data-testid="stExpander"]:has([data-testid="stExpanderIconSpinner"]) {
+        display:none !important;
+        height:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+        overflow:hidden !important;
+    }
+
     /* Compact file cards keep attachment actions readable without turning a
        user bubble into a full-width panel. */
     [class*="st-key-message_attachment_card_"],
@@ -1223,59 +1236,6 @@
         text-align:center !important;
         color:#fff !important;
         -webkit-text-fill-color:#fff !important;
-    }
-
-    /*
-     * While the coach is generating, Streamlit keeps the chat input mounted
-     * (disabled textarea + stop). Collapse it to a single stop row.
-     */
-    .st-key-chat_composer [data-testid="stChatInput"]:has(textarea:disabled),
-    .st-key-chat_composer [data-testid="stChatInput"]:has([data-testid="stChatInputStopButton"]) {
-        min-height:3.05rem !important;
-        height:auto !important;
-        max-height:3.4rem !important;
-    }
-
-    .st-key-chat_composer [data-testid="stChatInput"]:has(textarea:disabled) > div,
-    .st-key-chat_composer [data-testid="stChatInput"]:has([data-testid="stChatInputStopButton"]) > div {
-        min-height:0 !important;
-        height:auto !important;
-        max-height:none !important;
-        padding:.35rem .7rem !important;
-        display:flex !important;
-        align-items:center !important;
-        justify-content:flex-end !important;
-    }
-
-    .st-key-chat_composer [data-testid="stChatInput"]:has(textarea:disabled) textarea,
-    .st-key-chat_composer [data-testid="stChatInput"]:has(textarea:disabled) [data-testid="stChatInputTextArea"],
-    .st-key-chat_composer [data-testid="stChatInput"]:has(textarea:disabled) [data-baseweb="textarea"],
-    .st-key-chat_composer [data-testid="stChatInput"]:has([data-testid="stChatInputStopButton"]) textarea,
-    .st-key-chat_composer [data-testid="stChatInput"]:has([data-testid="stChatInputStopButton"]) [data-testid="stChatInputTextArea"],
-    .st-key-chat_composer [data-testid="stChatInput"]:has([data-testid="stChatInputStopButton"]) [data-baseweb="textarea"] {
-        display:none !important;
-        height:0 !important;
-        min-height:0 !important;
-        max-height:0 !important;
-        padding:0 !important;
-        margin:0 !important;
-        overflow:hidden !important;
-    }
-
-    .st-key-chat_composer [data-testid="stChatInput"]:has(textarea:disabled)
-    [data-testid="stChatInputFileUploadButton"],
-    .st-key-chat_composer [data-testid="stChatInput"]:has([data-testid="stChatInputStopButton"])
-    [data-testid="stChatInputFileUploadButton"] {
-        display:none !important;
-    }
-
-    .st-key-chat_composer:has(textarea:disabled) .st-key-composer_model_slot,
-    .st-key-chat_composer:has([data-testid="stChatInputStopButton"]) .st-key-composer_model_slot,
-    .st-key-chat_composer:has(textarea:disabled)
-    > [data-testid="stLayoutWrapper"]:has(.st-key-composer_model_slot),
-    .st-key-chat_composer:has([data-testid="stChatInputStopButton"])
-    > [data-testid="stLayoutWrapper"]:has(.st-key-composer_model_slot) {
-        display:none !important;
     }
 
     /* Thinking status is an expander; hide the compact chevron so it is not a second box. */
