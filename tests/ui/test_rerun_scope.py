@@ -113,6 +113,27 @@ def test_sources_local_paths_use_fragment_rerun() -> None:
     assert stable.index("if coach_turn_is_streaming():") < stable.index("rerun_app()")
 
 
+def test_completed_source_upload_does_not_request_fragment_rerun() -> None:
+    """A full-page reload may observe a finished upload without a fragment rerun."""
+    source = Path(inspect.getfile(sources_module)).read_text(encoding="utf-8")
+    body = source.split("def _render_sources_panel_body", 1)[1].split(
+        "def render_source_card", 1
+    )[0]
+    completed_upload = body.split("for job in pending_source_uploads(thread_id):", 1)[1].split(
+        "pending_uploads = pending_source_uploads(thread_id)", 1
+    )[0]
+
+    assert "finalize_source_upload(job.upload_id, thread_id)" in completed_upload
+    assert "rerun_fragment()" not in completed_upload
+    assert "Uploading…" in source
+    assert "retry_source_upload(job.upload_id, thread_id)" in source
+    assert "discard_source_upload(job.upload_id)" in source
+    enqueue = source.split("def _enqueue_uploaded_sources", 1)[1].split(
+        "@st.dialog", 1
+    )[0]
+    assert "rerun_fragment()" in enqueue
+
+
 def test_studio_deep_review_poll_skips_app_rerun_while_streaming() -> None:
     """A finishing Deep Review job must not remount the app during a coach stream."""
     source = Path(inspect.getfile(studio_module)).read_text(encoding="utf-8")

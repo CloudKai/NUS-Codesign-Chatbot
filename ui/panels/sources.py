@@ -490,7 +490,9 @@ def _render_sources_panel_body() -> None:
             store.update_thread(thread_id, metadata={"allow_model_knowledge": False})
             st.toast(f"Added {len(added)} source{'s' if len(added) != 1 else ''}.")
         finalize_source_upload(job.upload_id, thread_id)
-        rerun_fragment()
+        # This body can run during a full-page reload, when Streamlit rejects
+        # fragment-scoped reruns.  ``finalize_source_upload`` invalidates the
+        # cached source reads, so the authoritative card can render below now.
     pending_uploads = pending_source_uploads(thread_id)
     sync_future = store.request_course_material_sync(thread_id)
     sync_loading = not sync_future.done()
