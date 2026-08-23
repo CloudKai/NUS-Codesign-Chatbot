@@ -2,6 +2,47 @@
 
 ## CURRENT STATUS
 
+### Heavy-notebook composer typing responsiveness (2026-08-24)
+
+**Evidence.** An unsent browser comparison on the same authenticated session
+showed the 61-character deterministic typing sequence reaching the automation
+deadline after only six characters in a long, attachment-heavy notebook; an
+otherwise light notebook reached the same deadline only after typing all but
+the final character. No coaching turn, retrieval, model call, or persistence
+write occurred during the comparison. The compositor helper previously routed
+every ordinary input through a full layout routine plus nested animation-frame
+passes and broad mutation observers.
+
+**Change.** Ordinary composer input now passes its mounted textarea into one
+coalesced textarea-only animation-frame measurement, without document or
+transcript lookup. A composer-local, contained measurement mirror keeps
+auto-grow and deletion shrink correct without resetting the live textarea on
+every keypress. Full composer layout and model placement are reserved for
+structural input changes, busy controls, remounts, viewport changes, attachment
+overlay, and model controls; textarea-width observation never schedules full
+layout for a self-induced height change. Text paste stays on the lightweight
+path and attachment DOM changes remain structural. Textarea size writes occur
+only when visible size/overflow actually changes. Development-only browser
+counters are opt-in through
+``CO_DESIGN_COMPOSER_PROFILE=true`` and are hard-disabled when
+``APP_ENV=production``; they record no student text or request data.
+
+**Files.** `ui/layout/composer_layout.py`, `tests/ui/test_streamlit_ui.py`.
+
+**Validation.** `tests/ui/test_streamlit_ui.py`, `tests/ui/test_chat_scroll.py`,
+and `tests/ui/test_ui_perf_logging.py`: 43 passed. The injected JavaScript
+passed `node --check`; Ruff passed on changed files; `compileall` passed for
+`ui`, `tests/ui`, and `streamlit_app.py`; `git diff --check` passed.
+
+**Deployment.** Rebuild/recreate the application only. No AgentCore publication,
+session-generation increment, Guardrail change, or AWS change is required.
+
+**Next action.** On a local development build, set
+``CO_DESIGN_COMPOSER_PROFILE=true`` before startup and compare the counters
+from ``window.__cdComposerProfile`` for a light and heavy notebook; then run a
+desktop and 390px visual check for typing, paste, attachment controls, model
+placement, and the five-row textarea cap.
+
 ### Attachment scope and confirmation-gated navigation (2026-08-23)
 
 **Change.** Authoritative selected-source validation now remains separate from
@@ -5186,3 +5227,41 @@ object cleanup, ownership-in-write checks, `ca-certificates` in image.
   runtime contract. No database migration is required.
 - Next action: run the focused deterministic suite and a desktop/390 px smoke
   test with one CDE2300 attachment and one clearly unrelated attachment.
+
+**App-only Course Q&A, progression routing, and Sources refresh** — Current working-tree phase
+
+- Explicit navigation/readiness wording now routes to Coaching even when it
+  follows substantial project reasoning or names a course stage. It excludes
+  selected course/attachment evidence and Retrieve, then retains the existing
+  immediate-next-stage pending transition and exact `confirm` path. Explicit
+  Thinking Path/Reflection completion wording is likewise workflow intent;
+  before Reflection it can only use the ordinary immediate-next-stage flow.
+  At Reflection, the existing terminal ADVANCE→STAY normalization preserves
+  valid coaching prose while creating no transition or completion state.
+- Anaphoric course-source lookups now build one bounded retrieval-only query
+  from the current question plus the nearest already-loaded active-branch
+  substantive user contribution. Acknowledgements, confirmation, navigation,
+  source lookup chains, attachment-only commands, inactive/superseded rows,
+  assistant text, and source metadata are excluded. Direct Week/Lecture queries are unchanged;
+  required KB filtering, authorization, citation validation, and the no-retry
+  evidence-gap path remain intact.
+- Sources uploads now remount their polling fragment after enqueue without
+  interrupting a Coach stream. Completion finalizes exactly once and displays
+  the authoritative source in the same pass; the empty state is hidden while a
+  pending upload card exists. Completion does not request a fragment rerun, so
+  Streamlit preserves its normal scope-error reporting for all other callers.
+- Validation: focused mode/retrieval/Bedrock-retrieval/Q&A-grounding/
+  RAG-fallback/one-call/source-rerun/Streamlit suite passed; Ruff on touched
+  files, compileall, and
+  `git diff --check` passed. No AWS or paid model calls were made.
+- Compatibility: application/EC2 rebuild only. No AgentCore publication,
+  session-generation bump, Guardrail/model change, API/schema migration, or
+  KB mutation is required. Reflection 5/5 completion remains intentionally
+  deferred; the next exact action is a bounded EC2 smoke for a long navigation
+  question, chained course lookup, and live Sources Uploading→card replacement.
+- Broader deterministic run (excluding the known invalid
+  `tests/scripts/test_load_probe.py` collection path) reached 100% with one
+  unrelated stale UI assertion in
+  `tests/ui/test_chat_progress.py::test_submitted_prompt_does_not_share_widget_with_previous_assistant`:
+  the current authoritative rendering shows one prior assistant bubble while
+  that test expects two. No production chat code was changed for this phase.

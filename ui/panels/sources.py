@@ -454,7 +454,12 @@ def _render_sources_panel_stable() -> None:
     _render_sources_panel_body()
     if coach_turn_is_streaming():
         return
-    if not store.request_course_material_sync(st.session_state.thread_id).done():
+    thread_id = st.session_state.thread_id
+    uploads_active = any(not job.future.done() for job in pending_source_uploads(thread_id))
+    if uploads_active or not store.request_course_material_sync(thread_id).done():
+        # The enqueue callback used a fragment rerun to show its pending card.
+        # One guarded app rerun remounts the timed polling fragment without
+        # disrupting a simultaneous Coach stream.
         rerun_app()
 
 
@@ -464,7 +469,9 @@ def _render_sources_panel_polling() -> None:
     _render_sources_panel_body()
     if coach_turn_is_streaming():
         return
-    if store.request_course_material_sync(st.session_state.thread_id).done():
+    thread_id = st.session_state.thread_id
+    uploads_active = any(not job.future.done() for job in pending_source_uploads(thread_id))
+    if store.request_course_material_sync(thread_id).done() and not uploads_active:
         # Remount the stable fragment so the browser drops the 1s timer.
         rerun_app()
 
@@ -824,7 +831,9 @@ def _render_sources_panel_body() -> None:
             if personal_sources:
                 for source in personal_sources:
                     render_source_card(source)
-            elif not any(not is_locked_course_source(source) for source in sources):
+            elif not pending_uploads and not any(
+                not is_locked_course_source(source) for source in sources
+            ):
                 st.markdown(
                     empty_state_html(
                         title="Add your first source",

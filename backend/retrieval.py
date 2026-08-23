@@ -103,6 +103,207 @@ _STOP_WORDS = frozenset(
     }
 )
 
+_CONTEXT_ACKNOWLEDGEMENTS = frozenset(
+    {"ok", "okay", "thanks", "yes", "no", "sure"}
+)
+_CONTEXT_GREETINGS = re.compile(
+    r"^(?:hi|hello|hey|good\s+(?:morning|afternoon|evening))\b", re.I
+)
+_CONTEXT_SOURCE_CUE = re.compile(
+    r"\b(?:source|sources|lecture|lectures|reading|readings|course\s+material|"
+    r"course\s+materials|module\s+material|module\s+materials)\b",
+    re.IGNORECASE,
+)
+_CONTEXT_ANAPHORIC_CUE = re.compile(
+    r"\b(?:what\s+i\s+just\s+said|previous\s+(?:point|idea|message)|"
+    r"my\s+(?:statement|claim|reasoning|argument)|this\s+(?:idea|point|argument)|"
+    r"that|anything\s+in\s+the)\b",
+    re.IGNORECASE,
+)
+_CONTEXT_LOOKUP_FORM = re.compile(
+    r"\?|\b(?:which|what|does|do|is|are|can|could|would|please)\b|"
+    r"\b(?:support(?:s|ed|ing)?|mention(?:s|ed|ing)?|relate(?:s|d|ing)?)\b",
+    re.IGNORECASE,
+)
+_CONTEXT_ATTACHMENT_ONLY_COMMAND = re.compile(
+    r"^\s*(?:(?:can|could|would|will)\s+you\s+|please\s+)?"
+    r"(?:explain|summari[sz]e|describe|analy[sz]e|open|read|review|"
+    r"what(?:'s|\s+is)|tell\s+me\s+about)\s+"
+    r"(?:(?:this|the|my|an?)\s+)?(?:attached\s+|uploaded\s+)?"
+    r"(?:file|pdf|document|image|photo|diagram|attachment)\b"
+    r"(?:\s+(?:for\s+me|please))?[.?!\s]*$",
+    re.IGNORECASE,
+)
+_CONTEXT_NAVIGATION = re.compile(
+    r"\b(?:move\s+on|next\s+(?:stage|phase)|proceed\s+to|advance\s+to|"
+    r"ready\s+(?:to|for)|thinking\s+path|finish\s+(?:the\s+)?thinking\s+path|"
+    r"complete\s+(?:the\s+)?thinking\s+path)\b",
+    re.IGNORECASE,
+)
+
+
+def _compact_message_text(value: object) -> str:
+    """Return normalized message content without reading message metadata."""
+    return " ".join(str(value or "").split()).strip()
+
+
+def is_anaphoric_course_lookup(message: str) -> bool:
+    """Return whether a source question refers back to earlier student work.
+
+    This intentionally requires both a course-source cue and a reference such
+    as ``what I just said`` or ``my previous point``. Direct Week/Lecture
+    questions therefore keep their established query shape.
+    """
+    text = _compact_message_text(message)
+    return bool(
+        text
+        and _CONTEXT_SOURCE_CUE.search(text)
+        and _CONTEXT_ANAPHORIC_CUE.search(text)
+        and _CONTEXT_LOOKUP_FORM.search(text)
+    )
+
+
+def _is_source_lookup_question(message: str) -> bool:
+    """Return whether a prior user turn is itself a course-source lookup."""
+    text = _compact_message_text(message)
+    return bool(
+        text
+        and _CONTEXT_SOURCE_CUE.search(text)
+        and (
+            "?" in text
+            or re.match(
+                r"^(?:which|what|does|do|is|are|can|could|would|please)\b",
+                text,
+                re.IGNORECASE,
+            )
+        )
+    )
+
+
+def _is_attachment_only_command(message: str) -> bool:
+    """Return whether a prior turn only asks to inspect an attachment.
+
+    A project contribution can legitimately mention a PDF, image, or document.
+    Only direct, standalone inspection commands are excluded as anaphoric
+    course-Q&A antecedents.
+    """
+    return bool(_CONTEXT_ATTACHMENT_ONLY_COMMAND.match(_compact_message_text(message)))
+
+
+def _is_active_user_message(message: dict[str, Any]) -> bool:
+    """Return whether one already-loaded history row is active user content."""
+    if str(message.get("role") or "").strip().lower() != "user":
+        return False
+    if message.get("active") is False or message.get("is_active") is False:
+        return False
+    if (
+        message.get("superseded")
+        or message.get("superseded_by")
+        or message.get("supersededBy")
+    ):
+        return False
+    metadata = message.get("metadata")
+    if isinstance(metadata, dict) and (
+        metadata.get("superseded")
+        or metadata.get("superseded_by")
+        or metadata.get("active") is False
+    ):
+        return False
+    return True
+
+
+def _is_substantive_recent_user_message(message: dict[str, Any]) -> bool:
+    """Return whether a loaded active user row can ground an anaphoric query."""
+    if not _is_active_user_message(message):
+        return False
+    text = _compact_message_text(message.get("content"))
+    lowered = text.casefold().rstrip(".!?")
+    if not text or lowered == "confirm" or lowered in _CONTEXT_ACKNOWLEDGEMENTS:
+        return False
+    if _CONTEXT_GREETINGS.search(text) or _CONTEXT_NAVIGATION.search(text):
+        return False
+    if _is_source_lookup_question(text) or _is_attachment_only_command(text):
+        return False
+    informative_terms = _terms(text, remove_stop_words=True)
+    return len(informative_terms) >= 2 or len(lowered) >= 20
+
+
+def most_recent_substantive_user_contribution(
+    recent_messages: Sequence[dict[str, Any]],
+    *,
+    max_chars: int = 800,
+) -> str:
+    """Return the nearest valid active-branch user contribution, if any.
+
+    The caller supplies the already-loaded bounded history window. This helper
+    never loads persistence and does not inspect source metadata, excerpts, or
+    attachment bytes.
+    """
+    for message in reversed(tuple(recent_messages)):
+        if _is_substantive_recent_user_message(message):
+            return _compact_message_text(message.get("content"))[:max_chars].rstrip()
+    return ""
+
+
+def _summary_adds_relevant_terms(summary: str, *, question: str, antecedent: str) -> bool:
+    """Return whether a bounded summary adds lexical context to this lookup."""
+    summary_terms = set(_terms(summary, remove_stop_words=True))
+    if not summary_terms:
+        return False
+    anchor_terms = set(_terms(f"{question} {antecedent}", remove_stop_words=True))
+    return bool(summary_terms & anchor_terms)
+
+
+def contextual_course_query_text(
+    query: RetrievalQuery,
+    *,
+    max_chars: int = 2_000,
+    antecedent_max_chars: int = 800,
+) -> str:
+    """Build a bounded retrieval-only query for anaphoric course questions.
+
+    Direct course questions keep their exact established query. For anaphoric
+    questions, the current lookup and nearest substantive active user message
+    are always retained first; existing project/learning summaries are added
+    only when they share informative terms and remaining room exists.
+    """
+    question = _compact_message_text(query.current_message)
+    if not question or not is_anaphoric_course_lookup(question):
+        return question
+    limit = max(1, int(max_chars))
+    antecedent = most_recent_substantive_user_contribution(
+        query.recent_messages,
+        max_chars=max(1, int(antecedent_max_chars)),
+    )
+    if not antecedent:
+        return question
+
+    sections = [f"Current source question: {question}"]
+    remaining = limit - len(sections[0])
+    antecedent_prefix = "\nPrior student reasoning: "
+    if remaining <= len(antecedent_prefix):
+        return sections[0][:limit].rstrip()
+    sections.append(
+        f"{antecedent_prefix}{antecedent[: remaining - len(antecedent_prefix)].rstrip()}"
+    )
+
+    for summary in (query.project_context, query.conversation_summary):
+        cleaned = _compact_message_text(summary)
+        if not cleaned or not _summary_adds_relevant_terms(
+            cleaned, question=question, antecedent=antecedent
+        ):
+            continue
+        current = "".join(sections)
+        remaining = limit - len(current)
+        summary_prefix = "\nRelevant prior context: "
+        if remaining <= len(summary_prefix):
+            break
+        sections.append(
+            f"{summary_prefix}{cleaned[: remaining - len(summary_prefix)].rstrip()}"
+        )
+        break
+    return "".join(sections)[:limit].rstrip()
+
 
 @dataclass(frozen=True)
 class RetrievalSource:
@@ -733,10 +934,11 @@ _chunk_text = canonical_chunk_text
 def _query_weights(query: RetrievalQuery) -> Counter[str]:
     """Weight the current turn above short continuity and project context."""
     weights: Counter[str] = Counter()
+    retrieval_text = contextual_course_query_text(query)
     weights.update(
         {
             term: 3.0
-            for term in _terms(query.current_message, remove_stop_words=True)
+            for term in _terms(retrieval_text, remove_stop_words=True)
         }
     )
     for _head, number in _session_number_pairs(query.current_message):

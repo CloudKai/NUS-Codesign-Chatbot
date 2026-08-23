@@ -187,6 +187,39 @@ _STAGE_PROGRESSION_REQUEST = re.compile(
     re.IGNORECASE,
 )
 
+# The original expression intentionally favoured short commands at the start
+# of a turn. Students frequently explain their work first and ask a genuine
+# readiness question at the end, though. Keep stage names alone insufficient:
+# these phrases require an explicit navigation or readiness action.
+_EMBEDDED_STAGE_PROGRESSION_REQUEST = re.compile(
+    r"\b(?:move\s+on|go\s+(?:to|onto)\s+(?:the\s+)?(?:next\s+(?:stage|phase)|"
+    r"problem\s+identification|concept\s+generation|design\s+specification|"
+    r"ethics(?:\s*(?:&|and)\s*)?(?:critical\s+thinking|ct)|reflection))\b|"
+    r"\b(?:proceed|advance)\s+(?:to|onto)\b|"
+    r"\b(?:ready|enough|done)\s+(?:to\s+)?(?:move\s+on|proceed|advance)\b|"
+    r"\bready\s+for\s+(?:the\s+)?(?:next\s+(?:stage|phase)|problem\s+"
+    r"identification|concept\s+generation|design\s+specification|ethics"
+    r"(?:\s*(?:&|and)\s*)?(?:critical\s+thinking|ct)|reflection)\b",
+    re.IGNORECASE,
+)
+
+# Completion language is workflow intent even before Reflection, where it is
+# useful for explaining the remaining path. It never itself authorizes a stage
+# mutation. Generic "am I done?" remains terminal-only at Reflection below.
+_EXPLICIT_PATH_COMPLETION_REQUEST = re.compile(
+    r"\b(?:finish|complete)\s+(?:the\s+)?thinking\s+path\b|"
+    r"\b(?:is|am|are|can|could|may|should)\b[^?!.]{0,80}\b(?:thinking\s+path|"
+    r"reflection)\b[^?!.]{0,80}\b(?:complete|completed|finished|done)\b|"
+    r"\b(?:finish|complete)\s+(?:my\s+)?reflection\b",
+    re.IGNORECASE,
+)
+_GENERIC_TERMINAL_COMPLETION_REQUEST = re.compile(
+    r"^\s*(?:(?:am|are)\s+(?:i|we)|(?:can|could|may|should)\s+(?:i|we)|"
+    r"is\s+(?:this|my\s+reflection))\s+(?:done|finished|complete)\b|"
+    r"^\s*(?:can|could|may|should)\s+(?:i|we)\s+(?:finish|complete)\b",
+    re.IGNORECASE,
+)
+
 
 @dataclass(frozen=True)
 class ModePolicy:
@@ -269,7 +302,30 @@ def is_stage_progression_request(student_message: str) -> bool:
     provider assessment, HMW guard, pending transition, and atomic confirmation
     path remain authoritative.
     """
-    return bool(_STAGE_PROGRESSION_REQUEST.search(_normalized_text(student_message)))
+    text = _normalized_text(student_message)
+    return bool(
+        _STAGE_PROGRESSION_REQUEST.search(text)
+        or _EMBEDDED_STAGE_PROGRESSION_REQUEST.search(text)
+        or _EXPLICIT_PATH_COMPLETION_REQUEST.search(text)
+    )
+
+
+def is_terminal_completion_request(student_message: str, *, current_stage: str) -> bool:
+    """Return whether a Reflection turn asks to complete the Thinking Path.
+
+    Explicit Thinking Path/Reflection wording is routed as workflow intent at
+    every stage by :func:`is_stage_progression_request`. This narrower helper
+    identifies the terminal variant only when the authoritative current stage
+    is Reflection, so generic completion wording cannot invent a terminal
+    action earlier in the path.
+    """
+    if str(current_stage or "").strip().lower() != "reflection":
+        return False
+    text = _normalized_text(student_message)
+    return bool(
+        _EXPLICIT_PATH_COMPLETION_REQUEST.search(text)
+        or _GENERIC_TERMINAL_COMPLETION_REQUEST.search(text)
+    )
 
 
 def is_private_attachment_question(

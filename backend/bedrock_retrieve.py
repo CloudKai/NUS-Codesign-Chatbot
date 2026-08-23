@@ -28,6 +28,7 @@ from .retrieval import (
     RetrievalSource,
     RetrievedChunk,
     bounded_retrieval_result,
+    contextual_course_query_text,
     course_material_id_from_object_key,
     expand_session_query_text,
     is_course_retrieval_source,
@@ -817,7 +818,13 @@ class BedrockKnowledgeBaseRetriever:
                 failure_category="client_error",
             )
         original_query = " ".join(str(query.current_message or "").split()).strip()
-        query_text = expand_session_query_text(query.current_message)
+        contextual_query = contextual_course_query_text(
+            query,
+            max_chars=int(settings.fast_chat_project_context_chars),
+        )
+        query_text = expand_session_query_text(contextual_query)
+        if contextual_query != original_query:
+            query_text = query_text[: int(settings.fast_chat_project_context_chars)].rstrip()
         if not query_text:
             return RetrievalResult(context="", chunks=())
         material_ids = _course_material_ids(course_sources)

@@ -26,6 +26,30 @@ def test_runtime_exposes_explicit_rerun_helpers_only() -> None:
     assert 'st.rerun(scope="fragment")' in source
 
 
+def test_fragment_rerun_uses_streamlit_fragment_scope(monkeypatch) -> None:
+    """Panel-local helpers preserve Streamlit's native scope behavior."""
+    calls: list[dict[str, object]] = []
+
+    def rerun(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(runtime_module, "st", SimpleNamespace(rerun=rerun))
+    runtime_module.rerun_fragment()
+
+    assert calls == [{"scope": "fragment"}]
+
+    def failing_rerun(**_kwargs):
+        raise RuntimeError("fragment scope is invalid here")
+
+    monkeypatch.setattr(runtime_module, "st", SimpleNamespace(rerun=failing_rerun))
+    try:
+        runtime_module.rerun_fragment()
+    except RuntimeError as error:
+        assert str(error) == "fragment scope is invalid here"
+    else:
+        raise AssertionError("fragment rerun errors must remain visible")
+
+
 def test_coach_turn_is_streaming_reads_session_flag(monkeypatch) -> None:
     """Fragments consult the session flag, not a second Streamlit widget."""
     fake_state: dict[str, object] = {}
@@ -111,6 +135,9 @@ def test_sources_local_paths_use_fragment_rerun() -> None:
     )[0]
     assert "if coach_turn_is_streaming():" in stable
     assert stable.index("if coach_turn_is_streaming():") < stable.index("rerun_app()")
+    assert "uploads_active = any(" in stable
+    assert "uploads_active or not store.request_course_material_sync" in stable
+    assert "and not uploads_active" in polling
 
 
 def test_completed_source_upload_does_not_request_fragment_rerun() -> None:
@@ -125,6 +152,7 @@ def test_completed_source_upload_does_not_request_fragment_rerun() -> None:
 
     assert "finalize_source_upload(job.upload_id, thread_id)" in completed_upload
     assert "rerun_fragment()" not in completed_upload
+    assert "elif not pending_uploads and not any(" in source
     assert "Uploading…" in source
     assert "retry_source_upload(job.upload_id, thread_id)" in source
     assert "discard_source_upload(job.upload_id)" in source

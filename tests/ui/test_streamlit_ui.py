@@ -67,6 +67,69 @@ def test_student_coach_error_copy_is_category_safe():
     assert "check the local provider" not in chat_py
 
 
+def test_composer_profile_is_opt_in_and_unavailable_in_production(monkeypatch):
+    """Keep browser-only composer diagnostics out of production script output."""
+    from ui.layout import composer_layout
+
+    rendered: list[str] = []
+    monkeypatch.setattr(
+        composer_layout.components,
+        "html",
+        lambda script, **_kwargs: rendered.append(script),
+    )
+    monkeypatch.setenv("CO_DESIGN_COMPOSER_PROFILE", "true")
+    monkeypatch.setattr(composer_layout.settings, "app_env", "development")
+    composer_layout.sync_composer_layout(max_file_size_mb=10)
+    assert "const PROFILE_ENABLED = true;" in rendered[-1]
+    assert "__cdComposerProfile" in rendered[-1]
+    assert "__cdComposerProfileSnapshot" in rendered[-1]
+    assert "__cdComposerProfileReset" in rendered[-1]
+
+    monkeypatch.setattr(composer_layout.settings, "app_env", "production")
+    composer_layout.sync_composer_layout(max_file_size_mb=10)
+    assert "const PROFILE_ENABLED = false;" in rendered[-1]
+
+
+def test_composer_typing_path_stays_local_and_structural() -> None:
+    """Keep ordinary typing out of the heavyweight composer layout path."""
+    composer_layout = Path("ui/layout/composer_layout.py").read_text(
+        encoding="utf-8"
+    )
+    resize_path = composer_layout.split(
+        "function scheduleTextareaResize(textarea, refreshMetrics = false)", 1
+    )[1].split("function observeTextareaWidth", 1)[0]
+    assert "if (resizeFrame) return;" in resize_path
+    assert "const composer = root();" not in resize_path
+    assert "chatInput(composer)" not in resize_path
+    assert "scheduleModelPlacement" not in resize_path
+    assert "currentTextarea.isConnected" in resize_path
+
+    width_observer = composer_layout.split("function observeTextareaWidth", 1)[1].split(
+        "function capTextarea", 1
+    )[0]
+    assert "new win.ResizeObserver((entries)" in width_observer
+    assert "scheduleApply" not in width_observer
+    assert "scheduleTextareaResize(observedTextarea, true);" in width_observer
+
+    input_handler = composer_layout.split("const onComposerDraft", 1)[1].split(
+        'composer.addEventListener("input"', 1
+    )[0]
+    assert "scheduleTextareaResize(textarea);" in input_handler
+    assert "scheduleApply" not in input_handler
+    paste_handler = composer_layout.split('"paste",', 1)[1].split(
+        "win.addEventListener", 1
+    )[0]
+    assert "onComposerDraft(event);" in paste_handler
+    assert "scheduleApply" not in paste_handler
+    assert "measurementMirror" in composer_layout
+    assert "model_placement_calls" in composer_layout
+    assert "textarea_resize_frames" in composer_layout
+    assert "attachment_annotation_calls" in composer_layout
+    assert "attachment_tooltip_bind_calls" in composer_layout
+    assert "overlay_rewrite_calls" in composer_layout
+    assert "native_tooltip_scan_calls" in composer_layout
+
+
 def test_chat_composer_attachment_error_is_recoverable(monkeypatch):
     """Rejecting a chat attachment leaves the notebook usable and unsent."""
     from ui import chat
@@ -245,9 +308,16 @@ def test_streamlit_notebook_workspace_smoke():
     composer_layout = Path("ui/layout/composer_layout.py").read_text(
         encoding="utf-8"
     )
-    assert "MAX_ROWS = 5" in composer_layout
+    assert "lineHeight * 5 + padY" in composer_layout
     assert 'setProperty("height", "auto"' in composer_layout
     assert 'addEventListener("input", onComposerDraft, true)' in composer_layout
+    assert "scheduleTextareaResize(textarea);" in composer_layout
+    assert "if (applyFrame) return;" in composer_layout
+    assert "full_apply_calls" in composer_layout
+    assert "textarea_resize_calls" in composer_layout
+    assert "observer.observe(input, { childList: true, subtree: true });" in composer_layout
+    assert "characterData: true" not in composer_layout
+    assert "CO_DESIGN_COMPOSER_PROFILE" in composer_layout
     assert "MAX_COLS" not in composer_layout
     assert "field-sizing:content" in rendered.replace(" ", "")
     edit_layout = Path("ui/layout/user_message_edit_layout.py").read_text(

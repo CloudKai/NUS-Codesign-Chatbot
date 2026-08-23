@@ -27,6 +27,7 @@ from backend.retrieval import (
     RetrievedChunk,
     UNANALYZABLE_SOURCE_PLACEHOLDER,
     bounded_retrieval_result,
+    contextual_course_query_text,
     course_material_id_collisions,
     course_material_id_from_object_key,
     expand_session_query_text,
@@ -214,6 +215,120 @@ def test_expand_session_query_text_aliases_lecture_and_week():
     assert "lecture 1" in expand_session_query_text("week1")
     assert "week 1" in expand_session_query_text("lecture01")
     assert "lecture 1" in expand_session_query_text("lecture01")
+
+
+def test_contextual_course_query_uses_prior_substantive_reasoning_not_lookup_chain():
+    """Anaphoric lookups skip acknowledgements and earlier source questions."""
+    reasoning = (
+        "I think reliability matters more than convenience because a false negative "
+        "could leave someone in the road."
+    )
+    query = RetrievalQuery(
+        current_message="Does another reading support my previous point?",
+        current_stage="deep_analysis",
+        sources=(),
+        recent_messages=(
+            {"role": "user", "content": reasoning},
+            {"role": "assistant", "content": "What evidence supports that?"},
+            {"role": "user", "content": "Which reading supports what I just said?"},
+            {"role": "user", "content": "okay"},
+        ),
+    )
+
+    text = contextual_course_query_text(query)
+
+    assert "Current source question: Does another reading" in text
+    assert reasoning in text
+    assert "Which reading supports what I just said?" not in text
+    assert "okay" not in text
+
+
+def test_contextual_course_query_recognizes_my_statement_as_anaphoric():
+    """Student wording from the production course-support question stays grounded."""
+    reasoning = "The crossing should prioritise reliable access over convenience."
+    query = RetrievalQuery(
+        current_message="Which lecture materials or readings support my statement?",
+        current_stage="deep_analysis",
+        sources=(),
+        recent_messages=({"role": "user", "content": reasoning},),
+    )
+
+    assert reasoning in contextual_course_query_text(query)
+
+
+def test_contextual_course_query_ignores_inactive_and_attachment_only_messages():
+    """Only active user reasoning can become a retrieval antecedent."""
+    active = "Our stakeholder needs a safe crossing with enough signal time."
+    query = RetrievalQuery(
+        current_message="Which lecture supports what I just said?",
+        current_stage="problem_identification",
+        sources=(),
+        recent_messages=(
+            {"role": "user", "content": "Old superseded argument", "active": False},
+            {"role": "user", "content": "Please summarise this attached PDF."},
+            {"role": "user", "content": active},
+        ),
+    )
+
+    text = contextual_course_query_text(query)
+
+    assert active in text
+    assert "Old superseded argument" not in text
+    assert "attached PDF" not in text
+
+
+def test_contextual_course_query_keeps_reasoning_that_mentions_an_attachment():
+    """Attachment references do not discard an otherwise substantive point."""
+    reasoning = (
+        "The attached PDF shows older pedestrians need a longer crossing interval, "
+        "so reliability should matter more than convenience."
+    )
+    query = RetrievalQuery(
+        current_message="Which reading supports what I just said?",
+        current_stage="problem_identification",
+        sources=(),
+        recent_messages=(
+            {"role": "user", "content": "Please summarise this attached PDF."},
+            {"role": "user", "content": reasoning},
+        ),
+    )
+
+    text = contextual_course_query_text(query)
+
+    assert reasoning in text
+
+
+def test_contextual_course_query_is_bounded_and_uses_relevant_summary_only():
+    """Question and antecedent take priority; summary fills only spare budget."""
+    antecedent = "reliability " * 300
+    query = RetrievalQuery(
+        current_message="Which reading supports my previous point about reliability?",
+        current_stage="deep_analysis",
+        sources=(),
+        project_context="Reliability evidence should guide the crossing threshold.",
+        conversation_summary="Unrelated typography and colour discussion.",
+        recent_messages=({"role": "user", "content": antecedent},),
+    )
+
+    text = contextual_course_query_text(query, max_chars=500, antecedent_max_chars=800)
+
+    assert len(text) <= 500
+    assert "Current source question:" in text
+    assert "Prior student reasoning:" in text
+    assert "Unrelated typography" not in text
+
+
+def test_direct_course_query_keeps_its_existing_query_text():
+    """Non-anaphoric Week/Lecture queries do not gain hidden context."""
+    query = RetrievalQuery(
+        current_message="What is lecture 1 about?",
+        current_stage="problem_identification",
+        sources=(),
+        recent_messages=(
+            {"role": "user", "content": "My earlier design reasoning."},
+        ),
+    )
+    assert contextual_course_query_text(query) == "What is lecture 1 about?"
 
 
 def test_prefer_session_matching_sources_keeps_week_one_among_selected():

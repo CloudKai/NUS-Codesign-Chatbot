@@ -22,6 +22,7 @@ from backend.coaching.deep_review_context import (
 )
 from backend.coaching.mode_policy import (
     ModePolicy,
+    is_terminal_completion_request,
     is_stage_progression_request,
     is_private_attachment_question,
     looks_like_information_request,
@@ -1777,7 +1778,12 @@ class CoachApplicationService:
             ],
             has_selected_sources=bool(selected_sources),
         )
-        progression_request = is_stage_progression_request(request.student_message)
+        progression_request = is_stage_progression_request(
+            request.student_message
+        ) or is_terminal_completion_request(
+            request.student_message,
+            current_stage=authoritative_stage,
+        )
         if progression_request:
             # A stage-navigation command must not be hijacked by selected
             # source titles that happen to name a stage.

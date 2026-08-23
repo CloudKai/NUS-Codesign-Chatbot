@@ -20,6 +20,7 @@ from backend.coaching.mode_policy import (
     ModePolicy,
     enforce_model_mode,
     is_stage_progression_request,
+    is_terminal_completion_request,
     looks_like_project_reasoning,
     is_private_attachment_question,
     resolve_mode_policy,
@@ -411,6 +412,22 @@ def test_explicit_stage_progression_requests_are_narrowly_recognized(message: st
     assert is_stage_progression_request(message) is True
 
 
+def test_embedded_navigation_and_explicit_path_completion_are_workflow_intent() -> None:
+    """Reasoning before a readiness question cannot make it fall into course Q&A."""
+    assert is_stage_progression_request(
+        "My constraints include safety and accessibility. Is this enough to move on to Ethics and Critical Thinking?"
+    )
+    assert is_stage_progression_request("Can I finish the Thinking Path now?")
+    assert is_stage_progression_request("Is my Reflection complete?")
+    assert not is_stage_progression_request("Am I done now?")
+    assert not is_terminal_completion_request(
+        "Can I finish the Thinking Path now?", current_stage="concept_generation"
+    )
+    assert is_terminal_completion_request(
+        "Can I finish the Thinking Path now?", current_stage="reflection"
+    )
+
+
 @pytest.mark.parametrize(
     "message",
     (
@@ -531,6 +548,73 @@ def test_navigation_stay_with_stage_named_source_skips_retrieval(tmp_path) -> No
     assert len(client.calls) == 1
     assert turn.pending_transition is None
     assert (store.get_thread(thread_id) or {})["metadata"]["thinking_stage"] == "problem_identification"
+
+
+def test_embedded_navigation_skips_retrieval_and_keeps_immediate_confirm_flow(tmp_path) -> None:
+    """A long substantive turn ending in navigation stays in coaching mode."""
+    store = StudentStore(tmp_path / "embedded-navigation.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    add_text_source(store, thread_id, "Ethics and Critical Thinking", "Course text")
+    client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="advance"))
+    turn = _submit(
+        _service(store, client, retriever=_NoRetrieve()),
+        thread_id,
+        "My non-negotiable constraints are accessibility and safe operation. "
+        "Is this enough to move on to concept generation? How might we help "
+        "older pedestrians cross safely without rushing?",
+        key="embedded-navigation",
+    )
+
+    assert len(client.calls) == 1
+    assert turn.assessment.response_mode == "coaching"
+    assert turn.pending_transition is not None
+    assert turn.pending_transition.to_stage == "concept_generation"
+    assert "Type exact `confirm` to advance." in turn.response_text
+
+
+def test_reflection_completion_request_skips_retrieval_and_suppresses_advance(tmp_path) -> None:
+    """Deferred terminal completion remains a non-mutating Reflection coaching turn."""
+    store = StudentStore(tmp_path / "reflection-completion-deferred.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    metadata["learning_journey"] = {
+        "current_stage": "reflection",
+        "completed_stages": [
+            "problem_identification",
+            "concept_generation",
+            "design_specification",
+            "deep_analysis",
+        ],
+    }
+    metadata["thinking_stage"] = "reflection"
+    store.update_thread(thread_id, metadata=metadata)
+    add_text_source(store, thread_id, "Reflection lecture", "Course text")
+    client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="advance"))
+    service = _service(store, client, retriever=_NoRetrieve())
+
+    turn = service.submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="Can I finish?",
+            current_stage="reflection",
+            response_detail="short",
+            idempotency_key="reflection-completion-deferred",
+        )
+    )
+
+    assert len(client.calls) == 1
+    assert turn.assessment.response_mode == "coaching"
+    assert turn.assessment.recommendation is StageDecision.STAY
+    assert turn.pending_transition is None
+    current = (store.get_thread(thread_id) or {}).get("metadata") or {}
+    journey = current["learning_journey"]
+    assert journey["current_stage"] == "reflection"
+    assert journey["completed_stages"] == [
+        "problem_identification",
+        "concept_generation",
+        "design_specification",
+        "deep_analysis",
+    ]
 
 
 def test_navigation_pi_guard_blocks_premature_advance(tmp_path) -> None:

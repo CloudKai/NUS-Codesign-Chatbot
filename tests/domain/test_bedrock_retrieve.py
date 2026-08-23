@@ -192,6 +192,39 @@ def test_retrieve_expands_lecture_number_to_week_phrasing():
     )
 
 
+def test_retrieve_uses_bounded_active_antecedent_for_anaphoric_course_question():
+    """The managed adapter sends one scoped contextual Retrieve query only."""
+    client = FakeRetrieveClient()
+    antecedent = "Reliability matters because a false negative leaves someone in the road."
+    BedrockKnowledgeBaseRetriever(
+        "JUQNP8AZAZ",
+        course_bucket="cde2300-course-content-s3",
+        client=client,
+    ).retrieve(
+        RetrievalQuery(
+            current_message="Which reading supports what I just said?",
+            current_stage="deep_analysis",
+            sources=(
+                _course_source(
+                    "src-week-1",
+                    "S1",
+                    object_key="course/lectureNotes/week1.pdf",
+                ),
+            ),
+            recent_messages=(
+                {"role": "user", "content": antecedent},
+                {"role": "user", "content": "Which source supports my previous point?"},
+            ),
+        )
+    )
+
+    assert len(client.calls) == 1
+    query_text = client.calls[0]["retrievalQuery"]["text"]
+    assert antecedent in query_text
+    assert "Which source supports my previous point?" not in query_text
+    assert len(query_text) <= settings.fast_chat_project_context_chars
+
+
 def test_retrieve_drops_foreign_and_unselected_course_keys():
     client = FakeRetrieveClient(
         results=[
@@ -1723,4 +1756,3 @@ def test_configured_live_retriever_uses_managed_type(
     retriever = configured_context_retriever(client=FakeRetrieveClient(results=[]))
     assert retriever._knowledge_base is not None
     assert retriever._knowledge_base._knowledge_base_type == "managed"
-
