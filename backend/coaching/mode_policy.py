@@ -170,6 +170,23 @@ _COURSE_REFERENCE = re.compile(
     re.IGNORECASE,
 )
 
+# Navigation is a command about the student's Thinking Path, not a request to
+# explain a stage term.  Keep this intentionally narrow: stage names alone and
+# factual questions ("what is concept generation?") must retain normal Q&A.
+_STAGE_PROGRESSION_REQUEST = re.compile(
+    r"^\s*(?:nothing else[.!]?\s*)?(?:can|could|may|should)\s+(?:we|i)\s+"
+    r"move on\b|^\s*(?:can|could|may|should)\s+(?:we|i)\s+(?:proceed|advance)\s+"
+    r"(?:to|onto)\s+(?:the\s+)?(?:next\s+(?:stage|phase)|problem\s+identification|"
+    r"concept\s+generation|design\s+specification|ethics(?:\s*(?:&|and)\s*)?"
+    r"(?:critical\s+thinking|ct)|reflection)\b|^\s*(?:are|am)\s+(?:we|i)\s+ready\s+"
+    r"to\s+(?:move on|proceed|advance)\b|^\s*(?:let'?s|i(?:'m| am) ready to)\s+"
+    r"(?:move on|proceed|advance)\b|\bgo\s+(?:to|onto)\s+(?:the\s+)?"
+    r"(?:next\s+(?:stage|phase)|problem\s+identification|concept\s+generation|"
+    r"design\s+specification|ethics(?:\s*(?:&|and)\s*)?(?:critical\s+thinking|ct)|"
+    r"reflection)\b",
+    re.IGNORECASE,
+)
+
 
 @dataclass(frozen=True)
 class ModePolicy:
@@ -243,6 +260,16 @@ def looks_like_information_request(student_message: str) -> bool:
     if not text:
         return False
     return bool(_INFORMATION_REQUEST.search(text))
+
+
+def is_stage_progression_request(student_message: str) -> bool:
+    """Return whether the student explicitly asks to navigate the Thinking Path.
+
+    This matcher only controls routing.  It never changes a stage; the normal
+    provider assessment, HMW guard, pending transition, and atomic confirmation
+    path remain authoritative.
+    """
+    return bool(_STAGE_PROGRESSION_REQUEST.search(_normalized_text(student_message)))
 
 
 def is_private_attachment_question(

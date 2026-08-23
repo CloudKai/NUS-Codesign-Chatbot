@@ -145,13 +145,17 @@ def _format_recent_messages(
 
 def _runtime_instructions(context: PromptContext) -> str:
     """Build short turn-local guidance (detail, knowledge, images, transition)."""
-    from backend.coaching.mode_policy import runtime_mode_hint
+    from backend.coaching.mode_policy import (
+        is_stage_progression_request,
+        runtime_mode_hint,
+    )
 
     parts: list[str] = []
     hint = runtime_mode_hint(context.expected_response_mode)
     if hint:
         parts.append(hint)
     is_qa = str(context.expected_response_mode or "").strip().lower() == "qa"
+    stage_progression_request = is_stage_progression_request(context.student_message)
     if not is_qa:
         if context.response_detail == "short":
             parts.append(
@@ -184,7 +188,16 @@ def _runtime_instructions(context: PromptContext) -> str:
         f"Respond to the student in {language}. Keep source labels such as [S1] unchanged."
     )
     if not is_qa:
-        if settings.effective_auto_advance_stages:
+        if stage_progression_request:
+            parts.append(
+                "This is an explicit request to move to the next Thinking Path "
+                "stage. Assess readiness for the current stage. If not ready, "
+                "recommend STAY and state what remains. If ready, recommend "
+                "ADVANCE and explain the authoritative next-stage work. Do not "
+                "claim the stage changed: the application will hold the "
+                "recommendation pending and ask for exact `confirm`."
+            )
+        elif settings.effective_auto_advance_stages:
             parts.append(
                 "When you recommend advance, the application will automatically move "
                 "the student to the next stage—write as if already coaching that next "

@@ -326,6 +326,29 @@ def test_composer_qa_omits_strict_guidance_and_history_is_not_evidence():
     assert "could not retrieve a validated excerpt" in text
 
 
+def test_composer_navigation_overrides_auto_advance_confirmation_copy(monkeypatch):
+    """Explicit navigation keeps its pending-confirm rule under auto-advance."""
+    from backend.prompts import composer as composer_module
+
+    monkeypatch.setattr(composer_module.settings, "auto_advance_stages", True)
+    monkeypatch.setattr(composer_module.settings, "student_stage_selection", False)
+    prepared = PromptComposer().compose(
+        PromptContext(
+            current_stage="problem_identification",
+            student_message="Can we move on to concept generation?",
+            response_detail="short",
+            allow_model_knowledge=True,
+            expected_response_mode="coaching",
+            context_policy="fast_chat",
+        )
+    )
+    text = prepared.runtime_instructions
+    assert "hold the recommendation pending" in text
+    assert "exact `confirm`" in text
+    assert "automatically move" not in text
+    assert "no confirmation language" not in text
+
+
 def test_composer_course_evidence_gap_does_not_claim_unreadable_pdf():
     from backend.retrieval import COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT
 

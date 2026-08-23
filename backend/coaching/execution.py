@@ -21,6 +21,8 @@ from backend.coaching.deep_review_context import (
     record_deep_review_context_telemetry,
 )
 from backend.coaching.mode_policy import (
+    ModePolicy,
+    is_stage_progression_request,
     is_private_attachment_question,
     looks_like_information_request,
     qa_evidence_gap_turn,
@@ -44,6 +46,7 @@ from backend.domain import (
     CoachTurn,
     DeepReviewJob,
     DeepReviewJobStatus,
+    EducationalAssessment,
     ProvisionalResearchCoding,
     RESEARCH_CODING_VERSION,
     ResearchCodingStatus,
@@ -331,6 +334,35 @@ class CoachApplicationService:
         is true, the caller already owns the notebook/user/global slot and this
         helper must not acquire a second one.
         """
+        # A literal chat confirmation is resolved through the existing atomic
+        # learning service before any limiter, retrieval, or provider work.
+        # Idempotency markers around this helper make a same-key retry replay
+        # the result instead of attempting a second transition resolution.
+        if request.student_message == "confirm" and self._progress is not None:
+            pending = self._progress.get_pending(request.thread_id)
+            if pending is not None:
+                resolved = self._progress.resolve(request.thread_id, pending.id, accepted=True)
+                return CoachTurn(
+                    response_text=(
+                        "Confirmed. You are now in the next Thinking Path stage."
+                    ),
+                    assessment=EducationalAssessment(current_stage=resolved.to_stage),
+                )
+            return CoachTurn(
+                response_text="There is no pending stage recommendation to confirm.",
+                assessment=EducationalAssessment(
+                    current_stage=current_stage(
+                        normalize_journey(
+                            dict(
+                                (self._notebooks.get_thread(request.thread_id) or {})
+                                .get("metadata")
+                                or {}
+                            ).get("learning_journey")
+                        )
+                    ).id
+                ),
+            )
+
         from backend.rate_limit import get_coach_rate_limiter
 
         if execution_lease_held:
@@ -999,6 +1031,22 @@ class CoachApplicationService:
             prepared_request, turn = self._maybe_rag_fallback(
                 prepared_request, turn, snapshot
             )
+        if (
+            is_stage_progression_request(prepared_request.student_message)
+            and turn.pending_transition is not None
+        ):
+            destination = STAGE_BY_ID[turn.pending_transition.to_stage]
+            confirmation_instruction = (
+                f"\n\n**Next: {destination.label}.** {destination.description} "
+                "The stage has not changed yet. Type exact `confirm` to advance."
+            )
+            if "Type exact `confirm` to advance." not in turn.response_text:
+                turn = turn.model_copy(
+                    update={
+                        "response_text": turn.response_text.rstrip()
+                        + confirmation_instruction
+                    }
+                )
         if owned_review:
             should_generate_title = False
         research_observation = _research_observation_from_coding(
@@ -1066,6 +1114,7 @@ class CoachApplicationService:
             and not runtime_settings.student_stage_selection
             and self._progress is not None
             and turn.pending_transition is not None
+            and not is_stage_progression_request(prepared_request.student_message)
         ):
             pending = turn.pending_transition
             questions = turn.assessment.guidance_questions or list(
@@ -1625,8 +1674,10 @@ class CoachApplicationService:
                 visible_sources=[*visible_sources, *attachment_sources],
             )
         selected_sources = list(snapshot.selected_sources)
-        authoritative_ids = [str(source["id"]) for source in selected_sources]
-        authoritative_id_set = set(authoritative_ids)
+        # Keep this original set only for integrity checks.  Per-turn privacy
+        # scoping below can narrow the effective evidence set.
+        authorized_ids = [str(source["id"]) for source in selected_sources]
+        authorized_id_set = set(authorized_ids)
         if frozen_source_ids is not None:
             frozen_ids = [
                 str(source_id).strip()
@@ -1634,11 +1685,11 @@ class CoachApplicationService:
                 if str(source_id).strip()
             ]
             frozen_id_set = set(frozen_ids)
-            if len(frozen_ids) != len(frozen_id_set) or len(authoritative_ids) != len(
-                authoritative_id_set
+            if len(frozen_ids) != len(frozen_id_set) or len(authorized_ids) != len(
+                authorized_id_set
             ):
                 raise ValueError("Frozen source_ids contain duplicate identifiers")
-            if authoritative_id_set != frozen_id_set:
+            if authorized_id_set != frozen_id_set:
                 raise ValueError(
                     "Frozen source_ids no longer match the notebook sources"
                 )
@@ -1653,11 +1704,11 @@ class CoachApplicationService:
             unselected = [
                 source_id
                 for source_id in request.source_ids
-                if source_id not in authoritative_id_set
+                if source_id not in authorized_id_set
             ]
             if unselected:
                 raise ValueError("One or more source_ids are not selected")
-            if set(request.source_ids) != authoritative_id_set:
+            if set(request.source_ids) != authorized_id_set:
                 raise ValueError(
                     "source_ids must match the notebook's currently selected sources"
                 )
@@ -1701,19 +1752,6 @@ class CoachApplicationService:
             for source in selected_image_sources
             if str(source.get("id") or "") not in resolved_image_ids
         }
-        if unresolved_image_ids:
-            # An image row with missing bytes is not evidence. Keep the
-            # authoritative source ids for validation/citation ordering, but
-            # remove unresolved image rows from the retrieval snapshot so the
-            # generic image marker cannot satisfy a Q&A turn.
-            snapshot = replace(
-                snapshot,
-                selected_sources=tuple(
-                    source
-                    for source in snapshot.selected_sources
-                    if str(source.get("id") or "") not in unresolved_image_ids
-                ),
-            )
         selected_model = get_model(
             str(metadata.get("selected_model") or request.model_id or DEFAULT_CHAT_MODEL_ID)
         )
@@ -1739,6 +1777,25 @@ class CoachApplicationService:
             ],
             has_selected_sources=bool(selected_sources),
         )
+        progression_request = is_stage_progression_request(request.student_message)
+        if progression_request:
+            # A stage-navigation command must not be hijacked by selected
+            # source titles that happen to name a stage.
+            mode_policy = ModePolicy(
+                intent=mode_policy.intent,
+                expected_mode="coaching",
+                retrieve=False,
+                retrieval_intent=mode_policy.retrieval_intent,
+                mixed=mode_policy.mixed,
+            )
+            record_field("stage_progression_request", True)
+            # Progression readiness is about the student's recorded work, not
+            # a selected source title or attachment. Keep authorization checks
+            # above, then present no evidence scope to Fast Chat.
+            snapshot = replace(snapshot, selected_sources=(), retrieval_sources=())
+            selected_image_sources = []
+            image_inputs = []
+            unresolved_image_ids = set()
         attachment_only_question = is_private_attachment_question(
             request.student_message,
             attachment_count=len(attachment_ids),
@@ -1760,6 +1817,45 @@ class CoachApplicationService:
                     source
                     for source in snapshot.retrieval_sources
                     if source.source_id in attachment_id_set
+                ),
+            )
+            # Vision inputs are evidence too. Do not retain bytes from a
+            # separately selected course image after narrowing this turn to a
+            # private attachment.
+            selected_image_sources = [
+                source
+                for source in selected_image_sources
+                if str(source.get("id") or "") in attachment_id_set
+            ]
+            image_inputs = [
+                image
+                for image in image_inputs
+                if str(image.source_id) in attachment_id_set
+            ]
+            resolved_image_ids = {str(item.source_id) for item in image_inputs}
+            unresolved_image_ids = {
+                str(source.get("id") or "")
+                for source in selected_image_sources
+                if str(source.get("id") or "") not in resolved_image_ids
+            }
+        # Freeze the post-scope evidence IDs before excluding broken image
+        # bytes from provider inputs.  A missing selected image is still an
+        # evidence gap, not permission to use model knowledge.
+        effective_source_ids = [
+            str(source.get("id") or "")
+            for source in snapshot.selected_sources
+            if str(source.get("id") or "")
+        ]
+        if unresolved_image_ids:
+            # An image row with missing bytes is not evidence. Keep its ID in
+            # the effective scope above so the request fails closed instead of
+            # falling back to model knowledge.
+            snapshot = replace(
+                snapshot,
+                selected_sources=tuple(
+                    source
+                    for source in snapshot.selected_sources
+                    if str(source.get("id") or "") not in unresolved_image_ids
                 ),
             )
         missing_image_qa = bool(selected_image_sources) and (
@@ -1846,7 +1942,7 @@ class CoachApplicationService:
         # metadata must not leave a source-free notebook in source-only mode.
         # Conversely, a client cannot enable broader knowledge while any
         # selected source exists.
-        allow_model_knowledge = not authoritative_ids
+        allow_model_knowledge = not effective_source_ids
         if frozen_history_revision is not None:
             conversation_revision = max(0, int(frozen_history_revision))
         else:
@@ -1865,7 +1961,7 @@ class CoachApplicationService:
             update={
                 "current_stage": authoritative_stage,
                 "history": store_history,
-                "source_ids": authoritative_ids,
+                "source_ids": effective_source_ids,
                 "source_context": retrieval_result_context,
                 "student_project_context": project_context,
                 "conversation_summary": conversation_summary,

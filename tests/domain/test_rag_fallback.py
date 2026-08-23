@@ -279,6 +279,8 @@ def test_attachment_fallback_snapshot_excludes_selected_course_sources(tmp_path)
         attachment_source_ids=[attachment["id"]],
     )
     prepared, snapshot = service._prepare_authoritative_turn(request)
+    assert prepared.source_ids == [attachment["id"]]
+    assert prepared.allow_model_knowledge is False
     first_request = prepared.model_copy(
         update={"retrieval_required": False, "retrieved_chunks": []}
     )
@@ -290,6 +292,40 @@ def test_attachment_fallback_snapshot_excludes_selected_course_sources(tmp_path)
     assert len(retriever.calls) == 1
     assert [source.source_id for source in retriever.calls[0].sources] == [
         attachment["id"]
+    ]
+
+
+def test_attachment_course_comparison_keeps_combined_evidence_scope(tmp_path) -> None:
+    """Explicit course comparisons retain attachment and selected course evidence."""
+    store = StudentStore(tmp_path / "attachment-course-comparison.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    course = add_text_source(store, thread_id, "Lecture 4", "Course comparison evidence")
+    attachment = add_file_sources(
+        store,
+        thread_id,
+        [("private.pdf", b"Private comparison evidence", "application/pdf")],
+        origin=CHAT_ATTACHMENT_ORIGIN,
+        selected=False,
+    )[0]
+    retriever = RecordingRetriever(result=_result_for_source(store, thread_id))
+    client = FakeAgentCoreRuntime(payload=_coaching_payload())
+    service = _service(store, client, retriever)
+    request = CoachRequest(
+        thread_id=thread_id,
+        student_message="Compare this attachment to Lecture 4 material.",
+        current_stage="problem_identification",
+        response_detail="short",
+        attachment_source_ids=[attachment["id"]],
+        idempotency_key="attachment-course-comparison",
+    )
+    prepared, _ = service._prepare_authoritative_turn(request)
+    assert prepared.source_ids == [course["id"], attachment["id"]]
+    retriever.calls.clear()
+    service.submit(request)
+    assert len(retriever.calls) == 1
+    assert [source.source_id for source in retriever.calls[0].sources] == [
+        course["id"],
+        attachment["id"],
     ]
 
 

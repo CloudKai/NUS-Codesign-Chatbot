@@ -19,6 +19,7 @@ from backend.coaching.mode_policy import (
     RUNTIME_HINT_QA,
     ModePolicy,
     enforce_model_mode,
+    is_stage_progression_request,
     looks_like_project_reasoning,
     is_private_attachment_question,
     resolve_mode_policy,
@@ -38,6 +39,7 @@ from backend.retrieval_gate import (
     INTENT_HIGH_CONFIDENCE_SOURCE,
 )
 from backend.specialists.review_orchestration import COUNTER_SETTINGS_KEY
+from backend.source_library import CHAT_ATTACHMENT_ORIGIN, add_file_sources, add_text_source
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
 from fake_agentcore_runtime import FakeAgentCoreRuntime
@@ -132,7 +134,20 @@ def _provider(client: FakeAgentCoreRuntime) -> AgentCoreCoachProvider:
     )
 
 
-def _service(store: StudentStore, client: FakeAgentCoreRuntime) -> CoachApplicationService:
+class _NoRetrieve:
+    """Fail if a routing-only stage navigation reaches retrieval."""
+
+    def retrieve(self, query: Any) -> Any:
+        raise AssertionError(f"unexpected retrieval for {query.student_message!r}")
+
+
+def _service(
+    store: StudentStore,
+    client: FakeAgentCoreRuntime,
+    *,
+    auto_advance_stages: bool = False,
+    retriever: Any | None = None,
+) -> CoachApplicationService:
     """Build the application path with the AgentCore adapter injected."""
     notebooks = SQLiteNotebookRepository(store)
     transitions = SQLitePhaseTransitionRepository(store)
@@ -141,6 +156,8 @@ def _service(store: StudentStore, client: FakeAgentCoreRuntime) -> CoachApplicat
         notebooks,
         CoachWorkflow(_provider(client), transitions),
         LearningProgressService(store, notebooks, transitions),
+        auto_advance_stages=auto_advance_stages,
+        retriever=retriever,
     )
 
 
@@ -377,6 +394,218 @@ def test_private_attachment_project_reasoning_is_not_forced_to_attachment_rag() 
         "Please review our concept before I submit it",
     ):
         assert is_private_attachment_question(message, attachment_count=1) is False
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "Nothing else. Can we move on to concept generation?",
+        "Can we proceed to the next stage?",
+        "I'm ready to advance.",
+        "Are we ready to move on?",
+        "Am I ready to proceed?",
+    ),
+)
+def test_explicit_stage_progression_requests_are_narrowly_recognized(message: str) -> None:
+    """Navigation commands route to coaching without making stage terms Q&A."""
+    assert is_stage_progression_request(message) is True
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "what is concept generation?",
+        "concept generation seems difficult",
+        "How does concept generation relate to the lecture?",
+        "Can we go over my evidence?",
+        "Can we proceed with this idea?",
+        "Can we advance this idea?",
+        "Should I advance this proposal?",
+    ),
+)
+def test_stage_discussion_is_not_a_navigation_command(message: str) -> None:
+    """Ordinary stage discussion remains on the normal routing path."""
+    assert is_stage_progression_request(message) is False
+
+
+def test_exact_confirm_resolves_a_pending_transition_without_agentcore(tmp_path) -> None:
+    """Typed confirmation reuses the atomic transition path and never invokes Fast Chat."""
+    store = StudentStore(tmp_path / "typed-confirm.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="advance"))
+    service = _service(store, client)
+    pending_turn = _submit(
+        service,
+        thread_id,
+        "How might we help older pedestrians cross safely without rushing?",
+        key="pending-for-confirm",
+    )
+    assert pending_turn.pending_transition is not None
+    calls_before_confirm = len(client.calls)
+
+    confirmed = _submit(service, thread_id, "confirm", key="exact-confirm")
+
+    assert len(client.calls) == calls_before_confirm
+    assert confirmed.assessment.current_stage == "concept_generation"
+    assert store.get_pending_phase_transition(thread_id) is None
+    assert (store.get_thread(thread_id) or {})["metadata"]["thinking_stage"] == "concept_generation"
+
+
+def test_navigation_with_stage_named_source_skips_retrieval_and_waits_for_confirm(tmp_path) -> None:
+    """Explicit navigation is coaching even when selected source metadata matches it."""
+    store = StudentStore(tmp_path / "navigation-source-title.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    add_text_source(store, thread_id, "Concept generation", "Unrelated course text")
+    client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="advance"))
+    service = _service(store, client, retriever=_NoRetrieve())
+    message = (
+        "Can we move on to concept generation? How might we help older pedestrians "
+        "cross safely without rushing?"
+    )
+    request = CoachRequest(
+        thread_id=thread_id,
+        student_message=message,
+        current_stage="problem_identification",
+        response_detail="short",
+        idempotency_key="navigation-source-title",
+    )
+    prepared, _ = service._prepare_authoritative_turn(request)
+    assert prepared.source_ids == []
+    assert prepared.allow_model_knowledge is True
+    turn = service.submit(request)
+
+    assert len(client.calls) == 1
+    assert turn.assessment.response_mode == "coaching"
+    assert turn.pending_transition is not None
+    assert turn.pending_transition.to_stage == "concept_generation"
+    assert "Next: Concept generation" in turn.response_text
+    assert "Generate and compare plausible concepts" in turn.response_text
+    assert "The stage has not changed yet" in turn.response_text
+    assert "Type exact `confirm` to advance." in turn.response_text
+    assert (store.get_thread(thread_id) or {})["metadata"]["thinking_stage"] == "problem_identification"
+    payload = _decoded_payload(client.calls[0])
+    trusted = str(payload["trusted_instructions"])
+    assert "hold the recommendation pending" in trusted
+    assert "exact `confirm`" in trusted
+    assert "automatically move" not in trusted
+
+
+def test_navigation_opt_out_preserves_normal_auto_advance(tmp_path) -> None:
+    """Only explicit navigation waits; ordinary HMW advancement remains automatic."""
+    store = StudentStore(tmp_path / "navigation-auto-advance.sqlite3")
+    nav_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    ordinary_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="advance"))
+    service = _service(store, client, auto_advance_stages=True)
+    navigation = _submit(
+        service,
+        nav_id,
+        "Can we move on? How might we help older pedestrians cross safely without rushing?",
+        key="navigation-auto",
+    )
+    ordinary = _submit(
+        service,
+        ordinary_id,
+        "How might we help older pedestrians cross safely without rushing?",
+        key="ordinary-auto",
+    )
+
+    assert navigation.pending_transition is not None
+    assert navigation.auto_advanced_to is None
+    assert ordinary.pending_transition is None
+    assert ordinary.auto_advanced_to == "concept_generation"
+
+
+def test_navigation_stay_with_stage_named_source_skips_retrieval(tmp_path) -> None:
+    """A not-ready navigation request remains a single coaching call."""
+    store = StudentStore(tmp_path / "navigation-stay.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    add_text_source(store, thread_id, "Concept generation", "Unrelated course text")
+    client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="stay"))
+    turn = _submit(
+        _service(store, client, retriever=_NoRetrieve()),
+        thread_id,
+        "Can we move on to concept generation?",
+        key="navigation-stay",
+    )
+    assert len(client.calls) == 1
+    assert turn.pending_transition is None
+    assert (store.get_thread(thread_id) or {})["metadata"]["thinking_stage"] == "problem_identification"
+
+
+def test_navigation_pi_guard_blocks_premature_advance(tmp_path) -> None:
+    """Navigation does not bypass the student-authored HMW provenance guard."""
+    store = StudentStore(tmp_path / "navigation-pi-guard.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="advance"))
+    turn = _submit(
+        _service(store, client, retriever=_NoRetrieve()),
+        thread_id,
+        "Nothing else. Can we move on to concept generation?",
+        key="navigation-pi-guard",
+    )
+    assert len(client.calls) == 1
+    assert turn.pending_transition is None
+    assert turn.assessment.recommendation is StageDecision.STAY
+    assert "How Might We" in turn.response_text
+    assert (store.get_thread(thread_id) or {})["metadata"]["thinking_stage"] == "problem_identification"
+
+
+def test_confirm_without_pending_uses_authoritative_stage_without_agentcore(tmp_path) -> None:
+    """A stale client stage cannot affect an otherwise inert exact confirmation."""
+    store = StudentStore(tmp_path / "confirm-no-pending.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = FakeAgentCoreRuntime(payload=_coaching_payload())
+    service = _service(store, client)
+    turn = service.submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="confirm",
+            current_stage="concept_generation",
+            response_detail="short",
+            idempotency_key="confirm-no-pending",
+        )
+    )
+    assert client.calls == []
+    assert turn.assessment.current_stage == "problem_identification"
+    assert (store.get_thread(thread_id) or {})["metadata"]["thinking_stage"] == "problem_identification"
+
+
+def test_direct_image_attachment_excludes_selected_course_scope(tmp_path) -> None:
+    """A current private image question reaches Fast Chat, not a course evidence gap."""
+    store = StudentStore(tmp_path / "direct-image-scope.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    add_text_source(store, thread_id, "Lecture 3", "Unrelated course evidence")
+    course_image = add_file_sources(
+        store,
+        thread_id,
+        [("lecture-diagram.png", b"course-image", "image/png")],
+    )[0]
+    image = add_file_sources(
+        store,
+        thread_id,
+        [("diagram.png", b"not-a-real-image", "image/png")],
+        origin=CHAT_ATTACHMENT_ORIGIN,
+        selected=False,
+    )[0]
+    client = FakeAgentCoreRuntime(payload=_qa_payload(text="The image is a diagram."))
+    service = _service(store, client)
+    request = CoachRequest(
+        thread_id=thread_id,
+        student_message="What is this image about?",
+        current_stage="problem_identification",
+        response_detail="short",
+        attachment_source_ids=[image["id"]],
+        idempotency_key="direct-image-scope",
+    )
+    prepared, _ = service._prepare_authoritative_turn(request)
+    assert prepared.source_ids == [image["id"]]
+    assert prepared.image_inputs and prepared.image_inputs[0].source_id == image["id"]
+    assert [item.source_id for item in prepared.image_inputs] == [image["id"]]
+    assert course_image["id"] not in prepared.source_ids
+    turn = service.submit(request)
+    assert len(client.calls) == 1
+    assert turn.response_text != "I couldn't retrieve a validated excerpt from the selected course material for this turn, so I can't reliably summarise it from the course sources right now."
 
 
 def test_personal_reflection_phrased_as_a_question_is_not_qa() -> None:

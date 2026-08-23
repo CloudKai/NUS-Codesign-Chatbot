@@ -2,6 +2,46 @@
 
 ## CURRENT STATUS
 
+### Attachment scope and confirmation-gated navigation (2026-08-23)
+
+**Change.** Authoritative selected-source validation now remains separate from
+the effective per-turn evidence scope: direct private attachment questions send
+only their current attachment IDs to retrieval/provider grounding, while
+explicit course comparisons retain their combined scope. A narrow server-side
+stage-navigation matcher forces explicit move-on requests into coaching and
+skips retrieval even if a selected source title names the target stage. A ready
+navigation recommendation opts out of the existing auto-advance branch only
+for that explicit request, remains pending, receives a server-owned destination
+and exact ``confirm`` instruction, and a literal chat ``confirm`` resolves an
+existing pending transition through the existing atomic learning service without
+model or retrieval work. Organic/HMW auto-advance remains unchanged.
+
+**Files.** `backend/coaching/{execution,mode_policy}.py`,
+`backend/prompts/composer.py`, `tests/domain/{test_mode_classification,
+test_rag_fallback,test_prompt_architecture}.py`.
+
+**Validation.** A focused cross-cutting selection (mode/prompt/RAG/retrieval/
+Q&A/provider/HMW/workflow/API/deployment) passed: 273 tests. Ruff passed on
+touched Python files; compileall passed for `backend`, `ui`,
+`streamlit_app.py`, `tests`, and `agentcore_runtime`. Unfiltered full pytest
+collection remains blocked by the untouched pre-existing
+`scripts/load_probe.py:663` indentation error. A broad run ignoring only that
+file collected 1,675 tests: 1,674 passed and
+`tests/ui/test_chat_progress.py::test_submitted_prompt_does_not_share_widget_with_previous_assistant`
+failed (expected assistant reply count 2, got 1); its isolated rerun also
+fails. No UI files changed in this task, so this remains a pre-existing/stale
+UI-test blocker.
+
+**Compatibility / deployment.** No schema, Compose, AWS, or AgentCore runtime
+artifact changes. Rebuild the app image only; no runtime publication or
+session-generation bump is needed because the trusted navigation instruction
+is sent in the application-owned trusted-instructions payload.
+
+**Next action.** Resolve or separately handle the pre-existing
+`scripts/load_probe.py` syntax error and stale `test_chat_progress` failure,
+then rerun the full deterministic mock suite and perform a mock/API smoke of
+attachment-only image/PDF Q&A and typed confirmation.
+
 ### Default coaching style is Quick (2026-08-23)
 
 **Change.** New notebooks and empty progress blobs now default to Quick
