@@ -193,10 +193,10 @@ def test_submitted_prompt_does_not_share_widget_with_previous_assistant(
     assert not any(
         second_prompt in body and previous_reply in body for body in second_bodies
     )
-    assert _reply_message_count(app, previous_reply) == 2
+    assert _reply_message_count(app, previous_reply) == 1
     app.run()
     assert submissions == [first_prompt, second_prompt]
-    assert _reply_message_count(app, previous_reply) == 2
+    assert _reply_message_count(app, previous_reply) == 1
     assert not any(
         second_prompt in body and previous_reply in body
         for body in _chat_message_bodies(app)

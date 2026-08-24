@@ -15,10 +15,10 @@ services:
     environment:
       APP_ENV: "production"
       # Month-1 pilot: coach ADVANCE auto-applies (no Next confirmation).
-      # Month-2+: set AUTO_ADVANCE_STAGES=false and STUDENT_STAGE_SELECTION=true
-      # so students pick stages in Journey. If both are true, selection wins.
-      AUTO_ADVANCE_STAGES: "false"
-      STUDENT_STAGE_SELECTION: "true"
+      # Stage selection remains disabled in the production pilot. Month-2+
+      # can set AUTO_ADVANCE_STAGES=false and STUDENT_STAGE_SELECTION=true.
+      AUTO_ADVANCE_STAGES: "true"
+      STUDENT_STAGE_SELECTION: "false"
       USE_LOCAL_API: "true"
       CO_DESIGN_PUBLIC_API_URL: "${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}"
       CO_DESIGN_UI_URL: "${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}"

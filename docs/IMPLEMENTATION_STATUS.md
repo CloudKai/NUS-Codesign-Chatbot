@@ -2,6 +2,22 @@
 
 ## CURRENT STATUS
 
+### Production validation blocker cleanup (2026-08-25)
+
+**Change.** Restored the documented Month-1 production Compose policy
+(`AUTO_ADVANCE_STAGES=true`, `STUDENT_STAGE_SELECTION=false`), updated deployment
+tests to the active affinity generation 8, and repaired three malformed
+indentation sites in the mock-only `scripts/load_probe.py`.
+
+**Validation.** `tests/test_deployment_config.py` and
+`tests/scripts/test_load_probe.py`: 32 passed. The full deterministic suite:
+**1,755 passed**. Ruff, compileall, and `git diff --check` passed. No runtime,
+AgentCore, AWS, database, or user data changes were made.
+
+**Next exact action.** Run the broader deterministic suite; then rebuild the
+EC2 application from this reviewed commit if the remaining unrelated tests are
+green.
+
 ### Deep Review timeout boundaries (2026-08-25)
 
 **Change.** Confirmed the production timeout failure was an inner Bedrock

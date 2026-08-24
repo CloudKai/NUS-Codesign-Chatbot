@@ -660,9 +660,9 @@ def run_sequential_probe(*, users: int, requests_per_user: int) -> ProbeReport:
                         client, cookies, label=f"probe-{user_index}"
                     )
                 except RuntimeError:
-                with lock:
+                    with lock:
                         failed += 1
-                return
+                    return
                 for index in range(requests_per_user):
                     started = time.perf_counter()
                     response = client.post(
@@ -751,7 +751,7 @@ def run_distinct_owner_probe(
                     valid = False
                     if response.status_code == 200:
                         valid = _turn_is_structurally_valid(response.json())
-                with lock:
+                    with lock:
                         latencies_ms.append(elapsed_ms)
                         if response.status_code == 200:
                             accepted += 1
@@ -1099,9 +1099,9 @@ def run_kb_pool_probe(
             nonlocal accepted, capacity_exhausted, failed
             started = time.perf_counter()
             result = retriever.retrieve(query)
-                elapsed_ms = (time.perf_counter() - started) * 1000.0
-                with lock:
-                    latencies_ms.append(elapsed_ms)
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            with lock:
+                latencies_ms.append(elapsed_ms)
             category = str(result.failure_category or "")
             if result.chunks:
                 accepted += 1

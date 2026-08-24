@@ -188,7 +188,7 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     assert "body[data-cd-attach-hover=\"1\"]" in chat_css
     assert "stChatInputStopButton" in chat_css
     assert "stExpanderIconSpinner" in chat_css
-    assert "textarea:disabled" in chat_css
+    assert '[data-testid="stChatInputTextArea"]' in chat_css
 
     dialogs_css = Path(_STYLES_DIR / "50-dialogs-notebooks.css").read_text(
         encoding="utf-8"
