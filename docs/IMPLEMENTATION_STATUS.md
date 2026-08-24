@@ -2,6 +2,21 @@
 
 ## CURRENT STATUS
 
+### Journey stage cards: closed header + open filled card (2026-08-24)
+
+**Change.** Thinking Path non-current stages now use a compact header row:
+title, chevron, and a tertiary handwritten **Work on this stage** CTA on the
+right when ``STUDENT_STAGE_SELECTION=true``. Preview-open stages share the
+current-stage filled card via a hidden ``journey-state open`` marker. Current
+stage keeps description + Suggested questions and no CTA.
+
+**Files.** ``ui/panels/studio.py``, ``ui/assets/styles/{00-foundations,20-studio,90-responsive}.css``,
+``tests/ui/{test_rerun_scope,test_theme_styles}.py``.
+
+**Validation.** Focused UI rerun-scope, theme-styles, and streamlit UI tests;
+``compileall`` on ``ui``. No coaching logic, ``STUDENT_STAGE_SELECTION``
+default, or deploy changes.
+
 ### Local chat-driven authoritative stage selection (2026-08-24)
 
 **Change.** With ``STUDENT_STAGE_SELECTION=true``, an exact full-message

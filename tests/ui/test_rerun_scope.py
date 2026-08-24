@@ -312,6 +312,21 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
         "def render_journey_track", 1
     )[0]
     assert "rerun_app()" in select_block
+    journey_block = source.split("def render_journey_track", 1)[1].split(
+        "def review_stage_expander_key", 1
+    )[0]
+    assert 'state_classes = f"{state_classes} open"' in journey_block
+    assert "_render_journey_stage_header_row(" in journey_block
+    header_block = source.split("def _render_journey_stage_header_row", 1)[1].split(
+        "def _select_journey_stage", 1
+    )[0]
+    assert "header_column, cta_column = st.columns(" in header_block
+    work_on_index = header_block.index('"Work on this stage"')
+    work_on_context = header_block[max(0, work_on_index - 220) : work_on_index + 120]
+    assert '"Work on.."' in header_block
+    assert 'key=f"journey-select-compact-{stage.id}"' in header_block
+    assert 'type="tertiary"' in work_on_context
+    assert 'type="primary"' not in work_on_context
 
 
 def test_topbar_guidance_and_profile_use_correct_rerun_scope() -> None:

@@ -810,6 +810,8 @@ def test_journey_work_on_this_stage_appears_when_selection_enabled(monkeypatch):
         button for button in app.button if button.label == "Work on this stage"
     ]
     assert len(select_buttons) == 4
+    compact_buttons = [button for button in app.button if button.label == "Work on.."]
+    assert len(compact_buttons) == 4
     captions = "\n".join(caption.value or "" for caption in app.caption)
     assert "Choose a stage to work on." in captions
     assert not app.exception

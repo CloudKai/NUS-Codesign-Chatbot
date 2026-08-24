@@ -331,6 +331,63 @@ def _toggle_stage_preview(stage_id: str) -> None:
     st.session_state.journey_preview_stages = sorted(opened)
 
 
+def _render_journey_stage_header_row(
+    stage: ThinkingStage,
+    *,
+    chevron: str,
+    selection_enabled: bool,
+) -> None:
+    """Render a left-aligned stage title, chevron, and optional select CTA."""
+    if selection_enabled:
+        header_column, cta_column = st.columns(
+            [0.58, 0.42],
+            gap="small",
+            vertical_alignment="center",
+        )
+    else:
+        header_column = st.container()
+        cta_column = None
+    with header_column:
+        with st.container(key=f"journey_header_{stage.id}"):
+            title_column, chevron_column = st.columns(
+                [0.94, 0.06],
+                gap="small",
+                vertical_alignment="center",
+            )
+        with title_column:
+            st.markdown(
+                '<div class="journey-stage-heading">'
+                f'<span class="journey-short-label">'
+                f"{escape(stage.label)}</span></div>",
+                unsafe_allow_html=True,
+            )
+        with chevron_column:
+            if st.button(
+                chevron,
+                type="tertiary",
+                use_container_width=True,
+                key=f"journey-toggle-{stage.id}",
+            ):
+                _toggle_stage_preview(stage.id)
+                rerun_fragment()
+    if cta_column is not None:
+        with cta_column:
+            if st.button(
+                "Work on this stage",
+                type="tertiary",
+                use_container_width=False,
+                key=f"journey-select-{stage.id}",
+            ):
+                _select_journey_stage(stage.id)
+            if st.button(
+                "Work on..",
+                type="tertiary",
+                use_container_width=False,
+                key=f"journey-select-compact-{stage.id}",
+            ):
+                _select_journey_stage(stage.id)
+
+
 def _select_journey_stage(stage_id: str) -> None:
     """Persist a student-chosen Thinking Path stage and refresh session journey."""
     try:
@@ -402,9 +459,12 @@ def render_journey_track() -> None:
             )
             icon_name = "check" if state == "completed" else stage_icons[stage.id]
             is_preview_open = stage.id in preview_stages
+            state_classes = f"journey-state {state}"
+            if is_preview_open:
+                state_classes = f"{state_classes} open"
             with st.container(key=f"journey_stage_{stage.id}"):
                 st.markdown(
-                    f'<span class="journey-state {state}"></span>',
+                    f'<span class="{state_classes}"></span>',
                     unsafe_allow_html=True,
                 )
                 icon_column, copy_column = st.columns([0.13, 0.87], gap="small")
@@ -426,34 +486,12 @@ def render_journey_track() -> None:
                         )
                         _render_stage_detail(stage)
                     else:
-                        title_column, chevron_column = st.columns(
-                            [0.88, 0.12],
-                            gap="small",
-                        )
-                        title_column.markdown(
-                            '<div class="journey-stage-heading">'
-                            f'<span class="journey-short-label">'
-                            f"{escape(stage.label)}</span></div>",
-                            unsafe_allow_html=True,
-                        )
                         chevron = "⌃" if is_preview_open else "⌵"
-                        with chevron_column:
-                            if st.button(
-                                chevron,
-                                type="tertiary",
-                                use_container_width=True,
-                                key=f"journey-toggle-{stage.id}",
-                            ):
-                                _toggle_stage_preview(stage.id)
-                                rerun_fragment()
-                        if selection_enabled:
-                            if st.button(
-                                "Work on this stage",
-                                type="primary",
-                                use_container_width=True,
-                                key=f"journey-select-{stage.id}",
-                            ):
-                                _select_journey_stage(stage.id)
+                        _render_journey_stage_header_row(
+                            stage,
+                            chevron=chevron,
+                            selection_enabled=selection_enabled,
+                        )
                         if is_preview_open:
                             _render_stage_detail(stage)
                 if state == "current" or is_preview_open:

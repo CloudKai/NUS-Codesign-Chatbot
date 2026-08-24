@@ -51,7 +51,8 @@
         background:var(--cd-border);
     }
 
-    [class*="st-key-journey_stage_"]:has(.journey-state.current) {
+    [class*="st-key-journey_stage_"]:has(.journey-state.current),
+    [class*="st-key-journey_stage_"]:has(.journey-state.open) {
         margin:.1rem 0 .48rem;
         padding:.95rem .88rem .9rem;
         border:1px solid color-mix(in srgb,var(--cd-accent) 22%,transparent);
@@ -62,27 +63,125 @@
         opacity:.78;
     }
 
-    [class*="st-key-journey-toggle-"] {
+    [class*="st-key-journey_stage_"] [data-testid="stHorizontalBlock"]:has(.journey-short-label):has(
+        [class*="st-key-journey-toggle-"]
+    ):not(:has([class*="st-key-journey-select-"])) {
+        width:fit-content !important;
+        max-width:100%;
+        align-items:center !important;
+        justify-content:flex-start !important;
+        gap:.08rem;
+    }
+
+    [class*="st-key-journey_stage_"] [data-testid="stHorizontalBlock"]:has(.journey-short-label):has(
+        [class*="st-key-journey-toggle-"]
+    ):not(:has([class*="st-key-journey-select-"]))
+    > [data-testid="stColumn"] {
+        flex:0 0 auto !important;
+        width:auto !important;
+        min-width:0 !important;
+        align-self:center !important;
+    }
+
+    [class*="st-key-journey_stage_"] [data-testid="stHorizontalBlock"]:has(.journey-short-label):has(
+        [class*="st-key-journey-select-"]
+    ) {
+        align-items:center !important;
+        justify-content:space-between !important;
+        flex-wrap:nowrap !important;
         width:100%;
         min-width:0;
+        gap:.35rem;
+        container-type:inline-size;
+        container-name:journey-header;
+    }
+
+    [class*="st-key-journey_stage_"] [data-testid="stHorizontalBlock"]:has(.journey-short-label):has(
+        [class*="st-key-journey-select-"]
+    )
+    > [data-testid="stColumn"]:not(:has([class*="st-key-journey-select-"])) {
+        flex:1 1 auto !important;
+        width:auto !important;
+        min-width:0 !important;
+        overflow:hidden;
+    }
+
+    [class*="st-key-journey_stage_"] [data-testid="stHorizontalBlock"]:has(.journey-short-label):has(
+        [class*="st-key-journey-select-"]
+    )
+    > [data-testid="stColumn"]:has([class*="st-key-journey-select-"]) {
+        flex:0 0 auto !important;
+        display:flex !important;
+        flex-direction:column !important;
+        align-items:flex-end !important;
+        justify-content:center !important;
+        margin-left:auto;
+    }
+
+    [class*="st-key-journey_stage_"] [data-testid="stHorizontalBlock"]:has(.journey-short-label):has(
+        [class*="st-key-journey-select-"]
+    )
+    .journey-short-label {
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+    }
+
+    [class*="st-key-journey_header_"] [data-testid="stHorizontalBlock"] {
+        width:auto !important;
+        max-width:100% !important;
+        align-items:center !important;
+        justify-content:flex-start !important;
+        gap:.08rem;
+    }
+
+    [class*="st-key-journey_header_"] [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]:first-child {
+        flex:0 1 auto !important;
+        width:auto !important;
+        min-width:0 !important;
+    }
+
+    [class*="st-key-journey_header_"] [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]:last-child {
+        flex:0 0 auto !important;
+        width:auto !important;
+        min-width:0 !important;
+    }
+
+    [class*="st-key-journey_stage_"] > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]:last-child
+    > [data-testid="stVerticalBlock"] {
+        align-items:flex-start;
+    }
+
+    [class*="st-key-journey-toggle-"] {
+        width:auto;
+        min-width:0;
         display:flex;
-        justify-content:flex-end;
+        justify-content:flex-start;
+        align-items:center;
+        align-self:center;
+        margin-top:0;
     }
 
     [class*="st-key-journey-toggle-"] div[data-testid="stButton"],
     [class*="st-key-journey-toggle-"] [data-testid="stBaseButton-tertiary"] {
         width:auto !important;
         min-width:1.5rem;
-        margin-left:auto;
+        margin-left:0;
     }
 
     [class*="st-key-journey-toggle-"] div[data-testid="stButton"] button,
     [class*="st-key-journey-toggle-"] [data-testid="stBaseButton-tertiary"] {
         width:1.5rem !important;
         min-width:1.5rem !important;
-        min-height:1.4rem !important;
+        min-height:1.25rem !important;
+        height:1.25rem !important;
         justify-content:center !important;
-        margin:0 0 0 auto !important;
+        align-items:center !important;
+        margin:0 !important;
         padding:0 !important;
         border:0 !important;
         border-radius:0 !important;
@@ -108,6 +207,74 @@
         -webkit-text-fill-color:currentColor !important;
         font-size:inherit !important;
         font-weight:inherit !important;
+    }
+
+    [class*="st-key-journey-select-"] {
+        width:auto;
+        min-width:0;
+        flex-shrink:0;
+        display:flex;
+        justify-content:flex-end;
+        align-self:center;
+    }
+
+    [class*="st-key-journey-select-compact-"] {
+        display:none !important;
+    }
+
+    @container journey-header (max-width:17.5rem) {
+        [class*="st-key-journey-select-"]:not([class*="st-key-journey-select-compact-"]) {
+            display:none !important;
+        }
+
+        [class*="st-key-journey-select-compact-"] {
+            display:flex !important;
+        }
+    }
+
+    [class*="st-key-journey-select-"] div[data-testid="stButton"],
+    [class*="st-key-journey-select-"] [data-testid="stBaseButton-tertiary"] {
+        width:auto !important;
+        margin-left:0;
+    }
+
+    [class*="st-key-journey-select-"] div[data-testid="stButton"] button,
+    [class*="st-key-journey-select-"] [data-testid="stBaseButton-tertiary"] {
+        width:auto !important;
+        min-width:0 !important;
+        min-height:auto !important;
+        justify-content:center !important;
+        margin:0 0 0 auto !important;
+        padding:.12rem .55rem !important;
+        border:1px solid var(--cd-accent) !important;
+        border-radius:.4rem !important;
+        color:#fff !important;
+        background:var(--cd-accent) !important;
+        box-shadow:none !important;
+        font-family:"Caveat",cursive !important;
+        font-size:1.22rem !important;
+        font-weight:600 !important;
+        line-height:1.1 !important;
+        white-space:nowrap !important;
+    }
+
+    [class*="st-key-journey-select-"] div[data-testid="stButton"] button:hover,
+    [class*="st-key-journey-select-"] [data-testid="stBaseButton-tertiary"]:hover {
+        color:#fff !important;
+        background:var(--cd-accent-hover) !important;
+    }
+
+    [class*="st-key-journey-select-"] div[data-testid="stButton"] button p,
+    [class*="st-key-journey-select-"] [data-testid="stBaseButton-tertiary"] p {
+        margin:0;
+        text-align:center;
+        color:inherit !important;
+        -webkit-text-fill-color:currentColor !important;
+        font-family:inherit !important;
+        font-size:inherit !important;
+        font-weight:inherit !important;
+        line-height:inherit !important;
+        white-space:nowrap;
     }
 
     [class*="st-key-journey_stage_"] [data-testid="stColumn"] {
@@ -193,6 +360,7 @@
         align-items:center;
         gap:.5rem;
         color:var(--cd-text);
+        text-align:left;
     }
 
     .journey-copy-stack {
@@ -200,15 +368,18 @@
         display:flex;
         flex-direction:column;
         justify-content:flex-start;
+        align-items:flex-start;
     }
 
     .journey-short-label {
+        display:block;
         min-width:0;
         overflow:visible;
         font-size:1rem;
         font-weight:720;
         line-height:1.25;
         white-space:normal;
+        text-align:left;
     }
 
     .journey-stage-detail {

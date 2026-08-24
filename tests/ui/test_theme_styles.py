@@ -56,6 +56,18 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
         assert marker in Path(_STYLES_DIR / name).read_text(encoding="utf-8")
         assert marker in css
 
+    foundations_css = Path(_STYLES_DIR / "00-foundations.css").read_text(encoding="utf-8")
+    assert "family=Caveat" in foundations_css
+
+    studio_css = Path(_STYLES_DIR / "20-studio.css").read_text(encoding="utf-8")
+    assert ':has(.journey-state.open)' in studio_css
+    assert '[class*="st-key-journey-select-"]' in studio_css
+    assert '"Caveat",cursive' in studio_css
+    assert "white-space:nowrap" in studio_css
+    assert "background:var(--cd-accent)" in studio_css
+    assert "container-name:journey-header" in studio_css
+    assert '[class*="st-key-journey-select-compact-"]' in studio_css
+
     profile_css = Path(_STYLES_DIR / "60-profile-topbar.css").read_text(encoding="utf-8")
     assert ".st-key-profile_menu_root" in profile_css
     assert ".st-key-profile_coaching_style" in profile_css

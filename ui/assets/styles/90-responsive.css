@@ -331,8 +331,15 @@
             padding:1rem .8rem calc(.45rem + 10px);
         }
 
-        [class*="st-key-journey_stage_"]:has(.journey-state.current) {
+        [class*="st-key-journey_stage_"]:has(.journey-state.current),
+        [class*="st-key-journey_stage_"]:has(.journey-state.open) {
             min-height:11rem;
+        }
+
+        [class*="st-key-journey-select-"] div[data-testid="stButton"] button,
+        [class*="st-key-journey-select-"] [data-testid="stBaseButton-tertiary"] {
+            font-size:1.05rem !important;
+            padding:.1rem .42rem !important;
         }
     }
 
