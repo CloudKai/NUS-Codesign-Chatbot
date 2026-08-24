@@ -73,6 +73,7 @@ from backend.retrieval_gate import (
     RetrievalIntent,
     classify_retrieval_intent,
 )
+from backend.learning.stages import THINKING_STAGES
 
 ExpectedResponseMode = Literal["qa", "coaching"]
 
@@ -220,6 +221,38 @@ _GENERIC_TERMINAL_COMPLETION_REQUEST = re.compile(
     re.IGNORECASE,
 )
 
+# This is deliberately narrower than general stage-related Q&A. It answers
+# only a request for the student's *current* persisted position, never an
+# explanation of what a stage means (for example, "What is Ethics & Critical
+# Thinking?").
+_CURRENT_STAGE_STATUS_REQUEST = re.compile(
+    r"^\s*(?:(?:can|could|would)\s+you\s+(?:please\s+)?(?:tell|show)\s+me\s+)?"
+    r"(?:what|which)\s+(?:(?:my|the)\s+)?(?:journey\s+|thinking\s+path\s+)?"
+    r"(?:stage|phase)\s+(?:am\s+i|are\s+we)\s+(?:in|on|at)(?:\s+now)?[?.!]*\s*$"
+    r"|^\s*what\s+is\s+(?:my|the)\s+current\s+(?:journey\s+|thinking\s+path\s+)?"
+    r"(?:stage|phase)(?:\s+(?:right\s+now|now))?[?.!]*\s*$",
+    re.IGNORECASE,
+)
+
+_MANUAL_STAGE_SELECTION_REQUEST = re.compile(
+    r"^move\s+me\s+to\s+(.+?)\s*[?.!]*$",
+    re.IGNORECASE,
+)
+
+
+def _manual_stage_key(value: str) -> str:
+    """Return the strict comparison key for a canonical stage name."""
+    compact = " ".join(str(value or "").split()).strip().casefold()
+    compact = re.sub(r"\s*&\s*", " and ", compact)
+    return " ".join(compact.split())
+
+
+_MANUAL_STAGE_TARGETS = {
+    _manual_stage_key(alias): stage.id
+    for stage in THINKING_STAGES
+    for alias in (stage.id, stage.label)
+}
+
 
 @dataclass(frozen=True)
 class ModePolicy:
@@ -307,7 +340,36 @@ def is_stage_progression_request(student_message: str) -> bool:
         _STAGE_PROGRESSION_REQUEST.search(text)
         or _EMBEDDED_STAGE_PROGRESSION_REQUEST.search(text)
         or _EXPLICIT_PATH_COMPLETION_REQUEST.search(text)
+        or manual_stage_selection_target(text) is not None
     )
+
+
+def manual_stage_selection_target(student_message: str) -> str | None:
+    """Return the canonical target of an exact manual-stage chat command.
+
+    Only the full-message form ``move me to <canonical stage label or id>`` is
+    accepted. This parser does not authorize the move; the application service
+    separately enforces ``STUDENT_STAGE_SELECTION``. Keeping recognition
+    independent from authorization ensures a disabled command still routes as
+    Thinking Path workflow intent rather than course Q&A.
+    """
+    match = _MANUAL_STAGE_SELECTION_REQUEST.fullmatch(
+        _normalized_text(student_message)
+    )
+    if match is None:
+        return None
+    return _MANUAL_STAGE_TARGETS.get(_manual_stage_key(match.group(1)))
+
+
+def is_current_stage_status_request(student_message: str) -> bool:
+    """Return whether a turn asks only for the persisted current stage.
+
+    The answer comes from the server-authoritative learning journey rather
+    than a model, retrieval result, or client-side stage hint. Questions
+    asking about the meaning of a named stage intentionally remain normal Fast
+    Chat questions.
+    """
+    return bool(_CURRENT_STAGE_STATUS_REQUEST.fullmatch(_normalized_text(student_message)))
 
 
 def is_terminal_completion_request(student_message: str, *, current_stage: str) -> bool:

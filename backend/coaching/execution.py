@@ -22,10 +22,12 @@ from backend.coaching.deep_review_context import (
 )
 from backend.coaching.mode_policy import (
     ModePolicy,
+    is_current_stage_status_request,
     is_terminal_completion_request,
     is_stage_progression_request,
     is_private_attachment_question,
     looks_like_information_request,
+    manual_stage_selection_target,
     qa_evidence_gap_turn,
     resolve_mode_policy,
     should_author_qa_evidence_gap,
@@ -283,6 +285,54 @@ def _project_context_from_metadata(metadata: dict[str, Any]) -> str:
         if value:
             parts.append(f"{label}: {value}")
     return "\n".join(parts)
+
+
+def _current_stage_status_turn(request: CoachRequest) -> CoachTurn:
+    """Build one server-owned answer for a current-stage status question.
+
+    Args:
+        request: Prepared request stamped with the canonical notebook stage.
+
+    Returns:
+        A Q&A-shaped turn with no recommendation, citations, or workflow side
+        effects. The response is persisted through the ordinary idempotent
+        coach-turn path by the caller.
+    """
+    stage = STAGE_BY_ID[request.current_stage]
+    return CoachTurn(
+        response_text=(
+            f"You are currently in **{stage.label}**. {stage.description}"
+        ),
+        assessment=EducationalAssessment(
+            current_stage=stage.id,
+            contribution_summary="Reported the current persisted Thinking Path stage.",
+            stage_assessment="Current stage read from the authoritative notebook journey.",
+            recommendation=None,
+            response_mode="qa",
+        ),
+    )
+
+
+def _manual_stage_selection_turn(
+    *, target_stage: str, already_selected: bool
+) -> CoachTurn:
+    """Build the fixed server-owned result for a manual stage command."""
+    stage = STAGE_BY_ID[target_stage]
+    response = (
+        f"You are already in Stage: {stage.label}."
+        if already_selected
+        else f"Moved to Stage: {stage.label}."
+    )
+    return CoachTurn(
+        response_text=response,
+        assessment=EducationalAssessment(
+            current_stage=stage.id,
+            contribution_summary="Applied the student's explicit stage selection.",
+            stage_assessment="Stage selected from the authoritative notebook journey.",
+            recommendation=None,
+            response_mode="qa",
+        ),
+    )
 
 
 class CoachApplicationService:
@@ -1008,6 +1058,22 @@ class CoachApplicationService:
         prepared_request, snapshot = self._prepare_authoritative_turn(
             request, force_retrieval=owned_review
         )
+        stage_status_request = (
+            not owned_review
+            and is_current_stage_status_request(prepared_request.student_message)
+        )
+        requested_manual_stage = manual_stage_selection_target(
+            prepared_request.student_message
+        )
+        manual_stage_target = (
+            requested_manual_stage
+            if (
+                not owned_review
+                and runtime_settings.student_stage_selection
+                and prepared_request.revise_user_message_id is None
+            )
+            else None
+        )
         if owned_review:
             prepared_request = self._server_owned_deep_review_request(prepared_request)
         should_generate_title = str(snapshot.thread.get("name") or "") in {
@@ -1017,7 +1083,25 @@ class CoachApplicationService:
         } and not any(
             message.get("role") == "user" for message in prepared_request.history
         )
-        if (
+        if manual_stage_target is not None:
+            record_field("agentcore_call_count", 0)
+            record_field("agent_ms", 0)
+            should_generate_title = False
+            turn = _manual_stage_selection_turn(
+                target_stage=manual_stage_target,
+                already_selected=manual_stage_target == prepared_request.current_stage,
+            )
+        elif stage_status_request:
+            # The current stage is canonical notebook state, not an LLM
+            # judgement. Persist the answer in the normal idempotent path but
+            # bypass model, retrieval, citation, and review work so it cannot
+            # contradict the Journey sidebar.
+            record_field("current_stage_status_request", True)
+            record_field("agentcore_call_count", 0)
+            record_field("agent_ms", 0)
+            should_generate_title = False
+            turn = _current_stage_status_turn(prepared_request)
+        elif (
             not owned_review
             and should_author_qa_evidence_gap(prepared_request)
         ):
@@ -1050,15 +1134,20 @@ class CoachApplicationService:
                 )
         if owned_review:
             should_generate_title = False
-        research_observation = _research_observation_from_coding(
-            self._workflow.take_provisional_research_coding(
-                prepared_request.thread_id
-            ),
-            prepared_request,
-            provider=self._workflow.provider_id,
-            model_id=self._workflow.model_id_for(prepared_request),
-        )
-        citations = self._relevant_citations(prepared_request, turn, snapshot)
+        server_owned_turn = stage_status_request or manual_stage_target is not None
+        if server_owned_turn:
+            research_observation = None
+            citations: list[CitationReference] = []
+        else:
+            research_observation = _research_observation_from_coding(
+                self._workflow.take_provisional_research_coding(
+                    prepared_request.thread_id
+                ),
+                prepared_request,
+                provider=self._workflow.provider_id,
+                model_id=self._workflow.model_id_for(prepared_request),
+            )
+            citations = self._relevant_citations(prepared_request, turn, snapshot)
         if owned_review:
             research_observation = None
         turn = turn.model_copy(
@@ -1086,10 +1175,10 @@ class CoachApplicationService:
             if should_generate_title
             else None
         )
-        from backend.settings import settings as runtime_settings
-
-        orchestration = self._workflow.take_review_orchestration(
-            prepared_request.thread_id
+        orchestration = (
+            {}
+            if server_owned_turn
+            else self._workflow.take_review_orchestration(prepared_request.thread_id)
         )
         if owned_review:
             if not orchestration.get("deep_review_succeeded"):
@@ -1195,7 +1284,7 @@ class CoachApplicationService:
                 "thinking_stage": (
                     auto_advance.to_stage
                     if auto_advance is not None
-                    else prepared_request.current_stage
+                    else manual_stage_target or prepared_request.current_stage
                 ),
                 "assessment": turn.assessment.persisted_mapping(),
                 "pending_transition_id": transition_id,
@@ -1240,10 +1329,14 @@ class CoachApplicationService:
                     else {}
                 ),
             },
-            summary_metadata=self._summary_metadata_for_persist(
-                turn,
-                prepared_request=prepared_request,
-                owned_review=owned_review,
+            summary_metadata=(
+                {}
+                if server_owned_turn
+                else self._summary_metadata_for_persist(
+                    turn,
+                    prepared_request=prepared_request,
+                    owned_review=owned_review,
+                )
             ),
             generated_title=generated_title,
             existing_user_message_id=prepared_request.revise_user_message_id,
@@ -1256,6 +1349,7 @@ class CoachApplicationService:
             ),
             research_observation=research_observation,
             auto_advance=auto_advance,
+            manual_stage_selection_to=manual_stage_target,
             review_counter_qualifying=bool(
                 orchestration.get("qualifying_coaching_turn")
             ),
@@ -1267,7 +1361,7 @@ class CoachApplicationService:
         persist_stage = (
             auto_advance.to_stage
             if auto_advance is not None
-            else prepared_request.current_stage
+            else manual_stage_target or prepared_request.current_stage
         )
         record_field(
             "hmw_scaffold_ready_model",
@@ -1778,6 +1872,23 @@ class CoachApplicationService:
             ],
             has_selected_sources=bool(selected_sources),
         )
+        stage_status_request = is_current_stage_status_request(request.student_message)
+        if stage_status_request:
+            # A current-stage lookup is sourced exclusively from the
+            # authoritative notebook journey. Authorize supplied attachments
+            # above, then remove all evidence scope before the Retrieve gate.
+            mode_policy = ModePolicy(
+                intent=mode_policy.intent,
+                expected_mode="qa",
+                retrieve=False,
+                retrieval_intent=mode_policy.retrieval_intent,
+                mixed=mode_policy.mixed,
+            )
+            snapshot = replace(snapshot, selected_sources=(), retrieval_sources=())
+            selected_image_sources = []
+            image_inputs = []
+            unresolved_image_ids = set()
+            record_field("current_stage_status_request", True)
         progression_request = is_stage_progression_request(
             request.student_message
         ) or is_terminal_completion_request(

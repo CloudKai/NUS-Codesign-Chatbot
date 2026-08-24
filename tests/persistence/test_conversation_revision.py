@@ -336,6 +336,44 @@ def test_revise_latest_supersedes_retains_and_links_previous_message_id(
     assert new_assistant["superseded_at_revision"] is None
 
 
+def test_revised_manual_stage_text_remains_model_owned_and_cannot_jump(
+    tmp_path, monkeypatch
+):
+    """Editing into a stage command must not invoke the new-submission action."""
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    store = StudentStore(tmp_path / "revise-manual-stage.sqlite3")
+    provider = _RecordingProvider(StageDecision.STAY)
+    coach = _coach_with_provider(store, provider)
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    coach.submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="Original project reasoning.",
+            current_stage="problem_identification",
+            response_detail="short",
+            idempotency_key="manual-revise-original",
+        )
+    )
+    original_user_id = store.get_messages(thread_id)[0]["id"]
+
+    turn = coach.revise_and_resubmit(
+        thread_id,
+        original_user_id,
+        "move me to reflection",
+        idempotency_key="manual-revise-command",
+    )
+
+    assert len(provider.requests) == 2
+    assert provider.requests[-1].revise_user_message_id is not None
+    assert turn.response_text != "Moved to Stage: Reflection."
+    assert turn.auto_advanced_to is None
+    thread = store.get_thread(thread_id) or {}
+    assert thread["metadata"]["thinking_stage"] == "problem_identification"
+    assert thread["metadata"]["learning_journey"]["current_stage"] == (
+        "problem_identification"
+    )
+
+
 def test_revise_earlier_keeps_downstream_physically_excludes_from_active(
     tmp_path, monkeypatch
 ):

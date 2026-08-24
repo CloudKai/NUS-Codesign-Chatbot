@@ -2,6 +2,61 @@
 
 ## CURRENT STATUS
 
+### Local chat-driven authoritative stage selection (2026-08-24)
+
+**Change.** With ``STUDENT_STAGE_SELECTION=true``, an exact full-message
+``move me to <canonical stage label or id>`` command now persists the user
+message, fixed server reply, authoritative Journey stage, and legacy
+``thinking_stage`` together in the existing coach-turn transaction. The
+command accepts case/spacing/trailing punctuation plus ``and`` for the Ethics
+``&`` label, but performs no fuzzy matching. It rejects any active pending
+transition in that same transaction, preserves completed stages, and performs
+zero retrieval or model work. Revisions cannot use this path. With the flag
+disabled, the same text remains workflow intent and follows the existing
+immediate-next-stage readiness and exact-confirm flow; it cannot jump stages.
+The next normal Fast Chat turn keeps the same affinity session while carrying
+the newly persisted stage and corresponding stage prompt.
+
+**Files.** ``backend/coaching/{execution,mode_policy}.py``,
+``backend/student_store.py``,
+``tests/domain/{test_mode_classification,test_agentcore_session_affinity}.py``,
+``tests/persistence/{test_atomic_coach_turn,test_conversation_revision}.py``, and
+``tests/ui/test_streamlit_api_mode.py``.
+
+**Validation.** The focused parser/application/atomic-persistence/affinity/UI
+set passed with 145 tests. The expanded API, ownership, idempotency, revision,
+learning, provider, and architecture set passed with 293 tests. Ruff passed on
+all touched Python; compileall and ``git diff --check`` passed.
+
+**Compatibility / deployment.** No schema migration or data rewrite is
+required. The DSQL inherited OCC transaction path is covered by a deterministic
+SQLite-backed adapter test. Rollback is the application diff only. Rebuild the
+application when this local-only capability is wanted; do not publish
+AgentCore, change session generation, Guardrails, or AWS. Production remains
+unchanged while ``STUDENT_STAGE_SELECTION=false``.
+
+**Next action.** Keep arbitrary stage jumps local/testing-only. Production
+students should continue using the ordinary readiness and confirmation flow.
+
+### Authoritative per-stage AgentCore prompt verification (2026-08-24)
+
+**Change.** Added deterministic regression coverage proving that each persisted
+Thinking Path stage maps to the expected AgentCore topic and runtime stage
+prompt. Added an affinity-path regression proving an authoritative stage change
+reuses the same owner/notebook Fast Chat session while sending the new stage
+and prompt on the next invoke.
+
+**Files.** `tests/domain/test_agentcore_provider.py`,
+`tests/domain/test_agentcore_session_affinity.py`.
+
+**Validation.** The affected provider and affinity files passed with 70 tests;
+the requested cross-layer prompt/provider/affinity/learning/UI suite passed
+with 142 tests. Ruff, compileall, and `git diff --check` passed. No AgentCore
+runtime, schema, AWS, or deployment change is required.
+
+**Next action.** Keep stage selection/progression server-authoritative; publish
+AgentCore only if runtime prompt files themselves change.
+
 ### Native Stop button and clean in-flight cancellation (2026-08-24)
 
 **Change.** The composer now observes Streamlit's in-place Send/Stop
@@ -5283,3 +5338,23 @@ object cleanup, ownership-in-write checks, `ca-certificates` in image.
   `tests/ui/test_chat_progress.py::test_submitted_prompt_does_not_share_widget_with_previous_assistant`:
   the current authoritative rendering shows one prior assistant bubble while
   that test expects two. No production chat code was changed for this phase.
+
+**Authoritative stage selection and current-stage status** — Current working-tree phase
+
+- The local-only stage picker continues to persist its selection through the
+  existing owned `select-stage` API, then remounts from the returned notebook
+  Journey. Production continues to hide it with
+  `STUDENT_STAGE_SELECTION=false`.
+- Narrow questions such as “What stage am I in?” now produce a persisted,
+  server-owned Q&A reply from the authoritative notebook stage and its existing
+  description. They make no AgentCore or Retrieve call, attach no citations,
+  and cannot change HMW, Deep Review eligibility, pending transitions, or the
+  Thinking Path stage.
+- Validation: 133 focused mode, learning-service, FastAPI, and Streamlit API
+  tests passed; Ruff, compileall, and `git diff --check` passed. No AWS or paid
+  model calls were made.
+- Compatibility: application/EC2 rebuild only. No AgentCore publication,
+  affinity-generation bump, Guardrail change, API/schema migration, or AWS
+  configuration change is required. Next action: locally select each stage,
+  ask a current-stage status question, and confirm the Journey sidebar and
+  persisted reply agree after reload.

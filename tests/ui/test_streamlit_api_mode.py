@@ -14,10 +14,16 @@ from backend.source_library import CourseMaterialSyncCoordinator
 from backend.student_store import StudentStore
 
 
-def _install_inprocess_api(monkeypatch, *, auto_advance: bool) -> LocalApiClient:
+def _install_inprocess_api(
+    monkeypatch,
+    *,
+    auto_advance: bool,
+    stage_selection: bool = False,
+) -> LocalApiClient:
     """Point Streamlit UI modules at an in-process FastAPI app on the test DB."""
     monkeypatch.setattr(settings, "use_local_api", True)
     monkeypatch.setattr(settings, "auto_advance_stages", auto_advance)
+    monkeypatch.setattr(settings, "student_stage_selection", stage_selection)
     store = StudentStore()
     client = LocalApiClient(
         "http://testserver",
@@ -134,6 +140,94 @@ def test_streamlit_api_mode_auto_advance_moves_thinking_path(monkeypatch):
         state = client.learning_state(thread_id)
         assert (state.get("learning_journey") or {}).get("current_stage") == "concept_generation"
         assert app.session_state["learning_journey"]["current_stage"] == "concept_generation"
+    finally:
+        client.close()
+
+
+def test_streamlit_stage_selection_refreshes_authoritative_stage_and_status(monkeypatch):
+    """The local-only selector remounts from the API's persisted Journey state."""
+    client = _install_inprocess_api(
+        monkeypatch,
+        auto_advance=False,
+        stage_selection=True,
+    )
+    try:
+        app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+        assert not app.exception
+        thread_id = app.session_state["thread_id"]
+
+        select = next(
+            button
+            for button in app.button
+            if button.key == "journey-select-deep_analysis"
+        )
+        select.click().run()
+
+        persisted = client.learning_state(thread_id)
+        assert persisted["thinking_stage"] == "deep_analysis"
+        assert persisted["learning_journey"]["current_stage"] == "deep_analysis"
+        assert app.session_state["learning_journey"]["current_stage"] == "deep_analysis"
+
+        app.chat_input[0].set_value(
+            "I need to examine the trade-off between crossing safety and traffic delay."
+        ).run()
+        assert not app.exception
+        messages = client.get_messages(thread_id)
+        normal_assistant = [
+            message for message in messages if message["role"] == "assistant"
+        ][-1]
+        normal_assessment = (
+            (normal_assistant.get("metadata") or {}).get("assessment") or {}
+        )
+        assert normal_assessment["current_stage"] == "deep_analysis"
+
+        app.chat_input[0].set_value("What stage am I in?").run()
+        assert not app.exception
+        messages = client.get_messages(thread_id)
+        assistant = [message for message in messages if message["role"] == "assistant"][-1]
+        assert "Ethics & Critical Thinking" in assistant["content"]
+        assessment = (assistant.get("metadata") or {}).get("assessment") or {}
+        assert assessment["current_stage"] == "deep_analysis"
+        assert assessment["response_mode"] == "qa"
+        assert assessment.get("citations") == []
+        assert app.session_state["learning_journey"]["current_stage"] == "deep_analysis"
+    finally:
+        client.close()
+
+
+def test_streamlit_manual_stage_chat_command_refreshes_authoritative_journey(
+    monkeypatch,
+):
+    """The local chat command persists and remounts the selected stage."""
+    client = _install_inprocess_api(
+        monkeypatch,
+        auto_advance=False,
+        stage_selection=True,
+    )
+    try:
+        app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+        assert not app.exception
+        thread_id = app.session_state["thread_id"]
+
+        app.chat_input[0].set_value("move me to Reflection").run()
+
+        assert not app.exception
+        state = client.learning_state(thread_id)
+        assert state["thinking_stage"] == "reflection"
+        assert state["learning_journey"]["current_stage"] == "reflection"
+        assert app.session_state["learning_journey"]["current_stage"] == "reflection"
+        messages = client.get_messages(thread_id)
+        assistant = [message for message in messages if message["role"] == "assistant"][-1]
+        assert assistant["content"] == "Moved to Stage: Reflection."
+        assert assistant["metadata"]["assessment"]["current_stage"] == "reflection"
+
+        app.chat_input[0].set_value(
+            "I am reflecting on how evidence changed my design decision."
+        ).run()
+        assert not app.exception
+        messages = client.get_messages(thread_id)
+        assistant = [message for message in messages if message["role"] == "assistant"][-1]
+        assert assistant["metadata"]["assessment"]["current_stage"] == "reflection"
     finally:
         client.close()
 

@@ -29,6 +29,8 @@ from backend.settings import settings
 from backend.source_library import add_text_source, list_visible_sources
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
+from agentcore_runtime.prompts.loader import load_stage_prompt
+from agentcore_runtime.structured_coach import specialist_system_prompt
 from fake_agentcore_runtime import FakeAgentCoreRuntime
 
 _RUNTIME_ARN = (
@@ -181,6 +183,72 @@ def test_assess_reuses_fast_chat_session_across_invokes(
     second = str(client.calls[1]["runtimeSessionId"])
     assert first == second
     assert first == _affinity_session_id(_OWNER, _NOTEBOOK, "fast_chat", "1")
+
+
+def test_authoritative_stage_change_keeps_affinity_but_changes_prompt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """A chat-selected stage reuses affinity while replacing stage pedagogy."""
+    _enable_affinity(monkeypatch)
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    store = StudentStore(tmp_path / "affinity-stage.sqlite3", identifier=_OWNER)
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = FakeAgentCoreRuntime(payloads=[_output(), _output()])
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    service = CoachApplicationService(
+        store,
+        notebooks,
+        CoachWorkflow(_provider(client), transitions),
+        LearningProgressService(store, notebooks, transitions),
+    )
+
+    service.submit(
+        _request(
+            thread_id=thread_id,
+            current_stage="problem_identification",
+            idempotency_key="stage-pi",
+        )
+    )
+    selected = service.submit(
+        _request(
+            thread_id=thread_id,
+            student_message="move me to concept generation",
+            current_stage="problem_identification",
+            idempotency_key="stage-select-concept",
+        )
+    )
+    assert selected.response_text == "Moved to Stage: Concept generation."
+    assert len(client.calls) == 1
+    service.submit(
+        _request(
+            thread_id=thread_id,
+            current_stage="concept_generation",
+            idempotency_key="stage-concept",
+        )
+    )
+
+    assert len(client.calls) == 2
+    first_call, second_call = client.calls
+    assert first_call["runtimeSessionId"] == second_call["runtimeSessionId"]
+    assert first_call["runtimeSessionId"] == _affinity_session_id(
+        _OWNER, thread_id, "fast_chat", "1"
+    )
+    first_payload = _decoded_payload(first_call)
+    second_payload = _decoded_payload(second_call)
+    assert first_payload["topic"] == "problem_identification"
+    assert first_payload["runtime_context"]["current_stage"] == (
+        "problem_identification"
+    )
+    assert second_payload["topic"] == "concept_generation"
+    assert second_payload["runtime_context"]["current_stage"] == "concept_generation"
+
+    first_prompt = specialist_system_prompt(first_payload)
+    second_prompt = specialist_system_prompt(second_payload)
+    assert load_stage_prompt("problem_identification") in first_prompt
+    assert load_stage_prompt("concept_generation") in second_prompt
+    assert load_stage_prompt("concept_generation") not in first_prompt
+    assert load_stage_prompt("problem_identification") not in second_prompt
 
 
 def test_assess_isolates_review_deep_from_fast_chat(

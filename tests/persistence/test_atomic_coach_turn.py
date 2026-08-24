@@ -117,6 +117,22 @@ def _request(thread_id: str, *, key: str | None = None) -> CoachRequest:
     )
 
 
+def _manual_stage_request(
+    thread_id: str,
+    *,
+    key: str,
+    target: str = "reflection",
+) -> CoachRequest:
+    """Return an exact feature-gated manual-stage chat command."""
+    return CoachRequest(
+        thread_id=thread_id,
+        student_message=f"move me to {target}",
+        current_stage="problem_identification",
+        response_detail="short",
+        idempotency_key=key,
+    )
+
+
 def test_style_switch_during_provider_rolls_back_stale_profile_and_research(tmp_path):
     store = StudentStore(tmp_path / "style-race.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="guided")
@@ -203,6 +219,63 @@ def test_auto_advance_failure_rolls_back_messages_research_and_stage(tmp_path, m
     assert store.get_messages(thread_id) == []
     assert store.list_research_observations(notebook_id=thread_id) == []
     assert (store.get_thread(thread_id) or {})["metadata"]["thinking_stage"] == (
+        "problem_identification"
+    )
+
+
+def test_manual_stage_command_atomically_rejects_pending_and_persists_turn(
+    tmp_path, monkeypatch
+):
+    store = StudentStore(tmp_path / "atomic-manual-stage.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="guided")
+    service, _progress = _service(store, auto_advance=True)
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+
+    pending_turn = service.submit(_request(thread_id, key="manual-pending"))
+    assert pending_turn.pending_transition is not None
+    assert store.get_pending_phase_transition(thread_id) is not None
+
+    selected = service.submit(
+        _manual_stage_request(thread_id, key="manual-select", target="reflection")
+    )
+
+    assert selected.response_text == "Moved to Stage: Reflection."
+    assert selected.auto_advanced_to is None
+    assert selected.pending_transition is None
+    assert store.get_pending_phase_transition(thread_id) is None
+    thread = store.get_thread(thread_id) or {}
+    assert thread["metadata"]["thinking_stage"] == "reflection"
+    assert thread["metadata"]["learning_journey"]["current_stage"] == "reflection"
+    assert thread["metadata"]["learning_journey"]["completed_stages"] == []
+    messages = store.get_messages(thread_id)
+    assert [message["role"] for message in messages] == [
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    assert messages[1]["metadata"]["decision_status"] == "rejected"
+
+
+def test_manual_stage_command_failure_rolls_back_stage_messages_and_pending(
+    tmp_path, monkeypatch
+):
+    store = StudentStore(tmp_path / "atomic-manual-failure.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="guided")
+    service, _progress = _service(store)
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+
+    def injected_failure(_metadata):
+        raise RuntimeError("injected manual selection failure")
+
+    monkeypatch.setattr(store, "_split_notebook_metadata", injected_failure)
+    with pytest.raises(RuntimeError, match="injected manual selection failure"):
+        service.submit(_manual_stage_request(thread_id, key="manual-rollback"))
+
+    assert store.get_messages(thread_id) == []
+    thread = store.get_thread(thread_id) or {}
+    assert thread["metadata"]["thinking_stage"] == "problem_identification"
+    assert thread["metadata"]["learning_journey"]["current_stage"] == (
         "problem_identification"
     )
 
@@ -306,3 +379,24 @@ def test_atomic_auto_advance_runs_through_dsql_occ_adapter(tmp_path):
     )
     assert len(owner.get_messages(thread_id)) == 2
     assert len(owner.list_research_observations(notebook_id=thread_id)) == 1
+
+
+def test_atomic_manual_stage_selection_runs_through_dsql_occ_adapter(
+    tmp_path, monkeypatch
+):
+    database = tmp_path / "dsql-atomic-manual.sqlite3"
+    owner = StudentStore(database)
+    thread_id = owner.create_thread(model_id="mock", support_mode="guided")
+    dsql_store = _dsql_store_over_sqlite(database, owner)
+    service, _progress = _service(dsql_store)
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+
+    turn = service.submit(
+        _manual_stage_request(thread_id, key="dsql-manual", target="deep_analysis")
+    )
+
+    assert turn.response_text == "Moved to Stage: Ethics & Critical Thinking."
+    thread = owner.get_thread(thread_id) or {}
+    assert thread["metadata"]["thinking_stage"] == "deep_analysis"
+    assert thread["metadata"]["learning_journey"]["completed_stages"] == []
+    assert len(owner.get_messages(thread_id)) == 2

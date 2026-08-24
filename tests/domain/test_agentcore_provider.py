@@ -38,6 +38,7 @@ from backend.repositories import (
 from backend.settings import settings
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
+from agentcore_runtime.structured_coach import specialist_system_prompt
 
 from fake_agentcore_runtime import FakeAgentCoreRuntime, _payload_kind
 
@@ -321,6 +322,36 @@ def test_valid_structured_coaching_and_research_coding(
     assert _STUDENT_MESSAGE in _current_turn_text(payload)
     assert _STUDENT_MESSAGE not in payload["trusted_instructions"]
     assert "RetrieveAndGenerate" not in json.dumps(payload)
+
+
+@pytest.mark.parametrize(
+    ("stage_id", "topic"),
+    [
+        ("problem_identification", "problem_identification"),
+        ("concept_generation", "concept_generation"),
+        ("design_specification", "design_specification"),
+        ("deep_analysis", "ethics_critical"),
+        ("reflection", "reflection"),
+    ],
+)
+def test_each_authoritative_stage_selects_matching_agentcore_prompt(
+    stage_id: str, topic: str
+) -> None:
+    """The provider payload and runtime prompt agree for every stage."""
+    client = FakeAgentCoreRuntime(payload=_output())
+    result = _provider(client).assess(_request(current_stage=stage_id))
+    assert result.assessment.current_stage == stage_id
+
+    payload = _decoded_payload(_specialist_call(client))
+    assert payload["topic"] == topic
+    assert payload["runtime_context"]["current_stage"] == stage_id
+    assert payload["runtime_context"]["agentcore_topic"] == topic
+
+    runtime_prompt = specialist_system_prompt(payload)
+    assert _STAGE_MARKERS[stage_id] in runtime_prompt
+    for other_stage, marker in _STAGE_MARKERS.items():
+        if other_stage != stage_id:
+            assert marker not in runtime_prompt
 
 
 def test_live_uppercase_recommendation_is_accepted():

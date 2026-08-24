@@ -148,20 +148,32 @@ def test_select_stage_rejects_unknown_stage(tmp_path, monkeypatch):
         service.select_stage(thread_id, "not-a-stage")
 
 
-def test_select_stage_updates_journey_without_completing_skipped(tmp_path, monkeypatch):
-    store = StudentStore(tmp_path / "select-ok.sqlite3")
+@pytest.mark.parametrize(
+    "stage_id",
+    (
+        "problem_identification",
+        "concept_generation",
+        "design_specification",
+        "deep_analysis",
+        "reflection",
+    ),
+)
+def test_select_stage_updates_journey_without_completing_skipped(
+    tmp_path, monkeypatch, stage_id
+):
+    store = StudentStore(tmp_path / f"select-{stage_id}.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     monkeypatch.setattr(settings, "student_stage_selection", True)
     service = _learning_service(store)
 
-    metadata = service.select_stage(thread_id, "reflection")
+    metadata = service.select_stage(thread_id, stage_id)
 
     journey = metadata["learning_journey"]
-    assert journey["current_stage"] == "reflection"
+    assert journey["current_stage"] == stage_id
     assert journey.get("completed_stages") == []
-    assert metadata["thinking_stage"] == "reflection"
+    assert metadata["thinking_stage"] == stage_id
     thread = store.get_thread(thread_id) or {}
-    assert thread["metadata"]["thinking_stage"] == "reflection"
+    assert thread["metadata"]["thinking_stage"] == stage_id
 
 
 def test_select_stage_rejects_pending_transition(tmp_path, monkeypatch):

@@ -1387,7 +1387,7 @@ class StudentStore:
         Raises:
             ValueError: When the notebook is missing or ``stage_id`` is unknown.
         """
-        from backend.student_journey import STAGE_BY_ID, normalize_journey, set_current_stage
+        from backend.student_journey import STAGE_BY_ID
 
         cleaned_stage = str(stage_id or "").strip()
         if cleaned_stage not in STAGE_BY_ID:
@@ -1402,20 +1402,15 @@ class StudentStore:
                 raise ValueError("Notebook not found")
             thread = self._thread_dict(row)
             current_meta = dict(thread.get("metadata") or {})
-            journey = normalize_journey(current_meta.get("learning_journey"))
-            next_journey = set_current_stage(journey, cleaned_stage)
-            current_meta["learning_journey"] = next_journey
-            current_meta["thinking_stage"] = cleaned_stage
             now = utc_now()
             active_revision = self._notebook_revision_value(row)
-            connection.execute(
-                f"""
-                UPDATE messages
-                SET decision_status='rejected', decision_at=?
-                WHERE notebook_id=? AND decision_status='pending'
-                  AND {self._active_at_revision_sql()}
-                """,
-                (now, thread_id, active_revision, active_revision),
+            current_meta = self._selected_learning_stage_metadata(
+                connection,
+                thread_id=thread_id,
+                metadata=current_meta,
+                stage_id=cleaned_stage,
+                active_revision=active_revision,
+                decision_at=now,
             )
             current_stage, progress_text, settings_text = self._split_notebook_metadata(
                 current_meta
@@ -1436,6 +1431,46 @@ class StudentStore:
                 ),
             )
             return current_meta
+
+    def _selected_learning_stage_metadata(
+        self,
+        connection: Any,
+        *,
+        thread_id: str,
+        metadata: dict[str, Any],
+        stage_id: str,
+        active_revision: int,
+        decision_at: str,
+    ) -> dict[str, Any]:
+        """Return selected-stage metadata and reject active pending transitions.
+
+        The caller owns the surrounding transaction. Both the standalone
+        selection API and a persisted manual-selection chat turn use this
+        helper so their journey and pending-transition semantics cannot drift.
+        """
+        from backend.student_journey import (
+            STAGE_BY_ID,
+            normalize_journey,
+            set_current_stage,
+        )
+
+        cleaned_stage = str(stage_id or "").strip()
+        if cleaned_stage not in STAGE_BY_ID:
+            raise ValueError(f"Unknown thinking stage: {cleaned_stage}")
+        selected = dict(metadata)
+        journey = normalize_journey(selected.get("learning_journey"))
+        selected["learning_journey"] = set_current_stage(journey, cleaned_stage)
+        selected["thinking_stage"] = cleaned_stage
+        connection.execute(
+            f"""
+            UPDATE messages
+            SET decision_status='rejected', decision_at=?
+            WHERE notebook_id=? AND decision_status='pending'
+              AND {self._active_at_revision_sql()}
+            """,
+            (decision_at, thread_id, active_revision, active_revision),
+        )
+        return selected
 
     @staticmethod
     def _split_notebook_metadata(
@@ -2145,6 +2180,7 @@ class StudentStore:
         idempotency_turn_payload: dict[str, Any] | None = None,
         research_observation: ResearchObservationCreate | None = None,
         auto_advance: AtomicAutoAdvance | None = None,
+        manual_stage_selection_to: str | None = None,
         review_counter_qualifying: bool | None = None,
         review_counter_deep_succeeded: bool | None = None,
     ) -> tuple[str, str]:
@@ -2153,9 +2189,9 @@ class StudentStore:
         Provider, retrieval, and object-storage work must finish before this
         method is called. The user row, assistant assessment/citations/pending
         decision, optional auto-advance, optional research observation, and
-        notebook summary either commit together or roll back. Research evidence
-        stores offsets into the referenced student message rather than a
-        transcript copy.
+        notebook summary, and optional feature-gated manual stage selection
+        either commit together or roll back. Research evidence stores offsets
+        into the referenced student message rather than a transcript copy.
 
         When ``existing_user_message_id`` is set (edit/revise path), the user
         message is already durable from the revision transaction. Content is not
@@ -2179,6 +2215,16 @@ class StudentStore:
         cleaned_assistant = assistant_content.strip()
         if not cleaned_user or not cleaned_assistant:
             raise ValueError("Completed coach turns require both messages")
+        manual_target = str(manual_stage_selection_to or "").strip() or None
+        if manual_target is not None:
+            from backend.student_journey import STAGE_BY_ID
+
+            if manual_target not in STAGE_BY_ID:
+                raise ValueError(f"Unknown thinking stage: {manual_target}")
+            if auto_advance is not None:
+                raise ValueError("Manual stage selection cannot also auto-advance")
+            if existing_user_message_id is not None:
+                raise ValueError("Manual stage selection is not available during revision")
         user_id = str(existing_user_message_id or uuid.uuid4())
         assistant_id = assistant_message_id or str(uuid.uuid4())
         assistant_meta = dict(assistant_metadata)
@@ -2293,6 +2339,17 @@ class StudentStore:
                     raise CoachRequestLeaseLostError(
                         "Coach request lease was claimed by another worker"
                     )
+
+            if manual_target is not None:
+                current_meta = self._selected_learning_stage_metadata(
+                    connection,
+                    thread_id=thread_id,
+                    metadata=current_meta,
+                    stage_id=manual_target,
+                    active_revision=active_revision,
+                    decision_at=utc_now(),
+                )
+                current_journey = dict(current_meta.get("learning_journey") or {})
 
             user_created_at = utc_now()
             assistant_created_at = utc_now_after(user_created_at)
@@ -2444,6 +2501,9 @@ class StudentStore:
                     )
                 journey_meta = next_journey
                 current_meta["thinking_stage"] = auto_advance.to_stage
+            elif manual_target is not None:
+                journey_meta = current_journey
+                current_meta["thinking_stage"] = manual_target
             else:
                 journey_meta = current_journey
             for key in _PROGRESS_KEYS:
@@ -2454,7 +2514,9 @@ class StudentStore:
                 current_meta
             )
             expected_saved_stage = (
-                auto_advance.to_stage if auto_advance is not None else expected_stage
+                auto_advance.to_stage
+                if auto_advance is not None
+                else manual_target or expected_stage
             )
             if stage != expected_saved_stage:
                 raise ValueError("Coach summary cannot change the notebook stage")
