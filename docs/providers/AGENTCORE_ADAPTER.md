@@ -114,6 +114,15 @@ Invariants:
 - empty, fenced, or schema-invalid AgentCore bodies map to
   `structured_output_failure`, never `json.loads(str(AgentResult))`.
 
+Timeouts are role-specific. Fast Chat keeps the FastAPI AgentCore read timeout
+of 110 seconds. Deep Review uses a 200-second FastAPI AgentCore read timeout
+and the runtime-only `DEEP_REVIEW_BEDROCK_READ_TIMEOUT_SECONDS` environment
+variable (default 180 seconds, bounded 30–600) for its Sonnet Bedrock client.
+The runtime setting is not an EC2 application setting. Deep Review's
+`DEEP_REVIEW_JOB_TIMEOUT_SECONDS` default is 240 seconds and is a stale/
+acceptance deadline; it does not forcibly cancel a running worker. Botocore
+still permits one total attempt and existing Strands retries are unchanged.
+
 The live DEFAULT harness source of truth is
 [`agentcore_runtime/`](../../agentcore_runtime/). It hosts one-call
 `fast_chat` plus legacy Q&A / Coaching / Formative Review specialists with

@@ -13,25 +13,34 @@ from typing import Any
 import pytest
 
 
-def _capture_boto(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    """Patch ``boto3.client``/``botocore.config.Config`` and record kwargs."""
+def _capture_boto(
+    monkeypatch: pytest.MonkeyPatch, *, distinct_clients: bool = False
+) -> dict[str, Any]:
+    """Patch boto construction and record each client/configuration pair."""
     import boto3
     import botocore.config
 
     observed: dict[str, Any] = {}
     sentinel = object()
+    clients: list[object] = []
+    configs: list[dict[str, Any]] = []
 
     class FakeConfig:
         def __init__(self, **kwargs: Any) -> None:
             observed["config"] = kwargs
+            configs.append(kwargs)
 
     def fake_client(service: str, *, region_name: str, config: Any) -> object:
         observed.update({"service": service, "region_name": region_name})
-        return sentinel
+        client = object() if distinct_clients else sentinel
+        clients.append(client)
+        return client
 
     monkeypatch.setattr(botocore.config, "Config", FakeConfig)
     monkeypatch.setattr(boto3, "client", fake_client)
     observed["sentinel"] = sentinel
+    observed["clients"] = clients
+    observed["configs"] = configs
     return observed
 
 
@@ -81,6 +90,62 @@ def test_agentcore_client_uses_total_attempts(monkeypatch: pytest.MonkeyPatch) -
         "total_max_attempts": 1,
         "mode": "standard",
     }
+
+
+def test_agentcore_deep_review_client_has_separate_read_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deep Review gets 200s while the normal cached client stays at 110s."""
+    from backend.agentcore_provider import AgentCoreCoachProvider
+
+    observed = _capture_boto(monkeypatch, distinct_clients=True)
+    provider = AgentCoreCoachProvider(
+        "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/test-harness",
+        region="us-west-2",
+        qualifier="DEFAULT",
+        timeout_seconds=110.0,
+        deep_review_timeout_seconds=200.0,
+        max_retries=0,
+    )
+
+    normal = provider._runtime_client("fast_chat")
+    deep = provider._runtime_client("review_deep")
+    assert normal is not deep
+    assert len(observed["clients"]) == 2
+    assert observed["configs"][0]["read_timeout"] == 110.0
+    assert observed["configs"][1]["read_timeout"] == 200.0
+    assert observed["configs"][0]["retries"] == {
+        "total_max_attempts": 1,
+        "mode": "standard",
+    }
+    assert observed["configs"][1]["retries"] == {
+        "total_max_attempts": 1,
+        "mode": "standard",
+    }
+    assert provider._runtime_client("fast_chat") is normal
+    assert provider._runtime_client("review_deep") is deep
+    assert len(observed["clients"]) == 2
+
+
+def test_agentcore_injected_client_is_shared_without_boto_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Injected fakes remain role-agnostic and bypass boto client creation."""
+    import boto3
+    from backend.agentcore_provider import AgentCoreCoachProvider
+
+    injected = object()
+
+    def fail_boto(*_args: Any, **_kwargs: Any) -> object:
+        raise AssertionError("injected provider must not construct boto clients")
+
+    monkeypatch.setattr(boto3, "client", fail_boto)
+    provider = AgentCoreCoachProvider(
+        "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/test-harness",
+        client=injected,
+    )
+    assert provider._runtime_client("fast_chat") is injected
+    assert provider._runtime_client("review_deep") is injected
 
 
 def test_bedrock_converse_client_uses_total_attempts(

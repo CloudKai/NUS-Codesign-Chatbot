@@ -70,6 +70,7 @@ SAFE_PERF_FIELDS = frozenset(
         "compression_used",
         "input_over_soft_budget",
         "agentcore_invoke_ms",
+        "agentcore_configured_timeout_seconds",
         "model_role",
         "model_id",
         "mode_returned",

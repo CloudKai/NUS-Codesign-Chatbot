@@ -174,6 +174,8 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert 'AGENTCORE_SESSION_GENERATION: "7"' in app
     assert 'AGENTCORE_MODEL_PROVIDER: "bedrock"' in app
     assert 'AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
+    assert 'DEEP_REVIEW_AGENTCORE_TIMEOUT_SECONDS: "200"' in app
+    assert 'DEEP_REVIEW_JOB_TIMEOUT_SECONDS: "240"' in app
     assert 'ROUTER_MODEL_PROVIDER: "bedrock"' in app
     assert 'ROUTER_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
     assert 'QA_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
@@ -503,6 +505,12 @@ def test_production_sync_threadpool_covers_the_admitted_workflow_cap():
             f"{env_name}={configured} is outside [{minimum}, {maximum}] and would "
             f"silently fall back to {default}"
         )
+
+
+def test_deep_review_timeout_defaults_match_runtime_release_contract():
+    """The app stale deadline stays at the reviewed 240-second default."""
+    default, minimum, maximum = _bounded_int_bounds("DEEP_REVIEW_JOB_TIMEOUT_SECONDS")
+    assert (default, minimum, maximum) == (240, 30, 600)
 
 
 def test_production_requirements_ship_no_test_or_lint_tooling():

@@ -180,6 +180,36 @@ def _decoded_payload(call: dict[str, Any]) -> dict[str, Any]:
     return json.loads(str(raw))
 
 
+@pytest.mark.parametrize(
+    ("role", "expected_timeout"),
+    (("fast_chat", 110.0), ("review_deep", 200.0)),
+)
+def test_agentcore_timeout_telemetry_is_numeric_and_role_specific(
+    role: str, expected_timeout: float
+) -> None:
+    """Coach-turn metrics expose only the selected client timeout."""
+    from backend.turn_perf import begin_coach_turn_perf, emit_coach_turn_perf, reset_coach_turn_perf
+
+    client = FakeAgentCoreRuntime(payload=_output())
+    provider = AgentCoreCoachProvider(
+        _RUNTIME_ARN,
+        timeout_seconds=110.0,
+        deep_review_timeout_seconds=200.0,
+        client=client,
+    )
+    begin_coach_turn_perf()
+    try:
+        provider._call_runtime(
+            {"phase": "fast_chat" if role == "fast_chat" else "review", "messages": []},
+            request=_request(),
+            role=role,
+        )
+        recorded = emit_coach_turn_perf()
+    finally:
+        reset_coach_turn_perf()
+    assert recorded["agentcore_configured_timeout_seconds"] == expected_timeout
+
+
 def _call_phase(call: dict[str, Any]) -> str:
     """Return the payload phase for one recorded runtime call."""
     return str(_decoded_payload(call).get("phase") or "")

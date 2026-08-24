@@ -68,8 +68,8 @@ remain unique Cognito subjects.
 | | |
 |---|---|
 | **How** | AWS console: Bedrock AgentCore → this environment’s runtime (ARN from host `.env`) → **DEFAULT** endpoint. CLI used in prior publishes: control-plane `get-agent-runtime` / DEFAULT endpoint for the runtime id parsed from `AGENTCORE_RUNTIME_ARN` (do not paste ARNs into tickets). |
-| **Expected** | Qualifier `DEFAULT`. Query the current liveVersion before this release; last documented value was **21** (slim `fast_chat`) and must not be assumed. This release publishes a **new version on the existing ARN**, waits until READY, then moves DEFAULT. FastAPI Compose: `MODEL_PROVIDER=agentcore`, `AGENTCORE_QUALIFIER=DEFAULT`. |
-| **Pass** | Endpoint **READY**; DEFAULT liveVersion is the version you intend to serve. FastAPI host env qualifier is `DEFAULT`. |
+| **Expected** | Qualifier `DEFAULT`. Query the current liveVersion before this release; last documented value was **21** (slim `fast_chat`) and must not be assumed. This release publishes a **new version on the existing ARN**, waits until READY, then moves DEFAULT. FastAPI Compose: `MODEL_PROVIDER=agentcore`, `AGENTCORE_QUALIFIER=DEFAULT`. The published runtime environment must contain `DEEP_REVIEW_BEDROCK_READ_TIMEOUT_SECONDS=180`; this is runtime-only and must not be added to the EC2 app container. |
+| **Pass** | Endpoint **READY**; DEFAULT liveVersion is the version you intend to serve; the runtime configuration reports the Deep Review Bedrock read timeout as **180s**. FastAPI host env qualifier is `DEFAULT`. |
 
 ## 4. `AGENTCORE_SESSION_GENERATION` (required on republish)
 
@@ -82,7 +82,7 @@ generation.
 | | |
 |---|---|
 | **When** | Every authorised AgentCore republish. Not required for an app-image-only deploy that does not publish a new runtime version. |
-| **How** | Set a new non-secret generation value in host `.env` (this setting is required-on-republish). Redeploy the app container so FastAPI picks it up. |
+| **How** | **Always** set a new non-secret generation value in host `.env` for a republish (and redeploy the app container so FastAPI picks it up). This is required even when only runtime environment or prompt/schema assets changed. |
 | **Pass** | Host env generation differs from the pre-publish value; app container recreated after the change; DEFAULT liveVersion is the new published version. |
 
 Rolling back an AgentCore version has the same rule: change generation again

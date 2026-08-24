@@ -2,6 +2,51 @@
 
 ## CURRENT STATUS
 
+### Deep Review timeout boundaries (2026-08-25)
+
+**Change.** Confirmed the production timeout failure was an inner Bedrock
+read-timeout boundary, not a second model call. Deep Review now has an
+independent 180-second runtime Bedrock read timeout, a 200-second FastAPI
+AgentCore client timeout, and a 240-second stale/acceptance deadline. Fast
+Chat remains 110 seconds. Botocore remains pinned to one total attempt and
+the existing Strands retry policy, prompts, models, Guardrail, RAG, DSQL, and
+UI are unchanged.
+
+**Files.** `agentcore_runtime/model.py`, `backend/{settings,providers,agentcore_provider}.py`,
+`.env.example`, `compose.prod.yaml`, runtime/provider and release-checklist
+documentation, and focused timeout/config/telemetry tests.
+
+**Validation.** Sol independently reviewed all changed lines. Focused
+timeout/runtime/provider/lifecycle suites passed. The broad suite excluding
+the pre-existing `scripts/load_probe.py` collection error reached only the two
+unrelated existing UI failures: the stale duplicate-bubble count in
+`tests/ui/test_chat_progress.py` and the legacy `textarea:disabled` marker
+expectation in `tests/ui/test_theme_styles.py`. Exact full pytest, Ruff, and
+compileall including `scripts/` remain blocked by the pre-existing
+`scripts/load_probe.py` syntax/indentation errors. Ruff on touched files,
+compileall excluding `scripts/`, and `git diff --check` passed.
+
+**AWS publication.** The existing runtime ARN ending `6ncEO79sD7` was
+published successfully: previous `DEFAULT` version `v31` was `READY`, new
+version `v32` is `READY`, and `DEFAULT` now points to `v32` (`READY`). The
+artifact key is
+`agentcore-patches/chatbot_harnessAgent-deep-review-timeout-20260825T165943Z.zip`.
+The published runtime has
+`DEEP_REVIEW_BEDROCK_READ_TIMEOUT_SECONDS=180`, Guardrail v4, and lifecycle
+settings `idleRuntimeSessionTimeout=1800` / `maxLifetime=28800`. Version `v31`
+is retained `READY` for rollback.
+
+**Compatibility / deployment.** No EC2 application deployment or paid live
+Deep Review was performed. The local `.env` shows affinity generation `8`,
+while tracked `compose.prod.yaml` remains at generation `7`; align and
+redeploy the application before app rollout. The runtime 180-second setting
+is runtime-only; the 200/240 settings belong in the application environment.
+
+**Next action.** Align the application generation and obtain deployment
+approval before EC2 rollout; run one bounded live Deep Review only after
+explicit approval. The known unrelated failures remain separate
+release-checklist items.
+
 ### Journey stage cards: closed header + open filled card (2026-08-24)
 
 **Change.** Thinking Path non-current stages now use a compact header row:
@@ -1615,8 +1660,9 @@ RAG, STAY/ADVANCE, Facione, and CLEAR are unchanged. Live app image remains
    `DEEP_REVIEW_MAX_CONCURRENT` (default 8) is a separate semaphore.
 3. **GET status + stale fail-closed.** `GET` the same path returns the job
    (snapshot when completed). Queued/running jobs older than
-   `DEEP_REVIEW_JOB_TIMEOUT_SECONDS` (default 180) become `failed` /
-   `review_timeout`. Duplicate POST while queued/running reuses `review_id`.
+   `DEEP_REVIEW_JOB_TIMEOUT_SECONDS` (then-default 180; current default 240)
+   become `failed` / `review_timeout`. Duplicate POST while queued/running
+   reuses `review_id`.
 4. **Review UI poll.** Streamlit fragments poll GET every 2s only while
    queued/running. The spinner follows backend job status. Chat stays enabled.
    Browser refresh recovers from the job record. Failed jobs keep the counter

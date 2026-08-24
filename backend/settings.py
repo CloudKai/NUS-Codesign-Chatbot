@@ -239,6 +239,9 @@ class Settings:
     agentcore_timeout_seconds: float = float(
         os.getenv("AGENTCORE_TIMEOUT_SECONDS", "110")
     )
+    deep_review_agentcore_timeout_seconds: float = float(
+        os.getenv("DEEP_REVIEW_AGENTCORE_TIMEOUT_SECONDS", "200")
+    )
     agentcore_max_retries: int = int(os.getenv("AGENTCORE_MAX_RETRIES", "0"))
     # FastAPI-owned compute affinity only. Default false keeps a fresh
     # ``stateless-<uuid>`` runtimeSessionId per InvokeAgentRuntime. When true,
@@ -282,7 +285,7 @@ class Settings:
         "DEEP_REVIEW_MAX_CONCURRENT", 8, 1, 32
     )
     deep_review_job_timeout_seconds: int = _bounded_int(
-        "DEEP_REVIEW_JOB_TIMEOUT_SECONDS", 180, 30, 600
+        "DEEP_REVIEW_JOB_TIMEOUT_SECONDS", 240, 30, 600
     )
     guardrail_id: str = os.getenv("GUARDRAIL_ID", "").strip()
     guardrail_version: str = os.getenv("GUARDRAIL_VERSION", "").strip()
@@ -743,6 +746,10 @@ def validate_production_configuration() -> None:
             raise ValueError("AGENTCORE_RUNTIME_ARN is not configured")
         if not 1 <= settings.agentcore_timeout_seconds <= 120:
             raise ValueError("AGENTCORE_TIMEOUT_SECONDS must be between 1 and 120")
+        if not 30 <= settings.deep_review_agentcore_timeout_seconds <= 600:
+            raise ValueError(
+                "DEEP_REVIEW_AGENTCORE_TIMEOUT_SECONDS must be between 30 and 600"
+            )
         if not 0 <= settings.agentcore_max_retries <= 2:
             raise ValueError("AGENTCORE_MAX_RETRIES must be between 0 and 2")
         if not settings.agentcore_model_region.strip():

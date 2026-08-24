@@ -17,8 +17,8 @@ services:
       # Month-1 pilot: coach ADVANCE auto-applies (no Next confirmation).
       # Month-2+: set AUTO_ADVANCE_STAGES=false and STUDENT_STAGE_SELECTION=true
       # so students pick stages in Journey. If both are true, selection wins.
-      AUTO_ADVANCE_STAGES: "true"
-      STUDENT_STAGE_SELECTION: "false"
+      AUTO_ADVANCE_STAGES: "false"
+      STUDENT_STAGE_SELECTION: "true"
       USE_LOCAL_API: "true"
       CO_DESIGN_PUBLIC_API_URL: "${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}"
       CO_DESIGN_UI_URL: "${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}"
@@ -45,10 +45,14 @@ services:
       AGENTCORE_SESSION_AFFINITY_ENABLED: "true"
       # Bump when publishing a new AgentCore version or changing lifecycle
       # settings so new requests cannot reuse older warm microVM sessions.
-      AGENTCORE_SESSION_GENERATION: "7"
+      AGENTCORE_SESSION_GENERATION: "8"
       AGENTCORE_MODEL_PROVIDER: "bedrock"
       AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       AGENTCORE_MODEL_REGION: "us-west-2"
+      # Fast Chat remains 110s; Deep Review uses a separate 200s client.
+      DEEP_REVIEW_AGENTCORE_TIMEOUT_SECONDS: "200"
+      # Stale/acceptance deadline, not hard worker cancellation.
+      DEEP_REVIEW_JOB_TIMEOUT_SECONDS: "240"
       ROUTER_MODEL_PROVIDER: "bedrock"
       ROUTER_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       QA_MODEL_PROVIDER: "bedrock"

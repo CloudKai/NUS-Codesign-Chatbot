@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
+import types
 
 import pytest
 
@@ -22,6 +24,7 @@ from agentcore_runtime.model import (
     RuntimeModelError,
     bedrock_model_kwargs,
     load_runtime_requirement_pins,
+    load_runtime_model,
     mantle_responses_kwargs,
     parse_runtime_requirement_pins,
     role_model_config_from_mapping,
@@ -147,7 +150,7 @@ def test_harness_never_constructs_empty_bedrock_model() -> None:
     assert "retry_strategy" in main
     assert "structured_output_prompt=" not in loader
     assert "boto_client_config" in loader
-    assert 'retries={"total_max_attempts": 1, "mode": "standard"}' in loader
+    assert '"total_max_attempts": 1' in loader
 
 
 class _FakeGuardrail:
@@ -293,6 +296,8 @@ def test_fast_chat_role_is_haiku_and_deep_review_is_sonnet() -> None:
     assert sonnet_kwargs["model_id"] == SONNET_4_6_MODEL_ID
     assert "cache_config" not in haiku_kwargs
     assert "cache_config" not in sonnet_kwargs
+    assert roles[MODEL_ROLE_FAST_CHAT].bedrock_read_timeout_seconds is None
+    assert roles[MODEL_ROLE_REVIEW_DEEP].bedrock_read_timeout_seconds == 180
 
 
 def test_role_configs_load_haiku_and_sonnet_without_substitution() -> None:
@@ -320,6 +325,65 @@ def test_legacy_env_is_used_only_when_no_role_keys_are_present() -> None:
     assert config.provider == "bedrock"
     assert config.model_id == SONNET_4_6_MODEL_ID
     assert config.role == "review_deep"
+    assert config.bedrock_read_timeout_seconds == 180
+
+
+def test_runtime_model_applies_read_timeout_only_to_deep_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The runtime client config changes only for the Sonnet Review role."""
+    import botocore.config
+
+    configs: list[dict[str, object]] = []
+
+    class FakeConfig:
+        def __init__(self, **kwargs: object) -> None:
+            configs.append(kwargs)
+
+    class FakeBedrockModel:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    fake_models = types.ModuleType("strands.models")
+    fake_models.BedrockModel = FakeBedrockModel  # type: ignore[attr-defined]
+    fake_strands = types.ModuleType("strands")
+    fake_strands.__path__ = []  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "strands", fake_strands)
+    monkeypatch.setitem(sys.modules, "strands.models", fake_models)
+    monkeypatch.setattr(botocore.config, "Config", FakeConfig)
+
+    fast_config = role_model_config_from_mapping(_HYBRID_ENV, MODEL_ROLE_FAST_CHAT)
+    deep_config = role_model_config_from_mapping(_HYBRID_ENV, MODEL_ROLE_REVIEW_DEEP)
+    load_runtime_model(fast_config)
+    load_runtime_model(deep_config)
+
+    assert "read_timeout" not in configs[0]
+    assert configs[0]["retries"] == {"total_max_attempts": 1, "mode": "standard"}
+    assert configs[1]["read_timeout"] == 180
+    assert configs[1]["retries"] == {"total_max_attempts": 1, "mode": "standard"}
+
+
+def test_runtime_model_log_reports_deep_review_read_timeout(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Runtime startup logs the numeric Deep Review timeout without content."""
+    import logging
+
+    from agentcore_runtime.model import log_runtime_model_config
+
+    config = role_model_config_from_mapping(_HYBRID_ENV, MODEL_ROLE_REVIEW_DEEP)
+    with caplog.at_level(logging.INFO, logger="agentcore_runtime.model"):
+        log_runtime_model_config(config)
+    assert "runtime_model_loaded" in caplog.text
+    assert "bedrock_read_timeout_seconds=180" in caplog.text
+
+
+@pytest.mark.parametrize("value", ["29", "601", "not-an-int"])
+def test_deep_review_runtime_timeout_fails_closed(value: str) -> None:
+    env = dict(_SONNET_ENV)
+    env["DEEP_REVIEW_BEDROCK_READ_TIMEOUT_SECONDS"] = value
+    with pytest.raises(RuntimeModelError, match="DEEP_REVIEW_BEDROCK_READ_TIMEOUT_SECONDS"):
+        role_model_config_from_mapping(env, MODEL_ROLE_REVIEW_DEEP)
 
 
 def test_partial_role_config_fails_closed_without_legacy_fallback() -> None:

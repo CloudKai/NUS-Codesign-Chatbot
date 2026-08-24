@@ -161,6 +161,10 @@ class RuntimeModelConfig:
     guardrail_version: str
     guardrail_latest_message: bool = True
     role: str = ""
+    # Deep Review is the only runtime role with an extended Bedrock read
+    # window. ``None`` deliberately preserves the existing Botocore default
+    # for Fast Chat and legacy roles.
+    bedrock_read_timeout_seconds: int | None = None
 
     @property
     def uses_bedrock_model(self) -> bool:
@@ -183,6 +187,7 @@ class RuntimeModelConfig:
             "guardrail_latest_message": bool(self.guardrail_latest_message)
             if self.uses_bedrock_model
             else False,
+            "bedrock_read_timeout_seconds": self.bedrock_read_timeout_seconds,
             "pinned_strands_agents": _PINNED_STRANDS,
             "pinned_bedrock_agentcore": _PINNED_BEDROCK_AGENTCORE,
             "pinned_pydantic": _PINNED_PYDANTIC,
@@ -210,6 +215,22 @@ class RuntimeModelConfig:
 def _clean(value: Any) -> str:
     """Return a stripped string from an environment-like value."""
     return str(value or "").strip()
+
+
+def _deep_review_read_timeout(values: Mapping[str, Any]) -> int:
+    """Return the validated runtime-only Deep Review read timeout."""
+    raw = _clean(values.get("DEEP_REVIEW_BEDROCK_READ_TIMEOUT_SECONDS")) or "180"
+    try:
+        timeout = int(raw)
+    except ValueError as error:
+        raise RuntimeModelError(
+            "DEEP_REVIEW_BEDROCK_READ_TIMEOUT_SECONDS must be an integer"
+        ) from error
+    if not 30 <= timeout <= 600:
+        raise RuntimeModelError(
+            "DEEP_REVIEW_BEDROCK_READ_TIMEOUT_SECONDS must be between 30 and 600"
+        )
+    return timeout
 
 
 def validate_provider_model_pair(provider: str, model_id: str) -> None:
@@ -347,9 +368,22 @@ def role_model_config_from_mapping(
             guardrail_version=guardrail_version,
             guardrail_latest_message=True,
             role=cleaned_role,
+            bedrock_read_timeout_seconds=(
+                _deep_review_read_timeout(data)
+                if cleaned_role == MODEL_ROLE_REVIEW_DEEP
+                else None
+            ),
         )
     config = runtime_model_config_from_mapping(data)
-    return replace(config, role=cleaned_role)
+    return replace(
+        config,
+        role=cleaned_role,
+        bedrock_read_timeout_seconds=(
+            _deep_review_read_timeout(data)
+            if cleaned_role == MODEL_ROLE_REVIEW_DEEP
+            else None
+        ),
+    )
 
 
 def role_model_config_from_environ(role: str) -> RuntimeModelConfig:
@@ -457,13 +491,17 @@ def log_runtime_model_config(config: RuntimeModelConfig) -> None:
     meta = config.provenance()
     logger.info(
         "runtime_model_loaded role=%s provider=%s model_id=%s region=%s "
-        "guardrail_configured=%s guardrail_latest_message=%s strands_pin=%s",
+        "guardrail_configured=%s guardrail_latest_message=%s "
+        "bedrock_read_timeout_seconds=%s strands_pin=%s",
         meta["role"],
         meta["agentcore_model_provider"],
         meta["foundation_model_id"],
         meta["model_region"],
         str(meta["guardrail_configured"]).lower(),
         str(meta["guardrail_latest_message"]).lower(),
+        meta["bedrock_read_timeout_seconds"]
+        if meta["bedrock_read_timeout_seconds"] is not None
+        else "none",
         meta["pinned_strands_agents"],
     )
 
@@ -495,11 +533,14 @@ def load_runtime_model(config: RuntimeModelConfig | None = None) -> Any:
         # so 1 means a single Converse attempt and the Agent-level
         # ModelRetryStrategy stays the only Converse retry layer. The legacy
         # ``max_attempts`` key would instead be normalised to two attempts.
+        client_config_kwargs: dict[str, Any] = {
+            "retries": {"total_max_attempts": 1, "mode": "standard"},
+        }
+        if resolved.bedrock_read_timeout_seconds is not None:
+            client_config_kwargs["read_timeout"] = resolved.bedrock_read_timeout_seconds
         return BedrockModel(
             **bedrock_model_kwargs(resolved),
-            boto_client_config=BotocoreConfig(
-                retries={"total_max_attempts": 1, "mode": "standard"},
-            ),
+            boto_client_config=BotocoreConfig(**client_config_kwargs),
         )
     try:
         from strands.models.openai_responses import OpenAIResponsesModel

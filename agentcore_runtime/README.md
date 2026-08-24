@@ -64,6 +64,12 @@ Roles:
 - FAST CHAT / COACHING → `bedrock` + `global.anthropic.claude-haiku-4-5-20251001-v1:0`
 - DEEP REVIEW → `bedrock` + `global.anthropic.claude-sonnet-4-6`
 
+The published runtime uses `DEEP_REVIEW_BEDROCK_READ_TIMEOUT_SECONDS` for the
+Deep Review Bedrock client only (default `180`, bounded `30`–`600`). Fast Chat
+and legacy roles omit this client setting and retain their existing Botocore
+default. Botocore remains pinned to `total_max_attempts=1`; Strands model retry
+policy is unchanged.
+
 Changing these environment variables publishes a new Runtime **version** on
 the same ARN. Do not create a second runtime resource.
 

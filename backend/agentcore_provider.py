@@ -1407,6 +1407,7 @@ class AgentCoreCoachProvider:
         region: str = "us-west-2",
         qualifier: str = "DEFAULT",
         timeout_seconds: float = 110.0,
+        deep_review_timeout_seconds: float = 200.0,
         max_retries: int = 0,
         client: Any | None = None,
         planner: HistoryContextPlanner | None = None,
@@ -1419,6 +1420,7 @@ class AgentCoreCoachProvider:
             region: AWS region for the data-plane client, typically ``us-west-2``.
             qualifier: Runtime endpoint qualifier, normally ``DEFAULT``.
             timeout_seconds: boto read timeout; retries stay application-owned.
+            deep_review_timeout_seconds: Deep Review-only boto read timeout.
             max_retries: Extra SDK attempts after the first call (0 disables).
             client: Optional injected ``bedrock-agentcore`` client for tests.
             planner: Optional fast-chat history planner.
@@ -1434,8 +1436,11 @@ class AgentCoreCoachProvider:
         self._region = str(region or "").strip() or "us-west-2"
         self._qualifier = str(qualifier or "").strip() or "DEFAULT"
         self._timeout_seconds = float(timeout_seconds)
+        self._deep_review_timeout_seconds = float(deep_review_timeout_seconds)
         self._max_retries = int(max_retries)
+        self._injected_client = client is not None
         self._client = client
+        self._deep_review_client = client
         self._planner = planner or _fast_chat_planner_from_settings()
         self._deep_planner = deep_planner or _deep_review_planner_from_settings()
 
@@ -1444,9 +1449,14 @@ class AgentCoreCoachProvider:
         del request
         return self._runtime_arn
 
-    def _runtime_client(self) -> Any:
-        """Return the injected client or construct a bedrock-agentcore client."""
-        if self._client is not None:
+    def _runtime_client(self, role: str = "fast_chat") -> Any:
+        """Return the injected or cached client for the resolved invoke role."""
+        cleaned_role = str(role or "fast_chat").strip().lower()
+        if self._injected_client:
+            return self._client
+        if cleaned_role == "review_deep" and self._deep_review_client is not None:
+            return self._deep_review_client
+        if cleaned_role != "review_deep" and self._client is not None:
             return self._client
         try:
             import boto3
@@ -1457,17 +1467,26 @@ class AgentCoreCoachProvider:
         # ``total_max_attempts`` includes the initial call. The legacy
         # ``max_attempts`` key is normalised by botocore to ``value + 1``,
         # which would silently double the configured invoke budget.
+        timeout_seconds = (
+            self._deep_review_timeout_seconds
+            if cleaned_role == "review_deep"
+            else self._timeout_seconds
+        )
         config = Config(
             retries={"total_max_attempts": attempts, "mode": "standard"},
-            read_timeout=self._timeout_seconds,
-            connect_timeout=min(10.0, self._timeout_seconds),
+            read_timeout=timeout_seconds,
+            connect_timeout=min(10.0, timeout_seconds),
         )
-        self._client = boto3.client(
+        client = boto3.client(
             "bedrock-agentcore",
             region_name=self._region,
             config=config,
         )
-        return self._client
+        if cleaned_role == "review_deep":
+            self._deep_review_client = client
+        else:
+            self._client = client
+        return client
 
     def _invoke_payload(
         self,
@@ -1736,8 +1755,17 @@ class AgentCoreCoachProvider:
             ProviderUnavailableError: When the runtime is blocked, malformed,
                 timed out, or otherwise unavailable.
         """
+        configured_timeout = (
+            self._deep_review_timeout_seconds
+            if str(role or "").strip().lower() == "review_deep"
+            else self._timeout_seconds
+        )
+        record_field(
+            "agentcore_configured_timeout_seconds",
+            round(float(configured_timeout), 1),
+        )
         encoded = json.dumps(payload).encode("utf-8")
-        response = self._runtime_client().invoke_agent_runtime(
+        response = self._runtime_client(role).invoke_agent_runtime(
             agentRuntimeArn=self._runtime_arn,
             qualifier=self._qualifier,
             runtimeSessionId=_runtime_session_id(request, role),

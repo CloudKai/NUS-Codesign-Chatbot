@@ -198,6 +198,7 @@ def configured_coach_provider():
             region=settings.aws_region,
             qualifier=settings.agentcore_qualifier,
             timeout_seconds=settings.agentcore_timeout_seconds,
+            deep_review_timeout_seconds=settings.deep_review_agentcore_timeout_seconds,
             max_retries=settings.agentcore_max_retries,
         )
     raise ProviderUnavailableError(f"Unsupported MODEL_PROVIDER: {settings.model_provider}")
