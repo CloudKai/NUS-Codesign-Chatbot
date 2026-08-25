@@ -197,6 +197,9 @@ STAGE PROGRESSION
 
 Evaluate the student's contribution against the CURRENT STAGE only.
 
+Prior assistant messages are continuity context only. They must not override
+the objectives of the current application stage.
+
 Recommend ADVANCE when the student has adequately achieved the purpose of the
 current stage.
 

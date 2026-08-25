@@ -100,6 +100,7 @@ from backend.source_library import (
 )
 from backend.sources.chunk_load import hydrate_selected_retrieval_sources
 from backend.student_journey import (
+    DEFAULT_STAGE,
     DEFAULT_RESPONSE_DETAIL,
     STAGE_BY_ID,
     advanced_stage_response,
@@ -566,7 +567,39 @@ class CoachApplicationService:
                 request = request.model_copy(update={"conversation_revision": revision})
                 record_field("stage", request.current_stage)
 
-                idempotency_key = str(request.idempotency_key or "").strip()
+                requested_manual_stage = manual_stage_selection_target(
+                    request.student_message
+                )
+                request_key = str(request.idempotency_key or "").strip()
+                completed_replay = bool(
+                    request_key
+                    and self._store.lookup_completed_coach_request(
+                        request.thread_id,
+                        idempotency_key=request_key,
+                    )
+                )
+                if (
+                    requested_manual_stage is not None
+                    and runtime_settings.student_stage_selection
+                    and request.revise_user_message_id is None
+                    and not completed_replay
+                ):
+                    authoritative_stage = str(
+                        thread.get("current_stage")
+                        or metadata.get("thinking_stage")
+                        or DEFAULT_STAGE
+                    )
+                    if request.current_stage != authoritative_stage:
+                        raise ValueError(
+                            "The client current_stage does not match the notebook "
+                            "Thinking Path stage"
+                        )
+                    self._store.validate_learning_stage_selection(
+                        request.thread_id,
+                        requested_manual_stage,
+                    )
+
+                idempotency_key = request_key
                 if not idempotency_key:
                     turn = self._execute_rate_limited(
                         request,
@@ -1235,6 +1268,19 @@ class CoachApplicationService:
                     "auto_advanced_to": pending.to_stage,
                 }
             )
+        validated_completion_stage: str | None = None
+        if (
+            not owned_review
+            and runtime_settings.student_stage_selection
+            and manual_stage_target is None
+            and prepared_request.revise_user_message_id is None
+            and turn.pending_transition is not None
+            and turn.assessment.recommendation is StageDecision.ADVANCE
+        ):
+            # Workflow validation (including the PI HMW guard) has already
+            # produced this pending ADVANCE. Phase 2 records completion while
+            # keeping focus and the auditable pending choice unchanged.
+            validated_completion_stage = prepared_request.current_stage
         persist_started = time.perf_counter()
         emit_coach_progress(PROGRESS_SAVING)
         self._store.persist_coach_turn(
@@ -1316,6 +1362,11 @@ class CoachApplicationService:
                     if auto_advance is not None
                     else {}
                 ),
+                **(
+                    {"validated_completion_stage": validated_completion_stage}
+                    if validated_completion_stage is not None
+                    else {}
+                ),
                 "workflow": "langgraph",
                 "coaching_profile": (
                     "strict" if prepared_request.response_detail == "long" else "quick"
@@ -1349,6 +1400,7 @@ class CoachApplicationService:
             ),
             research_observation=research_observation,
             auto_advance=auto_advance,
+            validated_completion_stage=validated_completion_stage,
             manual_stage_selection_to=manual_stage_target,
             review_counter_qualifying=bool(
                 orchestration.get("qualifying_coaching_turn")

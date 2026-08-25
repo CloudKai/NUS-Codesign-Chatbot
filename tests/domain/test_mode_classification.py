@@ -30,6 +30,7 @@ from backend.coaching.mode_policy import (
 )
 from backend.domain import CoachRequest, EducationalAssessment, StageDecision
 from backend.learning_service import LearningProgressService
+from backend.mock_provider import DeterministicCoachProvider
 from backend.prompts.composer import PromptComposer, PromptContext
 from backend.providers import ProviderUnavailableError
 from backend.repositories import (
@@ -44,7 +45,7 @@ from backend.retrieval_gate import (
 from backend.specialists.review_orchestration import COUNTER_SETTINGS_KEY
 from backend.settings import settings
 from backend.source_library import CHAT_ATTACHMENT_ORIGIN, add_file_sources, add_text_source
-from backend.student_journey import STAGE_BY_ID
+from backend.student_journey import STAGE_BY_ID, THINKING_STAGES, selectable_stage_ids
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
 from fake_agentcore_runtime import FakeAgentCoreRuntime
@@ -409,11 +410,59 @@ def test_private_attachment_project_reasoning_is_not_forced_to_attachment_rag() 
         "I'm ready to advance.",
         "Are we ready to move on?",
         "Am I ready to proceed?",
+        "Hi, can I move to Concept Generation?",
+        "can i move to concept genration?",
+        "Can I start concept generation?",
+        "Can move on already?",
     ),
 )
 def test_explicit_stage_progression_requests_are_narrowly_recognized(message: str) -> None:
     """Navigation commands route to coaching without making stage terms Q&A."""
     assert is_stage_progression_request(message) is True
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "What is concept genration?",
+        "Which lecture covers concept generation?",
+        "Explain concept generation.",
+    ),
+)
+def test_stage_terms_without_navigation_remain_normal_questions(message: str) -> None:
+    """Stage nouns and the bounded typo do not force workflow routing."""
+    assert is_stage_progression_request(message) is False
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "Hi, can I move to Concept Generation?",
+        "can i move to concept genration?",
+        "Can I start concept generation?",
+        "Can move on already?",
+    ),
+)
+def test_explicit_navigation_variants_skip_retrieval_without_stage_mutation(
+    tmp_path,
+    message: str,
+) -> None:
+    """Bounded navigation variants route to Coaching without mutating state."""
+    store = StudentStore(tmp_path / "navigation-variant.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="advance"))
+    service = _service(store, client, retriever=_NoRetrieve())
+
+    turn = _submit(service, thread_id, message, key="navigation-variant")
+
+    assert len(client.calls) == 1
+    assert turn.assessment.response_mode == "coaching"
+    assert turn.pending_transition is None
+    journey = ((store.get_thread(thread_id) or {}).get("metadata") or {}).get(
+        "learning_journey", {}
+    )
+    assert journey["current_stage"] == "problem_identification"
+    assert journey["completed_stages"] == []
 
 
 def test_embedded_navigation_and_explicit_path_completion_are_workflow_intent() -> None:
@@ -521,6 +570,19 @@ def test_enabled_manual_stage_command_persists_without_model_or_retrieval(
     store = StudentStore(tmp_path / f"manual-{target_stage}.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     source = add_text_source(store, thread_id, "Selected evidence", "Course material")
+    target_index = next(
+        index for index, stage in enumerate(THINKING_STAGES) if stage.id == target_stage
+    )
+    if target_index:
+        metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+        journey = dict(metadata.get("learning_journey") or {})
+        journey["completed_stages"] = [
+            stage.id for stage in THINKING_STAGES[:target_index]
+        ]
+        journey["current_stage"] = "problem_identification"
+        metadata["learning_journey"] = journey
+        metadata["thinking_stage"] = "problem_identification"
+        store.update_thread(thread_id, metadata=metadata)
     client = FakeAgentCoreRuntime(payload=_coaching_payload())
     monkeypatch.setattr(settings, "student_stage_selection", True)
     service = _service(store, client, retriever=_NoRetrieve())
@@ -554,7 +616,9 @@ def test_enabled_manual_stage_command_persists_without_model_or_retrieval(
     thread = store.get_thread(thread_id) or {}
     journey = thread["metadata"]["learning_journey"]
     assert journey["current_stage"] == target_stage
-    assert journey["completed_stages"] == []
+    assert journey["completed_stages"] == [
+        stage.id for stage in THINKING_STAGES[:target_index]
+    ]
     assert thread["metadata"]["thinking_stage"] == target_stage
     messages = store.get_messages(thread_id)
     assert [message["role"] for message in messages] == ["user", "assistant"]
@@ -567,11 +631,157 @@ def test_enabled_manual_stage_command_persists_without_model_or_retrieval(
     ] is True
 
 
+def test_illegal_manual_stage_jump_fails_before_pending_or_chat_side_effects(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A locked exact command cannot reject pending or write a chat turn."""
+    store = StudentStore(tmp_path / "manual-locked-reflection.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    transitions = SQLitePhaseTransitionRepository(store)
+    pending = CoachWorkflow(
+        DeterministicCoachProvider(StageDecision.ADVANCE), transitions
+    ).run(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message=(
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
+            ),
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    ).pending_transition
+    assert pending is not None
+    transitions.create(pending)
+    messages_before = store.get_messages(thread_id)
+    client = FakeAgentCoreRuntime(payload=_coaching_payload())
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    service = _service(store, client, retriever=_NoRetrieve())
+
+    with pytest.raises(ValueError, match="locked"):
+        service.submit(
+            CoachRequest(
+                thread_id=thread_id,
+                student_message="move me to Reflection",
+                current_stage="problem_identification",
+                response_detail="short",
+                idempotency_key="manual-locked-reflection",
+            )
+        )
+
+    journey = (store.get_thread(thread_id) or {}).get("metadata", {}).get(
+        "learning_journey", {}
+    )
+    assert journey["current_stage"] == "problem_identification"
+    assert journey["completed_stages"] == []
+    assert store.get_messages(thread_id) == messages_before
+    assert client.calls == []
+    assert transitions.get_pending(thread_id) is not None
+
+
+@pytest.mark.parametrize(
+    ("message", "current_stage", "completed_before"),
+    (
+        (
+            "How might we improve road crossings for older pedestrians so that they can cross safely without rushing?",
+            "problem_identification",
+            [],
+        ),
+        ("Can I move on?", "concept_generation", ["problem_identification"]),
+    ),
+)
+def test_phase2_validated_advance_completes_current_without_changing_focus(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+    current_stage: str,
+    completed_before: list[str],
+) -> None:
+    """A validated Coaching ADVANCE unlocks only the immediate next stage."""
+    store = StudentStore(tmp_path / "phase2-completion.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    if completed_before:
+        metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+        journey = dict(metadata.get("learning_journey") or {})
+        journey["completed_stages"] = completed_before
+        journey["current_stage"] = current_stage
+        metadata["learning_journey"] = journey
+        metadata["thinking_stage"] = current_stage
+        store.update_thread(thread_id, metadata=metadata)
+    client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="advance"))
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    service = _service(store, client, retriever=_NoRetrieve())
+    request = CoachRequest(
+        thread_id=thread_id,
+        student_message=message,
+        current_stage=current_stage,
+        response_detail="short",
+        idempotency_key="phase2-advance",
+    )
+
+    turn = service.submit(request)
+    assert turn.pending_transition is not None
+    thread = store.get_thread(thread_id) or {}
+    journey = thread["metadata"]["learning_journey"]
+    assert journey["current_stage"] == current_stage
+    assert journey["completed_stages"] == [
+        *completed_before,
+        current_stage,
+    ]
+    assert store.get_pending_phase_transition(thread_id) is not None
+    assert current_stage in selectable_stage_ids(journey)
+    messages_before = store.get_messages(thread_id)
+    replay = service.submit(request)
+    assert replay == turn
+    assert store.get_messages(thread_id) == messages_before
+
+    next_stage = {
+        "problem_identification": "concept_generation",
+        "concept_generation": "design_specification",
+    }[current_stage]
+    store.select_learning_stage(thread_id, next_stage)
+    selected = store.get_thread(thread_id) or {}
+    selected_journey = selected["metadata"]["learning_journey"]
+    assert selected_journey["current_stage"] == next_stage
+    assert selected_journey["completed_stages"] == [
+        *completed_before,
+        current_stage,
+    ]
+    assert store.get_pending_phase_transition(thread_id) is None
+
+
+def test_phase2_stay_does_not_complete_current_stage(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = StudentStore(tmp_path / "phase2-stay.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="stay"))
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    turn = _service(store, client, retriever=_NoRetrieve()).submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="I am still comparing the needs and constraints.",
+            current_stage="problem_identification",
+            response_detail="short",
+            idempotency_key="phase2-stay",
+        )
+    )
+    assert turn.pending_transition is None
+    journey = (store.get_thread(thread_id) or {})["metadata"]["learning_journey"]
+    assert journey["completed_stages"] == []
+    assert selectable_stage_ids(journey) == ("problem_identification",)
+
+
 def test_manual_stage_command_rejects_stale_client_stage_without_mutation(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = StudentStore(tmp_path / "manual-stale-stage.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = ["problem_identification"]
+    metadata["learning_journey"] = journey
+    store.update_thread(thread_id, metadata=metadata)
     store.select_learning_stage(thread_id, "concept_generation")
     client = FakeAgentCoreRuntime(payload=_coaching_payload())
     monkeypatch.setattr(settings, "student_stage_selection", True)
@@ -636,6 +846,11 @@ def test_disabled_manual_stage_command_uses_immediate_next_confirmation(
 ) -> None:
     store = StudentStore(tmp_path / "manual-disabled.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = ["problem_identification"]
+    metadata["learning_journey"] = journey
+    store.update_thread(thread_id, metadata=metadata)
     store.select_learning_stage(thread_id, "concept_generation")
     client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="advance"))
     monkeypatch.setattr(settings, "student_stage_selection", False)
@@ -711,7 +926,18 @@ def test_current_stage_status_is_persisted_without_model_or_retrieval(
     """The displayed stage must come from the persisted Journey, not Haiku prose."""
     store = StudentStore(tmp_path / f"stage-status-{stage_id}.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
-    store.select_learning_stage(thread_id, stage_id)
+    target_index = next(
+        index for index, stage in enumerate(THINKING_STAGES) if stage.id == stage_id
+    )
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["current_stage"] = stage_id
+    journey["completed_stages"] = [
+        stage.id for stage in THINKING_STAGES[:target_index]
+    ]
+    metadata["learning_journey"] = journey
+    metadata["thinking_stage"] = stage_id
+    store.update_thread(thread_id, metadata=metadata)
     source = add_text_source(store, thread_id, "Week 1", "Course material")
     client = FakeAgentCoreRuntime(payload=_qa_payload())
     service = _service(store, client, retriever=_NoRetrieve())

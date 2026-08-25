@@ -188,6 +188,18 @@ _STAGE_PROGRESSION_REQUEST = re.compile(
     re.IGNORECASE,
 )
 
+# A few short, explicit navigation phrasings are common in the UI. Keep them
+# separate from broad stage-term matching so a typo or stage noun alone never
+# becomes workflow intent or a mutation authorization.
+_EXPLICIT_STAGE_NAVIGATION_VARIANTS = re.compile(
+    r"^\s*(?:hi\s*,\s*)?"
+    r"(?:can\s+i\s+move\s+to\s+concept\s+(?:generation|genration)|"
+    r"can\s+i\s+start\s+concept\s+generation|"
+    r"can\s+move\s+on(?:\s+already)?)"
+    r"\s*[?.!]*\s*$",
+    re.IGNORECASE,
+)
+
 # The original expression intentionally favoured short commands at the start
 # of a turn. Students frequently explain their work first and ask a genuine
 # readiness question at the end, though. Keep stage names alone insufficient:
@@ -338,6 +350,7 @@ def is_stage_progression_request(student_message: str) -> bool:
     text = _normalized_text(student_message)
     return bool(
         _STAGE_PROGRESSION_REQUEST.search(text)
+        or _EXPLICIT_STAGE_NAVIGATION_VARIANTS.search(text)
         or _EMBEDDED_STAGE_PROGRESSION_REQUEST.search(text)
         or _EXPLICIT_PATH_COMPLETION_REQUEST.search(text)
         or manual_stage_selection_target(text) is not None

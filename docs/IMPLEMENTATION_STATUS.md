@@ -2,6 +2,139 @@
 
 ## CURRENT STATUS
 
+### Authoritative stage after PI→CG (2026-08-26)
+
+**Change.** After the application advances to Concept Generation, coaching
+runtime instructions now name the live stage as authoritative, and the
+Concept Generation stage prompts explicitly forbid continuing Problem
+Identification gatekeeping ("Before we move…", evidence/HMW readiness
+probing) unless the student asks to revisit. Display cleanup also strips
+"Before we move to …" boilerplate from transition responses. History is
+kept; it is continuity only.
+
+**Files.** ``backend/prompts/composer.py``,
+``backend/prompts/stages/concept_generation.md``,
+``backend/prompts/shared/coaching.md``,
+``agentcore_runtime/prompts/stages/concept_generation.md``,
+``agentcore_runtime/prompts/shared_coaching.md``,
+``backend/learning/journey.py``,
+``tests/domain/test_prompt_architecture.py``,
+``tests/domain/test_student_journey.py``,
+``tests/fixtures/coaching_prompt_baseline.json``.
+
+**Validation.** Focused prompt-architecture, journey, baseline, and
+coaching-behavior tests pass. No AWS calls or deployment performed.
+
+**Next exact action.** Rebuild/recreate the EC2 app image (and republish
+AgentCore if production loads runtime prompt files from the published
+artifact) so live coaching picks up the Concept Generation guard.
+
+### Application-owned lenient PI HMW advancement (2026-08-26)
+
+**Change.** FastAPI now promotes Problem Identification to Concept Generation
+when the active student message is a structural How Might We
+(``how might we`` + ``for`` + ``so that``) even if the model keeps
+``recommendation=stay`` and ``hmw_scaffold_ready=true``. The promotion hides
+the scaffold card, replaces stay-probe coach text with a short acknowledgement
+headed **[Problem identification] -> [Concept generation] Ready**
+(and the same ``[prev] -> [next] Ready`` pattern for other auto-advances),
+and uses the
+existing pending/auto-advance machinery. The existing reject-without-candidate
+guard is unchanged.
+
+**Files.** ``backend/learning/hmw.py`` (``student_workable_hmw_present``),
+``backend/workflow.py``,
+``tests/domain/{test_hmw_stage_completion,test_hmw_scaffold_gate}.py``,
+``docs/PROMPT_ARCHITECTURE.md``.
+
+**Validation.** Focused HMW completion and scaffold-gate tests pass. No AWS
+calls or deployment performed.
+
+**Next exact action.** Rebuild/recreate the EC2 app image so production picks
+up the application guard; AgentCore republish remains optional for wording but
+is no longer required for progression on structural HMWs.
+
+### Problem Identification workable-HMW transition rule (2026-08-26)
+
+**Change.** Mirrored Problem Identification stage prompts now encode
+good-enough-to-progress language: stop PI probing after a workable
+student-authored HMW, honor explicit move-on requests and repeated HMW
+resubmissions, and keep root-cause/evidence as pre-completion coaching goals
+only. Progression still uses ``recommendation=advance`` and
+``hmw_scaffold_ready=false``; FastAPI remains stage authority. No new
+``stage_complete`` schema, guard, or production env change.
+
+**Files.** ``backend/prompts/stages/problem_identification.md``,
+``agentcore_runtime/prompts/stages/problem_identification.md``,
+``tests/domain/{test_hmw_stage_completion,test_coaching_behavior_contracts}.py``,
+``tests/fixtures/coaching_prompt_baseline.json``.
+
+**Validation.** Focused HMW completion, coaching behavior contracts, and prompt
+baseline tests pass. No AWS calls or deployment performed.
+
+**Next exact action.** Republish AgentCore with the updated stage prompt, then
+rebuild/recreate the EC2 app image before production picks up the behaviour.
+
+### Journey CTA mobile-safe placement when expanded (2026-08-26)
+
+**Change.** Thinking Path non-current stages now render title + chevron first,
+expanded stage detail second when preview-open, and the **Work on this stage** /
+**Revisit** CTA last so the button no longer sits between the title and dropdown
+body on narrow panels. Collapsed wide layouts still show the CTA right-aligned on
+the same row as the title via copy-column flex CSS; expanded or narrow stages
+stack vertically in document order.
+
+**Files.** ``ui/panels/studio.py``,
+``ui/assets/styles/{20-studio,90-responsive}.css``,
+``tests/ui/test_rerun_scope.py``.
+
+**Validation.** Focused journey, rerun-scope, theme-styles, and Streamlit UI
+tests pass. No coaching logic or ``STUDENT_STAGE_SELECTION`` default change.
+
+**Next exact action.** Manual check at desktop collapsed, ~390 px collapsed, and
+expanded on both widths; then rebuild/recreate the EC2 app image when approved.
+
+### Phase 2 linear Journey selection (2026-08-25)
+
+**Change.** Student stage selection now uses one canonical unlocked frontier:
+fresh Problem Identification exposes only itself. A validated Coaching ADVANCE
+after the existing student-authored HMW guard records Problem Identification as
+completed while keeping focus there and retaining the auditable pending choice;
+Concept then becomes the only immediate next unlock until the student selects
+it. Later stages require the same contiguous validated-completion prefix, while
+revisits preserve earlier access and corrupt gaps fail closed. The shared
+transactional store seam rejects locked API and exact chat commands before
+pending-transition/message writes; valid selections remain atomic and preserve
+completed history. Journey renders one scalar preview accordion, a single
+immediate frontier CTA, neutral revisits/previews, subdued locked future
+stages, a copy-column layout that keeps the collapsed-wide CTA beside the title
+and stacks title → detail → CTA when preview-open or narrow, and no bottom Next
+control when
+``STUDENT_STAGE_SELECTION=true``. Phase 1 selection-disabled behavior remains
+unchanged. Explicit bounded navigation variants route through Coaching with no
+retrieval; they never authorize a stage mutation. No AgentCore publication or
+provider, retrieval, prompt, guardrail, schema, or deployment change was made.
+
+**Files.** ``backend/learning/journey.py``, ``backend/student_journey.py``,
+``backend/student_store.py``, ``backend/learning_service.py``,
+``backend/coaching/mode_policy.py``,
+``ui/panels/studio.py``, ``ui/assets/styles/{20-studio,90-responsive}.css``,
+affected deterministic domain, persistence, and UI tests.
+
+**Validation.** Focused learning, mode-classification, atomic persistence,
+journey, theme, rerun-scope, Streamlit UI, and API-mode UI tests pass. The full
+deterministic suite passes; Ruff on touched Python, compileall, and
+``git diff --check`` also pass.
+
+**Visual review.** Sol verified the real Journey at 390 px and 1440 px. The
+stage icon/title pair remains horizontal, the current stage is visually
+distinct, the list stays compact, and neither viewport has horizontal
+overflow.
+
+**Next exact action.** Review the uncommitted diff, then rebuild/recreate the
+application when approved. No AgentCore publication or affinity-generation
+change is required.
+
 ### Production validation blocker cleanup (2026-08-25)
 
 **Change.** Restored the documented Month-1 production Compose policy
@@ -176,7 +309,16 @@ counters are opt-in through
 ``CO_DESIGN_COMPOSER_PROFILE=true`` and are hard-disabled when
 ``APP_ENV=production``; they record no student text or request data.
 
-**Files.** `ui/layout/composer_layout.py`, `tests/ui/test_streamlit_ui.py`.
+**Follow-up (2026-08-26).** Long-chat typing still lagged because composer
+auto-grow reflowed the transcript flex column. Kept the lightweight typing
+path (textarea-only resize, no full layout on each key), restored one-to-five-row
+auto-grow with internal scroll at the cap, added ``contain: layout style`` on
+``chat_feed`` / ``chat_log`` / ``chat_composer``, and removed the body-wide
+upload-tooltip ``MutationObserver`` in favour of apply/attach-hover scans.
+
+**Files.** `ui/layout/composer_layout.py`,
+`ui/assets/styles/{10-workspace,30-chat}.css`,
+`tests/ui/test_streamlit_ui.py`.
 
 **Validation.** `tests/ui/test_streamlit_ui.py`, `tests/ui/test_chat_scroll.py`,
 and `tests/ui/test_ui_perf_logging.py`: 43 passed. The injected JavaScript

@@ -1,3 +1,5 @@
+import pytest
+
 from backend.student_journey import (
     THINKING_STAGES,
     advanced_stage_response,
@@ -9,8 +11,10 @@ from backend.student_journey import (
     default_journey,
     journey_progress,
     learning_review,
+    mark_stage_completed,
     normalize_journey,
     personalized_stage_questions,
+    selectable_stage_ids,
     stage_guidance_questions,
     understanding_level,
 )
@@ -101,6 +105,80 @@ def test_journey_normalization_and_short_long_learning_reviews():
     assert "correlation" in long_review["critical_reflection"]
 
 
+def test_selectable_stage_ids_requires_contiguous_validated_completion():
+    assert selectable_stage_ids({"current_stage": "problem_identification"}) == (
+        "problem_identification",
+    )
+    assert selectable_stage_ids(
+        {
+            "current_stage": "problem_identification",
+            "completed_stages": ["problem_identification"],
+        }
+    ) == (
+        "problem_identification",
+        "concept_generation",
+    )
+    assert selectable_stage_ids(
+        {
+            "current_stage": "design_specification",
+            "completed_stages": ["problem_identification", "concept_generation"],
+        }
+    ) == (
+        "problem_identification",
+        "concept_generation",
+        "design_specification",
+    )
+    assert selectable_stage_ids(
+        {
+            "current_stage": "problem_identification",
+            "completed_stages": [
+                "problem_identification",
+                "concept_generation",
+                "design_specification",
+                "deep_analysis",
+            ],
+        }
+    ) == tuple(stage.id for stage in THINKING_STAGES)
+
+    assert selectable_stage_ids(
+        {
+            "current_stage": "problem_identification",
+            "completed_stages": ["problem_identification", "design_specification"],
+        }
+    ) == ("problem_identification", "concept_generation")
+
+
+def test_revisiting_completed_stage_preserves_focus_and_unlocked_frontier():
+    journey = {
+        "current_stage": "problem_identification",
+        "completed_stages": [
+            "problem_identification",
+            "concept_generation",
+            "design_specification",
+        ],
+    }
+    normalized = normalize_journey(journey)
+    assert normalized["current_stage"] == "problem_identification"
+    assert normalized["completed_stages"] == journey["completed_stages"]
+    assert selectable_stage_ids(normalized) == (
+        "problem_identification",
+        "concept_generation",
+        "design_specification",
+        "deep_analysis",
+    )
+
+
+def test_mark_stage_completed_fails_closed_on_missing_prerequisite():
+    with pytest.raises(ValueError, match="prerequisites"):
+        mark_stage_completed(
+            {
+                "current_stage": "design_specification",
+                "completed_stages": ["problem_identification"],
+            },
+            "design_specification",
+        )
+
+
 def test_chat_interaction_automatically_advances_or_keeps_stage():
     journey = default_journey()
     advanced, decision, clean_response = automatic_stage_update(
@@ -159,7 +237,9 @@ def test_legacy_automatic_transition_renders_as_next_stage_questions():
         ("Which concepts could address this problem?",),
     )
 
-    assert display.startswith("**Concept generation**")
+    assert display.startswith(
+        "**[Problem identification] -> [Concept generation] Ready**"
+    )
     assert "**Questions to explore**" in display
     assert "Which concepts could address this problem?" in display
     assert "I’ve moved you" not in display
@@ -175,6 +255,17 @@ def test_legacy_coach_restatement_is_hidden_without_changing_the_response_body()
     assert "You’re exploring" not in display
     assert display.startswith("**Problem identification**")
     assert "Before moving on" in display
+
+
+def test_before_we_move_gatekeeping_is_stripped_after_stage_advance():
+    """Transition copy must not keep 'before we move' once the stage advanced."""
+    display = concise_coach_response(
+        "**[Problem identification] -> [Concept generation] Ready**\n\n"
+        "Before we move to Concept Generation, what evidence do you have?\n\n"
+        "Let's start with three different concepts."
+    )
+    assert "Before we move to Concept Generation" not in display
+    assert "three different concepts" in display
 
 
 def test_empty_learning_review_has_a_summary_placeholder():

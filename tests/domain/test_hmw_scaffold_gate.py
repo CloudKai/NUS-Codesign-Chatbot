@@ -19,6 +19,7 @@ from backend.learning.hmw import (
     hmw_scaffold_available,
     hmw_scaffold_projection,
     student_hmw_candidate_present,
+    student_workable_hmw_present,
 )
 from backend.learning_service import LearningProgressService
 from backend.mock_provider import DeterministicCoachProvider
@@ -607,6 +608,21 @@ def test_student_hmw_candidate_accepts_substantive_attempts() -> None:
     assert student_hmw_candidate_present(
         "How might we do something for people so that things get better?"
     ) is True
+
+
+def test_student_workable_hmw_requires_for_and_so_that() -> None:
+    assert student_workable_hmw_present(_VALID_HMW) is True
+    assert student_workable_hmw_present(
+        "How might we improve the road-crossing experience for elderly pedestrians "
+        "so that they can cross busy roads safely and confidently?"
+    ) is True
+    assert student_workable_hmw_present(
+        "How might we improve road crossings for older pedestrians?"
+    ) is False
+    assert student_workable_hmw_present(
+        "How might we improve crossing safety so that it is safer?"
+    ) is False
+    assert student_workable_hmw_present(_TWO_SIGNAL_MESSAGE) is False
 
 
 def test_student_hmw_candidate_rejects_meta_and_empty_attempts() -> None:

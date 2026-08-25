@@ -244,6 +244,7 @@ def test_student_store_public_and_dsql_occ_contracts_are_stable() -> None:
         "update_thread",
         "update_user_preferences",
         "upsert_cognito_user",
+        "validate_learning_stage_selection",
     }
     actual_public = {
         name

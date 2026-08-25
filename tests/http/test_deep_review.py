@@ -310,6 +310,11 @@ def test_stage_advance_during_review_is_not_reverted(tmp_path, monkeypatch) -> N
     )
     assert posted.status_code == 200
     assert started.wait(timeout=2)
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = ["problem_identification"]
+    metadata["learning_journey"] = journey
+    store.update_thread(thread_id, metadata=metadata)
     store.select_learning_stage(thread_id, "concept_generation")
     release.set()
     finished = _wait_http_job(client, thread_id)

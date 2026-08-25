@@ -331,11 +331,6 @@
             padding:1rem .8rem calc(.45rem + 10px);
         }
 
-        [class*="st-key-journey_stage_"]:has(.journey-state.current),
-        [class*="st-key-journey_stage_"]:has(.journey-state.open) {
-            min-height:11rem;
-        }
-
         [class*="st-key-journey-select-"] div[data-testid="stButton"] button,
         [class*="st-key-journey-select-"] [data-testid="stBaseButton-tertiary"] {
             font-size:1.05rem !important;
@@ -375,4 +370,29 @@
             padding:.65rem;
         }
         .st-key-research_transcript_scroll { max-height:none; }
+    }
+
+    /* Journey's icon/content pair stays horizontal on narrow mobile layouts. */
+    @media (max-width:520px) {
+        [class*="st-key-journey_stage_"] > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] {
+            flex-direction:row !important;
+            flex-wrap:nowrap !important;
+        }
+
+        [class*="st-key-journey_stage_"] > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {
+            flex:0 0 2rem !important;
+            width:2rem !important;
+            min-width:2rem !important;
+            max-width:2rem !important;
+        }
+
+        [class*="st-key-journey_stage_"] > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) {
+            flex:1 1 0 !important;
+            width:auto !important;
+            min-width:0 !important;
+            max-width:100% !important;
+        }
     }

@@ -1385,7 +1385,8 @@ class StudentStore:
             The updated notebook metadata dict (includes ``learning_journey``).
 
         Raises:
-            ValueError: When the notebook is missing or ``stage_id`` is unknown.
+            ValueError: When the notebook is missing, ``stage_id`` is unknown,
+                or the stage is beyond the student's unlocked frontier.
         """
         from backend.student_journey import STAGE_BY_ID
 
@@ -1432,6 +1433,43 @@ class StudentStore:
             )
             return current_meta
 
+    def validate_learning_stage_selection(self, thread_id: str, stage_id: str) -> None:
+        """Validate a stage selection without changing notebook state.
+
+        This read-only preflight protects idempotency reservations from being
+        created for locked exact chat commands.  The transactional
+        ``_selected_learning_stage_metadata`` seam remains authoritative and
+        repeats the same check immediately before any write.
+
+        Args:
+            thread_id: Owned notebook id.
+            stage_id: Canonical Thinking Path stage id.
+
+        Raises:
+            ValueError: When the notebook is missing, the stage is unknown, or
+                the stage is beyond the unlocked frontier.
+        """
+        from backend.student_journey import (
+            STAGE_BY_ID,
+            normalize_journey,
+            selectable_stage_ids,
+        )
+
+        cleaned_stage = str(stage_id or "").strip()
+        if cleaned_stage not in STAGE_BY_ID:
+            raise ValueError(f"Unknown thinking stage: {cleaned_stage}")
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not row:
+                raise ValueError("Notebook not found")
+            metadata = self._thread_dict(row).get("metadata") or {}
+            journey = normalize_journey(metadata.get("learning_journey"))
+            if cleaned_stage not in selectable_stage_ids(journey):
+                raise ValueError(f"Thinking stage is locked: {cleaned_stage}")
+
     def _selected_learning_stage_metadata(
         self,
         connection: Any,
@@ -1447,18 +1485,23 @@ class StudentStore:
         The caller owns the surrounding transaction. Both the standalone
         selection API and a persisted manual-selection chat turn use this
         helper so their journey and pending-transition semantics cannot drift.
+        Stage authorization is validated before any pending-transition update
+        or metadata mutation, so an illegal request is fail-closed and atomic.
         """
         from backend.student_journey import (
             STAGE_BY_ID,
             normalize_journey,
+            selectable_stage_ids,
             set_current_stage,
         )
 
         cleaned_stage = str(stage_id or "").strip()
         if cleaned_stage not in STAGE_BY_ID:
             raise ValueError(f"Unknown thinking stage: {cleaned_stage}")
+        journey = normalize_journey(metadata.get("learning_journey"))
+        if cleaned_stage not in selectable_stage_ids(journey):
+            raise ValueError(f"Thinking stage is locked: {cleaned_stage}")
         selected = dict(metadata)
-        journey = normalize_journey(selected.get("learning_journey"))
         selected["learning_journey"] = set_current_stage(journey, cleaned_stage)
         selected["thinking_stage"] = cleaned_stage
         connection.execute(
@@ -2180,6 +2223,7 @@ class StudentStore:
         idempotency_turn_payload: dict[str, Any] | None = None,
         research_observation: ResearchObservationCreate | None = None,
         auto_advance: AtomicAutoAdvance | None = None,
+        validated_completion_stage: str | None = None,
         manual_stage_selection_to: str | None = None,
         review_counter_qualifying: bool | None = None,
         review_counter_deep_succeeded: bool | None = None,
@@ -2189,9 +2233,12 @@ class StudentStore:
         Provider, retrieval, and object-storage work must finish before this
         method is called. The user row, assistant assessment/citations/pending
         decision, optional auto-advance, optional research observation, and
-        notebook summary, and optional feature-gated manual stage selection
-        either commit together or roll back. Research evidence stores offsets
-        into the referenced student message rather than a transcript copy.
+        notebook summary, optional validated Phase 2 completion, and optional
+        feature-gated manual stage selection either commit together or roll
+        back. A validated Phase 2 completion records the current stage in
+        ``completed_stages`` while leaving the focus and pending transition
+        unchanged. Research evidence stores offsets into the referenced
+        student message rather than a transcript copy.
 
         When ``existing_user_message_id`` is set (edit/revise path), the user
         message is already durable from the revision transaction. Content is not
@@ -2216,6 +2263,7 @@ class StudentStore:
         if not cleaned_user or not cleaned_assistant:
             raise ValueError("Completed coach turns require both messages")
         manual_target = str(manual_stage_selection_to or "").strip() or None
+        completion_stage = str(validated_completion_stage or "").strip() or None
         if manual_target is not None:
             from backend.student_journey import STAGE_BY_ID
 
@@ -2225,6 +2273,21 @@ class StudentStore:
                 raise ValueError("Manual stage selection cannot also auto-advance")
             if existing_user_message_id is not None:
                 raise ValueError("Manual stage selection is not available during revision")
+        if completion_stage is not None:
+            from backend.student_journey import STAGE_BY_ID, THINKING_STAGES
+
+            if completion_stage not in STAGE_BY_ID:
+                raise ValueError(f"Unknown completion stage: {completion_stage}")
+            if auto_advance is not None or manual_target is not None:
+                raise ValueError(
+                    "Validated completion cannot combine with a stage mutation"
+                )
+            if existing_user_message_id is not None:
+                raise ValueError("Validated completion is not available during revision")
+            if completion_stage != expected_stage:
+                raise ValueError("Validated completion stage does not match the coach turn")
+            if completion_stage == THINKING_STAGES[-1].id:
+                raise ValueError("Reflection cannot be completed by an ADVANCE turn")
         user_id = str(existing_user_message_id or uuid.uuid4())
         assistant_id = assistant_message_id or str(uuid.uuid4())
         assistant_meta = dict(assistant_metadata)
@@ -2251,6 +2314,24 @@ class StudentStore:
         proposed_stage = assistant_meta.pop("proposed_stage", None)
         decision_status = assistant_meta.pop("decision_status", None)
         assistant_meta.pop("pending_transition_id", None)
+        if completion_stage is not None:
+            stage_ids = [stage.id for stage in THINKING_STAGES]
+            expected_index = stage_ids.index(completion_stage)
+            proposed_stage = str(proposed_stage or "").strip()
+            assessment_recommendation = (
+                assessment.get("recommendation")
+                if isinstance(assessment, dict)
+                else None
+            )
+            if (
+                decision_status != "pending"
+                or expected_index + 1 >= len(stage_ids)
+                or proposed_stage != stage_ids[expected_index + 1]
+                or str(assessment_recommendation or "").strip().lower() != "advance"
+            ):
+                raise ValueError(
+                    "Validated completion requires a pending ADVANCE recommendation"
+                )
         if auto_advance is None and decision_status and decision_status != "pending":
             raise ValueError("New coach transition status must be pending")
         if auto_advance is not None:
@@ -2504,6 +2585,10 @@ class StudentStore:
             elif manual_target is not None:
                 journey_meta = current_journey
                 current_meta["thinking_stage"] = manual_target
+            elif completion_stage is not None:
+                from .student_journey import mark_stage_completed
+
+                journey_meta = mark_stage_completed(current_journey, completion_stage)
             else:
                 journey_meta = current_journey
             for key in _PROGRESS_KEYS:

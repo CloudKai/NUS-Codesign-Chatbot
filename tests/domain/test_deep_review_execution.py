@@ -35,7 +35,7 @@ from backend.specialists.review_orchestration import (
     explicit_deep_review_available,
     parse_deep_review_job,
 )
-from backend.student_journey import learning_review
+from backend.student_journey import THINKING_STAGES, learning_review
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
 from counting_file_storage import CountingFileStorage, install_counting_storage
@@ -253,6 +253,22 @@ def _review_items(
 def _unlock(store: StudentStore, thread_id: str) -> None:
     """Grant one explicit Deep Review entitlement without stacking credits."""
     store.update_thread(thread_id, metadata={COUNTER_SETTINGS_KEY: 3})
+
+
+def _allow_stage_selection(
+    store: StudentStore, thread_id: str, stage_id: str
+) -> None:
+    """Seed the validated completion prefix needed for a direct stage fixture."""
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    target_index = next(
+        index for index, stage in enumerate(THINKING_STAGES) if stage.id == stage_id
+    )
+    journey["completed_stages"] = [
+        stage.id for stage in THINKING_STAGES[:target_index]
+    ]
+    metadata["learning_journey"] = journey
+    store.update_thread(thread_id, metadata=metadata)
 
 
 def _coach(service: CoachApplicationService, thread_id: str, key: str, message: str) -> None:
@@ -517,6 +533,7 @@ def test_snapshot_reviewed_stage_survives_later_stage_change(tmp_path) -> None:
     service = _service(store, client)
     job = service.enqueue_deep_review(thread_id, idempotency_key="deep-frozen-stage")
     assert job.status in {DeepReviewJobStatus.QUEUED, DeepReviewJobStatus.RUNNING}
+    _allow_stage_selection(store, thread_id, "concept_generation")
     store.select_learning_stage(thread_id, "concept_generation")
     finished = _wait_job(service, thread_id)
     assert finished.status is DeepReviewJobStatus.COMPLETED
@@ -628,6 +645,7 @@ def test_later_deep_review_on_new_stage_replaces_prior_snapshot_contribution(
         store, thread_id, "improvement_sections", "problem_identification"
     )
 
+    _allow_stage_selection(store, thread_id, "concept_generation")
     store.select_learning_stage(thread_id, "concept_generation")
     _add_incremental_assessment(
         store,
@@ -890,6 +908,7 @@ def test_deep_review_request_includes_whole_frozen_pi_and_cg_history(tmp_path) -
             content=f"Filler coach reply {index}.",
             stage="problem_identification",
         )
+    _allow_stage_selection(store, thread_id, "concept_generation")
     store.select_learning_stage(thread_id, "concept_generation")
     _add_turn(
         store,
@@ -935,6 +954,7 @@ def test_stage_aware_deep_review_persists_and_projects_pi_and_cg(tmp_path) -> No
         stage="problem_identification",
         strengths=["Incremental PI strength"],
     )
+    _allow_stage_selection(store, thread_id, "concept_generation")
     store.select_learning_stage(thread_id, "concept_generation")
     _add_turn(
         store,
@@ -1030,6 +1050,7 @@ def test_deep_review_started_in_cg_ignores_later_stage_advance(tmp_path) -> None
         stage="problem_identification",
         strengths=["PI incremental"],
     )
+    _allow_stage_selection(store, thread_id, "concept_generation")
     store.select_learning_stage(thread_id, "concept_generation")
     _add_turn(
         store,
@@ -1059,6 +1080,7 @@ def test_deep_review_started_in_cg_ignores_later_stage_advance(tmp_path) -> None
     service = _service(store, client)
     job = service.enqueue_deep_review(thread_id, idempotency_key="deep-async")
     assert job.status in {DeepReviewJobStatus.QUEUED, DeepReviewJobStatus.RUNNING}
+    _allow_stage_selection(store, thread_id, "design_specification")
     store.select_learning_stage(thread_id, "design_specification")
     _add_turn(
         store,
@@ -1361,6 +1383,7 @@ def test_long_second_deep_review_uses_checkpoint_delta(
     assert _wait_job(first_service, thread_id).status is DeepReviewJobStatus.COMPLETED
     snapshot = _snapshot(store, thread_id)
     assert snapshot is not None
+    _allow_stage_selection(store, thread_id, "concept_generation")
     store.select_learning_stage(thread_id, "concept_generation")
     delta_21 = _add_turn(
         store,

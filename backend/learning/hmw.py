@@ -201,6 +201,32 @@ def student_hmw_candidate_present(text: str | None) -> bool:
     return len(words) >= _MIN_HMW_CONTENT_WORDS
 
 
+def student_workable_hmw_present(text: str | None) -> bool:
+    """Return whether active user text is a structural How Might We completion.
+
+    This is a lenient application-owned check for Problem Identification
+    advancement. It reuses the student-authored candidate guard and additionally
+    requires the preferred ``for`` and ``so that`` clauses after the How Might
+    We marker. It does not judge evidence, root cause, or wording quality.
+
+    Args:
+        text: The current active student contribution for this Coaching turn.
+
+    Returns:
+        True when the text is a candidate HMW with both structural clauses.
+    """
+    if not student_hmw_candidate_present(text):
+        return False
+    lower = " ".join(str(text or "").split()).lower()
+    marker_index = lower.find(_HMW_MARKER)
+    if marker_index < 0:
+        return False
+    after = lower[marker_index + len(_HMW_MARKER) :]
+    return re.search(r"\bfor\b", after) is not None and re.search(
+        r"\bso that\b", after
+    ) is not None
+
+
 def qualifying_pi_coaching_assessments(
     active_messages: Sequence[Mapping[str, Any]] | None,
 ) -> list[Mapping[str, Any]]:

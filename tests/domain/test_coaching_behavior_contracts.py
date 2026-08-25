@@ -31,6 +31,12 @@ def test_each_stage_prompt_encodes_the_coaching_contract() -> None:
         text = load_stage_prompt(agentcore_topic_for_stage(stage.id)).lower()
         for needle in expected[stage.id]:
             assert needle in text, f"{stage.id} missing {needle}"
+    pi = load_stage_prompt("problem_identification").lower()
+    assert "good enough to progress" in pi
+    assert "when a workable hmw is present" in pi
+    assert "explicit progression requests" in pi
+    assert "repeated hmw rule" in pi
+    assert "what evidence do you have?" in pi
 
 
 def test_behavior_cases_exist_for_every_stage() -> None:

@@ -7,6 +7,7 @@ from backend.learning_service import LearningProgressService
 from backend.mock_provider import DeterministicCoachProvider
 from backend.repositories import SQLiteNotebookRepository, SQLitePhaseTransitionRepository
 from backend.settings import settings
+from backend.student_journey import THINKING_STAGES, normalize_journey, selectable_stage_ids
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
 
@@ -166,11 +167,24 @@ def test_select_stage_updates_journey_without_completing_skipped(
     monkeypatch.setattr(settings, "student_stage_selection", True)
     service = _learning_service(store)
 
+    target_index = next(
+        index for index, stage in enumerate(THINKING_STAGES) if stage.id == stage_id
+    )
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = [
+        stage.id for stage in THINKING_STAGES[:target_index]
+    ]
+    metadata["learning_journey"] = journey
+    metadata["thinking_stage"] = "problem_identification"
+    store.update_thread(thread_id, metadata=metadata)
     metadata = service.select_stage(thread_id, stage_id)
 
     journey = metadata["learning_journey"]
     assert journey["current_stage"] == stage_id
-    assert journey.get("completed_stages") == []
+    assert journey.get("completed_stages") == [
+        stage.id for stage in THINKING_STAGES[:target_index]
+    ]
     assert metadata["thinking_stage"] == stage_id
     thread = store.get_thread(thread_id) or {}
     assert thread["metadata"]["thinking_stage"] == stage_id
@@ -200,9 +214,61 @@ def test_select_stage_rejects_pending_transition(tmp_path, monkeypatch):
 
     monkeypatch.setattr(settings, "student_stage_selection", True)
     service = LearningProgressService(store, notebooks, transitions)
-    service.select_stage(thread_id, "deep_analysis")
+    with pytest.raises(ValueError, match="locked"):
+        service.select_stage(thread_id, "deep_analysis")
 
-    assert transitions.get_pending(thread_id) is None
+    assert transitions.get_pending(thread_id) is not None
     thread = store.get_thread(thread_id) or {}
-    assert thread["metadata"]["thinking_stage"] == "deep_analysis"
+    assert thread["metadata"]["thinking_stage"] == "problem_identification"
     assert thread["metadata"]["learning_journey"]["completed_stages"] == []
+
+
+def test_revisit_keeps_completed_frontier_and_valid_selection_rejects_pending(
+    tmp_path, monkeypatch
+):
+    """A completed-phase revisit survives reload and clears pending atomically."""
+    store = StudentStore(tmp_path / "select-revisit.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    journey = dict(metadata["learning_journey"])
+    journey["current_stage"] = "design_specification"
+    journey["completed_stages"] = ["problem_identification", "concept_generation"]
+    metadata["learning_journey"] = journey
+    metadata["thinking_stage"] = "design_specification"
+    store.update_thread(thread_id, metadata=metadata)
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    service = _learning_service(store)
+
+    selected = service.select_stage(thread_id, "problem_identification")
+    reloaded = store.get_thread(thread_id) or {}
+    persisted = normalize_journey((reloaded["metadata"] or {})["learning_journey"])
+    assert selected["learning_journey"]["current_stage"] == "problem_identification"
+    assert persisted["current_stage"] == "problem_identification"
+    assert persisted["completed_stages"] == [
+        "problem_identification",
+        "concept_generation",
+    ]
+    assert selectable_stage_ids(persisted) == (
+        "problem_identification",
+        "concept_generation",
+        "design_specification",
+    )
+
+    pending = CoachWorkflow(
+        DeterministicCoachProvider(StageDecision.ADVANCE),
+        SQLitePhaseTransitionRepository(store),
+    ).run(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message=(
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
+            ),
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    ).pending_transition
+    assert pending is not None
+    SQLitePhaseTransitionRepository(store).create(pending)
+    service.select_stage(thread_id, "concept_generation")
+    assert SQLitePhaseTransitionRepository(store).get_pending(thread_id) is None

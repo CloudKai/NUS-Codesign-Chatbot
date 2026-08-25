@@ -77,8 +77,10 @@ student-authored HMW sets `ready=false` and `recommendation=advance`; the
 card hides and existing stage machinery may move to Concept Generation.
 Equivalent prose without an HMW stays in Problem Identification. FastAPI
 also requires a deterministic student HMW candidate in the active user
-message before accepting ADVANCE. Zero extra model or Retrieve calls.
-Clients cannot write the flag.
+message before accepting ADVANCE, and promotes STAY to ADVANCE when the
+message satisfies ``student_workable_hmw_present()`` (candidate plus ``for``
+and ``so that`` after the How Might We marker) even if the model keeps probing.
+Zero extra model or Retrieve calls. Clients cannot write the flag.
 
 Legacy router / Q&A / Coaching / Incremental Review payloads remain in the
 runtime for compatibility and are unused on the active FastAPI path.

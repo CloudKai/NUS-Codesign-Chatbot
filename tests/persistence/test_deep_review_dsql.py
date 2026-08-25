@@ -7,6 +7,7 @@ import threading
 from typing import Any
 
 from backend.persistence.dsql_student_store import DsqlStudentStore, _OCC_WRITE_METHODS
+from backend.domain import StageDecision
 from backend.specialists.review_orchestration import (
     COUNTER_SETTINGS_KEY,
     DEEP_REVIEW_JOB_COMPLETED,
@@ -96,6 +97,11 @@ def _queue_frozen_problem_review(
     assert job["review_id"] == review_id
     assert job["stage_at_start"] == "problem_identification"
     assert dsql_store.mark_deep_review_job_running(thread_id, review_id) is True
+    metadata = dict((dsql_store.get_thread(thread_id) or {}).get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = ["problem_identification"]
+    metadata["learning_journey"] = journey
+    dsql_store.update_thread(thread_id, metadata=metadata)
     dsql_store.select_learning_stage(thread_id, "concept_generation")
 
 
@@ -128,6 +134,55 @@ def _assert_frozen_stage_after_complete(
         DEEP_REVIEW_TURN_MESSAGE not in str(item.get("content") or "")
         for item in messages
     )
+
+
+def test_dsql_validated_phase2_completion_keeps_focus_and_pending_transition(
+    tmp_path,
+) -> None:
+    """The DSQL OCC façade atomically records completion beside the pending turn."""
+    database = tmp_path / "dsql-phase2-completion.sqlite3"
+    owner = StudentStore(database)
+    thread_id = owner.create_thread(model_id="mock", support_mode="critical-thinking")
+    dsql_store = _dsql_store_over_sqlite(database, owner)
+    assessment = {
+        "current_stage": "problem_identification",
+        "response_mode": "coaching",
+        "recommendation": StageDecision.ADVANCE.value,
+    }
+    thread = dsql_store.get_thread(thread_id) or {}
+    revision = int(thread.get("conversation_revision") or 0)
+
+    dsql_store.persist_coach_turn(
+        thread_id,
+        expected_stage="problem_identification",
+        expected_conversation_revision=revision,
+        expected_response_detail="short",
+        user_content=(
+            "How might we improve road crossings for older pedestrians so that "
+            "they can cross safely without rushing?"
+        ),
+        user_metadata={"thinking_stage": "problem_identification"},
+        assistant_content="The problem is ready for the next stage.",
+        assistant_message_id="phase2-advance-assistant",
+        assistant_metadata={
+            "thinking_stage": "problem_identification",
+            "assessment": assessment,
+            "proposed_stage": "concept_generation",
+            "decision_status": "pending",
+            "from_stage": "problem_identification",
+        },
+        summary_metadata={},
+        validated_completion_stage="problem_identification",
+    )
+
+    persisted = owner.get_thread(thread_id) or {}
+    journey = (persisted.get("metadata") or {}).get("learning_journey") or {}
+    assert journey["current_stage"] == "problem_identification"
+    assert journey["completed_stages"] == ["problem_identification"]
+    pending = owner.get_pending_phase_transition(thread_id)
+    assert pending is not None
+    assert pending["from_stage"] == "problem_identification"
+    assert pending["to_stage"] == "concept_generation"
 
 
 def test_dsql_occ_wrappers_include_deep_review_writes() -> None:

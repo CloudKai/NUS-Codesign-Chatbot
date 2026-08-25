@@ -121,7 +121,9 @@ def test_local_api_runs_a_mock_turn_and_auto_advances(tmp_path):
     assert "ready for the next part" not in payload["response_text"].lower()
     assert "You’ve made this step clearer" not in payload["response_text"]
     assert "You've made this step clearer" not in payload["response_text"]
-    assert payload["response_text"].startswith("**Concept generation**")
+    assert payload["response_text"].startswith(
+        "**[Problem identification] -> [Concept generation] Ready**"
+    )
     assert "That's a solid start" in payload["response_text"]
     assert "Which group of older adults" in payload["response_text"]
     assert "I’ve moved you" not in payload["response_text"]
@@ -235,6 +237,11 @@ def test_confirm_advance_api_does_not_blank_existing_progress(tmp_path):
 def test_select_stage_api_requires_flag_and_valid_stage(tmp_path, monkeypatch, caplog):
     store = StudentStore(tmp_path / "select-api.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = ["problem_identification"]
+    metadata["learning_journey"] = journey
+    store.update_thread(thread_id, metadata=metadata)
     client = TestClient(create_app(store, auto_advance_stages=False))
     monkeypatch.setattr(settings, "student_stage_selection", False)
 
@@ -267,7 +274,9 @@ def test_select_stage_api_requires_flag_and_valid_stage(tmp_path, monkeypatch, c
     body = selected.json()
     assert body["thinking_stage"] == "concept_generation"
     assert body["learning_journey"]["current_stage"] == "concept_generation"
-    assert body["learning_journey"]["completed_stages"] == []
+    assert body["learning_journey"]["completed_stages"] == [
+        "problem_identification"
+    ]
     stage_event = next(
         json.loads(record.getMessage())
         for record in caplog.records

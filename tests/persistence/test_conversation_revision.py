@@ -1386,6 +1386,11 @@ def test_select_learning_stage_rejects_only_active_pending(tmp_path, monkeypatch
             (superseded_pending_id, thread_id),
         )
         connection.commit()
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = ["problem_identification"]
+    metadata["learning_journey"] = journey
+    store.update_thread(thread_id, metadata=metadata)
     store.select_learning_stage(thread_id, "concept_generation")
     revision = int(store.get_thread(thread_id)["conversation_revision"] or 0)
     with store._connect() as connection:

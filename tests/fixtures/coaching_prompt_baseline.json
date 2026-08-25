@@ -1,18 +1,18 @@
 {
   "baseline_commit": "a6d163668902beae4938fe552cced7ba92b15e88",
-  "note": "Updating these hashes requires explicit pedagogical review. 2026-08-22: shared_coaching.md adds the high-priority progress-over-interrogation rule: advance usable work, and block only for substantive reasons; a question is not required on an advance. 2026-08-22: problem_identification.md clarifies that a substantive student HMW is a working draft; awkward, template-formatted, problem/friction-oriented, or multi-benefit wording advances when user, meaningful problem/opportunity, and outcome are present. 2026-08-22: synchronized the shared_coaching.md hash with the reviewed prompt. 2026-08-21: problem_identification.md teaches the 0/1 explore → 2/3 scaffold → valid student HMW ADVANCE state machine, with no equivalent-prose auto-advance. Shared coaching and other stage files unchanged. 2026-08-20: problem_identification.md treats How Might We readiness as 2-of-3 framing signals, distinct from ADVANCE. Shared coaching and other stage files unchanged. 2026-08-17: shared_coaching.md dropped the assumptions_identified schema sentence and the Fast Chat structured-output section (contract now lives once in the runtime JSON block). RESEARCH CODING, Socratic, V&V, and assumption-check pedagogy are unchanged.",
+  "note": "Updating these hashes requires explicit pedagogical review. 2026-08-26: concept_generation.md and shared_coaching.md assert that the application current_stage is authoritative after PI→CG; Concept Generation must not gatekeep entry or continue PI probing unless the student revisits. 2026-08-26: problem_identification.md adds good-enough-to-progress, stop-probing after workable HMW, explicit progression requests, repeated-HMW confirmation, and Socratic boundary language; ADVANCE still uses recommendation=advance + hmw_scaffold_ready=false. 2026-08-22: shared_coaching.md adds the high-priority progress-over-interrogation rule: advance usable work, and block only for substantive reasons; a question is not required on an advance. 2026-08-22: problem_identification.md clarifies that a substantive student HMW is a working draft; awkward, template-formatted, problem/friction-oriented, or multi-benefit wording advances when user, meaningful problem/opportunity, and outcome are present. 2026-08-22: synchronized the shared_coaching.md hash with the reviewed prompt. 2026-08-21: problem_identification.md teaches the 0/1 explore → 2/3 scaffold → valid student HMW ADVANCE state machine, with no equivalent-prose auto-advance. Shared coaching and other stage files unchanged. 2026-08-20: problem_identification.md treats How Might We readiness as 2-of-3 framing signals, distinct from ADVANCE. Shared coaching and other stage files unchanged. 2026-08-17: shared_coaching.md dropped the assumptions_identified schema sentence and the Fast Chat structured-output section (contract now lives once in the runtime JSON block). RESEARCH CODING, Socratic, V&V, and assumption-check pedagogy are unchanged.",
   "files": [
     {
       "path": "agentcore_runtime/prompts/shared_coaching.md",
-      "sha256": "6abbec84bdc6ddcc944848f317812f59945d60471dec768b4a887dfec04bc56e"
+      "sha256": "00d0a5bc4de31b673a0419df357975e452450d3f5d9880a7e62b38354bf64327"
     },
     {
       "path": "agentcore_runtime/prompts/stages/problem_identification.md",
-      "sha256": "70f873e75badb32194615c42fcfb31428082603b07d8c826e5863c1c7b0d0351"
+      "sha256": "d08b007098a0fa4e18a888b12ee80d938a454e01103eb2d277d67dc15b10a3be"
     },
     {
       "path": "agentcore_runtime/prompts/stages/concept_generation.md",
-      "sha256": "7965254ade7aefeda4a848629f65676a89082727ae31df0a7d7a755d1cafcb4e"
+      "sha256": "7086ea9f9e86fae4a556dde4dfee091c4fd36aae931805014f57eaed12a34995"
     },
     {
       "path": "agentcore_runtime/prompts/stages/design_specification.md",

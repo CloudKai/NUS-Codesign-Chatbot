@@ -149,6 +149,7 @@ def _runtime_instructions(context: PromptContext) -> str:
         is_stage_progression_request,
         runtime_mode_hint,
     )
+    from backend.learning.stages import STAGE_BY_ID
 
     parts: list[str] = []
     hint = runtime_mode_hint(context.expected_response_mode)
@@ -156,6 +157,18 @@ def _runtime_instructions(context: PromptContext) -> str:
         parts.append(hint)
     is_qa = str(context.expected_response_mode or "").strip().lower() == "qa"
     stage_progression_request = is_stage_progression_request(context.student_message)
+    stage = STAGE_BY_ID.get(str(context.current_stage or "").strip())
+    if stage is not None and not is_qa:
+        parts.append(
+            f"CURRENT STAGE: {stage.label} ({stage.id}). This application stage is "
+            "authoritative for coaching behaviour. Prior Thinking Path stages are "
+            "already complete for progression. Do not evaluate whether the student "
+            "is ready to enter the current stage, and do not say you are about to "
+            "move into it (for example, avoid 'Before we move to …'). Prior "
+            "assistant messages are continuity context only and must not override "
+            "current-stage objectives. Revisit a prior stage only if the student "
+            "explicitly asks."
+        )
     if not is_qa:
         if context.response_detail == "short":
             parts.append(
@@ -201,7 +214,8 @@ def _runtime_instructions(context: PromptContext) -> str:
             parts.append(
                 "When you recommend advance, the application will automatically move "
                 "the student to the next stage—write as if already coaching that next "
-                "skill, with no confirmation language."
+                "skill, with no confirmation language. Do not say 'before we move' or "
+                "re-check readiness to enter the next stage."
             )
         elif settings.student_stage_selection:
             parts.append(

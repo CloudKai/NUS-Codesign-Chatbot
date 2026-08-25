@@ -210,6 +210,11 @@ def test_authoritative_stage_change_keeps_affinity_but_changes_prompt(
             idempotency_key="stage-pi",
         )
     )
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = ["problem_identification"]
+    metadata["learning_journey"] = journey
+    store.update_thread(thread_id, metadata=metadata)
     selected = service.submit(
         _request(
             thread_id=thread_id,

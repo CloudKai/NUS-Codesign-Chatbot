@@ -60,13 +60,65 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     assert "family=Caveat" in foundations_css
 
     studio_css = Path(_STYLES_DIR / "20-studio.css").read_text(encoding="utf-8")
-    assert ':has(.journey-state.open)' in studio_css
+    assert ':has(.journey-state.preview-open)' in studio_css
+    assert ':has(.journey-state.current) {' in studio_css
+    assert ':has(.journey-state.current),\n    [class*="st-key-journey_stage_"]:has(.journey-state.preview-open)' not in studio_css
+    assert "min-height:11rem" not in studio_css
     assert '[class*="st-key-journey-select-"]' in studio_css
     assert '"Caveat",cursive' in studio_css
     assert "white-space:nowrap" in studio_css
     assert "background:var(--cd-accent)" in studio_css
-    assert "container-name:journey-header" in studio_css
-    assert '[class*="st-key-journey-select-compact-"]' in studio_css
+    assert "container-type:inline-size" in studio_css
+    assert "container-name:journey-stage" in studio_css
+    assert "@container journey-stage (max-width:28rem)" in studio_css
+    assert ".cd-roadmap-node" in studio_css
+    assert "flex:none" in studio_css
+    assert "min-width:2rem !important" in studio_css
+    assert "min-height:2rem !important" in studio_css
+    assert "aspect-ratio:1" in studio_css
+    assert "white-space:normal" in studio_css
+    assert "text-overflow:ellipsis" not in studio_css
+    stage_columns = (
+        '[class*="st-key-journey_stage_"] > [data-testid="stLayoutWrapper"]\n'
+        '    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]'
+    )
+    assert f"{stage_columns}:first-child" in studio_css
+    assert "flex:0 0 2rem !important" in studio_css
+    assert f"{stage_columns}:nth-child(2)" in studio_css
+    assert "flex:1 1 0 !important" in studio_css
+    assert "max-width:100% !important" in studio_css
+    stage_row = (
+        '[class*="st-key-journey_stage_"] > [data-testid="stLayoutWrapper"]\n'
+        '    > [data-testid="stHorizontalBlock"] {\n'
+        '        flex-direction:row !important;'
+    )
+    assert stage_row in studio_css
+    copy_stack_row = (
+        '> [data-testid="stVerticalBlock"]:has([class*="st-key-journey_select_"]) {\n'
+        '        display:flex !important;\n'
+        '        flex-direction:row !important;'
+    )
+    assert copy_stack_row in studio_css
+    assert (
+        '> [data-testid="stLayoutWrapper"]:has([class*="st-key-journey_select_"])'
+        in studio_css
+    )
+    assert "container-name:journey-header" not in studio_css
+    assert '[class*="st-key-journey-select-compact-"]' not in studio_css
+
+    responsive_css = Path(_STYLES_DIR / "90-responsive.css").read_text(encoding="utf-8")
+    assert "min-height:11rem" not in responsive_css
+    assert "/* Journey's icon/content pair stays horizontal" in responsive_css
+    assert "flex-direction:row !important" in responsive_css
+    assert "flex-wrap:nowrap !important" in responsive_css
+    assert "flex:0 0 2rem !important" in responsive_css
+    assert "flex:1 1 0 !important" in responsive_css
+    assert (
+        '[class*="st-key-journey_stage_"] > [data-testid="stLayoutWrapper"]\n'
+        '        > [data-testid="stHorizontalBlock"] {\n'
+        '            flex-direction:row !important;'
+        in responsive_css
+    )
 
     profile_css = Path(_STYLES_DIR / "60-profile-topbar.css").read_text(encoding="utf-8")
     assert ".st-key-profile_menu_root" in profile_css
@@ -97,6 +149,7 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     )
     assert "flex:1 1 auto" in transcript_flex
     assert "overflow:visible" in transcript_flex
+    assert "gap:0 !important" in transcript_flex
     assert "overflow-y:auto" not in transcript_flex
     log_flex = _css_rule_body(
         workspace_css,

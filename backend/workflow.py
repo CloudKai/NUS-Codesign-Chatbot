@@ -26,7 +26,11 @@ from .domain import (
     ProvisionalResearchCoding,
     StageDecision,
 )
-from .learning.hmw import HMW_SCAFFOLD_STAGE_ID, student_hmw_candidate_present
+from .learning.hmw import (
+    HMW_SCAFFOLD_STAGE_ID,
+    student_hmw_candidate_present,
+    student_workable_hmw_present,
+)
 from .repositories import PhaseTransitionRepository
 from .student_journey import THINKING_STAGES
 
@@ -45,6 +49,14 @@ _PI_HMW_GUARD_RESPONSE = (
     "Let's keep refining the problem before moving on. Please draft your own "
     "How Might We question naming the opportunity, who it is for, and the "
     "outcome you want. What framing would you like to try?"
+)
+
+_PI_HMW_PROMOTE_RESPONSE = (
+    "**[Problem identification] -> [Concept generation] Ready**\n\n"
+    "That's a workable How Might We statement. You've identified the user, "
+    "the opportunity, and the outcome clearly enough to start exploring "
+    "solutions. We'll use this as your working HMW for now—you can refine "
+    "it later if your research changes your understanding."
 )
 
 
@@ -203,6 +215,60 @@ def _hmw_guard_applies(
     )
 
 
+def _promote_student_hmw_for_problem_identification_advance(
+    request: CoachRequest,
+    assessment: EducationalAssessment,
+    response_text: str,
+) -> tuple[EducationalAssessment, str]:
+    """Promote PI STAY to ADVANCE when the student authored a structural HMW.
+
+    Haiku may still recommend stay and keep probing after a workable HMW.
+    The application owns progression when the active message satisfies the
+    structural completion contract.
+
+    Args:
+        request: Authoritative coach request for this turn.
+        assessment: Provider assessment after the reject-without-candidate guard.
+        response_text: Provider response text for this turn.
+
+    Returns:
+        Updated assessment and response text for downstream stage machinery.
+    """
+    if request.current_stage != HMW_SCAFFOLD_STAGE_ID:
+        return assessment, response_text
+    if str(assessment.response_mode or "").strip().lower() == "qa":
+        return assessment, response_text
+    if not student_workable_hmw_present(request.student_message):
+        return assessment, response_text
+    if assessment.recommendation is StageDecision.ADVANCE:
+        return (
+            assessment.model_copy(
+                update={
+                    "hmw_scaffold_ready": False,
+                    "hmw_scaffold_guarded": False,
+                }
+            ),
+            response_text,
+        )
+    rationale = str(assessment.recommendation_rationale or "").strip()
+    return (
+        assessment.model_copy(
+            update={
+                "recommendation": StageDecision.ADVANCE,
+                "readiness_candidate": False,
+                "hmw_scaffold_ready": False,
+                "hmw_scaffold_guarded": False,
+                "recommendation_rationale": rationale
+                or (
+                    "Student authored a workable How Might We statement with "
+                    "user, opportunity, and outcome."
+                ),
+            }
+        ),
+        _PI_HMW_PROMOTE_RESPONSE,
+    )
+
+
 @dataclass
 class CoachWorkflow:
     """Run one student turn and return a confirmation-gated recommendation."""
@@ -269,6 +335,9 @@ class CoachWorkflow:
         )
         if hmw_guarded:
             response_text = _PI_HMW_GUARD_RESPONSE
+        assessment, response_text = _promote_student_hmw_for_problem_identification_advance(
+            request, assessment, response_text
+        )
         if assessment.current_stage != request.current_stage:
             raise ValueError("Assessment stage does not match the active journey stage")
         pending: PendingPhaseTransition | None = None
@@ -440,6 +509,9 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
         )
         if hmw_guarded:
             response_text = _PI_HMW_GUARD_RESPONSE
+        assessment, response_text = _promote_student_hmw_for_problem_identification_advance(
+            request, assessment, response_text
+        )
         if assessment.current_stage != request.current_stage:
             raise ValueError(
                 "Assessment stage does not match the active journey stage"

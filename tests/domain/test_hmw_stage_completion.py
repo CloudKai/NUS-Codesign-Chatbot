@@ -36,6 +36,10 @@ _SATISFACTORY_HMW = (
     "How might we improve road crossings for older pedestrians so that they can "
     "cross safely and confidently?"
 )
+_SCREENSHOT_HMW = (
+    "How might we improve the road-crossing experience for elderly pedestrians "
+    "so that they can cross busy roads safely and confidently?"
+)
 _WORKING_HMW_CASES = (
     pytest.param(
         "How might we\n"
@@ -70,6 +74,8 @@ _INCOMPLETE_CASES = (
         "How might we improve crossing safety so that it is safer?",
         id="missing-user",
     ),
+)
+_STRUCTURAL_HMW_STAY_CASES = (
     pytest.param(
         "How might we do something for users so that it is better?",
         id="template-filling",
@@ -87,7 +93,11 @@ _INCOMPLETE_CASES = (
 
 
 def _service(
-    store: StudentStore, recommendation: StageDecision, *, auto_advance: bool
+    store: StudentStore,
+    recommendation: StageDecision,
+    *,
+    auto_advance: bool,
+    hmw_scaffold_ready: bool = False,
 ) -> CoachApplicationService:
     """Return a mock coaching service with an explicit stay/advance decision."""
     notebooks = SQLiteNotebookRepository(store)
@@ -95,7 +105,12 @@ def _service(
     return CoachApplicationService(
         store,
         notebooks,
-        CoachWorkflow(DeterministicCoachProvider(recommendation), transitions),
+        CoachWorkflow(
+            DeterministicCoachProvider(
+                recommendation, hmw_scaffold_ready=hmw_scaffold_ready
+            ),
+            transitions,
+        ),
         LearningProgressService(store, notebooks, transitions),
         auto_advance_stages=auto_advance,
     )
@@ -107,6 +122,7 @@ def _submit(
     *,
     recommendation: StageDecision,
     auto_advance: bool,
+    hmw_scaffold_ready: bool = False,
 ) -> tuple[CoachTurn, StudentStore, str]:
     """Submit one Problem Identification turn and return the turn, store, and id."""
     store = StudentStore(tmp_path / "hmw.sqlite3")
@@ -124,7 +140,12 @@ def _submit(
             "response_detail": "short",
         },
     )
-    service = _service(store, recommendation, auto_advance=auto_advance)
+    service = _service(
+        store,
+        recommendation,
+        auto_advance=auto_advance,
+        hmw_scaffold_ready=hmw_scaffold_ready,
+    )
     turn = service.submit(
         CoachRequest(
             thread_id=thread_id,
@@ -164,12 +185,20 @@ def test_hmw_completion_criterion_lives_in_problem_identification_prompts() -> N
         assert "The application remains the stage authority" in collapsed
         assert "Do not write the finished HMW" in collapsed
         assert "solution-locked" in collapsed
-        assert "must not override the HMW readiness rule above" in collapsed
+        assert "GOOD ENOUGH TO PROGRESS" in collapsed
+        assert "Do NOT require the student to prove the root cause" in collapsed
+        assert "WHEN A WORKABLE HMW IS PRESENT" in collapsed
+        assert "What evidence do you have?" in collapsed
+        assert "EXPLICIT PROGRESSION REQUESTS" in collapsed
+        assert "REPEATED HMW RULE" in collapsed
+        assert "Workable Framing → Progress" in collapsed
+        assert "must not override the HMW completion rule above" in collapsed
         assert (
             "hmw_scaffold_ready=true even if root cause, additional evidence, "
             "scope, or consequences still need refinement"
         ) in collapsed
         assert "NOT prerequisites for showing the HMW scaffold" in collapsed
+        assert "must not block ADVANCE once the HMW completion contract is met" in collapsed
         assert _HMW_BRITTLE_REGEX not in text
     fast_chat = " ".join(
         Path("agentcore_runtime/prompts/fast_chat.md")
@@ -215,7 +244,7 @@ def test_older_pedestrians_two_of_three_is_scaffold_ready_contract() -> None:
     description = FastChatTurnOutput.model_fields["hmw_scaffold_ready"].description or ""
     schema_description = " ".join(description.split())
     assert "TWO of these THREE signals" in prompt
-    assert "must not override the HMW readiness rule above" in prompt
+    assert "must not override the HMW completion rule above" in prompt
     assert "consequences still need refinement" in prompt
     assert "at least two of identifiable user" in schema_description
     assert "does not prevent true" in schema_description
@@ -308,7 +337,7 @@ def test_legacy_keyword_fallback_is_not_an_hmw_evaluator() -> None:
 def test_incomplete_hmw_stays_in_problem_identification(
     tmp_path: Path, message: str
 ) -> None:
-    """Stay recommendations leave the notebook on Problem Identification."""
+    """Messages without both for and so that stay in Problem Identification."""
     turn, store, thread_id = _submit(
         tmp_path,
         message,
@@ -324,20 +353,63 @@ def test_incomplete_hmw_stays_in_problem_identification(
     assert journey.get("current_stage") == "problem_identification"
 
 
-def test_satisfactory_hmw_does_not_advance_without_coach_recommendation(
+@pytest.mark.parametrize("message", _STRUCTURAL_HMW_STAY_CASES)
+def test_structural_hmw_promotes_even_when_model_stays(
+    tmp_path: Path, message: str
+) -> None:
+    """Structural for/so that HMWs advance without semantic quality judging."""
+    turn, _, thread_id = _submit(
+        tmp_path,
+        message,
+        recommendation=StageDecision.STAY,
+        auto_advance=True,
+    )
+    assert turn.assessment.recommendation is StageDecision.ADVANCE
+    assert turn.auto_advanced_to == "concept_generation"
+
+
+def test_workable_hmw_promotes_model_stay_to_advance(
     tmp_path: Path,
 ) -> None:
-    """A well-formed HMW string is not enough; the coach recommendation is authority."""
+    """A structural HMW advances even when the model keeps probing in PI."""
     turn, store, thread_id = _submit(
         tmp_path,
         _SATISFACTORY_HMW,
         recommendation=StageDecision.STAY,
         auto_advance=True,
+        hmw_scaffold_ready=True,
     )
-    assert turn.assessment.recommendation is StageDecision.STAY
-    assert turn.auto_advanced_to is None
+    assert turn.assessment.recommendation is StageDecision.ADVANCE
+    assert turn.assessment.hmw_scaffold_ready is False
+    assert turn.auto_advanced_to == "concept_generation"
+    assert turn.response_text.startswith(
+        "**[Problem identification] -> [Concept generation] Ready**"
+    )
+    assert "workable How Might We" in turn.response_text
+    assert hmw_scaffold_available(
+        "problem_identification", store.get_messages(thread_id)
+    ) is False
     metadata = (store.get_thread(thread_id) or {})["metadata"]
-    assert metadata.get("thinking_stage") == "problem_identification"
+    assert metadata.get("thinking_stage") == "concept_generation"
+
+
+@pytest.mark.parametrize("message", (_SATISFACTORY_HMW, _SCREENSHOT_HMW))
+def test_screenshot_hmw_promotes_when_model_stays(
+    tmp_path: Path, message: str
+) -> None:
+    """Exact live-style HMW strings advance without model cooperation."""
+    turn, store, thread_id = _submit(
+        tmp_path,
+        message,
+        recommendation=StageDecision.STAY,
+        auto_advance=True,
+        hmw_scaffold_ready=True,
+    )
+    assert turn.assessment.recommendation is StageDecision.ADVANCE
+    assert turn.auto_advanced_to == "concept_generation"
+    assert hmw_scaffold_available(
+        "problem_identification", store.get_messages(thread_id)
+    ) is False
 
 
 def test_satisfactory_hmw_advances_with_feedback_via_existing_machinery(
@@ -358,7 +430,9 @@ def test_satisfactory_hmw_advances_with_feedback_via_existing_machinery(
     assert "people you are designing for" in turn.response_text
     assert "outcome you want to achieve" in turn.response_text
     assert "You have moved to Concept Generation" not in turn.response_text
-    assert turn.response_text.startswith("**Concept generation**")
+    assert turn.response_text.startswith(
+        "**[Problem identification] -> [Concept generation] Ready**"
+    )
     metadata = (store.get_thread(thread_id) or {})["metadata"]
     assert metadata.get("thinking_stage") == "concept_generation"
     journey = metadata.get("learning_journey") or {}

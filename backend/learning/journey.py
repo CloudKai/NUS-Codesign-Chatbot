@@ -37,6 +37,9 @@ _IMAGE_EVIDENCE_BOILERPLATE = re.compile(
     r"(?m)^I can see \d+ selected image source\(s\) and will treat them as notebook "
     r"evidence\.?\s*(?:\n\n|$)"
 )
+_BEFORE_STAGE_MOVE = re.compile(
+    r"(?is)\bBefore we (?:move|proceed|advance) to [^.?\n]+[.?]?\s*"
+)
 _STAGE_SIGNALS: dict[str, tuple[str, ...]] = {
     "problem_identification": (
         "problem",
@@ -132,6 +135,13 @@ def default_journey() -> dict[str, Any]:
 
 
 def normalize_journey(value: Any) -> dict[str, Any]:
+    """Return canonical journey metadata without changing the active focus.
+
+    ``current_stage`` is the student's present focus, while
+    ``completed_stages`` records historical progress.  They intentionally stay
+    independent so selecting a completed phase for a revisit survives every
+    normalization and does not discard the unlocked frontier.
+    """
     raw = value if isinstance(value, dict) else {}
     journey = default_journey()
     current_stage = raw.get("current_stage")
@@ -141,23 +151,6 @@ def normalize_journey(value: Any) -> dict[str, Any]:
         journey["completed_stages"] = [
             stage.id for stage in THINKING_STAGES if stage.id in set(completed)
         ]
-    if (
-        journey["current_stage"] in journey["completed_stages"]
-        and journey["current_stage"] != THINKING_STAGES[-1].id
-    ):
-        current_index = next(
-            index
-            for index, stage in enumerate(THINKING_STAGES)
-            if stage.id == journey["current_stage"]
-        )
-        journey["current_stage"] = next(
-            (
-                stage.id
-                for stage in THINKING_STAGES[current_index + 1 :]
-                if stage.id not in journey["completed_stages"]
-            ),
-            THINKING_STAGES[-1].id,
-        )
     notes = raw.get("stage_notes")
     if isinstance(notes, dict):
         journey["stage_notes"] = {
@@ -172,6 +165,81 @@ def normalize_journey(value: Any) -> dict[str, Any]:
         detail if detail in RESPONSE_DETAILS else DEFAULT_RESPONSE_DETAIL
     )
     return journey
+
+
+def selectable_stage_ids(journey: dict[str, Any]) -> tuple[str, ...]:
+    """Return stages unlocked by the contiguous validated-completion prefix.
+
+    A current focus is always selectable, as are canonical stages through the
+    first stage after the contiguous completed prefix.  The next stage is only
+    exposed when its predecessor is actually completed; current focus and
+    already-completed stages do not create a shortcut over a missing prefix.
+    Corrupt or non-contiguous completion metadata therefore fails closed and
+    cannot unlock a later stage through a gap.
+
+    Args:
+        journey: Raw or normalized learning-journey metadata.
+
+    Returns:
+        Ordered canonical stage ids through the unlocked frontier.  The result
+        is a tuple and this helper never mutates the supplied journey.
+    """
+    normalized = normalize_journey(journey)
+    stage_ids = [stage.id for stage in THINKING_STAGES]
+    completed = set(normalized["completed_stages"])
+    prefix_end = -1
+    for index, stage_id in enumerate(stage_ids):
+        if stage_id not in completed:
+            break
+        prefix_end = index
+
+    current_id = normalized["current_stage"]
+    allowed = set(stage_ids[: prefix_end + 1])
+    if prefix_end + 1 < len(stage_ids) and prefix_end >= 0:
+        allowed.add(stage_ids[prefix_end + 1])
+    # A corrupt later focus remains selectable, but it cannot unlock the
+    # missing stages between that focus and the contiguous completion prefix.
+    allowed.add(current_id)
+    return tuple(stage_id for stage_id in stage_ids if stage_id in allowed)
+
+
+def mark_stage_completed(
+    journey: dict[str, Any], stage_id: str, *, note: str = ""
+) -> dict[str, Any]:
+    """Record one validated stage completion without changing the focus.
+
+    Args:
+        journey: Raw or normalized learning-journey metadata.
+        stage_id: The stage completed by the validated Coaching turn.
+        note: Optional contribution summary to retain on that stage.
+
+    Returns:
+        A normalized journey with ``stage_id`` added to
+        ``completed_stages``. ``current_stage`` is intentionally unchanged.
+
+    Raises:
+        ValueError: If ``stage_id`` is unknown, is not the current focus, or
+            is the terminal Reflection stage.
+    """
+    normalized = normalize_journey(journey)
+    cleaned_stage = str(stage_id or "").strip()
+    if cleaned_stage not in STAGE_BY_ID:
+        raise ValueError(f"Unknown thinking stage: {cleaned_stage}")
+    if normalized["current_stage"] != cleaned_stage:
+        raise ValueError("Only the current stage can be completed")
+    if cleaned_stage == THINKING_STAGES[-1].id:
+        raise ValueError("Reflection is the terminal Thinking Path stage")
+    stage_ids = [stage.id for stage in THINKING_STAGES]
+    current_index = stage_ids.index(cleaned_stage)
+    completed = set(normalized["completed_stages"])
+    if any(stage_id not in completed for stage_id in stage_ids[:current_index]):
+        raise ValueError("Stage prerequisites are incomplete")
+    if cleaned_stage not in normalized["completed_stages"]:
+        normalized["completed_stages"].append(cleaned_stage)
+    cleaned_note = str(note or "").strip()
+    if cleaned_note:
+        normalized.setdefault("stage_notes", {})[cleaned_stage] = cleaned_note
+    return normalized
 
 
 def current_stage(journey: dict[str, Any]) -> ThinkingStage:
@@ -253,28 +321,37 @@ def advanced_stage_response(
     next_stage_id: str,
     questions: Iterable[str],
 ) -> str:
-    """Present an automatic transition as the new stage plus useful questions."""
+    """Present an automatic transition as prev -> next Ready plus questions."""
     current_stage_value = STAGE_BY_ID[current_stage_id]
     next_stage_value = STAGE_BY_ID[next_stage_id]
     response_body = concise_coach_response(response_text.strip())
+    transition_heading = (
+        f"**[{current_stage_value.label}] -> [{next_stage_value.label}] Ready**"
+    )
     current_heading = f"**{current_stage_value.label}**"
-    if response_body.startswith(current_heading):
-        response_body = response_body[len(current_heading) :].strip()
     next_heading = f"**{next_stage_value.label}**"
-    if response_body.startswith(next_heading):
-        # Mock/provider already wrote the destination-stage reply.
-        return response_body
+    started_as_destination = response_body.startswith(next_heading) or response_body.startswith(
+        transition_heading
+    )
+    for heading in (transition_heading, next_heading, current_heading):
+        if response_body.startswith(heading):
+            response_body = response_body[len(heading) :].strip()
+            break
     legacy_notice = (
         f"**Thinking Path:** I’ve moved you to {next_stage_value.short_label}."
     )
     response_body = response_body.replace(legacy_notice, "").strip()
+    if started_as_destination:
+        # Provider/promote already wrote the destination-stage reply.
+        body = response_body or next_stage_value.description
+        return f"{transition_heading}\n\n{body}".strip()
     normalized_questions = [question.strip() for question in questions if question.strip()]
     question_list = "\n".join(f"- {question}" for question in normalized_questions)
     body = response_body
     if not body:
         body = next_stage_value.description
     return (
-        f"**{next_stage_value.label}**\n\n"
+        f"{transition_heading}\n\n"
         f"{body}\n\n"
         f"**Questions to explore**\n\n{question_list}"
     ).strip()
@@ -287,6 +364,7 @@ def concise_coach_response(response_text: str) -> str:
     cleaned = _READY_NEXT_PART.sub("", cleaned)
     cleaned = _SELECTED_LECTURE_BOILERPLATE.sub("", cleaned)
     cleaned = _IMAGE_EVIDENCE_BOILERPLATE.sub("", cleaned)
+    cleaned = _BEFORE_STAGE_MOVE.sub("", cleaned)
     return cleaned.strip()
 
 

@@ -119,15 +119,17 @@ class LearningProgressService:
     def select_stage(self, thread_id: str, stage_id: str) -> dict[str, Any]:
         """Move the notebook to a student-chosen Thinking Path stage.
 
-        Requires ``STUDENT_STAGE_SELECTION=true``. Does not mark skipped stages
-        complete; rejects any pending ADVANCE recommendation for the notebook.
+        Requires ``STUDENT_STAGE_SELECTION=true``. Allows only the canonical
+        prerequisite-gated frontier (including revisits), does not mark
+        skipped stages complete, and rejects/resolves any pending ADVANCE
+        recommendation for the notebook atomically.
 
         Returns:
             Updated notebook metadata including ``learning_journey``.
 
         Raises:
-            ValueError: When selection is disabled, the stage is unknown, or the
-                notebook is missing.
+            ValueError: When selection is disabled, the stage is unknown or
+                locked, or the notebook is missing.
         """
         if not settings.student_stage_selection:
             raise ValueError("Student stage selection is not enabled")

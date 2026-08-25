@@ -19,6 +19,8 @@
 
     [class*="st-key-journey_stage_"] {
         position:relative;
+        container-type:inline-size;
+        container-name:journey-stage;
         min-height:0;
         margin:0 0 .22rem;
         padding:.38rem .55rem .34rem;
@@ -51,22 +53,32 @@
         background:var(--cd-border);
     }
 
-    [class*="st-key-journey_stage_"]:has(.journey-state.current),
-    [class*="st-key-journey_stage_"]:has(.journey-state.open) {
+    [class*="st-key-journey_stage_"]:has(.journey-state.current) {
         margin:.1rem 0 .48rem;
         padding:.95rem .88rem .9rem;
         border:1px solid color-mix(in srgb,var(--cd-accent) 22%,transparent);
         background:var(--cd-accent-soft);
     }
 
-    [class*="st-key-journey_stage_"]:has(.journey-state.upcoming) {
-        opacity:.78;
+    [class*="st-key-journey_stage_"]:has(.journey-state.preview-open) {
+        margin:.1rem 0 .38rem;
+        padding:.62rem .68rem .62rem;
+        border:1px solid var(--cd-border);
+        background:var(--cd-surface-muted);
+    }
+
+    [class*="st-key-journey_stage_"]:has(.journey-state.available):not(:has(.journey-state.preview-open)) {
+        background:var(--cd-surface);
+    }
+
+    [class*="st-key-journey_stage_"]:has(.journey-state.locked) {
+        opacity:.52;
     }
 
     [class*="st-key-journey_stage_"] [data-testid="stHorizontalBlock"]:has(.journey-short-label):has(
         [class*="st-key-journey-toggle-"]
     ):not(:has([class*="st-key-journey-select-"])) {
-        width:fit-content !important;
+        width:100% !important;
         max-width:100%;
         align-items:center !important;
         justify-content:flex-start !important;
@@ -83,52 +95,8 @@
         align-self:center !important;
     }
 
-    [class*="st-key-journey_stage_"] [data-testid="stHorizontalBlock"]:has(.journey-short-label):has(
-        [class*="st-key-journey-select-"]
-    ) {
-        align-items:center !important;
-        justify-content:space-between !important;
-        flex-wrap:nowrap !important;
-        width:100%;
-        min-width:0;
-        gap:.35rem;
-        container-type:inline-size;
-        container-name:journey-header;
-    }
-
-    [class*="st-key-journey_stage_"] [data-testid="stHorizontalBlock"]:has(.journey-short-label):has(
-        [class*="st-key-journey-select-"]
-    )
-    > [data-testid="stColumn"]:not(:has([class*="st-key-journey-select-"])) {
-        flex:1 1 auto !important;
-        width:auto !important;
-        min-width:0 !important;
-        overflow:hidden;
-    }
-
-    [class*="st-key-journey_stage_"] [data-testid="stHorizontalBlock"]:has(.journey-short-label):has(
-        [class*="st-key-journey-select-"]
-    )
-    > [data-testid="stColumn"]:has([class*="st-key-journey-select-"]) {
-        flex:0 0 auto !important;
-        display:flex !important;
-        flex-direction:column !important;
-        align-items:flex-end !important;
-        justify-content:center !important;
-        margin-left:auto;
-    }
-
-    [class*="st-key-journey_stage_"] [data-testid="stHorizontalBlock"]:has(.journey-short-label):has(
-        [class*="st-key-journey-select-"]
-    )
-    .journey-short-label {
-        overflow:hidden;
-        text-overflow:ellipsis;
-        white-space:nowrap;
-    }
-
     [class*="st-key-journey_header_"] [data-testid="stHorizontalBlock"] {
-        width:auto !important;
+        width:100% !important;
         max-width:100% !important;
         align-items:center !important;
         justify-content:flex-start !important;
@@ -137,7 +105,7 @@
 
     [class*="st-key-journey_header_"] [data-testid="stHorizontalBlock"]
     > [data-testid="stColumn"]:first-child {
-        flex:0 1 auto !important;
+        flex:1 1 0 !important;
         width:auto !important;
         min-width:0 !important;
     }
@@ -147,6 +115,123 @@
         flex:0 0 auto !important;
         width:auto !important;
         min-width:0 !important;
+    }
+
+    /* Collapsed wide: title row and select CTA share one row in the copy column. */
+    [class*="st-key-journey_stage_"]:not(:has(.journey-state.preview-open))
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child
+    > [data-testid="stVerticalBlock"]:has([class*="st-key-journey_select_"]) {
+        display:flex !important;
+        flex-direction:row !important;
+        flex-wrap:nowrap !important;
+        align-items:center !important;
+        justify-content:space-between !important;
+        gap:.35rem !important;
+    }
+
+    [class*="st-key-journey_stage_"]:not(:has(.journey-state.preview-open))
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child
+    > [data-testid="stVerticalBlock"]:has([class*="st-key-journey_select_"])
+    > [data-testid="stLayoutWrapper"]:has([class*="st-key-journey_header_"]) {
+        flex:1 1 auto !important;
+        min-width:0 !important;
+        width:auto !important;
+        max-width:none !important;
+    }
+
+    [class*="st-key-journey_stage_"]:not(:has(.journey-state.preview-open))
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child
+    > [data-testid="stVerticalBlock"]:has([class*="st-key-journey_select_"])
+    > [data-testid="stLayoutWrapper"]:has([class*="st-key-journey_select_"]) {
+        flex:0 0 auto !important;
+        width:auto !important;
+        margin-left:auto !important;
+    }
+
+    [class*="st-key-journey_stage_"]:not(:has(.journey-state.preview-open))
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child
+    > [data-testid="stVerticalBlock"]:has([class*="st-key-journey_select_"])
+    [class*="st-key-journey_header_"] {
+        width:auto !important;
+        max-width:100% !important;
+    }
+
+    [class*="st-key-journey_stage_"]:not(:has(.journey-state.preview-open))
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child
+    > [data-testid="stVerticalBlock"]:has([class*="st-key-journey_select_"])
+    [class*="st-key-journey_header_"] [data-testid="stHorizontalBlock"] {
+        width:auto !important;
+        max-width:100% !important;
+    }
+
+    [class*="st-key-journey_stage_"]:not(:has(.journey-state.preview-open))
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child
+    > [data-testid="stVerticalBlock"]:has([class*="st-key-journey_select_"])
+    .journey-short-label {
+        overflow-wrap:anywhere;
+        overflow:visible;
+        text-overflow:clip;
+        white-space:normal;
+    }
+
+    /* Expanded preview: title, detail, then CTA in document order. */
+    [class*="st-key-journey_stage_"]:has(.journey-state.preview-open)
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child
+    > [data-testid="stVerticalBlock"] {
+        display:flex !important;
+        flex-direction:column !important;
+        align-items:flex-start !important;
+    }
+
+    [class*="st-key-journey_stage_"]:has(.journey-state.preview-open)
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child
+    > [data-testid="stVerticalBlock"]
+    > [data-testid="stLayoutWrapper"]:has([class*="st-key-journey_select_"]) {
+        align-self:flex-end !important;
+        margin-top:.28rem !important;
+        margin-left:0 !important;
+        width:auto !important;
+    }
+
+    @container journey-stage (max-width:28rem) {
+        [class*="st-key-journey_stage_"]
+        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child
+        > [data-testid="stVerticalBlock"]:has([class*="st-key-journey_select_"]) {
+            flex-direction:column !important;
+            align-items:flex-start !important;
+        }
+
+        [class*="st-key-journey_stage_"]
+        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child
+        > [data-testid="stVerticalBlock"]
+        > [data-testid="stLayoutWrapper"]:has([class*="st-key-journey_header_"]),
+        [class*="st-key-journey_stage_"]
+        [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child
+        > [data-testid="stVerticalBlock"]
+        > [data-testid="stLayoutWrapper"]:has([class*="st-key-journey_select_"]) {
+            flex:1 1 auto !important;
+            align-self:flex-start !important;
+            margin-left:0 !important;
+            width:100% !important;
+        }
+
+        [class*="st-key-journey-select-"],
+        [class*="st-key-journey_select_"] {
+            justify-content:flex-start !important;
+            width:100% !important;
+        }
+
+        [class*="st-key-journey-select-"] div[data-testid="stButton"] button,
+        [class*="st-key-journey-select-"] [data-testid="stBaseButton-tertiary"] {
+            margin-left:0 !important;
+        }
+    }
+
+    /* Keep the stage icon beside its content; only the content header wraps. */
+    [class*="st-key-journey_stage_"] > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] {
+        flex-direction:row !important;
+        flex-wrap:nowrap !important;
     }
 
     [class*="st-key-journey_stage_"] > [data-testid="stLayoutWrapper"]
@@ -216,20 +301,6 @@
         display:flex;
         justify-content:flex-end;
         align-self:center;
-    }
-
-    [class*="st-key-journey-select-compact-"] {
-        display:none !important;
-    }
-
-    @container journey-header (max-width:17.5rem) {
-        [class*="st-key-journey-select-"]:not([class*="st-key-journey-select-compact-"]) {
-            display:none !important;
-        }
-
-        [class*="st-key-journey-select-compact-"] {
-            display:flex !important;
-        }
     }
 
     [class*="st-key-journey-select-"] div[data-testid="stButton"],
@@ -307,11 +378,37 @@
         gap:.42rem;
     }
 
+    /* Keep the stage icon/copy pair inside the card after mobile fragments rerun. */
+    [class*="st-key-journey_stage_"] > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {
+        flex:0 0 2rem !important;
+        width:2rem !important;
+        min-width:2rem !important;
+        max-width:2rem !important;
+    }
+
+    [class*="st-key-journey_stage_"] > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) {
+        flex:1 1 0 !important;
+        width:auto !important;
+        min-width:0 !important;
+        max-width:100% !important;
+    }
+
     [class*="st-key-journey_stage_"] .cd-roadmap-step {
         display:flex;
         align-items:flex-start;
         justify-content:flex-start;
         padding:0;
+    }
+
+    [class*="st-key-journey_stage_"] .cd-roadmap-node {
+        flex:none;
+        width:2rem !important;
+        height:2rem !important;
+        min-width:2rem !important;
+        min-height:2rem !important;
+        aspect-ratio:1;
     }
 
     [class*="st-key-journey_stage_"] [data-testid="stColumn"]:first-child {
@@ -409,9 +506,9 @@
         width:100%;
         margin:.42rem 0 0;
         padding:.12rem;
-        border:1px solid color-mix(in srgb,var(--cd-accent) 34%,var(--cd-border));
-        border-radius:.6rem;
-        background:var(--cd-surface);
+        border:1px solid var(--cd-border);
+        border-radius:.55rem;
+        background:var(--cd-surface-muted);
     }
 
     [class*="st-key-journey-suggestions-"]
@@ -426,7 +523,7 @@
         padding:.42rem .62rem !important;
         border:0 !important;
         border-radius:.48rem !important;
-        color:var(--cd-accent) !important;
+        color:var(--cd-muted) !important;
         background:transparent !important;
         font-size:.76rem;
         font-weight:650;
@@ -470,19 +567,19 @@
         display:flex;
         align-items:flex-start;
         gap:.55rem;
-        padding:.62rem .7rem;
+        padding:.48rem .58rem;
         border:1px solid var(--cd-border);
         border-radius:.55rem;
-        color:var(--cd-text);
+        color:var(--cd-muted);
         background:var(--cd-surface);
-        font-size:.8rem;
-        line-height:1.45;
+        font-size:.76rem;
+        line-height:1.38;
     }
 
     .journey-question-row .material-symbols-rounded {
         flex:none;
         margin-top:.08rem;
-        color:var(--cd-accent);
+        color:var(--cd-muted);
         font-family:"Material Symbols Rounded";
         font-size:1rem;
         line-height:1;
@@ -799,4 +896,3 @@
             padding:.48rem .55rem;
         }
     }
-
