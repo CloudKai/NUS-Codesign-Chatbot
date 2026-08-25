@@ -155,18 +155,35 @@ def test_streamlit_stage_selection_refreshes_authoritative_stage_and_status(monk
         app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
         assert not app.exception
         thread_id = app.session_state["thread_id"]
+        store = StudentStore()
+        thread = store.get_thread(thread_id) or {}
+        metadata = dict(thread.get("metadata") or {})
+        journey = dict(metadata.get("learning_journey") or {})
+        journey["completed_stages"] = ["problem_identification"]
+        metadata["learning_journey"] = journey
+        store.update_thread(thread_id, metadata=metadata)
+        app.session_state["learning_journey"]["completed_stages"] = [
+            "problem_identification"
+        ]
+        app.run()
 
         select = next(
             button
             for button in app.button
-            if button.key == "journey-select-deep_analysis"
+            if button.key == "journey-select-concept_generation"
         )
         select.click().run()
 
         persisted = client.learning_state(thread_id)
-        assert persisted["thinking_stage"] == "deep_analysis"
-        assert persisted["learning_journey"]["current_stage"] == "deep_analysis"
-        assert app.session_state["learning_journey"]["current_stage"] == "deep_analysis"
+        assert persisted["thinking_stage"] == "concept_generation"
+        assert persisted["learning_journey"]["current_stage"] == "concept_generation"
+        assert app.session_state["learning_journey"]["current_stage"] == "concept_generation"
+        assert app.session_state["mobile_panel"] == "Chat"
+        assert "chat_follow_bottom" not in app.session_state
+        messages = client.get_messages(thread_id)
+        assistant = [message for message in messages if message["role"] == "assistant"][-1]
+        assert assistant["content"] == "Moved to Stage: Concept generation."
+        assert assistant["metadata"]["assessment"]["current_stage"] == "concept_generation"
 
         app.chat_input[0].set_value(
             "I need to examine the trade-off between crossing safety and traffic delay."
@@ -179,18 +196,18 @@ def test_streamlit_stage_selection_refreshes_authoritative_stage_and_status(monk
         normal_assessment = (
             (normal_assistant.get("metadata") or {}).get("assessment") or {}
         )
-        assert normal_assessment["current_stage"] == "deep_analysis"
+        assert normal_assessment["current_stage"] == "concept_generation"
 
         app.chat_input[0].set_value("What stage am I in?").run()
         assert not app.exception
         messages = client.get_messages(thread_id)
         assistant = [message for message in messages if message["role"] == "assistant"][-1]
-        assert "Ethics & Critical Thinking" in assistant["content"]
+        assert "Concept generation" in assistant["content"]
         assessment = (assistant.get("metadata") or {}).get("assessment") or {}
-        assert assessment["current_stage"] == "deep_analysis"
+        assert assessment["current_stage"] == "concept_generation"
         assert assessment["response_mode"] == "qa"
         assert assessment.get("citations") == []
-        assert app.session_state["learning_journey"]["current_stage"] == "deep_analysis"
+        assert app.session_state["learning_journey"]["current_stage"] == "concept_generation"
     finally:
         client.close()
 
@@ -208,18 +225,29 @@ def test_streamlit_manual_stage_chat_command_refreshes_authoritative_journey(
         app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
         assert not app.exception
         thread_id = app.session_state["thread_id"]
+        store = StudentStore()
+        thread = store.get_thread(thread_id) or {}
+        metadata = dict(thread.get("metadata") or {})
+        journey = dict(metadata.get("learning_journey") or {})
+        journey["completed_stages"] = ["problem_identification"]
+        metadata["learning_journey"] = journey
+        store.update_thread(thread_id, metadata=metadata)
+        app.session_state["learning_journey"]["completed_stages"] = [
+            "problem_identification"
+        ]
+        app.run()
 
-        app.chat_input[0].set_value("move me to Reflection").run()
+        app.chat_input[0].set_value("move me to Concept generation").run()
 
         assert not app.exception
         state = client.learning_state(thread_id)
-        assert state["thinking_stage"] == "reflection"
-        assert state["learning_journey"]["current_stage"] == "reflection"
-        assert app.session_state["learning_journey"]["current_stage"] == "reflection"
+        assert state["thinking_stage"] == "concept_generation"
+        assert state["learning_journey"]["current_stage"] == "concept_generation"
+        assert app.session_state["learning_journey"]["current_stage"] == "concept_generation"
         messages = client.get_messages(thread_id)
         assistant = [message for message in messages if message["role"] == "assistant"][-1]
-        assert assistant["content"] == "Moved to Stage: Reflection."
-        assert assistant["metadata"]["assessment"]["current_stage"] == "reflection"
+        assert assistant["content"] == "Moved to Stage: Concept generation."
+        assert assistant["metadata"]["assessment"]["current_stage"] == "concept_generation"
 
         app.chat_input[0].set_value(
             "I am reflecting on how evidence changed my design decision."
@@ -227,7 +255,7 @@ def test_streamlit_manual_stage_chat_command_refreshes_authoritative_journey(
         assert not app.exception
         messages = client.get_messages(thread_id)
         assistant = [message for message in messages if message["role"] == "assistant"][-1]
-        assert assistant["metadata"]["assessment"]["current_stage"] == "reflection"
+        assert assistant["metadata"]["assessment"]["current_stage"] == "concept_generation"
     finally:
         client.close()
 

@@ -45,6 +45,10 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
         model_id: Model id forwarded to the chat panel.
         reasoning_effort: Reasoning effort forwarded to the chat panel.
     """
+    pending_panel = st.session_state.pop("pending_mobile_panel", None)
+    if pending_panel in {"Studio", "Chat", "Sources"}:
+        st.session_state.mobile_panel = pending_panel
+
     panel = st.radio(
         "Workspace panel",
         ["Studio", "Chat", "Sources"],
@@ -96,7 +100,14 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                         1,
                     )
                 )
-                sync_chat_scroll(mode="reconcile")
+                # Journey Revisit / Work on this stage sets chat_follow_bottom
+                # and switches to Chat so the Moved-to-Stage row is in view.
+                if panel == "Chat" and st.session_state.pop(
+                    "chat_follow_bottom", False
+                ):
+                    sync_chat_scroll(mode="send")
+                else:
+                    sync_chat_scroll(mode="reconcile")
         with studio_column:
             if studio_collapsed:
                 _render_collapsed_rail(

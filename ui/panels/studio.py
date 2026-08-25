@@ -17,6 +17,8 @@ from typing import Any, Literal
 
 import streamlit as st
 
+from backend.domain import CoachRequest
+from backend.models import DEFAULT_CHAT_MODEL_ID
 from backend.settings import settings
 from backend.specialists.review_orchestration import (
     COUNTER_SETTINGS_KEY,
@@ -31,10 +33,12 @@ from backend.specialists.review_orchestration import (
     parse_deep_review_job,
 )
 from backend.student_journey import (
+    STAGE_BY_ID,
     THINKING_STAGES,
     ThinkingStage,
     learning_review,
     normalize_journey,
+    selectable_stage_ids,
     stage_guidance_questions,
 )
 
@@ -51,6 +55,7 @@ from ui.runtime import (
     rerun_fragment,
     start_deep_review,
     store,
+    submit_coach_turn,
 )
 
 logger = logging.getLogger(__name__)
@@ -323,37 +328,22 @@ def _render_stage_suggestions(stage: ThinkingStage) -> None:
 
 def _toggle_stage_preview(stage_id: str) -> None:
     """Open or close an inactive stage preview without changing the learning stage."""
-    opened = set(st.session_state.get("journey_preview_stages") or [])
-    if stage_id in opened:
-        opened.discard(stage_id)
-    else:
-        opened.add(stage_id)
-    st.session_state.journey_preview_stages = sorted(opened)
+    opened = st.session_state.get("journey_preview_stage")
+    st.session_state.journey_preview_stage = None if opened == stage_id else stage_id
 
 
-def _render_journey_stage_header_row(
+def _render_journey_stage_title_row(
     stage: ThinkingStage,
     *,
     chevron: str,
-    selection_enabled: bool,
 ) -> None:
-    """Render a left-aligned stage title, chevron, and optional select CTA."""
-    if selection_enabled:
-        header_column, cta_column = st.columns(
-            [0.58, 0.42],
+    """Render a left-aligned stage title and preview chevron."""
+    with st.container(key=f"journey_header_{stage.id}"):
+        title_column, chevron_column = st.columns(
+            [0.94, 0.06],
             gap="small",
             vertical_alignment="center",
         )
-    else:
-        header_column = st.container()
-        cta_column = None
-    with header_column:
-        with st.container(key=f"journey_header_{stage.id}"):
-            title_column, chevron_column = st.columns(
-                [0.94, 0.06],
-                gap="small",
-                vertical_alignment="center",
-            )
         with title_column:
             st.markdown(
                 '<div class="journey-stage-heading">'
@@ -370,39 +360,79 @@ def _render_journey_stage_header_row(
             ):
                 _toggle_stage_preview(stage.id)
                 rerun_fragment()
-    if cta_column is not None:
-        with cta_column:
-            if st.button(
-                "Work on this stage",
-                type="tertiary",
-                use_container_width=False,
-                key=f"journey-select-{stage.id}",
-            ):
-                _select_journey_stage(stage.id)
-            if st.button(
-                "Work on..",
-                type="tertiary",
-                use_container_width=False,
-                key=f"journey-select-compact-{stage.id}",
-            ):
-                _select_journey_stage(stage.id)
+
+
+def _render_journey_stage_select_cta(
+    stage: ThinkingStage,
+    *,
+    cta_label: str,
+) -> None:
+    """Render the Thinking Path select CTA below the stage body when needed."""
+    with st.container(key=f"journey_select_{stage.id}"):
+        if st.button(
+            cta_label,
+            type="tertiary",
+            use_container_width=False,
+            key=f"journey-select-{stage.id}",
+        ):
+            _select_journey_stage(stage.id)
 
 
 def _select_journey_stage(stage_id: str) -> None:
-    """Persist a student-chosen Thinking Path stage and refresh session journey."""
+    """Move stage via the coach turn path so chat shows ``Moved to Stage: …``.
+
+    Journey CTAs use the same server-owned manual-stage command as typing
+    ``move me to <stage>`` in chat, so the transcript records the change.
+    """
+    stage = STAGE_BY_ID.get(str(stage_id or "").strip())
+    if stage is None:
+        st.error(_STAGE_SELECT_ERROR)
+        return
+    journey = normalize_journey(st.session_state.learning_journey)
+    thread_id = str(st.session_state.thread_id or "").strip()
+    if not thread_id:
+        st.error(_STAGE_SELECT_ERROR)
+        return
     try:
-        metadata = store.select_stage(st.session_state.thread_id, stage_id)
-        st.session_state.learning_journey = normalize_journey(
-            (metadata or {}).get("learning_journey")
+        turn = submit_coach_turn(
+            CoachRequest(
+                thread_id=thread_id,
+                student_message=f"move me to {stage.label}",
+                current_stage=str(journey.get("current_stage") or stage.id),
+                response_detail=str(journey.get("response_detail") or "short"),
+                allow_model_knowledge=bool(
+                    st.session_state.get("allow_model_knowledge", True)
+                ),
+                response_language=str(
+                    st.session_state.get("response_language") or "English"
+                ),
+                model_id=str(
+                    st.session_state.get("selected_model") or DEFAULT_CHAT_MODEL_ID
+                ),
+            )
         )
-        opened = set(st.session_state.get("journey_preview_stages") or [])
-        opened.discard(stage_id)
-        st.session_state.journey_preview_stages = sorted(opened)
+        store.forget_turn_reads(thread_id)
+        updated_thread = store.get_thread(thread_id) or {}
+        updated_meta = dict(updated_thread.get("metadata") or {})
+        updated_journey = normalize_journey(updated_meta.get("learning_journey"))
+        selected = str(turn.assessment.current_stage or stage.id).strip()
+        if selected in STAGE_BY_ID:
+            updated_journey["current_stage"] = selected
+            updated_journey = normalize_journey(updated_journey)
+        st.session_state.learning_journey = updated_journey
+        st.session_state.response_detail = updated_journey["response_detail"]
+        st.session_state.journey_preview_stage = None
+        # Open Chat on the next remount and force a bottom snap so
+        # "Moved to Stage: …" is visible. Do not assign mobile_panel here —
+        # the radio widget is already instantiated in this run.
+        st.session_state["pending_mobile_panel"] = "Chat"
+        st.session_state.nav_section = "Chat"
+        st.session_state["chat_follow_bottom"] = True
         rerun_app()
     except Exception:
         logger.exception(
             "Thinking Path stage select failed for notebook %s stage %s",
-            st.session_state.thread_id,
+            thread_id,
             stage_id,
         )
         st.error(_STAGE_SELECT_ERROR)
@@ -414,17 +444,28 @@ def render_journey_track() -> None:
     completed = set(journey["completed_stages"])
     current_id = journey["current_stage"]
     selection_enabled = bool(settings.student_stage_selection)
-    stage_index = next(
-        index
-        for index, item in enumerate(THINKING_STAGES, start=1)
-        if item.id == current_id
-    )
     completed_count = len(completed)
-    if current_id not in completed:
-        completed_count = max(completed_count, stage_index - 1)
-    preview_stages = set(st.session_state.get("journey_preview_stages") or [])
-    preview_stages.discard(current_id)
-    st.session_state.journey_preview_stages = sorted(preview_stages)
+    preview_stage = st.session_state.get("journey_preview_stage")
+    if preview_stage == current_id:
+        preview_stage = None
+        st.session_state.journey_preview_stage = None
+    selectable_ids = set(selectable_stage_ids(journey))
+    stage_indexes = {
+        stage.id: index for index, stage in enumerate(THINKING_STAGES)
+    }
+    completed_prefix_end = -1
+    for index, stage in enumerate(THINKING_STAGES):
+        if stage.id not in completed:
+            break
+        completed_prefix_end = index
+    frontier_candidate = completed_prefix_end + 1
+    frontier_next = (
+        THINKING_STAGES[frontier_candidate].id
+        if completed_prefix_end >= 0
+        and frontier_candidate < len(THINKING_STAGES)
+        and THINKING_STAGES[frontier_candidate].id in selectable_ids
+        else None
+    )
     st.markdown(
         progress_bar_html(
             completed=completed_count,
@@ -455,13 +496,15 @@ def render_journey_track() -> None:
                 if stage.id == current_id
                 else "completed"
                 if stage.id in completed
-                else "upcoming"
+                else "available"
+                if stage.id in selectable_ids
+                else "locked"
             )
             icon_name = "check" if state == "completed" else stage_icons[stage.id]
-            is_preview_open = stage.id in preview_stages
+            is_preview_open = stage.id == preview_stage
             state_classes = f"journey-state {state}"
             if is_preview_open:
-                state_classes = f"{state_classes} open"
+                state_classes = f"{state_classes} open preview-open"
             with st.container(key=f"journey_stage_{stage.id}"):
                 st.markdown(
                     f'<span class="{state_classes}"></span>',
@@ -487,13 +530,34 @@ def render_journey_track() -> None:
                         _render_stage_detail(stage)
                     else:
                         chevron = "⌃" if is_preview_open else "⌵"
-                        _render_journey_stage_header_row(
-                            stage,
-                            chevron=chevron,
-                            selection_enabled=selection_enabled,
+                        cta_label = (
+                            "Work on this stage"
+                            if (
+                                selection_enabled
+                                and stage.id != current_id
+                                and stage.id == frontier_next
+                            )
+                            else "Revisit"
+                            if (
+                                selection_enabled
+                                and stage.id != current_id
+                                and stage.id in selectable_ids
+                            )
+                            else None
                         )
+                        _render_journey_stage_title_row(stage, chevron=chevron)
                         if is_preview_open:
                             _render_stage_detail(stage)
+                            if state == "locked":
+                                preceding = THINKING_STAGES[stage_indexes[stage.id] - 1]
+                                st.caption(
+                                    f"Available after {preceding.label}."
+                                )
+                        if cta_label is not None:
+                            _render_journey_stage_select_cta(
+                                stage,
+                                cta_label=cta_label,
+                            )
                 if state == "current" or is_preview_open:
                     _render_stage_suggestions(stage)
 
@@ -791,7 +855,7 @@ def _confirm_next_stage_dialog() -> None:
 
 def render_thinking_path_footer(pending: Any | None = None) -> None:
     """Render the confirmation-gated Next control for Thinking Path."""
-    if settings.effective_auto_advance_stages:
+    if settings.effective_auto_advance_stages or settings.student_stage_selection:
         return
 
     if pending is None:

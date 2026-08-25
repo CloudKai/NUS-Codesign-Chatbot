@@ -799,21 +799,88 @@ def test_theme_coaching_style_and_journey_has_no_manual_progression_control():
     assert not app.exception
 
 
-def test_journey_work_on_this_stage_appears_when_selection_enabled(monkeypatch):
+def test_journey_fresh_problem_stage_keeps_next_stage_locked(monkeypatch):
     from backend.settings import settings
 
     monkeypatch.setattr(settings, "student_stage_selection", True)
     monkeypatch.setattr(settings, "auto_advance_stages", False)
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    select_buttons = [
-        button for button in app.button if button.label == "Work on this stage"
-    ]
-    assert len(select_buttons) == 4
+    assert not any(button.label == "Work on this stage" for button in app.button)
     compact_buttons = [button for button in app.button if button.label == "Work on.."]
-    assert len(compact_buttons) == 4
+    assert compact_buttons == []
     captions = "\n".join(caption.value or "" for caption in app.caption)
     assert "Choose a stage to work on." in captions
+    assert not app.exception
+
+
+def test_journey_linear_accordion_and_ctas_follow_unlocked_frontier(monkeypatch):
+    """Journey previews are scalar and selection CTAs follow server access."""
+    from backend.settings import settings
+
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    monkeypatch.setattr(settings, "auto_advance_stages", False)
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+
+    assert app.session_state["learning_journey"]["current_stage"] == (
+        "problem_identification"
+    )
+    assert not any(button.label == "Work on this stage" for button in app.button)
+    assert not any(button.key == "journey-select-deep_analysis" for button in app.button)
+
+    app.session_state["journey_preview_stage"] = "reflection"
+    app.run()
+    assert app.session_state["journey_preview_stage"] == "reflection"
+    assert app.session_state["learning_journey"]["current_stage"] == (
+        "problem_identification"
+    )
+    assert any(
+        "Available after Ethics & Critical Thinking." in (caption.value or "")
+        for caption in app.caption
+    )
+    assert not any(button.key == "journey-select-reflection" for button in app.button)
+
+    app.session_state["journey_preview_stage"] = "deep_analysis"
+    app.run()
+    assert app.session_state["journey_preview_stage"] == "deep_analysis"
+    assert app.session_state["learning_journey"]["current_stage"] == (
+        "problem_identification"
+    )
+
+    from backend.student_store import StudentStore
+
+    store = StudentStore()
+    thread = store.get_thread(app.session_state["thread_id"]) or {}
+    metadata = dict(thread.get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = ["problem_identification"]
+    metadata["learning_journey"] = journey
+    store.update_thread(app.session_state["thread_id"], metadata=metadata)
+    app.session_state["learning_journey"]["completed_stages"] = [
+        "problem_identification"
+    ]
+    app.run()
+    assert any(button.label == "Work on this stage" for button in app.button)
+    assert not any(button.key == "journey-select-problem_identification" for button in app.button)
+
+    app.button(key="journey-select-concept_generation").click().run()
+    assert app.session_state["learning_journey"]["current_stage"] == (
+        "concept_generation"
+    )
+    assert app.session_state["mobile_panel"] == "Chat"
+    assert "chat_follow_bottom" not in app.session_state
+    messages = store.get_messages(app.session_state["thread_id"])
+    assistant = [message for message in messages if message["role"] == "assistant"][-1]
+    assert assistant["content"] == "Moved to Stage: Concept generation."
+    labels = [button.label for button in app.button]
+    assert "Work on this stage" not in labels
+    assert "Revisit" in labels
+    assert "Work on.." not in labels
+    assert "Suggested questions" in Path(
+        "ui/panels/studio.py"
+    ).read_text(encoding="utf-8")
+    assert not any(button.key == "journey-select-concept_generation" for button in app.button)
+    assert app.session_state["journey_preview_stage"] is None
     assert not app.exception
 
 

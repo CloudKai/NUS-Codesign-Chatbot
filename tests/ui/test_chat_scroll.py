@@ -12,19 +12,38 @@ def test_chat_scroll_helper_uses_near_bottom_gating() -> None:
     helper = Path("ui/layout/chat_scroll.py").read_text(encoding="utf-8")
     assert "NEAR_BOTTOM_PX = 120" in helper
     assert NEAR_BOTTOM_PX == 120
-    assert 'querySelector(".st-key-chat_log")' in helper
+    assert 'querySelector(".st-key-chat_log")' not in helper
     assert "Element.prototype" not in helper
     assert "scrollIntoView" not in helper
     assert "scrollTo(" not in helper
-    assert "state().follow = false" in helper
+    assert "api().follow = false" in helper
     assert 'MODE === "send"' in helper
     assert 'MODE === "settle"' in helper
-    assert "if (root && !isNearBottom(root)) state().follow = false" in helper
+    assert "if (!isNearBottom(current)) api().follow = false" in helper
     assert "snapToBottom" in helper
     assert "root.scrollTop = root.scrollHeight - root.clientHeight" in helper
+    assert 'querySelector(".st-key-chat_feed")' in helper
+    assert 'querySelector(".st-key-chat_panel")' not in helper.split("scrollRoot")[1].split(
+        "function api"
+    )[0]
+    assert "cd-chat-scroll-down" in helper
+    assert "updateScrollDownButton" in helper
+    assert "cd-chat-scroll-down-icon" in helper
+    assert 'querySelector(".st-key-chat_panel")' in helper
+    assert "panel.appendChild(button)" in helper
+    assert "composer.appendChild(button)" not in helper
+    assert "onScrollDownClick" in helper
+    assert "listenersBound" in helper
+    assert 'closest("#cd-chat-scroll-down")' in helper
+    assert "button.addEventListener(\"click\"" not in helper
+    assert "AbortController" not in helper
+    assert "snapFollow" not in helper
+    assert "LISTENER_VERSION" not in helper
+    assert "cd-chat-scroll-away" not in helper
+    assert "keyboard_arrow_down" not in helper
     assert "setInterval" not in helper
     assert "MutationObserver" not in helper
-    assert helper.count("requestAnimationFrame") <= 4
+    assert helper.count("requestAnimationFrame") <= 5
 
 
 def test_inflight_wrapper_has_no_card_chrome() -> None:
@@ -77,6 +96,11 @@ def test_fragment_submit_path_still_owns_inflight() -> None:
     assert 'sync_chat_scroll(mode="reconcile")' not in composer_block
     workspace = Path("ui/workspace.py").read_text(encoding="utf-8")
     assert 'sync_chat_scroll(mode="reconcile")' in workspace
+    assert "chat_follow_bottom" in workspace
+    assert "pending_mobile_panel" in workspace
+    assert 'sync_chat_scroll(mode="send")' in workspace
+    assert "chat_scroll_after_stage_select" not in workspace
+    assert "switched_to_chat" not in workspace
     assert "from ui.layout.chat_scroll import sync_chat_scroll" in workspace
     send_block = chat.split("def handle_prompt(", 1)[1].split(
         "def _confirm_edit_earlier_message_dialog", 1
@@ -194,6 +218,26 @@ def test_narrow_chat_feed_owns_touch_scroll_without_changing_textarea_ownership(
     assert "max-height:calc(1em * 1.45 * 5) !important" in composer_textarea
     assert "overflow-y:auto !important" in composer_textarea
 
+    assert ".cd-chat-scroll-down" in chat
+    assert "opacity:0" in chat.split(".cd-chat-scroll-down {", 1)[1].split("}", 1)[0]
+    assert "pointer-events:none" in chat.split(".cd-chat-scroll-down {", 1)[1].split(
+        "}", 1
+    )[0]
+    assert "display:none" not in chat.split(".cd-chat-scroll-down {", 1)[1].split(
+        "}", 1
+    )[0]
+    assert "bottom:calc(100% + .35rem)" not in chat
+    assert ".cd-chat-scroll-down.cd-chat-scroll-down-visible" in chat
+    assert "opacity:1" in chat.split(
+        ".cd-chat-scroll-down.cd-chat-scroll-down-visible {", 1
+    )[1].split("}", 1)[0]
+    workspace = Path("ui/assets/styles/10-workspace.css").read_text(encoding="utf-8")
+    transcript_rule = workspace.split(
+        ".st-key-chat_transcript,\n    [data-testid=\"stElementContainer\"].st-key-chat_transcript",
+        1,
+    )[1].split("}", 1)[0]
+    assert "gap:0 !important" in transcript_rule
+    assert "cd-chat-scroll-away" not in workspace
     attachment_cards = chat.split(
         '[class*="st-key-message_attachment_card_"],', 1
     )[1].split("}", 1)[0]

@@ -547,8 +547,56 @@
         overflow:visible;
         overflow-anchor:none;
         background:var(--cd-surface);
-        padding-top:.25rem;
+        padding-top:0;
         padding-bottom:0;
+    }
+
+    /* Panel-hosted overlay above the composer; stays in the DOM always. */
+    .st-key-chat_panel {
+        position:relative;
+    }
+
+    .cd-chat-scroll-down {
+        position:absolute;
+        left:50%;
+        bottom:3.5rem;
+        z-index:12;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        width:1.85rem;
+        height:1.85rem;
+        margin:0;
+        padding:0;
+        border:1px solid var(--cd-border);
+        border-radius:999px;
+        color:var(--cd-text);
+        background:color-mix(in srgb,var(--cd-surface) 90%,transparent);
+        box-shadow:0 2px 10px color-mix(in srgb,var(--cd-shadow) 24%,transparent);
+        cursor:pointer;
+        transform:translateX(-50%);
+        opacity:0;
+        pointer-events:none;
+        transition:opacity .15s ease;
+    }
+
+    .cd-chat-scroll-down-icon {
+        display:block;
+        width:1rem;
+        height:1rem;
+    }
+
+    .cd-chat-scroll-down:hover,
+    .cd-chat-scroll-down:focus-visible {
+        color:var(--cd-text);
+        background:var(--cd-surface-muted);
+        border-color:color-mix(in srgb,var(--cd-accent) 24%,var(--cd-border));
+        outline:none;
+    }
+
+    .cd-chat-scroll-down.cd-chat-scroll-down-visible {
+        opacity:1;
+        pointer-events:auto;
     }
 
     /* Model chip: overlay the composer so bottom/left pin to the footer. */
