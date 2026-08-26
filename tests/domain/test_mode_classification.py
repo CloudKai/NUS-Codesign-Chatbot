@@ -15,11 +15,13 @@ import pytest
 from backend.agentcore_provider import AgentCoreCoachProvider
 from backend.application import CoachApplicationService
 from backend.coaching.mode_policy import (
+    QA_EVIDENCE_GAP_RESPONSE,
     RUNTIME_HINT_COACHING,
     RUNTIME_HINT_QA,
     ModePolicy,
     enforce_model_mode,
     is_current_stage_status_request,
+    is_exact_confirm_command,
     is_stage_progression_request,
     is_terminal_completion_request,
     looks_like_project_reasoning,
@@ -144,7 +146,10 @@ class _NoRetrieve:
     """Fail if a routing-only stage navigation reaches retrieval."""
 
     def retrieve(self, query: Any) -> Any:
-        raise AssertionError(f"unexpected retrieval for {query.student_message!r}")
+        message = getattr(query, "current_message", None) or getattr(
+            query, "student_message", ""
+        )
+        raise AssertionError(f"unexpected retrieval for {message!r}")
 
 
 def _service(
@@ -1507,3 +1512,323 @@ def test_idle_inputs_stay_unconstrained_and_skip_retrieve() -> None:
             INTENT_AMBIGUOUS,
             INTENT_HIGH_CONFIDENCE_PERSONAL,
         }, message
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "Can I move to Concept Generation?",
+        "Hi, can I move to Concept Generation?",
+        "Okay, can I move into Concept Generation?",
+        "I think I'm done here. Can I move to Concept Generation?",
+        "Can we proceed to Design Specification?",
+        "Can I continue to the next stage?",
+        "Can I switch to Ethics & Critical Thinking?",
+        "Am I ready to move on?",
+        "Is this enough for the next stage?",
+        (
+            "I compared the sensor and button approaches and I think the sensor "
+            "better addresses the user need while keeping interaction simple. "
+            "Can I move to Design Specification now?"
+        ),
+        "can i move to concept genration?",
+        "can i move to design specifcation?",
+        "can i move to refelction?",
+        "Can move to concept generation anot?",
+    ),
+)
+def test_natural_navigation_phrases_are_workflow_intent(message: str) -> None:
+    """Conversational prefixes, readiness, typos, and embedded asks stay workflow."""
+    assert is_stage_progression_request(message) is True
+
+
+@pytest.mark.parametrize(
+    ("message", "stage_id"),
+    (
+        ("Can I move to Concept Generation?", "concept_generation"),
+        ("Hi, can I move to Concept Generation?", "concept_generation"),
+        ("Okay, can I move into Concept Generation?", "concept_generation"),
+        ("can i move to concept genration?", "concept_generation"),
+        ("Can we proceed to Design Specification?", "design_specification"),
+        ("can i move to design specifcation?", "design_specification"),
+        ("Can I switch to Ethics & Critical Thinking?", "deep_analysis"),
+        ("can i move to refelction?", "reflection"),
+        (
+            "I compared the sensor and button approaches and I think the sensor "
+            "better addresses the user need while keeping interaction simple. "
+            "Can I move to Design Specification now?",
+            "design_specification",
+        ),
+    ),
+)
+def test_natural_navigation_extracts_named_stage_targets(
+    message: str, stage_id: str
+) -> None:
+    """Named destinations resolve only after strong navigation intent."""
+    assert manual_stage_selection_target(message) == stage_id
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "What is Concept Generation?",
+        "Can you explain Concept Generation?",
+        "How does Concept Generation work?",
+        "How do I generate more concepts?",
+        "Which lecture covers Concept Generation?",
+        "What does Design Specification mean?",
+        "What should I do during Design Specification?",
+        "What does the reading say about Design Specification?",
+        "What is Ethics & Critical Thinking?",
+        "How does Reflection work?",
+        "Which reading talks about Reflection?",
+        "What is concept genration?",
+        "Concept generation now?",
+    ),
+)
+def test_stage_name_questions_are_not_navigation(message: str) -> None:
+    """A stage noun or typo alone never becomes a stage command."""
+    assert is_stage_progression_request(message) is False
+    assert manual_stage_selection_target(message) is None
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "What stage am I in?",
+        "Hi, what stage am I in?",
+        "Where are we now?",
+        "Where am I in the Thinking Path?",
+        "Which phase am I currently working on?",
+        "What stage are we at?",
+    ),
+)
+def test_current_stage_status_natural_variants(message: str) -> None:
+    """Status lookups tolerate prefixes without becoming course Q&A."""
+    assert is_current_stage_status_request(message) is True
+    assert is_stage_progression_request(message) is False
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    (
+        ("confirm", True),
+        ("Confirm", True),
+        ("CONFIRM", True),
+        ("confirm.", True),
+        ("confirm!", True),
+        ("yes", False),
+        ("yeah", False),
+        ("okay", False),
+        ("ok", False),
+        ("sure", False),
+        ("sounds good", False),
+        ("go ahead", False),
+    ),
+)
+def test_confirm_normalization_rejects_vague_acknowledgements(
+    message: str, expected: bool
+) -> None:
+    """Only explicit confirm (with harmless punctuation) resolves pending."""
+    assert is_exact_confirm_command(message) is expected
+
+
+def test_navigation_with_selected_lecture_notes_still_skips_retrieval(tmp_path) -> None:
+    """Selected stage-named sources must not retrieve for pure navigation."""
+    store = StudentStore(tmp_path / "nav-selected-source.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    source = add_text_source(
+        store, thread_id, "Lecture Notes: Concept Generation", "Course material"
+    )
+    client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="stay"))
+    service = _service(store, client, retriever=_NoRetrieve())
+
+    turn = service.submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="Hi, can I move to Concept Generation?",
+            current_stage="problem_identification",
+            response_detail="short",
+            source_ids=[source["id"]],
+            idempotency_key="nav-selected",
+        )
+    )
+
+    assert len(client.calls) == 1
+    assert turn.assessment.response_mode == "coaching"
+    assert QA_EVIDENCE_GAP_RESPONSE.split(",")[0] not in turn.response_text
+    assert "couldn't retrieve" not in turn.response_text.casefold()
+
+
+def test_punctuated_confirm_resolves_pending_without_model(tmp_path) -> None:
+    """confirm! reuses the atomic confirmation path."""
+    store = StudentStore(tmp_path / "confirm-bang.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    transitions = SQLitePhaseTransitionRepository(store)
+    pending = CoachWorkflow(
+        DeterministicCoachProvider(StageDecision.ADVANCE), transitions
+    ).run(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message=(
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
+            ),
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    ).pending_transition
+    assert pending is not None
+    transitions.create(pending)
+    client = FakeAgentCoreRuntime(payload=_coaching_payload())
+    service = _service(store, client, retriever=_NoRetrieve())
+    calls_before = len(client.calls)
+
+    confirmed = _submit(service, thread_id, "confirm!", key="confirm-bang")
+
+    assert len(client.calls) == calls_before
+    assert confirmed.assessment.current_stage == "concept_generation"
+
+
+def test_vague_okay_does_not_resolve_pending_transition(tmp_path) -> None:
+    """okay must never silently confirm a pending stage change."""
+    store = StudentStore(tmp_path / "okay-not-confirm.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    transitions = SQLitePhaseTransitionRepository(store)
+    pending = CoachWorkflow(
+        DeterministicCoachProvider(StageDecision.ADVANCE), transitions
+    ).run(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message=(
+                "How might we improve road crossings for older pedestrians so that "
+                "they can cross safely without rushing?"
+            ),
+            current_stage="problem_identification",
+            response_detail="short",
+        )
+    ).pending_transition
+    assert pending is not None
+    transitions.create(pending)
+    client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="stay"))
+    service = _service(store, client, retriever=_NoRetrieve())
+
+    turn = _submit(service, thread_id, "okay", key="okay-not-confirm")
+
+    assert transitions.get_pending(thread_id) is not None
+    journey = ((store.get_thread(thread_id) or {}).get("metadata") or {}).get(
+        "learning_journey", {}
+    )
+    assert journey["current_stage"] == "problem_identification"
+    assert turn.assessment.current_stage == "problem_identification"
+
+
+def test_phase2_natural_language_immediate_next_succeeds(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unlocked next-stage NL commands use the same store authorization as buttons."""
+    store = StudentStore(tmp_path / "phase2-nl-next.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = ["problem_identification"]
+    journey["current_stage"] = "problem_identification"
+    metadata["learning_journey"] = journey
+    metadata["thinking_stage"] = "problem_identification"
+    store.update_thread(thread_id, metadata=metadata)
+    assert "concept_generation" in selectable_stage_ids(journey)
+    client = FakeAgentCoreRuntime(payload=_coaching_payload())
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    service = _service(store, client, retriever=_NoRetrieve())
+
+    turn = service.submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="Hi, can I move to Concept Generation?",
+            current_stage="problem_identification",
+            response_detail="short",
+            idempotency_key="phase2-nl-next",
+        )
+    )
+
+    assert client.calls == []
+    assert turn.response_text == "Moved to Stage: Concept generation."
+    thread = store.get_thread(thread_id) or {}
+    assert thread["metadata"]["thinking_stage"] == "concept_generation"
+
+
+def test_phase2_natural_language_locked_jump_is_rejected(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """NL stage commands cannot bypass the linear unlocked frontier."""
+    store = StudentStore(tmp_path / "phase2-nl-locked.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    messages_before = store.get_messages(thread_id)
+    client = FakeAgentCoreRuntime(payload=_coaching_payload())
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    service = _service(store, client, retriever=_NoRetrieve())
+
+    with pytest.raises(ValueError, match="locked"):
+        service.submit(
+            CoachRequest(
+                thread_id=thread_id,
+                student_message="Hi, move me to Ethics and Critical Thinking",
+                current_stage="problem_identification",
+                response_detail="short",
+                idempotency_key="phase2-nl-locked",
+            )
+        )
+
+    assert client.calls == []
+    assert store.get_messages(thread_id) == messages_before
+    journey = ((store.get_thread(thread_id) or {}).get("metadata") or {}).get(
+        "learning_journey", {}
+    )
+    assert journey["current_stage"] == "problem_identification"
+
+
+def test_phase2_natural_language_revisit_unlocked_stage(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Earlier unlocked stages remain reachable by natural-language commands."""
+    store = StudentStore(tmp_path / "phase2-nl-revisit.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = ["problem_identification"]
+    journey["current_stage"] = "concept_generation"
+    metadata["learning_journey"] = journey
+    metadata["thinking_stage"] = "concept_generation"
+    store.update_thread(thread_id, metadata=metadata)
+    client = FakeAgentCoreRuntime(payload=_coaching_payload())
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    service = _service(store, client, retriever=_NoRetrieve())
+
+    turn = service.submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="Can I switch to Problem Identification?",
+            current_stage="concept_generation",
+            response_detail="short",
+            idempotency_key="phase2-nl-revisit",
+        )
+    )
+
+    assert client.calls == []
+    assert turn.response_text == "Moved to Stage: Problem identification."
+    thread = store.get_thread(thread_id) or {}
+    assert thread["metadata"]["thinking_stage"] == "problem_identification"
+
+
+def test_genuine_course_qa_still_retrieves_after_navigation_hardening() -> None:
+    """Course lookup about a stage name remains retrieval-eligible."""
+    message = "Which lecture covers Concept Generation?"
+    assert is_stage_progression_request(message) is False
+    assert manual_stage_selection_target(message) is None
+    policy = resolve_mode_policy(
+        message,
+        has_selected_sources=True,
+        selected_source_titles=["Week 2 lecture"],
+    )
+    assert policy.retrieve is True
+    assert policy.expected_mode == "qa"

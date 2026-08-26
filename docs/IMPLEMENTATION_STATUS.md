@@ -2,6 +2,31 @@
 
 ## CURRENT STATUS
 
+### Natural-language Thinking Path navigation hardening (2026-08-26)
+
+**Change.** Deterministic workflow matching now tolerates conversational
+prefixes, punctuation, casing, embedded readiness asks, approved stage
+aliases, and **bounded** stage-name typos — only after strong navigation
+intent is established. Pure navigation and current-stage status requests
+force ``retrieve=false`` and never author the Course Q&A evidence-gap reply.
+Named destinations feed the existing Phase 2 ``validate_learning_stage_selection``
+path (same linear unlock rules as Journey buttons). Phase 1 still uses the
+readiness / pending-confirm path and does not mutate stage from the parser.
+Explicit ``confirm`` accepts harmless casing/punctuation; ``yes`` / ``okay``
+do not. No extra model call, AgentCore prompt change, or generation bump.
+
+**Files.** ``backend/coaching/workflow_navigation.py`` (new),
+``backend/coaching/mode_policy.py``,
+``backend/coaching/execution.py``,
+``tests/domain/test_mode_classification.py``,
+``docs/IMPLEMENTATION_STATUS.md``.
+
+**Validation.** Focused ``test_mode_classification`` suite passes. No AWS
+calls or deployment performed.
+
+**Next exact action.** Rebuild/recreate the EC2 app image so production picks
+up the parser; AgentCore republish is **not** required.
+
 ### Authoritative stage after PI→CG (2026-08-26)
 
 **Change.** After the application advances to Concept Generation, coaching

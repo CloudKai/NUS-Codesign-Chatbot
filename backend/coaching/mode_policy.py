@@ -65,6 +65,13 @@ from backend.retrieval import (
     COURSE_RETRIEVAL_EMPTY_CONTEXT,
     COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT,
 )
+from backend.coaching.workflow_navigation import (
+    is_current_stage_status_request,
+    is_exact_confirm_command,
+    is_stage_progression_request,
+    is_terminal_completion_request,
+    manual_stage_selection_target,
+)
 from backend.retrieval_gate import (
     INTENT_AMBIGUOUS,
     INTENT_HIGH_CONFIDENCE_PERSONAL,
@@ -73,9 +80,33 @@ from backend.retrieval_gate import (
     RetrievalIntent,
     classify_retrieval_intent,
 )
-from backend.learning.stages import THINKING_STAGES
 
 ExpectedResponseMode = Literal["qa", "coaching"]
+
+# Re-export navigation helpers for existing callers and tests.
+__all__ = (
+    "ExpectedResponseMode",
+    "ModeEnforcement",
+    "ModePolicy",
+    "QA_EVIDENCE_GAP_RESPONSE",
+    "RUNTIME_HINT_COACHING",
+    "RUNTIME_HINT_QA",
+    "enforce_model_mode",
+    "is_current_stage_status_request",
+    "is_exact_confirm_command",
+    "is_private_attachment_question",
+    "is_stage_progression_request",
+    "is_terminal_completion_request",
+    "looks_like_information_request",
+    "looks_like_project_reasoning",
+    "manual_stage_selection_target",
+    "overlay_mode_policy",
+    "policy_from_request",
+    "qa_evidence_gap_turn",
+    "resolve_mode_policy",
+    "runtime_mode_hint",
+    "should_author_qa_evidence_gap",
+)
 
 RUNTIME_HINT_QA = (
     "This turn is source Q&A: Q&A rules take precedence over Coaching. "
@@ -171,101 +202,6 @@ _COURSE_REFERENCE = re.compile(
     re.IGNORECASE,
 )
 
-# Navigation is a command about the student's Thinking Path, not a request to
-# explain a stage term.  Keep this intentionally narrow: stage names alone and
-# factual questions ("what is concept generation?") must retain normal Q&A.
-_STAGE_PROGRESSION_REQUEST = re.compile(
-    r"^\s*(?:nothing else[.!]?\s*)?(?:can|could|may|should)\s+(?:we|i)\s+"
-    r"move on\b|^\s*(?:can|could|may|should)\s+(?:we|i)\s+(?:proceed|advance)\s+"
-    r"(?:to|onto)\s+(?:the\s+)?(?:next\s+(?:stage|phase)|problem\s+identification|"
-    r"concept\s+generation|design\s+specification|ethics(?:\s*(?:&|and)\s*)?"
-    r"(?:critical\s+thinking|ct)|reflection)\b|^\s*(?:are|am)\s+(?:we|i)\s+ready\s+"
-    r"to\s+(?:move on|proceed|advance)\b|^\s*(?:let'?s|i(?:'m| am) ready to)\s+"
-    r"(?:move on|proceed|advance)\b|\bgo\s+(?:to|onto)\s+(?:the\s+)?"
-    r"(?:next\s+(?:stage|phase)|problem\s+identification|concept\s+generation|"
-    r"design\s+specification|ethics(?:\s*(?:&|and)\s*)?(?:critical\s+thinking|ct)|"
-    r"reflection)\b",
-    re.IGNORECASE,
-)
-
-# A few short, explicit navigation phrasings are common in the UI. Keep them
-# separate from broad stage-term matching so a typo or stage noun alone never
-# becomes workflow intent or a mutation authorization.
-_EXPLICIT_STAGE_NAVIGATION_VARIANTS = re.compile(
-    r"^\s*(?:hi\s*,\s*)?"
-    r"(?:can\s+i\s+move\s+to\s+concept\s+(?:generation|genration)|"
-    r"can\s+i\s+start\s+concept\s+generation|"
-    r"can\s+move\s+on(?:\s+already)?)"
-    r"\s*[?.!]*\s*$",
-    re.IGNORECASE,
-)
-
-# The original expression intentionally favoured short commands at the start
-# of a turn. Students frequently explain their work first and ask a genuine
-# readiness question at the end, though. Keep stage names alone insufficient:
-# these phrases require an explicit navigation or readiness action.
-_EMBEDDED_STAGE_PROGRESSION_REQUEST = re.compile(
-    r"\b(?:move\s+on|go\s+(?:to|onto)\s+(?:the\s+)?(?:next\s+(?:stage|phase)|"
-    r"problem\s+identification|concept\s+generation|design\s+specification|"
-    r"ethics(?:\s*(?:&|and)\s*)?(?:critical\s+thinking|ct)|reflection))\b|"
-    r"\b(?:proceed|advance)\s+(?:to|onto)\b|"
-    r"\b(?:ready|enough|done)\s+(?:to\s+)?(?:move\s+on|proceed|advance)\b|"
-    r"\bready\s+for\s+(?:the\s+)?(?:next\s+(?:stage|phase)|problem\s+"
-    r"identification|concept\s+generation|design\s+specification|ethics"
-    r"(?:\s*(?:&|and)\s*)?(?:critical\s+thinking|ct)|reflection)\b",
-    re.IGNORECASE,
-)
-
-# Completion language is workflow intent even before Reflection, where it is
-# useful for explaining the remaining path. It never itself authorizes a stage
-# mutation. Generic "am I done?" remains terminal-only at Reflection below.
-_EXPLICIT_PATH_COMPLETION_REQUEST = re.compile(
-    r"\b(?:finish|complete)\s+(?:the\s+)?thinking\s+path\b|"
-    r"\b(?:is|am|are|can|could|may|should)\b[^?!.]{0,80}\b(?:thinking\s+path|"
-    r"reflection)\b[^?!.]{0,80}\b(?:complete|completed|finished|done)\b|"
-    r"\b(?:finish|complete)\s+(?:my\s+)?reflection\b",
-    re.IGNORECASE,
-)
-_GENERIC_TERMINAL_COMPLETION_REQUEST = re.compile(
-    r"^\s*(?:(?:am|are)\s+(?:i|we)|(?:can|could|may|should)\s+(?:i|we)|"
-    r"is\s+(?:this|my\s+reflection))\s+(?:done|finished|complete)\b|"
-    r"^\s*(?:can|could|may|should)\s+(?:i|we)\s+(?:finish|complete)\b",
-    re.IGNORECASE,
-)
-
-# This is deliberately narrower than general stage-related Q&A. It answers
-# only a request for the student's *current* persisted position, never an
-# explanation of what a stage means (for example, "What is Ethics & Critical
-# Thinking?").
-_CURRENT_STAGE_STATUS_REQUEST = re.compile(
-    r"^\s*(?:(?:can|could|would)\s+you\s+(?:please\s+)?(?:tell|show)\s+me\s+)?"
-    r"(?:what|which)\s+(?:(?:my|the)\s+)?(?:journey\s+|thinking\s+path\s+)?"
-    r"(?:stage|phase)\s+(?:am\s+i|are\s+we)\s+(?:in|on|at)(?:\s+now)?[?.!]*\s*$"
-    r"|^\s*what\s+is\s+(?:my|the)\s+current\s+(?:journey\s+|thinking\s+path\s+)?"
-    r"(?:stage|phase)(?:\s+(?:right\s+now|now))?[?.!]*\s*$",
-    re.IGNORECASE,
-)
-
-_MANUAL_STAGE_SELECTION_REQUEST = re.compile(
-    r"^move\s+me\s+to\s+(.+?)\s*[?.!]*$",
-    re.IGNORECASE,
-)
-
-
-def _manual_stage_key(value: str) -> str:
-    """Return the strict comparison key for a canonical stage name."""
-    compact = " ".join(str(value or "").split()).strip().casefold()
-    compact = re.sub(r"\s*&\s*", " and ", compact)
-    return " ".join(compact.split())
-
-
-_MANUAL_STAGE_TARGETS = {
-    _manual_stage_key(alias): stage.id
-    for stage in THINKING_STAGES
-    for alias in (stage.id, stage.label)
-}
-
-
 @dataclass(frozen=True)
 class ModePolicy:
     """Deterministic mode expectation for one student turn.
@@ -338,69 +274,6 @@ def looks_like_information_request(student_message: str) -> bool:
     if not text:
         return False
     return bool(_INFORMATION_REQUEST.search(text))
-
-
-def is_stage_progression_request(student_message: str) -> bool:
-    """Return whether the student explicitly asks to navigate the Thinking Path.
-
-    This matcher only controls routing.  It never changes a stage; the normal
-    provider assessment, HMW guard, pending transition, and atomic confirmation
-    path remain authoritative.
-    """
-    text = _normalized_text(student_message)
-    return bool(
-        _STAGE_PROGRESSION_REQUEST.search(text)
-        or _EXPLICIT_STAGE_NAVIGATION_VARIANTS.search(text)
-        or _EMBEDDED_STAGE_PROGRESSION_REQUEST.search(text)
-        or _EXPLICIT_PATH_COMPLETION_REQUEST.search(text)
-        or manual_stage_selection_target(text) is not None
-    )
-
-
-def manual_stage_selection_target(student_message: str) -> str | None:
-    """Return the canonical target of an exact manual-stage chat command.
-
-    Only the full-message form ``move me to <canonical stage label or id>`` is
-    accepted. This parser does not authorize the move; the application service
-    separately enforces ``STUDENT_STAGE_SELECTION``. Keeping recognition
-    independent from authorization ensures a disabled command still routes as
-    Thinking Path workflow intent rather than course Q&A.
-    """
-    match = _MANUAL_STAGE_SELECTION_REQUEST.fullmatch(
-        _normalized_text(student_message)
-    )
-    if match is None:
-        return None
-    return _MANUAL_STAGE_TARGETS.get(_manual_stage_key(match.group(1)))
-
-
-def is_current_stage_status_request(student_message: str) -> bool:
-    """Return whether a turn asks only for the persisted current stage.
-
-    The answer comes from the server-authoritative learning journey rather
-    than a model, retrieval result, or client-side stage hint. Questions
-    asking about the meaning of a named stage intentionally remain normal Fast
-    Chat questions.
-    """
-    return bool(_CURRENT_STAGE_STATUS_REQUEST.fullmatch(_normalized_text(student_message)))
-
-
-def is_terminal_completion_request(student_message: str, *, current_stage: str) -> bool:
-    """Return whether a Reflection turn asks to complete the Thinking Path.
-
-    Explicit Thinking Path/Reflection wording is routed as workflow intent at
-    every stage by :func:`is_stage_progression_request`. This narrower helper
-    identifies the terminal variant only when the authoritative current stage
-    is Reflection, so generic completion wording cannot invent a terminal
-    action earlier in the path.
-    """
-    if str(current_stage or "").strip().lower() != "reflection":
-        return False
-    text = _normalized_text(student_message)
-    return bool(
-        _EXPLICIT_PATH_COMPLETION_REQUEST.search(text)
-        or _GENERIC_TERMINAL_COMPLETION_REQUEST.search(text)
-    )
 
 
 def is_private_attachment_question(

@@ -23,6 +23,7 @@ from backend.coaching.deep_review_context import (
 from backend.coaching.mode_policy import (
     ModePolicy,
     is_current_stage_status_request,
+    is_exact_confirm_command,
     is_terminal_completion_request,
     is_stage_progression_request,
     is_private_attachment_question,
@@ -390,7 +391,8 @@ class CoachApplicationService:
         # learning service before any limiter, retrieval, or provider work.
         # Idempotency markers around this helper make a same-key retry replay
         # the result instead of attempting a second transition resolution.
-        if request.student_message == "confirm" and self._progress is not None:
+        # Accept harmless casing/punctuation only; never treat yes/okay as confirm.
+        if is_exact_confirm_command(request.student_message) and self._progress is not None:
             pending = self._progress.get_pending(request.thread_id)
             if pending is not None:
                 resolved = self._progress.resolve(request.thread_id, pending.id, accepted=True)
