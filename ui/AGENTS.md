@@ -149,8 +149,9 @@ streamlit_app.py
   -> render_theme_css()
   -> render_topbar()  -> model_id, reasoning_effort
   -> render_workspace(model_id, reasoning_effort)
-  -> notebook_actions_dialog() if pending
-  -> else notebooks_dialog() if reopen after actions dismiss/delete
+  -> notebooks_dialog() from the Notebooks button, or while
+     pending_notebook_actions / reopen_notebooks_dialog (inline actions;
+     no nested Notebook Actions dialog)
 ```
 
 ## Common edit paths

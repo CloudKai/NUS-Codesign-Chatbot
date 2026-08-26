@@ -29,7 +29,7 @@ from ui.auth_gate import (
 )
 from ui.constants import DEFAULT_APPEARANCE
 from ui.toasts import show_corner_toasts
-from ui.notebooks import notebook_actions_dialog, notebooks_dialog
+from ui.notebooks import notebooks_dialog
 from ui.runtime import bind_owner_identifier, configure_ui_perf_logger
 from ui.session import initialize_session
 from ui.settings import sync_appearance_from_widget
@@ -122,9 +122,9 @@ if st.session_state.pop("toast_course_materials_loading", False):
 model_id, reasoning_effort = render_topbar()
 render_workspace(model_id, reasoning_effort)
 
-# Streamlit allows only one dialog at a time. Closing Notebook Actions reopens
-# Your Notebooks via reopen_notebooks_dialog.
-if st.session_state.pending_notebook_actions:
-    notebook_actions_dialog()
-elif st.session_state.pop("reopen_notebooks_dialog", False):
+# Single Your Notebooks dialog: remount while an inline actions panel is pending
+# or after delete asks for the list view. No nested Notebook Actions dialog.
+_pending_notebook = st.session_state.get("pending_notebook_actions")
+_reopen_notebooks = st.session_state.pop("reopen_notebooks_dialog", False)
+if _pending_notebook or _reopen_notebooks:
     notebooks_dialog()

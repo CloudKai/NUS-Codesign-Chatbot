@@ -485,7 +485,7 @@ def render_journey_track() -> None:
             completed=completed_count,
             total=len(THINKING_STAGES),
             label="Thinking path",
-            heading="Current focus",
+            heading="Stage Progression",
         ),
         unsafe_allow_html=True,
     )

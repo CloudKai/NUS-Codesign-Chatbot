@@ -35,9 +35,11 @@
 
     /* Dialogs and popovers */
     [data-testid="stDialog"] {
+        display:flex !important;
         padding:1.5rem !important;
         align-items:center !important;
         justify-content:center !important;
+        box-sizing:border-box !important;
     }
 
     [role="dialog"] {
@@ -50,9 +52,30 @@
         box-shadow:var(--cd-shadow) !important;
     }
 
+    /*
+     * Center Your Notebooks in the overlay. Size the mid wrapper against the
+     * flex content box (100%), not 100vw — vw + stDialog padding/margins was
+     * left-shifting the panel. Dialog fills that mid width at 100%.
+     */
+    [data-testid="stDialog"] > div:has(> [role="dialog"] .st-key-notebook-search),
+    [data-testid="stDialog"] > div:has(> [role="dialog"] .st-key-notebook_actions_panel) {
+        width:min(54rem,100%) !important;
+        max-width:100% !important;
+        margin:0 !important;
+        inset:auto !important;
+        position:relative !important;
+        left:auto !important;
+        right:auto !important;
+        box-sizing:border-box !important;
+    }
+
+    [data-testid="stDialog"] > div:has(> [role="dialog"] .st-key-notebook_actions_panel) {
+        width:min(31rem,100%) !important;
+    }
+
     [role="dialog"]:has(.st-key-notebook-search) {
-        width:min(54rem,calc(100vw - 3rem)) !important;
-        max-width:min(54rem,calc(100vw - 3rem)) !important;
+        width:100% !important;
+        max-width:min(54rem,100%) !important;
         max-height:calc(100vh - 3rem) !important;
         min-height:0;
         height:auto;
@@ -62,27 +85,41 @@
         box-sizing:border-box !important;
     }
 
+    /* Drop Streamlit's nested title/body pad so content fills our chrome. */
+    [role="dialog"]:has(.st-key-notebook-search) > h2[slot="title"] {
+        width:100% !important;
+        max-width:100% !important;
+        margin:0 0 .35rem !important;
+        padding:0 2rem .15rem 0 !important; /* room for the close control */
+        box-sizing:border-box !important;
+        text-align:left !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook-search) > div:last-child {
+        width:100% !important;
+        max-width:100% !important;
+        margin:0 !important;
+        padding:0 !important;
+        box-sizing:border-box !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook-search)
+    > div:last-child > [data-testid="stVerticalBlock"],
     [role="dialog"]:has(.st-key-notebook-search)
     > [data-testid="stVerticalBlock"] {
+        width:100% !important;
+        max-width:100% !important;
         overflow:hidden !important;
         max-height:100%;
         padding:0 !important;
         margin:0 !important;
-    }
-
-    /* Keep the close control from colliding with the title/actions. */
-    [role="dialog"]:has(.st-key-notebook-search) > h2[slot="title"],
-    [role="dialog"]:has(.st-key-notebook-search) header,
-    [role="dialog"]:has(.st-key-notebook-search)
-    [data-testid="stDialogHeader"],
-    [role="dialog"]:has(.st-key-notebook-search)
-    [data-testid="stMarkdownContainer"]:has(h2) {
-        padding-right:2rem !important;
         box-sizing:border-box !important;
     }
 
-    [data-testid="stDialog"] > div:has(> [role="dialog"] .st-key-notebook-search) {
-        width:min(54rem,calc(100vw - 3rem)) !important;
+    /* Actions + list must never stack; if both appear, keep library width. */
+    [role="dialog"]:has(.st-key-notebook-search):has(.st-key-notebook_actions_panel) {
+        width:100% !important;
+        max-width:min(54rem,100%) !important;
     }
 
     /* New notebook: keep material + and label on one midline. */
@@ -144,52 +181,54 @@
     }
 
     [role="dialog"]:has(.st-key-notebook_actions_panel) {
-        width:min(31rem,calc(100vw - 3rem)) !important;
-        max-width:min(31rem,calc(100vw - 3rem)) !important;
+        width:100% !important;
+        max-width:min(31rem,100%) !important;
         padding:.9rem 1.15rem 1.1rem !important;
         box-sizing:border-box !important;
     }
 
-    [data-testid="stDialog"] > div:has(
-        > [role="dialog"] .st-key-notebook_actions_panel
-    ) {
-        width:min(31rem,calc(100vw - 3rem)) !important;
+    [role="dialog"]:has(.st-key-notebook_actions_panel) > h2[slot="title"] {
+        width:100% !important;
+        max-width:100% !important;
+        margin:0 0 .35rem !important;
+        padding:0 2rem .15rem 0 !important;
+        box-sizing:border-box !important;
+        text-align:left !important;
+    }
+
+    [role="dialog"]:has(.st-key-notebook_actions_panel) > div:last-child {
+        width:100% !important;
+        max-width:100% !important;
+        margin:0 !important;
+        padding:0 !important;
+        box-sizing:border-box !important;
     }
 
     [role="dialog"]:has(.st-key-notebook_actions_panel)
+    > div:last-child > [data-testid="stVerticalBlock"],
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
     > [data-testid="stVerticalBlock"] {
+        width:100% !important;
+        max-width:100% !important;
         gap:.15rem !important;
         row-gap:.15rem !important;
         margin:0 !important;
         padding:0 !important;
+        box-sizing:border-box !important;
+    }
+
+    .st-key-notebook_actions_panel,
+    [data-testid="stElementContainer"]:has(> .st-key-notebook_actions_panel),
+    [data-testid="stLayoutWrapper"]:has(.st-key-notebook_actions_panel) {
+        width:100% !important;
+        max-width:100% !important;
+        box-sizing:border-box !important;
     }
 
     .st-key-notebook_actions_panel > [data-testid="stVerticalBlock"],
     .st-key-notebook_actions_panel [data-testid="stVerticalBlock"] {
         gap:.1rem !important;
         row-gap:.1rem !important;
-    }
-
-    /* Keep the dialog title on the same left edge as Rename / body fields. */
-    [role="dialog"]:has(.st-key-notebook_actions_panel) > h2[slot="title"],
-    [role="dialog"]:has(.st-key-notebook_actions_panel) header,
-    [role="dialog"]:has(.st-key-notebook_actions_panel)
-    [data-testid="stDialogHeader"],
-    [role="dialog"]:has(.st-key-notebook_actions_panel)
-    [data-testid="stMarkdownContainer"]:has(h2) {
-        margin:0 0 .35rem !important;
-        padding:0 !important;
-        padding-right:2rem !important; /* room for the close control */
-        box-sizing:border-box !important;
-    }
-
-    [role="dialog"]:has(.st-key-notebook_actions_panel) > h2[slot="title"],
-    [role="dialog"]:has(.st-key-notebook_actions_panel) header h2,
-    [role="dialog"]:has(.st-key-notebook_actions_panel)
-    [data-testid="stDialogHeader"] h2 {
-        margin:0 !important;
-        padding:0 !important;
-        text-align:left !important;
     }
 
     /* Tighten Rename → phase caption → transcript download → delete spacing. */
@@ -475,7 +514,9 @@
     [role="dialog"]:has(.st-key-notebook_actions_panel)
     [data-testid="stBaseButton-secondary"],
     [role="dialog"]:has(.st-key-notebook_actions_panel)
-    div[data-testid="stButton"] button {
+    div[data-testid="stButton"] button:not([kind="tertiary"]):not(
+        [data-testid="stBaseButton-tertiary"]
+    ) {
         opacity:1 !important;
         border:1px solid var(--cd-border) !important;
         color:var(--cd-text) !important;
@@ -486,9 +527,101 @@
     [role="dialog"]:has(.st-key-notebook_actions_panel)
     [data-testid="stBaseButton-secondary"] *,
     [role="dialog"]:has(.st-key-notebook_actions_panel)
-    div[data-testid="stButton"] button * {
+    div[data-testid="stButton"] button:not([kind="tertiary"]):not(
+        [data-testid="stBaseButton-tertiary"]
+    ) * {
         color:var(--cd-text) !important;
         -webkit-text-fill-color:var(--cd-text) !important;
+    }
+
+    /* Back control: bordered chip with icon + label vertically centered.
+       Streamlit tertiary defaults to width:100% of a narrow wrapper; size to
+       the label and force the inner flex row onto one midline. */
+    [class*="st-key-notebook-actions-back-"],
+    [class*="st-key-notebook-actions-back-"] [data-testid="stButton"],
+    [class*="st-key-notebook-actions-back-"] div[data-testid="stButton"] {
+        width:fit-content !important;
+        max-width:100% !important;
+    }
+
+    [class*="st-key-notebook-actions-back-"] button,
+    [class*="st-key-notebook-actions-back-"] [data-testid="stBaseButton-tertiary"] {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        gap:.4rem !important;
+        width:auto !important;
+        min-width:max-content !important;
+        max-width:100% !important;
+        height:2.35rem !important;
+        min-height:2.35rem !important;
+        max-height:2.35rem !important;
+        margin:0 0 .35rem !important;
+        padding:0 .75rem 0 .55rem !important;
+        border:1px solid var(--cd-border) !important;
+        border-radius:.6rem !important;
+        color:var(--cd-text) !important;
+        background:var(--cd-surface) !important;
+        white-space:nowrap !important;
+        box-sizing:border-box !important;
+        line-height:1 !important;
+    }
+
+    [class*="st-key-notebook-actions-back-"] button:hover,
+    [class*="st-key-notebook-actions-back-"] [data-testid="stBaseButton-tertiary"]:hover {
+        border-color:color-mix(in srgb,var(--cd-accent) 35%,var(--cd-border)) !important;
+        color:var(--cd-text) !important;
+        background:var(--cd-surface-muted) !important;
+    }
+
+    [class*="st-key-notebook-actions-back-"] button > div,
+    [class*="st-key-notebook-actions-back-"] button > div > span,
+    [class*="st-key-notebook-actions-back-"] button span[data-has-shortcut] {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:flex-start !important;
+        gap:.4rem !important;
+        margin:0 !important;
+        padding:0 !important;
+        line-height:1 !important;
+        height:auto !important;
+    }
+
+    [class*="st-key-notebook-actions-back-"] button *,
+    [class*="st-key-notebook-actions-back-"] [data-testid="stBaseButton-tertiary"] * {
+        color:inherit !important;
+        -webkit-text-fill-color:currentColor !important;
+    }
+
+    [class*="st-key-notebook-actions-back-"] [data-testid="stIconMaterial"] {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        flex:none !important;
+        width:1.05rem !important;
+        height:1.05rem !important;
+        margin:0 !important;
+        padding:0 !important;
+        font-size:1.05rem !important;
+        line-height:1 !important;
+        transform:none !important;
+    }
+
+    [class*="st-key-notebook-actions-back-"] [data-testid="stMarkdownContainer"],
+    [class*="st-key-notebook-actions-back-"] [data-testid="stMarkdownContainer"] > div,
+    [class*="st-key-notebook-actions-back-"] [data-testid="stMarkdownContainer"] p {
+        display:inline-flex !important;
+        align-items:center !important;
+        width:auto !important;
+        max-width:none !important;
+        height:auto !important;
+        margin:0 !important;
+        padding:0 !important;
+        overflow:visible !important;
+        white-space:nowrap !important;
+        line-height:1 !important;
+        font-size:.9rem !important;
+        font-weight:600 !important;
     }
 
     [role="dialog"]:has(.st-key-notebook_actions_panel)

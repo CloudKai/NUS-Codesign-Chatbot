@@ -27,6 +27,7 @@ from ui.rename import (
 from ui.session import (
     cancel_notebook_actions,
     delete_notebook,
+    dismiss_notebooks_dialog,
     new_notebook,
     request_notebook_actions,
     select_thread,
@@ -103,9 +104,40 @@ def _relative_activity(value: Any, *, now: datetime | None = None) -> str:
     return parsed.astimezone(current.tzinfo).strftime("%d %b %Y")
 
 
-@st.dialog("Your Notebooks", width="large")
+@st.dialog(
+    "Your Notebooks",
+    width="large",
+    on_dismiss=dismiss_notebooks_dialog,
+)
 def notebooks_dialog() -> None:
-    """Render a folder-free notebook library with search and actions."""
+    """Render the notebook library, with an inline actions panel when needed.
+
+    Rename / download / delete stay inside this dialog so delete never
+    dismisses Your Notebooks. Only X, outside click, or Esc closes it.
+    """
+    pending_id = str(st.session_state.get("pending_notebook_actions") or "").strip()
+    if pending_id:
+        if _render_notebook_actions_panel(pending_id):
+            return
+        # Missing notebook: pending cleared; show the list in this same open.
+
+    _render_notebook_library_list()
+
+
+def _return_to_notebook_list() -> None:
+    """Leave the actions panel and remount Your Notebooks on the list view.
+
+    Streamlit already drew the actions widgets in this run, so falling through
+    to the list would stack both UIs. Remount instead via reopen + rerun.
+    """
+    cancel_notebook_actions()
+    st.session_state._notebooks_suppress_dismiss = True
+    st.session_state.reopen_notebooks_dialog = True
+    rerun_app()
+
+
+def _render_notebook_library_list() -> None:
+    """Search, create, open, and open the inline actions panel."""
     st.caption("Continue a discussion or start a new inquiry.")
     search_column, new_column = st.columns([0.77, 0.23])
     search = search_column.text_input(
@@ -179,12 +211,94 @@ def notebooks_dialog() -> None:
                         "⋯",
                         type="tertiary",
                         key=f"notebook-actions-{thread['id']}",
-                        help="Rename, download, or delete this notebook",
                     ):
+                        # No help= tooltip: on touch / narrow preview the tip
+                        # intercepts the first tap and forces a double-click.
                         request_notebook_actions(thread["id"])
                         rerun_app()
 
     _sync_notebook_library_scroll()
+
+
+def _render_notebook_actions_panel(thread_id: str) -> bool:
+    """Render rename / download / delete for one notebook.
+
+    Returns:
+        ``True`` when the actions panel owns the dialog body.
+        ``False`` only when the notebook is missing so the list can render.
+        Back / rename / delete remount the list via ``rerun_app`` instead of
+        falling through (which would stack both UIs in one dialog body).
+    """
+    thread = store.get_thread(thread_id)
+    if not thread:
+        cancel_notebook_actions()
+        return False
+
+    if st.button(
+        "Back to notebooks",
+        icon=":material/arrow_back:",
+        type="tertiary",
+        key=f"notebook-actions-back-{thread_id}",
+    ):
+        _return_to_notebook_list()
+
+    current_title = str(thread.get("name") or "").strip() or "Untitled notebook"
+    overview = thread_overview(thread)
+    with st.container(key="notebook_actions_panel"):
+        applied, cleaned = render_enter_to_apply_rename(
+            kind="notebook",
+            item_id=str(thread_id),
+            label="Rename",
+            current_value=current_title,
+        )
+        st.caption(
+            f"{overview['stage'].label} · phase {overview['stage_index']} "
+            f"of {len(THINKING_STAGES)}"
+        )
+        if applied and cleaned and cleaned != current_title:
+            store.update_thread(thread_id, name=cleaned)
+            _return_to_notebook_list()
+        sync_rename_select_all(
+            root_selector='[role="dialog"]:has(.st-key-notebook_actions_panel)',
+            aria_label="Rename",
+        )
+
+        with st.container(key="notebook_action_export"):
+            try:
+                transcript = store.download_transcript(str(thread_id))
+            except ValueError:
+                transcript = None
+            if transcript is not None:
+                st.download_button(
+                    "Download transcript",
+                    data=transcript.data,
+                    file_name=transcript.filename,
+                    mime="text/plain",
+                    key=f"download-transcript-{thread_id}",
+                    use_container_width=True,
+                    type="secondary",
+                    icon=":material/download:",
+                    help="Save this notebook's chat from persisted messages",
+                )
+
+        with st.container(key="notebook_action_danger"):
+            st.markdown("#### Delete notebook")
+            confirm = st.checkbox(
+                "I understand this cannot be undone",
+                key=f"confirm-delete-{thread_id}",
+            )
+            if st.button(
+                "Delete permanently",
+                icon=":material/delete:",
+                use_container_width=True,
+                disabled=not confirm,
+                key=f"delete-notebook-{thread_id}",
+            ):
+                # Remount list-only; do not draw the library under this panel.
+                delete_notebook(thread_id)
+                rerun_app()
+
+    return True
 
 
 def _sync_notebook_library_scroll() -> None:
@@ -267,75 +381,3 @@ def _sync_notebook_library_scroll() -> None:
         """,
         height=0,
     )
-
-
-@st.dialog(
-    "Notebook Actions",
-    width="small",
-    on_dismiss=cancel_notebook_actions,
-)
-def notebook_actions_dialog() -> None:
-    """Rename, download the persisted transcript, or delete with confirmation.
-
-    Dismissing (X, click outside, or Esc) clears the pending action and reopens
-    Your Notebooks on the next script run.
-    """
-    thread_id = st.session_state.get("pending_notebook_actions")
-    thread = store.get_thread(thread_id) if thread_id else None
-    if not thread:
-        cancel_notebook_actions()
-        return
-
-    current_title = str(thread.get("name") or "").strip() or "Untitled notebook"
-    overview = thread_overview(thread)
-    with st.container(key="notebook_actions_panel"):
-        applied, cleaned = render_enter_to_apply_rename(
-            kind="notebook",
-            item_id=str(thread_id),
-            label="Rename",
-            current_value=current_title,
-        )
-        st.caption(
-            f"{overview['stage'].label} · phase {overview['stage_index']} "
-            f"of {len(THINKING_STAGES)}"
-        )
-        if applied and cleaned and cleaned != current_title:
-            store.update_thread(thread_id, name=cleaned)
-            rerun_app()
-        sync_rename_select_all(
-            root_selector='[role="dialog"]:has(.st-key-notebook_actions_panel)',
-            aria_label="Rename",
-        )
-
-        with st.container(key="notebook_action_export"):
-            try:
-                transcript = store.download_transcript(str(thread_id))
-            except ValueError:
-                transcript = None
-            if transcript is not None:
-                st.download_button(
-                    "Download transcript",
-                    data=transcript.data,
-                    file_name=transcript.filename,
-                    mime="text/plain",
-                    key=f"download-transcript-{thread_id}",
-                    use_container_width=True,
-                    type="secondary",
-                    icon=":material/download:",
-                    help="Save this notebook's chat from persisted messages",
-                )
-
-        with st.container(key="notebook_action_danger"):
-            st.markdown("#### Delete notebook")
-            confirm = st.checkbox(
-                "I understand this cannot be undone",
-                key=f"confirm-delete-{thread_id}",
-            )
-            if st.button(
-                "Delete permanently",
-                icon=":material/delete:",
-                use_container_width=True,
-                disabled=not confirm,
-            ):
-                delete_notebook(thread_id)
-                rerun_app()

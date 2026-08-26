@@ -171,7 +171,12 @@ def new_notebook(should_rerun: bool = True) -> None:
 
 
 def delete_notebook(thread_id: str) -> None:
-    """Delete a notebook and return to the notebook library dialog."""
+    """Delete a notebook and keep Your Notebooks open on the list view.
+
+    Clears the inline actions panel and asks the entrypoint to remount the
+    library dialog so delete never leaves the student with no notebook window.
+    """
+    st.session_state._notebooks_suppress_dismiss = True
     st.session_state.pending_notebook_actions = None
     st.session_state.reopen_notebooks_dialog = True
     store.delete_thread(thread_id)
@@ -181,24 +186,41 @@ def delete_notebook(thread_id: str) -> None:
         _persist_active_thread(None)
 
 
-def request_notebook_actions(thread_id: str) -> None:
-    """Open the notebook actions dialog for ``thread_id`` on the next render."""
-    st.session_state.pending_notebook_actions = thread_id
+def dismiss_notebooks_dialog() -> None:
+    """Clear library dialog state when Your Notebooks is closed (X / outside).
+
+    Remounts for the inline actions panel set ``_notebooks_suppress_dismiss``
+    so closing-and-reopening the same dialog does not wipe pending.
+    """
+    if st.session_state.pop("_notebooks_suppress_dismiss", False):
+        return
+    thread_id = st.session_state.get("pending_notebook_actions")
+    if thread_id:
+        discard_rename_draft("notebook", str(thread_id))
+        bump_rename_epoch("notebook", str(thread_id))
+    st.session_state.pending_notebook_actions = None
     st.session_state.reopen_notebooks_dialog = False
 
 
-def cancel_notebook_actions() -> None:
-    """Close notebook actions and reopen Your Notebooks on the next run.
+def request_notebook_actions(thread_id: str) -> None:
+    """Show rename / download / delete for ``thread_id`` inside Your Notebooks."""
+    # Keep dismiss from clearing pending when Streamlit remounts the dialog.
+    st.session_state._notebooks_suppress_dismiss = True
+    st.session_state.pending_notebook_actions = thread_id
+    st.session_state.reopen_notebooks_dialog = True
 
-    Used for the dialog X, click-outside, and Esc dismiss paths. Uncommitted
-    rename drafts are discarded so the field restores the saved title.
+
+def cancel_notebook_actions() -> None:
+    """Leave the inline actions panel and return to the notebook list.
+
+    Used by the Back control. Uncommitted rename drafts are discarded so the
+    field restores the saved title. Does not dismiss Your Notebooks.
     """
     thread_id = st.session_state.get("pending_notebook_actions")
     if thread_id:
         discard_rename_draft("notebook", str(thread_id))
         bump_rename_epoch("notebook", str(thread_id))
     st.session_state.pending_notebook_actions = None
-    st.session_state.reopen_notebooks_dialog = True
 
 
 def select_thread(thread_id: str, should_rerun: bool = True) -> None:

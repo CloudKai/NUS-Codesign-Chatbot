@@ -1101,13 +1101,17 @@ def test_notebook_history_confirmed_delete_removes_the_selected_notebook():
     assert StudentStore().get_thread(deleted_thread_id) is None
     assert app.session_state["thread_id"] != deleted_thread_id
     assert app.session_state["pending_notebook_actions"] is None
-    # Closing/deleting from actions returns to the notebook library.
+    # Your Notebooks remounts on the list view (Back is keyed and must be gone).
     assert any(button.label == "New notebook" for button in app.button)
+    assert not any(button.label == "Back to notebooks" for button in app.button)
+    assert any(
+        "Continue a discussion" in (caption.value or "") for caption in app.caption
+    )
     assert not app.exception
 
 
 def test_notebook_actions_offers_transcript_download():
-    """Notebook Actions downloads the persisted chat, not a sidecar store."""
+    """Inline notebook actions download the persisted chat, not a sidecar store."""
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     next(button for button in app.button if button.label == "Notebooks").click().run()
     next(button for button in app.button if button.label == "New notebook").click().run()
