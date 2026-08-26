@@ -123,10 +123,13 @@
     > [data-testid="stVerticalBlock"]:has([class*="st-key-journey_select_"]) {
         display:flex !important;
         flex-direction:row !important;
-        flex-wrap:nowrap !important;
+        flex-wrap:wrap !important;
         align-items:center !important;
         justify-content:space-between !important;
         gap:.35rem !important;
+        max-width:100% !important;
+        min-width:0 !important;
+        box-sizing:border-box !important;
     }
 
     [class*="st-key-journey_stage_"]:not(:has(.journey-state.preview-open))
@@ -194,18 +197,20 @@
     }
 
     @container journey-stage (max-width:28rem) {
-        [class*="st-key-journey_stage_"]
+        /* Rules apply to *descendants* of the stage container. Do not
+           re-select ``st-key-journey_stage_*`` here or the query never matches
+           and the wide row layout pushes Revisit into the clipped chat column. */
         [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child
         > [data-testid="stVerticalBlock"]:has([class*="st-key-journey_select_"]) {
             flex-direction:column !important;
             align-items:flex-start !important;
+            flex-wrap:wrap !important;
+            max-width:100% !important;
         }
 
-        [class*="st-key-journey_stage_"]
         [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child
         > [data-testid="stVerticalBlock"]
         > [data-testid="stLayoutWrapper"]:has([class*="st-key-journey_header_"]),
-        [class*="st-key-journey_stage_"]
         [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child
         > [data-testid="stVerticalBlock"]
         > [data-testid="stLayoutWrapper"]:has([class*="st-key-journey_select_"]) {
@@ -213,12 +218,14 @@
             align-self:flex-start !important;
             margin-left:0 !important;
             width:100% !important;
+            max-width:100% !important;
         }
 
         [class*="st-key-journey-select-"],
         [class*="st-key-journey_select_"] {
             justify-content:flex-start !important;
             width:100% !important;
+            max-width:100% !important;
         }
 
         [class*="st-key-journey-select-"] div[data-testid="stButton"] button,

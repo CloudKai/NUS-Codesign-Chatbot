@@ -9,7 +9,12 @@
             min-height:4.6rem;
             flex-basis:4.6rem;
             margin:0 -.7rem;
-            padding:0 .7rem;
+            /* Keep the bar full-bleed, but inset the brand/actions more than
+               the page gutter so the mark is not flush against the viewport. */
+            padding-top:0;
+            padding-right:1.05rem;
+            padding-bottom:0;
+            padding-left:2rem;
             overflow:hidden;
         }
 
@@ -295,12 +300,17 @@
 
         .st-key-notebook_topbar {
             margin:0 -.55rem;
-            padding:0 .55rem;
+            padding-top:0;
+            padding-right:0.95rem;
+            padding-bottom:0;
+            padding-left:1.9rem;
         }
 
         .st-key-notebook_topbar > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] {
-            grid-template-columns:2.55rem minmax(0,1fr) max-content 2.35rem;
+            /* Keep the first column wide enough for the 2.5rem mark; do not
+               inset via lockup margin (overflow:hidden would clip it). */
+            grid-template-columns:2.8rem minmax(0,1fr) max-content 2.35rem;
             column-gap:.75rem !important;
             gap:.75rem !important;
             align-items:center !important;

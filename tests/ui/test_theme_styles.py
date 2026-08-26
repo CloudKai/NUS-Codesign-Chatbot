@@ -71,6 +71,17 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     assert "container-type:inline-size" in studio_css
     assert "container-name:journey-stage" in studio_css
     assert "@container journey-stage (max-width:28rem)" in studio_css
+    # Container-query bodies must target descendants, not re-select the
+    # stage container (that prevented the narrow stack from ever applying).
+    container_query = studio_css.split(
+        "@container journey-stage (max-width:28rem) {", 1
+    )[1].split("\n    }", 1)[0]
+    assert '[class*="st-key-journey_stage_"]' not in container_query
+    assert (
+        '[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child'
+        in container_query
+    )
+    assert "flex-wrap:wrap !important" in studio_css
     assert ".cd-roadmap-node" in studio_css
     assert "flex:none" in studio_css
     assert "min-width:2rem !important" in studio_css
@@ -108,6 +119,13 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
 
     responsive_css = Path(_STYLES_DIR / "90-responsive.css").read_text(encoding="utf-8")
     assert "min-height:11rem" not in responsive_css
+    topbar_narrow = _css_rule_body(
+        responsive_css,
+        ".st-key-notebook_topbar {",
+    )
+    assert "padding-left:2rem" in topbar_narrow
+    assert "margin-left:.4rem" not in responsive_css
+    assert "margin-left:.45rem" not in responsive_css
     assert "/* Journey's icon/content pair stays horizontal" in responsive_css
     assert "flex-direction:row !important" in responsive_css
     assert "flex-wrap:nowrap !important" in responsive_css
