@@ -152,6 +152,7 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     assert "overflow-wrap:anywhere" in profile_css
     assert "p::first-line" in profile_css
     assert "background:var(--cd-accent)" in profile_css
+    assert "background:var(--cd-accent-soft)" in profile_css
 
     sources_css = Path(_STYLES_DIR / "40-sources.css").read_text(encoding="utf-8")
     assert "content:attr(data-tooltip)" in sources_css

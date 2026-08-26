@@ -283,8 +283,8 @@ def render_theme_css() -> None:
             > [role="radio"][aria-checked="true"],
             .st-key-profile_coaching_style [role="radiogroup"]
             > [role="radio"][aria-pressed="true"] {{
-                color:#fff !important;
-                background:var(--cd-accent) !important;
+                color:var(--cd-accent) !important;
+                background:var(--cd-accent-soft) !important;
                 border-color:var(--cd-accent) !important;
                 font-weight:700 !important;
             }}
@@ -297,13 +297,16 @@ def render_theme_css() -> None:
             .st-key-profile_coaching_style [role="radiogroup"]
             > [role="radio"][aria-checked="true"] p,
             .st-key-profile_coaching_style [role="radiogroup"]
-            > [role="radio"][aria-pressed="true"] p,
+            > [role="radio"][aria-pressed="true"] p {{
+                color:var(--cd-accent) !important;
+                -webkit-text-fill-color:var(--cd-accent) !important;
+            }}
             .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected]
             [data-testid="stCaptionContainer"] p,
             .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked)
             [data-testid="stCaptionContainer"] p {{
-                color:#fff !important;
-                -webkit-text-fill-color:#fff !important;
+                color:var(--cd-text) !important;
+                -webkit-text-fill-color:var(--cd-text) !important;
             }}
             [data-baseweb="select"] *,
             [data-baseweb="input"] input,

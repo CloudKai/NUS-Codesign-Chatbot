@@ -212,7 +212,8 @@
         font-size:.72rem !important;
     }
 
-    /* Coaching style: vertical block selector (native radio, Appearance-like fill). */
+    /* Coaching style: vertical cards; selected uses the same soft accent fill
+       as Appearance (not the bright dark-mode --cd-accent solid). */
     .st-key-profile_coaching_style [data-testid="stRadio"],
     .st-key-profile_coaching_style [data-testid="stRadioGroup"],
     .st-key-profile_coaching_style [role="radiogroup"] {
@@ -369,9 +370,11 @@
     > [role="radio"][aria-checked="true"],
     .st-key-profile_coaching_style [role="radiogroup"]
     > [role="radio"][aria-pressed="true"] {
-        background:var(--cd-accent) !important;
+        /* Match Appearance / design-system selected fill: soft darker teal,
+           not the bright dark-mode --cd-accent used for text accents. */
+        background:var(--cd-accent-soft) !important;
         border-color:var(--cd-accent) !important;
-        color:#fff !important;
+        color:var(--cd-accent) !important;
     }
 
     .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected] p,
@@ -385,15 +388,11 @@
     .st-key-profile_coaching_style [role="radiogroup"]
     > [role="radio"][aria-pressed="true"] p,
     .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected]
-    [data-testid="stCaptionContainer"] p,
-    .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked)
-    [data-testid="stCaptionContainer"] p,
-    .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected]
     [data-testid="stCaptionContainer"] p::first-line,
     .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked)
     [data-testid="stCaptionContainer"] p::first-line {
-        color:#fff !important;
-        -webkit-text-fill-color:#fff !important;
+        color:var(--cd-accent) !important;
+        -webkit-text-fill-color:var(--cd-accent) !important;
         font-weight:700 !important;
     }
 
@@ -401,6 +400,8 @@
     [data-testid="stCaptionContainer"] p,
     .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked)
     [data-testid="stCaptionContainer"] p {
+        color:var(--cd-text) !important;
+        -webkit-text-fill-color:var(--cd-text) !important;
         font-weight:450 !important;
         opacity:.92 !important;
     }
