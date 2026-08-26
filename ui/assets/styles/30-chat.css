@@ -580,16 +580,12 @@
         padding-bottom:0;
     }
 
-    /* Panel-hosted overlay above the composer; stays in the DOM always. */
-    .st-key-chat_panel {
-        position:relative;
-    }
-
+    /* Body-hosted fixed overlay; JS positions it above the composer. */
     .cd-chat-scroll-down {
-        position:absolute;
+        position:fixed;
         left:50%;
         bottom:3.5rem;
-        z-index:12;
+        z-index:60;
         display:flex;
         align-items:center;
         justify-content:center;

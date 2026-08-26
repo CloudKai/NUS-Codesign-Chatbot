@@ -53,6 +53,7 @@ from ui.layout.user_message_edit_layout import (
     sync_user_message_edit_layout,
 )
 from ui.runtime import (
+    coach_turn_is_streaming,
     log_ui_timing,
     rerun_app,
     rerun_fragment,
@@ -61,7 +62,14 @@ from ui.runtime import (
     stream_coach_turn_events,
 )
 from ui.retry_keys import get_retry_key, remove_retry_key
-from ui.session import apply_manual_stage_move, clear_stage_move_notice
+from ui.session import (
+    apply_manual_stage_move,
+    awaiting_coach_turn_for_thread,
+    awaiting_coach_turn_timed_out,
+    clear_awaiting_coach_turn,
+    clear_stage_move_notice,
+    set_awaiting_coach_turn,
+)
 from ui.sources import source_viewer_dialog
 
 
@@ -733,6 +741,153 @@ def apply_completed_turn_to_session(
     )
 
 
+def _awaiting_turn_has_assistant_reply(
+    messages: list[dict[str, Any]],
+    *,
+    baseline_message_count: int,
+) -> bool:
+    """Return True when persisted history advanced with a new assistant row."""
+    rows = [message for message in messages if isinstance(message, dict)]
+    for message in rows[max(0, int(baseline_message_count or 0)) :]:
+        if str(message.get("role") or "").strip().lower() != "assistant":
+            continue
+        if str(message.get("content") or "").strip():
+            return True
+    return False
+
+
+def _sync_session_journey_from_thread(thread_id: str) -> None:
+    """Refresh session journey fields from the authoritative notebook row."""
+    updated_thread = store.get_thread(thread_id) or {}
+    updated_meta = dict(updated_thread.get("metadata") or {})
+    updated_journey = normalize_journey(updated_meta.get("learning_journey"))
+    st.session_state.learning_journey = updated_journey
+    st.session_state.response_detail = updated_journey["response_detail"]
+
+
+def _abandon_awaiting_coach_turn(*, message: str) -> None:
+    """Clear a stuck awaiting lock and remount so the composer unlocks."""
+    clear_awaiting_coach_turn()
+    st.session_state.edit_error_message = message
+    st.session_state.composer_nonce = int(
+        st.session_state.get("composer_nonce") or 0
+    ) + 1
+    rerun_app()
+
+
+def _try_complete_awaiting_coach_turn() -> bool:
+    """Clear the awaiting marker once the persisted assistant reply exists.
+
+    Returns:
+        True when the marker was cleared and ``rerun_app()`` was requested so
+        the caller should stop rendering recovery chrome.
+    """
+    pending = awaiting_coach_turn_for_thread()
+    if pending is None or coach_turn_is_streaming():
+        return False
+    thread_id = str(pending.get("thread_id") or "").strip()
+    if not thread_id:
+        clear_awaiting_coach_turn()
+        return False
+    if awaiting_coach_turn_timed_out(pending):
+        _abandon_awaiting_coach_turn(
+            message=(
+                "The coach reply did not arrive after leaving Chat. "
+                "Send again if it is still missing."
+            )
+        )
+        return True
+    store.forget_turn_reads(thread_id)
+    messages = store.get_messages(thread_id)
+    baseline = int(pending.get("baseline_message_count") or 0)
+    if not _awaiting_turn_has_assistant_reply(
+        messages, baseline_message_count=baseline
+    ):
+        return False
+    _sync_session_journey_from_thread(thread_id)
+    clear_awaiting_coach_turn()
+    st.session_state.composer_nonce = int(
+        st.session_state.get("composer_nonce") or 0
+    ) + 1
+    rerun_app()
+    return True
+
+
+def _clear_stale_streaming_for_awaiting_recovery() -> None:
+    """Clear a stuck streaming flag after Chat remount tore down the send UI.
+
+    Parent ``render_chat_panel`` only runs on a full script remount. While
+    ``handle_prompt`` holds the composer fragment, the parent body does not
+    re-execute, so clearing here cannot race an in-flight send. A stuck
+    ``_coach_turn_streaming`` would otherwise skip the recovery poller and
+    leave the composer disabled forever.
+    """
+    if awaiting_coach_turn_for_thread() is None:
+        return
+    if not coach_turn_is_streaming():
+        return
+    set_coach_turn_streaming(False)
+
+
+@st.fragment(run_every="2s")
+def _recover_awaiting_coach_turn_fragment() -> None:
+    """Poll for a persisted reply after Chat remount interrupted the stream UI.
+
+    Mount via ``mount_awaiting_coach_turn_recovery`` outside ``chat_panel``.
+    Nested ``run_every`` inside the composer fragment is unreliable, and
+    mounting under ``.st-key-chat_panel`` remounts that block every tick and
+    strips the JS-appended scroll-down control.
+    """
+    if awaiting_coach_turn_for_thread() is None:
+        return
+    if coach_turn_is_streaming():
+        return
+    _try_complete_awaiting_coach_turn()
+
+
+def mount_awaiting_coach_turn_recovery() -> None:
+    """Register the awaiting-turn poller outside ``.st-key-chat_panel``.
+
+    Call from the workspace column on every paint so Streamlit keeps the
+    ``run_every`` timer registered even while idle. Idle ticks no-op. Keep
+    this outside the chat panel so fragment remounts do not churn panel DOM.
+    """
+    _recover_awaiting_coach_turn_fragment()
+
+
+def _render_awaiting_coach_recovery() -> None:
+    """Show the pending student bubble and finishing status while recovering."""
+    pending = awaiting_coach_turn_for_thread()
+    if pending is None or coach_turn_is_streaming():
+        return
+    # Complete immediately when the user returns and the reply is already saved.
+    if _try_complete_awaiting_coach_turn():
+        return
+    prompt = str(pending.get("prompt") or "").strip()
+    if prompt:
+        _render_inflight_user_prompt(prompt, [])
+    st.status(
+        "Coach is finishing…",
+        expanded=False,
+        type="compact",
+    )
+    st.caption(
+        "If you left Chat before the server acknowledged this turn, the reply "
+        "may never arrive."
+    )
+    if st.button(
+        "Stop waiting",
+        key="abandon_awaiting_coach_turn",
+        type="secondary",
+    ):
+        _abandon_awaiting_coach_turn(
+            message=(
+                "Stopped waiting for the coach reply. "
+                "Send again if it is still missing."
+            )
+        )
+
+
 def _render_inflight_user_prompt(prompt: str, uploads: list[Any]) -> None:
     """Paint the in-flight student prompt with history bubble markup.
 
@@ -950,6 +1105,8 @@ def handle_prompt(
                 attachment_source_ids=attachment_source_ids,
             )
             spans["request_build_ms"] = _duration_ms(build_started)
+            baseline_messages = store.get_messages(st.session_state.thread_id)
+            baseline_message_count = len(baseline_messages)
             thinking_started = time.perf_counter()
             if thinking is None:
                 thinking = st.status(
@@ -961,6 +1118,7 @@ def handle_prompt(
             try:
                 turn: CoachTurn | None = None
                 thinking_closed = False
+                awaiting_armed = False
                 log_ui_timing(
                     request_id=request_id,
                     fragment_to_api_ms=_duration_ms(api_origin),
@@ -990,7 +1148,27 @@ def handle_prompt(
                     thinking.update(label=label, state=state)
                     thinking_closed = True
 
+                def _arm_awaiting_after_server_ack() -> None:
+                    """Lock recovery only after the API has accepted the turn.
+
+                    Arming before the first stream event left Chat locked when a
+                    tab switch aborted the HTTP request before FastAPI started
+                    the worker — recovery then polled forever for a reply that
+                    would never be persisted.
+                    """
+                    nonlocal awaiting_armed
+                    if awaiting_armed:
+                        return
+                    set_awaiting_coach_turn(
+                        thread_id=str(st.session_state.thread_id or ""),
+                        idempotency_key=str(idempotency_key or ""),
+                        prompt=str(prompt or ""),
+                        baseline_message_count=baseline_message_count,
+                    )
+                    awaiting_armed = True
+
                 for event in stream_coach_turn_events(request, request_id=request_id):
+                    _arm_awaiting_after_server_ack()
                     kind = event.get("event")
                     if kind == "started" or kind == "graph":
                         continue
@@ -1039,6 +1217,7 @@ def handle_prompt(
                     pre_deep_review_available=pre_deep_review_available,
                     pre_deep_review_counter=pre_deep_review_counter,
                 )
+                clear_awaiting_coach_turn()
                 # Always remount from persisted history. Painting completed
                 # turns only in this fragment would drop them on the next
                 # Send. Do not also render_message here or the remount would
@@ -1047,6 +1226,7 @@ def handle_prompt(
                 rerun_app()
                 return
             except CoachTurnStreamError as error:
+                clear_awaiting_coach_turn()
                 try:
                     thinking.update(label="Coaching failed", state="error")
                 except Exception:
@@ -1057,6 +1237,7 @@ def handle_prompt(
                 sync_chat_scroll(mode="settle")
                 return
             except Exception:
+                clear_awaiting_coach_turn()
                 try:
                     thinking.update(label="Coaching failed", state="error")
                 except Exception:
@@ -1173,6 +1354,13 @@ def _submit_pending_edit(
     }
     st.session_state.pending_edit = pending
     set_coach_turn_streaming(True)
+    baseline_messages = store.get_messages(thread_id)
+    set_awaiting_coach_turn(
+        thread_id=str(thread_id or ""),
+        idempotency_key=str(idempotency_key or ""),
+        prompt=draft,
+        baseline_message_count=len(baseline_messages),
+    )
     thinking = st.status(
         "Coach is thinking…",
         expanded=False,
@@ -1192,6 +1380,7 @@ def _submit_pending_edit(
             )
             thinking.update(label="Coach reply ready", state="complete")
         except Exception:
+            clear_awaiting_coach_turn()
             thinking.update(label="Coaching failed", state="error")
             # Drop pending_edit so the next rerun does not auto-resubmit. Keep the
             # stable retry key in session and reopen the editor so the student must
@@ -1221,6 +1410,7 @@ def _submit_pending_edit(
         updated_journey = normalize_journey(updated_metadata.get("learning_journey"))
         st.session_state.learning_journey = updated_journey
         st.session_state.response_detail = updated_journey["response_detail"]
+        clear_awaiting_coach_turn()
         st.session_state.composer_nonce += 1
         rerun_app()
         return True
@@ -1374,10 +1564,13 @@ def _render_composer_submit_fragment(
                         "Reload the notebook before trying again."
                     )
                     _rerun_edit_fragment()
+                else:
+                    _render_awaiting_coach_recovery()
                 edit_error = st.session_state.pop("edit_error_message", None)
                 if edit_error:
                     st.error(str(edit_error))
 
+        awaiting_locked = awaiting_coach_turn_for_thread() is not None
         with st.container(key="chat_composer"):
             fragment_enter_ms = _duration_ms(fragment_started)
             prompt_started = time.perf_counter()
@@ -1390,6 +1583,8 @@ def _render_composer_submit_fragment(
                         f"</p>",
                         unsafe_allow_html=True,
                     )
+            if awaiting_locked and not coach_turn_is_streaming():
+                st.caption("Wait for the coach reply before sending another message.")
             composer_value = st.chat_input(
                 "Ask a question or share your thinking",
                 key=f"composer-{st.session_state.composer_nonce}",
@@ -1398,13 +1593,14 @@ def _render_composer_submit_fragment(
                 max_upload_size=settings.max_file_size_mb,
                 submit_mode="stop",
                 height="content",
+                disabled=awaiting_locked,
             )
             prompt_accept_ms = _duration_ms(prompt_started)
             layout_started = time.perf_counter()
             sync_composer_layout(max_file_size_mb=settings.max_file_size_mb)
             composer_layout_ms = _duration_ms(layout_started)
     prompt, uploads = normalize_composer_value(composer_value)
-    if prompt and not pending_message_id:
+    if prompt and not pending_message_id and not awaiting_locked:
         handle_prompt(
             prompt,
             uploads,
@@ -1436,6 +1632,15 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
     allow_model_knowledge = not selected_sources
     st.session_state.allow_model_knowledge = allow_model_knowledge
     seed_coach_welcome(store, st.session_state.thread_id)
+    # Recovery poller mounts from workspace outside this panel so its
+    # run_every ticks do not strip the JS scroll-down control. Still clear a
+    # stuck streaming flag and try to complete on every chat paint.
+    _clear_stale_streaming_for_awaiting_recovery()
+    if (
+        awaiting_coach_turn_for_thread() is not None
+        and not coach_turn_is_streaming()
+    ):
+        _try_complete_awaiting_coach_turn()
     messages = store.get_messages(st.session_state.thread_id)
     visible_source_ids = {str(source.get("id") or "") for source in sources}
     # Private attachments are absent from Sources but remain safe to open from

@@ -8,30 +8,62 @@ from ui.layout.chat_scroll import NEAR_BOTTOM_PX
 
 
 def test_chat_scroll_helper_uses_near_bottom_gating() -> None:
-    """Send snaps once; settle does not chase; manual scroll can stop follow."""
+    """Send snaps bottom; reply remount pins coach top; manual scroll stops follow."""
     helper = Path("ui/layout/chat_scroll.py").read_text(encoding="utf-8")
     assert "NEAR_BOTTOM_PX = 120" in helper
+    assert "FOLLOW_SNAP_FRAMES = 6" in helper
     assert NEAR_BOTTOM_PX == 120
     assert 'querySelector(".st-key-chat_log")' not in helper
     assert "Element.prototype" not in helper
     assert "scrollIntoView" not in helper
     assert "scrollTo(" not in helper
-    assert "api().follow = false" in helper
+    assert "api().follow = isNearBottom(root)" in helper
+    assert "snapping" in helper
+    assert "keepSnappingToBottom" in helper
+    assert "keepRevealingCoachReply" in helper
+    assert "revealLatestCoachReply" in helper
+    assert "latestCoachReply" in helper
+    assert (
+        '.st-key-chat_log [data-testid="stChatMessage"]'
+        ':has([aria-label="Chat message from assistant"])'
+    ) in helper
+    assert "replyRect.top - rootRect.top" in helper
     assert 'MODE === "send"' in helper
     assert 'MODE === "settle"' in helper
-    assert "if (!isNearBottom(current)) api().follow = false" in helper
     assert "snapToBottom" in helper
     assert "root.scrollTop = root.scrollHeight - root.clientHeight" in helper
-    assert 'querySelector(".st-key-chat_feed")' in helper
-    assert 'querySelector(".st-key-chat_panel")' not in helper.split("scrollRoot")[1].split(
-        "function api"
+    # Send uses bottom snap; reconcile+follow and scroll-down pin coach top.
+    assert (
+        'MODE === "send"' in helper
+        and "keepSnappingToBottom(FOLLOW_SNAP_FRAMES)" in helper
+    )
+    assert "keepRevealingCoachReply(FOLLOW_SNAP_FRAMES)" in helper
+    send_branch = helper.split('MODE === "send"', 1)[1].split(
+        'MODE === "settle"', 1
     )[0]
+    assert "keepSnappingToBottom" in send_branch
+    assert "keepRevealingCoachReply" not in send_branch
+    follow_branch = helper.split("if (api().follow)", 1)[1].split(
+        "updateScrollDownButton();", 1
+    )[0]
+    assert "keepRevealingCoachReply" in follow_branch
+    assert 'querySelector(".st-key-chat_feed")' in helper
+    scroll_root_fn = helper.split("function scrollRoot()", 1)[1].split(
+        "function chatPanel()", 1
+    )[0]
+    assert 'querySelector(".st-key-chat_feed")' in scroll_root_fn
+    assert 'querySelector(".st-key-chat_panel")' not in scroll_root_fn
+    assert "function chatPanel()" in helper
+    assert 'querySelector(".st-key-chat_panel")' in helper
     assert "cd-chat-scroll-down" in helper
     assert "updateScrollDownButton" in helper
     assert "cd-chat-scroll-down-icon" in helper
-    assert 'querySelector(".st-key-chat_panel")' in helper
-    assert "panel.appendChild(button)" in helper
+    assert "doc.body.appendChild(button)" in helper
+    assert "panel.appendChild(button)" not in helper
     assert "composer.appendChild(button)" not in helper
+    assert "position:fixed" in Path("ui/assets/styles/30-chat.css").read_text(
+        encoding="utf-8"
+    ).split(".cd-chat-scroll-down {", 1)[1].split("}", 1)[0]
     assert "onScrollDownClick" in helper
     assert "listenersBound" in helper
     assert 'closest("#cd-chat-scroll-down")' in helper
@@ -43,7 +75,9 @@ def test_chat_scroll_helper_uses_near_bottom_gating() -> None:
     assert "keyboard_arrow_down" not in helper
     assert "setInterval" not in helper
     assert "MutationObserver" not in helper
-    assert helper.count("requestAnimationFrame") <= 5
+    # One schedule() wrapper owns requestAnimationFrame.
+    assert helper.count("requestAnimationFrame") == 1
+    assert "function schedule(fn)" in helper
 
 
 def test_inflight_wrapper_has_no_card_chrome() -> None:
@@ -102,6 +136,18 @@ def test_fragment_submit_path_still_owns_inflight() -> None:
     assert "chat_scroll_after_stage_select" not in workspace
     assert "switched_to_chat" not in workspace
     assert "from ui.layout.chat_scroll import sync_chat_scroll" in workspace
+    assert "mount_awaiting_coach_turn_recovery()" in workspace
+    # Recovery poller stays outside chat_panel so run_every does not strip
+    # the JS scroll-down control appended to that panel node.
+    workspace_chat = workspace.split("with chat_column:", 1)[1].split(
+        "with studio_column:", 1
+    )[0]
+    assert workspace_chat.rindex('key="chat_panel"') < workspace_chat.index(
+        "mount_awaiting_coach_turn_recovery()"
+    )
+    assert workspace_chat.rindex("sync_chat_scroll(") < workspace_chat.index(
+        "mount_awaiting_coach_turn_recovery()"
+    )
     send_block = chat.split("def handle_prompt(", 1)[1].split(
         "def _confirm_edit_earlier_message_dialog", 1
     )[0]

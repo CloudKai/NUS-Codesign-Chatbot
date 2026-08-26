@@ -782,9 +782,23 @@
         padding:.35rem .65rem !important;
     }
 
+    /* 5px between nested stage expanders (Problem identification, …)
+       inside Strengths / Areas for improvement / Working conclusion. */
     .st-key-studio_scroll [data-testid="stExpanderDetails"]
     > [data-testid="stVerticalBlock"],
     .st-key-studio_scroll [data-testid="stExpanderDetails"]
+    > [data-testid="stLayoutWrapper"]
+    > [data-testid="stVerticalBlock"] {
+        gap:10px !important;
+        row-gap:10px !important;
+    }
+
+    /* Keep markdown / bullets inside a stage expander tight. */
+    .st-key-studio_scroll [data-testid="stExpanderDetails"]
+    [data-testid="stExpanderDetails"]
+    > [data-testid="stVerticalBlock"],
+    .st-key-studio_scroll [data-testid="stExpanderDetails"]
+    [data-testid="stExpanderDetails"]
     [data-testid="stVerticalBlock"] {
         gap:0 !important;
         row-gap:0 !important;

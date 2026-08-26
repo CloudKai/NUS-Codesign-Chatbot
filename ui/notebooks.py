@@ -29,6 +29,7 @@ from ui.session import (
     delete_notebook,
     dismiss_notebooks_dialog,
     new_notebook,
+    notebook_switch_locked,
     request_notebook_actions,
     select_thread,
 )
@@ -138,7 +139,10 @@ def _return_to_notebook_list() -> None:
 
 def _render_notebook_library_list() -> None:
     """Search, create, open, and open the inline actions panel."""
+    locked = notebook_switch_locked()
     st.caption("Continue a discussion or start a new inquiry.")
+    if locked:
+        st.caption("Wait for the coach reply before switching notebooks.")
     search_column, new_column = st.columns([0.77, 0.23])
     search = search_column.text_input(
         "Search notebooks",
@@ -151,6 +155,8 @@ def _render_notebook_library_list() -> None:
         icon=":material/add:",
         type="primary",
         use_container_width=True,
+        disabled=locked,
+        help="Wait for the coach reply" if locked else None,
     ):
         new_notebook()
 
@@ -200,17 +206,23 @@ def _render_notebook_library_list() -> None:
                         "</div>",
                         unsafe_allow_html=True,
                     )
+                    open_disabled = locked and not is_active
                     if open_column.button(
                         "Open",
                         use_container_width=True,
                         type="secondary",
                         key=f"open-notebook-{thread['id']}",
+                        disabled=open_disabled,
+                        help="Wait for the coach reply" if open_disabled else None,
                     ):
                         select_thread(thread["id"])
+                    actions_disabled = locked
                     if menu_column.button(
                         "⋯",
                         type="tertiary",
                         key=f"notebook-actions-{thread['id']}",
+                        disabled=actions_disabled,
+                        help="Wait for the coach reply" if actions_disabled else None,
                     ):
                         # No help= tooltip: on touch / narrow preview the tip
                         # intercepts the first tap and forces a double-click.
@@ -283,15 +295,19 @@ def _render_notebook_actions_panel(thread_id: str) -> bool:
 
         with st.container(key="notebook_action_danger"):
             st.markdown("#### Delete notebook")
+            locked = notebook_switch_locked()
+            if locked:
+                st.caption("Wait for the coach reply before deleting this notebook.")
             confirm = st.checkbox(
                 "I understand this cannot be undone",
                 key=f"confirm-delete-{thread_id}",
+                disabled=locked,
             )
             if st.button(
                 "Delete permanently",
                 icon=":material/delete:",
                 use_container_width=True,
-                disabled=not confirm,
+                disabled=locked or not confirm,
                 key=f"delete-notebook-{thread_id}",
             ):
                 # Remount list-only; do not draw the library under this panel.

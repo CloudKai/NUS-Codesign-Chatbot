@@ -214,6 +214,86 @@ def test_chat_marks_streaming_around_coach_send_and_revise() -> None:
     assert "render_message(" not in done_block
     normalized = chat.replace("\r\n", "\n")
     assert "@st.fragment\ndef _render_composer_submit_fragment(" in normalized
+
+
+def test_awaiting_coach_turn_survives_panel_remount_and_locks_notebooks() -> None:
+    """Interrupted Chat remounts recover via poll; notebooks stay locked mid-turn."""
+    chat = Path("ui/panels/chat.py").read_text(encoding="utf-8")
+    session = Path("ui/session.py").read_text(encoding="utf-8")
+    notebooks = Path("ui/notebooks.py").read_text(encoding="utf-8")
+    assert "def set_awaiting_coach_turn(" in session
+    assert "def clear_awaiting_coach_turn(" in session
+    assert "def notebook_switch_locked(" in session
+    assert "awaiting_coach_turn" in session
+    assert "set_awaiting_coach_turn(" in chat
+    assert "clear_awaiting_coach_turn(" in chat
+    assert "def _try_complete_awaiting_coach_turn(" in chat
+    assert "def _clear_stale_streaming_for_awaiting_recovery(" in chat
+    assert "def mount_awaiting_coach_turn_recovery(" in chat
+    assert "@st.fragment(run_every=\"2s\")" in chat.replace("'", '"')
+    assert "def _recover_awaiting_coach_turn_fragment(" in chat
+    assert "def _render_awaiting_coach_recovery(" in chat
+    assert "_render_awaiting_coach_recovery()" in chat
+    assert "Coach is finishing" in chat
+    assert "disabled=awaiting_locked" in chat
+    assert "not awaiting_locked" in chat
+    # Poller must not live under chat_panel (wipes JS scroll-down) and must
+    # stay outside the composer fragment (nested run_every is unreliable).
+    render_panel = chat.split("def render_chat_panel(", 1)[1]
+    assert "_recover_awaiting_coach_turn_fragment()" not in render_panel
+    assert "mount_awaiting_coach_turn_recovery()" not in render_panel
+    assert "_clear_stale_streaming_for_awaiting_recovery()" in render_panel
+    workspace = Path("ui/workspace.py").read_text(encoding="utf-8")
+    assert "mount_awaiting_coach_turn_recovery" in workspace
+    assert "mount_awaiting_coach_turn_recovery()" in workspace
+    # Called after the chat_panel container closes.
+    workspace_chat = workspace.split("with chat_column:", 1)[1].split(
+        "with studio_column:", 1
+    )[0]
+    assert workspace_chat.index('key="chat_panel"') < workspace_chat.index(
+        "mount_awaiting_coach_turn_recovery()"
+    )
+    assert workspace_chat.rindex("sync_chat_scroll(") < workspace_chat.index(
+        "mount_awaiting_coach_turn_recovery()"
+    )
+    recovery_ui = chat.split("def _render_awaiting_coach_recovery(", 1)[1].split(
+        "def _render_inflight_user_prompt(", 1
+    )[0]
+    assert "_recover_awaiting_coach_turn_fragment()" not in recovery_ui
+    assert "_try_complete_awaiting_coach_turn()" in recovery_ui
+    assert "Stop waiting" in recovery_ui
+    assert "_abandon_awaiting_coach_turn(" in recovery_ui
+    send_block = chat.split("def handle_prompt(", 1)[1].split(
+        "def _confirm_edit_earlier_message_dialog", 1
+    )[0]
+    # Arm awaiting only after the first stream event so a tab switch that
+    # aborts the HTTP request before FastAPI starts does not lock Chat.
+    assert "_arm_awaiting_after_server_ack" in send_block
+    assert (
+        "for event in stream_coach_turn_events(request, request_id=request_id):\n"
+        "                    _arm_awaiting_after_server_ack()"
+    ) in send_block.replace("\r\n", "\n")
+    assert "clear_awaiting_coach_turn()" in send_block
+    assert "_AWAITING_COACH_TURN_TIMEOUT_SECONDS = 90" in session
+    revise_block = chat.split("def _submit_pending_edit(", 1)[1].split(
+        "def _render_chat_history(", 1
+    )[0]
+    assert "set_awaiting_coach_turn(" in revise_block
+    assert "clear_awaiting_coach_turn()" in revise_block
+    assert "notebook_switch_locked()" in notebooks
+    assert "Wait for the coach reply before switching notebooks." in notebooks
+    assert "disabled=locked" in notebooks
+    assert "disabled=open_disabled" in notebooks
+    assert "if notebook_switch_locked():" in session
+    # Journey/Sources stay switchable; only notebooks are locked.
+    workspace = Path("ui/workspace.py").read_text(encoding="utf-8")
+    assert "notebook_switch_locked" not in workspace
+    assert 'key="mobile_panel"' in workspace
+
+
+def test_chat_composer_fragment_keeps_inflight_sibling() -> None:
+    """Composer fragment still owns chat_input and the inflight sibling target."""
+    chat = Path("ui/panels/chat.py").read_text(encoding="utf-8")
     composer_block = chat.split("def _render_composer_submit_fragment(", 1)[1].split(
         "def render_chat_panel(", 1
     )[0]

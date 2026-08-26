@@ -10,7 +10,7 @@ import time
 
 import streamlit as st
 
-from ui.panels.chat import render_chat_panel
+from ui.panels.chat import mount_awaiting_coach_turn_recovery, render_chat_panel
 from ui.layout.chat_scroll import sync_chat_scroll
 from ui.layout.column_resize import (
     effective_column_widths,
@@ -119,14 +119,16 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                         1,
                     )
                 )
-                # Journey Revisit / Work on this stage sets chat_follow_bottom
-                # and switches to Chat so the Moved-to-Stage row is in view.
-                if panel == "Chat" and st.session_state.pop(
-                    "chat_follow_bottom", False
-                ):
-                    sync_chat_scroll(mode="send")
-                else:
-                    sync_chat_scroll(mode="reconcile")
+            # Scroll helper and recovery poller stay outside chat_panel so
+            # Streamlit remounts of that block (Send / tab switch) do not tear
+            # down the components.html iframe or the body-hosted scroll button.
+            if panel == "Chat" and st.session_state.pop(
+                "chat_follow_bottom", False
+            ):
+                sync_chat_scroll(mode="send")
+            else:
+                sync_chat_scroll(mode="reconcile")
+            mount_awaiting_coach_turn_recovery()
         with studio_column:
             if studio_collapsed:
                 _render_collapsed_rail(

@@ -4,10 +4,14 @@ Streamlit has no first-class chat-anchor API. ``sync_chat_scroll`` injects a
 zero-height helper that:
 
 - treats ``.st-key-chat_feed`` as the only chat scrollport
-- snaps once on Send by assigning ``scrollTop`` (no smooth animation)
-- stops following if the student scrolls away from the bottom
-- shows a floating scroll-down control on ``.st-key-chat_panel`` when the
-  student is not near bottom
+- snaps to the bottom on Send (pending user bubble + thinking)
+- on reply remount while follow is active, pins the **top** of the latest
+  coach message to the top of the feed (clamped for short replies)
+- stops following when the student scrolls/swipes away from the bottom
+- resumes follow when they return to the bottom or tap the scroll-down control
+- hosts that control on ``document.body`` (fixed), not under
+  ``.st-key-chat_panel``, so Streamlit remounts after Send / tab switches
+  do not strip the node
 - does not poll, observe the whole app, or chase Thinking height changes
 
 Click / scroll handlers live on ``window.parent.__cdChatScroll`` so they keep
@@ -27,15 +31,19 @@ from __future__ import annotations
 import streamlit.components.v1 as components
 
 NEAR_BOTTOM_PX = 120
+# Extra frames after Send / reply remount so Streamlit can finish painting
+# the new bubble height before scrollTop is applied.
+FOLLOW_SNAP_FRAMES = 6
 
 
 def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     """Apply one event-driven chat scroll action.
 
     Args:
-        mode: ``send`` snaps once and resumes follow. ``settle`` records
-            near-bottom state and does not move the viewport. ``reconcile``
-            snaps once only when follow is still active after a remount.
+        mode: ``send`` snaps to the bottom and resumes follow. ``settle``
+            records near-bottom state and does not move the viewport.
+            ``reconcile`` reveals the latest coach reply top when follow is
+            still active after a remount.
     """
     cleaned = str(mode or "reconcile").strip().lower()
     if cleaned not in {"send", "settle", "reconcile"}:
@@ -47,11 +55,13 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
   const win = window.parent;
   const MODE = __CD_MODE__;
   const NEAR_BOTTOM_PX = __CD_NEAR_BOTTOM__;
+  const FOLLOW_SNAP_FRAMES = __CD_FOLLOW_FRAMES__;
 
   function api() {
     if (!win.__cdChatScroll) {
       win.__cdChatScroll = {
         follow: true,
+        snapping: false,
         nearBottomPx: NEAR_BOTTOM_PX,
         listenersBound: false,
       };
@@ -61,8 +71,16 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     return current;
   }
 
+  function schedule(fn) {
+    win.requestAnimationFrame(fn);
+  }
+
   function scrollRoot() {
     return doc.querySelector(".st-key-chat_feed");
+  }
+
+  function chatPanel() {
+    return doc.querySelector(".st-key-chat_panel");
   }
 
   function distanceFromBottom(root) {
@@ -79,19 +97,75 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     root.scrollTop = root.scrollHeight - root.clientHeight;
   }
 
+  function latestCoachReply() {
+    const nodes = doc.querySelectorAll(
+      '.st-key-chat_log [data-testid="stChatMessage"]:has([aria-label="Chat message from assistant"])'
+    );
+    return nodes.length ? nodes[nodes.length - 1] : null;
+  }
+
+  function revealLatestCoachReply(root) {
+    if (!root || root.clientHeight <= 0) return;
+    const reply = latestCoachReply();
+    if (!reply) {
+      snapToBottom(root);
+      return;
+    }
+    // Pin the coach message top to the feed top; clamp when the reply is
+    // shorter than the viewport (not enough content below to scroll further).
+    const rootRect = root.getBoundingClientRect();
+    const replyRect = reply.getBoundingClientRect();
+    const delta = replyRect.top - rootRect.top;
+    const maxScroll = Math.max(0, root.scrollHeight - root.clientHeight);
+    const next = root.scrollTop + delta;
+    root.scrollTop = Math.max(0, Math.min(next, maxScroll));
+  }
+
+  function isChatSurfaceVisible(panel) {
+    if (!panel) return false;
+    const column = panel.closest('[data-testid="stColumn"]') || panel;
+    const style = win.getComputedStyle(column);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    const rect = column.getBoundingClientRect();
+    return rect.width > 8 && rect.height > 8;
+  }
+
   function placeScrollDownButton(button) {
+    const panel = chatPanel();
     const composer = doc.querySelector(".st-key-chat_composer");
-    const lift = composer ? Math.max(8, composer.offsetHeight + 8) : 56;
-    button.style.bottom = lift + "px";
+    if (!panel) return;
+    const panelRect = panel.getBoundingClientRect();
+    const composerRect = composer ? composer.getBoundingClientRect() : null;
+    const bottom = composerRect
+      ? Math.max(8, win.innerHeight - composerRect.top + 8)
+      : Math.max(8, win.innerHeight - panelRect.bottom + 56);
+    button.style.left = panelRect.left + panelRect.width / 2 + "px";
+    button.style.bottom = bottom + "px";
   }
 
   function updateScrollDownButton() {
     const root = scrollRoot();
+    const panel = chatPanel();
     const button = scrollDownButton();
     if (!button) return;
-    placeScrollDownButton(button);
-    const show = !!(root && root.clientHeight > 0 && !isNearBottom(root));
+    const surfaceVisible = isChatSurfaceVisible(panel);
+    if (surfaceVisible) placeScrollDownButton(button);
+    const show = !!(
+      surfaceVisible &&
+      root &&
+      root.clientHeight > 0 &&
+      !isNearBottom(root)
+    );
     button.classList.toggle("cd-chat-scroll-down-visible", show);
+  }
+
+  function syncFollowFromViewport() {
+    // Ignore scroll events caused by our own stick while the coach reply is
+    // still painting; otherwise follow clears mid-snap.
+    if (api().snapping) return;
+    const root = scrollRoot();
+    if (!root || root.clientHeight <= 0) return;
+    api().follow = isNearBottom(root);
   }
 
   function onScrollDownClick(event) {
@@ -102,20 +176,15 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     event.preventDefault();
     event.stopPropagation();
     api().follow = true;
-    snapToBottom(scrollRoot());
-    win.requestAnimationFrame(() => {
-      snapToBottom(scrollRoot());
-      updateScrollDownButton();
-    });
+    keepRevealingCoachReply(FOLLOW_SNAP_FRAMES);
   }
 
   function scrollDownButton() {
     let button = doc.getElementById("cd-chat-scroll-down");
-    const panel = doc.querySelector(".st-key-chat_panel");
-    if (!panel) return null;
-    // Host on the chat panel so the control is not clipped by composer
-    // overflow or scrolled away with the feed.
-    if (!button || !panel.contains(button)) {
+    // Host on document.body with position:fixed. Appending under
+    // .st-key-chat_panel loses the node whenever Streamlit remounts that
+    // block after Send or Journey/Sources tab switches.
+    if (!button || button.parentElement !== doc.body) {
       if (button) button.remove();
       button = doc.createElement("button");
       button.id = "cd-chat-scroll-down";
@@ -126,7 +195,7 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
         '<svg class="cd-chat-scroll-down-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
         '<path d="M12 16.5 6 10.5l1.4-1.4 4.6 4.6 4.6-4.6L18 10.5z" fill="currentColor"/>' +
         "</svg>";
-      panel.appendChild(button);
+      doc.body.appendChild(button);
     }
     placeScrollDownButton(button);
     return button;
@@ -135,10 +204,10 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
   function markUserScroll(event) {
     const root = scrollRoot();
     if (!root || !event.target || !root.contains(event.target)) return;
-    win.requestAnimationFrame(() => {
-      const current = scrollRoot();
-      if (!current) return;
-      if (!isNearBottom(current)) api().follow = false;
+    // Wheel / touch: the student took over; cancel any in-flight stick.
+    schedule(() => {
+      api().snapping = false;
+      syncFollowFromViewport();
       updateScrollDownButton();
     });
   }
@@ -147,15 +216,48 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     const root = scrollRoot();
     if (!root || !event.target) return;
     if (event.target !== root && !root.contains(event.target)) return;
-    win.requestAnimationFrame(updateScrollDownButton);
+    schedule(() => {
+      syncFollowFromViewport();
+      updateScrollDownButton();
+    });
   }
 
   function onResize() {
     const activeRoot = scrollRoot();
-    if (activeRoot && api().follow && isNearBottom(activeRoot)) {
-      snapToBottom(activeRoot);
+    if (activeRoot && api().follow) {
+      revealLatestCoachReply(activeRoot);
     }
     updateScrollDownButton();
+  }
+
+  function finishSnapFrames(framesLeft, apply) {
+    if (!api().follow) {
+      api().snapping = false;
+      updateScrollDownButton();
+      return;
+    }
+    api().snapping = true;
+    const root = scrollRoot();
+    if (root && root.clientHeight > 0) apply(root);
+    updateScrollDownButton();
+    if (framesLeft > 1) {
+      schedule(() => finishSnapFrames(framesLeft - 1, apply));
+      return;
+    }
+    schedule(() => {
+      api().snapping = false;
+      const liveRoot = scrollRoot();
+      if (liveRoot && isNearBottom(liveRoot)) api().follow = true;
+      updateScrollDownButton();
+    });
+  }
+
+  function keepSnappingToBottom(framesLeft) {
+    finishSnapFrames(framesLeft, snapToBottom);
+  }
+
+  function keepRevealingCoachReply(framesLeft) {
+    finishSnapFrames(framesLeft, revealLatestCoachReply);
   }
 
   // Keep handlers on the parent window and bind document listeners once.
@@ -164,11 +266,14 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
   const current = api();
   current.scrollRoot = scrollRoot;
   current.snapToBottom = snapToBottom;
+  current.revealLatestCoachReply = revealLatestCoachReply;
   current.updateScrollDownButton = updateScrollDownButton;
   current.onScrollDownClick = onScrollDownClick;
   current.markUserScroll = markUserScroll;
   current.onFeedScroll = onFeedScroll;
   current.onResize = onResize;
+  current.keepSnappingToBottom = keepSnappingToBottom;
+  current.keepRevealingCoachReply = keepRevealingCoachReply;
   if (!current.listenersBound) {
     doc.addEventListener(
       "click",
@@ -227,30 +332,26 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
   }
   if (MODE === "send") {
     api().follow = true;
-    win.requestAnimationFrame(() => {
-      snapToBottom(scrollRoot());
-      updateScrollDownButton();
-    });
+    // Pending user + thinking are not yet a coach bubble in chat_log.
+    keepSnappingToBottom(FOLLOW_SNAP_FRAMES);
     return;
   }
   if (MODE === "settle") {
-    if (!isNearBottom(root)) api().follow = false;
+    syncFollowFromViewport();
     updateScrollDownButton();
     return;
   }
   if (api().follow) {
-    win.requestAnimationFrame(() => {
-      const liveRoot = scrollRoot();
-      if (liveRoot && api().follow) snapToBottom(liveRoot);
-      updateScrollDownButton();
-    });
+    keepRevealingCoachReply(FOLLOW_SNAP_FRAMES);
     return;
   }
   updateScrollDownButton();
 })();
 </script>
 """
-    script = script.replace("__CD_MODE__", repr(cleaned)).replace(
-        "__CD_NEAR_BOTTOM__", str(int(NEAR_BOTTOM_PX))
+    script = (
+        script.replace("__CD_MODE__", repr(cleaned))
+        .replace("__CD_NEAR_BOTTOM__", str(int(NEAR_BOTTOM_PX)))
+        .replace("__CD_FOLLOW_FRAMES__", str(int(FOLLOW_SNAP_FRAMES)))
     )
     components.html(script, height=0, width=0)

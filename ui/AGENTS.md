@@ -64,7 +64,7 @@ Compatibility shims at `ui/column_resize.py`, `ui/sources_scroll.py`, and
 |---|---|
 | `column_resize.py` | Between-column drag handles and side-panel collapse widths |
 | `sources_scroll.py` | Sources list scroll region sizing |
-| `chat_scroll.py` | Panel near-bottom snap; no smooth chase; respects manual scroll-up |
+| `chat_scroll.py` | Send snaps bottom; reply remount pins latest coach top; respects scroll-up |
 | `composer_layout.py` | Composer footer card / textarea sizing |
 
 These modules inject small `components.html` scripts because Streamlit lacks

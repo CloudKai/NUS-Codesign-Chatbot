@@ -8,6 +8,7 @@ the database on the next sync.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import streamlit as st
@@ -74,6 +75,7 @@ def initialize_session() -> None:
         "editing_message": None,
         "edit_confirm_message_id": None,
         "_coach_turn_streaming": False,
+        "awaiting_coach_turn": None,
         "pending_notebook_actions": None,
         "reopen_notebooks_dialog": False,
         "mobile_panel": "Chat",
@@ -133,6 +135,8 @@ def new_notebook(should_rerun: bool = True) -> None:
     Args:
         should_rerun: When True, trigger a Streamlit rerun after session updates.
     """
+    if notebook_switch_locked():
+        return
     journey = default_journey()
     thread_id = store.create_thread(
         name="Untitled notebook",
@@ -184,6 +188,88 @@ def clear_stage_move_notice() -> None:
     st.session_state.stage_move_notice = None
 
 
+_AWAITING_COACH_TURN_TIMEOUT_SECONDS = 90
+
+
+def set_awaiting_coach_turn(
+    *,
+    thread_id: str,
+    idempotency_key: str,
+    prompt: str,
+    baseline_message_count: int,
+) -> None:
+    """Record a durable in-flight coach turn that must survive Chat remounts.
+
+    Args:
+        thread_id: Notebook that owns the turn.
+        idempotency_key: Server turn scope for diagnostics (not re-submitted).
+        prompt: Student text shown in the recovery inflight bubble.
+        baseline_message_count: Persisted message count before this turn.
+    """
+    cleaned_thread = str(thread_id or "").strip()
+    cleaned_key = str(idempotency_key or "").strip()
+    cleaned_prompt = str(prompt or "").strip()
+    if not cleaned_thread or not cleaned_key:
+        return
+    st.session_state.awaiting_coach_turn = {
+        "thread_id": cleaned_thread,
+        "idempotency_key": cleaned_key,
+        "prompt": cleaned_prompt,
+        "baseline_message_count": max(0, int(baseline_message_count or 0)),
+        "started_at": time.time(),
+    }
+
+
+def clear_awaiting_coach_turn() -> None:
+    """Drop the durable in-flight coach-turn marker."""
+    st.session_state.awaiting_coach_turn = None
+
+
+def get_awaiting_coach_turn() -> dict[str, Any] | None:
+    """Return the awaiting marker when present and well-formed."""
+    pending = st.session_state.get("awaiting_coach_turn")
+    if not isinstance(pending, dict):
+        return None
+    thread_id = str(pending.get("thread_id") or "").strip()
+    if not thread_id:
+        return None
+    return pending
+
+
+def awaiting_coach_turn_for_thread(thread_id: str | None = None) -> dict[str, Any] | None:
+    """Return the awaiting marker when it matches ``thread_id`` (or the active one)."""
+    pending = get_awaiting_coach_turn()
+    if pending is None:
+        return None
+    target = str(thread_id or st.session_state.get("thread_id") or "").strip()
+    if not target or pending.get("thread_id") != target:
+        return None
+    return pending
+
+
+def notebook_switch_locked() -> bool:
+    """Return True when notebook create/switch must wait for an in-flight turn."""
+    from ui.runtime import coach_turn_is_streaming
+
+    if coach_turn_is_streaming():
+        return True
+    return get_awaiting_coach_turn() is not None
+
+
+def awaiting_coach_turn_timed_out(pending: dict[str, Any] | None = None) -> bool:
+    """Return True when the awaiting marker has exceeded the recovery window."""
+    marker = pending if isinstance(pending, dict) else get_awaiting_coach_turn()
+    if marker is None:
+        return False
+    try:
+        started = float(marker.get("started_at") or 0.0)
+    except (TypeError, ValueError):
+        return True
+    if started <= 0:
+        return True
+    return (time.time() - started) >= _AWAITING_COACH_TURN_TIMEOUT_SECONDS
+
+
 def apply_manual_stage_move(thread_id: str, stage_id: str) -> bool:
     """Move Thinking Path focus without writing chat bubbles.
 
@@ -228,6 +314,8 @@ def delete_notebook(thread_id: str) -> None:
     Clears the inline actions panel and asks the entrypoint to remount the
     library dialog so delete never leaves the student with no notebook window.
     """
+    if notebook_switch_locked():
+        return
     st.session_state._notebooks_suppress_dismiss = True
     st.session_state.pending_notebook_actions = None
     st.session_state.reopen_notebooks_dialog = True
@@ -282,6 +370,13 @@ def select_thread(thread_id: str, should_rerun: bool = True) -> None:
         thread_id: Persisted notebook identifier.
         should_rerun: When True, trigger a Streamlit rerun after loading.
     """
+    cleaned = str(thread_id or "").strip()
+    if (
+        notebook_switch_locked()
+        and cleaned
+        and cleaned != str(st.session_state.get("thread_id") or "").strip()
+    ):
+        return
     thread = store.get_thread(thread_id)
     if not thread:
         return

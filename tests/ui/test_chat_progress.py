@@ -38,6 +38,11 @@ def test_chat_panel_consumes_status_events_and_skips_fake_tokens() -> None:
     assert "_render_inflight_user_prompt" in chat
     assert "chat_inflight," in chat
     assert "cd-user-bubble-text" in chat
+    assert "_recover_awaiting_coach_turn_fragment" in chat
+    assert "_try_complete_awaiting_coach_turn" in chat
+    assert "mount_awaiting_coach_turn_recovery" in chat
+    assert "Coach is finishing" in chat
+    assert "disabled=awaiting_locked" in chat
 
 
 def _reply_visible(app: AppTest, text: str) -> bool:
