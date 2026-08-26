@@ -809,6 +809,7 @@ def _try_complete_awaiting_coach_turn() -> bool:
     st.session_state.composer_nonce = int(
         st.session_state.get("composer_nonce") or 0
     ) + 1
+    st.session_state.chat_reveal_coach_reply = True
     rerun_app()
     return True
 
@@ -1223,6 +1224,9 @@ def handle_prompt(
                 # Send. Do not also render_message here or the remount would
                 # duplicate the bubble.
                 st.session_state.composer_nonce += 1
+                # Prefer reply-top pin on remount when the student did not
+                # scroll away (JS awaitingReplyReveal survives feed reset).
+                st.session_state.chat_reveal_coach_reply = True
                 rerun_app()
                 return
             except CoachTurnStreamError as error:
@@ -1412,6 +1416,7 @@ def _submit_pending_edit(
         st.session_state.response_detail = updated_journey["response_detail"]
         clear_awaiting_coach_turn()
         st.session_state.composer_nonce += 1
+        st.session_state.chat_reveal_coach_reply = True
         rerun_app()
         return True
     finally:

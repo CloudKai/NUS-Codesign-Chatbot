@@ -126,6 +126,8 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                 "chat_follow_bottom", False
             ):
                 sync_chat_scroll(mode="send")
+            elif st.session_state.pop("chat_reveal_coach_reply", False):
+                sync_chat_scroll(mode="reply")
             else:
                 sync_chat_scroll(mode="reconcile")
             mount_awaiting_coach_turn_recovery()

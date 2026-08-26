@@ -11,13 +11,15 @@ def test_chat_scroll_helper_uses_near_bottom_gating() -> None:
     """Send snaps bottom; reply remount pins coach top; manual scroll stops follow."""
     helper = Path("ui/layout/chat_scroll.py").read_text(encoding="utf-8")
     assert "NEAR_BOTTOM_PX = 120" in helper
-    assert "FOLLOW_SNAP_FRAMES = 6" in helper
+    assert "FOLLOW_SNAP_FRAMES = 8" in helper
     assert NEAR_BOTTOM_PX == 120
     assert 'querySelector(".st-key-chat_log")' not in helper
     assert "Element.prototype" not in helper
     assert "scrollIntoView" not in helper
     assert "scrollTo(" not in helper
     assert "api().follow = isNearBottom(root)" in helper
+    assert "awaitingReplyReveal" in helper
+    assert "shouldRevealReply" in helper
     assert "snapping" in helper
     assert "keepSnappingToBottom" in helper
     assert "keepRevealingCoachReply" in helper
@@ -30,23 +32,23 @@ def test_chat_scroll_helper_uses_near_bottom_gating() -> None:
     assert "replyRect.top - rootRect.top" in helper
     assert 'MODE === "send"' in helper
     assert 'MODE === "settle"' in helper
+    assert '"reply"' in helper
     assert "snapToBottom" in helper
     assert "root.scrollTop = root.scrollHeight - root.clientHeight" in helper
-    # Send uses bottom snap; reconcile+follow and scroll-down pin coach top.
+    # Send uses bottom snap and arms reply reveal; remount pins coach top.
     assert (
         'MODE === "send"' in helper
         and "keepSnappingToBottom(FOLLOW_SNAP_FRAMES)" in helper
     )
+    assert "api().awaitingReplyReveal = true" in helper
     assert "keepRevealingCoachReply(FOLLOW_SNAP_FRAMES)" in helper
+    assert "shouldRevealReply()" in helper
     send_branch = helper.split('MODE === "send"', 1)[1].split(
         'MODE === "settle"', 1
     )[0]
     assert "keepSnappingToBottom" in send_branch
+    assert "awaitingReplyReveal = true" in send_branch
     assert "keepRevealingCoachReply" not in send_branch
-    follow_branch = helper.split("if (api().follow)", 1)[1].split(
-        "updateScrollDownButton();", 1
-    )[0]
-    assert "keepRevealingCoachReply" in follow_branch
     assert 'querySelector(".st-key-chat_feed")' in helper
     scroll_root_fn = helper.split("function scrollRoot()", 1)[1].split(
         "function chatPanel()", 1
@@ -78,6 +80,16 @@ def test_chat_scroll_helper_uses_near_bottom_gating() -> None:
     # One schedule() wrapper owns requestAnimationFrame.
     assert helper.count("requestAnimationFrame") == 1
     assert "function schedule(fn)" in helper
+    # Remount must not clear awaitingReplyReveal via viewport sync.
+    sync_fn = helper.split("function syncFollowFromViewport()", 1)[1].split(
+        "function onScrollDownClick", 1
+    )[0]
+    assert "awaitingReplyReveal" in sync_fn
+    assert "awaitingReplyReveal = false" not in sync_fn
+    mark_fn = helper.split("function markUserScroll(", 1)[1].split(
+        "function onFeedScroll(", 1
+    )[0]
+    assert "awaitingReplyReveal = false" in mark_fn
 
 
 def test_inflight_wrapper_has_no_card_chrome() -> None:
@@ -131,12 +143,16 @@ def test_fragment_submit_path_still_owns_inflight() -> None:
     workspace = Path("ui/workspace.py").read_text(encoding="utf-8")
     assert 'sync_chat_scroll(mode="reconcile")' in workspace
     assert "chat_follow_bottom" in workspace
+    assert "chat_reveal_coach_reply" in workspace
+    assert 'sync_chat_scroll(mode="reply")' in workspace
     assert "pending_mobile_panel" in workspace
     assert 'sync_chat_scroll(mode="send")' in workspace
     assert "chat_scroll_after_stage_select" not in workspace
     assert "switched_to_chat" not in workspace
     assert "from ui.layout.chat_scroll import sync_chat_scroll" in workspace
     assert "mount_awaiting_coach_turn_recovery()" in workspace
+    chat = Path("ui/panels/chat.py").read_text(encoding="utf-8")
+    assert 'chat_reveal_coach_reply = True' in chat
     # Recovery poller stays outside chat_panel so run_every does not strip
     # the JS scroll-down control appended to that panel node.
     workspace_chat = workspace.split("with chat_column:", 1)[1].split(

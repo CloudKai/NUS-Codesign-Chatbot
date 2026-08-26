@@ -5,13 +5,12 @@ zero-height helper that:
 
 - treats ``.st-key-chat_feed`` as the only chat scrollport
 - snaps to the bottom on Send (pending user bubble + thinking)
-- on reply remount while follow is active, pins the **top** of the latest
-  coach message to the top of the feed (clamped for short replies)
-- stops following when the student scrolls/swipes away from the bottom
-- resumes follow when they return to the bottom or tap the scroll-down control
-- hosts that control on ``document.body`` (fixed), not under
-  ``.st-key-chat_panel``, so Streamlit remounts after Send / tab switches
-  do not strip the node
+- remembers ``awaitingReplyReveal`` across the reply remount so a feed that
+  resets to the top cannot clear follow before the coach bubble is pinned
+- on reply remount, pins the **top** of the latest coach message to the top
+  of the feed (clamped for short replies) when the student did not scroll away
+- stops the pending reveal when the student scrolls/swipes away from the bottom
+- hosts the scroll-down control on ``document.body`` (fixed)
 - does not poll, observe the whole app, or chase Thinking height changes
 
 Click / scroll handlers live on ``window.parent.__cdChatScroll`` so they keep
@@ -33,20 +32,20 @@ import streamlit.components.v1 as components
 NEAR_BOTTOM_PX = 120
 # Extra frames after Send / reply remount so Streamlit can finish painting
 # the new bubble height before scrollTop is applied.
-FOLLOW_SNAP_FRAMES = 6
+FOLLOW_SNAP_FRAMES = 8
 
 
 def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     """Apply one event-driven chat scroll action.
 
     Args:
-        mode: ``send`` snaps to the bottom and resumes follow. ``settle``
-            records near-bottom state and does not move the viewport.
-            ``reconcile`` reveals the latest coach reply top when follow is
-            still active after a remount.
+        mode: ``send`` snaps to the bottom, arms reply reveal, and resumes
+            follow. ``settle`` records near-bottom state and does not move the
+            viewport. ``reconcile`` / ``reply`` pin the latest coach reply top
+            when follow or a pending reply-reveal is still armed after remount.
     """
     cleaned = str(mode or "reconcile").strip().lower()
-    if cleaned not in {"send", "settle", "reconcile"}:
+    if cleaned not in {"send", "settle", "reconcile", "reply"}:
         cleaned = "reconcile"
     script = """
 <script>
@@ -61,6 +60,7 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     if (!win.__cdChatScroll) {
       win.__cdChatScroll = {
         follow: true,
+        awaitingReplyReveal: false,
         snapping: false,
         nearBottomPx: NEAR_BOTTOM_PX,
         listenersBound: false,
@@ -68,6 +68,9 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     }
     const current = win.__cdChatScroll;
     current.nearBottomPx = NEAR_BOTTOM_PX;
+    if (typeof current.awaitingReplyReveal !== "boolean") {
+      current.awaitingReplyReveal = false;
+    }
     return current;
   }
 
@@ -121,6 +124,11 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     root.scrollTop = Math.max(0, Math.min(next, maxScroll));
   }
 
+  function shouldRevealReply() {
+    const current = api();
+    return !!(current.awaitingReplyReveal || current.follow);
+  }
+
   function isChatSurfaceVisible(panel) {
     if (!panel) return false;
     const column = panel.closest('[data-testid="stColumn"]') || panel;
@@ -161,7 +169,9 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
 
   function syncFollowFromViewport() {
     // Ignore scroll events caused by our own stick while the coach reply is
-    // still painting; otherwise follow clears mid-snap.
+    // still painting; otherwise follow clears mid-snap. Do not clear
+    // awaitingReplyReveal here: reply remounts often reset scrollTop to 0
+    // before this script runs, which would cancel the pending reveal.
     if (api().snapping) return;
     const root = scrollRoot();
     if (!root || root.clientHeight <= 0) return;
@@ -176,6 +186,7 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     event.preventDefault();
     event.stopPropagation();
     api().follow = true;
+    api().awaitingReplyReveal = true;
     keepRevealingCoachReply(FOLLOW_SNAP_FRAMES);
   }
 
@@ -204,10 +215,12 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
   function markUserScroll(event) {
     const root = scrollRoot();
     if (!root || !event.target || !root.contains(event.target)) return;
-    // Wheel / touch: the student took over; cancel any in-flight stick.
+    // Wheel / touch: the student took over; cancel any in-flight stick and
+    // the pending post-reply reveal.
     schedule(() => {
       api().snapping = false;
       syncFollowFromViewport();
+      if (!api().follow) api().awaitingReplyReveal = false;
       updateScrollDownButton();
     });
   }
@@ -224,28 +237,31 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
 
   function onResize() {
     const activeRoot = scrollRoot();
-    if (activeRoot && api().follow) {
+    if (activeRoot && shouldRevealReply()) {
       revealLatestCoachReply(activeRoot);
     }
     updateScrollDownButton();
   }
 
-  function finishSnapFrames(framesLeft, apply) {
-    if (!api().follow) {
+  function finishSnapFrames(framesLeft, apply, revealPass) {
+    const allow = revealPass ? shouldRevealReply() : api().follow;
+    if (!allow) {
       api().snapping = false;
       updateScrollDownButton();
       return;
     }
     api().snapping = true;
+    if (revealPass) api().follow = true;
     const root = scrollRoot();
     if (root && root.clientHeight > 0) apply(root);
     updateScrollDownButton();
     if (framesLeft > 1) {
-      schedule(() => finishSnapFrames(framesLeft - 1, apply));
+      schedule(() => finishSnapFrames(framesLeft - 1, apply, revealPass));
       return;
     }
     schedule(() => {
       api().snapping = false;
+      if (revealPass) api().awaitingReplyReveal = false;
       const liveRoot = scrollRoot();
       if (liveRoot && isNearBottom(liveRoot)) api().follow = true;
       updateScrollDownButton();
@@ -253,11 +269,11 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
   }
 
   function keepSnappingToBottom(framesLeft) {
-    finishSnapFrames(framesLeft, snapToBottom);
+    finishSnapFrames(framesLeft, snapToBottom, false);
   }
 
   function keepRevealingCoachReply(framesLeft) {
-    finishSnapFrames(framesLeft, revealLatestCoachReply);
+    finishSnapFrames(framesLeft, revealLatestCoachReply, true);
   }
 
   // Keep handlers on the parent window and bind document listeners once.
@@ -332,6 +348,7 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
   }
   if (MODE === "send") {
     api().follow = true;
+    api().awaitingReplyReveal = true;
     // Pending user + thinking are not yet a coach bubble in chat_log.
     keepSnappingToBottom(FOLLOW_SNAP_FRAMES);
     return;
@@ -341,7 +358,10 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     updateScrollDownButton();
     return;
   }
-  if (api().follow) {
+  // reconcile and reply: pin latest coach top when the student did not
+  // scroll away. awaitingReplyReveal survives remount scrollTop resets that
+  // would otherwise clear follow before this script runs.
+  if (shouldRevealReply()) {
     keepRevealingCoachReply(FOLLOW_SNAP_FRAMES);
     return;
   }
