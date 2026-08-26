@@ -1373,13 +1373,23 @@ class StudentStore:
         )
 
     def start_or_get_stage_review_job(
-        self, thread_id: str, *, stage_id: str
+        self,
+        thread_id: str,
+        *,
+        stage_id: str,
+        notebook_revision: int | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Mark one stage review as queued, or return the in-flight/complete job.
+
+        When a completed checkpoint's ``conversation_revision`` is older than
+        ``notebook_revision``, the job is re-queued so a revisit can replace
+        that stage's Review slice.
 
         Args:
             thread_id: Owned notebook id.
             stage_id: Completed Thinking Path stage id.
+            notebook_revision: Conversation revision used for revisit refresh.
+                Defaults to the notebook's current revision when omitted.
 
         Returns:
             ``(blob, created)`` where *created* is ``True`` only when this call
@@ -1408,11 +1418,26 @@ class StudentStore:
                 ).fetchone()
                 if not row:
                     raise ValueError("Notebook not found")
-                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                thread = self._thread_dict(row)
+                metadata = dict(thread.get("metadata") or {})
                 blob = parse_journey_stage_reviews(
                     metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
                 )
-                if not stage_review_should_enqueue(blob, stage_id=cleaned_stage):
+                if notebook_revision is None:
+                    try:
+                        revision = int(thread.get("conversation_revision") or 0)
+                    except (TypeError, ValueError):
+                        revision = 0
+                else:
+                    try:
+                        revision = int(notebook_revision)
+                    except (TypeError, ValueError):
+                        revision = 0
+                if not stage_review_should_enqueue(
+                    blob,
+                    stage_id=cleaned_stage,
+                    notebook_revision=revision,
+                ):
                     return blob, False
                 blob["jobs"][cleaned_stage] = {
                     "status": STAGE_REVIEW_QUEUED,

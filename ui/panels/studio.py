@@ -1,10 +1,12 @@
 """Thinking Path studio panel and learning review.
 
-Renders the configured Thinking Path, confirmation-gated pending transitions (when
-auto-advance is off), and Review cards. Review
-summary and Facione scores come from the latest coach assessment when present;
-strengths and improvement areas nest one expander per Thinking Path stage,
-with only the student's current stage open by default.
+Renders the configured Thinking Path, confirmation-gated pending transitions
+(when auto-advance is off), and Review cards. Review order is Working
+conclusion, Strengths, Areas for improvement, then the Critical Thinking
+Facione card inline (not in an expander). Facione scores prefer a Deep Review
+snapshot, else max message assessments with Haiku stage checkpoints; strengths
+and improvement areas nest one expander per Thinking Path stage, with only the
+student's current stage open by default.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ from backend.specialists.review_orchestration import (
     explicit_deep_review_available,
     parse_deep_review_job,
     parse_journey_stage_reviews,
+    stage_reviews_need_attention,
 )
 from backend.student_journey import (
     STAGE_BY_ID,
@@ -53,6 +56,7 @@ from ui.components import (
 from ui.runtime import (
     coach_turn_is_streaming,
     get_deep_review_job,
+    get_journey_stage_reviews,
     mark_journey_stage_reviews_read,
     rerun_app,
     rerun_fragment,
@@ -778,29 +782,31 @@ def _render_review_stage_expanders(
 
 
 def render_learning_review(journey: dict[str, Any]) -> None:
-    """Render actionable Review cards from the latest coaching assessment.
+    """Render actionable Review cards from coaching and Journey checkpoints.
 
-    Prefers a model-written summary and Facione scores from the newest Deep
-    Review snapshot when present, otherwise the newest assistant
-    ``assessment``. Strengths and areas for improvement nest one expander per
-    Thinking Path stage, merging historical incremental feedback with the
-    latest Deep Review ``stage_reviews`` (or the legacy frozen-stage lists)
-    and Journey stage-checkpoint items. Working conclusion uses the same
-    nested-stage pattern with checkpoint summaries. Only the current stage is
-    open by default. Marks the Review notification fingerprint as seen when
-    the Review section is active. Start Deep Review is always visible;
-    enablement comes from the persisted notebook counter, not a
-    Streamlit-only count.
+    Prefers Facione scores from the newest Deep Review snapshot when present,
+    otherwise maxes historical assessments with Haiku stage-checkpoint Facione.
+    Strengths and areas for improvement nest one expander per Thinking Path
+    stage, merging historical incremental feedback with the latest Deep Review
+    ``stage_reviews`` (or the legacy frozen-stage lists) and Journey stage-
+    checkpoint items. Working conclusion uses the same nested-stage pattern.
+    Only the current stage is open by default. Marks the Review notification
+    fingerprint as seen when the Review section is active. Start Deep Review
+    is always visible; enablement comes from the persisted notebook counter.
     """
     messages = store.get_messages(st.session_state.thread_id)
     thread = store.get_thread(st.session_state.thread_id) or {}
     metadata = dict(thread.get("metadata") or {})
     snapshot = metadata.get(DEEP_REVIEW_SNAPSHOT_KEY)
+    checkpoint_blob = parse_journey_stage_reviews(
+        metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+    )
     review = learning_review(
         messages,
         journey,
         detail=journey["response_detail"],
         deep_review_snapshot=snapshot if isinstance(snapshot, dict) else None,
+        journey_stage_reviews=checkpoint_blob,
     )
     fingerprint = _review_fingerprint(review)
     st.session_state.review_fingerprint = fingerprint
@@ -811,9 +817,6 @@ def render_learning_review(journey: dict[str, Any]) -> None:
 
     current_stage_id = str(
         journey.get("current_stage") or THINKING_STAGES[0].id
-    )
-    checkpoint_blob = parse_journey_stage_reviews(
-        metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
     )
     strength_sections = _merge_checkpoint_items_into_sections(
         review.get("strength_sections"),
@@ -841,13 +844,29 @@ def render_learning_review(journey: dict[str, Any]) -> None:
             pending_labels.append(f"{stage.label}: stage review unavailable.")
 
     _render_deep_review_chrome(metadata)
-    st.markdown(
-        review_card_html(
-            label="Summary",
-            body=str(review.get("summary") or ""),
-        ),
-        unsafe_allow_html=True,
-    )
+    if pending_labels:
+        for label in pending_labels:
+            st.caption(label)
+    with st.expander("Working conclusion", expanded=False):
+        _render_review_stage_expanders(
+            sections=conclusion_sections,
+            current_stage_id=current_stage_id,
+            key_prefix="conclusions",
+            content="body",
+            empty_label="No working conclusion yet.",
+        )
+    with st.expander("Strengths", expanded=False):
+        _render_review_stage_expanders(
+            sections=strength_sections,
+            current_stage_id=current_stage_id,
+            key_prefix="strengths",
+        )
+    with st.expander("Areas for improvement", expanded=False):
+        _render_review_stage_expanders(
+            sections=improvement_sections,
+            current_stage_id=current_stage_id,
+            key_prefix="improvements",
+        )
     st.markdown(
         facione_scores_table_html(review.get("facione_scores")),
         unsafe_allow_html=True,
@@ -888,29 +907,6 @@ def render_learning_review(journey: dict[str, Any]) -> None:
                 "A provisional whole-conversation candidate shown only in "
                 "Reflection. It is not a grade."
             )
-    if pending_labels:
-        for label in pending_labels:
-            st.caption(label)
-    with st.expander("Strengths", expanded=False):
-        _render_review_stage_expanders(
-            sections=strength_sections,
-            current_stage_id=current_stage_id,
-            key_prefix="strengths",
-        )
-    with st.expander("Areas for improvement", expanded=False):
-        _render_review_stage_expanders(
-            sections=improvement_sections,
-            current_stage_id=current_stage_id,
-            key_prefix="improvements",
-        )
-    with st.expander("Working conclusion", expanded=False):
-        _render_review_stage_expanders(
-            sections=conclusion_sections,
-            current_stage_id=current_stage_id,
-            key_prefix="conclusions",
-            content="body",
-            empty_label="No working conclusion yet.",
-        )
     # Preserve labels used by AppTest smoke assertions.
     st.markdown(
         '<div class="review-legacy-labels" hidden>'
@@ -1030,6 +1026,47 @@ def render_thinking_path_footer(pending: Any | None = None) -> None:
                 rerun_app()
 
 
+@st.fragment(run_every="2s")
+def _watch_stage_review_attention_fragment() -> None:
+    """Remount the workspace when a stage Haiku job needs a badge refresh.
+
+    Mounted outside ``studio_panel`` so ticks do not churn Thinking Path DOM.
+    Idle notebooks no-op after reading the durable blob.
+    """
+    thread_id = str(st.session_state.get("thread_id") or "").strip()
+    if not thread_id:
+        return
+    try:
+        blob = get_journey_stage_reviews(thread_id)
+    except Exception:
+        return
+    if not isinstance(blob, dict):
+        blob = {}
+    attention = stage_reviews_need_attention(blob)
+    active = any(
+        str((job or {}).get("status") or "") in {STAGE_REVIEW_QUEUED, STAGE_REVIEW_RUNNING}
+        for job in (blob.get("jobs") or {}).values()
+        if isinstance(job, dict)
+    )
+    prev_attention = st.session_state.get("_stage_review_attention")
+    prev_active = bool(st.session_state.get("_stage_review_active"))
+    st.session_state["_stage_review_attention"] = attention
+    st.session_state["_stage_review_active"] = active
+    if prev_attention is None:
+        return
+    if (not prev_attention and attention) or (prev_active and not active):
+        rerun_app()
+
+
+def mount_stage_review_attention_watch() -> None:
+    """Register the stage-review badge poller outside ``.st-key-studio_panel``.
+
+    Call from the workspace on every paint so Streamlit keeps the ``run_every``
+    timer registered. Idle ticks no-op when no checkpoint job is in flight.
+    """
+    _watch_stage_review_attention_fragment()
+
+
 @st.fragment
 def render_studio_panel() -> None:
     """Render Thinking Path with Journey/Review sections and the Next footer.
@@ -1052,10 +1089,10 @@ def render_studio_panel() -> None:
     journey_reviews = parse_journey_stage_reviews(
         thread_meta.get(JOURNEY_STAGE_REVIEWS_KEY)
     )
-    journey_unread = bool(journey_reviews.get("unread"))
+    journey_attention = stage_reviews_need_attention(journey_reviews)
 
     def _studio_section_label(value: str) -> str:
-        if value == "Review" and journey_unread:
+        if value == "Review" and journey_attention:
             return f"Review {_REVIEW_UNREAD_BADGE}"
         return value
 
@@ -1077,7 +1114,11 @@ def render_studio_panel() -> None:
         # Review body in this run. An early return left a blank Studio pane
         # (and a follow-up rerun refreshes the top Journey 🛑 badge).
         clear_unread_rerun = False
-        if selected == "Review" and journey_unread and thread_id:
+        if (
+            selected == "Review"
+            and bool(journey_reviews.get("unread"))
+            and thread_id
+        ):
             try:
                 mark_journey_stage_reviews_read(thread_id)
                 clear_unread_rerun = True

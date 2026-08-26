@@ -143,3 +143,14 @@ def test_studio_remounts_expanders_instead_of_writing_session_state() -> None:
     assert 'key_prefix="conclusions"' in _STUDIO
     assert "expanded=is_current" in _STUDIO
     assert 'content="body"' in _STUDIO
+    assert 'st.expander("Working conclusion"' in _STUDIO
+    assert 'st.expander("Strengths"' in _STUDIO
+    assert 'st.expander("Areas for improvement"' in _STUDIO
+    assert 'st.expander("Critical Thinking"' not in _STUDIO
+    assert "facione_scores_table_html(" in _STUDIO
+    assert 'label="Summary"' not in _STUDIO
+    working = _STUDIO.index('st.expander("Working conclusion"')
+    strengths = _STUDIO.index('st.expander("Strengths"')
+    areas = _STUDIO.index('st.expander("Areas for improvement"')
+    facione = _STUDIO.index("facione_scores_table_html(")
+    assert working < strengths < areas < facione

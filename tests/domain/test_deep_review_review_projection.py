@@ -704,3 +704,95 @@ def test_qa_messages_do_not_become_incremental_stage_feedback() -> None:
     assert items == ["Named a crossing problem"]
     assert "jobs to be done" not in " ".join(items).lower()
     assert "JTBD" not in " ".join(items)
+
+
+def test_haiku_stage_checkpoint_facione_projects_into_review() -> None:
+    """Max Facione across Journey checkpoints fills Review when no Deep Review."""
+    journey_stage_reviews = {
+        "jobs": {},
+        "reviews": {
+            "problem_identification": {
+                "stage": "problem_identification",
+                "summary": "Checkpoint summary.",
+                "strengths": ["Clear focus"],
+                "areas_to_revisit": ["Sharpen the outcome"],
+                "facione_scores": {
+                    "analysis": 3,
+                    "interpretation": 2,
+                    "inference": 0,
+                    "evaluation": 1,
+                    "explanation": 0,
+                    "self_regulation": 0,
+                },
+                "conversation_revision": 4,
+            },
+            "concept_generation": {
+                "stage": "concept_generation",
+                "summary": "Later checkpoint.",
+                "strengths": ["Divergent options"],
+                "areas_to_revisit": [],
+                "facione_scores": {
+                    "analysis": 2,
+                    "interpretation": 1,
+                    "inference": 2,
+                    "evaluation": 0,
+                    "explanation": 0,
+                    "self_regulation": 0,
+                },
+                "conversation_revision": 8,
+            },
+        },
+        "unread": False,
+    }
+    review = learning_review(
+        [],
+        default_journey(),
+        journey_stage_reviews=journey_stage_reviews,
+    )
+    assert review["facione_scores"]["analysis"] == 3
+    assert review["facione_scores"]["interpretation"] == 2
+    assert review["facione_scores"]["inference"] == 2
+    assert review["facione_scores"]["evaluation"] == 1
+
+
+def test_deep_review_facione_overrides_haiku_checkpoint_projection() -> None:
+    """Whole-conversation Deep Review Facione replaces checkpoint maxes."""
+    journey_stage_reviews = {
+        "jobs": {},
+        "reviews": {
+            "problem_identification": {
+                "stage": "problem_identification",
+                "summary": "Checkpoint summary.",
+                "strengths": ["Clear focus"],
+                "areas_to_revisit": [],
+                "facione_scores": {
+                    "analysis": 4,
+                    "interpretation": 4,
+                    "inference": 4,
+                    "evaluation": 4,
+                    "explanation": 4,
+                    "self_regulation": 4,
+                },
+            }
+        },
+        "unread": False,
+    }
+    snapshot = _snapshot(
+        facione={
+            "analysis": 2,
+            "interpretation": 1,
+            "inference": 1,
+            "evaluation": 1,
+            "explanation": 1,
+            "self_regulation": 1,
+        }
+    )
+    review = learning_review(
+        [],
+        default_journey(),
+        deep_review_snapshot=snapshot,
+        journey_stage_reviews=journey_stage_reviews,
+    )
+    assert review["facione_scores"]["analysis"] == 2
+    assert review["facione_scores"]["interpretation"] == 1
+    assert review["facione_scores"]["self_regulation"] == 1

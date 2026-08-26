@@ -287,12 +287,12 @@ def test_streamlit_notebook_workspace_smoke():
     assert "CDE2300 Design Thinking Companion" in rendered
     assert "Product Design and Innovation" in rendered
     assert 'aria-label="Critical-thinking journey"' not in rendered
-    assert "Summary" in rendered
     assert "Critical thinking (Facione)" in rendered
     assert "0/4" in rendered
     assert "Discussion summary" in rendered
     assert "What to strengthen" in rendered
-    assert {expander.label for expander in app.expander} >= {
+    expander_labels = [expander.label for expander in app.expander]
+    assert {label for label in expander_labels} >= {
         "Strengths",
         "Areas for improvement",
         "Working conclusion",
@@ -302,6 +302,13 @@ def test_streamlit_notebook_workspace_smoke():
         "Readings · 0",
         "My Sources · 0",
     }
+    assert "Critical Thinking" not in expander_labels
+    assert expander_labels.index("Working conclusion") < expander_labels.index(
+        "Strengths"
+    )
+    assert expander_labels.index("Strengths") < expander_labels.index(
+        "Areas for improvement"
+    )
     app.session_state["studio_tab"] = "Journey"
     app.run()
     assert not app.exception
@@ -669,10 +676,16 @@ def test_learning_studio_and_notebook_history_controls():
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Thinking Path" in rendered
-    assert "Summary" in rendered
+    app.session_state["studio_tab"] = "Review"
+    app.run()
+    assert not app.exception
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Critical thinking (Facione)" in rendered
     assert "0/4" in rendered
     assert "Discussion summary" in rendered
+    assert "Critical Thinking" not in {
+        expander.label for expander in app.expander
+    }
     next(button for button in app.button if button.label == "Notebooks").click().run()
     assert not app.exception
     assert any(

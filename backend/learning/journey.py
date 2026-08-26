@@ -519,15 +519,40 @@ def _normalize_facione_scores(raw: Any) -> dict[str, int]:
     return normalized
 
 
+def _max_facione_scores(*maps: Any) -> dict[str, int]:
+    """Return the per-dimension max across one or more Facione score maps."""
+    cumulative = _normalize_facione_scores(None)
+    for raw in maps:
+        scores = _normalize_facione_scores(raw)
+        for key, _label in FACIONE_DIMENSIONS:
+            cumulative[key] = max(cumulative[key], scores[key])
+    return cumulative
+
+
 def _cumulative_facione_scores(
     messages: Iterable[dict[str, Any]],
 ) -> dict[str, int]:
     """Keep the strongest numeric Facione evidence across active assessments."""
     cumulative = _normalize_facione_scores(None)
     for assessment in _assessments(messages):
-        scores = _normalize_facione_scores(assessment.get("facione_scores"))
-        for key, _label in FACIONE_DIMENSIONS:
-            cumulative[key] = max(cumulative[key], scores[key])
+        cumulative = _max_facione_scores(
+            cumulative, assessment.get("facione_scores")
+        )
+    return cumulative
+
+
+def _facione_from_stage_checkpoints(blob: Any) -> dict[str, int]:
+    """Max Facione scores across Journey Haiku stage checkpoints."""
+    reviews = blob.get("reviews") if isinstance(blob, dict) else None
+    if not isinstance(reviews, dict):
+        return _normalize_facione_scores(None)
+    cumulative = _normalize_facione_scores(None)
+    for review in reviews.values():
+        if not isinstance(review, dict):
+            continue
+        cumulative = _max_facione_scores(
+            cumulative, review.get("facione_scores")
+        )
     return cumulative
 
 
@@ -879,15 +904,18 @@ def learning_review(
     *,
     detail: str | None = None,
     deep_review_snapshot: dict[str, Any] | None = None,
+    journey_stage_reviews: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the Review-tab payload for the current notebook.
 
-    Summary, Facione profile, and working conclusion prefer the latest
-    successful Deep Review snapshot when one exists. Strengths and areas for
-    improvement start from Thinking Path stage history across the full
-    conversation, then merge the latest snapshot's ``stage_reviews`` onto
-    matching stages (or the legacy flat lists onto ``reviewed_stage_id``).
-    Empty notebooks stay empty instead of showing generic filler.
+    Facione and working conclusion prefer the latest successful Deep Review
+    snapshot when one exists. Otherwise Facione is the max of message
+    assessments and optional Haiku ``journey_stage_reviews`` checkpoints.
+    Strengths and areas for improvement start from Thinking Path stage history
+    across the full conversation, then merge the latest snapshot's
+    ``stage_reviews`` onto matching stages (or the legacy flat lists onto
+    ``reviewed_stage_id``). Empty notebooks stay empty instead of showing
+    generic filler.
 
     Returns:
         A dict consumed by ``ui.studio.render_learning_review``, including
@@ -945,7 +973,10 @@ def learning_review(
         ),
         [],
     )
-    facione_scores = _cumulative_facione_scores(message_list)
+    facione_scores = _max_facione_scores(
+        _cumulative_facione_scores(message_list),
+        _facione_from_stage_checkpoints(journey_stage_reviews),
+    )
     facione_behavior_counts, facione_holistic_candidate = (
         _research_facione_projection(message_list)
     )
@@ -958,7 +989,7 @@ def learning_review(
             summary = snapshot_summary
         raw_facione = snapshot.get("facione_scores")
         if isinstance(raw_facione, dict) and raw_facione:
-            facione_scores = raw_facione
+            facione_scores = _normalize_facione_scores(raw_facione)
         snapshot_conclusion = " ".join(
             str(snapshot.get("working_conclusion") or "").split()
         ).strip()

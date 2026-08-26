@@ -104,12 +104,59 @@ def test_review_tab_renders_projected_deep_review_feedback() -> None:
     assert "Deep improvement from Sonnet" in rendered
     assert "Normal strength" in rendered
     assert "Normal improvement" in rendered
-    assert {expander.label for expander in app.expander} >= {
+    expander_labels = [expander.label for expander in app.expander]
+    assert {label for label in expander_labels} >= {
         "Strengths",
         "Areas for improvement",
         "Working conclusion",
         "Problem identification",
     }
+    assert "Critical Thinking" not in expander_labels
+    assert "Critical thinking (Facione)" in rendered
+    assert expander_labels.index("Working conclusion") < expander_labels.index(
+        "Strengths"
+    )
+    assert expander_labels.index("Strengths") < expander_labels.index(
+        "Areas for improvement"
+    )
+
+
+def test_queued_stage_review_shows_journey_stop_badge_before_unread() -> None:
+    """Mobile Journey shows 🛑 as soon as a stage Haiku job is queued."""
+    from backend.specialists.review_orchestration import (
+        JOURNEY_STAGE_REVIEWS_KEY,
+        STAGE_REVIEW_QUEUED,
+        empty_journey_stage_reviews,
+    )
+    from backend.student_store import StudentStore
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    assert not app.exception
+    thread_id = str(app.session_state["thread_id"])
+    store = StudentStore()
+    thread = store.get_thread(thread_id) or {}
+    metadata = dict(thread.get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = ["problem_identification"]
+    blob = empty_journey_stage_reviews()
+    blob["unread"] = False
+    blob["jobs"]["problem_identification"] = {"status": STAGE_REVIEW_QUEUED}
+    metadata["learning_journey"] = journey
+    metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
+    store.update_thread(thread_id, metadata=metadata)
+    app.run()
+    assert not app.exception
+    workspace_panel = next(
+        radio for radio in app.radio if radio.label == "Workspace panel"
+    )
+    assert "Journey 🛑" in workspace_panel.options
+    studio_section = next(
+        radio for radio in app.radio if radio.label == "Thinking Path section"
+    )
+    assert any(
+        "Review" in str(option) and "🛑" in str(option)
+        for option in studio_section.options
+    )
 
 
 def test_stage_review_checkpoint_renders_on_review_tab_with_stop_badge() -> None:
@@ -164,12 +211,17 @@ def test_stage_review_checkpoint_renders_on_review_tab_with_stop_badge() -> None
     assert "Focused problem statement from the Journey checkpoint." in rendered
     assert "Clear user focus" in rendered
     assert "Check the outcome wording." in rendered
-    assert {expander.label for expander in app.expander} >= {
+    expander_labels = [expander.label for expander in app.expander]
+    assert {label for label in expander_labels} >= {
         "Strengths",
         "Areas for improvement",
         "Working conclusion",
         "Problem identification",
     }
+    assert "Critical Thinking" not in expander_labels
+    assert expander_labels.index("Working conclusion") < expander_labels.index(
+        "Strengths"
+    )
     cleared = parse_journey_stage_reviews(
         (store.get_thread(thread_id) or {}).get("metadata", {}).get(
             JOURNEY_STAGE_REVIEWS_KEY

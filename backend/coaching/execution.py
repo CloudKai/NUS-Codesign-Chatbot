@@ -778,7 +778,13 @@ class CoachApplicationService:
         *,
         completed_before: list[str] | None,
     ) -> None:
-        """Queue Haiku Journey reviews for newly completed stages (fail-open)."""
+        """Queue Haiku Journey reviews for new completions and stage revisits.
+
+        Newly completed stages enqueue once. When the student keeps working on
+        an already-completed stage and the notebook revision advances, re-queue
+        that stage so the checkpoint (including Facione) can be replaced.
+        Failures never block the coach turn.
+        """
         try:
             from backend.coaching.stage_review_jobs import submit_stage_review_job
 
@@ -788,11 +794,25 @@ class CoachApplicationService:
             journey = normalize_journey(
                 (thread.get("metadata") or {}).get("learning_journey")
             )
-            for stage_id in newly_completed_stage_ids(
-                completed_before, journey.get("completed_stages") or []
+            completed_after = list(journey.get("completed_stages") or [])
+            newly = newly_completed_stage_ids(completed_before, completed_after)
+            try:
+                notebook_revision = int(thread.get("conversation_revision") or 0)
+            except (TypeError, ValueError):
+                notebook_revision = 0
+            enqueue_stages = list(newly)
+            current_stage = str(journey.get("current_stage") or "").strip()
+            if (
+                current_stage
+                and current_stage in completed_after
+                and current_stage not in newly
             ):
+                enqueue_stages.append(current_stage)
+            for stage_id in enqueue_stages:
                 blob, created = self._store.start_or_get_stage_review_job(
-                    thread_id, stage_id=stage_id
+                    thread_id,
+                    stage_id=stage_id,
+                    notebook_revision=notebook_revision,
                 )
                 del blob
                 if created:
@@ -806,7 +826,8 @@ class CoachApplicationService:
         """Run one background Haiku checkpoint for a completed stage.
 
         Failures are persisted on the job envelope and never roll back stage
-        completion or the coach transcript.
+        completion or the coach transcript. A successful run overwrites that
+        stage's Strengths / Areas / summary / Facione checkpoint.
         """
         cleaned_stage = str(stage_id or "").strip()
         try:
@@ -843,6 +864,10 @@ class CoachApplicationService:
                 f"{STAGE_BY_ID[cleaned_stage].label} stage. "
                 f"Stage note: {note or 'none'}."
             )
+            try:
+                conversation_revision = int(thread.get("conversation_revision") or 0)
+            except (TypeError, ValueError):
+                conversation_revision = 0
             request = CoachRequest(
                 thread_id=thread_id,
                 student_message=student_message,
@@ -860,7 +885,7 @@ class CoachApplicationService:
                     journey.get("response_detail") or DEFAULT_RESPONSE_DETAIL
                 ),
                 specialist="review",
-                conversation_revision=int(thread.get("conversation_revision") or 0),
+                conversation_revision=conversation_revision,
             )
             provider = self._workflow.provider
             if hasattr(provider, "assess_stage_checkpoint"):
@@ -871,6 +896,13 @@ class CoachApplicationService:
             artifacts: dict[str, str] = {}
             if note:
                 artifacts["stage_note"] = note[:400]
+            facione_payload: dict[str, int] = {}
+            raw_facione = getattr(assessment, "facione_scores", None)
+            if raw_facione is not None:
+                if hasattr(raw_facione, "model_dump"):
+                    facione_payload = dict(raw_facione.model_dump())
+                elif isinstance(raw_facione, dict):
+                    facione_payload = dict(raw_facione)
             checkpoint = normalize_stage_checkpoint(
                 {
                     "stage": cleaned_stage,
@@ -889,6 +921,8 @@ class CoachApplicationService:
                         if str(message.get("id") or "").strip()
                     ][:8],
                     "important_artifacts": artifacts,
+                    "facione_scores": facione_payload,
+                    "conversation_revision": conversation_revision,
                 },
                 stage_id=cleaned_stage,
             )

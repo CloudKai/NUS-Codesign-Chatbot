@@ -103,11 +103,57 @@ def test_newly_completed_stage_ids_are_ordered() -> None:
 def test_stage_review_should_enqueue_idempotent() -> None:
     blob = {
         "jobs": {"problem_identification": {"status": STAGE_REVIEW_COMPLETE}},
-        "reviews": {},
+        "reviews": {
+            "problem_identification": {
+                "summary": "Done.",
+                "strengths": ["Clear focus"],
+                "areas_to_revisit": [],
+                "conversation_revision": 3,
+            }
+        },
         "unread": False,
     }
     assert not stage_review_should_enqueue(blob, stage_id="problem_identification")
+    assert not stage_review_should_enqueue(
+        blob, stage_id="problem_identification", notebook_revision=3
+    )
+    assert stage_review_should_enqueue(
+        blob, stage_id="problem_identification", notebook_revision=4
+    )
     assert stage_review_should_enqueue(None, stage_id="problem_identification")
+
+
+def test_stage_reviews_need_attention_for_unread_or_active_jobs() -> None:
+    from backend.specialists.review_orchestration import stage_reviews_need_attention
+
+    assert not stage_reviews_need_attention(None)
+    assert not stage_reviews_need_attention(
+        {"jobs": {}, "reviews": {}, "unread": False}
+    )
+    assert stage_reviews_need_attention(
+        {"jobs": {}, "reviews": {}, "unread": True}
+    )
+    assert stage_reviews_need_attention(
+        {
+            "jobs": {"problem_identification": {"status": "queued"}},
+            "reviews": {},
+            "unread": False,
+        }
+    )
+    assert stage_reviews_need_attention(
+        {
+            "jobs": {"problem_identification": {"status": "running"}},
+            "reviews": {},
+            "unread": False,
+        }
+    )
+    assert not stage_reviews_need_attention(
+        {
+            "jobs": {"problem_identification": {"status": STAGE_REVIEW_COMPLETE}},
+            "reviews": {},
+            "unread": False,
+        }
+    )
 
 
 def test_execute_stage_review_job_persists_checkpoint_and_unread(
@@ -138,6 +184,9 @@ def test_execute_stage_review_job_persists_checkpoint_and_unread(
     assert blob["jobs"]["problem_identification"]["status"] == STAGE_REVIEW_COMPLETE
     assert blob["unread"] is True
     assert "problem_identification" in blob["reviews"]
+    checkpoint = blob["reviews"]["problem_identification"]
+    assert checkpoint["facione_scores"]["analysis"] >= 1
+    assert "conversation_revision" in checkpoint
     cleared = coach.mark_journey_stage_reviews_read(thread_id)
     assert cleared["unread"] is False
     again, created_again = store.start_or_get_stage_review_job(
@@ -145,6 +194,126 @@ def test_execute_stage_review_job_persists_checkpoint_and_unread(
     )
     assert created_again is False
     assert again["jobs"]["problem_identification"]["status"] == STAGE_REVIEW_COMPLETE
+
+
+def test_stage_review_revisit_reenqueues_and_replaces_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A later revision on a completed stage re-queues Haiku and overwrites the slice."""
+    monkeypatch.setenv("STUDENT_STAGE_SELECTION", "true")
+    store = StudentStore(tmp_path / "stage-revisit.sqlite3")
+    coach = _services(store)
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    journey = default_journey()
+    journey = mark_stage_completed(journey, "problem_identification")
+    journey = set_current_stage(journey, "problem_identification")
+    store.update_thread(
+        thread_id,
+        metadata={
+            "learning_journey": journey,
+            "thinking_stage": "problem_identification",
+        },
+    )
+
+    def _set_revision(revision: int) -> None:
+        with store._lock, store._connect() as connection:
+            connection.execute(
+                "UPDATE notebooks SET conversation_revision=? WHERE id=? AND user_id=?",
+                (revision, thread_id, store.owner_id),
+            )
+
+    _set_revision(2)
+    blob, created = store.start_or_get_stage_review_job(
+        thread_id, stage_id="problem_identification", notebook_revision=2
+    )
+    assert created is True
+    coach.execute_stage_review_job(thread_id, "problem_identification")
+    first = parse_journey_stage_reviews(
+        (store.get_thread(thread_id) or {}).get("metadata", {}).get(
+            JOURNEY_STAGE_REVIEWS_KEY
+        )
+    )
+    assert first["reviews"]["problem_identification"]["conversation_revision"] == 2
+    store.mark_journey_stage_reviews_read(thread_id)
+
+    _, created_same = store.start_or_get_stage_review_job(
+        thread_id, stage_id="problem_identification", notebook_revision=2
+    )
+    assert created_same is False
+
+    _set_revision(5)
+    queued_blob, created_refresh = store.start_or_get_stage_review_job(
+        thread_id, stage_id="problem_identification", notebook_revision=5
+    )
+    assert created_refresh is True
+    assert queued_blob["jobs"]["problem_identification"]["status"] == "queued"
+    # Prior checkpoint remains until the refresh completes.
+    assert "problem_identification" in queued_blob["reviews"]
+    coach.execute_stage_review_job(thread_id, "problem_identification")
+    second = parse_journey_stage_reviews(
+        (store.get_thread(thread_id) or {}).get("metadata", {}).get(
+            JOURNEY_STAGE_REVIEWS_KEY
+        )
+    )
+    assert second["jobs"]["problem_identification"]["status"] == STAGE_REVIEW_COMPLETE
+    assert second["unread"] is True
+    assert second["reviews"]["problem_identification"]["conversation_revision"] == 5
+    assert second["reviews"]["problem_identification"]["facione_scores"]["analysis"] >= 1
+
+
+def test_enqueue_after_completion_includes_completed_stage_revisit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Coach-turn enqueue refreshes Haiku when staying on a completed stage."""
+    store = StudentStore(tmp_path / "stage-revisit-enqueue.sqlite3")
+    coach = _services(store)
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    journey = default_journey()
+    journey = mark_stage_completed(journey, "problem_identification")
+    journey = set_current_stage(journey, "problem_identification")
+    store.update_thread(
+        thread_id,
+        metadata={
+            "learning_journey": journey,
+            "thinking_stage": "problem_identification",
+        },
+    )
+    with store._lock, store._connect() as connection:
+        connection.execute(
+            "UPDATE notebooks SET conversation_revision=? WHERE id=? AND user_id=?",
+            (2, thread_id, store.owner_id),
+        )
+    store.start_or_get_stage_review_job(
+        thread_id, stage_id="problem_identification", notebook_revision=2
+    )
+    coach.execute_stage_review_job(thread_id, "problem_identification")
+    store.mark_journey_stage_reviews_read(thread_id)
+
+    with store._lock, store._connect() as connection:
+        connection.execute(
+            "UPDATE notebooks SET conversation_revision=? WHERE id=? AND user_id=?",
+            (7, thread_id, store.owner_id),
+        )
+    enqueued: list[str] = []
+
+    def _capture(_coach: object, _thread: str, stage: str) -> None:
+        enqueued.append(stage)
+
+    monkeypatch.setattr(
+        "backend.coaching.stage_review_jobs.submit_stage_review_job",
+        _capture,
+    )
+    coach._enqueue_stage_reviews_after_completion(
+        thread_id,
+        completed_before=list(journey.get("completed_stages") or []),
+    )
+    assert enqueued == ["problem_identification"]
+    blob = parse_journey_stage_reviews(
+        (store.get_thread(thread_id) or {}).get("metadata", {}).get(
+            JOURNEY_STAGE_REVIEWS_KEY
+        )
+    )
+    assert blob["jobs"]["problem_identification"]["status"] == "queued"
 
 
 def test_deep_review_enqueue_blocked_until_reflection_complete(

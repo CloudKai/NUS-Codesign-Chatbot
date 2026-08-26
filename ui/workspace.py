@@ -22,7 +22,7 @@ from ui.layout.sources_scroll import sync_sources_scroll
 from ui.layout.studio_scroll import sync_studio_scroll
 from ui.runtime import log_ui_timing, rerun_app
 from ui.sources import render_sources_panel
-from ui.studio import render_studio_panel
+from ui.studio import mount_stage_review_attention_watch, render_studio_panel
 
 
 def _render_collapsed_rail(*, side: str, expand_icon: str, label: str) -> None:
@@ -63,6 +63,7 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
             from backend.specialists.review_orchestration import (
                 JOURNEY_STAGE_REVIEWS_KEY,
                 parse_journey_stage_reviews,
+                stage_reviews_need_attention,
             )
             from ui.runtime import store
 
@@ -70,7 +71,7 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
             blob = parse_journey_stage_reviews(
                 (thread.get("metadata") or {}).get(JOURNEY_STAGE_REVIEWS_KEY)
             )
-            if blob.get("unread"):
+            if stage_reviews_need_attention(blob):
                 return "Journey 🛑"
         except Exception:
             pass
@@ -131,6 +132,7 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
             else:
                 sync_chat_scroll(mode="reconcile")
             mount_awaiting_coach_turn_recovery()
+            mount_stage_review_attention_watch()
         with studio_column:
             if studio_collapsed:
                 _render_collapsed_rail(

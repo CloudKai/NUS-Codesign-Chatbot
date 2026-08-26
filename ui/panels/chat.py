@@ -857,7 +857,12 @@ def mount_awaiting_coach_turn_recovery() -> None:
 
 
 def _render_awaiting_coach_recovery() -> None:
-    """Show the pending student bubble and finishing status while recovering."""
+    """Show the pending student bubble while a remounted turn is recovering.
+
+    The finishing status and Stop control live in the composer so they stay
+    visible next to the locked input (native chat_input Stop is unavailable
+    once the composer is disabled for awaiting).
+    """
     pending = awaiting_coach_turn_for_thread()
     if pending is None or coach_turn_is_streaming():
         return
@@ -867,19 +872,24 @@ def _render_awaiting_coach_recovery() -> None:
     prompt = str(pending.get("prompt") or "").strip()
     if prompt:
         _render_inflight_user_prompt(prompt, [])
+
+
+def _render_awaiting_composer_controls() -> None:
+    """Render finishing status + Stop in the composer while awaiting recovery."""
+    pending = awaiting_coach_turn_for_thread()
+    if pending is None or coach_turn_is_streaming():
+        return
     st.status(
         "Coach is finishing…",
         expanded=False,
         type="compact",
     )
-    st.caption(
-        "If you left Chat before the server acknowledged this turn, the reply "
-        "may never arrive."
-    )
     if st.button(
         "Stop waiting",
         key="abandon_awaiting_coach_turn",
         type="secondary",
+        icon=":material/stop_circle:",
+        use_container_width=True,
     ):
         _abandon_awaiting_coach_turn(
             message=(
@@ -1589,7 +1599,7 @@ def _render_composer_submit_fragment(
                         unsafe_allow_html=True,
                     )
             if awaiting_locked and not coach_turn_is_streaming():
-                st.caption("Wait for the coach reply before sending another message.")
+                _render_awaiting_composer_controls()
             composer_value = st.chat_input(
                 "Ask a question or share your thinking",
                 key=f"composer-{st.session_state.composer_nonce}",

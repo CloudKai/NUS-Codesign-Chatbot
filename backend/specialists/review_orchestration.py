@@ -410,6 +410,24 @@ def empty_journey_stage_reviews() -> dict[str, Any]:
     return {"jobs": {}, "reviews": {}, "unread": False}
 
 
+def stage_reviews_need_attention(blob: dict[str, Any] | None) -> bool:
+    """Return whether Journey/Review should show the unread stop badge.
+
+    True when a checkpoint is unread, or a stage Haiku job is still queued or
+    running (so the badge appears as soon as a stage completes, not only after
+    the background checkpoint finishes).
+    """
+    parsed = parse_journey_stage_reviews(blob)
+    if parsed.get("unread"):
+        return True
+    for job in (parsed.get("jobs") or {}).values():
+        if not isinstance(job, dict):
+            continue
+        if str(job.get("status") or "") in STAGE_REVIEW_ACTIVE:
+            return True
+    return False
+
+
 def parse_journey_stage_reviews(value: Any) -> dict[str, Any]:
     """Normalize the ``journey_stage_reviews`` settings blob.
 
@@ -448,10 +466,38 @@ def parse_journey_stage_reviews(value: Any) -> dict[str, Any]:
     }
 
 
+_FACIONE_CHECKPOINT_KEYS = (
+    "analysis",
+    "interpretation",
+    "inference",
+    "evaluation",
+    "explanation",
+    "self_regulation",
+)
+
+
+def _normalize_checkpoint_facione_scores(raw: Any) -> dict[str, int]:
+    """Clamp optional Haiku Facione scores to the 0–4 Review contract."""
+    source = raw if isinstance(raw, dict) else {}
+    normalized: dict[str, int] = {}
+    for key in _FACIONE_CHECKPOINT_KEYS:
+        try:
+            value = int(source.get(key, 0))
+        except (TypeError, ValueError):
+            value = 0
+        normalized[key] = max(0, min(4, value))
+    return normalized
+
+
 def normalize_stage_checkpoint(
     value: Any, *, stage_id: str
 ) -> dict[str, Any] | None:
-    """Return one compact Journey stage checkpoint, or ``None`` when empty."""
+    """Return one compact Journey stage checkpoint, or ``None`` when empty.
+
+    Optional ``facione_scores`` and ``conversation_revision`` are preserved so
+    Review can project Critical Thinking and revisit refresh can compare
+    notebook watermarks.
+    """
     if not isinstance(value, dict):
         return None
     cleaned_stage = str(stage_id or value.get("stage") or "").strip()
@@ -481,6 +527,14 @@ def normalize_stage_checkpoint(
                 artifacts[cleaned_key] = cleaned_item
             if len(artifacts) >= 8:
                 break
+    facione_scores = _normalize_checkpoint_facione_scores(
+        value.get("facione_scores") or value.get("facione_profile")
+    )
+    try:
+        conversation_revision = int(value.get("conversation_revision") or 0)
+    except (TypeError, ValueError):
+        conversation_revision = 0
+    conversation_revision = max(0, conversation_revision)
     if not (summary or strengths or areas or reasoning or artifacts):
         return None
     return {
@@ -491,20 +545,43 @@ def normalize_stage_checkpoint(
         "reasoning_progress": reasoning,
         "important_message_ids": message_ids,
         "important_artifacts": artifacts,
+        "facione_scores": facione_scores,
+        "conversation_revision": conversation_revision,
     }
 
 
 def stage_review_should_enqueue(
-    blob: dict[str, Any] | None, *, stage_id: str
+    blob: dict[str, Any] | None,
+    *,
+    stage_id: str,
+    notebook_revision: int | None = None,
 ) -> bool:
-    """Return whether one stage still needs a Journey Haiku review queued."""
+    """Return whether one stage still needs a Journey Haiku review queued.
+
+    Queued/running jobs stay exclusive. A completed checkpoint may re-queue
+    when ``notebook_revision`` is strictly newer than the checkpoint watermark
+    (student revisited an already-completed stage after a later coach turn).
+    """
     cleaned = str(stage_id or "").strip()
     if cleaned not in STAGE_BY_ID:
         return False
     parsed = parse_journey_stage_reviews(blob)
     status = str((parsed["jobs"].get(cleaned) or {}).get("status") or "")
-    if status in STAGE_REVIEW_ACTIVE or status == STAGE_REVIEW_COMPLETE:
+    if status in STAGE_REVIEW_ACTIVE:
         return False
+    if status == STAGE_REVIEW_COMPLETE:
+        if notebook_revision is None:
+            return False
+        try:
+            revision = int(notebook_revision)
+        except (TypeError, ValueError):
+            return False
+        review = parsed["reviews"].get(cleaned) or {}
+        try:
+            watermark = int(review.get("conversation_revision") or 0)
+        except (TypeError, ValueError):
+            watermark = 0
+        return revision > max(0, watermark)
     return True
 
 

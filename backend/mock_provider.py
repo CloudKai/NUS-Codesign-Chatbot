@@ -465,6 +465,7 @@ class DeterministicCoachProvider:
             review_improvements=[
                 "One assumption or limitation still needs a later revisit.",
             ],
+            facione_scores=_mock_facione_scores(stage.id, is_advancing=False),
             review_depth="incremental",
             review_model="mock-haiku-stage-checkpoint",
             review_trigger="stage_checkpoint",

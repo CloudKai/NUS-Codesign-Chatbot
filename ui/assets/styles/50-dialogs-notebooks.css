@@ -687,15 +687,42 @@
         opacity:0 !important;
     }
 
+    /* Enabled delete must beat the dialog secondary override above
+       ([role=dialog]:has(...) div[data-testid=stButton] button:not(...)). */
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    .st-key-notebook_action_danger
+    div[data-testid="stButton"]
+    button:not(:disabled):not([kind="tertiary"]):not(
+        [data-testid="stBaseButton-tertiary"]
+    ),
+    [role="dialog"]:has([class*="st-key-source_action_danger"])
+    [class*="st-key-source_action_danger"]
+    div[data-testid="stButton"]
+    button:not(:disabled):not([kind="tertiary"]):not(
+        [data-testid="stBaseButton-tertiary"]
+    ),
     .st-key-notebook_action_danger
     div[data-testid="stButton"] button:not(:disabled),
     [class*="st-key-source_action_danger"]
     div[data-testid="stButton"] button:not(:disabled) {
         border-color:var(--cd-danger) !important;
         color:#fff !important;
+        -webkit-text-fill-color:#fff !important;
         background:var(--cd-danger) !important;
     }
 
+    [role="dialog"]:has(.st-key-notebook_actions_panel)
+    .st-key-notebook_action_danger
+    div[data-testid="stButton"]
+    button:not(:disabled):not([kind="tertiary"]):not(
+        [data-testid="stBaseButton-tertiary"]
+    ) *,
+    [role="dialog"]:has([class*="st-key-source_action_danger"])
+    [class*="st-key-source_action_danger"]
+    div[data-testid="stButton"]
+    button:not(:disabled):not([kind="tertiary"]):not(
+        [data-testid="stBaseButton-tertiary"]
+    ) *,
     .st-key-notebook_action_danger
     div[data-testid="stButton"] button:not(:disabled) *,
     [class*="st-key-source_action_danger"]

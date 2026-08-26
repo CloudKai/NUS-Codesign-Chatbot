@@ -257,12 +257,18 @@ def test_awaiting_coach_turn_survives_panel_remount_and_locks_notebooks() -> Non
         "mount_awaiting_coach_turn_recovery()"
     )
     recovery_ui = chat.split("def _render_awaiting_coach_recovery(", 1)[1].split(
-        "def _render_inflight_user_prompt(", 1
+        "def _render_awaiting_composer_controls(", 1
     )[0]
     assert "_recover_awaiting_coach_turn_fragment()" not in recovery_ui
     assert "_try_complete_awaiting_coach_turn()" in recovery_ui
-    assert "Stop waiting" in recovery_ui
-    assert "_abandon_awaiting_coach_turn(" in recovery_ui
+    assert "Stop waiting" not in recovery_ui
+    composer_controls = chat.split("def _render_awaiting_composer_controls(", 1)[1].split(
+        "def _render_inflight_user_prompt(", 1
+    )[0]
+    assert "Stop waiting" in composer_controls
+    assert "Coach is finishing" in composer_controls
+    assert "_abandon_awaiting_coach_turn(" in composer_controls
+    assert "_render_awaiting_composer_controls()" in chat
     send_block = chat.split("def handle_prompt(", 1)[1].split(
         "def _confirm_edit_earlier_message_dialog", 1
     )[0]
@@ -420,10 +426,14 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
     assert "mark_journey_stage_reviews_read(" in panel_block
     assert "st.tabs(" not in panel_block
     assert "sync_journey_unread_watch" not in panel_block
+    assert "mount_stage_review_attention_watch" in Path("ui/workspace.py").read_text(
+        encoding="utf-8"
+    )
     assert '"Journey !"' not in source
     assert Path("ui/layout/journey_tab_unread.py").exists() is False
     workspace = Path("ui/workspace.py").read_text(encoding="utf-8")
     assert 'return "Journey 🛑"' in workspace
+    assert "stage_reviews_need_attention" in workspace
     assert 'return "Journey !"' not in workspace
     assert 'studio_tab") == "Review"' not in workspace
     assert 'return "Review"' not in workspace.split("def _studio_mobile_label", 1)[1].split(
