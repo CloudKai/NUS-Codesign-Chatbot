@@ -1276,6 +1276,8 @@
         scroll-behavior:auto;
         scrollbar-width:thin;
         scrollbar-color:var(--cd-scrollbar) transparent;
+        /* Isolate transcript layout from composer auto-grow reflows. */
+        contain:layout style;
     }
 
     .st-key-chat_feed > [data-testid="stVerticalBlock"],

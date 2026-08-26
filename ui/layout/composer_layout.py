@@ -351,8 +351,13 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
   let attachTipTimer = 0;
   function showAttachTooltip() {
     doc.body.setAttribute("data-cd-attach-hover", "1");
+    // Hide Streamlit's native upload tip on hover without a body-wide observer.
+    hideNativeUploadTooltips();
     win.clearTimeout(attachTipTimer);
-    attachTipTimer = win.setTimeout(placeAttachTooltip, 450);
+    attachTipTimer = win.setTimeout(() => {
+      hideNativeUploadTooltips();
+      placeAttachTooltip();
+    }, 450);
   }
 
   function hideAttachTooltip() {
@@ -855,21 +860,8 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
       if (profile) profileCount("overlay_mutation_ms", now() - started);
     });
     overlayObserver.observe(input, { childList: true, subtree: true });
-    const nativeTipObserver = new win.MutationObserver((records) => {
-      const started = now();
-      profileCount("tooltip_mutation_callbacks");
-      const hasUploadTooltip = records.some((record) =>
-        Array.from(record.addedNodes).some(
-          (node) =>
-            node.nodeType === 1 &&
-            (node.matches('[data-testid="stTooltipContent"]') ||
-              node.querySelector('[data-testid="stTooltipContent"]'))
-        )
-      );
-      if (hasUploadTooltip) hideNativeUploadTooltips();
-      if (profile) profileCount("tooltip_mutation_ms", now() - started);
-    });
-    nativeTipObserver.observe(doc.body, { childList: true, subtree: true });
+    // Native upload tooltips are cleared in apply() and on attach hover/focus
+    // instead of watching document.body with a MutationObserver.
     const slot = modelSlot(composer);
     if (slot) observer.observe(slot, { childList: true, subtree: true });
     observeTextareaWidth(textarea);

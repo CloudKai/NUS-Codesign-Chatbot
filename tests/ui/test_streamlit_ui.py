@@ -128,6 +128,10 @@ def test_composer_typing_path_stays_local_and_structural() -> None:
     assert "attachment_tooltip_bind_calls" in composer_layout
     assert "overlay_rewrite_calls" in composer_layout
     assert "native_tooltip_scan_calls" in composer_layout
+    assert "nativeTipObserver" not in composer_layout
+    assert "hideNativeUploadTooltips();" in composer_layout.split(
+        "function showAttachTooltip", 1
+    )[1].split("function hideAttachTooltip", 1)[0]
 
 
 def test_composer_observes_native_send_stop_state_and_cleans_stopped_turn() -> None:
@@ -361,9 +365,13 @@ def test_streamlit_notebook_workspace_smoke():
     assert "textarea_resize_calls" in composer_layout
     assert 'attributeFilter: ["data-testid", "disabled"]' in composer_layout
     assert "characterData: true" not in composer_layout
+    assert "nativeTipObserver" not in composer_layout
+    assert "doc.body, { childList: true, subtree: true }" not in composer_layout
+    assert "hideNativeUploadTooltips();" in composer_layout
     assert "CO_DESIGN_COMPOSER_PROFILE" in composer_layout
     assert "MAX_COLS" not in composer_layout
     assert "field-sizing:content" in rendered.replace(" ", "")
+    assert "contain:layoutstyle" in rendered.replace(" ", "")
     edit_layout = Path("ui/layout/user_message_edit_layout.py").read_text(
         encoding="utf-8"
     )

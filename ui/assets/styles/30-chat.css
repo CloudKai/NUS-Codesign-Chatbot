@@ -21,6 +21,8 @@
     .st-key-chat_log {
         padding:0 .25rem 0 0;
         overflow-anchor:auto;
+        /* Keep message-list style/layout work out of the composer typing path. */
+        contain:layout style;
     }
 
     .st-key-chat_log > [data-testid="stVerticalBlock"],
@@ -534,6 +536,8 @@
         overflow:visible;
         gap:0 !important;
         row-gap:0 !important;
+        /* Isolate composer size changes from the long transcript DOM. */
+        contain:layout style;
     }
 
     .st-key-chat_panel .st-key-chat_composer,

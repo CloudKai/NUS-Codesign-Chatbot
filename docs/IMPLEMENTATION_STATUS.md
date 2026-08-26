@@ -2,6 +2,24 @@
 
 ## CURRENT STATUS
 
+### Composer typing lag: contain + drop body tooltip observer (2026-08-26)
+
+**Change.** Finish the long-chat typing responsiveness leftovers: add
+``contain: layout style`` on ``chat_feed`` / ``chat_log`` / ``chat_composer``,
+and remove the body-wide upload-tooltip ``MutationObserver``. Native upload
+tips are still cleared from ``apply()`` and attach hover/focus scans.
+
+**Files.** ``ui/assets/styles/10-workspace.css``, ``ui/assets/styles/30-chat.css``,
+``ui/layout/composer_layout.py``, ``tests/ui/test_streamlit_ui.py``,
+``docs/IMPLEMENTATION_STATUS.md``.
+
+**Validation.** Focused ``tests/ui/test_streamlit_ui.py`` composer assertions.
+Hard-refresh Streamlit and smoke-test typing on a long notebook, Send/Stop,
+scroll-to-bottom, and attach hover (custom tip only).
+
+**Next exact action.** Visual smoke check in the running local app (desktop +
+390px). No AgentCore republish required.
+
 ### Stage-completion reviews, Reflection DONE, Deep Review unlock (2026-08-26)
 
 **Change.** Reflection ADVANCE now completes in place (no sixth stage): prompts
