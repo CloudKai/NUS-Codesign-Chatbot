@@ -186,6 +186,15 @@ _ATTACHMENT_REFERENCE = re.compile(
     r"diagram|scan)\b",
     re.IGNORECASE,
 )
+# Deictic pointers to the just-uploaded file ("this article", "like this")
+# even when the turn is not phrased as a question.
+_DEICTIC_EVIDENCE = re.compile(
+    r"\b(?:this|that|the|my)\s+"
+    r"(?:article|paper|study|pdf|document|file|report|source|attachment|"
+    r"upload|image|photo|diagram|scan)s?\b"
+    r"|\b(?:like|see|per|from)\s+this\b",
+    re.IGNORECASE,
+)
 _ATTACHMENT_ACTION = re.compile(
     r"\b(outline|extract|list|identify|review|analy[sz]e|summar(?:y|ise|ize))\b",
     re.IGNORECASE,
@@ -198,7 +207,7 @@ _ATTACHMENT_DIRECTIVE = re.compile(
 _COURSE_REFERENCE = re.compile(
     r"\b(lecture|lectures|week|weeks|course|cde2300|product\s+design|"
     r"design\s+thinking|jtbd|how\s+might\s+we|reading|readings|syllabus|"
-    r"class\s+materials?)\b",
+    r"class\s+materials?|(?:lecture|course|class|the)\s+notes)\b",
     re.IGNORECASE,
 )
 
@@ -283,15 +292,30 @@ def is_private_attachment_question(
 ) -> bool:
     """Return whether this turn should retrieve only current attachments.
 
-    This is a retrieval-scope hint, not a relevance classifier.  It applies
-    only to a turn with private attachments, an information request, and no
-    explicit course reference.  The existing Fast Chat result still owns the
-    semantic out-of-scope decision, and explicit course comparisons continue
-    through the normal combined attachment + course retrieval path.
+    This is a retrieval-scope hint, not a relevance classifier. It applies
+    when the turn has private attachments and no explicit course comparison.
+    Deictic references to the upload (``this article``, ``like this``) scope
+    to the attachment even without a question mark. Explicit course
+    comparisons keep the combined attachment + course retrieval path. Chat
+    history stays in the prompt either way so students can still compare the
+    file with earlier replies.
     """
     if int(attachment_count or 0) <= 0:
         return False
     text = _normalized_text(student_message)
+    if not text:
+        return False
+    # Course / notes comparisons keep combined attachment + course RAG.
+    if _COURSE_REFERENCE.search(text):
+        return False
+
+    evidence_ref = bool(
+        _ATTACHMENT_REFERENCE.search(text) or _DEICTIC_EVIDENCE.search(text)
+    )
+    # "so like this article…" and similar deixis always use the upload.
+    if evidence_ref:
+        return True
+
     asks_for_information = looks_like_information_request(text)
     # Attached-file verbs are commonly written as polite requests without a
     # question mark ("Could you outline…", "Please analyze…") or as direct
@@ -299,11 +323,9 @@ def is_private_attachment_question(
     # project-reasoning guard below so "analyze my idea" is not re-scoped.
     if not asks_for_information and not _ATTACHMENT_DIRECTIVE.search(text):
         return False
-    if _COURSE_REFERENCE.search(text):
-        return False
     if looks_like_project_reasoning(text):
         return False
-    if _ATTACHMENT_REFERENCE.search(text) or _ATTACHMENT_ACTION.search(text):
+    if _ATTACHMENT_ACTION.search(text):
         return True
     # Short questions such as "what themes do you notice?" implicitly refer
     # to the only newly supplied evidence. Project deliberation remains on the

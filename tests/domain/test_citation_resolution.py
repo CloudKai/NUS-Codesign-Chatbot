@@ -12,7 +12,7 @@ from backend.learning_service import LearningProgressService
 from backend.persistence.factory import reset_file_storage_cache
 from backend.persistence.memory_files import MemoryFileStorage
 from backend.persistence.ports import ListedObject
-from backend.prompts.composer import prompt_context_from_request
+from backend.prompts.composer import PromptComposer, prompt_context_from_request
 from backend.repositories import (
     SQLiteNotebookRepository,
     SQLitePhaseTransitionRepository,
@@ -324,3 +324,23 @@ def test_image_prompt_uses_full_selected_source_labels() -> None:
     context = prompt_context_from_request(request)
 
     assert "Attached notebook images (1): S1" in context.image_note
+
+
+def test_attachment_prompt_note_names_current_turn_files() -> None:
+    """Current-turn uploads are named in the prompt so the model cannot deny them."""
+    request = CoachRequest(
+        thread_id="thread-1",
+        student_message="so like this article that states my point further",
+        current_stage="concept_generation",
+        response_detail="short",
+        attachment_source_ids=["att-1"],
+        attachment_titles=["muarc157.pdf"],
+    )
+
+    context = prompt_context_from_request(request)
+
+    assert "Current-turn private attachments (1): muarc157.pdf" in context.attachment_note
+    assert "Do not claim they are missing" in context.attachment_note
+    prepared = PromptComposer().compose(context)
+    assert "muarc157.pdf" in prepared.runtime_instructions
+    assert "muarc157.pdf" in prepared.trusted_instructions

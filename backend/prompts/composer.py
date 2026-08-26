@@ -85,6 +85,7 @@ class PromptContext(BaseModel):
     allow_model_knowledge: bool = False
     response_language: str = "English"
     image_note: str = ""
+    attachment_note: str = ""
     include_recent_messages: bool = True
     context_policy: str = "standard"
     expected_response_mode: str | None = None
@@ -230,6 +231,8 @@ def _runtime_instructions(context: PromptContext) -> str:
             )
     if context.image_note.strip():
         parts.append(context.image_note.strip())
+    if context.attachment_note.strip():
+        parts.append(context.attachment_note.strip())
     retrieved_text = str(context.retrieved_course_context or "")
     gap_note = (
         COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT in retrieved_text
@@ -637,6 +640,32 @@ def prompt_context_from_request(
             "Inspect the image content as selected evidence and use its [S#] "
             "label only when the image supports the claim."
         )
+    attachment_note = ""
+    attachment_ids = [
+        str(source_id).strip()
+        for source_id in (request.attachment_source_ids or [])
+        if str(source_id).strip()
+    ]
+    if attachment_ids:
+        titles = [
+            " ".join(str(title or "").split()).strip()
+            for title in (request.attachment_titles or [])
+            if " ".join(str(title or "").split()).strip()
+        ]
+        if len(titles) < len(attachment_ids):
+            # Fall back to stable ids so presence is never silent.
+            titles = titles + [
+                source_id
+                for source_id in attachment_ids[len(titles) :]
+            ]
+        listed = ", ".join(titles[: len(attachment_ids)])
+        attachment_note = (
+            f"Current-turn private attachments ({len(attachment_ids)}): {listed}. "
+            "These files were uploaded with this student message. Do not claim "
+            "they are missing. Use retrieved excerpts when present; if excerpts "
+            "are unavailable, say you received the file but could not read its "
+            "contents yet."
+        )
     return PromptContext(
         current_stage=request.current_stage,
         student_project_context=request.student_project_context,
@@ -649,6 +678,7 @@ def prompt_context_from_request(
         allow_model_knowledge=request.allow_model_knowledge,
         response_language=request.response_language,
         image_note=image_note,
+        attachment_note=attachment_note,
         include_recent_messages=include_recent_messages,
         context_policy=context_policy,
         expected_response_mode=request.expected_response_mode,

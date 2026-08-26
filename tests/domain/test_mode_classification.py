@@ -357,6 +357,9 @@ def test_hyphenated_selected_source_title_matches_spaced_question() -> None:
         "summarise the uploaded file",
         "help me understand this diagram",
         "what themes do you notice?",
+        "so like this article that states my point further",
+        "see this paper for the elderly crossing evidence",
+        "like this — it supports the travelator idea",
     ),
 )
 def test_private_attachment_questions_scope_retrieval_to_attachment(
@@ -388,13 +391,15 @@ def test_private_attachment_file_action_phrasings_are_scoped(
 
 def test_private_attachment_course_comparison_keeps_combined_retrieval() -> None:
     """Explicit course comparisons retain normal attachment + course RAG."""
-    assert (
-        is_private_attachment_question(
-            "compare this attachment with Lecture 4",
-            attachment_count=1,
+    for message in (
+        "compare this attachment with Lecture 4",
+        "does this article match the week 2 reading?",
+        "compare this pdf with the notes",
+        "how does this paper relate to the lecture notes?",
+    ):
+        assert (
+            is_private_attachment_question(message, attachment_count=1) is False
         )
-        is False
-    )
 
 
 def test_private_attachment_project_reasoning_is_not_forced_to_attachment_rag() -> None:

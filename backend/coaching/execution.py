@@ -2302,11 +2302,23 @@ class CoachApplicationService:
             metadata, conversation_revision=conversation_revision
         )
         record_field("memory_load_ms", elapsed_ms(memory_started))
+        attachment_titles = [
+            " ".join(
+                str(
+                    (snapshot.sources_by_id.get(source_id) or {}).get("title")
+                    or source_id
+                ).split()
+            ).strip()
+            for source_id in attachment_ids
+            if source_id
+        ]
         prepared = request.model_copy(
             update={
                 "current_stage": authoritative_stage,
                 "history": store_history,
                 "source_ids": effective_source_ids,
+                "attachment_source_ids": list(attachment_ids),
+                "attachment_titles": attachment_titles,
                 "source_context": retrieval_result_context,
                 "student_project_context": project_context,
                 "conversation_summary": conversation_summary,

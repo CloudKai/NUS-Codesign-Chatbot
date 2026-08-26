@@ -402,6 +402,8 @@ class CoachRequest(BaseModel):
     # Per-turn uploads are stored privately with the student message. They are
     # not selected notebook Sources and must be resolved server-side.
     attachment_source_ids: list[str] = Field(default_factory=list, max_length=5)
+    # Server-filled display titles for current-turn attachments (prompt presence).
+    attachment_titles: list[str] = Field(default_factory=list, max_length=5)
     source_context: str = ""
     student_project_context: str = ""
     conversation_summary: str = ""
@@ -474,6 +476,20 @@ class CoachRequest(BaseModel):
         cleaned = [str(value).strip() for value in values if str(value).strip()]
         if len(cleaned) != len(set(cleaned)):
             raise ValueError("attachment_source_ids must be unique")
+        return cleaned
+
+    @field_validator("attachment_titles")
+    @classmethod
+    def attachment_titles_must_be_bounded(cls, values: list[str]) -> list[str]:
+        """Normalize display titles for current-turn attachment prompt notes."""
+        cleaned: list[str] = []
+        for value in values:
+            title = " ".join(str(value or "").split()).strip()
+            if not title:
+                continue
+            cleaned.append(title[:200])
+            if len(cleaned) >= 5:
+                break
         return cleaned
 
     @field_validator("specialist")
