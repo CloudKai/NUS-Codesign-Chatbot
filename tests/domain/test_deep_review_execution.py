@@ -251,8 +251,17 @@ def _review_items(
 
 
 def _unlock(store: StudentStore, thread_id: str) -> None:
-    """Grant one explicit Deep Review entitlement without stacking credits."""
-    store.update_thread(thread_id, metadata={COUNTER_SETTINGS_KEY: 3})
+    """Mark every Thinking Path stage complete so Deep Review is eligible.
+
+    Also seeds the legacy counter so fail-path tests can assert it is not
+    cleared; unlock no longer depends on that counter.
+    """
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = [stage.id for stage in THINKING_STAGES]
+    metadata["learning_journey"] = journey
+    metadata[COUNTER_SETTINGS_KEY] = 3
+    store.update_thread(thread_id, metadata=metadata)
 
 
 def _allow_stage_selection(
@@ -408,7 +417,8 @@ def test_failed_deep_review_preserves_previous_snapshot_feedback(tmp_path) -> No
     )
 
 
-def test_completed_deep_review_cannot_start_another_until_eligible(tmp_path) -> None:
+def test_completed_deep_review_remains_eligible_when_path_complete(tmp_path) -> None:
+    """Stage-complete unlock stays open after a successful Deep Review."""
     store = StudentStore(tmp_path / "dr-idem.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     _unlock(store, thread_id)
@@ -416,12 +426,19 @@ def test_completed_deep_review_cannot_start_another_until_eligible(tmp_path) -> 
     service = _service(store, client)
     service.enqueue_deep_review(thread_id, idempotency_key="same-deep")
     assert _wait_job(service, thread_id).status is DeepReviewJobStatus.COMPLETED
-    replay_client = FakeAgentCoreRuntime(deep_payload=_deep_payload(synthesis="Must not run."))
-    replay_service = _service(store, replay_client)
-    with pytest.raises(ValueError, match="not available"):
-        replay_service.enqueue_deep_review(thread_id, idempotency_key="same-deep")
-    assert replay_client.calls == []
     assert _counter(store, thread_id) == 0
+    replay_client = FakeAgentCoreRuntime(
+        deep_payload=_deep_payload(synthesis="Second Deep Review.")
+    )
+    replay_service = _service(store, replay_client)
+    job = replay_service.enqueue_deep_review(thread_id, idempotency_key="same-deep")
+    assert job.status in {DeepReviewJobStatus.QUEUED, DeepReviewJobStatus.RUNNING}
+    finished = _wait_job(replay_service, thread_id)
+    assert finished.status is DeepReviewJobStatus.COMPLETED
+    assert _phases(replay_client) == ["review"]
+    snapshot = _snapshot(store, thread_id)
+    assert snapshot is not None
+    assert "Second Deep Review" in str(snapshot.get("synthesis") or "")
 
 
 def test_normal_coaching_does_not_overwrite_snapshot(tmp_path) -> None:

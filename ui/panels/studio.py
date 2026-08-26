@@ -26,11 +26,15 @@ from backend.specialists.review_orchestration import (
     DEEP_REVIEW_JOB_FAILED,
     DEEP_REVIEW_JOB_KEY,
     DEEP_REVIEW_SNAPSHOT_KEY,
-    bound_deep_review_interval,
+    JOURNEY_STAGE_REVIEWS_KEY,
+    STAGE_REVIEW_COMPLETE,
+    STAGE_REVIEW_FAILED,
+    STAGE_REVIEW_QUEUED,
+    STAGE_REVIEW_RUNNING,
     deep_review_job_is_active,
     explicit_deep_review_available,
-    parse_coaching_turns_since_deep_review,
     parse_deep_review_job,
+    parse_journey_stage_reviews,
 )
 from backend.student_journey import (
     STAGE_BY_ID,
@@ -44,6 +48,7 @@ from backend.student_journey import (
 
 from ui.components import (
     facione_scores_table_html,
+    notification_dot_html,
     progress_bar_html,
     review_card_html,
     review_feedback_items_html,
@@ -51,6 +56,7 @@ from ui.components import (
 from ui.runtime import (
     coach_turn_is_streaming,
     get_deep_review_job,
+    mark_journey_stage_reviews_read,
     rerun_app,
     rerun_fragment,
     start_deep_review,
@@ -100,35 +106,29 @@ class DeepReviewControlView:
 
 
 def deep_review_control_view(
-    counter: int,
-    interval: int,
+    completed_stages: list[str] | tuple[str, ...] | None,
     *,
     running: bool,
 ) -> DeepReviewControlView:
-    """Map persisted Deep Review eligibility onto the Review-tab button.
+    """Map Thinking Path completion onto the Deep Review button.
 
-    This helper does not increment or store a second counter. ``counter`` must
-    already come from notebook metadata and ``interval`` from settings.
+    Unlock requires every required stage, including Reflection, to be in
+    ``completed_stages``. This helper does not invoke Sonnet.
 
     Args:
-        counter: Persisted ``coaching_turns_since_deep_review``.
-        interval: Configured ``DEEP_REVIEW_INTERVAL_TURNS``.
+        completed_stages: Persisted completed Thinking Path stage ids.
         running: Whether this notebook already has an in-flight Deep Review.
 
     Returns:
         Caption, enablement, and button type for Start Deep Review.
     """
-    bounded_interval = bound_deep_review_interval(interval)
-    current = parse_coaching_turns_since_deep_review(counter)
     eligible = explicit_deep_review_available(
-        coaching_turns_since_deep_review=current,
-        interval=bounded_interval,
+        completed_stages=list(completed_stages or []),
     )
     disabled = (not eligible) or running
-    shown = min(current, bounded_interval)
     locked_caption = (
-        f"Deep Review unlocks after {bounded_interval} coaching turns — "
-        f"{shown}/{bounded_interval} completed."
+        "Deep Review unlocks when the Thinking Path including Reflection "
+        "is complete."
     )
     if running:
         return DeepReviewControlView(
@@ -182,8 +182,8 @@ def _render_deep_review_stable() -> None:
             rerun_app()
         return
     view = deep_review_control_view(
-        parse_coaching_turns_since_deep_review(metadata.get(COUNTER_SETTINGS_KEY)),
-        settings.deep_review_interval_turns,
+        normalize_journey(metadata.get("learning_journey")).get("completed_stages")
+        or [],
         running=False,
     )
     with st.container(key="deep_review_control", gap=10):
@@ -229,8 +229,8 @@ def _render_deep_review_polling() -> None:
     thread = store.get_thread(thread_id) or {}
     metadata = dict(thread.get("metadata") or {})
     view = deep_review_control_view(
-        parse_coaching_turns_since_deep_review(metadata.get(COUNTER_SETTINGS_KEY)),
-        settings.deep_review_interval_turns,
+        normalize_journey(metadata.get("learning_journey")).get("completed_stages")
+        or [],
         running=True,
     )
     with st.container(key="deep_review_control", gap=10):
@@ -459,12 +459,26 @@ def render_journey_track() -> None:
             break
         completed_prefix_end = index
     frontier_candidate = completed_prefix_end + 1
+    frontier_progress_id = (
+        THINKING_STAGES[frontier_candidate].id
+        if frontier_candidate < len(THINKING_STAGES)
+        else None
+    )
     frontier_next = (
         THINKING_STAGES[frontier_candidate].id
         if completed_prefix_end >= 0
         and frontier_candidate < len(THINKING_STAGES)
         and THINKING_STAGES[frontier_candidate].id in selectable_ids
         else None
+    )
+    thread_meta = dict(
+        (store.get_thread(str(st.session_state.thread_id or "")) or {}).get(
+            "metadata"
+        )
+        or {}
+    )
+    stage_reviews_blob = parse_journey_stage_reviews(
+        thread_meta.get(JOURNEY_STAGE_REVIEWS_KEY)
     )
     st.markdown(
         progress_bar_html(
@@ -477,6 +491,24 @@ def render_journey_track() -> None:
     )
     if selection_enabled:
         st.caption("Choose a stage to work on.")
+    if explicit_deep_review_available(
+        completed_stages=list(completed),
+    ) and not isinstance(thread_meta.get(DEEP_REVIEW_SNAPSHOT_KEY), dict):
+        with st.container(key="journey_deep_review"):
+            st.markdown("**Deep Review**")
+            st.caption("Your full learning journey is ready.")
+            if st.button(
+                "Generate Deep Review",
+                key="journey_generate_deep_review",
+                type="primary",
+                use_container_width=True,
+            ):
+                try:
+                    start_deep_review(str(st.session_state.thread_id or ""))
+                    rerun_app()
+                except Exception:
+                    logger.exception("journey_deep_review_ui_failed")
+                    st.error(_DEEP_REVIEW_ERROR)
     stage_icons = {
         "problem_identification": "problem",
         "concept_generation": "lightbulb",
@@ -491,15 +523,16 @@ def render_journey_track() -> None:
             unsafe_allow_html=True,
         )
         for stage in THINKING_STAGES:
-            state = (
-                "current"
-                if stage.id == current_id
-                else "completed"
-                if stage.id in completed
-                else "available"
-                if stage.id in selectable_ids
-                else "locked"
-            )
+            # Progress node state is cumulative; focus/expansion uses current_id.
+            if stage.id in completed:
+                state = "completed"
+            elif frontier_progress_id and stage.id == frontier_progress_id:
+                state = "current"
+            elif stage.id in selectable_ids:
+                state = "available"
+            else:
+                state = "locked"
+            is_focus = stage.id == current_id
             icon_name = "check" if state == "completed" else stage_icons[stage.id]
             is_preview_open = stage.id == preview_stage
             state_classes = f"journey-state {state}"
@@ -519,7 +552,7 @@ def render_journey_track() -> None:
                     unsafe_allow_html=True,
                 )
                 with copy_column:
-                    if state == "current":
+                    if is_focus:
                         st.markdown(
                             '<div class="journey-copy-stack">'
                             '<div class="journey-stage-heading">'
@@ -558,8 +591,52 @@ def render_journey_track() -> None:
                                 stage,
                                 cta_label=cta_label,
                             )
-                if state == "current" or is_preview_open:
+                if stage.id in completed:
+                    _render_journey_stage_checkpoint(
+                        stage.id, stage_reviews_blob
+                    )
+                if is_focus or is_preview_open:
                     _render_stage_suggestions(stage)
+
+
+def _render_journey_stage_checkpoint(
+    stage_id: str, blob: dict[str, Any]
+) -> None:
+    """Render one saved Journey stage-review checkpoint under a completed stage."""
+    job = (blob.get("jobs") or {}).get(stage_id) or {}
+    status = str(job.get("status") or "")
+    review = (blob.get("reviews") or {}).get(stage_id)
+    if isinstance(review, dict) and status == STAGE_REVIEW_COMPLETE:
+        summary = str(review.get("summary") or "").strip()
+        strengths = list(review.get("strengths") or [])
+        areas = list(review.get("areas_to_revisit") or [])
+        if summary:
+            st.markdown(
+                review_card_html(label="Stage review", body=summary),
+                unsafe_allow_html=True,
+            )
+        if strengths:
+            st.markdown(
+                review_card_html(
+                    label="Strengths", body="", items=strengths
+                ),
+                unsafe_allow_html=True,
+            )
+        if areas:
+            st.markdown(
+                review_card_html(
+                    label="Worth revisiting", body="", items=areas
+                ),
+                unsafe_allow_html=True,
+            )
+        reasoning = str(review.get("reasoning_progress") or "").strip()
+        if reasoning:
+            st.caption(reasoning)
+        return
+    if status in {STAGE_REVIEW_QUEUED, STAGE_REVIEW_RUNNING}:
+        st.caption("Reviewing this stage…")
+    elif status == STAGE_REVIEW_FAILED:
+        st.caption("Stage review unavailable.")
 
 
 def review_stage_expander_key(
@@ -899,6 +976,13 @@ def render_studio_panel() -> None:
     )
     journey = normalize_journey(st.session_state.learning_journey)
     preferred = st.session_state.get("studio_tab", "Journey")
+    thread_id = str(st.session_state.thread_id or "")
+    thread_meta = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    journey_reviews = parse_journey_stage_reviews(
+        thread_meta.get(JOURNEY_STAGE_REVIEWS_KEY)
+    )
+    journey_unread = bool(journey_reviews.get("unread"))
+    journey_label = "Journey" + (" !" if journey_unread else "")
     st.markdown(
         '<div class="pane-heading"><span class="pane-title">Thinking Path</span></div>',
         unsafe_allow_html=True,
@@ -907,9 +991,18 @@ def render_studio_panel() -> None:
         # Streamlit tabs always render both bodies (client-side tab switch
         # does not rerun). Duplicate get_messages/get_thread work is avoided
         # by the page-run memo, not by skipping Review.
-        journey_tab, review_tab = st.tabs(["Journey", "Review"])
+        journey_tab, review_tab = st.tabs([journey_label, "Review"])
         pending = _fetch_pending_transition()
         with journey_tab:
+            if journey_unread:
+                from ui.layout.journey_tab_unread import sync_journey_unread_watch
+
+                sync_journey_unread_watch(
+                    unread=True,
+                    clear_path=(
+                        f"/api/v1/threads/{thread_id}/journey-stage-reviews/read"
+                    ),
+                )
             render_journey_track()
             render_pending_transition(pending)
         with review_tab:

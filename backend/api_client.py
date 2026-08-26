@@ -798,6 +798,26 @@ class LocalApiClient:
         response.raise_for_status()
         return DeepReviewJob.model_validate(response.json())
 
+    def get_journey_stage_reviews(self, thread_id: str) -> dict[str, Any]:
+        """Return Journey stage-completion review checkpoints for one notebook."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/threads/{quote(thread_id, safe='')}/journey-stage-reviews",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
+
+    def mark_journey_stage_reviews_read(self, thread_id: str) -> dict[str, Any]:
+        """Clear the Journey unread notification for one notebook."""
+        response = self._http.post(
+            f"{self._base_url}/api/v1/threads/{quote(thread_id, safe='')}/journey-stage-reviews/read",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
+
     @staticmethod
     def coaching_error_category(payload: Mapping[str, Any] | None) -> str:
         """Return the structured coaching error category from an API payload.

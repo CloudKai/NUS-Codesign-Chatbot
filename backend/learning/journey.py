@@ -219,7 +219,8 @@ def mark_stage_completed(
 
     Raises:
         ValueError: If ``stage_id`` is unknown, is not the current focus, or
-            is the terminal Reflection stage.
+            prerequisites are incomplete. Reflection may be completed
+            in-place (no later stage); focus stays on Reflection.
     """
     normalized = normalize_journey(journey)
     cleaned_stage = str(stage_id or "").strip()
@@ -227,8 +228,6 @@ def mark_stage_completed(
         raise ValueError(f"Unknown thinking stage: {cleaned_stage}")
     if normalized["current_stage"] != cleaned_stage:
         raise ValueError("Only the current stage can be completed")
-    if cleaned_stage == THINKING_STAGES[-1].id:
-        raise ValueError("Reflection is the terminal Thinking Path stage")
     stage_ids = [stage.id for stage in THINKING_STAGES]
     current_index = stage_ids.index(cleaned_stage)
     completed = set(normalized["completed_stages"])

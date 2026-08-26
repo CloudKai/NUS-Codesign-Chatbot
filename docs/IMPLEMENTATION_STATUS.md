@@ -2,6 +2,49 @@
 
 ## CURRENT STATUS
 
+### Stage-completion reviews, Reflection DONE, Deep Review unlock (2026-08-26)
+
+**Change.** Reflection ADVANCE now completes in place (no sixth stage): prompts
+recommend ADVANCE when Reflection purpose is met; workflow no longer rewrites
+that ADVANCE to STAY or raises; ``mark_stage_completed("reflection")`` and
+persist accept terminal completion without a next-stage pending. Each newly
+completed stage (including Reflection) enqueues one background Haiku Journey
+checkpoint (``journey_stage_reviews``); failures are fail-open. Journey shows
+checkpoints, a red ``!`` unread badge (cleared when the Journey tab is viewed),
+and progress nodes derived from ``completed_stages`` + frontier (not viewed
+``current_stage``). Deep Review unlock **replaces** the 3-turn gate: eligible
+only when all five Thinking Path stages including Reflection are in
+``completed_stages``. Explicit click still required. Sonnet context prefers
+Journey stage checkpoints (+ important message ids) when prior Deep Review
+checkpoint_delta is unavailable.
+
+**Production note.** Live Coach uses AgentCore copies of ``reflection.md``.
+FastAPI persist alone cannot mark Reflection complete until the AgentCore
+runtime prompt is republished. App image rebuild is also required for FastAPI
+and Streamlit changes.
+
+**Files.** ``backend/learning/journey.py``, ``backend/workflow.py``,
+``backend/student_store.py``, ``backend/coaching/execution.py``,
+``backend/coaching/stage_review_jobs.py``, ``backend/coaching/deep_review_context.py``,
+``backend/specialists/review_orchestration.py``, ``backend/mock_provider.py``,
+``backend/agentcore_provider.py``, ``backend/prompts/stages/reflection.md``,
+``agentcore_runtime/prompts/stages/reflection.md``, ``backend/http/app.py``,
+``backend/api_client.py``, ``ui/panels/studio.py``, ``ui/panels/chat.py``,
+``ui/workspace.py``, ``ui/components.py``, ``ui/layout/journey_tab_unread.py``,
+``ui/services/runtime.py``, ``ui/assets/styles/00-foundations.css``,
+``tests/domain/test_stage_reviews_and_reflection.py``,
+``tests/http/test_deep_review.py``, ``tests/domain/test_deep_review_execution.py``,
+``tests/ui/test_deep_review_control.py``, ``docs/IMPLEMENTATION_STATUS.md``.
+
+**Validation.** Focused pytest:
+``test_stage_reviews_and_reflection``, ``test_deep_review`` (HTTP),
+``test_deep_review_execution``, ``test_deep_review_control``, journey/theme
+filters. ``compileall`` on touched packages. Mock providers only; no paid
+Bedrock/OpenAI.
+
+**Next exact action.** Rebuild/recreate the EC2 app image **and** republish
+AgentCore so production Reflection ADVANCE and Haiku stage reviews take effect.
+
 ### Natural-language Thinking Path navigation hardening (2026-08-26)
 
 **Change.** Deterministic workflow matching now tolerates conversational

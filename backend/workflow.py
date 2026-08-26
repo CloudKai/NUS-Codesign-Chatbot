@@ -101,20 +101,13 @@ def _next_stage(stage_id: str) -> str | None:
 def _normalize_terminal_assessment(
     request: CoachRequest, assessment: EducationalAssessment
 ) -> EducationalAssessment:
-    """Prevent a provider from recommending advancement beyond Reflection."""
-    if (
-        request.current_stage == THINKING_STAGES[-1].id
-        and assessment.recommendation is StageDecision.ADVANCE
-    ):
-        return assessment.model_copy(
-            update={
-                "recommendation": StageDecision.STAY,
-                "recommendation_rationale": (
-                    "Reflection is the terminal Thinking Path stage; the student's "
-                    "work remains here for final calibration or completion."
-                ),
-            }
-        )
+    """Pass Reflection ADVANCE through as complete-in-place (no next stage).
+
+    ADVANCE on Reflection means the stage purpose is met. The workflow must
+    not invent a sixth phase or rewrite the recommendation to STAY; persist
+    records Reflection in ``completed_stages`` while focus stays put.
+    """
+    del request  # Authority is request.current_stage at the call site.
     return assessment
 
 
@@ -343,16 +336,16 @@ class CoachWorkflow:
         pending: PendingPhaseTransition | None = None
         if assessment.recommendation is StageDecision.ADVANCE:
             next_stage = _next_stage(request.current_stage)
-            if next_stage is None:
-                raise ValueError("Reflection cannot advance to another stage")
-            pending = PendingPhaseTransition(
-                id=str(uuid4()),
-                thread_id=request.thread_id,
-                from_stage=request.current_stage,
-                to_stage=next_stage,
-                assessment=assessment,
-                created_at=datetime.now(timezone.utc).isoformat(),
-            )
+            # Reflection ADVANCE is complete-in-place: no pending Next target.
+            if next_stage is not None:
+                pending = PendingPhaseTransition(
+                    id=str(uuid4()),
+                    thread_id=request.thread_id,
+                    from_stage=request.current_stage,
+                    to_stage=next_stage,
+                    assessment=assessment,
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                )
         turn = CoachTurn(
             response_text=response_text,
             assessment=assessment,
@@ -543,16 +536,16 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
         pending: PendingPhaseTransition | None = None
         if assessment.recommendation is StageDecision.ADVANCE:
             next_stage = _next_stage(request.current_stage)
-            if next_stage is None:
-                raise ValueError("Reflection cannot advance to another stage")
-            pending = PendingPhaseTransition(
-                id=str(uuid4()),
-                thread_id=request.thread_id,
-                from_stage=request.current_stage,
-                to_stage=next_stage,
-                assessment=assessment,
-                created_at=datetime.now(timezone.utc).isoformat(),
-            )
+            # Reflection ADVANCE is complete-in-place: no pending Next target.
+            if next_stage is not None:
+                pending = PendingPhaseTransition(
+                    id=str(uuid4()),
+                    thread_id=request.thread_id,
+                    from_stage=request.current_stage,
+                    to_stage=next_stage,
+                    assessment=assessment,
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                )
         steps = list(state.get("steps_completed") or [])
         steps.append("recommend")
         return {

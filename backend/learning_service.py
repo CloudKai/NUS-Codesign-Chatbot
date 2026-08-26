@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+import logging
+from typing import Any, Callable
 
 from .domain import PendingPhaseTransition
 from .repositories import NotebookRepository, PhaseTransitionRepository
@@ -15,6 +16,10 @@ from .student_journey import (
 )
 from .student_store import StudentStore
 
+logger = logging.getLogger(__name__)
+
+StageReviewEnqueue = Callable[[str, str], None]
+
 
 class LearningProgressService:
     """Apply student-confirmed recommendations and optional stage selection."""
@@ -24,10 +29,17 @@ class LearningProgressService:
         store: StudentStore,
         notebooks: NotebookRepository,
         transitions: PhaseTransitionRepository,
+        *,
+        enqueue_stage_review: StageReviewEnqueue | None = None,
     ) -> None:
         self._store = store
         self._notebooks = notebooks
         self._transitions = transitions
+        self._enqueue_stage_review = enqueue_stage_review
+
+    def set_stage_review_enqueue(self, enqueue: StageReviewEnqueue | None) -> None:
+        """Attach the background stage-review submitter after coach construction."""
+        self._enqueue_stage_review = enqueue
 
     def get_pending(self, thread_id: str) -> PendingPhaseTransition | None:
         """Return the unresolved recommendation for one owned notebook."""
@@ -114,6 +126,33 @@ class LearningProgressService:
             metadata_patch=metadata_patch,
             expected_from_stage=pending.from_stage if accepted else None,
         )
+        if accepted:
+            try:
+                from backend.specialists.review_orchestration import (
+                    newly_completed_stage_ids,
+                )
+
+                after = normalize_journey(
+                    (
+                        (self._notebooks.get_thread(thread_id) or {}).get("metadata")
+                        or {}
+                    ).get("learning_journey")
+                )
+                for stage_id in newly_completed_stage_ids(
+                    journey.get("completed_stages") or [],
+                    after.get("completed_stages") or [],
+                ):
+                    blob, created = self._store.start_or_get_stage_review_job(
+                        thread_id, stage_id=stage_id
+                    )
+                    del blob
+                    if created and self._enqueue_stage_review is not None:
+                        self._enqueue_stage_review(thread_id, stage_id)
+            except Exception:
+                logger.exception(
+                    "stage_review_enqueue_after_confirm_failed thread_id=%s",
+                    thread_id,
+                )
         return PendingPhaseTransition.model_validate(resolved)
 
     def select_stage(self, thread_id: str, stage_id: str) -> dict[str, Any]:

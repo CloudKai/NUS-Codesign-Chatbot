@@ -170,6 +170,13 @@ class OwnerResolver:
             and not settings.student_stage_selection,
             retriever=configured_context_retriever(),
         )
+
+        def _enqueue_stage_review(thread_id: str, stage_id: str) -> None:
+            from backend.coaching.stage_review_jobs import submit_stage_review_job
+
+            submit_stage_review_job(coach, thread_id, stage_id)
+
+        learning.set_stage_review_enqueue(_enqueue_stage_review)
         resolved_user_id = str(user_id or getattr(store, "owner_id", "") or "")
         return OwnerServices(
             store=store,

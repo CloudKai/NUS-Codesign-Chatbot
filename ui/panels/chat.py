@@ -680,9 +680,9 @@ def _deep_review_counter(metadata: dict[str, Any]) -> int:
 
 def _deep_review_is_available(metadata: dict[str, Any]) -> bool:
     """Return whether notebook metadata currently unlocks Deep Review."""
+    journey = normalize_journey(metadata.get("learning_journey"))
     return explicit_deep_review_available(
-        coaching_turns_since_deep_review=_deep_review_counter(metadata),
-        interval=settings.deep_review_interval_turns,
+        completed_stages=journey.get("completed_stages") or [],
     )
 
 

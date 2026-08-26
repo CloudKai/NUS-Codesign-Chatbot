@@ -6,26 +6,27 @@ from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
 
+from backend.learning.stages import THINKING_STAGES
 from ui.panels.studio import deep_review_control_view
 
 
-def test_locked_views_at_zero_one_and_two_turns() -> None:
-    """Counters below the interval keep Start Deep Review disabled."""
-    for counter in (0, 1, 2):
-        view = deep_review_control_view(counter, 3, running=False)
-        assert view.eligible is False
-        assert view.disabled is True
-        assert view.button_type == "secondary"
-        assert view.caption == (
-            f"Deep Review unlocks after 3 coaching turns — {counter}/3 completed."
-        )
-        assert view.detail_caption is None
-        assert view.status_label is None
+def test_locked_view_before_reflection_complete() -> None:
+    """Incomplete Thinking Path keeps Start Deep Review disabled."""
+    prefix = [stage.id for stage in THINKING_STAGES[:-1]]
+    view = deep_review_control_view(prefix, running=False)
+    assert view.eligible is False
+    assert view.disabled is True
+    assert view.button_type == "secondary"
+    assert view.caption is not None
+    assert "Reflection" in view.caption
+    assert view.detail_caption is None
+    assert view.status_label is None
 
 
-def test_unlocked_view_at_interval() -> None:
-    """Reaching the persisted interval enables the primary Deep Review button."""
-    view = deep_review_control_view(3, 3, running=False)
+def test_unlocked_view_when_all_stages_complete() -> None:
+    """Completing every stage including Reflection enables Deep Review."""
+    all_ids = [stage.id for stage in THINKING_STAGES]
+    view = deep_review_control_view(all_ids, running=False)
     assert view.eligible is True
     assert view.disabled is False
     assert view.button_type == "primary"
@@ -35,18 +36,10 @@ def test_unlocked_view_at_interval() -> None:
     assert view.status_label is None
 
 
-def test_unlocked_view_above_interval_does_not_show_a_second_counter() -> None:
-    """Surplus qualifying turns still yield one entitlement, not stacked reviews."""
-    view = deep_review_control_view(5, 3, running=False)
-    assert view.eligible is True
-    assert view.disabled is False
-    assert view.caption == "Deep Review is ready."
-    assert "5/3" not in (view.caption or "")
-
-
 def test_running_disables_button_even_when_eligible() -> None:
     """An in-flight Deep Review keeps the button locked without a progress caption."""
-    view = deep_review_control_view(3, 3, running=True)
+    all_ids = [stage.id for stage in THINKING_STAGES]
+    view = deep_review_control_view(all_ids, running=True)
     assert view.eligible is True
     assert view.disabled is True
     assert view.caption is None

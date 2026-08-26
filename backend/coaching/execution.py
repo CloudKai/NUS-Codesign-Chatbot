@@ -84,13 +84,17 @@ from backend.specialists.review_orchestration import (
     DEEP_REVIEW_JOB_KEY,
     DEEP_REVIEW_SNAPSHOT_KEY,
     DEEP_REVIEW_TURN_MESSAGE,
+    JOURNEY_STAGE_REVIEWS_KEY,
     bound_deep_review_interval,
     deep_review_job_is_stale,
     deep_review_snapshot_payload,
     deep_review_stage_reviews_for_snapshot,
     explicit_deep_review_available,
+    newly_completed_stage_ids,
+    normalize_stage_checkpoint,
     parse_coaching_turns_since_deep_review,
     parse_deep_review_job,
+    parse_journey_stage_reviews,
 )
 from backend.source_library import (
     CHAT_ATTACHMENT_ORIGIN,
@@ -104,6 +108,7 @@ from backend.student_journey import (
     DEFAULT_STAGE,
     DEFAULT_RESPONSE_DETAIL,
     STAGE_BY_ID,
+    THINKING_STAGES,
     advanced_stage_response,
     current_stage,
     normalize_journey,
@@ -721,18 +726,12 @@ class CoachApplicationService:
             raise ValueError("Notebook not found")
         metadata = dict(thread.get("metadata") or {})
         journey = normalize_journey(metadata.get("learning_journey"))
-        counter = parse_coaching_turns_since_deep_review(
-            metadata.get(COUNTER_SETTINGS_KEY)
-        )
-        interval = bound_deep_review_interval(
-            runtime_settings.deep_review_interval_turns
-        )
         if not explicit_deep_review_available(
-            coaching_turns_since_deep_review=counter,
-            interval=interval,
+            completed_stages=journey.get("completed_stages") or [],
         ):
             raise ValueError(
-                "Deep Review is not available yet. Complete more Coaching turns first."
+                "Deep Review is not available yet. Complete the Thinking Path "
+                "including Reflection first."
             )
         reviewed_revision = int(thread.get("conversation_revision") or 0)
         messages = self._store.get_messages(thread_id)
@@ -772,6 +771,160 @@ class CoachApplicationService:
             metadata={**metadata, DEEP_REVIEW_JOB_KEY: job_payload},
             conversation_revision=reviewed_revision,
         )
+
+    def _enqueue_stage_reviews_after_completion(
+        self,
+        thread_id: str,
+        *,
+        completed_before: list[str] | None,
+    ) -> None:
+        """Queue Haiku Journey reviews for newly completed stages (fail-open)."""
+        try:
+            from backend.coaching.stage_review_jobs import submit_stage_review_job
+
+            thread = self._notebooks.get_thread(thread_id)
+            if not thread:
+                return
+            journey = normalize_journey(
+                (thread.get("metadata") or {}).get("learning_journey")
+            )
+            for stage_id in newly_completed_stage_ids(
+                completed_before, journey.get("completed_stages") or []
+            ):
+                blob, created = self._store.start_or_get_stage_review_job(
+                    thread_id, stage_id=stage_id
+                )
+                del blob
+                if created:
+                    submit_stage_review_job(self, thread_id, stage_id)
+        except Exception:
+            logger.exception(
+                "stage_review_enqueue_failed thread_id=%s", thread_id
+            )
+
+    def execute_stage_review_job(self, thread_id: str, stage_id: str) -> None:
+        """Run one background Haiku checkpoint for a completed stage.
+
+        Failures are persisted on the job envelope and never roll back stage
+        completion or the coach transcript.
+        """
+        cleaned_stage = str(stage_id or "").strip()
+        try:
+            self._store.mark_stage_review_running(thread_id, stage_id=cleaned_stage)
+            thread = self._notebooks.get_thread(thread_id)
+            if not thread:
+                raise ValueError("Notebook not found")
+            metadata = dict(thread.get("metadata") or {})
+            journey = normalize_journey(metadata.get("learning_journey"))
+            if cleaned_stage not in (journey.get("completed_stages") or []):
+                raise ValueError("Stage is not completed")
+            messages = self._store.get_messages(thread_id)
+            stage_history = [
+                message
+                for message in messages
+                if str(
+                    (message.get("metadata") or {}).get("thinking_stage")
+                    or ""
+                ).strip()
+                == cleaned_stage
+                or str(
+                    ((message.get("metadata") or {}).get("assessment") or {}).get(
+                        "current_stage"
+                    )
+                    or ""
+                ).strip()
+                == cleaned_stage
+            ]
+            if not stage_history:
+                stage_history = messages[-12:]
+            note = str((journey.get("stage_notes") or {}).get(cleaned_stage) or "")
+            student_message = (
+                f"Create a short Journey checkpoint for the completed "
+                f"{STAGE_BY_ID[cleaned_stage].label} stage. "
+                f"Stage note: {note or 'none'}."
+            )
+            request = CoachRequest(
+                thread_id=thread_id,
+                student_message=student_message,
+                current_stage=cleaned_stage,
+                history=[
+                    {
+                        "role": str(message.get("role") or "user"),
+                        "content": str(message.get("content") or ""),
+                        "metadata": dict(message.get("metadata") or {}),
+                    }
+                    for message in stage_history
+                    if str(message.get("content") or "").strip()
+                ][-24:],
+                response_detail=str(
+                    journey.get("response_detail") or DEFAULT_RESPONSE_DETAIL
+                ),
+                specialist="review",
+                conversation_revision=int(thread.get("conversation_revision") or 0),
+            )
+            provider = self._workflow.provider
+            if hasattr(provider, "assess_stage_checkpoint"):
+                result = provider.assess_stage_checkpoint(request)
+            else:
+                result = provider.assess(request)
+            assessment = result.assessment
+            artifacts: dict[str, str] = {}
+            if note:
+                artifacts["stage_note"] = note[:400]
+            checkpoint = normalize_stage_checkpoint(
+                {
+                    "stage": cleaned_stage,
+                    "summary": (
+                        assessment.learning_summary
+                        or assessment.contribution_summary
+                        or assessment.stage_assessment
+                        or ""
+                    ),
+                    "strengths": list(assessment.review_strengths or []),
+                    "areas_to_revisit": list(assessment.review_improvements or []),
+                    "reasoning_progress": assessment.understanding_change or "",
+                    "important_message_ids": [
+                        str(message.get("id") or "")
+                        for message in stage_history
+                        if str(message.get("id") or "").strip()
+                    ][:8],
+                    "important_artifacts": artifacts,
+                },
+                stage_id=cleaned_stage,
+            )
+            if checkpoint is None:
+                raise ValueError("Empty stage checkpoint")
+            self._store.complete_stage_review_job(
+                thread_id, stage_id=cleaned_stage, checkpoint=checkpoint
+            )
+        except Exception:
+            logger.exception(
+                "stage_review_execute_failed thread_id=%s stage_id=%s",
+                thread_id,
+                cleaned_stage,
+            )
+            try:
+                self._store.fail_stage_review_job(
+                    thread_id, stage_id=cleaned_stage, error_code="review_failed"
+                )
+            except Exception:
+                logger.exception(
+                    "stage_review_fail_mark_failed thread_id=%s stage_id=%s",
+                    thread_id,
+                    cleaned_stage,
+                )
+
+    def mark_journey_stage_reviews_read(self, thread_id: str) -> dict[str, Any]:
+        """Clear Journey unread after the student views Journey updates."""
+        return self._store.mark_journey_stage_reviews_read(thread_id)
+
+    def get_journey_stage_reviews(self, thread_id: str) -> dict[str, Any]:
+        """Return the durable Journey stage-review blob for one notebook."""
+        thread = self._notebooks.get_thread(thread_id)
+        if not thread:
+            raise ValueError("Notebook not found")
+        metadata = dict(thread.get("metadata") or {})
+        return parse_journey_stage_reviews(metadata.get(JOURNEY_STAGE_REVIEWS_KEY))
 
     def get_deep_review_job(self, thread_id: str) -> DeepReviewJob | None:
         """Return the owner-scoped Deep Review job, failing stale in-flight work.
@@ -908,6 +1061,7 @@ class CoachApplicationService:
                     force_full_final=bool(
                         runtime_settings.deep_review_force_full_final
                     ),
+                    journey_stage_reviews=metadata.get(JOURNEY_STAGE_REVIEWS_KEY),
                 )
                 metrics = record_deep_review_context_telemetry(context_plan)
                 prepared = prepared.model_copy(
@@ -1273,16 +1427,32 @@ class CoachApplicationService:
         validated_completion_stage: str | None = None
         if (
             not owned_review
-            and runtime_settings.student_stage_selection
             and manual_stage_target is None
             and prepared_request.revise_user_message_id is None
-            and turn.pending_transition is not None
             and turn.assessment.recommendation is StageDecision.ADVANCE
         ):
-            # Workflow validation (including the PI HMW guard) has already
-            # produced this pending ADVANCE. Phase 2 records completion while
-            # keeping focus and the auditable pending choice unchanged.
-            validated_completion_stage = prepared_request.current_stage
+            if (
+                prepared_request.current_stage == THINKING_STAGES[-1].id
+                and turn.pending_transition is None
+            ):
+                # Reflection ADVANCE is complete-in-place (no next-stage pending).
+                validated_completion_stage = prepared_request.current_stage
+            elif (
+                runtime_settings.student_stage_selection
+                and turn.pending_transition is not None
+            ):
+                # Workflow validation (including the PI HMW guard) has already
+                # produced this pending ADVANCE. Phase 2 records completion while
+                # keeping focus and the auditable pending choice unchanged.
+                validated_completion_stage = prepared_request.current_stage
+        completed_before = list(
+            normalize_journey(
+                (self._notebooks.get_thread(prepared_request.thread_id) or {})
+                .get("metadata", {})
+                .get("learning_journey")
+            ).get("completed_stages")
+            or []
+        )
         persist_started = time.perf_counter()
         emit_coach_progress(PROGRESS_SAVING)
         self._store.persist_coach_turn(
@@ -1412,6 +1582,10 @@ class CoachApplicationService:
             ),
         )
         record_field("persist_turn_ms", elapsed_ms(persist_started))
+        self._enqueue_stage_reviews_after_completion(
+            prepared_request.thread_id,
+            completed_before=completed_before,
+        )
         persist_stage = (
             auto_advance.to_stage
             if auto_advance is not None

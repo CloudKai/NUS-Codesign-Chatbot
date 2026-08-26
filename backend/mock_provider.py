@@ -24,6 +24,7 @@ from .specialists.routing import (
     select_specialist,
 )
 from .student_journey import (
+    DEFAULT_STAGE,
     STAGE_BY_ID,
     THINKING_STAGES,
     next_stage_id,
@@ -258,7 +259,7 @@ class DeterministicCoachProvider:
         advance_after = 2 if request.response_detail == "long" else 1
         guided_recommendation = (
             StageDecision.ADVANCE
-            if prior_stage_contributions >= advance_after and stage.id != "reflection"
+            if prior_stage_contributions >= advance_after
             else StageDecision.STAY
         )
         recommendation = self.recommendation or guided_recommendation
@@ -433,4 +434,47 @@ class DeterministicCoachProvider:
             qualifying_coaching_turn=False,
             deep_review_succeeded=True,
             review_trigger="explicit",
+        )
+
+    def assess_stage_checkpoint(
+        self, request: CoachRequest
+    ) -> ProviderAssessmentResult:
+        """Return a deterministic Journey stage-completion checkpoint."""
+        stage = STAGE_BY_ID.get(request.current_stage) or STAGE_BY_ID[DEFAULT_STAGE]
+        summary = " ".join(request.student_message.split())[:500]
+        assessment = EducationalAssessment(
+            current_stage=stage.id,
+            contribution_summary=summary or f"Completed {stage.label}.",
+            stage_assessment=f"Formative checkpoint for {stage.label}.",
+            critical_understanding_level="Not assessed",
+            confidence=0.55,
+            recommendation=StageDecision.STAY,
+            recommendation_rationale="Stage checkpoints do not change the Thinking Path.",
+            guidance_questions=[],
+            learning_summary=(
+                f"The student completed {stage.label} with a clearer "
+                "contribution and rationale."
+            ),
+            understanding_change=(
+                f"Reasoning in {stage.short_label} became more specific."
+            ),
+            review_strengths=[
+                f"Produced a usable {stage.short_label} contribution.",
+                "Connected the work to earlier Thinking Path context.",
+            ],
+            review_improvements=[
+                "One assumption or limitation still needs a later revisit.",
+            ],
+            review_depth="incremental",
+            review_model="mock-haiku-stage-checkpoint",
+            review_trigger="stage_checkpoint",
+        )
+        return ProviderAssessmentResult(
+            response_text=assessment.learning_summary or "",
+            assessment=assessment,
+            research_coding=None,
+            specialist="review",
+            qualifying_coaching_turn=False,
+            deep_review_succeeded=False,
+            review_trigger="stage_checkpoint",
         )

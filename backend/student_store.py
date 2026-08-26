@@ -1372,6 +1372,235 @@ class StudentStore:
             "The notebook was updated before Deep Review could be marked failed"
         )
 
+    def start_or_get_stage_review_job(
+        self, thread_id: str, *, stage_id: str
+    ) -> tuple[dict[str, Any], bool]:
+        """Mark one stage review as queued, or return the in-flight/complete job.
+
+        Args:
+            thread_id: Owned notebook id.
+            stage_id: Completed Thinking Path stage id.
+
+        Returns:
+            ``(blob, created)`` where *created* is ``True`` only when this call
+            newly queued the stage.
+
+        Raises:
+            ValueError: Missing notebook or unknown stage.
+        """
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            STAGE_REVIEW_QUEUED,
+            parse_journey_stage_reviews,
+            stage_review_should_enqueue,
+        )
+        from backend.student_journey import STAGE_BY_ID
+
+        cleaned_stage = str(stage_id or "").strip()
+        if cleaned_stage not in STAGE_BY_ID:
+            raise ValueError(f"Unknown thinking stage: {cleaned_stage}")
+        now = utc_now()
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                blob = parse_journey_stage_reviews(
+                    metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+                )
+                if not stage_review_should_enqueue(blob, stage_id=cleaned_stage):
+                    return blob, False
+                blob["jobs"][cleaned_stage] = {
+                    "status": STAGE_REVIEW_QUEUED,
+                    "updated_at": now,
+                    "error_code": None,
+                }
+                metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return blob, True
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before the stage review could be queued"
+        )
+
+    def mark_stage_review_running(self, thread_id: str, *, stage_id: str) -> None:
+        """Move a queued stage review to running."""
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            STAGE_REVIEW_QUEUED,
+            STAGE_REVIEW_RUNNING,
+            parse_journey_stage_reviews,
+        )
+
+        cleaned_stage = str(stage_id or "").strip()
+        now = utc_now()
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                blob = parse_journey_stage_reviews(
+                    metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+                )
+                job = dict(blob["jobs"].get(cleaned_stage) or {})
+                status = str(job.get("status") or "")
+                if status == STAGE_REVIEW_RUNNING:
+                    return
+                if status != STAGE_REVIEW_QUEUED:
+                    return
+                job["status"] = STAGE_REVIEW_RUNNING
+                job["updated_at"] = now
+                blob["jobs"][cleaned_stage] = job
+                metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before the stage review could start"
+        )
+
+    def complete_stage_review_job(
+        self,
+        thread_id: str,
+        *,
+        stage_id: str,
+        checkpoint: dict[str, Any],
+    ) -> None:
+        """Persist one successful Journey stage checkpoint and set unread."""
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            STAGE_REVIEW_COMPLETE,
+            normalize_stage_checkpoint,
+            parse_journey_stage_reviews,
+        )
+
+        cleaned_stage = str(stage_id or "").strip()
+        cleaned = normalize_stage_checkpoint(checkpoint, stage_id=cleaned_stage)
+        if cleaned is None:
+            raise ValueError("Stage checkpoint is empty")
+        now = utc_now()
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                blob = parse_journey_stage_reviews(
+                    metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+                )
+                blob["reviews"][cleaned_stage] = cleaned
+                blob["jobs"][cleaned_stage] = {
+                    "status": STAGE_REVIEW_COMPLETE,
+                    "updated_at": now,
+                    "error_code": None,
+                }
+                blob["unread"] = True
+                metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before the stage review could be saved"
+        )
+
+    def fail_stage_review_job(
+        self,
+        thread_id: str,
+        *,
+        stage_id: str,
+        error_code: str = "review_failed",
+    ) -> None:
+        """Mark one stage review failed without rolling back stage completion."""
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            STAGE_REVIEW_COMPLETE,
+            STAGE_REVIEW_FAILED,
+            parse_journey_stage_reviews,
+        )
+
+        cleaned_stage = str(stage_id or "").strip()
+        now = utc_now()
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                blob = parse_journey_stage_reviews(
+                    metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+                )
+                status = str(
+                    (blob["jobs"].get(cleaned_stage) or {}).get("status") or ""
+                )
+                if status == STAGE_REVIEW_COMPLETE:
+                    return
+                blob["jobs"][cleaned_stage] = {
+                    "status": STAGE_REVIEW_FAILED,
+                    "updated_at": now,
+                    "error_code": str(error_code or "review_failed").strip()
+                    or "review_failed",
+                }
+                metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before the stage review could be marked failed"
+        )
+
+    def mark_journey_stage_reviews_read(self, thread_id: str) -> dict[str, Any]:
+        """Clear the Journey unread flag after the student views Journey.
+
+        Returns:
+            The updated ``journey_stage_reviews`` blob.
+        """
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            parse_journey_stage_reviews,
+        )
+
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                blob = parse_journey_stage_reviews(
+                    metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+                )
+                if not blob["unread"]:
+                    return blob
+                blob["unread"] = False
+                metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return blob
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before Journey unread could be cleared"
+        )
+
     def select_learning_stage(self, thread_id: str, stage_id: str) -> dict[str, Any]:
         """Set the notebook's current stage and reject active pending transitions.
 
@@ -2286,8 +2515,6 @@ class StudentStore:
                 raise ValueError("Validated completion is not available during revision")
             if completion_stage != expected_stage:
                 raise ValueError("Validated completion stage does not match the coach turn")
-            if completion_stage == THINKING_STAGES[-1].id:
-                raise ValueError("Reflection cannot be completed by an ADVANCE turn")
         user_id = str(existing_user_message_id or uuid.uuid4())
         assistant_id = assistant_message_id or str(uuid.uuid4())
         assistant_meta = dict(assistant_metadata)
@@ -2323,11 +2550,26 @@ class StudentStore:
                 if isinstance(assessment, dict)
                 else None
             )
-            if (
+            is_terminal = completion_stage == THINKING_STAGES[-1].id
+            if str(assessment_recommendation or "").strip().lower() != "advance":
+                raise ValueError(
+                    "Validated completion requires an ADVANCE recommendation"
+                )
+            if is_terminal:
+                # Reflection complete-in-place: no next-stage pending row.
+                if decision_status not in {None, "", "pending"}:
+                    raise ValueError(
+                        "Terminal Reflection completion must not carry a "
+                        "confirmed transition"
+                    )
+                if proposed_stage:
+                    raise ValueError(
+                        "Terminal Reflection completion cannot propose a next stage"
+                    )
+            elif (
                 decision_status != "pending"
                 or expected_index + 1 >= len(stage_ids)
                 or proposed_stage != stage_ids[expected_index + 1]
-                or str(assessment_recommendation or "").strip().lower() != "advance"
             ):
                 raise ValueError(
                     "Validated completion requires a pending ADVANCE recommendation"

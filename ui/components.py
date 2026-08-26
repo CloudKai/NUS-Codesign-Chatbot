@@ -200,7 +200,9 @@ def notification_dot_html(*, visible: bool) -> str:
     """Return a small change indicator for navigation labels."""
     if not visible:
         return ""
-    return '<span class="cd-nav-dot" aria-label="New review updates"></span>'
+    return (
+        '<span class="cd-nav-dot" aria-label="New Journey updates">!</span>'
+    )
 
 
 def profile_initial(name: str) -> str:

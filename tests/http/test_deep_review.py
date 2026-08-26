@@ -19,7 +19,7 @@ from backend.specialists.review_orchestration import (
     DEEP_REVIEW_JOB_RUNNING,
     DEEP_REVIEW_TURN_MESSAGE,
 )
-from backend.student_journey import learning_review
+from backend.student_journey import THINKING_STAGES, learning_review, normalize_journey
 from backend.student_store import StudentStore
 
 
@@ -32,6 +32,20 @@ def _coach_payload(thread_id: str, message: str, key: str) -> dict[str, str]:
         "response_detail": "short",
         "idempotency_key": key,
     }
+
+
+def _unlock_deep_review(store: StudentStore, thread_id: str) -> None:
+    """Mark every Thinking Path stage complete so Deep Review is eligible.
+
+    Leaves ``current_stage`` unchanged so fixtures can still freeze review
+    provenance on Problem Identification (revisit-style focus).
+    """
+    thread = store.get_thread(thread_id) or {}
+    metadata = dict(thread.get("metadata") or {})
+    journey = normalize_journey(metadata.get("learning_journey"))
+    journey["completed_stages"] = [stage.id for stage in THINKING_STAGES]
+    metadata["learning_journey"] = journey
+    store.update_thread(thread_id, metadata=metadata)
 
 
 def _wait_http_job(client: TestClient, thread_id: str, timeout: float = 5.0) -> dict:
@@ -90,13 +104,13 @@ def test_ineligible_deep_review_returns_400(tmp_path) -> None:
         json={"idempotency_key": "too-soon"},
     )
     assert response.status_code == 400
-    assert "not available" in response.json()["detail"].lower()
+    assert "thinking path" in response.json()["detail"].lower()
 
 
 def test_eligible_deep_review_endpoint_enqueues_server_owned_review(tmp_path) -> None:
     store = StudentStore(tmp_path / "http-dr-ok.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
-    store.update_thread(thread_id, metadata={COUNTER_SETTINGS_KEY: 3})
+    _unlock_deep_review(store, thread_id)
     client = TestClient(create_app(store))
     started = time.monotonic()
     response = client.post(
@@ -159,7 +173,7 @@ def test_deep_review_same_notebook_allows_overlapping_coach_turn(
     monkeypatch.setattr(rate_limit_module, "_LIMITER", limiter)
     store = StudentStore(tmp_path / "http-dr-busy.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
-    store.update_thread(thread_id, metadata={COUNTER_SETTINGS_KEY: 3})
+    _unlock_deep_review(store, thread_id)
     client = TestClient(create_app(store))
     started = threading.Event()
     release = threading.Event()
@@ -195,7 +209,7 @@ def test_deep_review_same_notebook_allows_overlapping_coach_turn(
 def test_deep_review_post_returns_before_slow_worker(tmp_path, monkeypatch) -> None:
     store = StudentStore(tmp_path / "http-dr-slow.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
-    store.update_thread(thread_id, metadata={COUNTER_SETTINGS_KEY: 3})
+    _unlock_deep_review(store, thread_id)
     client = TestClient(create_app(store))
     original = CoachApplicationService.execute_deep_review_job
 
@@ -223,7 +237,7 @@ def test_deep_review_post_returns_before_slow_worker(tmp_path, monkeypatch) -> N
 def test_duplicate_deep_review_post_reuses_inflight_job(tmp_path, monkeypatch) -> None:
     store = StudentStore(tmp_path / "http-dr-dup.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
-    store.update_thread(thread_id, metadata={COUNTER_SETTINGS_KEY: 3})
+    _unlock_deep_review(store, thread_id)
     client = TestClient(create_app(store))
     started = threading.Event()
     release = threading.Event()
@@ -260,7 +274,7 @@ def test_chat_during_review_does_not_change_reviewed_revision(
 ) -> None:
     store = StudentStore(tmp_path / "http-dr-rev.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
-    store.update_thread(thread_id, metadata={COUNTER_SETTINGS_KEY: 3})
+    _unlock_deep_review(store, thread_id)
     client = TestClient(create_app(store))
     started = threading.Event()
     release = threading.Event()
@@ -292,7 +306,7 @@ def test_chat_during_review_does_not_change_reviewed_revision(
 def test_stage_advance_during_review_is_not_reverted(tmp_path, monkeypatch) -> None:
     store = StudentStore(tmp_path / "http-dr-stage.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
-    store.update_thread(thread_id, metadata={COUNTER_SETTINGS_KEY: 3})
+    _unlock_deep_review(store, thread_id)
     client = TestClient(create_app(store))
     started = threading.Event()
     release = threading.Event()
@@ -377,7 +391,7 @@ def test_another_user_cannot_read_or_invoke_deep_review(tmp_path) -> None:
     db = tmp_path / "http-dr-owner.sqlite3"
     owner_a = StudentStore(db, identifier="cognito:a")
     thread_id = owner_a.create_thread(model_id="mock", support_mode="critical-thinking")
-    owner_a.update_thread(thread_id, metadata={COUNTER_SETTINGS_KEY: 3})
+    _unlock_deep_review(owner_a, thread_id)
     owner_b = StudentStore(db, identifier="cognito:b")
     client_b = TestClient(create_app(owner_b))
     response = client_b.post(
@@ -406,7 +420,7 @@ def test_coach_turn_idempotency_key_does_not_block_http_deep_review(tmp_path) ->
         json=_coach_payload(thread_id, DEEP_REVIEW_TURN_MESSAGE, "shared-deep"),
     )
     assert poisoned.status_code == 200
-    store.update_thread(thread_id, metadata={COUNTER_SETTINGS_KEY: 3})
+    _unlock_deep_review(store, thread_id)
     response = client.post(
         f"/api/v1/threads/{thread_id}/deep-review",
         json={"idempotency_key": "shared-deep"},
@@ -422,6 +436,7 @@ def test_coach_turn_idempotency_key_does_not_block_http_deep_review(tmp_path) ->
 def test_mock_review_phrasing_does_not_reset_deep_review_counter(tmp_path) -> None:
     store = StudentStore(tmp_path / "http-dr-mock-review.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    _unlock_deep_review(store, thread_id)
     store.update_thread(thread_id, metadata={COUNTER_SETTINGS_KEY: 3})
     client = TestClient(create_app(store))
     response = client.post(

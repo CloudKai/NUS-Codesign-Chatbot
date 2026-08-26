@@ -370,6 +370,22 @@ def start_deep_review(
     return coach.enqueue_deep_review(thread_id, idempotency_key=idempotency_key)
 
 
+def mark_journey_stage_reviews_read(thread_id: str) -> dict:
+    """Clear the Journey unread flag after the student views Journey."""
+    if local_api_enabled():
+        return local_api_client().mark_journey_stage_reviews_read(thread_id)
+    _, _, coach, _ = _resolve_resources()
+    return coach.mark_journey_stage_reviews_read(thread_id)
+
+
+def get_journey_stage_reviews(thread_id: str) -> dict:
+    """Return the durable Journey stage-review blob for one notebook."""
+    if local_api_enabled():
+        return local_api_client().get_journey_stage_reviews(thread_id)
+    _, _, coach, _ = _resolve_resources()
+    return coach.get_journey_stage_reviews(thread_id)
+
+
 def get_deep_review_job(thread_id: str) -> DeepReviewJob | None:
     """Return the owner-scoped Deep Review job, or ``None`` when none exists."""
     if local_api_enabled():

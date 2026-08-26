@@ -1761,6 +1761,32 @@ def create_app(
             raise HTTPException(status_code=404, detail="Deep Review job not found")
         return job
 
+    @app.get("/api/v1/threads/{thread_id}/journey-stage-reviews")
+    def get_journey_stage_reviews(
+        thread_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> dict[str, Any]:
+        """Return Journey stage-completion review checkpoints for one notebook."""
+        if not owner.store.get_thread(thread_id):
+            raise HTTPException(status_code=404, detail="Notebook not found")
+        try:
+            return owner.coach.get_journey_stage_reviews(thread_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @app.post("/api/v1/threads/{thread_id}/journey-stage-reviews/read")
+    def mark_journey_stage_reviews_read(
+        thread_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> dict[str, Any]:
+        """Clear the Journey unread notification after the student views Journey."""
+        if not owner.store.get_thread(thread_id):
+            raise HTTPException(status_code=404, detail="Notebook not found")
+        try:
+            return owner.coach.mark_journey_stage_reviews_read(thread_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
     @app.post("/api/v1/coach/turn/stream")
     def coach_turn_stream(
         request: CoachRequest,

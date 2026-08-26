@@ -49,18 +49,33 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
     if pending_panel in {"Studio", "Chat", "Sources"}:
         st.session_state.mobile_panel = pending_panel
 
+    def _studio_mobile_label(value: str) -> str:
+        if value != "Studio":
+            return {"Sources": "Sources", "Chat": "Chat"}.get(value, value)
+        if st.session_state.get("studio_tab") == "Review":
+            return "Review"
+        label = "Journey"
+        try:
+            from backend.specialists.review_orchestration import (
+                JOURNEY_STAGE_REVIEWS_KEY,
+                parse_journey_stage_reviews,
+            )
+            from ui.runtime import store
+
+            thread = store.get_thread(str(st.session_state.get("thread_id") or "")) or {}
+            blob = parse_journey_stage_reviews(
+                (thread.get("metadata") or {}).get(JOURNEY_STAGE_REVIEWS_KEY)
+            )
+            if blob.get("unread"):
+                return "Journey !"
+        except Exception:
+            pass
+        return label
+
     panel = st.radio(
         "Workspace panel",
         ["Studio", "Chat", "Sources"],
-        format_func=lambda value: {
-            "Sources": "Sources",
-            "Chat": "Chat",
-            "Studio": (
-                "Review"
-                if st.session_state.get("studio_tab") == "Review"
-                else "Journey"
-            ),
-        }[value],
+        format_func=_studio_mobile_label,
         horizontal=True,
         key="mobile_panel",
         label_visibility="collapsed",

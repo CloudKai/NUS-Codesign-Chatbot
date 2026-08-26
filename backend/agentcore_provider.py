@@ -2033,6 +2033,114 @@ class AgentCoreCoachProvider:
             if owns_perf:
                 emit_coach_turn_perf()
 
+    def assess_stage_checkpoint(
+        self, request: CoachRequest
+    ) -> ProviderAssessmentResult:
+        """Run one Haiku incremental checkpoint for a completed Journey stage.
+
+        Separate from explicit Deep Review (Sonnet). Failures raise and are
+        handled by the stage-review job executor without affecting coaching.
+        """
+        owns_perf = current_perf() is None
+        if owns_perf:
+            begin_coach_turn_perf()
+        routed = request.model_copy(update={"specialist": SPECIALIST_REVIEW})
+        started = time.monotonic()
+        try:
+            payload, plan = self._invoke_payload(
+                routed,
+                SPECIALIST_REVIEW,
+                review_mode=REVIEW_DEPTH_INCREMENTAL,
+                review_trigger="stage_checkpoint",
+            )
+            parsed = self._call_runtime(
+                payload, request=routed, role="review_incremental"
+            )
+            result = _validated_result(parsed, routed)
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=True,
+                extra=" review_depth=incremental review_trigger=stage_checkpoint",
+                model_role="review_incremental",
+            )
+            record_field(
+                "agentcore_invoke_ms",
+                max(0, int((time.monotonic() - started) * 1000)),
+            )
+        except ProviderUnavailableError as error:
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=False,
+                failure_category=error.category,
+                extra=" review_depth=incremental review_trigger=stage_checkpoint",
+                model_role="review_incremental",
+            )
+            record_field(
+                "agentcore_invoke_ms",
+                max(0, int((time.monotonic() - started) * 1000)),
+            )
+            record_failure(error.category)
+            raise
+        except Exception as error:
+            translated = _translate_agentcore_error(error)
+            self._log_role_precise(
+                role="review",
+                started=started,
+                success=False,
+                failure_category=translated.category,
+                extra=" review_depth=incremental review_trigger=stage_checkpoint",
+                model_role="review_incremental",
+            )
+            record_field(
+                "agentcore_invoke_ms",
+                max(0, int((time.monotonic() - started) * 1000)),
+            )
+            record_failure(translated.category)
+            raise translated from error
+        review = self._parse_review_turn(parsed)
+        model_id = self._role_provider_model("review_incremental")[1]
+        strengths = list(getattr(review, "strengths", None) or [])
+        areas = list(getattr(review, "areas_to_develop", None) or [])
+        synthesis = str(getattr(review, "synthesis", "") or "").strip()
+        working = str(getattr(review, "working_conclusion", "") or "").strip()
+        text = str(getattr(review, "response_text", "") or "").strip()
+        assessment = result.assessment.model_copy(
+            update={
+                "recommendation": StageDecision.STAY,
+                "learning_summary": synthesis
+                or text
+                or result.assessment.learning_summary,
+                "understanding_change": working
+                or result.assessment.understanding_change,
+                "review_strengths": strengths
+                or list(result.assessment.review_strengths or []),
+                "review_improvements": areas
+                or list(result.assessment.review_improvements or []),
+                "review_depth": REVIEW_DEPTH_INCREMENTAL,
+                "review_model": model_id or "",
+                "review_trigger": "stage_checkpoint",
+            }
+        )
+        merged = self._with_memory(
+            request,
+            result.model_copy(
+                update={
+                    "assessment": assessment,
+                    "specialist": SPECIALIST_REVIEW,
+                    "qualifying_coaching_turn": False,
+                    "deep_review_succeeded": False,
+                    "review_trigger": "stage_checkpoint",
+                }
+            ),
+            plan,
+        )
+        if owns_perf:
+            record_success()
+            emit_coach_turn_perf()
+        return merged
+
     def _assess_explicit_review(self, request: CoachRequest) -> ProviderAssessmentResult:
         """Run one explicit Deep Review invoke. Never used for normal chat."""
         owns_perf = current_perf() is None

@@ -40,6 +40,7 @@ SETTINGS_KEYS = frozenset(
         "coaching_turns_since_deep_review",
         "deep_review_snapshot",
         "deep_review_job",
+        "journey_stage_reviews",
     }
 )
 

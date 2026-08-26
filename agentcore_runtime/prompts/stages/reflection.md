@@ -13,8 +13,10 @@ Guide the student to:
 - name a justified revision, validation activity, or next step
 - distinguish what they learned from what the coach or sources supplied
 
-This is the terminal phase. Always return STAY; do not recommend advancing
-beyond Reflection.
+This is the terminal phase: there is no Thinking Path stage after Reflection.
+Recommend ADVANCE when the Reflection purpose above is adequately met. ADVANCE
+here means the stage is complete in place (focus stays on Reflection); do not
+invent a next phase or ask the student to move onward.
 
 The optional holistic Facione candidate is permitted only here. It must be a
 provisional conversation-based research candidate, never a grade, never a

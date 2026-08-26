@@ -356,23 +356,171 @@ def should_run_deep_review(trigger: str | None) -> bool:
 
 def explicit_deep_review_available(
     *,
-    coaching_turns_since_deep_review: int,
-    interval: int,
+    completed_stages: list[str] | tuple[str, ...] | None = None,
+    coaching_turns_since_deep_review: int | None = None,
+    interval: int | None = None,
 ) -> bool:
-    """Return whether persisted Coaching turns unlock one explicit Deep Review.
+    """Return whether the Thinking Path unlocks one explicit Deep Review.
 
-    Reaching 4, 5, or 6 unused qualifying turns still yields one entitlement.
-    The counter is not a bank of stacked reviews.
+    Unlock requires every required Thinking Path stage, including Reflection,
+    to appear in ``completed_stages``. The legacy coaching-turn counter is
+    ignored when ``completed_stages`` is supplied (the live gate). The
+    counter/interval form remains only for older callers and tests.
 
     Args:
-        coaching_turns_since_deep_review: Durable notebook counter.
-        interval: Configured ``DEEP_REVIEW_INTERVAL_TURNS``.
+        completed_stages: Persisted completed stage ids.
+        coaching_turns_since_deep_review: Legacy notebook counter (unused when
+            ``completed_stages`` is provided).
+        interval: Legacy ``DEEP_REVIEW_INTERVAL_TURNS`` (unused when
+            ``completed_stages`` is provided).
 
     Returns:
-        ``True`` when ``counter >= interval``.
+        ``True`` when Deep Review may be enqueued.
     """
+    if completed_stages is not None:
+        done = {
+            str(stage_id or "").strip()
+            for stage_id in completed_stages
+            if str(stage_id or "").strip()
+        }
+        required = {stage.id for stage in THINKING_STAGES}
+        return required.issubset(done)
     current = parse_coaching_turns_since_deep_review(coaching_turns_since_deep_review)
     return current >= bound_deep_review_interval(interval)
+
+
+JOURNEY_STAGE_REVIEWS_KEY = "journey_stage_reviews"
+STAGE_REVIEW_QUEUED = "queued"
+STAGE_REVIEW_RUNNING = "running"
+STAGE_REVIEW_COMPLETE = "complete"
+STAGE_REVIEW_FAILED = "failed"
+STAGE_REVIEW_ACTIVE = frozenset({STAGE_REVIEW_QUEUED, STAGE_REVIEW_RUNNING})
+STAGE_REVIEW_STATUSES = frozenset(
+    {
+        STAGE_REVIEW_QUEUED,
+        STAGE_REVIEW_RUNNING,
+        STAGE_REVIEW_COMPLETE,
+        STAGE_REVIEW_FAILED,
+    }
+)
+
+
+def empty_journey_stage_reviews() -> dict[str, Any]:
+    """Return an empty durable Journey stage-review blob."""
+    return {"jobs": {}, "reviews": {}, "unread": False}
+
+
+def parse_journey_stage_reviews(value: Any) -> dict[str, Any]:
+    """Normalize the ``journey_stage_reviews`` settings blob.
+
+    Args:
+        value: Raw notebook settings value.
+
+    Returns:
+        ``{jobs, reviews, unread}`` with known stage ids only.
+    """
+    base = empty_journey_stage_reviews()
+    if not isinstance(value, dict):
+        return base
+    jobs_raw = value.get("jobs") if isinstance(value.get("jobs"), dict) else {}
+    reviews_raw = value.get("reviews") if isinstance(value.get("reviews"), dict) else {}
+    jobs: dict[str, Any] = {}
+    reviews: dict[str, Any] = {}
+    for stage_id in STAGE_BY_ID:
+        job = jobs_raw.get(stage_id)
+        if isinstance(job, dict):
+            status = str(job.get("status") or "").strip().lower()
+            if status in STAGE_REVIEW_STATUSES:
+                jobs[stage_id] = {
+                    "status": status,
+                    "updated_at": str(job.get("updated_at") or "").strip() or None,
+                    "error_code": str(job.get("error_code") or "").strip() or None,
+                }
+        review = reviews_raw.get(stage_id)
+        if isinstance(review, dict):
+            cleaned = normalize_stage_checkpoint(review, stage_id=stage_id)
+            if cleaned is not None:
+                reviews[stage_id] = cleaned
+    return {
+        "jobs": jobs,
+        "reviews": reviews,
+        "unread": bool(value.get("unread")),
+    }
+
+
+def normalize_stage_checkpoint(
+    value: Any, *, stage_id: str
+) -> dict[str, Any] | None:
+    """Return one compact Journey stage checkpoint, or ``None`` when empty."""
+    if not isinstance(value, dict):
+        return None
+    cleaned_stage = str(stage_id or value.get("stage") or "").strip()
+    if cleaned_stage not in STAGE_BY_ID:
+        return None
+    strengths = _compact_stage_review_items(value.get("strengths"), limit=4)
+    areas = _compact_stage_review_items(
+        value.get("areas_to_revisit") or value.get("areas_to_develop"),
+        limit=4,
+    )
+    summary = " ".join(str(value.get("summary") or "").split()).strip()[:600]
+    reasoning = " ".join(
+        str(value.get("reasoning_progress") or "").split()
+    ).strip()[:400]
+    message_ids = [
+        str(item).strip()
+        for item in (value.get("important_message_ids") or [])
+        if str(item).strip()
+    ][:12]
+    artifacts_raw = value.get("important_artifacts")
+    artifacts: dict[str, str] = {}
+    if isinstance(artifacts_raw, dict):
+        for key, item in artifacts_raw.items():
+            cleaned_key = str(key or "").strip()[:64]
+            cleaned_item = " ".join(str(item or "").split()).strip()[:400]
+            if cleaned_key and cleaned_item:
+                artifacts[cleaned_key] = cleaned_item
+            if len(artifacts) >= 8:
+                break
+    if not (summary or strengths or areas or reasoning or artifacts):
+        return None
+    return {
+        "stage": cleaned_stage,
+        "summary": summary,
+        "strengths": strengths,
+        "areas_to_revisit": areas,
+        "reasoning_progress": reasoning,
+        "important_message_ids": message_ids,
+        "important_artifacts": artifacts,
+    }
+
+
+def stage_review_should_enqueue(
+    blob: dict[str, Any] | None, *, stage_id: str
+) -> bool:
+    """Return whether one stage still needs a Journey Haiku review queued."""
+    cleaned = str(stage_id or "").strip()
+    if cleaned not in STAGE_BY_ID:
+        return False
+    parsed = parse_journey_stage_reviews(blob)
+    status = str((parsed["jobs"].get(cleaned) or {}).get("status") or "")
+    if status in STAGE_REVIEW_ACTIVE or status == STAGE_REVIEW_COMPLETE:
+        return False
+    return True
+
+
+def newly_completed_stage_ids(
+    before: list[str] | tuple[str, ...] | None,
+    after: list[str] | tuple[str, ...] | None,
+) -> list[str]:
+    """Return newly completed stage ids in Thinking Path order."""
+    before_set = {str(item).strip() for item in (before or []) if str(item).strip()}
+    after_list = [str(item).strip() for item in (after or []) if str(item).strip()]
+    added = [stage_id for stage_id in after_list if stage_id not in before_set]
+    order = {stage.id: index for index, stage in enumerate(THINKING_STAGES)}
+    return sorted(
+        (stage_id for stage_id in added if stage_id in order),
+        key=lambda stage_id: order[stage_id],
+    )
 
 
 def _compact_stage_review_items(values: Any, *, limit: int = 8) -> list[str]:

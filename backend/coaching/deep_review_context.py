@@ -28,6 +28,7 @@ from backend.turn_perf import record_field
 DEEP_REVIEW_CHECKPOINT_VERSION = 1
 DEEP_REVIEW_CONTEXT_FULL_HISTORY = "full_history"
 DEEP_REVIEW_CONTEXT_CHECKPOINT_DELTA = "checkpoint_delta"
+DEEP_REVIEW_CONTEXT_STAGE_JOURNEY = "stage_journey"
 DEFAULT_CHECKPOINT_TOKEN_THRESHOLD = 20_000
 MAX_SUPPORTING_MESSAGE_REFS = 3
 MAX_COMPACT_CONTEXT_CHARS = 120_000
@@ -453,6 +454,90 @@ def checkpoint_identity_for_enqueue(snapshot: Any) -> tuple[int | None, int | No
     )
 
 
+def _format_journey_stage_checkpoints(
+    reviews: dict[str, Any],
+) -> str:
+    """Render completed Journey Haiku checkpoints for longitudinal Deep Review.
+
+    Args:
+        reviews: Stage-id → checkpoint mapping from ``journey_stage_reviews``.
+
+    Returns:
+        Untrusted compact context text, or empty when no checkpoints exist.
+    """
+    if not isinstance(reviews, dict) or not reviews:
+        return ""
+    blocks: list[str] = [
+        "Journey stage checkpoints (Haiku incremental reviews).",
+        "Treat as formative summaries, not immutable truth. Prefer these over",
+        "dumping the full transcript. Re-evaluate using the raw evidence anchors.",
+        "",
+    ]
+    found = False
+    for stage in STAGE_BY_ID.values():
+        checkpoint = reviews.get(stage.id)
+        if not isinstance(checkpoint, dict):
+            continue
+        summary = str(checkpoint.get("summary") or "").strip()
+        strengths = [
+            str(item).strip()
+            for item in (checkpoint.get("strengths") or [])
+            if str(item).strip()
+        ]
+        areas = [
+            str(item).strip()
+            for item in (
+                checkpoint.get("areas_to_revisit")
+                or checkpoint.get("areas_to_develop")
+                or []
+            )
+            if str(item).strip()
+        ]
+        reasoning = str(checkpoint.get("reasoning_progress") or "").strip()
+        artifacts = checkpoint.get("important_artifacts")
+        if not (summary or strengths or areas or reasoning or artifacts):
+            continue
+        found = True
+        blocks.append(f"## {stage.label} ({stage.id})")
+        if summary:
+            blocks.append(f"Summary: {summary}")
+        if reasoning:
+            blocks.append(f"Reasoning progress: {reasoning}")
+        if strengths:
+            blocks.append("Strengths:")
+            blocks.extend(f"- {item}" for item in strengths)
+        if areas:
+            blocks.append("Areas to revisit:")
+            blocks.extend(f"- {item}" for item in areas)
+        if isinstance(artifacts, dict) and artifacts:
+            blocks.append("Important artifacts:")
+            for key, value in artifacts.items():
+                cleaned_key = str(key or "").strip()
+                cleaned_value = str(value or "").strip()
+                if cleaned_key and cleaned_value:
+                    blocks.append(f"- {cleaned_key}: {cleaned_value}")
+        blocks.append("")
+    return "\n".join(blocks).strip() if found else ""
+
+
+def _important_ids_from_journey_reviews(reviews: dict[str, Any]) -> list[str]:
+    """Collect durable message ids named by Journey stage checkpoints."""
+    ordered: list[str] = []
+    seen: set[str] = set()
+    if not isinstance(reviews, dict):
+        return ordered
+    for stage_id in STAGE_BY_ID:
+        checkpoint = reviews.get(stage_id)
+        if not isinstance(checkpoint, dict):
+            continue
+        for item in checkpoint.get("important_message_ids") or []:
+            cleaned = _clean_id(item)
+            if cleaned and cleaned not in seen:
+                seen.add(cleaned)
+                ordered.append(cleaned)
+    return ordered
+
+
 def _format_checkpoint_body(snapshot: dict[str, Any]) -> str:
     """Render prior validated Deep Review fields without raw message content."""
     lines = [
@@ -782,11 +867,14 @@ def plan_deep_review_context(
     expected_checkpoint_version: int | None,
     threshold: int = DEFAULT_CHECKPOINT_TOKEN_THRESHOLD,
     force_full_final: bool = True,
+    journey_stage_reviews: Any = None,
 ) -> DeepReviewContextPlan:
-    """Choose full_history or checkpoint_delta for one Deep Review invoke.
+    """Choose full_history, checkpoint_delta, or stage_journey for Deep Review.
 
     Accuracy wins. Any uncertain compatibility check falls back to sending
-    the full frozen active history.
+    the full frozen active history. When Journey Haiku checkpoints exist and
+    prior Deep Review checkpoint_delta is unavailable, prefer those
+    checkpoints plus only their important message rows.
 
     Args:
         frozen_history: Active messages reconstructed for this frozen job.
@@ -797,7 +885,10 @@ def plan_deep_review_context(
         expected_checkpoint_revision: Checkpoint identity frozen at enqueue.
         expected_checkpoint_version: Checkpoint version frozen at enqueue.
         threshold: Transcript-token ceiling that still uses full history.
-        force_full_final: When True, Reflection-stage reviews stay full history.
+        force_full_final: When True, Reflection-stage reviews stay full history
+            unless Journey stage checkpoints can replace the dump.
+        journey_stage_reviews: Optional ``journey_stage_reviews`` settings blob
+            or its ``reviews`` mapping.
 
     Returns:
         A plan with converse history, optional compact untrusted context, and
@@ -808,6 +899,13 @@ def plan_deep_review_context(
     reviewed_count = len(eligible)
     prefixed = prefix_history_with_refs(frozen_history, id_to_ref)
 
+    reviews_map: dict[str, Any] = {}
+    if isinstance(journey_stage_reviews, dict):
+        if isinstance(journey_stage_reviews.get("reviews"), dict):
+            reviews_map = dict(journey_stage_reviews.get("reviews") or {})
+        else:
+            reviews_map = dict(journey_stage_reviews)
+
     def _full(
         reason: str,
         *,
@@ -816,6 +914,18 @@ def plan_deep_review_context(
         anchor_count: int = 0,
         delta_count: int = 0,
     ) -> DeepReviewContextPlan:
+        journey_plan = _try_stage_journey_plan(
+            frozen_history=frozen_history,
+            eligible=eligible,
+            reviews_map=reviews_map,
+            full_tokens=full_tokens,
+            reviewed_count=reviewed_count,
+            ref_to_id=ref_to_id,
+            id_to_ref=id_to_ref,
+            checkpoint_revision=checkpoint_revision,
+        )
+        if journey_plan is not None:
+            return journey_plan
         return DeepReviewContextPlan(
             mode=DEEP_REVIEW_CONTEXT_FULL_HISTORY,
             fallback_reason=reason,
@@ -866,7 +976,12 @@ def plan_deep_review_context(
     for message_id in supporting_ids:
         message = frozen_by_id.get(message_id)
         if message is None or message_id not in id_to_ref:
-            return _full("anchors_invalid", checkpoint_revision=_optional_int(snapshot.get("reviewed_through_revision")))
+            return _full(
+                "anchors_invalid",
+                checkpoint_revision=_optional_int(
+                    snapshot.get("reviewed_through_revision")
+                ),
+            )
         anchors.append(message)
     delta_messages = [
         item
@@ -922,6 +1037,66 @@ def plan_deep_review_context(
         converse_history=[],
         frozen_history=list(frozen_history),
     )
+
+
+def _try_stage_journey_plan(
+    *,
+    frozen_history: list[dict[str, Any]],
+    eligible: list[dict[str, Any]],
+    reviews_map: dict[str, Any],
+    full_tokens: int,
+    reviewed_count: int,
+    ref_to_id: dict[str, str],
+    id_to_ref: dict[str, str],
+    checkpoint_revision: int | None,
+) -> DeepReviewContextPlan | None:
+    """Build a stage_journey plan when Haiku checkpoints can replace a dump."""
+    compact = _format_journey_stage_checkpoints(reviews_map)
+    if not compact or len(compact) > MAX_COMPACT_CONTEXT_CHARS:
+        return None
+    important_ids = _important_ids_from_journey_reviews(reviews_map)
+    frozen_by_id = _messages_by_id(frozen_history)
+    anchors: list[dict[str, Any]] = []
+    for message_id in important_ids:
+        message = frozen_by_id.get(message_id)
+        if message is None or message_id not in id_to_ref:
+            continue
+        anchors.append(message)
+    if len(anchors) < 2:
+        for item in eligible[-6:]:
+            message_id = _message_id(item)
+            if not message_id or message_id not in id_to_ref:
+                continue
+            if any(_message_id(existing) == message_id for existing in anchors):
+                continue
+            anchors.append(item)
+            if len(anchors) >= 6:
+                break
+    compact_tokens = estimate_tokens(compact) + estimate_transcript_tokens(anchors)
+    # Prefer Journey checkpoints whenever they exist so Sonnet sees a
+    # longitudinal digest instead of dumping the full transcript.
+    exposed_ids = exposed_message_ids_for_blocks(anchors)
+    exposed_ref_map = filter_ref_map(ref_to_id, exposed_ids) if exposed_ids else {}
+    converse = prefix_history_with_refs(anchors, id_to_ref) if anchors else []
+    saved = max(0, full_tokens - compact_tokens)
+    return DeepReviewContextPlan(
+        mode=DEEP_REVIEW_CONTEXT_STAGE_JOURNEY,
+        fallback_reason="",
+        checkpoint_valid=False,
+        checkpoint_revision=checkpoint_revision,
+        full_estimated_tokens=full_tokens,
+        actual_context_estimated_tokens=compact_tokens,
+        estimated_tokens_saved=saved,
+        estimated_savings_ratio=round(estimated_savings_ratio(full_tokens, saved), 4),
+        anchor_count=len(anchors),
+        delta_message_count=0,
+        reviewed_message_count=reviewed_count,
+        compact_context=compact,
+        ref_map=exposed_ref_map,
+        converse_history=converse,
+        frozen_history=list(frozen_history),
+    )
+
 
 
 def context_metrics(plan: DeepReviewContextPlan) -> dict[str, Any]:

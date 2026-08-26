@@ -72,12 +72,18 @@
     }
 
     .cd-nav-dot {
-        display:inline-block;
-        width:.42rem;
-        height:.42rem;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        width:.95rem;
+        height:.95rem;
         margin-left:.28rem;
         border-radius:999px;
         background:var(--cd-warning-dot);
+        color:#fff;
+        font-size:.62rem;
+        font-weight:800;
+        line-height:1;
         vertical-align:middle;
     }
 
