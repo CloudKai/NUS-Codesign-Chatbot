@@ -1108,6 +1108,20 @@
         height:100%;
     }
 
+    /* Collapse zero-height layout helpers so they cannot stretch the Review pane. */
+    .st-key-studio_scroll [data-testid="stLayoutWrapper"]:has(iframe[height="0"]),
+    .st-key-studio_scroll [data-testid="stLayoutWrapper"]:has(iframe[style*="height: 0"]),
+    .st-key-studio_scroll [data-testid="stElementContainer"]:has(iframe[height="0"]),
+    .st-key-studio_scroll [data-testid="stElementContainer"]:has(iframe[style*="height: 0"]) {
+        flex:0 0 0 !important;
+        min-height:0 !important;
+        max-height:0 !important;
+        height:0 !important;
+        overflow:hidden !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
     .st-key-sources_scroll,
     .st-key-studio_scroll {
         min-height:0;
@@ -1194,42 +1208,109 @@
         font-variant-numeric:tabular-nums;
     }
 
-    .st-key-studio_scroll [role="tablist"] {
+    .st-key-studio_section_tabs {
         position:sticky;
         top:0;
         z-index:3;
-        width:100%;
-        height:2.55rem;
-        display:grid !important;
-        grid-template-columns:1fr 1fr;
-        gap:0 !important;
-        overflow:hidden;
-        margin:.35rem 0 .4rem;
+        width:100% !important;
+        max-width:100% !important;
+        margin:.35rem 0 .4rem !important;
         padding:0 !important;
-        border:1px solid var(--cd-border);
-        border-radius:.62rem;
-        background:var(--cd-surface);
     }
 
-    .st-key-studio_scroll [role="tab"] {
-        min-height:2.45rem;
-        display:flex;
-        justify-content:center;
+    /* Force full-width two-pane tabs (Streamlit radio defaults shrink-wrap). */
+    .st-key-studio_section_tabs [data-testid="stElementContainer"],
+    .st-key-studio_section_tabs [data-testid="stLayoutWrapper"],
+    .st-key-studio_section_tabs .st-key-studio_tab,
+    .st-key-studio_section_tabs [data-testid="stRadio"],
+    .st-key-studio_section_tabs [data-testid="stRadio"] > div,
+    .st-key-studio_section_tabs [data-testid="stRadioGroup"],
+    .st-key-studio_section_tabs [role="radiogroup"] {
+        width:100% !important;
+        max-width:100% !important;
+        min-width:0 !important;
+        box-sizing:border-box !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-studio_section_tabs [data-testid="stRadioGroup"],
+    .st-key-studio_section_tabs [role="radiogroup"] {
+        height:2.55rem !important;
+        display:grid !important;
+        grid-template-columns:minmax(0,1fr) minmax(0,1fr) !important;
+        grid-auto-flow:column !important;
+        align-items:stretch !important;
+        justify-content:stretch !important;
+        gap:0 !important;
+        overflow:hidden !important;
+        border:1px solid var(--cd-border) !important;
+        border-radius:.62rem !important;
+        background:var(--cd-surface) !important;
+        flex-wrap:nowrap !important;
+    }
+
+    .st-key-studio_section_tabs [role="radiogroup"] > label,
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"] {
+        width:100% !important;
+        min-width:0 !important;
+        min-height:2.45rem !important;
+        flex:1 1 0% !important;
+        display:flex !important;
+        align-items:center !important;
+        justify-content:center !important;
         margin:0 !important;
         padding:.45rem .7rem !important;
         border:0 !important;
+        border-radius:0 !important;
         color:var(--cd-muted) !important;
         background:transparent !important;
+        gap:0 !important;
     }
 
-    .st-key-studio_scroll [role="tab"]:first-child {
+    .st-key-studio_section_tabs [role="radiogroup"] > label:first-child,
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:first-child {
         border-right:1px solid var(--cd-border) !important;
     }
 
-    .st-key-studio_scroll [role="tab"][aria-selected="true"] {
+    .st-key-studio_section_tabs [role="radiogroup"] > label[data-checked="true"],
+    .st-key-studio_section_tabs [role="radiogroup"] > label:has(input:checked),
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"][data-selected="true"],
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:has(input:checked) {
         color:var(--cd-accent) !important;
         background:var(--cd-accent-soft) !important;
         box-shadow:inset 0 -2px 0 var(--cd-accent);
+    }
+
+    /* Hide the native radio glyph so this control reads like the old tabs. */
+    .st-key-studio_section_tabs [role="radiogroup"] > label
+    > div > div > div:first-child,
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"]
+    > div > div > div:first-child {
+        display:none !important;
+    }
+
+    .st-key-studio_section_tabs [role="radiogroup"] > label [data-testid="stWidgetLabel"],
+    .st-key-studio_section_tabs [role="radiogroup"] > label p,
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"] p {
+        color:inherit !important;
+        -webkit-text-fill-color:currentColor !important;
+        font-weight:650 !important;
+        margin:0 !important;
+        text-align:center !important;
+    }
+
+    .st-key-studio_section_tabs [role="radiogroup"] input {
+        position:absolute !important;
+        opacity:0 !important;
+        pointer-events:none !important;
+        width:0 !important;
+        height:0 !important;
+    }
+
+    .st-key-studio_section_tabs [role="radiogroup"] [data-testid="stMarkdownContainer"] {
+        margin:0 !important;
+        padding:0 !important;
     }
 
     .st-key-studio_scroll [data-testid="stCaptionContainer"] {
@@ -1251,10 +1332,6 @@
     .st-key-studio_scroll .cd-progress,
     .st-key-studio_scroll .cd-progress-heading {
         overflow:visible !important;
-    }
-
-    .st-key-studio_scroll [role="tab"] .react-aria-SelectionIndicator {
-        display:none !important;
     }
 
     /* One feed owns persisted history and the in-flight turn. The composer is

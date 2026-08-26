@@ -96,6 +96,7 @@ def test_review_tab_renders_projected_deep_review_feedback() -> None:
             )
         },
     )
+    app.session_state["studio_tab"] = "Review"
     app.run()
     assert not app.exception
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
@@ -106,9 +107,85 @@ def test_review_tab_renders_projected_deep_review_feedback() -> None:
     assert {expander.label for expander in app.expander} >= {
         "Strengths",
         "Areas for improvement",
+        "Working conclusion",
         "Problem identification",
     }
 
+
+def test_stage_review_checkpoint_renders_on_review_tab_with_stop_badge() -> None:
+    """Checkpoint copy nests under Review expanders; selecting Review clears badges."""
+    from backend.specialists.review_orchestration import (
+        JOURNEY_STAGE_REVIEWS_KEY,
+        STAGE_REVIEW_COMPLETE,
+        empty_journey_stage_reviews,
+        parse_journey_stage_reviews,
+    )
+    from backend.student_store import StudentStore
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    assert not app.exception
+    thread_id = str(app.session_state["thread_id"])
+    store = StudentStore()
+    thread = store.get_thread(thread_id) or {}
+    metadata = dict(thread.get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = ["problem_identification"]
+    blob = empty_journey_stage_reviews()
+    blob["unread"] = True
+    blob["jobs"]["problem_identification"] = {"status": STAGE_REVIEW_COMPLETE}
+    blob["reviews"]["problem_identification"] = {
+        "summary": "Focused problem statement from the Journey checkpoint.",
+        "strengths": ["Clear user focus"],
+        "areas_to_revisit": ["Check the outcome wording."],
+        "reasoning_progress": "Moved from a general concern to a HMW.",
+    }
+    metadata["learning_journey"] = journey
+    metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
+    store.update_thread(thread_id, metadata=metadata)
+    app.session_state["learning_journey"]["completed_stages"] = [
+        "problem_identification"
+    ]
+    app.run()
+    assert not app.exception
+    workspace_panel = next(
+        radio for radio in app.radio if radio.label == "Workspace panel"
+    )
+    assert "Journey 🛑" in workspace_panel.options
+    assert "Journey !" not in workspace_panel.options
+    studio_section = next(
+        radio for radio in app.radio if radio.label == "Thinking Path section"
+    )
+    assert any("Review" in str(option) and "🛑" in str(option) for option in studio_section.options)
+
+    app.session_state["studio_tab"] = "Review"
+    app.run()
+    assert not app.exception
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert "Focused problem statement from the Journey checkpoint." in rendered
+    assert "Clear user focus" in rendered
+    assert "Check the outcome wording." in rendered
+    assert {expander.label for expander in app.expander} >= {
+        "Strengths",
+        "Areas for improvement",
+        "Working conclusion",
+        "Problem identification",
+    }
+    cleared = parse_journey_stage_reviews(
+        (store.get_thread(thread_id) or {}).get("metadata", {}).get(
+            JOURNEY_STAGE_REVIEWS_KEY
+        )
+    )
+    assert cleared.get("unread") is False
+    workspace_panel = next(
+        radio for radio in app.radio if radio.label == "Workspace panel"
+    )
+    assert "Journey 🛑" not in workspace_panel.options
+    assert "Journey" in workspace_panel.options
+    assert "Review" not in workspace_panel.options
+    studio_section = next(
+        radio for radio in app.radio if radio.label == "Thinking Path section"
+    )
+    assert all("🛑" not in str(option) for option in studio_section.options)
 
 def test_deep_review_button_is_full_width_and_grouped_with_caption() -> None:
     """Start Deep Review spans the Review column and sits tight under its caption."""

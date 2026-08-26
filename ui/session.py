@@ -22,6 +22,7 @@ from backend.models import (
 from backend.student_journey import (
     DEFAULT_RESPONSE_DETAIL,
     DEFAULT_STAGE,
+    STAGE_BY_ID,
     default_journey,
     normalize_journey,
 )
@@ -81,6 +82,7 @@ def initialize_session() -> None:
         "display_name": "Student",
         "review_fingerprint": "",
         "review_seen_fingerprint": "",
+        "stage_move_notice": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -161,6 +163,7 @@ def new_notebook(should_rerun: bool = True) -> None:
     st.session_state.pending_edit = None
     st.session_state.edit_error_message = None
     st.session_state.edit_confirm_message_id = None
+    clear_stage_move_notice()
     _persist_active_thread(thread_id)
     if should_rerun:
         st.session_state.mobile_panel = "Chat"
@@ -168,6 +171,55 @@ def new_notebook(should_rerun: bool = True) -> None:
         set_side_panel_collapsed("sources", False)
         st.session_state.toast_course_materials_loading = True
         rerun_app()
+
+
+def set_stage_move_notice(label: str) -> None:
+    """Show a session-only ``Moved to stage: …`` line above the composer."""
+    cleaned = str(label or "").strip()
+    st.session_state.stage_move_notice = cleaned or None
+
+
+def clear_stage_move_notice() -> None:
+    """Drop the ephemeral stage-move composer notice."""
+    st.session_state.stage_move_notice = None
+
+
+def apply_manual_stage_move(thread_id: str, stage_id: str) -> bool:
+    """Move Thinking Path focus without writing chat bubbles.
+
+    Calls ``store.select_stage``, refreshes session journey, and sets
+    ``stage_move_notice`` only when focus actually changed.
+
+    Args:
+        thread_id: Active notebook id.
+        stage_id: Canonical Thinking Path stage id.
+
+    Returns:
+        True when ``current_stage`` changed; False when already on ``stage_id``.
+
+    Raises:
+        ValueError: When the stage is unknown, locked, or the notebook is missing.
+    """
+    cleaned = str(stage_id or "").strip()
+    stage = STAGE_BY_ID.get(cleaned)
+    if stage is None:
+        raise ValueError(f"Unknown thinking stage: {cleaned}")
+    previous = str(
+        normalize_journey(st.session_state.get("learning_journey")).get(
+            "current_stage"
+        )
+        or ""
+    ).strip()
+    metadata = store.select_stage(thread_id, cleaned)
+    journey = normalize_journey(metadata.get("learning_journey"))
+    st.session_state.learning_journey = journey
+    st.session_state.response_detail = journey["response_detail"]
+    selected = str(journey.get("current_stage") or cleaned).strip()
+    if selected != previous:
+        set_stage_move_notice(STAGE_BY_ID[selected].label)
+        return True
+    clear_stage_move_notice()
+    return False
 
 
 def delete_notebook(thread_id: str) -> None:
@@ -276,6 +328,7 @@ def select_thread(thread_id: str, should_rerun: bool = True) -> None:
     st.session_state.pending_edit = None
     st.session_state.edit_error_message = None
     st.session_state.edit_confirm_message_id = None
+    clear_stage_move_notice()
     _persist_active_thread(thread_id)
     store.backfill_legacy_sources(thread_id)
     seed_coach_welcome(store, thread_id)

@@ -17,8 +17,6 @@ from typing import Any, Literal
 
 import streamlit as st
 
-from backend.domain import CoachRequest
-from backend.models import DEFAULT_CHAT_MODEL_ID
 from backend.settings import settings
 from backend.specialists.review_orchestration import (
     COUNTER_SETTINGS_KEY,
@@ -48,7 +46,6 @@ from backend.student_journey import (
 
 from ui.components import (
     facione_scores_table_html,
-    notification_dot_html,
     progress_bar_html,
     review_card_html,
     review_feedback_items_html,
@@ -61,10 +58,12 @@ from ui.runtime import (
     rerun_fragment,
     start_deep_review,
     store,
-    submit_coach_turn,
 )
+from ui.session import apply_manual_stage_move
 
 logger = logging.getLogger(__name__)
+
+_REVIEW_UNREAD_BADGE = "🛑"
 
 _STAGE_SELECT_ERROR = "The Thinking Path stage could not be updated. Try again."
 _TRANSITION_RESOLVE_ERROR = (
@@ -379,55 +378,27 @@ def _render_journey_stage_select_cta(
 
 
 def _select_journey_stage(stage_id: str) -> None:
-    """Move stage via the coach turn path so chat shows ``Moved to Stage: …``.
+    """Move stage via ``select_stage`` and show an ephemeral composer notice.
 
-    Journey CTAs use the same server-owned manual-stage command as typing
-    ``move me to <stage>`` in chat, so the transcript records the change.
+    Does not write ``move me to …`` / ``Moved to Stage: …`` chat bubbles.
+    Focus is persisted on the notebook journey only.
     """
     stage = STAGE_BY_ID.get(str(stage_id or "").strip())
     if stage is None:
         st.error(_STAGE_SELECT_ERROR)
         return
-    journey = normalize_journey(st.session_state.learning_journey)
     thread_id = str(st.session_state.thread_id or "").strip()
     if not thread_id:
         st.error(_STAGE_SELECT_ERROR)
         return
     try:
-        turn = submit_coach_turn(
-            CoachRequest(
-                thread_id=thread_id,
-                student_message=f"move me to {stage.label}",
-                current_stage=str(journey.get("current_stage") or stage.id),
-                response_detail=str(journey.get("response_detail") or "short"),
-                allow_model_knowledge=bool(
-                    st.session_state.get("allow_model_knowledge", True)
-                ),
-                response_language=str(
-                    st.session_state.get("response_language") or "English"
-                ),
-                model_id=str(
-                    st.session_state.get("selected_model") or DEFAULT_CHAT_MODEL_ID
-                ),
-            )
-        )
+        apply_manual_stage_move(thread_id, stage.id)
         store.forget_turn_reads(thread_id)
-        updated_thread = store.get_thread(thread_id) or {}
-        updated_meta = dict(updated_thread.get("metadata") or {})
-        updated_journey = normalize_journey(updated_meta.get("learning_journey"))
-        selected = str(turn.assessment.current_stage or stage.id).strip()
-        if selected in STAGE_BY_ID:
-            updated_journey["current_stage"] = selected
-            updated_journey = normalize_journey(updated_journey)
-        st.session_state.learning_journey = updated_journey
-        st.session_state.response_detail = updated_journey["response_detail"]
         st.session_state.journey_preview_stage = None
-        # Open Chat on the next remount and force a bottom snap so
-        # "Moved to Stage: …" is visible. Do not assign mobile_panel here —
-        # the radio widget is already instantiated in this run.
+        # Open Chat so the composer notice is visible. Do not assign
+        # mobile_panel here — the radio widget is already instantiated.
         st.session_state["pending_mobile_panel"] = "Chat"
         st.session_state.nav_section = "Chat"
-        st.session_state["chat_follow_bottom"] = True
         rerun_app()
     except Exception:
         logger.exception(
@@ -476,9 +447,6 @@ def render_journey_track() -> None:
             "metadata"
         )
         or {}
-    )
-    stage_reviews_blob = parse_journey_stage_reviews(
-        thread_meta.get(JOURNEY_STAGE_REVIEWS_KEY)
     )
     st.markdown(
         progress_bar_html(
@@ -591,52 +559,93 @@ def render_journey_track() -> None:
                                 stage,
                                 cta_label=cta_label,
                             )
-                if stage.id in completed:
-                    _render_journey_stage_checkpoint(
-                        stage.id, stage_reviews_blob
-                    )
                 if is_focus or is_preview_open:
                     _render_stage_suggestions(stage)
 
 
-def _render_journey_stage_checkpoint(
+def _dedupe_feedback_items(*groups: list[Any]) -> list[str]:
+    """Return cleaned feedback strings with case-insensitive dedupe, first wins."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for group in groups:
+        for raw in group:
+            cleaned = " ".join(str(raw).split()).strip()
+            if not cleaned:
+                continue
+            key = cleaned.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(cleaned)
+    return result
+
+
+def _complete_checkpoint_review(
     stage_id: str, blob: dict[str, Any]
-) -> None:
-    """Render one saved Journey stage-review checkpoint under a completed stage."""
+) -> dict[str, Any] | None:
+    """Return a completed stage-checkpoint review mapping, if present."""
     job = (blob.get("jobs") or {}).get(stage_id) or {}
-    status = str(job.get("status") or "")
+    if str(job.get("status") or "") != STAGE_REVIEW_COMPLETE:
+        return None
     review = (blob.get("reviews") or {}).get(stage_id)
-    if isinstance(review, dict) and status == STAGE_REVIEW_COMPLETE:
-        summary = str(review.get("summary") or "").strip()
-        strengths = list(review.get("strengths") or [])
-        areas = list(review.get("areas_to_revisit") or [])
+    return review if isinstance(review, dict) else None
+
+
+def _merge_checkpoint_items_into_sections(
+    sections: list[dict[str, Any]] | None,
+    blob: dict[str, Any],
+    *,
+    field: str,
+) -> list[dict[str, Any]]:
+    """Prepend Journey stage-checkpoint items onto matching Review sections."""
+    merged: list[dict[str, Any]] = []
+    for section in list(sections or []):
+        stage_id = str(section.get("stage_id") or "").strip()
+        checkpoint = _complete_checkpoint_review(stage_id, blob)
+        extra = list((checkpoint or {}).get(field) or []) if checkpoint else []
+        existing = list(section.get("items") or [])
+        merged.append(
+            {
+                **section,
+                "items": _dedupe_feedback_items(extra, existing),
+            }
+        )
+    return merged
+
+
+def _conclusion_sections_from_checkpoints(
+    *,
+    blob: dict[str, Any],
+    current_stage_id: str,
+    whole_conclusion: str,
+) -> list[dict[str, Any]]:
+    """Build Working-conclusion stage sections from checkpoint summaries.
+
+    Each stage expander is labeled with the Thinking Path stage name. The
+    whole-conversation conclusion is shown on the current stage when present.
+    """
+    current = str(current_stage_id or "").strip()
+    whole = " ".join(str(whole_conclusion or "").split()).strip()
+    sections: list[dict[str, Any]] = []
+    for stage in THINKING_STAGES:
+        checkpoint = _complete_checkpoint_review(stage.id, blob)
+        summary = ""
+        if checkpoint is not None:
+            summary = " ".join(str(checkpoint.get("summary") or "").split()).strip()
+        parts: list[str] = []
         if summary:
-            st.markdown(
-                review_card_html(label="Stage review", body=summary),
-                unsafe_allow_html=True,
-            )
-        if strengths:
-            st.markdown(
-                review_card_html(
-                    label="Strengths", body="", items=strengths
-                ),
-                unsafe_allow_html=True,
-            )
-        if areas:
-            st.markdown(
-                review_card_html(
-                    label="Worth revisiting", body="", items=areas
-                ),
-                unsafe_allow_html=True,
-            )
-        reasoning = str(review.get("reasoning_progress") or "").strip()
-        if reasoning:
-            st.caption(reasoning)
-        return
-    if status in {STAGE_REVIEW_QUEUED, STAGE_REVIEW_RUNNING}:
-        st.caption("Reviewing this stage…")
-    elif status == STAGE_REVIEW_FAILED:
-        st.caption("Stage review unavailable.")
+            parts.append(summary)
+        if stage.id == current and whole:
+            if not summary or whole.lower() != summary.lower():
+                parts.append(whole)
+        sections.append(
+            {
+                "stage_id": stage.id,
+                "stage": stage.label,
+                "body": "\n\n".join(parts),
+            }
+        )
+    return sections
 
 
 def review_stage_expander_key(
@@ -654,7 +663,7 @@ def review_stage_expander_key(
     student's manual open or close is preserved.
 
     Args:
-        key_prefix: ``strengths`` or ``improvements``.
+        key_prefix: ``strengths``, ``improvements``, or ``conclusions``.
         thread_key: Sanitized notebook/thread id.
         current_stage_id: Persisted Thinking Path stage.
         stage_key: Stage id (or label fallback) for this expander.
@@ -669,8 +678,8 @@ def review_stage_expander_key(
 def review_stage_expander_defaults(current_stage_id: str) -> dict[str, bool]:
     """Return default open/closed flags for the five Thinking Path stages.
 
-    Only the current stage starts open. Strengths and Areas for improvement
-    share this mapping.
+    Only the current stage starts open. Strengths, Areas for improvement, and
+    Working conclusion share this mapping.
 
     Args:
         current_stage_id: Persisted Thinking Path stage.
@@ -687,6 +696,8 @@ def _render_review_stage_expanders(
     sections: list[dict[str, Any]] | None,
     current_stage_id: str,
     key_prefix: str,
+    content: Literal["items", "body"] = "items",
+    empty_label: str = "No feedback yet",
 ) -> None:
     """Render one nested expander per Thinking Path stage.
 
@@ -696,11 +707,20 @@ def _render_review_stage_expanders(
     keys include the current stage so a stage change remounts expanders
     instead of fighting leftover Streamlit client state. Within the same
     stage the keys stay stable, so a student's manual open/close is kept.
+
+    Args:
+        sections: Stage-grouped feedback with ``items`` bullets or ``body``
+            prose depending on ``content``.
+        current_stage_id: Persisted Thinking Path stage.
+        key_prefix: Widget-key namespace (``strengths``, ``improvements``,
+            ``conclusions``).
+        content: ``items`` for bullet lists, ``body`` for prose paragraphs.
+        empty_label: Placeholder when a stage has no content.
     """
     stage_sections = list(sections or [])
     if not stage_sections:
         st.markdown(
-            '<p class="review-empty">No feedback yet</p>',
+            f'<p class="review-empty">{escape(empty_label)}</p>',
             unsafe_allow_html=True,
         )
         return
@@ -729,10 +749,32 @@ def _render_review_stage_expanders(
                     stage_key=stage_key,
                 ),
             ):
-                st.markdown(
-                    review_feedback_items_html(section.get("items")),
-                    unsafe_allow_html=True,
-                )
+                if content == "body":
+                    body = str(section.get("body") or "").strip()
+                    if body:
+                        paragraphs = [
+                            f"<p>{escape(part)}</p>"
+                            for part in body.split("\n\n")
+                            if part.strip()
+                        ]
+                        st.markdown(
+                            f'<div class="review-conclusion-body">'
+                            f'{"".join(paragraphs)}</div>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            f'<p class="review-empty">{escape(empty_label)}</p>',
+                            unsafe_allow_html=True,
+                        )
+                else:
+                    st.markdown(
+                        review_feedback_items_html(
+                            section.get("items"),
+                            empty_label=empty_label,
+                        ),
+                        unsafe_allow_html=True,
+                    )
 
 
 def render_learning_review(journey: dict[str, Any]) -> None:
@@ -742,11 +784,13 @@ def render_learning_review(journey: dict[str, Any]) -> None:
     Review snapshot when present, otherwise the newest assistant
     ``assessment``. Strengths and areas for improvement nest one expander per
     Thinking Path stage, merging historical incremental feedback with the
-    latest Deep Review ``stage_reviews`` (or the legacy frozen-stage lists).
-    Only the current stage is open by default. Marks the Review notification
-    fingerprint as seen when
-    the Review tab is active. Start Deep Review is always visible; enablement
-    comes from the persisted notebook counter, not a Streamlit-only count.
+    latest Deep Review ``stage_reviews`` (or the legacy frozen-stage lists)
+    and Journey stage-checkpoint items. Working conclusion uses the same
+    nested-stage pattern with checkpoint summaries. Only the current stage is
+    open by default. Marks the Review notification fingerprint as seen when
+    the Review section is active. Start Deep Review is always visible;
+    enablement comes from the persisted notebook counter, not a
+    Streamlit-only count.
     """
     messages = store.get_messages(st.session_state.thread_id)
     thread = store.get_thread(st.session_state.thread_id) or {}
@@ -768,6 +812,34 @@ def render_learning_review(journey: dict[str, Any]) -> None:
     current_stage_id = str(
         journey.get("current_stage") or THINKING_STAGES[0].id
     )
+    checkpoint_blob = parse_journey_stage_reviews(
+        metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+    )
+    strength_sections = _merge_checkpoint_items_into_sections(
+        review.get("strength_sections"),
+        checkpoint_blob,
+        field="strengths",
+    )
+    improvement_sections = _merge_checkpoint_items_into_sections(
+        review.get("improvement_sections"),
+        checkpoint_blob,
+        field="areas_to_revisit",
+    )
+    conclusion_sections = _conclusion_sections_from_checkpoints(
+        blob=checkpoint_blob,
+        current_stage_id=current_stage_id,
+        whole_conclusion=str(review.get("conclusion") or ""),
+    )
+    # Show pending/failed checkpoint captions without duplicating cards.
+    pending_labels: list[str] = []
+    for stage in THINKING_STAGES:
+        job = (checkpoint_blob.get("jobs") or {}).get(stage.id) or {}
+        status = str(job.get("status") or "")
+        if status in {STAGE_REVIEW_QUEUED, STAGE_REVIEW_RUNNING}:
+            pending_labels.append(f"{stage.label}: reviewing…")
+        elif status == STAGE_REVIEW_FAILED:
+            pending_labels.append(f"{stage.label}: stage review unavailable.")
+
     _render_deep_review_chrome(metadata)
     st.markdown(
         review_card_html(
@@ -816,30 +888,29 @@ def render_learning_review(journey: dict[str, Any]) -> None:
                 "A provisional whole-conversation candidate shown only in "
                 "Reflection. It is not a grade."
             )
+    if pending_labels:
+        for label in pending_labels:
+            st.caption(label)
     with st.expander("Strengths", expanded=False):
         _render_review_stage_expanders(
-            sections=review.get("strength_sections"),
+            sections=strength_sections,
             current_stage_id=current_stage_id,
             key_prefix="strengths",
         )
     with st.expander("Areas for improvement", expanded=False):
         _render_review_stage_expanders(
-            sections=review.get("improvement_sections"),
+            sections=improvement_sections,
             current_stage_id=current_stage_id,
             key_prefix="improvements",
         )
     with st.expander("Working conclusion", expanded=False):
-        conclusion = str(review.get("conclusion") or "").strip()
-        if conclusion:
-            st.markdown(
-                f'<div class="review-conclusion-body">{escape(conclusion)}</div>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                '<p class="review-empty">No working conclusion yet.</p>',
-                unsafe_allow_html=True,
-            )
+        _render_review_stage_expanders(
+            sections=conclusion_sections,
+            current_stage_id=current_stage_id,
+            key_prefix="conclusions",
+            content="body",
+            empty_label="No working conclusion yet.",
+        )
     # Preserve labels used by AppTest smoke assertions.
     st.markdown(
         '<div class="review-legacy-labels" hidden>'
@@ -961,7 +1032,7 @@ def render_thinking_path_footer(pending: Any | None = None) -> None:
 
 @st.fragment
 def render_studio_panel() -> None:
-    """Render Thinking Path with Journey/Review tabs and the Next footer.
+    """Render Thinking Path with Journey/Review sections and the Next footer.
 
     With ``STUDENT_STAGE_SELECTION=true``, Journey exposes audited stage picks.
     Otherwise stage changes require a coach ADVANCE recommendation, then Next
@@ -969,50 +1040,64 @@ def render_studio_panel() -> None:
 
     Mounted as a fragment so Journey preview toggles stay panel-local. Stage
     selection and transition confirmations still call ``rerun_app()`` because
-    they change shared coach/chat state.
+    they change shared coach/chat state. Selecting Review while stage-review
+    feedback is unread clears the durable unread flag via the workspace API.
     """
     st.session_state["_studio_fragment_runs"] = (
         int(st.session_state.get("_studio_fragment_runs") or 0) + 1
     )
     journey = normalize_journey(st.session_state.learning_journey)
-    preferred = st.session_state.get("studio_tab", "Journey")
     thread_id = str(st.session_state.thread_id or "")
     thread_meta = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
     journey_reviews = parse_journey_stage_reviews(
         thread_meta.get(JOURNEY_STAGE_REVIEWS_KEY)
     )
     journey_unread = bool(journey_reviews.get("unread"))
-    journey_label = "Journey" + (" !" if journey_unread else "")
+
+    def _studio_section_label(value: str) -> str:
+        if value == "Review" and journey_unread:
+            return f"Review {_REVIEW_UNREAD_BADGE}"
+        return value
+
     st.markdown(
         '<div class="pane-heading"><span class="pane-title">Thinking Path</span></div>',
         unsafe_allow_html=True,
     )
     with st.container(key="studio_scroll", height="stretch"):
-        # Streamlit tabs always render both bodies (client-side tab switch
-        # does not rerun). Duplicate get_messages/get_thread work is avoided
-        # by the page-run memo, not by skipping Review.
-        journey_tab, review_tab = st.tabs([journey_label, "Review"])
-        pending = _fetch_pending_transition()
-        with journey_tab:
-            if journey_unread:
-                from ui.layout.journey_tab_unread import sync_journey_unread_watch
-
-                sync_journey_unread_watch(
-                    unread=True,
-                    clear_path=(
-                        f"/api/v1/threads/{thread_id}/journey-stage-reviews/read"
-                    ),
+        with st.container(key="studio_section_tabs"):
+            selected = st.radio(
+                "Thinking Path section",
+                ["Journey", "Review"],
+                horizontal=True,
+                key="studio_tab",
+                format_func=_studio_section_label,
+                label_visibility="collapsed",
+            )
+        # Clear durable unread when Review is opened, but still render the
+        # Review body in this run. An early return left a blank Studio pane
+        # (and a follow-up rerun refreshes the top Journey 🛑 badge).
+        clear_unread_rerun = False
+        if selected == "Review" and journey_unread and thread_id:
+            try:
+                mark_journey_stage_reviews_read(thread_id)
+                clear_unread_rerun = True
+            except Exception:
+                logger.exception(
+                    "Clearing Thinking Path review unread failed for notebook %s",
+                    thread_id,
                 )
+        pending = _fetch_pending_transition()
+        if selected == "Review":
+            st.session_state.review_seen_fingerprint = st.session_state.get(
+                "review_fingerprint", ""
+            )
+            render_learning_review(journey)
+        else:
             render_journey_track()
             render_pending_transition(pending)
-        with review_tab:
-            if preferred == "Review":
-                st.caption("Current focus")
-                st.session_state.review_seen_fingerprint = st.session_state.get(
-                    "review_fingerprint", ""
-                )
-            render_learning_review(journey)
     with st.container(key="thinking_path_footer"):
         render_thinking_path_footer(pending)
     if st.session_state.get("confirm_next_transition_id"):
         _confirm_next_stage_dialog()
+    if clear_unread_rerun:
+        rerun_app()

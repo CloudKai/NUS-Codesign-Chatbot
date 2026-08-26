@@ -266,8 +266,15 @@ def test_streamlit_notebook_workspace_smoke():
     assert coaching_style.value == "Quick"
     assert app.session_state["response_detail"] == "short"
     assert app.session_state["learning_journey"]["response_detail"] == "short"
-    assert {tab.label for tab in app.tabs} >= {"Journey", "Review"}
-
+    studio_section = next(
+        radio for radio in app.radio if radio.label == "Thinking Path section"
+    )
+    assert studio_section.options == ["Journey", "Review"]
+    app.session_state["studio_tab"] = "Review"
+    app.run()
+    assert not app.exception
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert "Guidance Level:" not in rendered
     assert '<span class="pane-title">Sources</span>' in rendered
     assert f"Max {settings.max_file_size_mb} MB per file" in rendered
     assert "Welcome to your critical-thinking coach" in rendered
@@ -279,16 +286,7 @@ def test_streamlit_notebook_workspace_smoke():
     assert '<span class="pane-title">Thinking Path</span>' in rendered
     assert "CDE2300 Design Thinking Companion" in rendered
     assert "Product Design and Innovation" in rendered
-    assert 'aria-label="Critical-thinking journey"' in rendered
-    assert 'class="journey-short-label">Problem identification</span>' in rendered
-    assert 'class="journey-short-label">Concept generation</span>' in rendered
-    assert 'class="journey-short-label">Design specification</span>' in rendered
-    assert 'class="journey-short-label">Ethics &amp; Critical Thinking</span>' in rendered
-    assert 'class="journey-short-label">Reflection</span>' in rendered
-    assert 'class="journey-short-label">Problem</span>' not in rendered
-    assert 'class="journey-short-label">Concepts</span>' not in rendered
-    assert 'class="journey-short-label">Specification</span>' not in rendered
-    assert 'class="journey-short-label">Ethics & CT</span>' not in rendered
+    assert 'aria-label="Critical-thinking journey"' not in rendered
     assert "Summary" in rendered
     assert "Critical thinking (Facione)" in rendered
     assert "0/4" in rendered
@@ -304,6 +302,21 @@ def test_streamlit_notebook_workspace_smoke():
         "Readings · 0",
         "My Sources · 0",
     }
+    app.session_state["studio_tab"] = "Journey"
+    app.run()
+    assert not app.exception
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert 'aria-label="Critical-thinking journey"' in rendered
+    assert 'class="journey-short-label">Problem identification</span>' in rendered
+    assert 'class="journey-short-label">Concept generation</span>' in rendered
+    assert 'class="journey-short-label">Design specification</span>' in rendered
+    assert 'class="journey-short-label">Ethics &amp; Critical Thinking</span>' in rendered
+    assert 'class="journey-short-label">Reflection</span>' in rendered
+    assert 'class="journey-short-label">Problem</span>' not in rendered
+    assert 'class="journey-short-label">Concepts</span>' not in rendered
+    assert 'class="journey-short-label">Specification</span>' not in rendered
+    assert 'class="journey-short-label">Ethics & CT</span>' not in rendered
+    assert "Frame the design problem, who it affects, and why it matters." in rendered
     sources_py = _implementation_source(sources_module)
     my_sources_at = sources_py.index('f"My Sources · {len(personal_sources)}"')
     lecture_at = sources_py.index('f"{group} · {len(group_all)}"')
@@ -877,9 +890,17 @@ def test_journey_linear_accordion_and_ctas_follow_unlocked_frontier(monkeypatch)
     )
     assert app.session_state["mobile_panel"] == "Chat"
     assert "chat_follow_bottom" not in app.session_state
+    assert app.session_state["stage_move_notice"] == "Concept generation"
     messages = store.get_messages(app.session_state["thread_id"])
-    assistant = [message for message in messages if message["role"] == "assistant"][-1]
-    assert assistant["content"] == "Moved to Stage: Concept generation."
+    assert not any(
+        "Moved to Stage:" in str(message.get("content") or "")
+        for message in messages
+    )
+    assert not any(
+        str(message.get("content") or "").lower().startswith("move me to")
+        for message in messages
+        if message.get("role") == "user"
+    )
     labels = [button.label for button in app.button]
     assert "Work on this stage" not in labels
     assert "Revisit" in labels

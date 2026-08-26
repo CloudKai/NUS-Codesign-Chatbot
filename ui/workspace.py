@@ -50,10 +50,14 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
         st.session_state.mobile_panel = pending_panel
 
     def _studio_mobile_label(value: str) -> str:
+        """Label the Studio rail as Journey (with unread stop badge when needed).
+
+        Never rename this option to ``Review``. Doing so remounts the mobile
+        switcher labels and can leave no ``input:checked``, which hides every
+        workspace column on narrow viewports.
+        """
         if value != "Studio":
             return {"Sources": "Sources", "Chat": "Chat"}.get(value, value)
-        if st.session_state.get("studio_tab") == "Review":
-            return "Review"
         label = "Journey"
         try:
             from backend.specialists.review_orchestration import (
@@ -67,7 +71,7 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                 (thread.get("metadata") or {}).get(JOURNEY_STAGE_REVIEWS_KEY)
             )
             if blob.get("unread"):
-                return "Journey !"
+                return "Journey 🛑"
         except Exception:
             pass
         return label

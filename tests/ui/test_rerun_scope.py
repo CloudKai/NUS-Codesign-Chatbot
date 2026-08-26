@@ -312,18 +312,49 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
         "def render_journey_track", 1
     )[0]
     assert "rerun_app()" in select_block
-    assert "submit_coach_turn" in select_block
-    assert 'f"move me to {stage.label}"' in select_block
+    assert "apply_manual_stage_move" in select_block
+    assert "submit_coach_turn" not in select_block
+    assert 'f"move me to {stage.label}"' not in select_block
     assert 'pending_mobile_panel"] = "Chat"' in select_block
-    assert 'chat_follow_bottom"] = True' in select_block
+    assert 'chat_follow_bottom"] = True' not in select_block
     assert "chat_scroll_after_stage_select" not in select_block
     assert "store.select_stage" not in select_block
     journey_block = source.split("def render_journey_track", 1)[1].split(
-        "def review_stage_expander_key", 1
+        "def _dedupe_feedback_items", 1
     )[0]
     assert 'state_classes = f"{state_classes} open preview-open"' in journey_block
     assert "_render_journey_stage_title_row(" in journey_block
     assert "_render_journey_stage_select_cta(" in journey_block
+    assert "_render_journey_stage_checkpoint(" not in journey_block
+    assert "_render_journey_stage_checkpoints(" not in journey_block
+    review_block = source.split("def render_learning_review", 1)[1].split(
+        "def render_pending_transition", 1
+    )[0]
+    assert "_render_journey_stage_checkpoints(" not in review_block
+    assert "_merge_checkpoint_items_into_sections(" in review_block
+    assert "_conclusion_sections_from_checkpoints(" in review_block
+    assert 'key_prefix="conclusions"' in review_block
+    panel_block = source.split("def render_studio_panel", 1)[1]
+    assert 'key="studio_tab"' in panel_block
+    assert 'st.radio(' in panel_block
+    assert "mark_journey_stage_reviews_read(" in panel_block
+    assert "st.tabs(" not in panel_block
+    assert "sync_journey_unread_watch" not in panel_block
+    assert '"Journey !"' not in source
+    assert Path("ui/layout/journey_tab_unread.py").exists() is False
+    workspace = Path("ui/workspace.py").read_text(encoding="utf-8")
+    assert 'return "Journey 🛑"' in workspace
+    assert 'return "Journey !"' not in workspace
+    assert 'studio_tab") == "Review"' not in workspace
+    assert 'return "Review"' not in workspace.split("def _studio_mobile_label", 1)[1].split(
+        "panel = st.radio(", 1
+    )[0]
+    css = Path("ui/assets/styles/10-workspace.css").read_text(encoding="utf-8")
+    assert ".st-key-studio_section_tabs" in css
+    assert 'iframe[height="0"]' in css
+    assert "stRadioOption" in css
+    assert "stRadioGroup" in css
+    assert "minmax(0,1fr) minmax(0,1fr)" in css
     title_block = source.split("def _render_journey_stage_title_row", 1)[1].split(
         "def _render_journey_stage_select_cta", 1
     )[0]

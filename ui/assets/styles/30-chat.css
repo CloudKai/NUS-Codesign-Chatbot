@@ -540,6 +540,31 @@
         contain:layout style;
     }
 
+    /* Ephemeral stage hop notice above the chat input (not a chat bubble). */
+    .st-key-stage_move_notice {
+        width:100% !important;
+        margin:0 0 .35rem !important;
+        padding:0 !important;
+    }
+
+    .st-key-stage_move_notice [data-testid="stMarkdownContainer"],
+    .st-key-stage_move_notice [data-testid="stMarkdownContainer"] > div {
+        width:100% !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .cd-stage-move-notice {
+        margin:0 !important;
+        padding:.15rem .5rem !important;
+        color:var(--cd-muted) !important;
+        text-align:center !important;
+        font-size:.88rem !important;
+        font-weight:550 !important;
+        line-height:1.35 !important;
+        letter-spacing:-.01em;
+    }
+
     .st-key-chat_panel .st-key-chat_composer,
     .st-key-chat_transcript .st-key-chat_composer {
         position:relative;

@@ -117,11 +117,20 @@ def test_strengths_and_areas_share_defaults_and_remount_separately() -> None:
         current_stage_id="concept_generation",
         stage_key="concept_generation",
     )
+    conclusions = review_stage_expander_key(
+        key_prefix="conclusions",
+        thread_key="nb_a",
+        current_stage_id="concept_generation",
+        stage_key="concept_generation",
+    )
     assert defaults["concept_generation"] is True
     assert defaults["problem_identification"] is False
     assert strengths != areas
+    assert strengths != conclusions
+    assert areas != conclusions
     assert "_strengths_" in strengths
     assert "_improvements_" in areas
+    assert "_conclusions_" in conclusions
 
 
 def test_studio_remounts_expanders_instead_of_writing_session_state() -> None:
@@ -131,4 +140,6 @@ def test_studio_remounts_expanders_instead_of_writing_session_state() -> None:
     assert "review_stage_expander_defaults(" in _STUDIO
     assert 'key_prefix="strengths"' in _STUDIO
     assert 'key_prefix="improvements"' in _STUDIO
+    assert 'key_prefix="conclusions"' in _STUDIO
     assert "expanded=is_current" in _STUDIO
+    assert 'content="body"' in _STUDIO

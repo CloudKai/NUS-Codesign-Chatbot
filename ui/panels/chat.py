@@ -36,6 +36,7 @@ from backend.student_journey import (
     normalize_journey,
     personalized_stage_questions,
 )
+from backend.coaching.workflow_navigation import manual_stage_selection_target
 
 from ui.coach_welcome import (
     COACH_WELCOME_KIND,
@@ -60,6 +61,7 @@ from ui.runtime import (
     stream_coach_turn_events,
 )
 from ui.retry_keys import get_retry_key, remove_retry_key
+from ui.session import apply_manual_stage_move, clear_stage_move_notice
 from ui.sources import source_viewer_dialog
 
 
@@ -819,6 +821,30 @@ def handle_prompt(
     must be the in-flight sibling, never ``chat_log``: re-entering that
     keyed history container reuses the last assistant ``st.chat_message``.
     """
+    cleaned_prompt = str(prompt or "").strip()
+    # Feature-gated exact stage command: update journey only, no chat rows.
+    if (
+        existing_user_message_id is None
+        and settings.student_stage_selection
+        and cleaned_prompt
+    ):
+        manual_target = manual_stage_selection_target(cleaned_prompt)
+        if manual_target is not None:
+            thread_id = str(st.session_state.thread_id or "").strip()
+            try:
+                apply_manual_stage_move(thread_id, manual_target)
+                store.forget_turn_reads(thread_id)
+                st.session_state.composer_nonce = (
+                    int(st.session_state.get("composer_nonce") or 0) + 1
+                )
+                rerun_app()
+            except Exception:
+                st.error(
+                    "The Thinking Path stage could not be updated. Try again."
+                )
+            return
+
+    clear_stage_move_notice()
     set_coach_turn_streaming(True)
     handle_started = time.perf_counter()
     request_id = str(request_id or uuid.uuid4())
@@ -1355,6 +1381,15 @@ def _render_composer_submit_fragment(
         with st.container(key="chat_composer"):
             fragment_enter_ms = _duration_ms(fragment_started)
             prompt_started = time.perf_counter()
+            notice = str(st.session_state.get("stage_move_notice") or "").strip()
+            if notice:
+                with st.container(key="stage_move_notice"):
+                    st.markdown(
+                        f'<p class="cd-stage-move-notice">'
+                        f"Moved to stage: {html.escape(notice)}"
+                        f"</p>",
+                        unsafe_allow_html=True,
+                    )
             composer_value = st.chat_input(
                 "Ask a question or share your thinking",
                 key=f"composer-{st.session_state.composer_nonce}",

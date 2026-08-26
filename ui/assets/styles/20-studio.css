@@ -750,8 +750,16 @@
         line-height:1.5;
     }
 
+    .review-conclusion-body p {
+        margin:0;
+    }
+
+    .review-conclusion-body p + p {
+        margin-top:.4rem;
+    }
+
     .review-stage-body ul {
-        margin:.1rem 0 0;
+        margin:0;
         padding-left:1.05rem;
     }
 
@@ -765,6 +773,35 @@
         font-size:.76rem;
         line-height:1.45;
         opacity:.9;
+    }
+
+    /* Equal, tight padding inside Strengths / Areas / Working conclusion
+       (and their nested stage expanders). Streamlit defaults leave a tall
+       top gap on stExpanderDetails. */
+    .st-key-studio_scroll [data-testid="stExpanderDetails"] {
+        padding:.35rem .65rem !important;
+    }
+
+    .st-key-studio_scroll [data-testid="stExpanderDetails"]
+    > [data-testid="stVerticalBlock"],
+    .st-key-studio_scroll [data-testid="stExpanderDetails"]
+    [data-testid="stVerticalBlock"] {
+        gap:0 !important;
+        row-gap:0 !important;
+    }
+
+    .st-key-studio_scroll [data-testid="stExpanderDetails"]
+    [data-testid="stLayoutWrapper"],
+    .st-key-studio_scroll [data-testid="stExpanderDetails"]
+    [data-testid="stElementContainer"] {
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-studio_scroll [data-testid="stExpanderDetails"]
+    [data-testid="stMarkdownContainer"] {
+        margin:0 !important;
+        padding:0 !important;
     }
 
     .st-key-deep_review_control {
