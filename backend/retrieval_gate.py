@@ -6,15 +6,19 @@ ownership checks remain in the retriever after this gate returns true.
 
 Retrieval policy
 ================
-There is no LLM router. False negatives (skipping Retrieve for a course or
-source question) are worse than false positives (a bounded Retrieve that
-returns nothing). A wasted Retrieve costs latency, not correctness, so a
-project question that mentions a lecture, week, or source still retrieves.
+There is no LLM router. Retrieve for explicit or clearly source-dependent
+requests: named material, definitional grounding, or a narrow implicit
+request against already-selected sources (summarise / main points /
+what-it-says / outline).
 
-Do not retrieve when the turn is clearly personal/project reasoning or
-brainstorming with no factual grounding need. Idle acknowledgements also
-skip. The gate must not degenerate into "always retrieve"; that would attach
-Retrieve to every reflective coaching turn.
+Selected sources alone do not force retrieval. A bare ``?`` or a generic
+coaching question ("Can you help me?", "What do you think?") must stay
+Coaching even when sources are selected — otherwise an empty Retrieve can
+surface an evidence-gap reply on ordinary coaching turns.
+
+Prefer a false negative on ambiguous selected-source questions over a false
+positive Retrieve. Do not retrieve for clear personal/project reasoning or
+idle acknowledgements. The gate must not degenerate into "always retrieve".
 
 ``looks_like_course_question`` in ``backend.specialists.routing`` stays
 conservative because ``select_specialist`` uses it for mock/offline qa
@@ -27,9 +31,9 @@ with ``intent``:
 
 - ``high_confidence_source`` — retrieve; later Q&A mode hints may use this
 - ``high_confidence_personal`` — skip; later coaching mode hints may use this
-- ``ambiguous`` — weak or mixed signal. ``retrieve`` is true only for a
-  selected-source factual question that is not clearly personal. Idle text
-  is ambiguous with ``retrieve`` false so a later hint can stay silent.
+- ``ambiguous`` — weak signal. ``retrieve`` is true only for a narrow
+  implicit selected-source request (not generic coaching). Idle / generic
+  questions are ambiguous with ``retrieve`` false.
 
 :func:`retrieval_required` keeps its existing signature and returns
 ``classification.retrieve``.
@@ -171,10 +175,42 @@ _PROJECT_REASONING = (
         re.IGNORECASE,
     ),
 )
-_QUESTION_SHAPE = re.compile(
-    r"\?|^\s*who\b|\b(what|why|how|when|where|which|explain|describe|according|"
-    r"summar(?:y|ise|ize)|tell me)\b",
-    re.IGNORECASE,
+# Narrow implicit requests that retrieve only when sources are already
+# selected. Excludes bare ``?``, generic help/feedback, and "what do you
+# think" — those stay Coaching even with selected sources.
+_IMPLICIT_SELECTED_SOURCE = (
+    re.compile(r"\b(summarise|summarize)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(give me |provide |write )?(a |an |the )?(brief |short )?summary\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(main|key) (points?|ideas?|takeaways?|themes?|findings?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bwhat (are|is) the (main|key) (points?|ideas?|takeaways?|themes?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bwhat does (it|this|that|they|the (selected )?(source|material|"
+        r"document|reading|lecture|pdf|notes?)) "
+        r"(say|mention|cover|discuss|explain|describe)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bwhat (does|do) (it|this|that) cover\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(give me |provide )?(an? )?outline(\s+of\s+(it|this|that))?\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bexplain (the )?(selected )?(material|source|document|reading|"
+        r"lecture|notes?)\b",
+        re.IGNORECASE,
+    ),
 )
 
 # A course-concept question carries no lecture/week/S# cue but is still a
@@ -288,14 +324,33 @@ def _is_definitional_question(text: str) -> bool:
         that ask for course knowledge without naming a lecture, week, or
         source label. Any first- or second-person pronoun disqualifies the
         turn so project reflection is never misread as a factual lookup.
+        Summary-style requests ("what are the main points") are not
+        definitional — they use the selected-source implicit matcher instead.
     """
     if _FIRST_OR_SECOND_PERSON.search(text):
+        return False
+    if _is_implicit_selected_source_request(text):
         return False
     if any(pattern.search(text) for pattern in _DEFINITIONAL_MARKERS):
         return True
     if len(text.split()) < _MIN_DEFINITIONAL_WORDS:
         return False
     return bool(_GENERIC_DEFINITIONAL_MARKER.search(text))
+
+
+def _is_implicit_selected_source_request(text: str) -> bool:
+    """Return whether ``text`` clearly asks to use already-selected sources.
+
+    Covers summarise / main points / what-it-says / outline style requests.
+    Does not treat bare question marks or generic coaching as source use.
+
+    Args:
+        text: Normalised student message.
+
+    Returns:
+        True when selected sources should be retrieved for this turn.
+    """
+    return any(pattern.search(text) for pattern in _IMPLICIT_SELECTED_SOURCE)
 
 
 def classify_retrieval_intent(
@@ -311,12 +366,14 @@ def classify_retrieval_intent(
         student_message: Current student contribution. Not logged by callers.
         selected_source_titles: Authoritative selected source titles.
         selected_source_filenames: Authoritative selected source filenames.
-        has_selected_sources: When True, factual questions about selected
-            material also retrieve. Inferred from titles/filenames when omitted.
+        has_selected_sources: When True, narrow implicit selected-source
+            requests (summarise / main points / …) also retrieve. Inferred
+            from titles/filenames when omitted.
 
     Returns:
-        A :class:`RetrievalClassification`. Strong source/course cues win
-        over personal-reasoning cues. Project-only turns skip retrieval.
+        A :class:`RetrievalClassification`. Strong source/course cues and
+        definitional questions retrieve. Project-only turns skip. Selected
+        sources plus a generic coaching question do not retrieve.
     """
     text = _normalized_text(student_message)
     titles = tuple(selected_source_titles)
@@ -351,11 +408,11 @@ def classify_retrieval_intent(
     selected = bool(has_selected_sources)
     if has_selected_sources is None:
         selected = any(_normalized_text(value) for value in (*titles, *filenames))
-    if selected and _QUESTION_SHAPE.search(text):
+    if selected and _is_implicit_selected_source_request(text):
         return RetrievalClassification(
             intent=INTENT_AMBIGUOUS,
             retrieve=True,
-            cues=("selected_source_question",),
+            cues=("implicit_selected_source",),
         )
     return RetrievalClassification(
         intent=INTENT_AMBIGUOUS, retrieve=False, cues=()
@@ -375,13 +432,13 @@ def retrieval_required(
         student_message: Current student contribution. Not logged by callers.
         selected_source_titles: Authoritative selected source titles.
         selected_source_filenames: Authoritative selected source filenames.
-        has_selected_sources: When True, factual questions about selected
-            material also retrieve. Inferred from titles/filenames when omitted.
+        has_selected_sources: When True, narrow implicit selected-source
+            requests also retrieve. Inferred from titles/filenames when omitted.
 
     Returns:
-        True when the message has strong source/course-evidence intent, names
-        a selected source, or (with selected sources) asks a non-project
-        question that needs grounding. Project-reasoning turns return False.
+        True for strong source/course cues, definitional grounding, or a
+        narrow implicit selected-source request. Generic coaching and
+        project-reasoning turns return False even when sources are selected.
     """
     return classify_retrieval_intent(
         student_message,

@@ -6,15 +6,13 @@ what that label is allowed to *mean* downstream.
 
 How confidence is derived
 =========================
-:func:`backend.retrieval_gate.classify_retrieval_intent` is recall-oriented:
-any source cue wins, including a genuine project message that mentions
-"lecture" or "week 2". That is correct for Retrieve (skipping evidence is
-worse than a cheap empty Retrieve). It is too aggressive for mode
-enforcement. Over-forcing a project-reasoning turn into Q&A would drop the
-Socratic recommendation — a worse pedagogy failure than the bug this policy
-fixes.
+:func:`backend.retrieval_gate.classify_retrieval_intent` is recall-oriented for
+explicit source cues (including a project message that mentions "lecture" or
+"week 2"). That remains correct for Retrieve on named material. Generic
+coaching questions with selected sources no longer retrieve — that false
+positive was worse because an empty Retrieve can author an evidence-gap reply.
 
-This overlay therefore uses a **conservative** threshold and a **generous**
+Mode enforcement still uses a **conservative** threshold and a **generous**
 ambiguous bucket:
 
 - ``high_confidence_source`` **and no first-person project reasoning**
@@ -120,9 +118,9 @@ RUNTIME_HINT_COACHING = (
 )
 
 QA_EVIDENCE_GAP_RESPONSE = (
-    "I couldn't retrieve a validated excerpt from the selected course material "
-    "for this turn, so I can't reliably summarise it from the course sources "
-    "right now."
+    "I couldn't find a matching validated excerpt for that question in the "
+    "currently selected course material. Try asking about a specific topic, "
+    "week, or reading, or adjust the selected sources."
 )
 
 # Project deliberation used only to *demote* source→ambiguous, so a turn is
@@ -507,6 +505,10 @@ def policy_from_request(request: object) -> ModePolicy:
 def should_author_qa_evidence_gap(request: object) -> bool:
     """Return whether FastAPI should author a Q&A evidence-gap reply.
 
+    Only a source-dependent Q&A turn that actually required and attempted
+    retrieval may surface the canned gap. Generic Coaching turns must not
+    reach this path even when sources are selected.
+
     High-confidence source Q&A with selected sources and no validated chunks
     must not invoke the model, so prior assistant text cannot become course
     facts. Mixed/unconstrained turns still go to the provider.
@@ -519,6 +521,8 @@ def should_author_qa_evidence_gap(request: object) -> bool:
         without an AgentCore invoke.
     """
     if str(getattr(request, "expected_response_mode", "") or "").strip().lower() != "qa":
+        return False
+    if not bool(getattr(request, "retrieval_required", False)):
         return False
     if bool(getattr(request, "allow_model_knowledge", False)):
         return False

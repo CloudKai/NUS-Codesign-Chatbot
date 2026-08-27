@@ -68,7 +68,9 @@ from ui.session import (
     awaiting_coach_turn_timed_out,
     clear_awaiting_coach_turn,
     clear_stage_move_notice,
+    locked_stage_move_notice,
     set_awaiting_coach_turn,
+    set_stage_move_notice,
 )
 from ui.sources import source_viewer_dialog
 
@@ -1004,10 +1006,30 @@ def handle_prompt(
                     int(st.session_state.get("composer_nonce") or 0) + 1
                 )
                 rerun_app()
-            except Exception:
-                st.error(
-                    "The Thinking Path stage could not be updated. Try again."
-                )
+            except Exception as exc:
+                detail = str(exc or "")
+                response = getattr(exc, "response", None)
+                if response is not None:
+                    try:
+                        payload = response.json()
+                    except Exception:
+                        payload = None
+                    if isinstance(payload, dict):
+                        detail = str(payload.get("detail") or detail)
+                    elif not detail:
+                        detail = str(getattr(response, "text", "") or "")
+                if "locked" in detail.casefold():
+                    set_stage_move_notice(
+                        locked_stage_move_notice(manual_target)
+                    )
+                    st.session_state.composer_nonce = (
+                        int(st.session_state.get("composer_nonce") or 0) + 1
+                    )
+                    rerun_app()
+                else:
+                    st.error(
+                        "The Thinking Path stage could not be updated. Try again."
+                    )
             return
 
     clear_stage_move_notice()
@@ -1594,7 +1616,7 @@ def _render_composer_submit_fragment(
                 with st.container(key="stage_move_notice"):
                     st.markdown(
                         f'<p class="cd-stage-move-notice">'
-                        f"Moved to stage: {html.escape(notice)}"
+                        f"{html.escape(notice)}"
                         f"</p>",
                         unsafe_allow_html=True,
                     )

@@ -2250,6 +2250,11 @@ class CoachApplicationService:
         if attachment_only_question:
             needs_retrieval = True
             record_field("attachment_retrieval_scoped", True)
+        if missing_image_qa:
+            # Missing image bytes still need the fail-closed Q&A gap path even
+            # when the retrieval gate no longer treats generic questions as
+            # selected-source retrieves.
+            needs_retrieval = True
         if force_retrieval and selected_sources:
             needs_retrieval = True
         record_field("retrieval_gate_ms", elapsed_ms(gate_started))

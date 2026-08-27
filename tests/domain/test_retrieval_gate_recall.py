@@ -116,8 +116,8 @@ AMBIGUOUS: list[tuple[str, dict[str, object], bool, str]] = [
             "selected_source_titles": ["Battery cycling notes"],
             "has_selected_sources": True,
         },
-        True,
-        "selected-source factual question with no course noun",
+        False,
+        "selected-source factual question without source cue: prefer coaching FN",
     ),
     (
         "What quantified thermal degradation was reported?",
@@ -134,20 +134,32 @@ AMBIGUOUS: list[tuple[str, dict[str, object], bool, str]] = [
     (
         "Can you help me with this?",
         dict(_SELECTED),
-        True,
-        "help question with selected sources: retrieve, no Q&A hint",
+        False,
+        "help question with selected sources: Coaching, no Retrieve",
     ),
     (
         "tell me more",
         dict(_SELECTED),
-        True,
-        "continuation with selected sources",
+        False,
+        "continuation with selected sources is not an implicit source request",
     ),
     (
         "tell me more",
         {},
         False,
         "continuation without selected sources",
+    ),
+    (
+        "What are the main points?",
+        dict(_SELECTED),
+        True,
+        "implicit selected-source summary request",
+    ),
+    (
+        "Can you summarise it?",
+        dict(_SELECTED),
+        True,
+        "implicit selected-source summarise request",
     ),
 ]
 

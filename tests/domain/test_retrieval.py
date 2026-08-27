@@ -720,7 +720,7 @@ def test_citation_preview_uses_retrieved_excerpt_not_document_beginning(
     turn = service.submit(
         CoachRequest(
             thread_id=notebook,
-            student_message="What quantified thermal degradation was reported?",
+            student_message="What does the selected source say about thermal degradation?",
             current_stage="problem_identification",
             response_detail="short",
         )

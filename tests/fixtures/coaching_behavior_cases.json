@@ -411,7 +411,7 @@
     {
       "id": "qa_quantified",
       "stage": "design_specification",
-      "student_message": "What quantified thermal degradation was reported?",
+      "student_message": "What does the selected source say about quantified thermal degradation?",
       "expected": {
         "mode": "qa",
         "must_remain_socratic": false,

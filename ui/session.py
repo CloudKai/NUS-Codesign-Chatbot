@@ -24,6 +24,7 @@ from backend.student_journey import (
     DEFAULT_RESPONSE_DETAIL,
     DEFAULT_STAGE,
     STAGE_BY_ID,
+    THINKING_STAGES,
     default_journey,
     normalize_journey,
 )
@@ -177,15 +178,49 @@ def new_notebook(should_rerun: bool = True) -> None:
         rerun_app()
 
 
-def set_stage_move_notice(label: str) -> None:
-    """Show a session-only ``Moved to stage: …`` line above the composer."""
-    cleaned = str(label or "").strip()
+def set_stage_move_notice(message: str) -> None:
+    """Show a session-only stage-hop line above the composer.
+
+    Args:
+        message: Full notice text such as ``Moved to stage: …``,
+            ``You are already in …``, or ``Must complete … to reach …``.
+    """
+    cleaned = " ".join(str(message or "").split()).strip()
     st.session_state.stage_move_notice = cleaned or None
 
 
 def clear_stage_move_notice() -> None:
     """Drop the ephemeral stage-move composer notice."""
     st.session_state.stage_move_notice = None
+
+
+def locked_stage_move_notice(stage_id: str, journey: Any | None = None) -> str:
+    """Return composer copy when ``stage_id`` is beyond the unlocked frontier.
+
+    Always names the immediate predecessor stage — the one students must
+    complete before the requested stage can unlock.
+
+    Args:
+        stage_id: Canonical Thinking Path stage the student asked for.
+        journey: Unused; kept for call-site compatibility.
+
+    Returns:
+        A ``Must complete <prior> to reach <target>`` line, or a generic
+        fallback when the target is the first stage or unknown.
+    """
+    del journey  # Call sites may pass journey; predecessor is path-order only.
+    cleaned = str(stage_id or "").strip()
+    target = STAGE_BY_ID.get(cleaned)
+    target_label = target.label if target is not None else cleaned or "that stage"
+    stage_ids = [stage.id for stage in THINKING_STAGES]
+    try:
+        index = stage_ids.index(cleaned)
+    except ValueError:
+        return f"Must complete earlier stages to reach {target_label}"
+    if index <= 0:
+        return f"Must complete earlier stages to reach {target_label}"
+    prior = STAGE_BY_ID[stage_ids[index - 1]]
+    return f"Must complete {prior.label} to reach {target_label}"
 
 
 _AWAITING_COACH_TURN_TIMEOUT_SECONDS = 90
@@ -302,9 +337,10 @@ def apply_manual_stage_move(thread_id: str, stage_id: str) -> bool:
     st.session_state.response_detail = journey["response_detail"]
     selected = str(journey.get("current_stage") or cleaned).strip()
     if selected != previous:
-        set_stage_move_notice(STAGE_BY_ID[selected].label)
+        label = STAGE_BY_ID[selected].label
+        set_stage_move_notice(f"Moved to stage: {label}")
         return True
-    clear_stage_move_notice()
+    set_stage_move_notice(f"You are already in {stage.label}")
     return False
 
 

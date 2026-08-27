@@ -1251,7 +1251,7 @@ def test_direct_image_attachment_excludes_selected_course_scope(tmp_path) -> Non
     assert course_image["id"] not in prepared.source_ids
     turn = service.submit(request)
     assert len(client.calls) == 1
-    assert turn.response_text != "I couldn't retrieve a validated excerpt from the selected course material for this turn, so I can't reliably summarise it from the course sources right now."
+    assert turn.response_text != QA_EVIDENCE_GAP_RESPONSE
 
 
 def test_personal_reflection_phrased_as_a_question_is_not_qa() -> None:
@@ -1290,6 +1290,7 @@ def test_should_author_qa_evidence_gap_skips_image_only_turns() -> None:
 
     image_only = SimpleNamespace(
         expected_response_mode="qa",
+        retrieval_required=True,
         allow_model_knowledge=False,
         retrieved_chunks=[],
         source_ids=["img-1"],
@@ -1299,6 +1300,7 @@ def test_should_author_qa_evidence_gap_skips_image_only_turns() -> None:
     assert should_author_qa_evidence_gap(image_only) is False
     course_gap = SimpleNamespace(
         expected_response_mode="qa",
+        retrieval_required=True,
         allow_model_knowledge=False,
         retrieved_chunks=[],
         source_ids=["src-1"],
@@ -1309,6 +1311,7 @@ def test_should_author_qa_evidence_gap_skips_image_only_turns() -> None:
 
     mixed = SimpleNamespace(
         expected_response_mode="qa",
+        retrieval_required=True,
         allow_model_knowledge=False,
         retrieved_chunks=[],
         source_ids=["img-1", "pdf-1"],
@@ -1316,6 +1319,28 @@ def test_should_author_qa_evidence_gap_skips_image_only_turns() -> None:
         image_inputs=[SimpleNamespace(source_id="img-1")],
     )
     assert should_author_qa_evidence_gap(mixed) is True
+
+    coaching_no_retrieve = SimpleNamespace(
+        expected_response_mode="coaching",
+        retrieval_required=False,
+        allow_model_knowledge=False,
+        retrieved_chunks=[],
+        source_ids=["src-1"],
+        retrieved_course_context=COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT,
+        image_inputs=[],
+    )
+    assert should_author_qa_evidence_gap(coaching_no_retrieve) is False
+
+    qa_without_retrieval_flag = SimpleNamespace(
+        expected_response_mode="qa",
+        retrieval_required=False,
+        allow_model_knowledge=False,
+        retrieved_chunks=[],
+        source_ids=["src-1"],
+        retrieved_course_context=COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT,
+        image_inputs=[],
+    )
+    assert should_author_qa_evidence_gap(qa_without_retrieval_flag) is False
 
 
 def test_runtime_hint_is_silent_when_ambiguous_and_qa_skips_coaching_guidance() -> None:

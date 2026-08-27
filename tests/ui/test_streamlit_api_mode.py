@@ -180,7 +180,7 @@ def test_streamlit_stage_selection_refreshes_authoritative_stage_and_status(monk
         assert app.session_state["learning_journey"]["current_stage"] == "concept_generation"
         assert app.session_state["mobile_panel"] == "Chat"
         assert "chat_follow_bottom" not in app.session_state
-        assert app.session_state["stage_move_notice"] == "Concept generation"
+        assert app.session_state["stage_move_notice"] == "Moved to stage: Concept generation"
         messages = client.get_messages(thread_id)
         assert not any(
             "Moved to Stage:" in str(message.get("content") or "")
@@ -247,7 +247,7 @@ def test_streamlit_manual_stage_chat_command_refreshes_authoritative_journey(
         assert state["thinking_stage"] == "concept_generation"
         assert state["learning_journey"]["current_stage"] == "concept_generation"
         assert app.session_state["learning_journey"]["current_stage"] == "concept_generation"
-        assert app.session_state["stage_move_notice"] == "Concept generation"
+        assert app.session_state["stage_move_notice"] == "Moved to stage: Concept generation"
         messages = client.get_messages(thread_id)
         assert not any(
             "Moved to Stage:" in str(message.get("content") or "")
@@ -258,6 +258,23 @@ def test_streamlit_manual_stage_chat_command_refreshes_authoritative_journey(
             for message in messages
             if message.get("role") == "user"
         )
+
+        app.chat_input[0].set_value("Hi, can I move to Concept Generation?").run()
+        assert not app.exception
+        assert (
+            app.session_state["stage_move_notice"]
+            == "You are already in Concept generation"
+        )
+        assert client.get_messages(thread_id) == messages
+
+        app.chat_input[0].set_value("move me to Reflection").run()
+        assert not app.exception
+        assert (
+            app.session_state["stage_move_notice"]
+            == "Must complete Ethics & Critical Thinking to reach Reflection"
+        )
+        assert client.learning_state(thread_id)["thinking_stage"] == "concept_generation"
+        assert client.get_messages(thread_id) == messages
 
         app.chat_input[0].set_value(
             "I am reflecting on how evidence changed my design decision."
