@@ -8,8 +8,11 @@ Architecture: [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md).
 Current SHA / CI / deploy impact: [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) (**CURRENT STATUS**).  
 Topology and build commands: [`deploy/AWS_STATELESS_EC2.md`](deploy/AWS_STATELESS_EC2.md).
 
-Month-1 production (`compose.prod.yaml`) keeps `AUTO_ADVANCE_STAGES=true` and
-`STUDENT_STAGE_SELECTION=false`. Do not “fix” that during release.
+Production (`compose.prod.yaml`) matches the local demo stage policy:
+`STUDENT_STAGE_SELECTION=true` and `AUTO_ADVANCE_STAGES=false`. Coach ADVANCE
+opens Ready; students move with Journey **Work on this stage** or typed
+`Move to`. Do not flip those flags back to Month-1 auto-advance during release
+unless product explicitly reverts.
 
 ---
 
@@ -137,14 +140,14 @@ and redeploy FastAPI, or warm sessions may keep the version you just left.
 
 ## 10. Post-deploy smoke
 
-Historical live matrix: [`MANUAL_PRODUCTION_QA.md`](MANUAL_PRODUCTION_QA.md) (dated; not current HEAD evidence). Optional **local** headed path after `sh scripts/start.sh`: `sh scripts/browser_e2e_smoke.sh` (manual Cognito; that script’s “press Next” step is the **local confirmation-gated** default, not Month-1 production).
+Historical live matrix: [`MANUAL_PRODUCTION_QA.md`](MANUAL_PRODUCTION_QA.md) (dated; not current HEAD evidence). Optional **local** headed path after `sh scripts/start.sh`: `sh scripts/browser_e2e_smoke.sh` (manual Cognito; selection-mode Ready / Move to).
 
-Ordered production smoke (Month-1 auto-advance):
+Ordered production smoke (selection mode):
 
 1. Public `/api/v1/health` → 200, `"mode":"production"`. Host-local `/api/v1/ready` → 200.
 2. Cognito login → workspace. Refresh keeps the session.
 3. Create or open a notebook. Send a coaching turn. Expect a reply (not `safety_blocked` / 503).
-4. **Do not** expect student **Next** confirmation. Coach ADVANCE auto-applies. Journey has no stage picker.
+4. When Ready appears, focus stays until the student moves via Journey **Work on this stage** or typed `Move to <stage>`. Do **not** expect silent auto-advance.
 5. Upload a small personal source, select it, ask a grounded question, open `[S#]` preview.
 6. Recreate the app container (no student data volume). Log in again; notebook, messages, and stage persist (DSQL + S3).
 7. Logout → signed-out gate; back-navigation does not restore protected data.
@@ -180,7 +183,8 @@ Container logs (json-file → CloudWatch or the host sink). No student text.
 - Schema change in the app container or as `co_design_app`.
 - Paid/live AgentCore or Bedrock smokes without an explicit cost cap.
 - Copy course objects into `users/`.
-- Flip Month-1 `AUTO_ADVANCE_STAGES` / `STUDENT_STAGE_SELECTION` as a “bugfix”.
+- Flip `STUDENT_STAGE_SELECTION` / `AUTO_ADVANCE_STAGES` away from the
+  selection-mode Compose defaults without an explicit product decision.
 - Republish AgentCore without changing `AGENTCORE_SESSION_GENERATION` and recreating FastAPI.
 - Create a **new** AgentCore runtime ARN (publish a new version on the existing ARN).
 - Enable `FAST_CHAT_PROMPT_CACHE_ENABLED` on this baseline. Session affinity is

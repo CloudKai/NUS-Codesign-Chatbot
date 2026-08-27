@@ -587,7 +587,9 @@ Performs no DDL/S3/Bedrock/provider-paid calls; removes disposable rows in
 2. Create notebook.
 3. Send message / generate coach turn.
 4. Upload source; preview source.
-5. Confirm stage transition. Month-1 production: coach ADVANCE auto-applies (no student confirm). Local-demo default: recommend → student Next/confirm.
+5. Confirm stage transition. Production (`compose.prod.yaml`): coach ADVANCE
+   opens Ready; student moves with Journey **Work on this stage** or typed
+   `Move to <stage>`.
 6. Restart/remove/recreate the application container (no `/app/data` mount).
 7. Log back in; confirm notebook, messages, progress, and source still exist.
 8. Delete source/notebook; confirm S3 cleanup under the owner prefix.
@@ -599,9 +601,8 @@ Performs no DDL/S3/Bedrock/provider-paid calls; removes disposable rows in
 Until this smoke sequence passes, the migration is **not** complete and the
 application remains **READY FOR CONTROLLED PILOT** at best.
 
-Month-1 production (`AUTO_ADVANCE_STAGES=true` in `compose.prod.yaml`): step 5
-must **not** require student Next/confirm. Coach ADVANCE auto-applies. The
-confirmation-gated Next path remains the local-demo / repository default.
+Production selection mode (`STUDENT_STAGE_SELECTION=true` in `compose.prod.yaml`):
+step 5 must **not** auto-advance focus. Ready stays open until the student moves.
 
 ## CloudFront distribution and Caddy origin
 

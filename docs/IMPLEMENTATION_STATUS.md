@@ -2,6 +2,22 @@
 
 ## CURRENT STATUS
 
+### Production stage policy matches local selection mode (2026-08-28)
+
+**Change.** ``compose.prod.yaml`` now sets ``STUDENT_STAGE_SELECTION=true`` and
+``AUTO_ADVANCE_STAGES=false`` so CloudFront/EC2 matches the local demo Journey
+Ready / ``Move to`` / Work on this stage behavior. Release checklist and
+``docs/deploy/AWS_STATELESS_EC2.md`` smoke steps updated. Code parity still
+requires merging ``Integrate-Bedrock-v2`` into ``main`` and rebuilding the EC2
+app image.
+
+**Files.** ``compose.prod.yaml``, ``docs/PRODUCTION_RELEASE_CHECKLIST.md``,
+``docs/deploy/AWS_STATELESS_EC2.md``, ``docs/IMPLEMENTATION_STATUS.md``.
+
+**Next exact action.** Merge/push this branch to the deploy SHA, build a new
+immutable ``APP_IMAGE``, run ``sh scripts/deploy_ecr.sh`` (or the documented
+EC2 recreate), then smoke Ready + Move to on CloudFront.
+
 ### Generate Deep Analysis PDF (2026-08-28)
 
 **Change.** Renamed student-facing **Start Deep Review** / Journey **Generate

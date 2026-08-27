@@ -14,11 +14,11 @@ services:
       - .env
     environment:
       APP_ENV: "production"
-      # Month-1 pilot: coach ADVANCE auto-applies (no Next confirmation).
-      # Stage selection remains disabled in the production pilot. Month-2+
-      # can set AUTO_ADVANCE_STAGES=false and STUDENT_STAGE_SELECTION=true.
-      AUTO_ADVANCE_STAGES: "true"
-      STUDENT_STAGE_SELECTION: "false"
+      # Match local demo stage policy: students choose stages (Journey Work on
+      # this stage / Move to). Coach ADVANCE opens Ready; it does not auto-move.
+      # AUTO_ADVANCE_STAGES is ignored while STUDENT_STAGE_SELECTION is true.
+      AUTO_ADVANCE_STAGES: "false"
+      STUDENT_STAGE_SELECTION: "true"
       USE_LOCAL_API: "true"
       CO_DESIGN_PUBLIC_API_URL: "${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}"
       CO_DESIGN_UI_URL: "${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}"
