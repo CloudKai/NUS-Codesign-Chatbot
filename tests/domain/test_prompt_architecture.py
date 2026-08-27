@@ -344,7 +344,14 @@ def test_composer_quick_guidance_overrides_stage_thoroughness():
     guidance = prepared.runtime_instructions
     assert "Guidance mode: Quick" in guidance
     assert "minimum workable" in guidance
-    assert "take precedence" in guidance
+    assert "authoritative completion thresholds" in guidance
+    assert "replace the current stage's ADVANCE/STAY and READINESS" in guidance
+    assert "PURPOSE" in guidance
+    assert "remain active and unchanged" in guidance
+    assert "informal HMW" in guidance
+    assert "Barrier/root-cause sharpening is non-blocking" in guidance
+    assert "elderly pedestrians" not in guidance
+    assert "road-crossing" not in guidance
     assert "Problem Identification" in guidance
     assert "Concept Generation" in guidance
     assert "Design Specification" in guidance
@@ -406,6 +413,31 @@ def test_composer_navigation_overrides_auto_advance_confirmation_copy(monkeypatc
     assert "exact `confirm`" in text
     assert "automatically move" not in text
     assert "no confirmation language" not in text
+
+
+def test_composer_selection_mode_points_to_move_to_and_journey_cta(monkeypatch):
+    """Selection ADVANCE copy uses Ready heading and Move to / Work on this stage."""
+    from backend.prompts import composer as composer_module
+
+    monkeypatch.setattr(composer_module.settings, "auto_advance_stages", False)
+    monkeypatch.setattr(composer_module.settings, "student_stage_selection", True)
+    prepared = PromptComposer().compose(
+        PromptContext(
+            current_stage="problem_identification",
+            student_message="Here is my How Might We framing.",
+            response_detail="short",
+            allow_model_knowledge=True,
+            expected_response_mode="coaching",
+            context_policy="fast_chat",
+        )
+    )
+    text = prepared.runtime_instructions
+    assert "Move to <next stage label>" in text
+    assert "Work on this stage" in text
+    assert "] -> [" in text and "Ready**" in text
+    assert "do not ask for Next or a confirm command" in text
+    assert "confirmation via Next" not in text
+    assert "automatically move" not in text
 
 
 def test_composer_course_evidence_gap_does_not_claim_unreadable_pdf():

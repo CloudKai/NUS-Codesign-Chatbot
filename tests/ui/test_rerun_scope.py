@@ -432,13 +432,18 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
     assert '"Journey !"' not in source
     assert Path("ui/layout/journey_tab_unread.py").exists() is False
     workspace = Path("ui/workspace.py").read_text(encoding="utf-8")
-    assert 'return "Journey 🛑"' in workspace
-    assert "stage_reviews_need_attention" in workspace
+    assert 'return "Journey"' in workspace.split("def _studio_mobile_label", 1)[1].split(
+        "panel = st.radio(", 1
+    )[0]
+    assert "Journey 🛑" not in workspace
     assert 'return "Journey !"' not in workspace
     assert 'studio_tab") == "Review"' not in workspace
     assert 'return "Review"' not in workspace.split("def _studio_mobile_label", 1)[1].split(
         "panel = st.radio(", 1
     )[0]
+    responsive = Path("ui/assets/styles/90-responsive.css").read_text(encoding="utf-8")
+    assert 'input[value="Studio"]:checked' in responsive
+    assert "not(:has(.st-key-mobile_panel input:checked))" in responsive
     css = Path("ui/assets/styles/10-workspace.css").read_text(encoding="utf-8")
     assert ".st-key-studio_section_tabs" in css
     assert 'iframe[height="0"]' in css

@@ -314,6 +314,63 @@ def personalized_stage_questions(
     return stage_guidance_questions(stage_id)[:2]
 
 
+def selection_pending_move_footer(next_stage_id: str) -> str:
+    """Return how-to-move copy for a selection-mode pending ADVANCE.
+
+    Args:
+        next_stage_id: Canonical destination Thinking Path stage id.
+
+    Returns:
+        Markdown lines telling the student to type ``Move to <label>`` or use
+        Journey **Work on this stage**.
+    """
+    next_stage_value = STAGE_BY_ID[next_stage_id]
+    return (
+        f"Type: Move to {next_stage_value.label}\n"
+        "or Journey → Click Work on this stage."
+    )
+
+
+def selection_pending_ready_response(
+    *,
+    from_stage_id: str,
+    to_stage_id: str,
+    response_text: str = "",
+) -> str:
+    """Format a selection-mode pending ADVANCE as Ready plus how to move.
+
+    Keeps focus unchanged. Does not claim the stage already moved.
+
+    Args:
+        from_stage_id: Stage that just became ready to leave.
+        to_stage_id: Recommended destination stage.
+        response_text: Optional coach body to keep under the Ready heading.
+
+    Returns:
+        Markdown starting with ``**[from] -> [to] Ready**`` and ending with the
+        selection how-to-move footer.
+    """
+    current_stage_value = STAGE_BY_ID[from_stage_id]
+    next_stage_value = STAGE_BY_ID[to_stage_id]
+    transition_heading = (
+        f"**[{current_stage_value.label}] -> [{next_stage_value.label}] Ready**"
+    )
+    footer = selection_pending_move_footer(to_stage_id)
+    response_body = concise_coach_response(str(response_text or "").strip())
+    current_heading = f"**{current_stage_value.label}**"
+    next_heading = f"**{next_stage_value.label}**"
+    for heading in (transition_heading, next_heading, current_heading):
+        if response_body.startswith(heading):
+            response_body = response_body[len(heading) :].strip()
+            break
+    # Drop explore-question blocks; selection mode points to Journey / Move to.
+    if "**Questions to explore**" in response_body:
+        response_body = response_body.split("**Questions to explore**", 1)[0].strip()
+    if response_body:
+        return f"{transition_heading}\n\n{response_body}\n\n{footer}".strip()
+    return f"{transition_heading}\n\n{footer}".strip()
+
+
 def advanced_stage_response(
     response_text: str,
     current_stage_id: str,

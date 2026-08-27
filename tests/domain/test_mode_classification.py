@@ -515,6 +515,9 @@ def test_stage_discussion_is_not_a_navigation_command(message: str) -> None:
         ("move me to Problem identification", "problem_identification"),
         ("move me to concept_generation", "concept_generation"),
         (" Move   Me to Concept Generation!!! ", "concept_generation"),
+        ("Move to Concept generation", "concept_generation"),
+        ("move to concept_generation", "concept_generation"),
+        ("Move to Ethics & Critical Thinking", "deep_analysis"),
         ("move me to design_specification", "design_specification"),
         ("move me to design specification.", "design_specification"),
         ("move me to deep_analysis", "deep_analysis"),
@@ -540,6 +543,7 @@ def test_manual_stage_command_parser_is_strict_and_canonical(
         "Please move me to reflection",
         "Move me to ethical consideration",
         "Move me to the next stage",
+        "Move to the next stage",
     ),
 )
 def test_manual_stage_command_parser_rejects_fuzzy_or_broad_phrasing(
@@ -731,6 +735,19 @@ def test_phase2_validated_advance_completes_current_without_changing_focus(
 
     turn = service.submit(request)
     assert turn.pending_transition is not None
+    from_label = STAGE_BY_ID[current_stage].label
+    to_label = STAGE_BY_ID[
+        {
+            "problem_identification": "concept_generation",
+            "concept_generation": "design_specification",
+        }[current_stage]
+    ].label
+    assert turn.response_text.startswith(
+        f"**[{from_label}] -> [{to_label}] Ready**"
+    )
+    assert f"Type: Move to {to_label}" in turn.response_text
+    assert "Work on this stage" in turn.response_text
+    assert "Type exact `confirm` to advance." not in turn.response_text
     thread = store.get_thread(thread_id) or {}
     journey = thread["metadata"]["learning_journey"]
     assert journey["current_stage"] == current_stage
@@ -758,6 +775,66 @@ def test_phase2_validated_advance_completes_current_without_changing_focus(
         current_stage,
     ]
     assert store.get_pending_phase_transition(thread_id) is None
+
+
+def test_phase2_pending_followup_repeats_ready_without_pi_stay(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """While pending ADVANCE is open, ordinary chat keeps Ready how-to-move copy."""
+    store = StudentStore(tmp_path / "phase2-pending-reminder.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="advance"))
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    service = _service(store, client, retriever=_NoRetrieve())
+    first = service.submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message=(
+                "How might we help elderly cross busy roads safely so they "
+                "feel less stressed?"
+            ),
+            current_stage="problem_identification",
+            response_detail="short",
+            idempotency_key="phase2-ready-first",
+        )
+    )
+    assert first.pending_transition is not None
+    assert first.response_text.startswith(
+        "**[Problem identification] -> [Concept generation] Ready**"
+    )
+
+    stay_client = FakeAgentCoreRuntime(
+        payload=_coaching_payload(
+            recommendation="stay",
+            text=(
+                "**Problem identification**\n\n"
+                "Let's keep refining the problem before moving on."
+            ),
+        )
+    )
+    reminder = _service(store, stay_client, retriever=_NoRetrieve()).submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="a design feature",
+            current_stage="problem_identification",
+            response_detail="short",
+            idempotency_key="phase2-ready-followup",
+        )
+    )
+    assert reminder.pending_transition is None
+    assert reminder.assessment.recommendation is StageDecision.STAY
+    assert reminder.response_text.startswith(
+        "**[Problem identification] -> [Concept generation] Ready**"
+    )
+    assert "Type: Move to Concept generation" in reminder.response_text
+    assert "Work on this stage" in reminder.response_text
+    assert "keep refining the problem" not in reminder.response_text.casefold()
+    assert store.get_pending_phase_transition(thread_id) is not None
+    journey = ((store.get_thread(thread_id) or {}).get("metadata") or {}).get(
+        "learning_journey", {}
+    )
+    assert journey["current_stage"] == "problem_identification"
+    assert stay_client.calls == []
 
 
 def test_phase2_stay_does_not_complete_current_stage(

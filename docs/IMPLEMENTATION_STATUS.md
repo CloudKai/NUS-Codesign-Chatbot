@@ -2,6 +2,33 @@
 
 ## CURRENT STATUS
 
+### Selection-mode Chat Ready copy (2026-08-27)
+
+**Change.** With ``STUDENT_STAGE_SELECTION=true``, a coach ADVANCE now rewrites
+Chat to ``**[from] -> [to] Ready**`` plus how to move (``Type: Move to <stage>``
+or Journey → **Work on this stage**). Focus and the pending recommendation stay
+until the student moves. Whole-message ``Move to <stage>`` is accepted as a
+manual selection command (alongside ``move me to``). While a pending ADVANCE is
+open, ordinary follow-ups get a server-owned Ready reminder instead of another
+Problem identification STAY. Confirmation-mode ``confirm`` / Next language is
+unchanged when selection is off.
+
+**Files.** ``backend/learning/journey.py``, ``backend/student_journey.py``,
+``backend/coaching/execution.py``, ``backend/coaching/workflow_navigation.py``,
+``backend/prompts/composer.py``, ``tests/domain/test_mode_classification.py``,
+``tests/domain/test_student_journey.py``, ``tests/domain/test_prompt_architecture.py``,
+``docs/IMPLEMENTATION_STATUS.md``. Local ``.env`` restored to selection on /
+auto-advance off.
+
+**Validation.** Focused pytest on mode classification, student journey Ready
+helper, and composer selection copy. Known unrelated flake:
+``test_reflection_completion_request_skips_retrieval_and_suppresses_advance``
+(expects STAY, may get ADVANCE) left alone.
+
+**Next exact action.** Hard-refresh Streamlit; with selection mode, trigger an
+ADVANCE and confirm Chat shows Ready + Move to / Work on this stage, then that
+a non-move follow-up keeps Ready (not PI STAY).
+
 ### Composer typing lag: contain + drop body tooltip observer (2026-08-26)
 
 **Change.** Finish the long-chat typing responsiveness leftovers: add

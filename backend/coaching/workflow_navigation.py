@@ -83,6 +83,13 @@ _EXACT_MOVE_ME_TO = re.compile(
     re.IGNORECASE,
 )
 
+# Selection-mode chat CTA: whole-message ``Move to <stage>`` (no ``me``).
+# Rejects discussion such as ``Move this idea to concept generation``.
+_EXACT_MOVE_TO = re.compile(
+    r"^move\s+to\s+(.+)$",
+    re.IGNORECASE,
+)
+
 # Strong navigation / readiness language. Matched anywhere so a project
 # paragraph can end with a move request.
 _NAVIGATION_CLAUSE = re.compile(
@@ -423,6 +430,13 @@ def classify_workflow_intent(message: str) -> WorkflowIntent:
             return WorkflowIntent(kind="move_stage", target_stage_id=target)
         return WorkflowIntent(kind="none", confidence="low")
 
+    move_to = _EXACT_MOVE_TO.fullmatch(text)
+    if move_to is not None:
+        target = resolve_stage_phrase(move_to.group(1), allow_typos=True)
+        if target is not None:
+            return WorkflowIntent(kind="move_stage", target_stage_id=target)
+        return WorkflowIntent(kind="none", confidence="low")
+
     named = _target_from_named_move(text)
     if named is not None:
         return WorkflowIntent(kind="move_stage", target_stage_id=named)
@@ -453,10 +467,11 @@ def is_stage_progression_request(student_message: str) -> bool:
 def manual_stage_selection_target(student_message: str) -> str | None:
     """Return the canonical target of an explicit stage-move command.
 
-    Accepts ``move me to <stage>`` and natural ``can I move to <stage>`` forms
-    once intent and destination resolve. Does not authorize the move; Phase 2
-    selection and store validation remain authoritative. Ambiguous phrases such
-    as ``Concept generation now?`` return ``None``.
+    Accepts ``move me to <stage>``, whole-message ``move to <stage>``, and
+    natural ``can I move to <stage>`` forms once intent and destination
+    resolve. Does not authorize the move; Phase 2 selection and store
+    validation remain authoritative. Ambiguous phrases such as
+    ``Concept generation now?`` return ``None``.
     """
     intent = classify_workflow_intent(student_message)
     if intent.kind == "move_stage":

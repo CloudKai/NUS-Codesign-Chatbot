@@ -200,21 +200,40 @@
             display:none;
         }
 
+        /* Prefer value-based matching so label-text remounts cannot desync
+           nth-child indices from Studio/Chat/Sources. */
+        body:has(.st-key-mobile_panel input[value="Studio"]:checked)
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel),
         body:has(.st-key-mobile_panel label:nth-child(1) input:checked)
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel) {
             display:block;
         }
 
+        body:has(.st-key-mobile_panel input[value="Chat"]:checked)
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel),
         body:has(.st-key-mobile_panel label:nth-child(2) input:checked)
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel) {
             display:block;
         }
 
+        body:has(.st-key-mobile_panel input[value="Sources"]:checked)
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-sources_panel),
         body:has(.st-key-mobile_panel label:nth-child(3) input:checked)
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-sources_panel) {
+            display:block;
+        }
+
+        /* If the switcher remounts with no checked option, show Studio rather
+           than a blank white workspace. */
+        body:has(.st-key-mobile_panel):not(:has(.st-key-mobile_panel input:checked))
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel) {
             display:block;
         }
 

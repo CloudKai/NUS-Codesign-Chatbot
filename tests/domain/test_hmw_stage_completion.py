@@ -179,7 +179,15 @@ def test_hmw_completion_criterion_lives_in_problem_identification_prompts() -> N
         assert "working draft, not a polished final statement" in collapsed
         assert "opportunity is expressed as a problem or friction" in collapsed
         assert "refinement a progression gate" in collapsed
-        assert "Equivalent prose that states user, problem, and outcome" in collapsed
+        assert "QUICK MODE — INFORMAL HMW COMPLETION" in collapsed
+        assert "STRICT MODE — CLEARER ARTICULATION" in collapsed
+        assert "NON-BLOCKING AFTER WORKABLE HMW" in collapsed
+        assert "BAN PROGRESSION-HOLDING LANGUAGE" in collapsed
+        assert "recommendation MUST be advance" in collapsed
+        assert "hmw_scaffold_ready MUST be false" in collapsed
+        assert "do NOT return STAY merely to" in collapsed
+        assert "identify the \"real barrier\"" in collapsed
+        assert "Before we move forward" in collapsed
         assert "recommendation=advance" in collapsed
         assert "Concept Generation" in collapsed
         assert "The application remains the stage authority" in collapsed
@@ -218,6 +226,57 @@ def test_hmw_completion_criterion_lives_in_problem_identification_prompts() -> N
     assert "recommendation=stay with hmw_scaffold_ready=true is normal" in shared
     concept = load_stage_prompt("concept_generation")
     assert "HOW MIGHT WE READINESS AND COMPLETION" not in concept
+
+
+def test_quick_informal_hmw_contract_accepts_meaningful_shorthand() -> None:
+    """Quick PI prompt treats informal A/B/C HMW as workable completion."""
+    prompt = Path(
+        "agentcore_runtime/prompts/stages/problem_identification.md"
+    ).read_text(encoding="utf-8")
+    collapsed = " ".join(prompt.split())
+    assert "QUICK MODE — INFORMAL HMW COMPLETION" in collapsed
+    assert "hmw help elderly cross busy roads safely / feel less stressed" in collapsed
+    assert "meaning, not syntax" in collapsed
+    assert "block informal HMW/shorthand" in collapsed
+    assert "do NOT return STAY merely to" in collapsed
+    assert "real barrier" in collapsed
+    assert "recommendation MUST be advance" in collapsed
+    assert "Before we move forward" in collapsed
+
+
+def test_strict_retains_clearer_hmw_articulation_bar() -> None:
+    """Strict PI still prefers clearer HMW wording and is not reduced to Quick."""
+    prompt = Path(
+        "agentcore_runtime/prompts/stages/problem_identification.md"
+    ).read_text(encoding="utf-8")
+    collapsed = " ".join(prompt.split())
+    assert "STRICT MODE — CLEARER ARTICULATION" in collapsed
+    assert "prefer a clearer working HMW using the preferred structure" in collapsed
+    assert "research-validation gate" in collapsed
+    assert (
+        "equivalent prose that states user, problem, and outcome without a "
+        "clearer working HMW articulation is not completion"
+    ) in collapsed
+    assert "solution-locked" in collapsed
+    assert "Template filling" in collapsed
+
+
+def test_composer_quick_pi_allows_informal_hmw_syntax() -> None:
+    """Quick runtime PI minimum accepts informal HMW when A/B/C are clear."""
+    from backend.prompts import PromptComposer, PromptContext
+
+    guidance = PromptComposer().compose(
+        PromptContext(
+            current_stage="problem_identification",
+            student_message="hmw help elderly cross busy roads safely / feel less stressed",
+            response_detail="short",
+        )
+    ).runtime_instructions
+    assert "Guidance mode: Quick" in guidance
+    assert "informal HMW" in guidance
+    assert "must not block ADVANCE" in guidance
+    assert "Barrier/root-cause sharpening is non-blocking" in guidance
+    assert "How might we / for / so that" in guidance
 
 
 _PEDESTRIAN_TWO_OF_THREE = (

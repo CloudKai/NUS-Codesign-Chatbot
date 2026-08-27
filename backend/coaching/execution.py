@@ -113,6 +113,7 @@ from backend.student_journey import (
     current_stage,
     normalize_journey,
     personalized_stage_questions,
+    selection_pending_ready_response,
 )
 from backend.student_store import (
     AtomicAutoAdvance,
@@ -337,6 +338,40 @@ def _manual_stage_selection_turn(
             contribution_summary="Applied the student's explicit stage selection.",
             stage_assessment="Stage selected from the authoritative notebook journey.",
             recommendation=None,
+            response_mode="qa",
+        ),
+    )
+
+
+def _selection_pending_ready_reminder_turn(
+    *,
+    current_stage_id: str,
+    from_stage_id: str,
+    to_stage_id: str,
+) -> CoachTurn:
+    """Repeat Ready + how-to-move while a selection pending ADVANCE is open.
+
+    Does not call the model and does not create a second pending transition.
+    Focus stays on ``current_stage_id`` until the student moves.
+    """
+    return CoachTurn(
+        response_text=selection_pending_ready_response(
+            from_stage_id=from_stage_id,
+            to_stage_id=to_stage_id,
+        ),
+        assessment=EducationalAssessment(
+            current_stage=current_stage_id,
+            contribution_summary=(
+                "Reminded the student that the next Thinking Path stage is ready."
+            ),
+            stage_assessment=(
+                "A pending ADVANCE recommendation is already open; coaching "
+                "focus is unchanged until the student moves."
+            ),
+            recommendation=StageDecision.STAY,
+            recommendation_rationale=(
+                "Keep focus until Move to <stage> or Journey Work on this stage."
+            ),
             response_mode="qa",
         ),
     )
@@ -1306,6 +1341,7 @@ class CoachApplicationService:
         } and not any(
             message.get("role") == "user" for message in prepared_request.history
         )
+        pending_ready_reminder = False
         if manual_stage_target is not None:
             record_field("agentcore_call_count", 0)
             record_field("agent_ms", 0)
@@ -1326,6 +1362,30 @@ class CoachApplicationService:
             turn = _current_stage_status_turn(prepared_request)
         elif (
             not owned_review
+            and runtime_settings.student_stage_selection
+            and prepared_request.revise_user_message_id is None
+            and (
+                existing_pending := self._store.get_pending_phase_transition(
+                    prepared_request.thread_id
+                )
+            )
+            and str(existing_pending.get("from_stage") or "").strip() in STAGE_BY_ID
+            and str(existing_pending.get("to_stage") or "").strip() in STAGE_BY_ID
+        ):
+            # Keep Chat aligned with Journey while a pending ADVANCE is open.
+            # Do not let ordinary coaching re-emit Problem identification STAY.
+            pending_ready_reminder = True
+            record_field("selection_pending_ready_reminder", True)
+            record_field("agentcore_call_count", 0)
+            record_field("agent_ms", 0)
+            should_generate_title = False
+            turn = _selection_pending_ready_reminder_turn(
+                current_stage_id=prepared_request.current_stage,
+                from_stage_id=str(existing_pending["from_stage"]),
+                to_stage_id=str(existing_pending["to_stage"]),
+            )
+        elif (
+            not owned_review
             and should_author_qa_evidence_gap(prepared_request)
         ):
             record_field("qa_evidence_gap_authored", True)
@@ -1342,6 +1402,7 @@ class CoachApplicationService:
         if (
             is_stage_progression_request(prepared_request.student_message)
             and turn.pending_transition is not None
+            and not runtime_settings.student_stage_selection
         ):
             destination = STAGE_BY_ID[turn.pending_transition.to_stage]
             confirmation_instruction = (
@@ -1357,7 +1418,11 @@ class CoachApplicationService:
                 )
         if owned_review:
             should_generate_title = False
-        server_owned_turn = stage_status_request or manual_stage_target is not None
+        server_owned_turn = (
+            stage_status_request
+            or manual_stage_target is not None
+            or pending_ready_reminder
+        )
         if server_owned_turn:
             research_observation = None
             citations: list[CitationReference] = []
@@ -1456,6 +1521,23 @@ class CoachApplicationService:
                     ),
                     "pending_transition": None,
                     "auto_advanced_to": pending.to_stage,
+                }
+            )
+        elif (
+            not owned_review
+            and runtime_settings.student_stage_selection
+            and turn.pending_transition is not None
+            and manual_stage_target is None
+        ):
+            # Keep pending for Journey / Move to; rewrite Chat to Ready copy.
+            pending = turn.pending_transition
+            turn = turn.model_copy(
+                update={
+                    "response_text": selection_pending_ready_response(
+                        from_stage_id=pending.from_stage,
+                        to_stage_id=pending.to_stage,
+                        response_text=turn.response_text,
+                    ),
                 }
             )
         validated_completion_stage: str | None = None

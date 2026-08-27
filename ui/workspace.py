@@ -50,33 +50,17 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
         st.session_state.mobile_panel = pending_panel
 
     def _studio_mobile_label(value: str) -> str:
-        """Label the Studio rail as Journey (with unread stop badge when needed).
+        """Label the Studio rail as Journey with a stable string.
 
-        Never rename this option to ``Review``. Doing so remounts the mobile
-        switcher labels and can leave no ``input:checked``, which hides every
-        workspace column on narrow viewports.
+        Keep this label identical across unread/read states. Appending ``🛑``
+        remounts Streamlit radio options; on narrow viewports the column CSS
+        keys off ``input:checked``, and a remount with no checked option hides
+        every workspace column (blank screen). Unread attention stays on the
+        Thinking Path ``Review`` tab badge inside the studio panel.
         """
         if value != "Studio":
             return {"Sources": "Sources", "Chat": "Chat"}.get(value, value)
-        label = "Journey"
-        try:
-            from backend.specialists.review_orchestration import (
-                JOURNEY_STAGE_REVIEWS_KEY,
-                parse_journey_stage_reviews,
-                stage_reviews_need_attention,
-            )
-            from ui.runtime import store
-
-            thread = store.get_thread(str(st.session_state.get("thread_id") or "")) or {}
-            blob = parse_journey_stage_reviews(
-                (thread.get("metadata") or {}).get(JOURNEY_STAGE_REVIEWS_KEY)
-            )
-            if stage_reviews_need_attention(blob):
-                return "Journey 🛑"
-        except Exception:
-            pass
-        return label
-
+        return "Journey"
     panel = st.radio(
         "Workspace panel",
         ["Studio", "Chat", "Sources"],

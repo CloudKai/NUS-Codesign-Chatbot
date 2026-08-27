@@ -15,6 +15,7 @@ from backend.student_journey import (
     normalize_journey,
     personalized_stage_questions,
     selectable_stage_ids,
+    selection_pending_ready_response,
     stage_guidance_questions,
     understanding_level,
 )
@@ -243,6 +244,25 @@ def test_legacy_automatic_transition_renders_as_next_stage_questions():
     assert "**Questions to explore**" in display
     assert "Which concepts could address this problem?" in display
     assert "I’ve moved you" not in display
+
+
+def test_selection_pending_ready_response_is_heading_plus_how_to_move():
+    display = selection_pending_ready_response(
+        from_stage_id="problem_identification",
+        to_stage_id="concept_generation",
+        response_text=(
+            "**Problem identification**\n\n"
+            "Your HMW is workable.\n\n"
+            "**Questions to explore**\n\n- ignore me"
+        ),
+    )
+    assert display.startswith(
+        "**[Problem identification] -> [Concept generation] Ready**"
+    )
+    assert "Your HMW is workable." in display
+    assert "Type: Move to Concept generation" in display
+    assert "Work on this stage" in display
+    assert "**Questions to explore**" not in display
 
 
 def test_legacy_coach_restatement_is_hidden_without_changing_the_response_body():

@@ -1112,7 +1112,7 @@ def render_studio_panel() -> None:
             )
         # Clear durable unread when Review is opened, but still render the
         # Review body in this run. An early return left a blank Studio pane
-        # (and a follow-up rerun refreshes the top Journey 🛑 badge).
+        # (and a follow-up rerun refreshes the Review 🛑 section badge).
         clear_unread_rerun = False
         if (
             selected == "Review"

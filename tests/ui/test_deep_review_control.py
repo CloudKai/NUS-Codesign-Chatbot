@@ -149,7 +149,9 @@ def test_queued_stage_review_shows_journey_stop_badge_before_unread() -> None:
     workspace_panel = next(
         radio for radio in app.radio if radio.label == "Workspace panel"
     )
-    assert "Journey 🛑" in workspace_panel.options
+    # Mobile Journey label stays stable; unread lives on Review only.
+    assert "Journey" in workspace_panel.options
+    assert "Journey 🛑" not in workspace_panel.options
     studio_section = next(
         radio for radio in app.radio if radio.label == "Thinking Path section"
     )
@@ -197,7 +199,8 @@ def test_stage_review_checkpoint_renders_on_review_tab_with_stop_badge() -> None
     workspace_panel = next(
         radio for radio in app.radio if radio.label == "Workspace panel"
     )
-    assert "Journey 🛑" in workspace_panel.options
+    assert "Journey" in workspace_panel.options
+    assert "Journey 🛑" not in workspace_panel.options
     assert "Journey !" not in workspace_panel.options
     studio_section = next(
         radio for radio in app.radio if radio.label == "Thinking Path section"
