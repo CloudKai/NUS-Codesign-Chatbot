@@ -370,7 +370,10 @@ def test_local_api_grounds_mock_reply_in_retrieved_selected_source(tmp_path):
         "/api/v1/coach/turn",
         json={
             "thread_id": thread_id,
-            "student_message": "What should I evaluate in this crossing design?",
+            "student_message": (
+                "Based on the selected source, what should I evaluate in this "
+                "crossing design?"
+            ),
             "current_stage": "problem_identification",
             "response_detail": "short",
             "source_ids": [source["id"]],

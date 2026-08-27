@@ -255,13 +255,16 @@ def test_selection_pending_ready_response_is_heading_plus_how_to_move():
             "Your HMW is workable.\n\n"
             "**Questions to explore**\n\n- ignore me"
         ),
+        stay_guidance="Clarify the most consequential user outcome.",
     )
     assert display.startswith(
-        "**[Problem identification] -> [Concept generation] Ready**"
+        "**[Problem identification] -> [Concept generation] is Ready.**"
     )
     assert "Your HMW is workable." in display
-    assert "Type: Move to Concept generation" in display
-    assert "Work on this stage" in display
+    assert "You can also stay in **Problem identification**" in display
+    assert "Clarify the most consequential user outcome." in display
+    assert "Enter `Move to Concept generation`" in display
+    assert "go to Journey and click **Work on this stage**" in display
     assert "**Questions to explore**" not in display
 
 

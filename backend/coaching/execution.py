@@ -348,6 +348,7 @@ def _selection_pending_ready_reminder_turn(
     current_stage_id: str,
     from_stage_id: str,
     to_stage_id: str,
+    pending_assessment: Mapping[str, Any] | None = None,
 ) -> CoachTurn:
     """Repeat Ready + how-to-move while a selection pending ADVANCE is open.
 
@@ -358,6 +359,7 @@ def _selection_pending_ready_reminder_turn(
         response_text=selection_pending_ready_response(
             from_stage_id=from_stage_id,
             to_stage_id=to_stage_id,
+            stay_guidance=_selection_stay_guidance(pending_assessment or {}),
         ),
         assessment=EducationalAssessment(
             current_stage=current_stage_id,
@@ -374,6 +376,40 @@ def _selection_pending_ready_reminder_turn(
             ),
             response_mode="qa",
         ),
+    )
+
+
+def _selection_stay_guidance(
+    assessment: EducationalAssessment | Mapping[str, Any],
+) -> str:
+    """Return one bounded, non-blocking refinement from an assessment."""
+    if isinstance(assessment, EducationalAssessment):
+        missing = assessment.missing_reasoning_elements
+        questions = assessment.guidance_questions
+        rationale = assessment.recommendation_rationale
+        recommendation = assessment.recommendation
+    else:
+        raw_missing = assessment.get("missing_reasoning_elements") or []
+        raw_questions = assessment.get("guidance_questions") or []
+        missing = raw_missing if isinstance(raw_missing, list) else []
+        questions = raw_questions if isinstance(raw_questions, list) else []
+        rationale = str(assessment.get("recommendation_rationale") or "")
+        recommendation = assessment.get("recommendation")
+    recommendation_value = (
+        recommendation.value
+        if isinstance(recommendation, StageDecision)
+        else str(recommendation or "").strip().lower()
+    )
+    candidates = [*missing, *questions]
+    if recommendation_value == StageDecision.STAY.value:
+        candidates.append(rationale)
+    for candidate in candidates:
+        cleaned = " ".join(str(candidate or "").split()).strip()
+        if cleaned:
+            return cleaned[:320].rstrip()
+    return (
+        "add one more concrete detail or piece of evidence where your current "
+        "reasoning is still weakest."
     )
 
 
@@ -1342,6 +1378,25 @@ class CoachApplicationService:
             message.get("role") == "user" for message in prepared_request.history
         )
         pending_ready_reminder = False
+        existing_pending: dict[str, Any] | None = None
+        if (
+            not owned_review
+            and runtime_settings.student_stage_selection
+            and prepared_request.revise_user_message_id is None
+        ):
+            candidate_pending = self._store.get_pending_phase_transition(
+                prepared_request.thread_id
+            )
+            if (
+                candidate_pending
+                and str(candidate_pending.get("from_stage") or "").strip()
+                in STAGE_BY_ID
+                and str(candidate_pending.get("to_stage") or "").strip()
+                in STAGE_BY_ID
+                and str(candidate_pending.get("from_stage") or "").strip()
+                == prepared_request.current_stage
+            ):
+                existing_pending = candidate_pending
         if manual_stage_target is not None:
             record_field("agentcore_call_count", 0)
             record_field("agent_ms", 0)
@@ -1361,19 +1416,12 @@ class CoachApplicationService:
             should_generate_title = False
             turn = _current_stage_status_turn(prepared_request)
         elif (
-            not owned_review
-            and runtime_settings.student_stage_selection
-            and prepared_request.revise_user_message_id is None
-            and (
-                existing_pending := self._store.get_pending_phase_transition(
-                    prepared_request.thread_id
-                )
-            )
-            and str(existing_pending.get("from_stage") or "").strip() in STAGE_BY_ID
-            and str(existing_pending.get("to_stage") or "").strip() in STAGE_BY_ID
+            existing_pending is not None
+            and is_stage_progression_request(prepared_request.student_message)
         ):
-            # Keep Chat aligned with Journey while a pending ADVANCE is open.
-            # Do not let ordinary coaching re-emit Problem identification STAY.
+            # A repeated move-on request needs no second model assessment.
+            # Ordinary coaching and Q&A continue below so readiness never
+            # makes the rest of Chat unresponsive.
             pending_ready_reminder = True
             record_field("selection_pending_ready_reminder", True)
             record_field("agentcore_call_count", 0)
@@ -1383,6 +1431,11 @@ class CoachApplicationService:
                 current_stage_id=prepared_request.current_stage,
                 from_stage_id=str(existing_pending["from_stage"]),
                 to_stage_id=str(existing_pending["to_stage"]),
+                pending_assessment=(
+                    existing_pending.get("assessment")
+                    if isinstance(existing_pending.get("assessment"), Mapping)
+                    else None
+                ),
             )
         elif (
             not owned_review
@@ -1398,6 +1451,38 @@ class CoachApplicationService:
                 turn = self._workflow.run(prepared_request)
             prepared_request, turn = self._maybe_rag_fallback(
                 prepared_request, turn, snapshot
+            )
+        if (
+            existing_pending is not None
+            and not pending_ready_reminder
+            and manual_stage_target is None
+            and stage_status_request is False
+            and str(turn.assessment.response_mode or "").strip().lower()
+            == "coaching"
+        ):
+            # Readiness unlocks the next stage but does not disable coaching in
+            # the current one. Keep the original pending row, prevent a second
+            # transition, and preserve the new Coach response as optional
+            # refinement beneath the Ready notice.
+            turn = turn.model_copy(
+                update={
+                    "response_text": selection_pending_ready_response(
+                        from_stage_id=str(existing_pending["from_stage"]),
+                        to_stage_id=str(existing_pending["to_stage"]),
+                        response_text=turn.response_text,
+                        stay_guidance=_selection_stay_guidance(turn.assessment),
+                    ),
+                    "assessment": turn.assessment.model_copy(
+                        update={
+                            "recommendation": StageDecision.STAY,
+                            "recommendation_rationale": (
+                                "The next stage is already unlocked; the student "
+                                "chose to continue refining the current stage."
+                            ),
+                        }
+                    ),
+                    "pending_transition": None,
+                }
             )
         if (
             is_stage_progression_request(prepared_request.student_message)
@@ -1537,6 +1622,7 @@ class CoachApplicationService:
                         from_stage_id=pending.from_stage,
                         to_stage_id=pending.to_stage,
                         response_text=turn.response_text,
+                        stay_guidance=_selection_stay_guidance(turn.assessment),
                     ),
                 }
             )
@@ -2377,6 +2463,12 @@ class CoachApplicationService:
                     conversation_summary=conversation_summary,
                     recent_messages=store_history,
                 )
+            except ValueError:
+                # Authorization/catalog-integrity failures are not an
+                # evidence-availability gap. They must remain visible and
+                # fail closed instead of being converted to a student-facing
+                # "no matching excerpt" response.
+                raise
             except Exception:
                 # A source Q&A turn cannot fall through to the provider when
                 # retrieval itself fails: doing so would let model knowledge or

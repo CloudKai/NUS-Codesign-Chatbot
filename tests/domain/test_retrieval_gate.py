@@ -60,6 +60,7 @@ def test_course_and_source_intent_triggers_retrieval() -> None:
         is True
     )
     assert retrieval_required("Give me evidence from the selected source.") is True
+    assert retrieval_required("What does the evidence say?") is True
     assert retrieval_required("Compare my idea against the lecture.") is True
     assert retrieval_required("WHAT DOES LECTURE 3 SAY ABOUT ACCESSIBILITY?") is True
     assert retrieval_required("What does lecture 3 say about accessibility?") is True
@@ -80,6 +81,50 @@ def test_selected_source_title_triggers_retrieval() -> None:
         )
         is True
     )
+
+
+def test_single_title_word_does_not_turn_project_coaching_into_source_qa() -> None:
+    selected = {
+        "has_selected_sources": True,
+        "selected_source_titles": ["Vulnerability in the elderly"],
+        "selected_source_filenames": ["Vulnerability_in_the_elderly.pdf"],
+    }
+    for message in (
+        "Elderly pedestrians need a safer crossing.",
+        "How can elderly pedestrians cross more safely?",
+    ):
+        decision = classify_retrieval_intent(message, **selected)
+        assert decision.retrieve is False, message
+        assert "selected_source_title" not in decision.cues, message
+
+    named = classify_retrieval_intent(
+        "What does Vulnerability in the elderly say?", **selected
+    )
+    assert named.retrieve is True
+    assert "selected_source_title" in named.cues
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "Can we go over my evidence?",
+        "What evidence should I gather to improve this?",
+        "Does my evidence support this idea?",
+    ),
+)
+def test_generic_project_evidence_language_does_not_retrieve(message: str) -> None:
+    decision = classify_retrieval_intent(message, **_ONE)
+    assert decision.retrieve is False
+    assert decision.intent != INTENT_HIGH_CONFIDENCE_SOURCE
+
+
+def test_selected_source_evidence_lookup_remains_grounded() -> None:
+    for message in (
+        "What thermal battery evidence is available?",
+        "What evidence does my source provide?",
+    ):
+        decision = classify_retrieval_intent(message, **_ONE)
+        assert decision.retrieve is True, message
 
 
 def test_punctuation_and_citation_markers() -> None:

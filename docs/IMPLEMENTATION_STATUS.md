@@ -2,32 +2,52 @@
 
 ## CURRENT STATUS
 
-### Selection-mode Chat Ready copy (2026-08-27)
+### Selection-mode readiness + Fast Chat intent hardening (2026-08-27)
 
 **Change.** With ``STUDENT_STAGE_SELECTION=true``, a coach ADVANCE now rewrites
-Chat to ``**[from] -> [to] Ready**`` plus how to move (``Type: Move to <stage>``
-or Journey → **Work on this stage**). Focus and the pending recommendation stay
-until the student moves. Whole-message ``Move to <stage>`` is accepted as a
-manual selection command (alongside ``move me to``). While a pending ADVANCE is
-open, ordinary follow-ups get a server-owned Ready reminder instead of another
-Problem identification STAY. Confirmation-mode ``confirm`` / Next language is
-unchanged when selection is off.
+Chat to ``**[from] -> [to] is Ready.**`` plus how to move (enter
+``Move to <stage>`` or use Journey → **Work on this stage**) and explicitly
+offers the option to stay with one bounded refinement focus. Focus and the
+pending recommendation stay until the student moves. Whole-message
+``Move to <stage>`` remains a manual selection command. A repeated progression
+request reuses the server-owned Ready reminder without another model call;
+ordinary coaching and Q&A now continue normally while the original pending
+recommendation remains open.
 
-**Files.** ``backend/learning/journey.py``, ``backend/student_journey.py``,
-``backend/coaching/execution.py``, ``backend/coaching/workflow_navigation.py``,
-``backend/prompts/composer.py``, ``tests/domain/test_mode_classification.py``,
-``tests/domain/test_student_journey.py``, ``tests/domain/test_prompt_architecture.py``,
-``docs/IMPLEMENTATION_STATUS.md``. Local ``.env`` restored to selection on /
-auto-advance off.
+Fast Chat now stamps every ordinary message with a deterministic Q&A or
+Coaching expectation. Generic project uses of ``evidence`` and a one-word
+overlap with a selected filename/title no longer activate Retrieve or the
+course evidence-gap response. Explicit source requests (including “what does
+the evidence say?”), two-term source-title references, named course material,
+and implicit summaries of selected sources still retrieve. Mixed project/source
+language defaults to Coaching unless it explicitly asks to use a source.
+Confirmation-mode ``confirm`` / Next behavior is unchanged when selection is
+off.
 
-**Validation.** Focused pytest on mode classification, student journey Ready
-helper, and composer selection copy. Known unrelated flake:
-``test_reflection_completion_request_skips_retrieval_and_suppresses_advance``
-(expects STAY, may get ADVANCE) left alone.
+**Files.** ``backend/learning/journey.py``, ``backend/coaching/execution.py``,
+``backend/coaching/mode_policy.py``, ``backend/prompts/composer.py``,
+``backend/retrieval_gate.py``, ``tests/domain/test_mode_classification.py``,
+``tests/domain/test_retrieval.py``, ``tests/domain/test_retrieval_gate.py``,
+``tests/domain/test_student_journey.py``,
+``tests/domain/test_prompt_architecture.py``, ``tests/http/test_api.py``, and
+``docs/IMPLEMENTATION_STATUS.md``. Local ``.env`` remains untracked and was not
+changed.
+
+**Validation.** Focused pytest covers mode classification, retrieval recall,
+selected-source grounding, Q&A evidence gaps, pending-readiness follow-ups,
+student journey Ready formatting, API behavior, session affinity, and composer
+selection copy. Ruff, compileall, and ``git diff --check`` pass. The complete
+suite has 17 failures, all present in an untouched HEAD comparison (which has
+18); the difference is one corrected stale selected-source API expectation.
+The known Reflection-completion mismatch and other existing prompt, workflow,
+architecture-contract, and Deep Review UI test debt remain outside this narrow
+change.
 
 **Next exact action.** Hard-refresh Streamlit; with selection mode, trigger an
-ADVANCE and confirm Chat shows Ready + Move to / Work on this stage, then that
-a non-move follow-up keeps Ready (not PI STAY).
+ADVANCE and confirm Chat shows Ready + the move choices + optional stay guidance.
+Then verify a refinement follow-up still receives Coach feedback, an explicit
+course/source question still gets grounded Q&A, and generic project evidence
+language does not show the course evidence-gap response.
 
 ### Composer typing lag: contain + drop body tooltip observer (2026-08-26)
 

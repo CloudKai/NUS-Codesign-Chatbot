@@ -12,15 +12,17 @@ explicit source cues (including a project message that mentions "lecture" or
 coaching questions with selected sources no longer retrieve — that false
 positive was worse because an empty Retrieve can author an evidence-gap reply.
 
-Mode enforcement still uses a **conservative** threshold and a **generous**
-ambiguous bucket:
+Mode enforcement still uses a **conservative** threshold. Every ordinary turn
+receives one deterministic mode expectation; ``ambiguous`` remains a retrieval
+classification, not a third model response mode:
 
 - ``high_confidence_source`` **and no first-person project reasoning**
   → the server expects ``mode=qa``.
-- ``high_confidence_personal`` (the retrieval classifier already found no
-  source cues) → the server expects ``mode=coaching``.
-- ``ambiguous``, idle text, weak questions, **or mixed** source+project
-  language → Haiku chooses; the server does not constrain.
+- ``high_confidence_personal`` → the server expects ``mode=coaching``.
+- narrow implicit selected-source requests → the server expects ``mode=qa``.
+- idle text, weak questions, or mixed source+project language → the server
+  expects ``mode=coaching``. Mixed turns retrieve only when they explicitly
+  ask to use a source; merely mentioning a lecture or filename is insufficient.
 
 Mixed detection uses first-person project cues (``I think``, ``I interviewed``,
 ``my problem``, ``should I choose``, ``help me think``, …). A factual question
@@ -113,8 +115,8 @@ RUNTIME_HINT_QA = (
     "the student's project unless they asked. Do not recommend stay or advance."
 )
 RUNTIME_HINT_COACHING = (
-    "This turn is the student's own project reasoning: coach Socratically and "
-    "include a stay or advance recommendation."
+    "This turn should use Coaching semantics: respond Socratically and include "
+    "a stay or advance recommendation."
 )
 
 QA_EVIDENCE_GAP_RESPONSE = (
@@ -123,13 +125,13 @@ QA_EVIDENCE_GAP_RESPONSE = (
     "week, or reading, or adjust the selected sources."
 )
 
-# Project deliberation used only to *demote* source→ambiguous, so a turn is
-# never forced into Q&A just because it mentions a lecture or a week. These
+# Project deliberation is used to keep source-adjacent project reasoning in
+# Coaching, so a turn is never forced into Q&A just because it mentions a
+# lecture or a week. These
 # are deliberately person-agnostic: students frame design work in the third
 # person ("the core problem is that students skip the week 2 lecture") as
-# often as the first. Over-matching here is safe — it only returns the turn
-# to the model's own judgement — while under-matching silently strips a
-# legitimate coaching recommendation.
+# often as the first. Over-matching here is safe — it keeps Coaching semantics
+# — while under-matching can silently strip a legitimate recommendation.
 _PROJECT_REASONING = (
     re.compile(
         r"^\s*i (think|thought|want|changed|chose|decided|will|am)\b",
@@ -209,6 +211,22 @@ _COURSE_REFERENCE = re.compile(
     re.IGNORECASE,
 )
 
+_EXPLICIT_MIXED_SOURCE_CUES = {
+    "according_to_source",
+    "bare_source_label",
+    "based_on_source",
+    "bracket_source_label",
+    "citation_request",
+    "compare_to_source",
+    "course_grounding",
+    "evidence_request",
+    "selected_source_title",
+    "selected_source_phrase",
+    "uploaded_document",
+    "what_evidence_says",
+    "what_source_says",
+}
+
 @dataclass(frozen=True)
 class ModePolicy:
     """Deterministic mode expectation for one student turn.
@@ -216,13 +234,13 @@ class ModePolicy:
     Attributes:
         intent: Overlay intent used for the hint and enforcement. Mixed
             source+project turns are ``ambiguous``.
-        expected_mode: ``qa``, ``coaching``, or ``None`` when unconstrained.
-        retrieve: Retrieval-gate decision. Mixed project+source still
-            retrieves; this overlay does not change Retrieve.
+        expected_mode: ``qa`` or ``coaching`` for current server-stamped
+            requests; ``None`` remains accepted for old serialized requests.
+        retrieve: Effective retrieval decision. Mixed project/source turns
+            retrieve only when they explicitly request source use.
         retrieval_intent: Raw retrieval-gate intent before the overlay.
         mixed: True when source cues fired but the turn is project
-            deliberation or is not an information request, so the model
-            keeps authority over the mode.
+            deliberation or is not an information request.
     """
 
     intent: RetrievalIntent
@@ -342,18 +360,21 @@ def overlay_mode_policy(
         student_message: Same student text, used only for mixed detection.
 
     Returns:
-        A :class:`ModePolicy`. Mixed source+project turns are unconstrained.
+        A :class:`ModePolicy` with a deterministic Q&A or Coaching expectation.
     """
     project = looks_like_project_reasoning(student_message)
     asks_for_information = looks_like_information_request(student_message)
+    explicit_source_use = bool(
+        set(classification.cues).intersection(_EXPLICIT_MIXED_SOURCE_CUES)
+    )
     mixed = classification.intent == INTENT_HIGH_CONFIDENCE_SOURCE and (
-        project or not asks_for_information
+        project or (not asks_for_information and not explicit_source_use)
     )
     if mixed:
         return ModePolicy(
             intent=INTENT_AMBIGUOUS,
-            expected_mode=None,
-            retrieve=classification.retrieve,
+            expected_mode="coaching",
+            retrieve=classification.retrieve and explicit_source_use,
             retrieval_intent=classification.intent,
             mixed=True,
         )
@@ -373,7 +394,7 @@ def overlay_mode_policy(
         )
     return ModePolicy(
         intent=INTENT_AMBIGUOUS,
-        expected_mode=None,
+        expected_mode="qa" if classification.retrieve else "coaching",
         retrieve=classification.retrieve,
         retrieval_intent=classification.intent,
     )

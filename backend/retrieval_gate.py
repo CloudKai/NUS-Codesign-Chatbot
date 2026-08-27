@@ -130,6 +130,14 @@ _SOURCE_CUES: tuple[tuple[str, re.Pattern[str]], ...] = (
         ),
     ),
     (
+        "what_evidence_says",
+        re.compile(
+            r"\bwhat (?:does|did|do) (?:the |this |that )?evidence "
+            r"(?:say|show|report|support)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
         "based_on_source",
         re.compile(
             r"\b(based on|from) (the )?(pdf|lecture|reading|source|uploaded|"
@@ -155,12 +163,11 @@ _SOURCE_CUES: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "selected_source_phrase",
         re.compile(
-            r"\b(selected (lecture|reading|source|pdf|file)|this source|"
-            r"the source|those sources)\b",
+            r"\b(selected (lecture|reading|source|pdf|file|evidence)|this source|"
+            r"the source|my source|those sources)\b",
             re.IGNORECASE,
         ),
     ),
-    ("evidence_word", re.compile(r"\bevidence\b", re.IGNORECASE)),
 )
 
 _PROJECT_REASONING = (
@@ -211,6 +218,14 @@ _IMPLICIT_SELECTED_SOURCE = (
         r"lecture|notes?)\b",
         re.IGNORECASE,
     ),
+    # A selected source makes "what topic evidence is available?" a bounded
+    # evidence lookup. This remains narrower than any use of the word
+    # "evidence", so coaching questions such as "what evidence should I
+    # gather?" do not accidentally become source Q&A.
+    re.compile(
+        r"\bwhat\b.{0,100}\bevidence\s+(?:is|are)\s+available\b",
+        re.IGNORECASE,
+    ),
 )
 
 # A course-concept question carries no lecture/week/S# cue but is still a
@@ -235,7 +250,17 @@ _FIRST_OR_SECOND_PERSON = re.compile(
 )
 _MIN_DEFINITIONAL_WORDS = 5
 
-_TITLE_TOKEN = re.compile(r"[a-z0-9][a-z0-9._-]{3,}", re.IGNORECASE)
+_TITLE_TERM = re.compile(r"[a-z0-9]+", re.IGNORECASE)
+_TITLE_STOP_TERMS = {
+    "document",
+    "file",
+    "handout",
+    "lecture",
+    "material",
+    "notes",
+    "reading",
+    "slides",
+}
 
 
 @dataclass(frozen=True)
@@ -259,32 +284,35 @@ def _normalized_text(value: str) -> str:
     return " ".join(str(value or "").split()).strip()
 
 
-def _title_markers(values: Iterable[str]) -> tuple[str, ...]:
-    """Return distinctive title/filename tokens that can trigger retrieval."""
-    markers: list[str] = []
-    seen: set[str] = set()
-    for raw in values:
-        text = _normalized_text(raw)
-        if not text:
-            continue
-        lowered = text.casefold()
-        if len(lowered) >= 4 and lowered not in seen:
-            seen.add(lowered)
-            markers.append(lowered)
-        for match in _TITLE_TOKEN.findall(text):
-            token = match.casefold()
-            if token in seen or len(token) < 4:
-                continue
-            if token in {"lecture", "reading", "notes", "week", "file", "pdf"}:
-                continue
-            seen.add(token)
-            markers.append(token)
-            for part in re.split(r"[-_.]+", token):
-                if len(part) < 4 or part in seen:
-                    continue
-                seen.add(part)
-                markers.append(part)
-    return tuple(markers)
+def _distinctive_title_terms(value: str) -> set[str]:
+    """Return stable content terms from one source title or filename."""
+    return {
+        term.casefold()
+        for term in _TITLE_TERM.findall(_normalized_text(value))
+        if len(term) >= 4
+        and term.casefold() not in _TITLE_STOP_TERMS
+        and term.casefold() != "pdf"
+    }
+
+
+def _matches_selected_source_title(text: str, values: Iterable[str]) -> bool:
+    """Return whether ``text`` names a selected source unambiguously.
+
+    One shared word is not enough. A title such as ``Vulnerability in the
+    elderly.pdf`` must not turn ordinary project discussion containing only
+    ``elderly`` into source Q&A. Two distinctive terms still support natural
+    references such as ``Stakeholder Mapping`` and spaced versions of
+    hyphenated filenames.
+    """
+    message_terms = {
+        term.casefold() for term in _TITLE_TERM.findall(text) if len(term) >= 4
+    }
+    if len(message_terms) < 2:
+        return False
+    return any(
+        len(terms) >= 2 and len(message_terms.intersection(terms)) >= 2
+        for terms in (_distinctive_title_terms(value) for value in values)
+    )
 
 
 def _source_cues(
@@ -300,10 +328,9 @@ def _source_cues(
     for name, pattern in _SOURCE_CUES:
         if pattern.search(text):
             found.append(name)
-    lowered = text.casefold()
     titles = tuple(selected_source_titles)
     filenames = tuple(selected_source_filenames)
-    if any(marker in lowered for marker in _title_markers((*titles, *filenames))):
+    if _matches_selected_source_title(text, (*titles, *filenames)):
         found.append("selected_source_title")
     return tuple(found)
 

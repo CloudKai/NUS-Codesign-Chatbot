@@ -321,13 +321,13 @@ def selection_pending_move_footer(next_stage_id: str) -> str:
         next_stage_id: Canonical destination Thinking Path stage id.
 
     Returns:
-        Markdown lines telling the student to type ``Move to <label>`` or use
+        Markdown lines telling the student to enter ``Move to <label>`` or use
         Journey **Work on this stage**.
     """
     next_stage_value = STAGE_BY_ID[next_stage_id]
     return (
-        f"Type: Move to {next_stage_value.label}\n"
-        "or Journey → Click Work on this stage."
+        f"Enter `Move to {next_stage_value.label}`\n"
+        "or go to Journey and click **Work on this stage**."
     )
 
 
@@ -336,6 +336,7 @@ def selection_pending_ready_response(
     from_stage_id: str,
     to_stage_id: str,
     response_text: str = "",
+    stay_guidance: str = "",
 ) -> str:
     """Format a selection-mode pending ADVANCE as Ready plus how to move.
 
@@ -345,30 +346,50 @@ def selection_pending_ready_response(
         from_stage_id: Stage that just became ready to leave.
         to_stage_id: Recommended destination stage.
         response_text: Optional coach body to keep under the Ready heading.
+        stay_guidance: Optional current-stage refinement to present as
+            non-blocking work when the student chooses not to move yet.
 
     Returns:
-        Markdown starting with ``**[from] -> [to] Ready**`` and ending with the
-        selection how-to-move footer.
+        Markdown starting with ``**[from] -> [to] is Ready.**`` and ending
+        with the selection how-to-move footer.
     """
     current_stage_value = STAGE_BY_ID[from_stage_id]
     next_stage_value = STAGE_BY_ID[to_stage_id]
     transition_heading = (
+        f"**[{current_stage_value.label}] -> "
+        f"[{next_stage_value.label}] is Ready.**"
+    )
+    legacy_transition_heading = (
         f"**[{current_stage_value.label}] -> [{next_stage_value.label}] Ready**"
     )
     footer = selection_pending_move_footer(to_stage_id)
     response_body = concise_coach_response(str(response_text or "").strip())
     current_heading = f"**{current_stage_value.label}**"
     next_heading = f"**{next_stage_value.label}**"
-    for heading in (transition_heading, next_heading, current_heading):
+    for heading in (
+        transition_heading,
+        legacy_transition_heading,
+        next_heading,
+        current_heading,
+    ):
         if response_body.startswith(heading):
             response_body = response_body[len(heading) :].strip()
             break
     # Drop explore-question blocks; selection mode points to Journey / Move to.
     if "**Questions to explore**" in response_body:
         response_body = response_body.split("**Questions to explore**", 1)[0].strip()
+    cleaned_guidance = " ".join(str(stay_guidance or "").split()).strip()
+    stay_copy = (
+        f"You can also stay in **{current_stage_value.label}** and refine it "
+        "further."
+    )
+    if cleaned_guidance:
+        stay_copy += f" If you stay, focus on: {cleaned_guidance}"
+    parts = [transition_heading]
     if response_body:
-        return f"{transition_heading}\n\n{response_body}\n\n{footer}".strip()
-    return f"{transition_heading}\n\n{footer}".strip()
+        parts.append(response_body)
+    parts.extend((stay_copy, footer))
+    return "\n\n".join(parts).strip()
 
 
 def advanced_stage_response(

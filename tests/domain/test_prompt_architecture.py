@@ -434,7 +434,8 @@ def test_composer_selection_mode_points_to_move_to_and_journey_cta(monkeypatch):
     text = prepared.runtime_instructions
     assert "Move to <next stage label>" in text
     assert "Work on this stage" in text
-    assert "] -> [" in text and "Ready**" in text
+    assert "] -> [" in text and "is Ready.**" in text
+    assert "one optional way" in text
     assert "do not ask for Next or a confirm command" in text
     assert "confirmation via Next" not in text
     assert "automatically move" not in text

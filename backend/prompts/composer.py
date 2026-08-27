@@ -267,13 +267,16 @@ def _runtime_instructions(context: PromptContext) -> str:
             )
         elif settings.student_stage_selection:
             parts.append(
-                "The student can choose any Thinking Path stage in Journey. Recommend "
-                "ADVANCE only when the current stage purpose is adequately met; do not "
-                "assume a fixed linear order. When recommending ADVANCE, open with "
-                "`**[<current stage label>] -> [<next stage label>] Ready**`, then tell "
-                "the student to type `Move to <next stage label>` or open Journey and "
-                "click Work on this stage. Do not claim the stage already changed, and "
-                "do not ask for Next or a confirm command."
+                "The student controls when to move along the linear Thinking Path and "
+                "may select only the immediate unlocked next stage or revisit an "
+                "earlier unlocked stage. Recommend ADVANCE only when the current stage "
+                "purpose is adequately met. When recommending ADVANCE, explain briefly "
+                "why it is ready and name one optional way the student could improve "
+                "the current work if they choose to stay. The application will open "
+                "with `**[<current stage label>] -> [<next stage label>] is Ready.**`, "
+                "then tell the student to enter `Move to <next stage label>` or open "
+                "Journey and click Work on this stage. Do not claim the stage already "
+                "changed, and do not ask for Next or a confirm command."
             )
         else:
             parts.append(

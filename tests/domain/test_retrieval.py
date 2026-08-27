@@ -106,7 +106,10 @@ def test_application_persists_mid_chunk_excerpt_within_domain_limit(tmp_path):
     turn = service.submit(
         CoachRequest(
             thread_id=notebook,
-            student_message="Which older-adult crossing trade-off still needs evidence?",
+            student_message=(
+                "What does the selected source say about evidence for "
+                "older-adult crossing trade-offs?"
+            ),
             current_stage="problem_identification",
             response_detail="short",
         )

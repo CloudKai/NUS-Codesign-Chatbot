@@ -240,7 +240,7 @@ def test_qa_leaning_strings_are_not_forced_coaching(message: str, note: str) -> 
         assert not policy.mixed, note
     else:
         assert policy.intent == INTENT_AMBIGUOUS, note
-        assert policy.expected_mode is None, note
+    assert policy.expected_mode in {"qa", "coaching"}, note
 
 
 @pytest.mark.parametrize("message,note", COACHING_LEANING)
@@ -261,9 +261,74 @@ def test_mixed_project_plus_lecture_is_not_force_flattened(message: str, note: s
     assert looks_like_project_reasoning(message) is True, note
     assert policy.mixed is True, note
     assert policy.intent == INTENT_AMBIGUOUS, note
-    assert policy.expected_mode is None, note
-    assert policy.retrieve is True, note
+    assert policy.expected_mode == "coaching", note
+    assert policy.retrieve is False, note
     assert policy.retrieval_intent == INTENT_HIGH_CONFIDENCE_SOURCE, note
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "Can we go over my evidence?",
+        "What evidence should I gather to improve this?",
+        "Does my evidence support this idea?",
+        "How can elderly pedestrians cross more safely?",
+    ),
+)
+def test_project_coaching_never_has_an_unclassified_response_mode(message: str) -> None:
+    policy = resolve_mode_policy(
+        message,
+        selected_source_titles=["Vulnerability in the elderly"],
+        selected_source_filenames=["Vulnerability_in_the_elderly.pdf"],
+        has_selected_sources=True,
+    )
+    assert policy.expected_mode == "coaching"
+    assert policy.retrieve is False
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "What evidence should I gather to improve this?",
+        "How can elderly pedestrians cross more safely?",
+    ),
+)
+def test_selected_source_does_not_hijack_project_coaching_execution(
+    tmp_path, message: str
+) -> None:
+    """Generic evidence words and one title word cannot author an evidence gap."""
+    store = StudentStore(tmp_path / "selected-source-coaching.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    add_text_source(
+        store,
+        thread_id,
+        "Vulnerability in the elderly",
+        "Older adults may experience mobility constraints.",
+    )
+    client = FakeAgentCoreRuntime(
+        payload=_coaching_payload(text="Which observation would test that assumption?")
+    )
+    turn = _submit(
+        _service(store, client, retriever=_NoRetrieve()),
+        thread_id,
+        message,
+        key="selected-source-project-coaching",
+    )
+    assert len(client.calls) == 1
+    assert turn.assessment.response_mode == "coaching"
+    assert turn.response_text != QA_EVIDENCE_GAP_RESPONSE
+
+
+def test_explicit_full_source_title_can_ground_project_coaching() -> None:
+    policy = resolve_mode_policy(
+        "How does Vulnerability in the elderly support my project?",
+        selected_source_titles=["Vulnerability in the elderly"],
+        selected_source_filenames=["Vulnerability_in_the_elderly.pdf"],
+        has_selected_sources=True,
+    )
+    assert policy.expected_mode == "coaching"
+    assert policy.retrieve is True
+    assert policy.mixed is True
 
 
 THIRD_PERSON_PROJECT_WITH_SOURCE_CUE = (
@@ -316,10 +381,10 @@ def test_third_person_project_reasoning_is_never_forced_to_qa(
     deny the turn Deep Review credit, which is a pedagogy regression.
     """
     policy = _policy(message)
-    assert policy.expected_mode is None, note
+    assert policy.expected_mode == "coaching", note
     assert policy.intent == INTENT_AMBIGUOUS, note
     assert policy.mixed is True, note
-    assert policy.retrieve is True, note
+    assert policy.retrieve is False, note
 
 
 @pytest.mark.parametrize("message,note", IMPERSONAL_COURSE_CONCEPT)
@@ -743,10 +808,12 @@ def test_phase2_validated_advance_completes_current_without_changing_focus(
         }[current_stage]
     ].label
     assert turn.response_text.startswith(
-        f"**[{from_label}] -> [{to_label}] Ready**"
+        f"**[{from_label}] -> [{to_label}] is Ready.**"
     )
-    assert f"Type: Move to {to_label}" in turn.response_text
+    assert f"Enter `Move to {to_label}`" in turn.response_text
     assert "Work on this stage" in turn.response_text
+    assert f"You can also stay in **{from_label}**" in turn.response_text
+    assert "where your current reasoning is still weakest" in turn.response_text
     assert "Type exact `confirm` to advance." not in turn.response_text
     thread = store.get_thread(thread_id) or {}
     journey = thread["metadata"]["learning_journey"]
@@ -777,10 +844,10 @@ def test_phase2_validated_advance_completes_current_without_changing_focus(
     assert store.get_pending_phase_transition(thread_id) is None
 
 
-def test_phase2_pending_followup_repeats_ready_without_pi_stay(
+def test_phase2_pending_followup_keeps_ready_and_allows_refinement(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """While pending ADVANCE is open, ordinary chat keeps Ready how-to-move copy."""
+    """Pending readiness keeps its CTA while ordinary coaching still runs."""
     store = StudentStore(tmp_path / "phase2-pending-reminder.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     client = FakeAgentCoreRuntime(payload=_coaching_payload(recommendation="advance"))
@@ -800,8 +867,22 @@ def test_phase2_pending_followup_repeats_ready_without_pi_stay(
     )
     assert first.pending_transition is not None
     assert first.response_text.startswith(
-        "**[Problem identification] -> [Concept generation] Ready**"
+        "**[Problem identification] -> [Concept generation] is Ready.**"
     )
+    repeated = service.submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="Can we move on now?",
+            current_stage="problem_identification",
+            response_detail="short",
+            idempotency_key="phase2-ready-repeated-move",
+        )
+    )
+    assert repeated.response_text.startswith(
+        "**[Problem identification] -> [Concept generation] is Ready.**"
+    )
+    assert "Enter `Move to Concept generation`" in repeated.response_text
+    assert store.get_pending_phase_transition(thread_id) is not None
 
     stay_client = FakeAgentCoreRuntime(
         payload=_coaching_payload(
@@ -824,17 +905,61 @@ def test_phase2_pending_followup_repeats_ready_without_pi_stay(
     assert reminder.pending_transition is None
     assert reminder.assessment.recommendation is StageDecision.STAY
     assert reminder.response_text.startswith(
-        "**[Problem identification] -> [Concept generation] Ready**"
+        "**[Problem identification] -> [Concept generation] is Ready.**"
     )
-    assert "Type: Move to Concept generation" in reminder.response_text
+    assert "Enter `Move to Concept generation`" in reminder.response_text
     assert "Work on this stage" in reminder.response_text
-    assert "keep refining the problem" not in reminder.response_text.casefold()
+    assert "keep refining the problem" in reminder.response_text.casefold()
+    assert "You can also stay in **Problem identification**" in reminder.response_text
     assert store.get_pending_phase_transition(thread_id) is not None
     journey = ((store.get_thread(thread_id) or {}).get("metadata") or {}).get(
         "learning_journey", {}
     )
     assert journey["current_stage"] == "problem_identification"
-    assert stay_client.calls == []
+    assert len(stay_client.calls) == 1
+
+
+def test_phase2_pending_readiness_does_not_swallow_a_qa_response(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unlocked next stage must not turn all later Chat turns into reminders."""
+    store = StudentStore(tmp_path / "phase2-pending-qa.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    first_client = FakeAgentCoreRuntime(
+        payload=_coaching_payload(recommendation="advance")
+    )
+    first = _service(store, first_client, retriever=_NoRetrieve()).submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message=(
+                "How might we help elderly pedestrians cross safely so that "
+                "they do not need to rush?"
+            ),
+            current_stage="problem_identification",
+            response_detail="short",
+            idempotency_key="phase2-ready-before-qa",
+        )
+    )
+    assert first.pending_transition is not None
+
+    qa_client = FakeAgentCoreRuntime(
+        payload=_qa_payload(text="Here is the direct answer to that question.")
+    )
+    answer = _service(store, qa_client, retriever=_NoRetrieve()).submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="Can you help me understand this?",
+            current_stage="problem_identification",
+            response_detail="short",
+            idempotency_key="phase2-ready-qa-followup",
+        )
+    )
+    assert len(qa_client.calls) == 1
+    assert answer.assessment.response_mode == "qa"
+    assert answer.response_text == "Here is the direct answer to that question."
+    assert "is Ready" not in answer.response_text
+    assert store.get_pending_phase_transition(thread_id) is not None
 
 
 def test_phase2_stay_does_not_complete_current_stage(
@@ -1544,7 +1669,7 @@ def test_ambiguous_respects_model_qa_and_coaching(tmp_path) -> None:
     assert coaching_turn.assessment.recommendation is StageDecision.STAY
     assert _counter(store, thread_id) == 1
     assert RUNTIME_HINT_QA not in _trusted_instructions(qa_client)
-    assert RUNTIME_HINT_COACHING not in _trusted_instructions(qa_client)
+    assert RUNTIME_HINT_COACHING in _trusted_instructions(qa_client)
 
 
 def test_mixed_adversarial_keeps_coaching_semantics(tmp_path) -> None:
