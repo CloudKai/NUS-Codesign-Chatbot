@@ -295,6 +295,18 @@
         background:var(--cd-surface-muted) !important;
     }
 
+    /* Hidden flag for the mobile Journey review-update badge. Keep it out of
+       flow on every viewport so it cannot add a gap above the workspace. */
+    .st-key-mobile_journey_attention,
+    .stElementContainer:has(.cd-mobile-journey-attention),
+    [data-testid="stMarkdownContainer"]:has(.cd-mobile-journey-attention) {
+        display:none !important;
+        height:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+        overflow:hidden !important;
+    }
+
     /* Responsive panel selector */
     .st-key-mobile_panel {
         display:none;
@@ -1275,11 +1287,43 @@
 
     .st-key-studio_section_tabs [role="radiogroup"] > label[data-checked="true"],
     .st-key-studio_section_tabs [role="radiogroup"] > label:has(input:checked),
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"][data-selected],
     .st-key-studio_section_tabs label[data-testid="stRadioOption"][data-selected="true"],
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"][aria-checked="true"],
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"][aria-pressed="true"],
     .st-key-studio_section_tabs label[data-testid="stRadioOption"]:has(input:checked) {
         color:var(--cd-accent) !important;
         background:var(--cd-accent-soft) !important;
         box-shadow:inset 0 -2px 0 var(--cd-accent);
+    }
+
+    /* Paint 🛑 on the stable "Review" label. Changing the radio option string
+       remounts the widget and drops this selected highlight. */
+    body:has(.st-key-mobile_journey_attention)
+    .st-key-studio_section_tabs [role="radiogroup"] > label:last-child p,
+    body:has(.cd-mobile-journey-attention)
+    .st-key-studio_section_tabs [role="radiogroup"] > label:last-child p,
+    body:has(.st-key-mobile_journey_attention)
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:has(input[value="1"]) p,
+    body:has(.cd-mobile-journey-attention)
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:has(input[value="1"]) p {
+        white-space:nowrap;
+    }
+
+    body:has(.st-key-mobile_journey_attention)
+    .st-key-studio_section_tabs [role="radiogroup"] > label:last-child p::after,
+    body:has(.cd-mobile-journey-attention)
+    .st-key-studio_section_tabs [role="radiogroup"] > label:last-child p::after,
+    body:has(.st-key-mobile_journey_attention)
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:has(input[value="1"]) p::after,
+    body:has(.cd-mobile-journey-attention)
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:has(input[value="1"]) p::after {
+        content:" 🛑";
+        font-size:1.05rem;
+        line-height:1;
+        margin-left:.12rem;
+        -webkit-text-fill-color:initial;
+        vertical-align:-0.12em;
     }
 
     /* Hide the native radio glyph so this control reads like the old tabs. */

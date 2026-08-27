@@ -926,6 +926,45 @@ def test_journey_linear_accordion_and_ctas_follow_unlocked_frontier(monkeypatch)
     assert not app.exception
 
 
+def test_journey_ready_next_stage_is_not_focus_highlighted(monkeypatch):
+    """Ready next stage keeps Work on this stage but is not the current card."""
+    from backend.settings import settings
+    from backend.student_store import StudentStore
+
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    monkeypatch.setattr(settings, "auto_advance_stages", False)
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    store = StudentStore()
+    thread = store.get_thread(app.session_state["thread_id"]) or {}
+    metadata = dict(thread.get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["current_stage"] = "concept_generation"
+    journey["completed_stages"] = [
+        "problem_identification",
+        "concept_generation",
+    ]
+    metadata["learning_journey"] = journey
+    store.update_thread(app.session_state["thread_id"], metadata=metadata)
+    app.session_state["learning_journey"]["current_stage"] = "concept_generation"
+    app.session_state["learning_journey"]["completed_stages"] = [
+        "problem_identification",
+        "concept_generation",
+    ]
+    app.run()
+    assert not app.exception
+    assert app.session_state["learning_journey"]["current_stage"] == (
+        "concept_generation"
+    )
+    assert any(button.label == "Work on this stage" for button in app.button)
+    assert any(
+        button.key == "journey-select-design_specification" for button in app.button
+    )
+    blob = "\n".join(str(markdown.value or "") for markdown in app.markdown)
+    assert "journey-state completed focus" in blob
+    assert "journey-state current focus" not in blob
+    assert "journey-state current" in blob
+
+
 def test_stale_appearance_widget_does_not_overwrite_stored_dark():
     """DB appearance wins over a leftover settings-widget value on init."""
     from backend.student_store import StudentStore

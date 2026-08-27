@@ -61,7 +61,8 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
 
     studio_css = Path(_STYLES_DIR / "20-studio.css").read_text(encoding="utf-8")
     assert ':has(.journey-state.preview-open)' in studio_css
-    assert ':has(.journey-state.current) {' in studio_css
+    assert ':has(.journey-state.focus) {' in studio_css
+    assert ':has(.journey-state.current) {' not in studio_css
     assert ':has(.journey-state.current),\n    [class*="st-key-journey_stage_"]:has(.journey-state.preview-open)' not in studio_css
     assert "min-height:11rem" not in studio_css
     assert '[class*="st-key-journey-select-"]' in studio_css

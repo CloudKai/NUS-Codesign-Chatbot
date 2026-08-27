@@ -33,6 +33,12 @@ from backend.coaching.mode_policy import (
     resolve_mode_policy,
     should_author_qa_evidence_gap,
 )
+from backend.coaching.workflow_navigation import (
+    apply_progression_effect,
+    is_compound_status_guidance_request,
+    progression_effect_for,
+    workflow_skips_retrieval,
+)
 from backend.coaching.progress import (
     PROGRESS_RETRIEVING,
     PROGRESS_SAVING,
@@ -319,6 +325,23 @@ def _current_stage_status_turn(request: CoachRequest) -> CoachTurn:
             response_mode="qa",
         ),
     )
+
+
+def _ensure_current_stage_named(response_text: str, stage_id: str) -> str:
+    """Prepend the authoritative stage label when the model omitted it.
+
+    Used for compound status+guidance turns so the student always sees the
+    canonical stage without a second model call.
+    """
+    stage = STAGE_BY_ID[stage_id]
+    text = str(response_text or "")
+    if stage.label.casefold() in text.casefold():
+        return text
+    prefix = f"You are currently in **{stage.label}**."
+    body = text.strip()
+    if not body:
+        return prefix
+    return f"{prefix}\n\n{body}"
 
 
 def _manual_stage_selection_turn(
@@ -1452,6 +1475,39 @@ class CoachApplicationService:
             prepared_request, turn = self._maybe_rag_fallback(
                 prepared_request, turn, snapshot
             )
+        progression_effect = progression_effect_for(
+            prepared_request.student_message,
+            current_stage=prepared_request.current_stage,
+        )
+        # Application fail-safe (belt-and-suspenders with workflow gate):
+        # NONE turns never create pending, complete stages, or auto-advance.
+        if progression_effect == "none" and not owned_review:
+            coerced = apply_progression_effect(turn.assessment, progression_effect)
+            if (
+                turn.pending_transition is not None
+                or coerced is not turn.assessment
+                or turn.auto_advanced_to
+            ):
+                turn = turn.model_copy(
+                    update={
+                        "assessment": coerced,
+                        "pending_transition": None,
+                        "auto_advanced_to": None,
+                    }
+                )
+        if (
+            not owned_review
+            and not stage_status_request
+            and is_compound_status_guidance_request(prepared_request.student_message)
+        ):
+            turn = turn.model_copy(
+                update={
+                    "response_text": _ensure_current_stage_named(
+                        turn.response_text,
+                        prepared_request.current_stage,
+                    )
+                }
+            )
         if (
             existing_pending is not None
             and not pending_ready_reminder
@@ -1573,6 +1629,7 @@ class CoachApplicationService:
         auto_advance: AtomicAutoAdvance | None = None
         if (
             not owned_review
+            and progression_effect != "none"
             and self._auto_advance_stages
             and not runtime_settings.student_stage_selection
             and self._progress is not None
@@ -1629,6 +1686,7 @@ class CoachApplicationService:
         validated_completion_stage: str | None = None
         if (
             not owned_review
+            and progression_effect != "none"
             and manual_stage_target is None
             and prepared_request.revise_user_message_id is None
             and turn.assessment.recommendation is StageDecision.ADVANCE
@@ -2325,9 +2383,16 @@ class CoachApplicationService:
             request.student_message,
             current_stage=authoritative_stage,
         )
-        if progression_request:
-            # A stage-navigation command must not be hijacked by selected
-            # source titles that happen to name a stage.
+        workflow_no_retrieve = workflow_skips_retrieval(
+            request.student_message,
+            current_stage=authoritative_stage,
+        )
+        if progression_request or (
+            workflow_no_retrieve and not stage_status_request
+        ):
+            # Stage navigation, meta-guidance, prior-stage review, and compound
+            # status+guidance must not be hijacked by selected source titles.
+            # Pure status already cleared evidence above.
             mode_policy = ModePolicy(
                 intent=mode_policy.intent,
                 expected_mode="coaching",
@@ -2335,10 +2400,11 @@ class CoachApplicationService:
                 retrieval_intent=mode_policy.retrieval_intent,
                 mixed=mode_policy.mixed,
             )
-            record_field("stage_progression_request", True)
-            # Progression readiness is about the student's recorded work, not
-            # a selected source title or attachment. Keep authorization checks
-            # above, then present no evidence scope to Fast Chat.
+            if progression_request:
+                record_field("stage_progression_request", True)
+            elif workflow_no_retrieve:
+                record_field("workflow_skips_retrieval", True)
+            # Keep authorization checks above, then present no evidence scope.
             snapshot = replace(snapshot, selected_sources=(), retrieval_sources=())
             selected_image_sources = []
             image_inputs = []

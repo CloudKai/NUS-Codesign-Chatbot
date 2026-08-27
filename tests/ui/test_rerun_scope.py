@@ -409,6 +409,8 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
         "def _dedupe_feedback_items", 1
     )[0]
     assert 'state_classes = f"{state_classes} open preview-open"' in journey_block
+    assert 'state_classes = f"{state_classes} focus"' in journey_block
+    assert 'step_visual = "available"' in journey_block
     assert "_render_journey_stage_title_row(" in journey_block
     assert "_render_journey_stage_select_cta(" in journey_block
     assert "_render_journey_stage_checkpoint(" not in journey_block
@@ -423,6 +425,7 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
     panel_block = source.split("def render_studio_panel", 1)[1]
     assert 'key="studio_tab"' in panel_block
     assert 'st.radio(' in panel_block
+    assert "format_func" not in panel_block
     assert "mark_journey_stage_reviews_read(" in panel_block
     assert "st.tabs(" not in panel_block
     assert "sync_journey_unread_watch" not in panel_block
@@ -437,6 +440,7 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
     )[0]
     assert "Journey 🛑" not in workspace
     assert 'return "Journey !"' not in workspace
+    assert "cd-mobile-journey-attention" in workspace
     assert 'studio_tab") == "Review"' not in workspace
     assert 'return "Review"' not in workspace.split("def _studio_mobile_label", 1)[1].split(
         "panel = st.radio(", 1
@@ -444,12 +448,18 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
     responsive = Path("ui/assets/styles/90-responsive.css").read_text(encoding="utf-8")
     assert 'input[value="Studio"]:checked' in responsive
     assert "not(:has(.st-key-mobile_panel input:checked))" in responsive
+    assert "cd-mobile-journey-attention" in responsive
+    assert "st-key-mobile_journey_attention" in responsive
+    assert 'content:" 🛑"' in responsive
+    assert 'input[value="0"]' in responsive
     css = Path("ui/assets/styles/10-workspace.css").read_text(encoding="utf-8")
     assert ".st-key-studio_section_tabs" in css
     assert 'iframe[height="0"]' in css
     assert "stRadioOption" in css
     assert "stRadioGroup" in css
     assert "minmax(0,1fr) minmax(0,1fr)" in css
+    assert 'input[value="1"]' in css
+    assert 'content:" 🛑"' in css
     title_block = source.split("def _render_journey_stage_title_row", 1)[1].split(
         "def _render_journey_stage_select_cta", 1
     )[0]

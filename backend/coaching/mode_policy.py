@@ -66,11 +66,14 @@ from backend.retrieval import (
     COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT,
 )
 from backend.coaching.workflow_navigation import (
+    is_compound_status_guidance_request,
     is_current_stage_status_request,
     is_exact_confirm_command,
     is_stage_progression_request,
     is_terminal_completion_request,
     manual_stage_selection_target,
+    progression_effect_for,
+    workflow_skips_retrieval,
 )
 from backend.retrieval_gate import (
     INTENT_AMBIGUOUS,
@@ -92,6 +95,7 @@ __all__ = (
     "RUNTIME_HINT_COACHING",
     "RUNTIME_HINT_QA",
     "enforce_model_mode",
+    "is_compound_status_guidance_request",
     "is_current_stage_status_request",
     "is_exact_confirm_command",
     "is_private_attachment_question",
@@ -102,10 +106,12 @@ __all__ = (
     "manual_stage_selection_target",
     "overlay_mode_policy",
     "policy_from_request",
+    "progression_effect_for",
     "qa_evidence_gap_turn",
     "resolve_mode_policy",
     "runtime_mode_hint",
     "should_author_qa_evidence_gap",
+    "workflow_skips_retrieval",
 )
 
 RUNTIME_HINT_QA = (

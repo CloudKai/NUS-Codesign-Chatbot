@@ -13,9 +13,14 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from backend.learning.stages import THINKING_STAGES
+
+if TYPE_CHECKING:
+    from backend.domain import EducationalAssessment
+
+ProgressionEffect = Literal["none", "evaluate", "execute"]
 
 WorkflowIntentKind = Literal[
     "move_stage",
@@ -23,6 +28,8 @@ WorkflowIntentKind = Literal[
     "readiness",
     "status",
     "confirm",
+    "meta_guidance",
+    "prior_stage_review",
     "none",
 ]
 
@@ -35,11 +42,17 @@ class WorkflowIntent:
         kind: Recognized workflow class, or ``none``.
         target_stage_id: Canonical stage id when a named destination resolved.
         confidence: ``high`` only when the match is safe to act on for routing.
+        progression_effect: Application-owned progression gate for this turn.
+            ``none`` forbids pending / completion / auto-advance side effects.
+            ``evaluate`` allows readiness assessment side effects.
+            ``execute`` marks an explicit stage-move command (store still
+            authorizes).
     """
 
     kind: WorkflowIntentKind
     target_stage_id: str | None = None
     confidence: Literal["high", "low"] = "high"
+    progression_effect: ProgressionEffect = "evaluate"
 
 
 _TRAILING_PUNCT = re.compile(r"[.?!…]+$")
@@ -210,12 +223,67 @@ _STATUS = re.compile(
     re.IGNORECASE,
 )
 
+# Status lookup plus guidance ("where am I and how do I continue?"). Not
+# readiness merely because the guidance clause says "progress" / "continue".
+_COMPOUND_STATUS_GUIDANCE = re.compile(
+    r"^\s*(?:"
+    r"(?:what|which)\s+stage\s+(?:am\s+i|are\s+we)\s+(?:in|on|at)"
+    r"|where\s+(?:am\s+i|are\s+we)(?:\s+now)?"
+    r"(?:\s+in\s+(?:the\s+)?(?:thinking\s+path|journey))?"
+    r"|where\s+am\s+i\s+in\s+(?:the\s+)?thinking\s+path"
+    r"|what\s+stage\s+are\s+we\s+on"
+    r")"
+    r"(?:\s*,)?\s+(?:and\s+)?"
+    r"(?:"
+    r"how\s+do\s+i\s+(?:continue|progress|finish|proceed)"
+    r"|what\s+should\s+i\s+(?:do|focus\s+on|work\s+on)(?:\s+next)?"
+    r"|what\s+do\s+i\s+need\s+to\s+work\s+on"
+    r"|how\s+do\s+i\s+progress"
+    r")\s*$",
+    re.IGNORECASE,
+)
+
+# Short process / orientation questions that must not complete a stage.
+# Trailing filler stripping may drop a final "now", so keep bare work-on forms.
+_META_GUIDANCE = re.compile(
+    r"^\s*(?:"
+    r"what\s+should\s+i\s+do\s+(?:here|now|next)"
+    r"|how\s+do\s+i\s+continue"
+    r"|what\s+am\s+i\s+supposed\s+to\s+(?:focus\s+on|do)(?:\s+here)?"
+    r"|what\s+should\s+i\s+work\s+on(?:\s+(?:next|now))?"
+    r"|can\s+you\s+guide\s+me\s+through\s+this\s+stage"
+    r"|what\s+is\s+missing\s+from\s+my\s+process"
+    r"|how\s+should\s+i\s+approach\s+this"
+    r"|what\s+should\s+i\s+focus\s+on\s+for\s+my\s+problem"
+    r"|what\s+should\s+i\s+do\s+in\s+.+"
+    r"|can\s+you\s+explain\s+what\s+belongs\s+in\s+(?:a\s+)?.+"
+    r"|what\s+should\s+i\s+think\s+about\s+for\s+ethics"
+    r"|what\s+should\s+i\s+reflect\s+on"
+    r")\s*$",
+    re.IGNORECASE,
+)
+
+_PRIOR_STAGE_QUALITY = re.compile(
+    r"^\s*(?:"
+    r"(?:is|was)\s+my\s+(?P<named>.+?)\s+"
+    r"(?:strong(?:\s+enough)?|clear(?:\s+enough)?|good(?:\s+enough)?|"
+    r"solid|complete(?:\s+enough)?)\b"
+    r"|"
+    r"did\s+i\s+handle\s+(?:the\s+)?(?P<named2>.+?)\s+part\s+"
+    r"(?:properly|well|correctly|ok|okay)\b"
+    r").*$",
+    re.IGNORECASE,
+)
+
 _CONFIRM = re.compile(r"^confirm$", re.IGNORECASE)
 
 _NEXT_STAGE_PHRASE = re.compile(
     r"^(?:the\s+)?(?:next\s+)?(?:stage|phase)$",
     re.IGNORECASE,
 )
+
+# Bound meta matches so a long project paragraph containing "next" stays work.
+_META_GUIDANCE_MAX_WORDS = 24
 
 
 def _manual_stage_key(value: str) -> str:
@@ -379,6 +447,62 @@ def is_current_stage_status_request(message: str) -> bool:
     return bool(_STATUS.fullmatch(text))
 
 
+def is_compound_status_guidance_request(message: str) -> bool:
+    """Return whether the turn asks for current stage plus how to continue.
+
+    Compound status+guidance is not pure status (model may still answer) and
+    is not readiness merely because the guidance clause says "progress".
+    """
+    text = normalize_workflow_text(message)
+    if not text or _STATUS.fullmatch(text):
+        return False
+    return bool(_COMPOUND_STATUS_GUIDANCE.fullmatch(text))
+
+
+def _stage_index(stage_id: str) -> int | None:
+    """Return the Thinking Path index for ``stage_id``, or ``None``."""
+    cleaned = str(stage_id or "").strip().lower()
+    for index, stage in enumerate(THINKING_STAGES):
+        if stage.id == cleaned:
+            return index
+    return None
+
+
+def _prior_stage_review_target(
+    normalized: str, *, current_stage: str
+) -> str | None:
+    """Return an earlier stage id when the message reviews that stage's quality."""
+    current_idx = _stage_index(current_stage)
+    if current_idx is None or current_idx <= 0:
+        return None
+    match = _PRIOR_STAGE_QUALITY.fullmatch(normalized)
+    if match is None:
+        return None
+    raw = match.groupdict().get("named") or match.groupdict().get("named2") or ""
+    phrase = _strip_target_noise(raw)
+    if not phrase:
+        return None
+    named = resolve_stage_phrase(phrase, allow_typos=True)
+    if named is None:
+        return None
+    named_idx = _stage_index(named)
+    if named_idx is None or named_idx >= current_idx:
+        return None
+    return named
+
+
+def _is_meta_guidance(normalized: str, *, current_stage: str) -> bool:
+    """Return whether the turn is short process guidance, not stage work.
+
+    Mentions of the *current* stage name in a how-to question stay meta.
+    Long project paragraphs that merely contain "next" do not match.
+    """
+    del current_stage  # Reserved for future stage-aware meta refinements.
+    if len(normalized.split()) > _META_GUIDANCE_MAX_WORDS:
+        return False
+    return bool(_META_GUIDANCE.fullmatch(normalized))
+
+
 def _target_from_named_move(normalized: str) -> str | None:
     """Extract and resolve a named stage from a navigation clause."""
     match = _NAVIGATION_CLAUSE.search(normalized)
@@ -399,66 +523,190 @@ def _target_from_named_move(normalized: str) -> str | None:
     return resolve_stage_phrase(phrase, allow_typos=True)
 
 
-def classify_workflow_intent(message: str) -> WorkflowIntent:
+def classify_workflow_intent(
+    message: str,
+    *,
+    current_stage: str = "",
+) -> WorkflowIntent:
     """Classify one student message for Thinking Path workflow routing.
 
     Args:
         message: Raw student contribution.
+        current_stage: Authoritative notebook stage id. Required for
+            prior-stage review and Reflection terminal-completion routing.
 
     Returns:
         A :class:`WorkflowIntent`. ``kind=none`` means normal coaching / Q&A
-        routing should proceed unchanged.
+        routing should proceed unchanged. ``progression_effect`` is the
+        application-owned gate for pending / completion / auto-advance.
     """
     text = normalize_workflow_text(message)
     if not text:
-        return WorkflowIntent(kind="none", confidence="low")
+        return WorkflowIntent(
+            kind="none", confidence="low", progression_effect="evaluate"
+        )
 
+    # 1. Exact confirm
     if is_exact_confirm_command(message):
-        return WorkflowIntent(kind="confirm")
+        return WorkflowIntent(kind="confirm", progression_effect="none")
 
+    # 2. Pure status
     if is_current_stage_status_request(message):
-        return WorkflowIntent(kind="status")
+        return WorkflowIntent(kind="status", progression_effect="none")
 
-    if _looks_like_stage_definition_qa(text):
-        return WorkflowIntent(kind="none")
+    # 3. Compound status + guidance → NONE (not readiness)
+    if is_compound_status_guidance_request(message):
+        return WorkflowIntent(kind="meta_guidance", progression_effect="none")
 
-    # Exact Phase-2 style command first.
+    # 4. Terminal / path-completion (keep Reflection explicit completion)
+    stage_key = str(current_stage or "").strip().lower()
+    if stage_key == "reflection" and (
+        _PATH_COMPLETION.search(text) or _GENERIC_TERMINAL_COMPLETION.search(text)
+    ):
+        return WorkflowIntent(kind="readiness", progression_effect="evaluate")
+    if _PATH_COMPLETION.search(text):
+        return WorkflowIntent(kind="readiness", progression_effect="evaluate")
+
+    # 5. Exact move me to / move to
     move_me = _EXACT_MOVE_ME_TO.fullmatch(text)
     if move_me is not None:
         target = resolve_stage_phrase(move_me.group(1), allow_typos=True)
         if target is not None:
-            return WorkflowIntent(kind="move_stage", target_stage_id=target)
-        return WorkflowIntent(kind="none", confidence="low")
+            return WorkflowIntent(
+                kind="move_stage",
+                target_stage_id=target,
+                progression_effect="execute",
+            )
+        return WorkflowIntent(
+            kind="none", confidence="low", progression_effect="evaluate"
+        )
 
     move_to = _EXACT_MOVE_TO.fullmatch(text)
     if move_to is not None:
         target = resolve_stage_phrase(move_to.group(1), allow_typos=True)
         if target is not None:
-            return WorkflowIntent(kind="move_stage", target_stage_id=target)
-        return WorkflowIntent(kind="none", confidence="low")
+            return WorkflowIntent(
+                kind="move_stage",
+                target_stage_id=target,
+                progression_effect="execute",
+            )
+        return WorkflowIntent(
+            kind="none", confidence="low", progression_effect="evaluate"
+        )
 
+    # 6. Named move
     named = _target_from_named_move(text)
     if named is not None:
-        return WorkflowIntent(kind="move_stage", target_stage_id=named)
+        return WorkflowIntent(
+            kind="move_stage",
+            target_stage_id=named,
+            progression_effect="execute",
+        )
 
-    # Whole-message next/readiness forms after prefix stripping.
+    # 7. Explicit move_next / readiness only
     if _MOVE_NEXT.fullmatch(text) or _READINESS.fullmatch(text):
-        return WorkflowIntent(kind="move_next")
-
-    # Embedded readiness / next after a reasoning paragraph.
+        return WorkflowIntent(kind="move_next", progression_effect="evaluate")
     if _EMBEDDED_READINESS_OR_NEXT.search(text):
-        return WorkflowIntent(kind="readiness")
+        return WorkflowIntent(kind="readiness", progression_effect="evaluate")
 
-    if _PATH_COMPLETION.search(text):
-        return WorkflowIntent(kind="readiness")
+    # 8. Prior-stage review
+    prior = _prior_stage_review_target(text, current_stage=stage_key)
+    if prior is not None:
+        return WorkflowIntent(
+            kind="prior_stage_review",
+            target_stage_id=prior,
+            progression_effect="none",
+        )
 
-    return WorkflowIntent(kind="none")
+    # 9. Meta-guidance
+    if _is_meta_guidance(text, current_stage=stage_key):
+        return WorkflowIntent(kind="meta_guidance", progression_effect="none")
+
+    # 10. Stage-definition / course Q&A — never navigation
+    if _looks_like_stage_definition_qa(text):
+        return WorkflowIntent(kind="none", progression_effect="evaluate")
+
+    # 11. Normal current-stage work → evaluate
+    return WorkflowIntent(kind="none", progression_effect="evaluate")
+
+
+def progression_effect_for(
+    message: str,
+    *,
+    current_stage: str = "",
+) -> ProgressionEffect:
+    """Return the application-owned progression gate for one student message.
+
+    Args:
+        message: Raw student contribution.
+        current_stage: Authoritative notebook stage id.
+
+    Returns:
+        ``none``, ``evaluate``, or ``execute``.
+    """
+    return classify_workflow_intent(
+        message, current_stage=current_stage
+    ).progression_effect
+
+
+def apply_progression_effect(
+    assessment: EducationalAssessment,
+    effect: ProgressionEffect,
+) -> EducationalAssessment:
+    """Fail-safe: coerce ADVANCE to STAY when progression is disabled.
+
+    Keeps useful prose and response_mode. Call after HMW guard/promote and
+    before creating a pending transition.
+
+    Args:
+        assessment: Provider assessment after workflow guards.
+        effect: Application-owned progression gate for this turn.
+
+    Returns:
+        The same assessment, or a STAY copy when ``effect`` is ``none`` and the
+        recommendation was ADVANCE.
+    """
+    from backend.domain import StageDecision
+
+    if effect != "none":
+        return assessment
+    if assessment.recommendation is not StageDecision.ADVANCE:
+        return assessment
+    return assessment.model_copy(
+        update={
+            "recommendation": StageDecision.STAY,
+            "readiness_candidate": False,
+        }
+    )
+
+
+def workflow_skips_retrieval(
+    message: str,
+    *,
+    current_stage: str = "",
+) -> bool:
+    """Return whether meta/status/prior-review/progression must skip Retrieve.
+
+    Genuine source questions (Week N, lecture, reading) keep the normal
+    retrieval gate and must not be classified as navigation here.
+    """
+    intent = classify_workflow_intent(message, current_stage=current_stage)
+    return intent.kind in {
+        "status",
+        "meta_guidance",
+        "prior_stage_review",
+        "confirm",
+        "move_stage",
+        "move_next",
+        "readiness",
+    }
 
 
 def is_stage_progression_request(student_message: str) -> bool:
     """Return whether the student explicitly asks to navigate the Thinking Path.
 
-    Routing only. Never changes a stage.
+    Routing only. Never changes a stage. Meta-guidance and compound
+    status+guidance are intentionally excluded.
     """
     intent = classify_workflow_intent(student_message)
     return intent.kind in {"move_stage", "move_next", "readiness"}

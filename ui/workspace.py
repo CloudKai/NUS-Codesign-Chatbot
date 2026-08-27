@@ -6,10 +6,12 @@ rails. Layout helpers live under ``ui.layout``; this module only wires panels.
 
 from __future__ import annotations
 
+import logging
 import time
 
 import streamlit as st
 
+from backend.specialists.review_orchestration import stage_reviews_need_attention
 from ui.panels.chat import mount_awaiting_coach_turn_recovery, render_chat_panel
 from ui.layout.chat_scroll import sync_chat_scroll
 from ui.layout.column_resize import (
@@ -20,9 +22,47 @@ from ui.layout.column_resize import (
 )
 from ui.layout.sources_scroll import sync_sources_scroll
 from ui.layout.studio_scroll import sync_studio_scroll
-from ui.runtime import log_ui_timing, rerun_app
+from ui.runtime import get_journey_stage_reviews, log_ui_timing, rerun_app
 from ui.sources import render_sources_panel
 from ui.studio import mount_stage_review_attention_watch, render_studio_panel
+
+logger = logging.getLogger(__name__)
+
+_MOBILE_JOURNEY_ATTENTION_FLAG = (
+    '<span class="cd-mobile-journey-attention" hidden>'
+    "Review update available</span>"
+)
+
+
+def _mobile_journey_needs_review_attention() -> bool:
+    """Return whether the mobile Journey tab should show a review-update badge.
+
+    Reads the durable stage-review blob. Falls back to the attention-watch
+    session flag if the notebook cannot be loaded.
+    """
+    thread_id = str(st.session_state.get("thread_id") or "").strip()
+    if not thread_id:
+        return bool(st.session_state.get("_stage_review_attention"))
+    try:
+        return stage_reviews_need_attention(get_journey_stage_reviews(thread_id))
+    except Exception:
+        logger.exception(
+            "Could not load Journey review attention for notebook %s",
+            thread_id,
+        )
+        return bool(st.session_state.get("_stage_review_attention"))
+
+
+def _render_mobile_journey_attention_flag() -> None:
+    """Mount a hidden DOM flag so CSS can badge the stable Journey radio.
+
+    The radio label string stays ``Journey``. Changing it to include ``🛑``
+    remounts the widget and can blank the mobile workspace.
+    """
+    if not _mobile_journey_needs_review_attention():
+        return
+    with st.container(key="mobile_journey_attention"):
+        st.markdown(_MOBILE_JOURNEY_ATTENTION_FLAG, unsafe_allow_html=True)
 
 
 def _render_collapsed_rail(*, side: str, expand_icon: str, label: str) -> None:
@@ -55,12 +95,15 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
         Keep this label identical across unread/read states. Appending ``🛑``
         remounts Streamlit radio options; on narrow viewports the column CSS
         keys off ``input:checked``, and a remount with no checked option hides
-        every workspace column (blank screen). Unread attention stays on the
-        Thinking Path ``Review`` tab badge inside the studio panel.
+        every workspace column (blank screen). The stop badge is painted with
+        CSS from ``cd-mobile-journey-attention``, and Review still shows ``🛑``
+        on the inner Thinking Path tab.
         """
         if value != "Studio":
             return {"Sources": "Sources", "Chat": "Chat"}.get(value, value)
         return "Journey"
+
+    _render_mobile_journey_attention_flag()
     panel = st.radio(
         "Workspace panel",
         ["Studio", "Chat", "Sources"],

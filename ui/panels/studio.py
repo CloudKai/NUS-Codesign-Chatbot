@@ -67,8 +67,6 @@ from ui.session import apply_manual_stage_move
 
 logger = logging.getLogger(__name__)
 
-_REVIEW_UNREAD_BADGE = "🛑"
-
 _STAGE_SELECT_ERROR = "The Thinking Path stage could not be updated. Try again."
 _TRANSITION_RESOLVE_ERROR = (
     "The stage recommendation could not be updated. Try again."
@@ -508,8 +506,17 @@ def render_journey_track() -> None:
             icon_name = "check" if state == "completed" else stage_icons[stage.id]
             is_preview_open = stage.id == preview_stage
             state_classes = f"journey-state {state}"
+            if is_focus:
+                state_classes = f"{state_classes} focus"
             if is_preview_open:
                 state_classes = f"{state_classes} open preview-open"
+            if is_focus:
+                step_visual = "completed" if state == "completed" else "current"
+            elif state == "current":
+                # Frontier / Ready is selectable, not the working stage.
+                step_visual = "available"
+            else:
+                step_visual = state
             with st.container(key=f"journey_stage_{stage.id}"):
                 st.markdown(
                     f'<span class="{state_classes}"></span>',
@@ -517,7 +524,7 @@ def render_journey_track() -> None:
                 )
                 icon_column, copy_column = st.columns([0.13, 0.87], gap="small")
                 icon_column.markdown(
-                    f'<div class="cd-roadmap-step {state}">'
+                    f'<div class="cd-roadmap-step {step_visual}">'
                     f'<div class="cd-roadmap-node" aria-hidden="true">'
                     f'<span class="material-symbols-rounded">'
                     f"{escape(icon_name)}</span></div></div>",
@@ -1089,12 +1096,6 @@ def render_studio_panel() -> None:
     journey_reviews = parse_journey_stage_reviews(
         thread_meta.get(JOURNEY_STAGE_REVIEWS_KEY)
     )
-    journey_attention = stage_reviews_need_attention(journey_reviews)
-
-    def _studio_section_label(value: str) -> str:
-        if value == "Review" and journey_attention:
-            return f"Review {_REVIEW_UNREAD_BADGE}"
-        return value
 
     st.markdown(
         '<div class="pane-heading"><span class="pane-title">Thinking Path</span></div>',
@@ -1102,17 +1103,18 @@ def render_studio_panel() -> None:
     )
     with st.container(key="studio_scroll", height="stretch"):
         with st.container(key="studio_section_tabs"):
+            # Keep option strings identical across unread/read. Appending 🛑
+            # remounts the radio and drops the selected highlight on Review.
             selected = st.radio(
                 "Thinking Path section",
                 ["Journey", "Review"],
                 horizontal=True,
                 key="studio_tab",
-                format_func=_studio_section_label,
                 label_visibility="collapsed",
             )
         # Clear durable unread when Review is opened, but still render the
-        # Review body in this run. An early return left a blank Studio pane
-        # (and a follow-up rerun refreshes the Review 🛑 section badge).
+        # Review body in this run. An early return left a blank Studio pane.
+        # A follow-up rerun drops the CSS 🛑 flag without remounting options.
         clear_unread_rerun = False
         if (
             selected == "Review"

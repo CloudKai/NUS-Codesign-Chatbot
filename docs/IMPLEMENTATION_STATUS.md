@@ -2,6 +2,60 @@
 
 ## CURRENT STATUS
 
+### Progression-effect boundary (2026-08-28)
+
+**Change.** Separated application-owned ``progression_effect``
+(``none`` | ``evaluate`` | ``execute``) from ``response_mode`` / coaching
+semantics. Ordinary Coaching can still answer meta, status+guidance, and
+prior-stage review questions, but those turns cannot open Ready, write
+``validated_completion_stage``, or auto-advance — even when the mock/model
+returns ADVANCE. Classification lives in
+``backend/coaching/workflow_navigation.py`` (no extra LLM call). Fail-safe
+``apply_progression_effect`` runs after HMW guard/promote and before
+``PendingPhaseTransition`` in both ``CoachWorkflow._run_sequential`` and the
+LangGraph ``recommend`` node, with a second drop in
+``CoachApplicationService._submit_once``.
+
+- Compound status+guidance (e.g. “what stage am I in and how do I continue”)
+  → ``none``; Fast Chat may still guide; response prepends the authoritative
+  stage label when missing.
+- Meta-guidance and prior-stage quality review → ``none`` on all five stages.
+- Explicit readiness / move-next / named move → ``evaluate`` / ``execute``;
+  Phase 1 confirm and Phase 2 linear ``Move to`` preserved.
+- Substantive current-stage work and Reflection complete-in-place / terminal
+  path completion remain ``evaluate``.
+- Meta/status/prior-review/workflow turns skip Retrieve; genuine Week/lecture
+  source Q&A still retrieves.
+
+**Not done (documented debt).** Ready / Journey nodes / stage-review enqueue /
+Deep Review unlock still key off ``completed_stages``. This task does **not**
+decouple Ready from ``completed_stages``.
+
+**Files.** ``backend/coaching/workflow_navigation.py``,
+``backend/workflow.py``, ``backend/coaching/execution.py``,
+``backend/coaching/mode_policy.py``, ``backend/prompts/composer.py`` (optional
+non-progression sentence only), ``tests/domain/test_progression_effect.py``,
+``docs/IMPLEMENTATION_STATUS.md``. No AgentCore prompt publish / generation
+bump.
+
+**Validation.** Focused pytest:
+``tests/domain/test_mode_classification.py``,
+``tests/domain/test_progression_effect.py``,
+``tests/domain/test_hmw_stage_completion.py``,
+``tests/domain/test_workflow.py``,
+``tests/domain/test_retrieval_gate.py``,
+``tests/http/test_api.py``. New progression suite passes. Three failures match
+untouched HEAD debt (``test_reflection_completion_request_skips_retrieval_and_suppresses_advance``,
+``test_workflow_keeps_stage_without_creating_a_pending_transition``,
+``test_reflection_normalizes_advance_to_stay_without_transition``) — not
+regressions from this change. Ruff, compileall, and ``git diff --check`` on
+touched Python files.
+
+**Next exact action.** Hard-refresh Streamlit; on each stage ask compound
+status+guidance and a prior-stage quality question with sources selected —
+confirm helpful prose, no Ready, no completion, no evidence-gap. Then ask an
+explicit readiness question and confirm Ready/confirm still works.
+
 ### Selection-mode readiness + Fast Chat intent hardening (2026-08-27)
 
 **Change.** With ``STUDENT_STAGE_SELECTION=true``, a coach ADVANCE now rewrites

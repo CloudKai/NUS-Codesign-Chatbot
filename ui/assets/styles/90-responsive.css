@@ -166,6 +166,36 @@
             -webkit-text-fill-color:currentColor !important;
         }
 
+        /* Paint 🛑 on the stable "Journey" label without changing the radio
+           option string (a string change remounts the widget). Streamlit
+           radios use index values (0/1/2), not the Python option ids. */
+        body:has(.st-key-mobile_journey_attention)
+        .st-key-mobile_panel [role="radiogroup"] > label[data-testid="stRadioOption"]:first-child p,
+        body:has(.cd-mobile-journey-attention)
+        .st-key-mobile_panel [role="radiogroup"] > label[data-testid="stRadioOption"]:first-child p,
+        body:has(.st-key-mobile_journey_attention)
+        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="0"]) p,
+        body:has(.cd-mobile-journey-attention)
+        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="0"]) p {
+            white-space:nowrap;
+        }
+
+        body:has(.st-key-mobile_journey_attention)
+        .st-key-mobile_panel [role="radiogroup"] > label[data-testid="stRadioOption"]:first-child p::after,
+        body:has(.cd-mobile-journey-attention)
+        .st-key-mobile_panel [role="radiogroup"] > label[data-testid="stRadioOption"]:first-child p::after,
+        body:has(.st-key-mobile_journey_attention)
+        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="0"]) p::after,
+        body:has(.cd-mobile-journey-attention)
+        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="0"]) p::after {
+            content:" 🛑";
+            font-size:1.05rem;
+            line-height:1;
+            margin-left:.12rem;
+            -webkit-text-fill-color:initial;
+            vertical-align:-0.12em;
+        }
+
         .st-key-notebook_workspace {
             border:1px solid var(--cd-border);
             border-radius:.85rem;

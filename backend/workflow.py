@@ -26,6 +26,10 @@ from .domain import (
     ProvisionalResearchCoding,
     StageDecision,
 )
+from .coaching.workflow_navigation import (
+    apply_progression_effect,
+    progression_effect_for,
+)
 from .learning.hmw import (
     HMW_SCAFFOLD_STAGE_ID,
     student_hmw_candidate_present,
@@ -331,6 +335,15 @@ class CoachWorkflow:
         assessment, response_text = _promote_student_hmw_for_problem_identification_advance(
             request, assessment, response_text
         )
+        # Application-owned progression gate: AFTER HMW guard/promote, BEFORE
+        # PendingPhaseTransition. Meta/status/prior-review cannot open Ready.
+        assessment = apply_progression_effect(
+            assessment,
+            progression_effect_for(
+                request.student_message,
+                current_stage=request.current_stage,
+            ),
+        )
         if assessment.current_stage != request.current_stage:
             raise ValueError("Assessment stage does not match the active journey stage")
         pending: PendingPhaseTransition | None = None
@@ -533,6 +546,15 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
     def recommend(state: dict) -> dict:
         request = CoachRequest.model_validate(state["request"])
         assessment = EducationalAssessment.model_validate(state["assessment"])
+        # Application-owned progression gate: AFTER HMW guard/promote (assess),
+        # BEFORE PendingPhaseTransition. Same helper as sequential path.
+        assessment = apply_progression_effect(
+            assessment,
+            progression_effect_for(
+                request.student_message,
+                current_stage=request.current_stage,
+            ),
+        )
         pending: PendingPhaseTransition | None = None
         if assessment.recommendation is StageDecision.ADVANCE:
             next_stage = _next_stage(request.current_stage)

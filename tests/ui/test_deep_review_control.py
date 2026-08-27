@@ -9,6 +9,13 @@ from streamlit.testing.v1 import AppTest
 from backend.learning.stages import THINKING_STAGES
 from ui.panels.studio import deep_review_control_view
 
+_MOBILE_JOURNEY_ATTENTION_MARKUP = '<span class="cd-mobile-journey-attention"'
+
+
+def _markdown_blob(app: AppTest) -> str:
+    """Join AppTest markdown values for DOM-flag assertions."""
+    return "\n".join(str(markdown.value or "") for markdown in app.markdown)
+
 
 def test_locked_view_before_reflection_complete() -> None:
     """Incomplete Thinking Path keeps Start Deep Review disabled."""
@@ -149,16 +156,15 @@ def test_queued_stage_review_shows_journey_stop_badge_before_unread() -> None:
     workspace_panel = next(
         radio for radio in app.radio if radio.label == "Workspace panel"
     )
-    # Mobile Journey label stays stable; unread lives on Review only.
+    # Radio option string stays Journey; CSS paints 🛑 from this DOM flag.
     assert "Journey" in workspace_panel.options
     assert "Journey 🛑" not in workspace_panel.options
+    assert _MOBILE_JOURNEY_ATTENTION_MARKUP in _markdown_blob(app)
     studio_section = next(
         radio for radio in app.radio if radio.label == "Thinking Path section"
     )
-    assert any(
-        "Review" in str(option) and "🛑" in str(option)
-        for option in studio_section.options
-    )
+    assert "Review" in studio_section.options
+    assert all("🛑" not in str(option) for option in studio_section.options)
 
 
 def test_stage_review_checkpoint_renders_on_review_tab_with_stop_badge() -> None:
@@ -202,10 +208,12 @@ def test_stage_review_checkpoint_renders_on_review_tab_with_stop_badge() -> None
     assert "Journey" in workspace_panel.options
     assert "Journey 🛑" not in workspace_panel.options
     assert "Journey !" not in workspace_panel.options
+    assert _MOBILE_JOURNEY_ATTENTION_MARKUP in _markdown_blob(app)
     studio_section = next(
         radio for radio in app.radio if radio.label == "Thinking Path section"
     )
-    assert any("Review" in str(option) and "🛑" in str(option) for option in studio_section.options)
+    assert "Review" in studio_section.options
+    assert all("🛑" not in str(option) for option in studio_section.options)
 
     app.session_state["studio_tab"] = "Review"
     app.run()
@@ -237,9 +245,11 @@ def test_stage_review_checkpoint_renders_on_review_tab_with_stop_badge() -> None
     assert "Journey 🛑" not in workspace_panel.options
     assert "Journey" in workspace_panel.options
     assert "Review" not in workspace_panel.options
+    assert _MOBILE_JOURNEY_ATTENTION_MARKUP not in _markdown_blob(app)
     studio_section = next(
         radio for radio in app.radio if radio.label == "Thinking Path section"
     )
+    assert studio_section.value == "Review"
     assert all("🛑" not in str(option) for option in studio_section.options)
 
 def test_deep_review_button_is_full_width_and_grouped_with_caption() -> None:

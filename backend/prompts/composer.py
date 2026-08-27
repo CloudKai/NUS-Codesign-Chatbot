@@ -89,6 +89,7 @@ class PromptContext(BaseModel):
     include_recent_messages: bool = True
     context_policy: str = "standard"
     expected_response_mode: str | None = None
+    progression_effect: str | None = None
     deep_review_compact_context: str = ""
     deep_review_context_mode: str = ""
 
@@ -158,6 +159,13 @@ def _runtime_instructions(context: PromptContext) -> str:
         parts.append(hint)
     is_qa = str(context.expected_response_mode or "").strip().lower() == "qa"
     stage_progression_request = is_stage_progression_request(context.student_message)
+    if str(context.progression_effect or "").strip().lower() == "none":
+        parts.append(
+            "A coaching turn may be marked non-progression by the application. "
+            "When progression is disabled for this turn, respond helpfully but "
+            "do not frame the student as having completed the stage or being "
+            "ready to advance."
+        )
     stage = STAGE_BY_ID.get(str(context.current_stage or "").strip())
     if stage is not None and not is_qa:
         parts.append(
@@ -678,6 +686,8 @@ def prompt_context_from_request(
     Set ``include_recent_messages=False`` when the provider already sends the
     same bounded DSQL turns as conversation messages (AgentCore).
     """
+    from backend.coaching.workflow_navigation import progression_effect_for
+
     image_note = ""
     if request.image_inputs:
         labels_by_source = {
@@ -735,6 +745,10 @@ def prompt_context_from_request(
         include_recent_messages=include_recent_messages,
         context_policy=context_policy,
         expected_response_mode=request.expected_response_mode,
+        progression_effect=progression_effect_for(
+            request.student_message,
+            current_stage=request.current_stage,
+        ),
         deep_review_compact_context=str(
             getattr(request, "deep_review_compact_context", "") or ""
         ),
