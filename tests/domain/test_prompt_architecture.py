@@ -332,6 +332,41 @@ def test_composer_qa_omits_strict_guidance_and_history_is_not_evidence():
     assert "could not retrieve a validated excerpt" in text
 
 
+def test_composer_quick_guidance_overrides_stage_thoroughness():
+    """Quick mode names minimum-workable bars that override Strict stage wording."""
+    prepared = PromptComposer().compose(
+        PromptContext(
+            current_stage="problem_identification",
+            student_message="How might we help elderly pedestrians cross safely?",
+            response_detail="short",
+        )
+    )
+    guidance = prepared.runtime_instructions
+    assert "Guidance mode: Quick" in guidance
+    assert "minimum workable" in guidance
+    assert "take precedence" in guidance
+    assert "Problem Identification" in guidance
+    assert "Concept Generation" in guidance
+    assert "Design Specification" in guidance
+    assert "Ethics & Critical Thinking" in guidance
+    assert "Reflection" in guidance
+
+
+def test_composer_strict_guidance_keeps_stage_advance_authoritative():
+    """Strict mode keeps the thorough bar and stage ADVANCE/STAY as authoritative."""
+    prepared = PromptComposer().compose(
+        PromptContext(
+            current_stage="design_specification",
+            student_message="Here is my design specification draft.",
+            response_detail="long",
+        )
+    )
+    guidance = prepared.runtime_instructions
+    assert "Guidance mode: Strict" in guidance
+    assert "thorough" in guidance
+    assert "authoritative" in guidance
+
+
 def test_composer_runtime_asserts_authoritative_current_stage():
     """Coaching runtime names the live stage and blocks prior-stage gatekeeping."""
     prepared = PromptComposer().compose(
