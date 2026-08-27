@@ -12,6 +12,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+from .learning.deep_analysis_pdf import (
+    DeepAnalysisPdfExport,
+    build_deep_analysis_pdf,
+)
 from .persistence.object_keys import sanitize_filename
 from .source_library import (
     CourseMaterialSyncCoordinator,
@@ -24,6 +28,8 @@ from .source_library import (
     list_visible_sources,
     read_source_bytes,
 )
+from .specialists.review_orchestration import DEEP_REVIEW_SNAPSHOT_KEY
+from .student_journey import normalize_journey
 from .student_store import StudentStore
 
 _TRANSCRIPT_ROLES = {"user": "Student", "assistant": "Coach"}
@@ -253,6 +259,34 @@ class WorkspaceService:
         return TranscriptExport(
             data=text.encode("utf-8"),
             filename=transcript_filename(title),
+        )
+
+    def export_deep_analysis_pdf(self, thread_id: str) -> DeepAnalysisPdfExport:
+        """Return a PDF built from the notebook's Sonnet Deep Review snapshot.
+
+        Args:
+            thread_id: Owned notebook id.
+
+        Returns:
+            PDF bytes and download filename.
+
+        Raises:
+            ValueError: When the notebook is missing/not owned, or no usable
+                Deep Review snapshot has been persisted yet.
+        """
+        thread = self._store.get_thread(thread_id)
+        if not thread:
+            raise ValueError("Notebook not found")
+        metadata = dict(thread.get("metadata") or {})
+        snapshot = metadata.get(DEEP_REVIEW_SNAPSHOT_KEY)
+        if not isinstance(snapshot, dict) or not snapshot:
+            raise ValueError("Deep Analysis PDF is not ready yet")
+        title = str(thread.get("name") or "").strip() or "Untitled notebook"
+        journey = normalize_journey(metadata.get("learning_journey"))
+        return build_deep_analysis_pdf(
+            title=title,
+            snapshot=snapshot,
+            journey=journey,
         )
 
     def get_messages_at_revision(

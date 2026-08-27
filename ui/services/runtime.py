@@ -45,7 +45,12 @@ from backend.settings import settings
 from backend.source_library import CourseMaterialSyncCoordinator, LectureNotesSyncResult
 from backend.student_store import StudentStore
 from backend.workflow import CoachWorkflow
-from backend.workspace_service import SourceContent, TranscriptExport, WorkspaceService
+from backend.workspace_service import (
+    DeepAnalysisPdfExport,
+    SourceContent,
+    TranscriptExport,
+    WorkspaceService,
+)
 
 
 _T = TypeVar("_T")
@@ -717,6 +722,12 @@ class WorkspaceFacade:
         if local_api_enabled():
             return local_api_client().download_transcript(thread_id)
         return self._service().export_transcript(thread_id)
+
+    def download_deep_analysis_pdf(self, thread_id: str) -> DeepAnalysisPdfExport:
+        """Return a PDF built from the notebook's completed Sonnet Deep Review."""
+        if local_api_enabled():
+            return local_api_client().download_deep_analysis_pdf(thread_id)
+        return self._service().export_deep_analysis_pdf(thread_id)
 
     def add_message(
         self,

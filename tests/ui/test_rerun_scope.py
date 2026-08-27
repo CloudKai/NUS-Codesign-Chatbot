@@ -403,6 +403,7 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
     assert 'f"move me to {stage.label}"' not in select_block
     assert 'pending_mobile_panel"] = "Chat"' in select_block
     assert 'chat_follow_bottom"] = True' not in select_block
+    assert "chat_reveal_coach_reply = True" in select_block
     assert "chat_scroll_after_stage_select" not in select_block
     assert "store.select_stage" not in select_block
     journey_block = source.split("def render_journey_track", 1)[1].split(

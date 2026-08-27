@@ -677,13 +677,15 @@ def test_enabled_manual_stage_command_persists_without_model_or_retrieval(
     turn = service.submit(request)
     replay = service.submit(request)
 
-    expected = (
-        f"You are already in Stage: {label}."
-        if target_stage == "problem_identification"
-        else f"Moved to Stage: {label}."
-    )
+    if target_stage == "problem_identification":
+        expected = f"You are already in Stage: {label}."
+        assert turn.response_text == expected
+    else:
+        expected_prefix = f"Moved to Stage: {label}."
+        assert turn.response_text.startswith(expected_prefix)
+        assert "What to work on next:" in turn.response_text
+        expected = turn.response_text
     assert replay == turn
-    assert turn.response_text == expected
     assert turn.assessment.current_stage == target_stage
     assert turn.assessment.recommendation is None
     assert turn.assessment.citations == []
@@ -1984,7 +1986,8 @@ def test_phase2_natural_language_immediate_next_succeeds(
     )
 
     assert client.calls == []
-    assert turn.response_text == "Moved to Stage: Concept generation."
+    assert turn.response_text.startswith("Moved to Stage: Concept generation.")
+    assert "What to work on next:" in turn.response_text
     thread = store.get_thread(thread_id) or {}
     assert thread["metadata"]["thinking_stage"] == "concept_generation"
 
@@ -2047,7 +2050,8 @@ def test_phase2_natural_language_revisit_unlocked_stage(
     )
 
     assert client.calls == []
-    assert turn.response_text == "Moved to Stage: Problem identification."
+    assert turn.response_text.startswith("Moved to Stage: Problem identification.")
+    assert "How to improve:" in turn.response_text
     thread = store.get_thread(thread_id) or {}
     assert thread["metadata"]["thinking_stage"] == "problem_identification"
 

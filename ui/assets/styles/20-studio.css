@@ -644,10 +644,14 @@
 
     .facione-card .cd-card-body {
         padding-top:.15rem;
+        min-width:0;
+        max-width:100%;
+        overflow:hidden;
     }
 
     .facione-table {
         width:100%;
+        max-width:100%;
         border-collapse:collapse;
         border-spacing:0;
         table-layout:fixed;
@@ -657,12 +661,14 @@
     .facione-table th,
     .facione-table td {
         display:table-cell;
-        padding:.48rem .65rem;
+        padding:.42rem .45rem;
         vertical-align:middle;
         border:1px solid var(--cd-border);
         font-size:.79rem;
         line-height:1.35;
         box-sizing:border-box;
+        overflow-wrap:anywhere;
+        word-break:normal;
     }
 
     .facione-table thead th {
@@ -676,22 +682,25 @@
     }
 
     .facione-table tbody th {
-        width:58%;
+        width:44%;
         color:var(--cd-text);
         font-weight:620;
         text-align:left;
     }
 
     .facione-table tbody td {
-        width:42%;
+        width:56%;
         color:var(--cd-muted);
+        overflow:hidden;
     }
 
     .facione-score-content {
-        display:inline-flex;
+        display:flex;
+        flex-wrap:wrap;
         align-items:center;
-        gap:.42rem;
-        white-space:nowrap;
+        gap:.2rem .36rem;
+        min-width:0;
+        max-width:100%;
     }
 
     .facione-score-value {
@@ -699,14 +708,16 @@
         font-variant-numeric:tabular-nums;
         font-weight:620;
         min-width:2.15em;
+        flex:0 0 auto;
     }
 
     .facione-score .material-symbols-rounded {
         font-family:"Material Symbols Rounded";
-        font-size:1.2rem;
+        font-size:1.1rem;
         font-variation-settings:"FILL" 0,"wght" 420,"GRAD" 0,"opsz" 20;
         line-height:1;
         color:var(--cd-muted);
+        flex:0 0 auto;
     }
 
     .facione-score-3 .material-symbols-rounded,
@@ -722,6 +733,10 @@
     .facione-rubric {
         color:var(--cd-muted);
         font-size:.72rem;
+        flex:1 1 auto;
+        min-width:0;
+        white-space:normal;
+        overflow-wrap:anywhere;
     }
 
     .review-stage-list {
@@ -945,7 +960,14 @@
 
     @media (max-width:420px) {
         .facione-table tbody th {
-            width:52%;
+            width:40%;
+        }
+        .facione-table tbody td {
+            width:60%;
+        }
+        .facione-table th,
+        .facione-table td {
+            padding:.38rem .38rem;
         }
         .facione-rubric {
             font-size:.68rem;

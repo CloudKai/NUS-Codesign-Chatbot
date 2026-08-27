@@ -2,6 +2,59 @@
 
 ## CURRENT STATUS
 
+### Generate Deep Analysis PDF (2026-08-28)
+
+**Change.** Renamed student-facing **Start Deep Review** / Journey **Generate
+Deep Review** to **Generate Deep Analysis PDF**. Unlock remains Reflection-
+complete (all Thinking Path stages in ``completed_stages``). Press still
+enqueues the existing Sonnet Deep Review job; when it completes, Review shows
+**Download Deep Analysis PDF** built from the snapshot via PyMuPDF
+(``GET /api/v1/threads/{id}/deep-analysis.pdf``). Internal route/job keys stay
+``deep-review`` for compatibility.
+
+**Files.** ``backend/learning/deep_analysis_pdf.py``,
+``backend/workspace_service.py``, ``backend/api_client.py``,
+``backend/http/app.py``, ``ui/panels/studio.py``, ``ui/services/runtime.py``,
+``tests/domain/test_deep_analysis_pdf.py``, UI Deep Review tests,
+``docs/IMPLEMENTATION_STATUS.md``.
+
+**Validation.** Focused pytest for PDF builder + Deep Review control/chat
+progress; ``compileall`` on touched Python.
+
+**Next exact action.** Hard-refresh Streamlit; complete Reflection; press
+Generate Deep Analysis PDF (mock/Sonnet as configured); download the PDF when
+ready.
+
+### Stage-move coach briefing (2026-08-28)
+
+**Change.** After Journey **Work on this stage** / **Revisit** or a Streamlit-
+intercepted typed ``Move to [Stage]``, the coach persists one assistant-only
+chat bubble: ``Moved to Stage: [Stage].`` plus deterministic enter/revisit
+commands (no extra LLM call). Enter uses stage purpose + personalized
+how-questions tied to working conclusion / prior notes / last student message.
+Revisit uses Areas to improve + Working conclusion and revise-how commands.
+Successful moves and already-on-stage taps no longer show the composer notice
+above the textbox; locked jumps still do.
+
+**Files.** ``backend/learning/stage_briefing.py``, ``backend/student_journey.py``,
+``backend/learning_service.py``, ``backend/coaching/execution.py``,
+``ui/session.py``, ``ui/panels/studio.py``,
+``tests/domain/test_stage_move_briefing.py``, domain/UI assertion updates,
+``docs/IMPLEMENTATION_STATUS.md``.
+
+**Validation.** Focused pytest: ``tests/domain/test_stage_move_briefing.py``,
+manual-stage / phase2 assertions in ``test_mode_classification.py``,
+``test_agentcore_session_affinity.py``, ``test_atomic_coach_turn.py``,
+``test_journey_linear_accordion_and_ctas_follow_unlocked_frontier``,
+``test_streamlit_stage_selection_refreshes_authoritative_stage_and_status``,
+``test_streamlit_manual_stage_chat_command_refreshes_authoritative_journey``.
+``compileall`` on touched Python. One pre-existing HEAD failure remains
+(``test_reflection_completion_request_skips_retrieval_and_suppresses_advance``).
+
+**Next exact action.** Hard-refresh Streamlit; move via Journey CTA and typed
+``Move to``; confirm the chat bubble (not the composer notice) and that
+Revisit shows improve/how copy when Areas exist.
+
 ### Progression-effect boundary (2026-08-28)
 
 **Change.** Separated application-owned ``progression_effect``

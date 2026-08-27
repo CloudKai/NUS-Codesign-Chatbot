@@ -179,11 +179,10 @@ def new_notebook(should_rerun: bool = True) -> None:
 
 
 def set_stage_move_notice(message: str) -> None:
-    """Show a session-only stage-hop line above the composer.
+    """Show a session-only line above the composer (locked stage hops).
 
     Args:
-        message: Full notice text such as ``Moved to stage: …``,
-            ``You are already in …``, or ``Must complete … to reach …``.
+        message: Notice text such as ``Must complete … to reach …``.
     """
     cleaned = " ".join(str(message or "").split()).strip()
     st.session_state.stage_move_notice = cleaned or None
@@ -306,10 +305,11 @@ def awaiting_coach_turn_timed_out(pending: dict[str, Any] | None = None) -> bool
 
 
 def apply_manual_stage_move(thread_id: str, stage_id: str) -> bool:
-    """Move Thinking Path focus without writing chat bubbles.
+    """Move Thinking Path focus and let the service persist a coach briefing.
 
-    Calls ``store.select_stage``, refreshes session journey, and sets
-    ``stage_move_notice`` only when focus actually changed.
+    Calls ``store.select_stage``, refreshes session journey, and does **not**
+    write a composer notice for successful moves or already-on-stage taps.
+    Locked jumps still set ``stage_move_notice`` at the call site.
 
     Args:
         thread_id: Active notebook id.
@@ -336,12 +336,8 @@ def apply_manual_stage_move(thread_id: str, stage_id: str) -> bool:
     st.session_state.learning_journey = journey
     st.session_state.response_detail = journey["response_detail"]
     selected = str(journey.get("current_stage") or cleaned).strip()
-    if selected != previous:
-        label = STAGE_BY_ID[selected].label
-        set_stage_move_notice(f"Moved to stage: {label}")
-        return True
-    set_stage_move_notice(f"You are already in {stage.label}")
-    return False
+    clear_stage_move_notice()
+    return selected != previous
 
 
 def delete_notebook(thread_id: str) -> None:

@@ -69,6 +69,12 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     assert '"Caveat",cursive' in studio_css
     assert "white-space:nowrap" in studio_css
     assert "background:var(--cd-accent)" in studio_css
+    facione_score = studio_css.split(".facione-score-content {", 1)[1].split("}", 1)[0]
+    assert "flex-wrap:wrap" in facione_score
+    assert "white-space:nowrap" not in facione_score
+    assert "overflow:hidden" in studio_css.split(".facione-card .cd-card-body {", 1)[1].split(
+        "}", 1
+    )[0]
     assert "container-type:inline-size" in studio_css
     assert "container-name:journey-stage" in studio_css
     assert "@container journey-stage (max-width:28rem)" in studio_css

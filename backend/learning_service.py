@@ -8,9 +8,14 @@ from typing import Any, Callable
 from .domain import PendingPhaseTransition
 from .repositories import NotebookRepository, PhaseTransitionRepository
 from .settings import settings
+from .specialists.review_orchestration import (
+    DEEP_REVIEW_SNAPSHOT_KEY,
+    JOURNEY_STAGE_REVIEWS_KEY,
+)
 from .student_journey import (
     STAGE_BY_ID,
     complete_and_advance,
+    compose_stage_move_briefing,
     current_stage,
     normalize_journey,
 )
@@ -163,6 +168,11 @@ class LearningProgressService:
         skipped stages complete, and rejects/resolves any pending ADVANCE
         recommendation for the notebook atomically.
 
+        When focus actually changes, persists one assistant-only briefing
+        bubble (``Moved to Stage:`` plus enter/revisit commands). Already-on-
+        stage selections write no chat row. Does not bump the Deep Review
+        coaching-turn counter.
+
         Returns:
             Updated notebook metadata including ``learning_journey``.
 
@@ -175,6 +185,49 @@ class LearningProgressService:
         cleaned = str(stage_id or "").strip()
         if cleaned not in STAGE_BY_ID:
             raise ValueError(f"Unknown thinking stage: {cleaned}")
-        if not self._notebooks.get_thread(thread_id):
+        thread = self._notebooks.get_thread(thread_id)
+        if not thread:
             raise ValueError("Notebook not found")
-        return self._store.select_learning_stage(thread_id, cleaned)
+        metadata = dict(thread.get("metadata") or {})
+        prior_journey = normalize_journey(metadata.get("learning_journey"))
+        prior_stage = str(prior_journey.get("current_stage") or "").strip()
+        briefing: str | None = None
+        if prior_stage != cleaned:
+            messages = self._store.get_messages(thread_id)
+            snapshot = metadata.get(DEEP_REVIEW_SNAPSHOT_KEY)
+            reviews = metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+            briefing = compose_stage_move_briefing(
+                target_stage=cleaned,
+                journey=prior_journey,
+                messages=messages,
+                deep_review_snapshot=(
+                    snapshot if isinstance(snapshot, dict) else None
+                ),
+                journey_stage_reviews=(
+                    reviews if isinstance(reviews, dict) else None
+                ),
+                already_selected=False,
+            )
+        updated = self._store.select_learning_stage(thread_id, cleaned)
+        if briefing:
+            self._store.add_message(
+                thread_id,
+                "assistant",
+                briefing,
+                metadata={
+                    "thinking_stage": cleaned,
+                    "stage_move_briefing": True,
+                    "assessment": {
+                        "current_stage": cleaned,
+                        "contribution_summary": (
+                            "Applied the student's explicit stage selection."
+                        ),
+                        "stage_assessment": (
+                            "Stage selected from the authoritative notebook journey."
+                        ),
+                        "recommendation": None,
+                        "response_mode": "qa",
+                    },
+                },
+            )
+        return updated

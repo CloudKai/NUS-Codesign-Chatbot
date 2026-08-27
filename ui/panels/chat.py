@@ -990,7 +990,7 @@ def handle_prompt(
     keyed history container reuses the last assistant ``st.chat_message``.
     """
     cleaned_prompt = str(prompt or "").strip()
-    # Feature-gated exact stage command: update journey only, no chat rows.
+    # Feature-gated exact stage command: journey + assistant briefing only.
     if (
         existing_user_message_id is None
         and settings.student_stage_selection
@@ -1000,11 +1000,13 @@ def handle_prompt(
         if manual_target is not None:
             thread_id = str(st.session_state.thread_id or "").strip()
             try:
-                apply_manual_stage_move(thread_id, manual_target)
+                moved = apply_manual_stage_move(thread_id, manual_target)
                 store.forget_turn_reads(thread_id)
                 st.session_state.composer_nonce = (
                     int(st.session_state.get("composer_nonce") or 0) + 1
                 )
+                if moved:
+                    st.session_state.chat_reveal_coach_reply = True
                 rerun_app()
             except Exception as exc:
                 detail = str(exc or "")

@@ -1247,6 +1247,23 @@ def create_app(
             headers={"Content-Disposition": disposition},
         )
 
+    @app.get("/api/v1/threads/{thread_id}/deep-analysis.pdf")
+    def download_deep_analysis_pdf(
+        thread_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> Response:
+        """Return a PDF built from the notebook's completed Sonnet Deep Review."""
+        try:
+            export = owner.workspace.export_deep_analysis_pdf(thread_id)
+        except ValueError as error:
+            raise _value_error(error) from error
+        disposition = "attachment; filename*=UTF-8''" + quote(export.filename)
+        return Response(
+            content=export.data,
+            media_type=export.mime,
+            headers={"Content-Disposition": disposition},
+        )
+
     @app.post("/api/v1/threads/{thread_id}/messages")
     def create_message(
         thread_id: str,

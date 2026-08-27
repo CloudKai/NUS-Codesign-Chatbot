@@ -71,19 +71,22 @@ _STAGE_SELECT_ERROR = "The Thinking Path stage could not be updated. Try again."
 _TRANSITION_RESOLVE_ERROR = (
     "The stage recommendation could not be updated. Try again."
 )
-_DEEP_REVIEW_ERROR = "Deep Review could not be completed. Try again."
+_DEEP_REVIEW_ERROR = "Deep Analysis PDF could not be completed. Try again."
 _DEEP_REVIEW_STATUS_LABEL = (
-    "Running Deep Review… This may take a few seconds to a couple of minutes."
+    "Generating Deep Analysis PDF… This may take a few seconds to a couple of minutes."
 )
 _DEEP_REVIEW_READY_DETAIL = (
-    "Deep Review performs a more detailed analysis of your progress and may "
-    "take from a few seconds to a couple of minutes."
+    "Generate Deep Analysis PDF runs a detailed Sonnet review of your progress "
+    "and prepares a downloadable PDF. This may take from a few seconds to a "
+    "couple of minutes."
 )
-_DEEP_REVIEW_COMPLETE_CAPTION = "Deep Review ready."
+_DEEP_REVIEW_COMPLETE_CAPTION = "Deep Analysis PDF ready."
 _DEEP_REVIEW_NEWER_TURNS_CAPTION = (
-    "This review reflects the conversation at the start of Deep Review. "
+    "This PDF reflects the conversation at the start of Deep Analysis. "
     "Newer turns are not included."
 )
+_DEEP_ANALYSIS_BUTTON_LABEL = "Generate Deep Analysis PDF"
+_DEEP_ANALYSIS_DOWNLOAD_LABEL = "Download Deep Analysis PDF"
 _FACIONE_ACTIVITY_LABELS = (
     ("analysis", "Analysis"),
     ("interpretation", "Interpretation"),
@@ -111,7 +114,7 @@ def deep_review_control_view(
     *,
     running: bool,
 ) -> DeepReviewControlView:
-    """Map Thinking Path completion onto the Deep Review button.
+    """Map Thinking Path completion onto the Deep Analysis PDF button.
 
     Unlock requires every required stage, including Reflection, to be in
     ``completed_stages``. This helper does not invoke Sonnet.
@@ -121,14 +124,14 @@ def deep_review_control_view(
         running: Whether this notebook already has an in-flight Deep Review.
 
     Returns:
-        Caption, enablement, and button type for Start Deep Review.
+        Caption, enablement, and button type for Generate Deep Analysis PDF.
     """
     eligible = explicit_deep_review_available(
         completed_stages=list(completed_stages or []),
     )
     disabled = (not eligible) or running
     locked_caption = (
-        "Deep Review unlocks when the Thinking Path including Reflection "
+        "Deep Analysis PDF unlocks when the Thinking Path including Reflection "
         "is complete."
     )
     if running:
@@ -145,7 +148,7 @@ def deep_review_control_view(
             eligible=True,
             disabled=False,
             button_type="primary",
-            caption="Deep Review is ready.",
+            caption="Path including Reflection is complete.",
             detail_caption=_DEEP_REVIEW_READY_DETAIL,
             status_label=None,
         )
@@ -194,12 +197,13 @@ def _render_deep_review_stable() -> None:
             reviewed_revision = int(job.get("reviewed_revision") or 0)
             if live_revision > reviewed_revision:
                 st.caption(_DEEP_REVIEW_NEWER_TURNS_CAPTION)
+            _render_deep_analysis_pdf_download(thread_id)
         if view.caption:
             st.caption(view.caption)
         if view.detail_caption:
             st.caption(view.detail_caption)
         clicked = st.button(
-            "Start Deep Review",
+            _DEEP_ANALYSIS_BUTTON_LABEL,
             key="start_deep_review",
             type=view.button_type,
             disabled=view.disabled,
@@ -236,7 +240,7 @@ def _render_deep_review_polling() -> None:
     )
     with st.container(key="deep_review_control", gap=10):
         st.button(
-            "Start Deep Review",
+            _DEEP_ANALYSIS_BUTTON_LABEL,
             key="start_deep_review",
             type=view.button_type,
             disabled=True,
@@ -244,6 +248,26 @@ def _render_deep_review_polling() -> None:
         )
         if view.status_label:
             st.status(view.status_label, expanded=False, type="compact")
+
+
+def _render_deep_analysis_pdf_download(thread_id: str) -> None:
+    """Offer a download button when the Sonnet Deep Analysis snapshot exists."""
+    cleaned = str(thread_id or "").strip()
+    if not cleaned:
+        return
+    try:
+        export = store.download_deep_analysis_pdf(cleaned)
+    except Exception:
+        logger.exception("deep_analysis_pdf_download_failed thread_id=%s", cleaned)
+        return
+    st.download_button(
+        _DEEP_ANALYSIS_DOWNLOAD_LABEL,
+        data=export.data,
+        file_name=export.filename,
+        mime=export.mime,
+        key="download_deep_analysis_pdf",
+        use_container_width=True,
+    )
 
 
 def _review_fingerprint(review: dict[str, Any]) -> str:
@@ -380,10 +404,12 @@ def _render_journey_stage_select_cta(
 
 
 def _select_journey_stage(stage_id: str) -> None:
-    """Move stage via ``select_stage`` and show an ephemeral composer notice.
+    """Move stage via ``select_stage`` and open Chat to show the coach briefing.
 
-    Does not write ``move me to …`` / ``Moved to Stage: …`` chat bubbles.
-    Focus is persisted on the notebook journey only.
+    Persists an assistant-only ``Moved to Stage:`` briefing through the
+    learning service. Does not write a student ``move me to …`` chat row or a
+    composer notice for successful moves. Arms ``chat_reveal_coach_reply`` so
+    the feed pins the top of the new briefing bubble (same as a coach reply).
     """
     stage = STAGE_BY_ID.get(str(stage_id or "").strip())
     if stage is None:
@@ -394,13 +420,15 @@ def _select_journey_stage(stage_id: str) -> None:
         st.error(_STAGE_SELECT_ERROR)
         return
     try:
-        apply_manual_stage_move(thread_id, stage.id)
+        moved = apply_manual_stage_move(thread_id, stage.id)
         store.forget_turn_reads(thread_id)
         st.session_state.journey_preview_stage = None
-        # Open Chat so the composer notice is visible. Do not assign
+        # Open Chat so the briefing bubble is visible. Do not assign
         # mobile_panel here — the radio widget is already instantiated.
         st.session_state["pending_mobile_panel"] = "Chat"
         st.session_state.nav_section = "Chat"
+        if moved:
+            st.session_state.chat_reveal_coach_reply = True
         rerun_app()
     except Exception:
         logger.exception(
@@ -465,10 +493,10 @@ def render_journey_track() -> None:
         completed_stages=list(completed),
     ) and not isinstance(thread_meta.get(DEEP_REVIEW_SNAPSHOT_KEY), dict):
         with st.container(key="journey_deep_review"):
-            st.markdown("**Deep Review**")
+            st.markdown("**Deep Analysis PDF**")
             st.caption("Your full learning journey is ready.")
             if st.button(
-                "Generate Deep Review",
+                _DEEP_ANALYSIS_BUTTON_LABEL,
                 key="journey_generate_deep_review",
                 type="primary",
                 use_container_width=True,
@@ -798,8 +826,9 @@ def render_learning_review(journey: dict[str, Any]) -> None:
     ``stage_reviews`` (or the legacy frozen-stage lists) and Journey stage-
     checkpoint items. Working conclusion uses the same nested-stage pattern.
     Only the current stage is open by default. Marks the Review notification
-    fingerprint as seen when the Review section is active. Start Deep Review
-    is always visible; enablement comes from the persisted notebook counter.
+    fingerprint as seen when the Review section is active. Generate Deep Analysis
+    PDF sits at the bottom of Review; enablement comes from Reflection-complete
+    entitlement.
     """
     messages = store.get_messages(st.session_state.thread_id)
     thread = store.get_thread(st.session_state.thread_id) or {}
@@ -850,7 +879,6 @@ def render_learning_review(journey: dict[str, Any]) -> None:
         elif status == STAGE_REVIEW_FAILED:
             pending_labels.append(f"{stage.label}: stage review unavailable.")
 
-    _render_deep_review_chrome(metadata)
     if pending_labels:
         for label in pending_labels:
             st.caption(label)
@@ -914,6 +942,7 @@ def render_learning_review(journey: dict[str, Any]) -> None:
                 "A provisional whole-conversation candidate shown only in "
                 "Reflection. It is not a grade."
             )
+    _render_deep_review_chrome(metadata)
     # Preserve labels used by AppTest smoke assertions.
     st.markdown(
         '<div class="review-legacy-labels" hidden>'

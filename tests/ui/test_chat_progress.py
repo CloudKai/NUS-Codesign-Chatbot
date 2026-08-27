@@ -474,9 +474,14 @@ def test_citation_buttons_render_from_done_payload_without_get_source(
 
 
 def _deep_review_button(app: AppTest) -> Any:
-    """Return the always-visible Start Deep Review control."""
+    """Return the Review-tab Generate Deep Analysis PDF control."""
+    app.session_state["studio_tab"] = "Review"
+    app.run()
     return next(
-        button for button in app.button if button.label == "Start Deep Review"
+        button
+        for button in app.button
+        if button.label == "Generate Deep Analysis PDF"
+        and button.key == "start_deep_review"
     )
 
 
@@ -516,12 +521,10 @@ def _notebook_deep_review_counter(thread_id: str) -> int:
 
 
 def test_deep_review_button_appears_after_qualifying_turn(monkeypatch) -> None:
-    """Deep Review stays visible; the qualifying turn unlocks the existing button."""
-    from backend.settings import settings
+    """Generate Deep Analysis PDF stays visible but locked until Reflection completes."""
+    from backend.learning.stages import THINKING_STAGES
+    from backend.student_store import StudentStore
     from ui import chat
-
-    monkeypatch.setattr(settings, "deep_review_interval_turns", 1)
-    _force_qualifying_coaching(monkeypatch)
 
     reruns: list[str] = []
     real_rerun = chat.rerun_app
@@ -539,8 +542,19 @@ def test_deep_review_button_appears_after_qualifying_turn(monkeypatch) -> None:
         "I want to evaluate a crossing design for older pedestrians."
     ).run()
     assert not app.exception
-    assert _notebook_deep_review_counter(app.session_state["thread_id"]) >= 1
     assert reruns == ["app"]
+    button = _deep_review_button(app)
+    assert button.disabled is True
+
+    store = StudentStore()
+    thread_id = app.session_state["thread_id"]
+    thread = store.get_thread(thread_id) or {}
+    metadata = dict(thread.get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = [stage.id for stage in THINKING_STAGES]
+    metadata["learning_journey"] = journey
+    store.update_thread(thread_id, metadata=metadata)
+    app.session_state["learning_journey"] = journey
     button = _deep_review_button(app)
     assert button.disabled is False
 
@@ -548,41 +562,17 @@ def test_deep_review_button_appears_after_qualifying_turn(monkeypatch) -> None:
 def test_deep_review_progress_caption_refreshes_after_qualifying_turn(
     monkeypatch,
 ) -> None:
-    """Studio reruns when the persisted counter changes, not only when unlocked."""
-    from backend.settings import settings
-    from ui import chat
-
-    monkeypatch.setattr(settings, "deep_review_interval_turns", 3)
-    _force_qualifying_coaching(monkeypatch)
-
-    reruns: list[str] = []
-    real_rerun = chat.rerun_app
-
-    def spy_rerun() -> None:
-        reruns.append("app")
-        real_rerun()
-
-    monkeypatch.setattr(chat, "rerun_app", spy_rerun)
-
+    """Locked caption names Reflection until the full Thinking Path is complete."""
+    del monkeypatch
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     button = _deep_review_button(app)
     assert button.disabled is True
-    assert "0/3 completed" in _caption_text(app)
-    app.chat_input[0].set_value(
-        "I want to evaluate a crossing design for older pedestrians."
-    ).run()
-    assert not app.exception
-    assert _notebook_deep_review_counter(app.session_state["thread_id"]) == 1
-    assert reruns == ["app"]
-    button = _deep_review_button(app)
-    assert button.disabled is True
     captions = _caption_text(app)
-    assert "1/3 completed" in captions
-    assert "Deep Review is ready." not in captions
+    assert "Deep Analysis PDF unlocks when the Thinking Path including Reflection" in captions
 
 
 def test_ineligible_deep_review_click_does_not_start(monkeypatch) -> None:
-    """A locked Start Deep Review control must not call the Deep Review route."""
+    """A locked Generate Deep Analysis PDF control must not call the review route."""
     from ui.panels import studio as studio_panel
 
     calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
@@ -601,12 +591,10 @@ def test_ineligible_deep_review_click_does_not_start(monkeypatch) -> None:
 
 
 def test_deep_review_failure_keeps_counter_and_safe_error(monkeypatch) -> None:
-    """Failed Deep Review leaves eligibility intact and hides provider text."""
-    from backend.settings import settings
+    """Failed Deep Analysis leaves eligibility intact and hides provider text."""
+    from backend.learning.stages import THINKING_STAGES
+    from backend.student_store import StudentStore
     from ui.panels import studio as studio_panel
-
-    monkeypatch.setattr(settings, "deep_review_interval_turns", 1)
-    _force_qualifying_coaching(monkeypatch)
 
     def boom(*_args: Any, **_kwargs: Any) -> None:
         raise RuntimeError("AgentCore timeout in us-west-2")
@@ -614,20 +602,25 @@ def test_deep_review_failure_keeps_counter_and_safe_error(monkeypatch) -> None:
     monkeypatch.setattr(studio_panel, "start_deep_review", boom)
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    app.chat_input[0].set_value(
-        "I want to evaluate a crossing design for older pedestrians."
-    ).run()
-    assert not app.exception
+    store = StudentStore()
+    thread_id = app.session_state["thread_id"]
+    thread = store.get_thread(thread_id) or {}
+    metadata = dict(thread.get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = [stage.id for stage in THINKING_STAGES]
+    metadata["learning_journey"] = journey
+    store.update_thread(thread_id, metadata=metadata)
+    app.session_state["learning_journey"] = journey
     button = _deep_review_button(app)
     assert button.disabled is False
-    before = _notebook_deep_review_counter(app.session_state["thread_id"])
+    before = _notebook_deep_review_counter(thread_id)
     button.click().run()
     assert not app.exception
     errors = "\n".join(error.value or "" for error in app.error)
-    assert "Deep Review could not be completed. Try again." in errors
+    assert "Deep Analysis PDF could not be completed. Try again." in errors
     assert "AgentCore" not in errors
     assert "us-west-2" not in errors
-    assert _notebook_deep_review_counter(app.session_state["thread_id"]) == before
+    assert _notebook_deep_review_counter(thread_id) == before
     assert _deep_review_button(app).disabled is False
 
 

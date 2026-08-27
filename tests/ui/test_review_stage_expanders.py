@@ -149,8 +149,12 @@ def test_studio_remounts_expanders_instead_of_writing_session_state() -> None:
     assert 'st.expander("Critical Thinking"' not in _STUDIO
     assert "facione_scores_table_html(" in _STUDIO
     assert 'label="Summary"' not in _STUDIO
-    working = _STUDIO.index('st.expander("Working conclusion"')
-    strengths = _STUDIO.index('st.expander("Strengths"')
-    areas = _STUDIO.index('st.expander("Areas for improvement"')
-    facione = _STUDIO.index("facione_scores_table_html(")
-    assert working < strengths < areas < facione
+    review_block = _STUDIO.split("def render_learning_review", 1)[1].split(
+        "def render_pending_transition", 1
+    )[0]
+    working = review_block.index('st.expander("Working conclusion"')
+    strengths = review_block.index('st.expander("Strengths"')
+    areas = review_block.index('st.expander("Areas for improvement"')
+    facione = review_block.index("facione_scores_table_html(")
+    deep_pdf = review_block.index("_render_deep_review_chrome(")
+    assert working < strengths < areas < facione < deep_pdf

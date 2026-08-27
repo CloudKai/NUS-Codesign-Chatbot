@@ -30,6 +30,10 @@ from backend.learning.journey import (
     stage_selection_enabled,
     understanding_level,
 )
+from backend.learning.stage_briefing import (
+    compose_stage_move_briefing,
+    stage_move_heading,
+)
 from backend.learning.stages import (
     DEFAULT_STAGE,
     STAGE_BY_ID,
@@ -49,6 +53,7 @@ __all__ = [
     "advanced_stage_response",
     "automatic_stage_update",
     "complete_and_advance",
+    "compose_stage_move_briefing",
     "concise_coach_response",
     "contribution_supports_stage",
     "current_stage",
@@ -64,6 +69,7 @@ __all__ = [
     "selection_pending_ready_response",
     "set_current_stage",
     "stage_guidance_questions",
+    "stage_move_heading",
     "stage_selection_enabled",
     "understanding_level",
 ]

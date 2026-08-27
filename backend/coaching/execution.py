@@ -116,6 +116,7 @@ from backend.student_journey import (
     STAGE_BY_ID,
     THINKING_STAGES,
     advanced_stage_response,
+    compose_stage_move_briefing,
     current_stage,
     normalize_journey,
     personalized_stage_questions,
@@ -345,15 +346,33 @@ def _ensure_current_stage_named(response_text: str, stage_id: str) -> str:
 
 
 def _manual_stage_selection_turn(
-    *, target_stage: str, already_selected: bool
+    *,
+    target_stage: str,
+    already_selected: bool,
+    journey: Mapping[str, Any] | None = None,
+    messages: list[Mapping[str, Any]] | None = None,
+    deep_review_snapshot: Mapping[str, Any] | None = None,
+    journey_stage_reviews: Mapping[str, Any] | None = None,
 ) -> CoachTurn:
-    """Build the fixed server-owned result for a manual stage command."""
+    """Build the fixed server-owned result for a manual stage command.
+
+    Successful moves append a deterministic enter/revisit briefing after the
+    ``Moved to Stage:`` heading. Already-on-stage replies stay a short status
+    line with no briefing bubble content beyond that notice.
+    """
     stage = STAGE_BY_ID[target_stage]
-    response = (
-        f"You are already in Stage: {stage.label}."
-        if already_selected
-        else f"Moved to Stage: {stage.label}."
-    )
+    if already_selected:
+        response = f"You are already in Stage: {stage.label}."
+    else:
+        briefing = compose_stage_move_briefing(
+            target_stage=target_stage,
+            journey=journey,
+            messages=messages,
+            deep_review_snapshot=deep_review_snapshot,
+            journey_stage_reviews=journey_stage_reviews,
+            already_selected=False,
+        )
+        response = briefing or f"Moved to Stage: {stage.label}."
     return CoachTurn(
         response_text=response,
         assessment=EducationalAssessment(
@@ -1424,9 +1443,24 @@ class CoachApplicationService:
             record_field("agentcore_call_count", 0)
             record_field("agent_ms", 0)
             should_generate_title = False
+            snapshot_meta = dict(snapshot.metadata or {})
             turn = _manual_stage_selection_turn(
                 target_stage=manual_stage_target,
                 already_selected=manual_stage_target == prepared_request.current_stage,
+                journey=normalize_journey(snapshot_meta.get("learning_journey")),
+                messages=list(prepared_request.history or []),
+                deep_review_snapshot=(
+                    snapshot_meta.get(DEEP_REVIEW_SNAPSHOT_KEY)
+                    if isinstance(snapshot_meta.get(DEEP_REVIEW_SNAPSHOT_KEY), Mapping)
+                    else None
+                ),
+                journey_stage_reviews=(
+                    snapshot_meta.get(JOURNEY_STAGE_REVIEWS_KEY)
+                    if isinstance(
+                        snapshot_meta.get(JOURNEY_STAGE_REVIEWS_KEY), Mapping
+                    )
+                    else None
+                ),
             )
         elif stage_status_request:
             # The current stage is canonical notebook state, not an LLM

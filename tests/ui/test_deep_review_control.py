@@ -18,7 +18,7 @@ def _markdown_blob(app: AppTest) -> str:
 
 
 def test_locked_view_before_reflection_complete() -> None:
-    """Incomplete Thinking Path keeps Start Deep Review disabled."""
+    """Incomplete Thinking Path keeps Generate Deep Analysis PDF disabled."""
     prefix = [stage.id for stage in THINKING_STAGES[:-1]]
     view = deep_review_control_view(prefix, running=False)
     assert view.eligible is False
@@ -31,20 +31,20 @@ def test_locked_view_before_reflection_complete() -> None:
 
 
 def test_unlocked_view_when_all_stages_complete() -> None:
-    """Completing every stage including Reflection enables Deep Review."""
+    """Completing every stage including Reflection enables Deep Analysis PDF."""
     all_ids = [stage.id for stage in THINKING_STAGES]
     view = deep_review_control_view(all_ids, running=False)
     assert view.eligible is True
     assert view.disabled is False
     assert view.button_type == "primary"
-    assert view.caption == "Deep Review is ready."
+    assert view.caption == "Path including Reflection is complete."
     assert view.detail_caption is not None
     assert "few seconds to a couple of minutes" in view.detail_caption
     assert view.status_label is None
 
 
 def test_running_disables_button_even_when_eligible() -> None:
-    """An in-flight Deep Review keeps the button locked without a progress caption."""
+    """An in-flight Deep Analysis keeps the button locked without a progress caption."""
     all_ids = [stage.id for stage in THINKING_STAGES]
     view = deep_review_control_view(all_ids, running=True)
     assert view.eligible is True
@@ -52,7 +52,7 @@ def test_running_disables_button_even_when_eligible() -> None:
     assert view.caption is None
     assert view.detail_caption is None
     assert view.status_label is not None
-    assert view.status_label.startswith("Running Deep Review")
+    assert view.status_label.startswith("Generating Deep Analysis PDF")
 
 
 def test_review_tab_renders_projected_deep_review_feedback() -> None:
@@ -253,7 +253,7 @@ def test_stage_review_checkpoint_renders_on_review_tab_with_stop_badge() -> None
     assert all("🛑" not in str(option) for option in studio_section.options)
 
 def test_deep_review_button_is_full_width_and_grouped_with_caption() -> None:
-    """Start Deep Review spans the Review column and sits tight under its caption."""
+    """Generate Deep Analysis PDF spans the Review column under its caption."""
     studio = Path("ui/panels/studio.py").read_text(encoding="utf-8")
     button = studio.split("clicked = st.button(", 1)[1].split(")", 1)[0]
     assert 'key="start_deep_review"' in button
@@ -263,7 +263,8 @@ def test_deep_review_button_is_full_width_and_grouped_with_caption() -> None:
     assert '@st.fragment(run_every="2s")' in studio
     assert "_deep_review_running_thread_id" not in studio
     assert "get_deep_review_job" in studio
-    assert "This review reflects the conversation at the start of Deep Review" in studio
+    assert "This PDF reflects the conversation at the start of Deep Analysis" in studio
+    assert "Download Deep Analysis PDF" in studio
     css = Path("ui/assets/styles/20-studio.css").read_text(encoding="utf-8")
     assert ".st-key-deep_review_control" in css
     assert ".st-key-start_deep_review" in css

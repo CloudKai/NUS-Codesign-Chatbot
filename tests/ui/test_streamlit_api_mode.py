@@ -180,12 +180,18 @@ def test_streamlit_stage_selection_refreshes_authoritative_stage_and_status(monk
         assert app.session_state["learning_journey"]["current_stage"] == "concept_generation"
         assert app.session_state["mobile_panel"] == "Chat"
         assert "chat_follow_bottom" not in app.session_state
-        assert app.session_state["stage_move_notice"] == "Moved to stage: Concept generation"
+        assert app.session_state["stage_move_notice"] is None
         messages = client.get_messages(thread_id)
-        assert not any(
-            "Moved to Stage:" in str(message.get("content") or "")
+        briefing = [
+            message
             for message in messages
-        )
+            if message.get("role") == "assistant"
+            and str(message.get("content") or "").startswith(
+                "Moved to Stage: Concept generation."
+            )
+        ]
+        assert len(briefing) == 1
+        assert "What to work on next:" in briefing[0]["content"]
 
         app.chat_input[0].set_value(
             "I need to examine the trade-off between crossing safety and traffic delay."
@@ -218,7 +224,7 @@ def test_streamlit_stage_selection_refreshes_authoritative_stage_and_status(monk
 def test_streamlit_manual_stage_chat_command_refreshes_authoritative_journey(
     monkeypatch,
 ):
-    """Exact move-me-to updates journey without chat bubbles, then clears notice."""
+    """Exact move-me-to updates journey with a coach briefing, no user row."""
     client = _install_inprocess_api(
         monkeypatch,
         auto_advance=False,
@@ -247,12 +253,18 @@ def test_streamlit_manual_stage_chat_command_refreshes_authoritative_journey(
         assert state["thinking_stage"] == "concept_generation"
         assert state["learning_journey"]["current_stage"] == "concept_generation"
         assert app.session_state["learning_journey"]["current_stage"] == "concept_generation"
-        assert app.session_state["stage_move_notice"] == "Moved to stage: Concept generation"
+        assert app.session_state["stage_move_notice"] is None
         messages = client.get_messages(thread_id)
-        assert not any(
-            "Moved to Stage:" in str(message.get("content") or "")
+        briefing = [
+            message
             for message in messages
-        )
+            if message.get("role") == "assistant"
+            and str(message.get("content") or "").startswith(
+                "Moved to Stage: Concept generation."
+            )
+        ]
+        assert len(briefing) == 1
+        assert "What to work on next:" in briefing[0]["content"]
         assert not any(
             str(message.get("content") or "").lower().startswith("move me to")
             for message in messages
@@ -261,10 +273,7 @@ def test_streamlit_manual_stage_chat_command_refreshes_authoritative_journey(
 
         app.chat_input[0].set_value("Hi, can I move to Concept Generation?").run()
         assert not app.exception
-        assert (
-            app.session_state["stage_move_notice"]
-            == "You are already in Concept generation"
-        )
+        assert app.session_state["stage_move_notice"] is None
         assert client.get_messages(thread_id) == messages
 
         app.chat_input[0].set_value("move me to Reflection").run()

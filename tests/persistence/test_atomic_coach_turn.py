@@ -259,7 +259,8 @@ def test_manual_stage_command_atomically_rejects_pending_and_persists_turn(
         _manual_stage_request(thread_id, key="manual-select", target="reflection")
     )
 
-    assert selected.response_text == "Moved to Stage: Reflection."
+    assert selected.response_text.startswith("Moved to Stage: Reflection.")
+    assert "What to work on next:" in selected.response_text
     assert selected.auto_advanced_to is None
     assert selected.pending_transition is None
     assert store.get_pending_phase_transition(thread_id) is None
@@ -419,7 +420,10 @@ def test_atomic_manual_stage_selection_runs_through_dsql_occ_adapter(
         _manual_stage_request(thread_id, key="dsql-manual", target="deep_analysis")
     )
 
-    assert turn.response_text == "Moved to Stage: Ethics & Critical Thinking."
+    assert turn.response_text.startswith(
+        "Moved to Stage: Ethics & Critical Thinking."
+    )
+    assert "What to work on next:" in turn.response_text
     thread = owner.get_thread(thread_id) or {}
     assert thread["metadata"]["thinking_stage"] == "deep_analysis"
     assert thread["metadata"]["learning_journey"]["completed_stages"] == [

@@ -20,7 +20,11 @@ from .domain import (
     SourceSelectAllRequest,
     SourceUpdateRequest,
 )
-from .workspace_service import SourceContent, TranscriptExport
+from .workspace_service import (
+    DeepAnalysisPdfExport,
+    SourceContent,
+    TranscriptExport,
+)
 
 
 class _HttpSession(Protocol):
@@ -503,6 +507,24 @@ class LocalApiClient:
         if "filename*=" in disposition:
             filename = disposition.split("filename*=UTF-8''", 1)[-1].strip()
         return TranscriptExport(
+            data=bytes(response.content),
+            filename=filename,
+            mime=mime,
+        )
+
+    def download_deep_analysis_pdf(self, thread_id: str) -> DeepAnalysisPdfExport:
+        """Download the Sonnet Deep Analysis PDF for one owned notebook."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/threads/{thread_id}/deep-analysis.pdf",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        mime = response.headers.get("content-type", "application/pdf")
+        filename = "deep-analysis.pdf"
+        disposition = response.headers.get("content-disposition") or ""
+        if "filename*=" in disposition:
+            filename = disposition.split("filename*=UTF-8''", 1)[-1].strip()
+        return DeepAnalysisPdfExport(
             data=bytes(response.content),
             filename=filename,
             mime=mime,

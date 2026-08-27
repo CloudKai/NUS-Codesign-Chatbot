@@ -903,12 +903,18 @@ def test_journey_linear_accordion_and_ctas_follow_unlocked_frontier(monkeypatch)
     )
     assert app.session_state["mobile_panel"] == "Chat"
     assert "chat_follow_bottom" not in app.session_state
-    assert app.session_state["stage_move_notice"] == "Moved to stage: Concept generation"
+    assert app.session_state["stage_move_notice"] is None
     messages = store.get_messages(app.session_state["thread_id"])
-    assert not any(
-        "Moved to Stage:" in str(message.get("content") or "")
+    briefing = [
+        message
         for message in messages
-    )
+        if message.get("role") == "assistant"
+        and str(message.get("content") or "").startswith(
+            "Moved to Stage: Concept generation."
+        )
+    ]
+    assert len(briefing) == 1
+    assert "What to work on next:" in briefing[0]["content"]
     assert not any(
         str(message.get("content") or "").lower().startswith("move me to")
         for message in messages

@@ -223,7 +223,8 @@ def test_authoritative_stage_change_keeps_affinity_but_changes_prompt(
             idempotency_key="stage-select-concept",
         )
     )
-    assert selected.response_text == "Moved to Stage: Concept generation."
+    assert selected.response_text.startswith("Moved to Stage: Concept generation.")
+    assert "What to work on next:" in selected.response_text
     assert len(client.calls) == 1
     service.submit(
         _request(
