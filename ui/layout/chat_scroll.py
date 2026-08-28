@@ -7,10 +7,12 @@ zero-height helper that:
 - snaps to the bottom on Send (pending user bubble + thinking)
 - remembers ``awaitingReplyReveal`` across the reply remount so a feed that
   resets to the top cannot clear follow before the coach bubble is pinned
-- on reply remount, pins the **top** of the latest coach message to the top
-  of the feed (clamped for short replies) when the student did not scroll away
+- on reply remount, arms ``awaitingReplyReveal`` and pins the **top** of the
+  latest coach message to the top of the feed (clamped for short replies)
+- on reconcile, pins only when follow or a pending reply-reveal is still armed
 - stops the pending reveal when the student scrolls/swipes away from the bottom
-- hosts the scroll-down control on ``document.body`` (fixed)
+- hosts the scroll-down control on ``document.body`` (fixed), retrying placement
+  briefly after remount when the chat panel is not yet sized
 - does not poll, observe the whole app, or chase Thinking height changes
 
 Click / scroll handlers live on ``window.parent.__cdChatScroll`` so they keep
@@ -41,8 +43,9 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     Args:
         mode: ``send`` snaps to the bottom, arms reply reveal, and resumes
             follow. ``settle`` records near-bottom state and does not move the
-            viewport. ``reconcile`` / ``reply`` pin the latest coach reply top
-            when follow or a pending reply-reveal is still armed after remount.
+            viewport. ``reply`` arms reveal and pins the latest coach reply top
+            after a remount (stage move or completed coach turn). ``reconcile``
+            pins only when follow or a pending reply-reveal is still armed.
     """
     cleaned = str(mode or "reconcile").strip().lower()
     if cleaned not in {"send", "settle", "reconcile", "reply"}:
@@ -340,10 +343,22 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     current.listenersBound = true;
   }
 
+  function ensureScrollDownAfterRemount(framesLeft) {
+    // Stage-move / reply remounts can paint chat_panel after this iframe.
+    // Retry placement on the same rAF loop only (no timers or DOM observers).
+    scrollDownButton();
+    updateScrollDownButton();
+    const panel = chatPanel();
+    if (panel && isChatSurfaceVisible(panel)) return;
+    if (framesLeft > 1) {
+      schedule(() => ensureScrollDownAfterRemount(framesLeft - 1));
+    }
+  }
+
   scrollDownButton();
   const root = scrollRoot();
   if (!root) {
-    updateScrollDownButton();
+    ensureScrollDownAfterRemount(FOLLOW_SNAP_FRAMES);
     return;
   }
   if (MODE === "send") {
@@ -358,9 +373,17 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     updateScrollDownButton();
     return;
   }
-  // reconcile and reply: pin latest coach top when the student did not
-  // scroll away. awaitingReplyReveal survives remount scrollTop resets that
-  // would otherwise clear follow before this script runs.
+  if (MODE === "reply") {
+    // Stage-move remounts never go through Send, so follow may already be
+    // false from a scrollTop=0 reset. Arm reveal the same way Send does.
+    api().follow = true;
+    api().awaitingReplyReveal = true;
+    keepRevealingCoachReply(FOLLOW_SNAP_FRAMES);
+    ensureScrollDownAfterRemount(FOLLOW_SNAP_FRAMES);
+    return;
+  }
+  // reconcile: pin latest coach top only when follow / pending reveal is
+  // still armed. Do not steal the viewport after the student scrolled away.
   if (shouldRevealReply()) {
     keepRevealingCoachReply(FOLLOW_SNAP_FRAMES);
     return;

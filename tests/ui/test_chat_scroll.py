@@ -43,12 +43,28 @@ def test_chat_scroll_helper_uses_near_bottom_gating() -> None:
     assert "api().awaitingReplyReveal = true" in helper
     assert "keepRevealingCoachReply(FOLLOW_SNAP_FRAMES)" in helper
     assert "shouldRevealReply()" in helper
+    assert "ensureScrollDownAfterRemount" in helper
     send_branch = helper.split('MODE === "send"', 1)[1].split(
         'MODE === "settle"', 1
     )[0]
     assert "keepSnappingToBottom" in send_branch
     assert "awaitingReplyReveal = true" in send_branch
     assert "keepRevealingCoachReply" not in send_branch
+    # Reply arms reveal like Send (stage-move remount never went through Send).
+    reply_branch = helper.split('MODE === "reply"', 1)[1].split(
+        "// reconcile:", 1
+    )[0]
+    assert "awaitingReplyReveal = true" in reply_branch
+    assert "api().follow = true" in reply_branch
+    assert "keepRevealingCoachReply(FOLLOW_SNAP_FRAMES)" in reply_branch
+    assert "ensureScrollDownAfterRemount" in reply_branch
+    assert "shouldRevealReply()" not in reply_branch
+    # Reconcile stays gated so ordinary paints do not steal the viewport.
+    reconcile_tail = helper.split("// reconcile:", 1)[1].split(
+        "})();", 1
+    )[0]
+    assert "shouldRevealReply()" in reconcile_tail
+    assert "keepRevealingCoachReply(FOLLOW_SNAP_FRAMES)" in reconcile_tail
     assert 'querySelector(".st-key-chat_feed")' in helper
     scroll_root_fn = helper.split("function scrollRoot()", 1)[1].split(
         "function chatPanel()", 1

@@ -427,6 +427,10 @@ def _select_journey_stage(stage_id: str) -> None:
         # mobile_panel here — the radio widget is already instantiated.
         st.session_state["pending_mobile_panel"] = "Chat"
         st.session_state.nav_section = "Chat"
+        # Match typed Move to: remount the composer fragment with history.
+        st.session_state.composer_nonce = int(
+            st.session_state.get("composer_nonce") or 0
+        ) + 1
         if moved:
             st.session_state.chat_reveal_coach_reply = True
         rerun_app()
