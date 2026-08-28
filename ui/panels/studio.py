@@ -975,8 +975,12 @@ def render_pending_transition(
 
 
 def _fetch_pending_transition():
-    """Return the pending transition through the active application path."""
-    if settings.effective_auto_advance_stages:
+    """Return the pending transition through the active application path.
+
+    Selection mode and auto-advance hide Next/confirm, so do not surface a
+    stuck ADVANCE recommendation banner either.
+    """
+    if settings.effective_auto_advance_stages or settings.student_stage_selection:
         return None
     try:
         return store.pending_transition(st.session_state.thread_id)

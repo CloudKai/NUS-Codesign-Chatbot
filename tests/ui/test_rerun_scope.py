@@ -407,6 +407,15 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
     assert "composer_nonce" in select_block
     assert "chat_scroll_after_stage_select" not in select_block
     assert "store.select_stage" not in select_block
+    fetch_block = source.split("def _fetch_pending_transition", 1)[1].split(
+        "def _resolve_pending_transition", 1
+    )[0]
+    assert "effective_auto_advance_stages" in fetch_block
+    assert "student_stage_selection" in fetch_block
+    footer_block = source.split("def render_thinking_path_footer", 1)[1].split(
+        "def _watch_stage_review_attention_fragment", 1
+    )[0]
+    assert "student_stage_selection" in footer_block
     journey_block = source.split("def render_journey_track", 1)[1].split(
         "def _dedupe_feedback_items", 1
     )[0]
