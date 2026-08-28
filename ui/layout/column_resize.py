@@ -1,8 +1,9 @@
 """Between-column drag resize for the notebook workspace.
 
-Injects a small browser script that draws drag handles between the Thinking Path,
-Chat, and Sources columns. Collapse state and ratios live in ``st.session_state``
-and are restored on each render. Prefer importing from ``ui.layout``.
+Injects a small browser script that sizes the Gemini-style left nav (fixed px)
+and draws drag handles among center / Sources / Thinking Path. Collapse and
+Library visibility live in ``st.session_state``. Prefer importing from
+``ui.layout``.
 """
 
 from __future__ import annotations
@@ -12,11 +13,14 @@ import json
 import streamlit as st
 import streamlit.components.v1 as components
 
-DEFAULT_WORKSPACE_WIDTHS: tuple[float, float, float] = (1.05, 2.35, 1.05)
+# Center, Sources, Thinking Path (nav is fixed px, not stored).
+DEFAULT_WORKSPACE_WIDTHS: tuple[float, float, float] = (2.35, 1.05, 1.05)
 _MIN_RATIO = 0.18
 _COLLAPSED_RATIO = 0.08
 _RAIL_WIDTH_PX = 42
-_STORAGE_KEY = "cd_workspace_column_widths"
+_NAV_EXPANDED_PX = 260
+_NAV_COLLAPSED_PX = 72
+_STORAGE_KEY = "cd_workspace_column_widths_v2"
 
 
 def _normalize_widths(widths: list[float]) -> list[float]:
@@ -29,7 +33,7 @@ def _normalize_widths(widths: list[float]) -> list[float]:
 
 
 def get_workspace_widths() -> list[float]:
-    """Return desktop workspace column ratios for ``st.columns``."""
+    """Return center / Sources / Thinking Path ratios for ``st.columns``."""
     raw = st.session_state.get("workspace_column_widths")
     if isinstance(raw, (list, tuple)) and len(raw) == 3:
         try:
@@ -39,8 +43,32 @@ def get_workspace_widths() -> list[float]:
     return list(DEFAULT_WORKSPACE_WIDTHS)
 
 
+def nav_collapsed() -> bool:
+    """Return whether the left chat nav rail is icon-only."""
+    return bool(st.session_state.get("workspace_nav_collapsed", False))
+
+
+def set_nav_collapsed(collapsed: bool) -> None:
+    """Persist left-nav collapse for the session."""
+    st.session_state["workspace_nav_collapsed"] = bool(collapsed)
+
+
+def library_open() -> bool:
+    """Return whether the Sources (Library) column is visible."""
+    return not side_panel_collapsed("sources")
+
+
+def set_library_open(open_: bool) -> None:
+    """Show or fully hide Sources. Hidden Library leaves no skinny rail."""
+    set_side_panel_collapsed("sources", not bool(open_))
+
+
 def side_panel_collapsed(side: str) -> bool:
-    """Return whether Thinking Path (``studio``) or Sources is collapsed."""
+    """Return whether Thinking Path (``studio``) or Sources is collapsed/hidden.
+
+    Sources collapsed means Library is off (column fully hidden). Studio
+    collapsed still shows a narrow expand rail.
+    """
     key = f"workspace_{side}_collapsed"
     return bool(st.session_state.get(key, False))
 
@@ -51,28 +79,34 @@ def set_side_panel_collapsed(side: str, collapsed: bool) -> None:
 
 
 def effective_column_widths() -> list[float]:
-    """Return column ratios after applying side-panel collapse."""
-    studio, chat, sources = get_workspace_widths()
+    """Return ``[nav, center, sources, studio]`` ratios for ``st.columns``.
+
+    Nav weights are placeholders; the resize script forces fixed pixel widths.
+    When Library is closed, Sources weight is near-zero (no rail).
+    """
+    center, sources, studio = get_workspace_widths()
+    nav = 0.22 if nav_collapsed() else 0.72
     if side_panel_collapsed("studio"):
         freed = max(studio - _COLLAPSED_RATIO, 0.0)
         studio = _COLLAPSED_RATIO
-        chat += freed
+        center += freed
     if side_panel_collapsed("sources"):
-        freed = max(sources - _COLLAPSED_RATIO, 0.0)
-        sources = _COLLAPSED_RATIO
-        chat += freed
-    return [round(studio, 4), round(chat, 4), round(sources, 4)]
+        center += sources
+        sources = 0.001
+    return [
+        round(nav, 4),
+        round(center, 4),
+        round(sources, 4),
+        round(studio, 4),
+    ]
 
 
 def sync_workspace_column_resize() -> None:
-    """Apply column widths and between-column drag handles.
-
-    Collapsed side columns stay fixed rails. Drag handles remain between any
-    two adjacent open panels so resize still works while a side is collapsed.
-    """
+    """Apply nav fixed widths and drag handles among open workspace panels."""
     stored = get_workspace_widths()
     studio_collapsed = side_panel_collapsed("studio")
-    sources_collapsed = side_panel_collapsed("sources")
+    sources_hidden = side_panel_collapsed("sources")
+    nav_is_collapsed = nav_collapsed()
     components.html(
         f"""
 <script>
@@ -80,9 +114,12 @@ def sync_workspace_column_resize() -> None:
   const STORED = {json.dumps(stored)};
   const MIN_RATIO = {_MIN_RATIO};
   const RAIL_PX = {_RAIL_WIDTH_PX};
+  const NAV_EXPANDED_PX = {_NAV_EXPANDED_PX};
+  const NAV_COLLAPSED_PX = {_NAV_COLLAPSED_PX};
   const STORAGE_KEY = {_STORAGE_KEY!r};
   const STUDIO_COLLAPSED = {str(studio_collapsed).lower()};
-  const SOURCES_COLLAPSED = {str(sources_collapsed).lower()};
+  const SOURCES_HIDDEN = {str(sources_hidden).lower()};
+  const NAV_COLLAPSED = {str(nav_is_collapsed).lower()};
   const doc = window.parent.document;
   const win = window.parent;
 
@@ -106,26 +143,30 @@ def sync_workspace_column_resize() -> None:
     }}
   }}
 
-  function isCollapsedRole(role) {{
-    return (
-      (role === "studio" && STUDIO_COLLAPSED) ||
-      (role === "sources" && SOURCES_COLLAPSED)
-    );
-  }}
-
   function classify(column) {{
+    if (
+      column.querySelector(".st-key-nav_panel") ||
+      column.querySelector(".st-key-nav_rail")
+    ) {{
+      return "nav";
+    }}
+    if (
+      column.querySelector(".st-key-chat_panel") ||
+      column.querySelector(".st-key-search_panel")
+    ) {{
+      return "center";
+    }}
+    if (
+      column.querySelector(".st-key-sources_panel") ||
+      column.querySelector(".st-key-sources_hidden")
+    ) {{
+      return "sources";
+    }}
     if (
       column.querySelector(".st-key-studio_rail") ||
       column.querySelector(".st-key-studio_panel")
     ) {{
       return "studio";
-    }}
-    if (column.querySelector(".st-key-chat_panel")) return "chat";
-    if (
-      column.querySelector(".st-key-sources_rail") ||
-      column.querySelector(".st-key-sources_panel")
-    ) {{
-      return "sources";
     }}
     return null;
   }}
@@ -138,12 +179,13 @@ def sync_workspace_column_resize() -> None:
       const columns = Array.from(
         row.querySelectorAll(':scope > [data-testid="stColumn"]')
       );
-      if (columns.length < 3) continue;
+      if (columns.length < 4) continue;
       const roles = columns.map(classify);
       if (
-        roles.includes("studio") &&
-        roles.includes("chat") &&
-        roles.includes("sources")
+        roles.includes("nav") &&
+        roles.includes("center") &&
+        roles.includes("sources") &&
+        roles.includes("studio")
       ) {{
         return {{ row, columns, roles }};
       }}
@@ -160,26 +202,37 @@ def sync_workspace_column_resize() -> None:
       "width",
       "min-width",
       "max-width",
+      "display",
     ].forEach((prop) => column.style.removeProperty(prop));
-    column.classList.remove("cd-col-rail");
+    column.classList.remove("cd-col-rail", "cd-col-nav", "cd-col-hidden");
   }}
 
-  function setRail(column) {{
-    column.classList.add("cd-col-rail");
-    column.style.setProperty("flex", "0 0 " + RAIL_PX + "px", "important");
-    column.style.setProperty("width", RAIL_PX + "px", "important");
-    column.style.setProperty("min-width", RAIL_PX + "px", "important");
-    column.style.setProperty("max-width", RAIL_PX + "px", "important");
+  function setFixed(column, px, className) {{
+    column.classList.add(className);
+    column.style.setProperty("flex", "0 0 " + px + "px", "important");
+    column.style.setProperty("width", px + "px", "important");
+    column.style.setProperty("min-width", px + "px", "important");
+    column.style.setProperty("max-width", px + "px", "important");
+  }}
+
+  function setHidden(column) {{
+    column.classList.add("cd-col-hidden");
+    column.style.setProperty("flex", "0 0 0px", "important");
+    column.style.setProperty("width", "0px", "important");
+    column.style.setProperty("min-width", "0px", "important");
+    column.style.setProperty("max-width", "0px", "important");
+    column.style.setProperty("display", "none", "important");
   }}
 
   function setFlex(column, grow) {{
-    column.classList.remove("cd-col-rail");
+    column.classList.remove("cd-col-rail", "cd-col-nav", "cd-col-hidden");
     column.style.setProperty("flex-grow", String(grow), "important");
     column.style.setProperty("flex-shrink", "1", "important");
     column.style.setProperty("flex-basis", "0px", "important");
     column.style.setProperty("width", "auto", "important");
     column.style.setProperty("min-width", "0", "important");
     column.style.setProperty("max-width", "none", "important");
+    column.style.removeProperty("display");
   }}
 
   function applyLayout(columns, roles, ratios) {{
@@ -190,26 +243,32 @@ def sync_workspace_column_resize() -> None:
 
     Object.values(byRole).forEach((item) => clearSizing(item.column));
 
-    let studioGrow = byRole.studio.ratio;
-    let chatGrow = byRole.chat.ratio;
-    let sourcesGrow = byRole.sources.ratio;
+    setFixed(
+      byRole.nav.column,
+      NAV_COLLAPSED ? NAV_COLLAPSED_PX : NAV_EXPANDED_PX,
+      "cd-col-nav"
+    );
 
-    if (STUDIO_COLLAPSED) {{
-      setRail(byRole.studio.column);
-      studioGrow = 0;
-    }}
-    if (SOURCES_COLLAPSED) {{
-      setRail(byRole.sources.column);
+    let centerGrow = byRole.center.ratio;
+    let sourcesGrow = byRole.sources.ratio;
+    let studioGrow = byRole.studio.ratio;
+
+    if (SOURCES_HIDDEN) {{
+      setHidden(byRole.sources.column);
       sourcesGrow = 0;
     }}
+    if (STUDIO_COLLAPSED) {{
+      setFixed(byRole.studio.column, RAIL_PX, "cd-col-rail");
+      studioGrow = 0;
+    }}
 
-    const openTotal = studioGrow + chatGrow + sourcesGrow || 1;
+    const openTotal = centerGrow + sourcesGrow + studioGrow || 1;
+    setFlex(byRole.center.column, centerGrow / openTotal);
+    if (!SOURCES_HIDDEN) {{
+      setFlex(byRole.sources.column, sourcesGrow / openTotal);
+    }}
     if (!STUDIO_COLLAPSED) {{
       setFlex(byRole.studio.column, studioGrow / openTotal);
-    }}
-    setFlex(byRole.chat.column, chatGrow / openTotal);
-    if (!SOURCES_COLLAPSED) {{
-      setFlex(byRole.sources.column, sourcesGrow / openTotal);
     }}
   }}
 
@@ -223,22 +282,36 @@ def sync_workspace_column_resize() -> None:
       row.style.position = "relative";
     }}
 
+    // Ratios are center/sources/studio only (stored length 3).
     const ratios = readStored();
-    applyLayout(columns, roles, ratios);
+    const layoutRatios = roles.map((role) => {{
+      if (role === "center") return ratios[0];
+      if (role === "sources") return ratios[1];
+      if (role === "studio") return ratios[2];
+      return 0;
+    }});
+    applyLayout(columns, roles, layoutRatios);
     writeStored(ratios);
     win.dispatchEvent(new Event("resize"));
 
-    const openCount =
-      (STUDIO_COLLAPSED ? 0 : 1) + 1 + (SOURCES_COLLAPSED ? 0 : 1);
-    if (openCount < 2) return true;
+    const openPairs = [];
+    for (let i = 0; i < roles.length - 1; i += 1) {{
+      const left = roles[i];
+      const right = roles[i + 1];
+      if (left === "nav" || right === "nav") continue;
+      if (left === "sources" && SOURCES_HIDDEN) continue;
+      if (right === "sources" && SOURCES_HIDDEN) continue;
+      if (left === "studio" && STUDIO_COLLAPSED) continue;
+      if (right === "studio" && STUDIO_COLLAPSED) continue;
+      openPairs.push(i);
+    }}
+    if (!openPairs.length) return true;
 
     let active = null;
 
     const onMove = (event) => {{
       if (!active) return;
       const delta = event.clientX - active.startX;
-      const left = active.leftIndex;
-      const right = active.rightIndex;
       if (active.openWidth <= 0) return;
 
       let leftPx = active.startLeftPx + delta;
@@ -253,12 +326,18 @@ def sync_workspace_column_resize() -> None:
         rightPx = minPx;
       }}
 
-      const pairTotal = active.ratios[left] + active.ratios[right];
       const next = active.ratios.slice();
-      next[left] = (leftPx / (leftPx + rightPx)) * pairTotal;
-      next[right] = (rightPx / (leftPx + rightPx)) * pairTotal;
+      const pairTotal = next[active.leftStore] + next[active.rightStore];
+      next[active.leftStore] = (leftPx / (leftPx + rightPx)) * pairTotal;
+      next[active.rightStore] = (rightPx / (leftPx + rightPx)) * pairTotal;
       active.current = next;
-      applyLayout(columns, roles, next);
+      const layoutNext = roles.map((role) => {{
+        if (role === "center") return next[0];
+        if (role === "sources") return next[1];
+        if (role === "studio") return next[2];
+        return 0;
+      }});
+      applyLayout(columns, roles, layoutNext);
       event.preventDefault();
     }};
 
@@ -267,10 +346,8 @@ def sync_workspace_column_resize() -> None:
       const finalWidths = (active.current || active.ratios).map((value) =>
         Number(value.toFixed(4))
       );
-      // Keep collapsed panel's remembered width for when it expands again.
-      roles.forEach((role, index) => {{
-        if (isCollapsedRole(role)) finalWidths[index] = ratios[index];
-      }});
+      if (SOURCES_HIDDEN) finalWidths[1] = ratios[1];
+      if (STUDIO_COLLAPSED) finalWidths[2] = ratios[2];
       active = null;
       doc.removeEventListener("mousemove", onMove);
       doc.removeEventListener("mouseup", onUp);
@@ -278,15 +355,18 @@ def sync_workspace_column_resize() -> None:
       writeStored(finalWidths);
     }};
 
-    columns.slice(0, -1).forEach((column, index) => {{
+    function storeIndex(role) {{
+      if (role === "center") return 0;
+      if (role === "sources") return 1;
+      if (role === "studio") return 2;
+      return -1;
+    }}
+
+    openPairs.forEach((index) => {{
       const leftRole = roles[index];
       const rightRole = roles[index + 1];
-      if (isCollapsedRole(leftRole) || isCollapsedRole(rightRole)) return;
-
-      // Attach the Sources divider to the Sources column (higher stacking
-      // context) so its tooltip is not covered by the Sources panel.
       const attachToRight = rightRole === "sources";
-      const host = attachToRight ? columns[index + 1] : column;
+      const host = attachToRight ? columns[index + 1] : columns[index];
       const handle = doc.createElement("div");
       handle.className = attachToRight
         ? "cd-col-resize-handle cd-col-resize-handle-start"
@@ -303,14 +383,14 @@ def sync_workspace_column_resize() -> None:
       handle.addEventListener("mousedown", (event) => {{
         if (event.button !== 0) return;
         const rowWidth = row.getBoundingClientRect().width;
-        const railCount =
-          (STUDIO_COLLAPSED ? 1 : 0) + (SOURCES_COLLAPSED ? 1 : 0);
-        const openWidth = Math.max(rowWidth - railCount * RAIL_PX, 1);
+        const navPx = NAV_COLLAPSED ? NAV_COLLAPSED_PX : NAV_EXPANDED_PX;
+        const railCount = STUDIO_COLLAPSED ? 1 : 0;
+        const openWidth = Math.max(rowWidth - navPx - railCount * RAIL_PX, 1);
         const leftRect = columns[index].getBoundingClientRect().width;
         const rightRect = columns[index + 1].getBoundingClientRect().width;
         active = {{
-          leftIndex: index,
-          rightIndex: index + 1,
+          leftStore: storeIndex(leftRole),
+          rightStore: storeIndex(rightRole),
           startX: event.clientX,
           openWidth,
           startLeftPx: leftRect,

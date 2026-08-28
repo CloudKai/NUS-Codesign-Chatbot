@@ -257,7 +257,7 @@ def test_streamlit_notebook_workspace_smoke():
     workspace_panel = next(
         radio for radio in app.radio if radio.label == "Workspace panel"
     )
-    assert workspace_panel.options == ["Journey", "Chat", "Sources"]
+    assert workspace_panel.options == ["Chats", "Chat", "Library", "Journey"]
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Guidance Level:" not in rendered
     assert any(control.label == "Coaching style" for control in app.radio)
@@ -358,9 +358,10 @@ def test_streamlit_notebook_workspace_smoke():
     assert "logger.exception" in sources_py
     assert "st.caption(_SOURCE_IMPORT_PARTIAL_ERROR)" in sources_py
     assert 'st.caption(\n                "Some lecture notes could not be imported:' not in sources_py
-    assert rendered.index('<span class="pane-title">Thinking Path</span>') < rendered.index(
-        'class="message-meta coach-welcome"'
-    ) < rendered.index('<span class="pane-title">Sources</span>')
+    # Chat center renders before Sources and Thinking Path (right column).
+    assert rendered.index('class="message-meta coach-welcome"') < rendered.index(
+        '<span class="pane-title">Sources</span>'
+    ) < rendered.index('<span class="pane-title">Thinking Path</span>')
     assert ".st-key-chat_log" in rendered
     assert ".st-key-chat_inflight" in rendered
     assert ".st-key-chat_panel" in rendered
@@ -474,16 +475,16 @@ def test_streamlit_notebook_workspace_smoke():
     assert "cd-col-resize-handle" in rendered
     assert "cd-col-rail" in rendered
     assert ":has(.st-key-studio_rail)" in rendered
-    assert any(button.label == "‹" for button in app.button)
     assert any(button.label == "›" for button in app.button)
     assert "cd-roadmap" in rendered
-    # Footer Next is present but disabled without a pending coach recommendation / local API.
-    assert any(button.label == "Next" for button in app.button)
     assert "IBM Plex Sans" in rendered
     assert "background:var(--cd-panel)" in rendered
 
     button_labels = {button.label for button in app.button}
-    assert "Notebooks" in button_labels
+    assert "New chat" in button_labels
+    assert "Search chats" in button_labels
+    assert "Library" in button_labels
+    assert "Notebooks" not in button_labels
     assert len(app.file_uploader) >= 1
     add_uploader = next(
         uploader
@@ -686,19 +687,14 @@ def test_learning_studio_and_notebook_history_controls():
     assert "Critical Thinking" not in {
         expander.label for expander in app.expander
     }
-    next(button for button in app.button if button.label == "Notebooks").click().run()
+    next(button for button in app.button if button.label == "New chat").click().run()
     assert not app.exception
-    assert any(
-        text_input.label == "Search notebooks" for text_input in app.text_input
-    )
-    assert any(
-        button.label == "New notebook" for button in app.button
-    )
+    assert any(button.label == "Search chats" for button in app.button)
+    assert any(button.label == "Library" for button in app.button)
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "notebook-card-meta" in rendered
-    assert "notebook-card-activity" in rendered
-    assert "Last active" in rendered
-    assert "messages</div>" not in rendered
+    assert "Recents" in rendered
+    assert "cd-nav-section-label" in rendered
+    assert "notebook-card-meta" not in rendered
     assert "of 5 stages" in rendered
 
 
@@ -799,8 +795,7 @@ def test_theme_coaching_style_and_journey_has_no_manual_progression_control():
     ] == "short"
 
     # A later notebook must start Quick even if this session had Strict selected.
-    next(button for button in app.button if button.label == "Notebooks").click().run()
-    next(button for button in app.button if button.label == "New notebook").click().run()
+    next(button for button in app.button if button.label == "New chat").click().run()
     coaching_style = _coaching_style_radio(app)
     assert coaching_style.value == "Quick"
     assert app.session_state["response_detail"] == "short"
@@ -1062,8 +1057,7 @@ def test_current_notebook_title_is_directly_editable_and_syncs_with_history():
     from backend.student_store import StudentStore
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    next(button for button in app.button if button.label == "Notebooks").click().run()
-    next(button for button in app.button if button.label == "New notebook").click().run()
+    next(button for button in app.button if button.label == "New chat").click().run()
     current = StudentStore().get_thread(app.session_state["thread_id"])
     assert current
     title = next(
@@ -1081,9 +1075,9 @@ def test_current_notebook_title_is_directly_editable_and_syncs_with_history():
     assert StudentStore().get_thread(app.session_state["thread_id"])["name"] == (
         "Road Safety Research"
     )
-    next(button for button in app.button if button.label == "Notebooks").click().run()
-    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "Road Safety Research" in rendered
+    assert "Road Safety Research" in {
+        button.label for button in app.button
+    }
     assert not app.exception
 
 
@@ -1135,8 +1129,7 @@ def test_notebook_history_card_highlights_active_notebook_without_folders():
     from backend.student_store import StudentStore
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    next(button for button in app.button if button.label == "Notebooks").click().run()
-    next(button for button in app.button if button.label == "New notebook").click().run()
+    next(button for button in app.button if button.label == "New chat").click().run()
     local_store = StudentStore()
     thread_id = app.session_state["thread_id"]
     local_store.update_thread(thread_id, name="Active research notebook")
@@ -1147,11 +1140,9 @@ def test_notebook_history_card_highlights_active_notebook_without_folders():
         text_input for text_input in app.text_input if text_input.label == "Notebook title"
     )
     assert title.value == local_store.get_thread(thread_id)["name"]
-
-    next(button for button in app.button if button.label == "Notebooks").click().run()
-    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    assert "notebook-current-badge" in rendered
-    assert "Active research notebook" in rendered
+    assert "Active research notebook" in {
+        button.label for button in app.button
+    }
     assert not app.exception
 
 
@@ -1159,57 +1150,42 @@ def test_notebook_history_confirmed_delete_removes_the_selected_notebook():
     from backend.student_store import StudentStore
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    next(button for button in app.button if button.label == "Notebooks").click().run()
-    next(button for button in app.button if button.label == "New notebook").click().run()
+    next(button for button in app.button if button.label == "New chat").click().run()
     deleted_thread_id = app.session_state["thread_id"]
 
-    app.session_state["pending_notebook_actions"] = deleted_thread_id
+    app.session_state["pending_delete_chat_id"] = deleted_thread_id
     app.run()
-    confirmation = next(
-        checkbox
-        for checkbox in app.checkbox
-        if checkbox.key == f"confirm-delete-{deleted_thread_id}"
-    )
-    confirmation.set_value(True).run()
     delete_button = next(
-        button for button in app.button if button.label == "Delete permanently"
+        button for button in app.button if button.label == "Delete" and "nav-delete-confirm" in (button.key or "")
     )
     assert not delete_button.disabled
     delete_button.click().run()
 
     assert StudentStore().get_thread(deleted_thread_id) is None
     assert app.session_state["thread_id"] != deleted_thread_id
-    assert app.session_state["pending_notebook_actions"] is None
-    # Your Notebooks remounts on the list view (Back is keyed and must be gone).
-    assert any(button.label == "New notebook" for button in app.button)
-    assert not any(button.label == "Back to notebooks" for button in app.button)
-    assert any(
-        "Continue a discussion" in (caption.value or "") for caption in app.caption
-    )
+    assert "pending_delete_chat_id" not in app.session_state or not app.session_state[
+        "pending_delete_chat_id"
+    ]
+    assert any(button.label == "New chat" for button in app.button)
     assert not app.exception
 
 
 def test_notebook_actions_offers_transcript_download():
-    """Inline notebook actions download the persisted chat, not a sidecar store."""
+    """Top bar download saves the persisted chat transcript."""
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    next(button for button in app.button if button.label == "Notebooks").click().run()
-    next(button for button in app.button if button.label == "New notebook").click().run()
-    thread_id = app.session_state["thread_id"]
-    app.session_state["pending_notebook_actions"] = thread_id
-    app.run()
     download = next(
         control
         for control in app.download_button
-        if control.label == "Download transcript"
+        if control.key == "topbar-download-transcript"
+        or control.label == "Download"
     )
-    assert "persisted messages" in str(download.help)
+    assert "transcript" in str(download.help).lower()
     assert not app.exception
 
 
 def test_legacy_chat_turn_does_not_move_the_learning_stage_without_confirmation():
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    next(button for button in app.button if button.label == "Notebooks").click().run()
-    next(button for button in app.button if button.label == "New notebook").click().run()
+    next(button for button in app.button if button.label == "New chat").click().run()
     app.chat_input[0].set_value(
         "My focus is to evaluate whether the study evidence supports the main claim."
     ).run()

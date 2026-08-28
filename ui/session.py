@@ -79,9 +79,13 @@ def initialize_session() -> None:
         "awaiting_coach_turn": None,
         "pending_notebook_actions": None,
         "reopen_notebooks_dialog": False,
+        "pending_delete_chat_id": None,
         "mobile_panel": "Chat",
+        "center_view": "chat",
         "nav_section": "Chat",
         "studio_tab": "Journey",
+        "workspace_nav_collapsed": False,
+        "workspace_sources_collapsed": False,
         "display_name": "Student",
         "review_fingerprint": "",
         "review_seen_fingerprint": "",
@@ -172,6 +176,7 @@ def new_notebook(should_rerun: bool = True) -> None:
     _persist_active_thread(thread_id)
     if should_rerun:
         st.session_state.mobile_panel = "Chat"
+        st.session_state.center_view = "chat"
         st.session_state.nav_section = "Chat"
         set_side_panel_collapsed("sources", False)
         st.session_state.toast_course_materials_loading = True
@@ -341,16 +346,16 @@ def apply_manual_stage_move(thread_id: str, stage_id: str) -> bool:
 
 
 def delete_notebook(thread_id: str) -> None:
-    """Delete a notebook and keep Your Notebooks open on the list view.
+    """Delete a notebook and clear inline library-dialog state if any.
 
-    Clears the inline actions panel and asks the entrypoint to remount the
-    library dialog so delete never leaves the student with no notebook window.
+    Recents delete uses the dedicated confirmation dialog; the legacy
+    Your Notebooks reopen flag is cleared so the old dialog does not resurface.
     """
     if notebook_switch_locked():
         return
-    st.session_state._notebooks_suppress_dismiss = True
     st.session_state.pending_notebook_actions = None
-    st.session_state.reopen_notebooks_dialog = True
+    st.session_state.reopen_notebooks_dialog = False
+    st.session_state.pop("_notebooks_suppress_dismiss", None)
     store.delete_thread(thread_id)
     purge_notebook_retry_keys(st.session_state, thread_id)
     if thread_id == st.session_state.thread_id:

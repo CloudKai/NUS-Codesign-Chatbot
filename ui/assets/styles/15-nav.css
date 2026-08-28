@@ -1,0 +1,203 @@
+/*
+ * Left chat nav + center Search pane (Gemini-style).
+ * Tokens come from foundations / theme appearance overrides.
+ */
+    .st-key-nav_panel {
+        height:100% !important;
+        min-height:0 !important;
+        max-height:100% !important;
+        padding:.85rem .7rem .75rem;
+        overflow:hidden !important;
+        display:flex !important;
+        flex-direction:column !important;
+        gap:.35rem;
+        border-right:1px solid var(--cd-border);
+        background:var(--cd-surface-muted);
+    }
+
+    .st-key-nav_panel > [data-testid="stVerticalBlock"] {
+        height:100%;
+        min-height:0;
+        gap:.35rem !important;
+    }
+
+    .cd-nav-brand {
+        display:flex;
+        align-items:center;
+        gap:.55rem;
+        min-height:2.4rem;
+    }
+
+    .cd-nav-brand .brand-mark {
+        width:1.85rem;
+        height:1.85rem;
+        border-radius:.55rem;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        color:#fff;
+        font-weight:700;
+        font-size:.95rem;
+    }
+
+    .cd-nav-brand-title {
+        font-family:"Source Serif 4",Georgia,"Times New Roman",serif;
+        font-weight:700;
+        font-size:1.05rem;
+        color:var(--cd-text);
+        letter-spacing:-0.01em;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+    }
+
+    .cd-nav-section-label {
+        margin:.55rem .35rem .15rem;
+        font-size:.72rem;
+        font-weight:600;
+        letter-spacing:.02em;
+        color:var(--cd-muted);
+        text-transform:none;
+    }
+
+    .st-key-nav_primary div[data-testid="stButton"] button {
+        justify-content:flex-start !important;
+        border-radius:.85rem !important;
+        padding:.55rem .7rem !important;
+        min-height:2.45rem !important;
+    }
+
+    .st-key-nav_recents_scroll {
+        flex:1 1 auto !important;
+        min-height:0 !important;
+        overflow-y:auto !important;
+        overflow-x:hidden !important;
+        padding-right:.15rem;
+        scrollbar-width:thin;
+    }
+
+    [class*="st-key-nav_recent_"] {
+        margin:0 0 .15rem !important;
+    }
+
+    [class*="st-key-nav_recent_"] div[data-testid="stButton"] button {
+        justify-content:flex-start !important;
+        text-align:left !important;
+        border-radius:.75rem !important;
+        min-height:2.2rem !important;
+        padding:.4rem .65rem !important;
+        overflow:hidden;
+    }
+
+    [class*="st-key-nav_recent_"] div[data-testid="stButton"] button p {
+        white-space:nowrap !important;
+        overflow:hidden !important;
+        text-overflow:ellipsis !important;
+        max-width:100%;
+    }
+
+    .st-key-nav_collapsed_actions {
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        gap:.35rem;
+        padding-top:.2rem;
+    }
+
+    .st-key-nav_collapsed_actions div[data-testid="stButton"] button {
+        width:2.55rem !important;
+        min-width:2.55rem !important;
+        height:2.55rem !important;
+        border-radius:.8rem !important;
+        padding:0 !important;
+    }
+
+    .st-key-search_panel {
+        height:100% !important;
+        min-height:0 !important;
+        max-height:100% !important;
+        padding:1.4rem 1.35rem 1rem;
+        overflow:hidden !important;
+        display:flex !important;
+        flex-direction:column !important;
+        background:var(--cd-surface);
+    }
+
+    .st-key-search_panel > [data-testid="stVerticalBlock"] {
+        height:100%;
+        min-height:0;
+        max-width:46rem;
+        margin:0 auto;
+        width:100%;
+        gap:.65rem !important;
+    }
+
+    .cd-search-heading {
+        font-size:1.15rem;
+        font-weight:600;
+        color:var(--cd-text);
+        margin:0 0 .35rem;
+    }
+
+    .cd-search-section-label {
+        margin:.35rem 0 .1rem;
+        font-size:.78rem;
+        font-weight:600;
+        color:var(--cd-muted);
+    }
+
+    .cd-search-empty {
+        margin:2.4rem 0 0;
+        text-align:center;
+        color:var(--cd-muted);
+        font-size:.95rem;
+    }
+
+    .st-key-search_panel [data-testid="stTextInput"] input {
+        border-radius:999px !important;
+        min-height:2.85rem !important;
+        padding-left:1rem !important;
+        background:var(--cd-subtle) !important;
+        border:1px solid var(--cd-border) !important;
+    }
+
+    .st-key-search_results_scroll {
+        flex:1 1 auto !important;
+        min-height:0 !important;
+        overflow-y:auto !important;
+        overflow-x:hidden !important;
+        scrollbar-width:thin;
+    }
+
+    [class*="st-key-search_row_"] {
+        padding:.55rem .2rem .65rem;
+        border-bottom:1px solid var(--cd-border);
+    }
+
+    .cd-search-row-title {
+        font-size:.95rem;
+        font-weight:500;
+        color:var(--cd-text);
+        line-height:1.35;
+    }
+
+    .cd-search-row-snippet {
+        margin-top:.2rem;
+        font-size:.8rem;
+        color:var(--cd-muted);
+        line-height:1.35;
+    }
+
+    .cd-search-row-meta {
+        margin-top:.25rem;
+        font-size:.72rem;
+        color:var(--cd-muted);
+    }
+
+    .cd-search-row-title mark,
+    .cd-search-row-snippet mark {
+        background:color-mix(in srgb,var(--cd-accent) 28%,transparent);
+        color:inherit;
+        padding:0 .05em;
+        border-radius:.15rem;
+    }

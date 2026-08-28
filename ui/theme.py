@@ -17,6 +17,7 @@ _STYLES_DIR = _ASSETS_DIR / "styles"
 _STYLE_PARTIALS: tuple[str, ...] = (
     "00-foundations.css",
     "10-workspace.css",
+    "15-nav.css",
     "20-studio.css",
     "30-chat.css",
     "40-sources.css",

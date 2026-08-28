@@ -388,8 +388,15 @@
     }
 
     .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel) {
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel),
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-search_panel) {
         background:var(--cd-surface);
+    }
+
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-nav_panel) {
+        background:var(--cd-surface-muted);
     }
 
     .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
@@ -589,15 +596,15 @@
         pointer-events:auto !important;
     }
 
-    /* Thinking Path controls sit on the right divider. */
+    /* Thinking Path is on the right; controls sit on its left divider. */
     [class*="st-key-collapse-studio"],
     [class*="st-key-expand-studio"] {
-        right:0 !important;
-        left:auto !important;
-        transform:translate(50%, -50%) !important;
+        left:0 !important;
+        right:auto !important;
+        transform:translate(-50%, -50%) !important;
     }
 
-    /* Sources controls sit on the left divider. */
+    /* Sources / Library controls sit on the left divider (toward Chat). */
     [class*="st-key-collapse-sources"],
     [class*="st-key-expand-sources"] {
         left:0 !important;

@@ -171,13 +171,13 @@ def test_fragment_submit_path_still_owns_inflight() -> None:
     assert 'chat_reveal_coach_reply = True' in chat
     # Recovery poller stays outside chat_panel so run_every does not strip
     # the JS scroll-down control appended to that panel node.
-    workspace_chat = workspace.split("with chat_column:", 1)[1].split(
-        "with studio_column:", 1
+    workspace_chat = workspace.split("with center_column:", 1)[1].split(
+        "with nav_column:", 1
     )[0]
-    assert workspace_chat.rindex('key="chat_panel"') < workspace_chat.index(
+    assert workspace_chat.rindex('key="chat_panel"') < workspace_chat.rindex(
         "mount_awaiting_coach_turn_recovery()"
     )
-    assert workspace_chat.rindex("sync_chat_scroll(") < workspace_chat.index(
+    assert workspace_chat.rindex("sync_chat_scroll(") < workspace_chat.rindex(
         "mount_awaiting_coach_turn_recovery()"
     )
     send_block = chat.split("def handle_prompt(", 1)[1].split(

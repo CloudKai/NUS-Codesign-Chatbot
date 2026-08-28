@@ -70,30 +70,30 @@ copy or presented as a warning.
 ```text
 Top bar
 ├── Product identity
-├── Current notebook title
-├── Section switcher: Journey | Review | Chat | Sources | Notebooks
-├── Coaching style (Quick / Strict; new notebooks default to Quick)
+├── Current chat title
+├── Transcript download
 └── Profile avatar
     ├── Display name
     ├── Appearance
-    ├── Coaching style
+    ├── Coaching style (Quick / Strict; new chats default to Quick)
     └── Logout
 
 Workspace
-├── Thinking Path
-│   ├── Journey roadmap
-│   └── Review insights
-├── Chat
-│   ├── Conversation
-│   └── Composer
-└── Sources
-    ├── Search / type / sort
-    ├── Lecture Notes / Readings / My Sources
-    └── Add sources
+├── Left nav (collapsible)
+│   ├── New chat
+│   ├── Search chats
+│   ├── Library (toggles Sources)
+│   └── Recents (rename / delete)
+├── Center
+│   ├── Chat (conversation + composer) or Search pane
+│   └── Sources when Library is on
+└── Thinking Path (right)
+    ├── Journey roadmap
+    └── Review insights
 ```
 
-Desktop keeps all three workspace areas visible. Tablet and mobile use a panel switcher for
-Sources, Chat, and Journey/Review. Notebooks opens as a folder-free library dialog.
+Desktop keeps Chat visible while Library opens Sources beside it. Search chats
+swaps the center pane only. Tablet and mobile use Chats | Chat | Library | Journey.
 
 ## 4. Desktop layout
 
@@ -102,13 +102,15 @@ The application fills the viewport and uses a compact header above one continuou
 
 | Region        | Relative width | Purpose                                  |
 | ------------- | -------------- | ---------------------------------------- |
-| Thinking Path | 1.05           | Journey guidance and actionable review   |
+| Left nav      | fixed px       | New / Search / Library + Recents         |
 | Discussion    | 2.35           | Primary student–coach interaction        |
-| Sources       | 1.05           | Grounding material and source management |
+| Sources       | 1.05           | Library column when toggled on           |
+| Thinking Path | 1.05           | Journey guidance and actionable review   |
 
 
-The three areas share one outer surface. Thin vertical dividers create structure without
-turning each area into a floating card.
+The areas share one outer surface. Thin vertical dividers create structure without
+turning each area into a floating card. Library off hides Sources completely (no
+skinny rail). Thinking Path can collapse to a right-hand rail.
 
 ### Spacing
 

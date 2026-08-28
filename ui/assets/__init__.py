@@ -5,6 +5,7 @@ Ordered stylesheet partials live in ``styles/`` and are concatenated by
 
 - ``00-foundations.css`` — tokens and shared baseline controls
 - ``10-workspace.css`` — header, columns, resize/collapse
+- ``15-nav.css`` — left chat nav and center Search pane
 - ``20-studio.css`` — Thinking Path, journey, review
 - ``30-chat.css`` — discussion and composer
 - ``40-sources.css`` — Sources panel and source menus

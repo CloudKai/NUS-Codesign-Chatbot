@@ -123,7 +123,7 @@
         .st-key-mobile_panel [data-testid="stRadio"] > div {
             width:100%;
             display:grid;
-            grid-template-columns:repeat(3,1fr);
+            grid-template-columns:repeat(4,1fr);
             gap:.2rem;
             padding:.25rem;
             border:1px solid var(--cd-border);
@@ -134,7 +134,7 @@
         .st-key-mobile_panel [role="radiogroup"] {
             width:100%;
             display:grid;
-            grid-template-columns:repeat(3,minmax(0,1fr));
+            grid-template-columns:repeat(4,minmax(0,1fr));
             gap:.2rem;
             padding:.24rem;
         }
@@ -166,28 +166,35 @@
             -webkit-text-fill-color:currentColor !important;
         }
 
-        /* Paint 🛑 on the stable "Journey" label without changing the radio
-           option string (a string change remounts the widget). Streamlit
-           radios use index values (0/1/2), not the Python option ids. */
+        /* Paint 🛑 on the Journey (Studio) label without remounting options.
+           Studio is the 4th radio (index 3) after Chats / Chat / Library. */
         body:has(.st-key-mobile_journey_attention)
-        .st-key-mobile_panel [role="radiogroup"] > label[data-testid="stRadioOption"]:first-child p,
+        .st-key-mobile_panel [role="radiogroup"] > label[data-testid="stRadioOption"]:nth-child(4) p,
         body:has(.cd-mobile-journey-attention)
-        .st-key-mobile_panel [role="radiogroup"] > label[data-testid="stRadioOption"]:first-child p,
+        .st-key-mobile_panel [role="radiogroup"] > label[data-testid="stRadioOption"]:nth-child(4) p,
         body:has(.st-key-mobile_journey_attention)
-        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="0"]) p,
+        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="Studio"]) p,
         body:has(.cd-mobile-journey-attention)
-        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="0"]) p {
+        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="Studio"]) p,
+        body:has(.st-key-mobile_journey_attention)
+        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="3"]) p,
+        body:has(.cd-mobile-journey-attention)
+        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="3"]) p {
             white-space:nowrap;
         }
 
         body:has(.st-key-mobile_journey_attention)
-        .st-key-mobile_panel [role="radiogroup"] > label[data-testid="stRadioOption"]:first-child p::after,
+        .st-key-mobile_panel [role="radiogroup"] > label[data-testid="stRadioOption"]:nth-child(4) p::after,
         body:has(.cd-mobile-journey-attention)
-        .st-key-mobile_panel [role="radiogroup"] > label[data-testid="stRadioOption"]:first-child p::after,
+        .st-key-mobile_panel [role="radiogroup"] > label[data-testid="stRadioOption"]:nth-child(4) p::after,
         body:has(.st-key-mobile_journey_attention)
-        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="0"]) p::after,
+        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="Studio"]) p::after,
         body:has(.cd-mobile-journey-attention)
-        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="0"]) p::after {
+        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="Studio"]) p::after,
+        body:has(.st-key-mobile_journey_attention)
+        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="3"]) p::after,
+        body:has(.cd-mobile-journey-attention)
+        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="3"]) p::after {
             content:" 🛑";
             font-size:1.05rem;
             line-height:1;
@@ -226,16 +233,20 @@
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel),
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel) {
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-search_panel),
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel),
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-nav_panel),
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-sources_hidden) {
             display:none;
         }
 
-        /* Prefer value-based matching so label-text remounts cannot desync
-           nth-child indices from Studio/Chat/Sources. */
         body:has(.st-key-mobile_panel input[value="Studio"]:checked)
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel),
-        body:has(.st-key-mobile_panel label:nth-child(1) input:checked)
+        body:has(.st-key-mobile_panel label:nth-child(4) input:checked)
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel) {
             display:block;
@@ -244,9 +255,15 @@
         body:has(.st-key-mobile_panel input[value="Chat"]:checked)
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel),
+        body:has(.st-key-mobile_panel input[value="Chat"]:checked)
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-search_panel),
         body:has(.st-key-mobile_panel label:nth-child(2) input:checked)
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel) {
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel),
+        body:has(.st-key-mobile_panel label:nth-child(2) input:checked)
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-search_panel) {
             display:block;
         }
 
@@ -259,11 +276,20 @@
             display:block;
         }
 
-        /* If the switcher remounts with no checked option, show Studio rather
+        body:has(.st-key-mobile_panel input[value="Chats"]:checked)
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-nav_panel),
+        body:has(.st-key-mobile_panel label:nth-child(1) input:checked)
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-nav_panel) {
+            display:block;
+        }
+
+        /* If the switcher remounts with no checked option, show Chat rather
            than a blank white workspace. */
         body:has(.st-key-mobile_panel):not(:has(.st-key-mobile_panel input:checked))
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel) {
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel) {
             display:block;
         }
 
@@ -279,7 +305,9 @@
 
         .st-key-studio_panel,
         .st-key-chat_panel,
-        .st-key-sources_panel {
+        .st-key-search_panel,
+        .st-key-sources_panel,
+        .st-key-nav_panel {
             height:100% !important;
             min-height:0 !important;
             max-height:100% !important;

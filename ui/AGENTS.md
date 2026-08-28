@@ -42,12 +42,14 @@ Only read that for UI tasks that touch API migration or coaching flow.
 | `rename.py` | Shared Enter-only rename forms, draft discard, select-all helper |
 | `topbar.py` | Brand, title, section switcher, Guidance, profile entry |
 | `profile.py` | Compact settings popover (display name, Coaching style Quick/Strict, appearance, logout) |
-| `workspace.py` | Mobile panel radio and three-column studio/chat/sources layout |
+| `workspace.py` | Mobile panel radio and four-column nav/chat/sources/studio layout |
 | `chat.py` | Compatibility alias for `panels/chat.py` (messages, citations, composer, `handle_prompt()`) |
 | `sources.py` | Compatibility alias for `panels/sources.py` (library, search/filter, add/viewer dialogs) |
 | `studio.py` | Compatibility alias for `panels/studio.py` (five-phase Journey/Review, pending transitions). Review stage expanders remount when notebook or current stage changes; keys stay stable within a stage. |
+| `panels/nav.py` | Gemini-style left chat rail: New chat, Search, Library, Recents rename/delete |
+| `panels/search.py` | Center Search chats pane (substring match via `list_threads`) |
 | `professor.py` | Lecturer Research/analytics workbench. Do not relocate. CSS lives in `assets/styles/70-professor.css`. |
-| `notebooks.py` | Folder-free notebook library and actions dialog (rename, transcript download, delete) |
+| `notebooks.py` | Shared notebook helpers (`thread_overview`); legacy Your Notebooks dialog kept unused by the top bar |
 | `settings.py` | Preference persistence callbacks used by the profile popover |
 
 `ui.chat`, `ui.sources`, `ui.studio`, and `ui.runtime` replace themselves with
@@ -62,7 +64,7 @@ Compatibility shims at `ui/column_resize.py`, `ui/sources_scroll.py`, and
 
 | Module | Responsibility |
 |---|---|
-| `column_resize.py` | Between-column drag handles and side-panel collapse widths |
+| `column_resize.py` | Nav fixed widths, Library hide, Thinking Path rail, drag handles |
 | `sources_scroll.py` | Sources list scroll region sizing |
 | `chat_scroll.py` | Send snaps bottom; reply remount pins latest coach top unless scrolled away |
 | `composer_layout.py` | Composer footer card / textarea sizing |

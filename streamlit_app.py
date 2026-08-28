@@ -31,7 +31,7 @@ from ui.constants import DEFAULT_APPEARANCE
 from ui.toasts import show_corner_toasts
 from ui.notebooks import notebooks_dialog
 from ui.runtime import bind_owner_identifier, configure_ui_perf_logger
-from ui.session import initialize_session
+from ui.session import initialize_session, new_notebook, select_thread
 from ui.settings import sync_appearance_from_widget
 from ui.theme import inject_template_css, render_theme_css
 from ui.topbar import render_topbar
@@ -115,6 +115,13 @@ if str(user.get("role") or "").strip().lower() in {"lecturer", "admin"}:
 st.session_state["_app_runs"] = int(st.session_state.get("_app_runs") or 0) + 1
 
 initialize_session()
+# Recents delete may request a notebook switch after the dialog closed; apply
+# before top-bar widgets are instantiated.
+_pending_select = st.session_state.pop("_pending_select_thread", None)
+if _pending_select:
+    select_thread(str(_pending_select), should_rerun=False)
+elif st.session_state.pop("_pending_new_notebook", False):
+    new_notebook(should_rerun=False)
 sync_appearance_from_widget()
 render_theme_css()
 if st.session_state.pop("toast_course_materials_loading", False):

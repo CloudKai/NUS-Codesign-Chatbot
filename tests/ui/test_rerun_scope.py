@@ -247,13 +247,13 @@ def test_awaiting_coach_turn_survives_panel_remount_and_locks_notebooks() -> Non
     assert "mount_awaiting_coach_turn_recovery" in workspace
     assert "mount_awaiting_coach_turn_recovery()" in workspace
     # Called after the chat_panel container closes.
-    workspace_chat = workspace.split("with chat_column:", 1)[1].split(
-        "with studio_column:", 1
+    workspace_chat = workspace.split("with center_column:", 1)[1].split(
+        "with nav_column:", 1
     )[0]
-    assert workspace_chat.index('key="chat_panel"') < workspace_chat.index(
+    assert workspace_chat.rindex('key="chat_panel"') < workspace_chat.rindex(
         "mount_awaiting_coach_turn_recovery()"
     )
-    assert workspace_chat.rindex("sync_chat_scroll(") < workspace_chat.index(
+    assert workspace_chat.rindex("sync_chat_scroll(") < workspace_chat.rindex(
         "mount_awaiting_coach_turn_recovery()"
     )
     recovery_ui = chat.split("def _render_awaiting_coach_recovery(", 1)[1].split(
@@ -385,7 +385,8 @@ def test_workspace_renders_chat_before_studio() -> None:
     chat_idx = source.index("render_chat_panel(")
     studio_idx = source.index("render_studio_panel()")
     sources_idx = source.index("render_sources_panel()")
-    assert chat_idx < studio_idx < sources_idx
+    # Center Chat runs first; Sources then Thinking Path follow.
+    assert chat_idx < sources_idx < studio_idx
 
 
 def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
@@ -446,23 +447,27 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
     assert '"Journey !"' not in source
     assert Path("ui/layout/journey_tab_unread.py").exists() is False
     workspace = Path("ui/workspace.py").read_text(encoding="utf-8")
-    assert 'return "Journey"' in workspace.split("def _studio_mobile_label", 1)[1].split(
+    assert '"Studio": "Journey"' in workspace.split("def _mobile_panel_label", 1)[1].split(
         "panel = st.radio(", 1
     )[0]
     assert "Journey 🛑" not in workspace
     assert 'return "Journey !"' not in workspace
     assert "cd-mobile-journey-attention" in workspace
     assert 'studio_tab") == "Review"' not in workspace
-    assert 'return "Review"' not in workspace.split("def _studio_mobile_label", 1)[1].split(
-        "panel = st.radio(", 1
-    )[0]
+    assert '"Chats"' in workspace
+    assert "render_nav_panel" in workspace
+    assert "render_search_panel" in workspace
+    assert "nav_column, center_column, source_column, studio_column" in workspace
     responsive = Path("ui/assets/styles/90-responsive.css").read_text(encoding="utf-8")
     assert 'input[value="Studio"]:checked' in responsive
+    assert 'input[value="Chats"]:checked' in responsive
     assert "not(:has(.st-key-mobile_panel input:checked))" in responsive
     assert "cd-mobile-journey-attention" in responsive
     assert "st-key-mobile_journey_attention" in responsive
     assert 'content:" 🛑"' in responsive
-    assert 'input[value="0"]' in responsive
+    assert 'input[value="3"]' in responsive
+    assert ".st-key-nav_panel" in responsive
+    assert ".st-key-search_panel" in responsive
     css = Path("ui/assets/styles/10-workspace.css").read_text(encoding="utf-8")
     assert ".st-key-studio_section_tabs" in css
     assert 'iframe[height="0"]' in css
@@ -471,6 +476,22 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
     assert "minmax(0,1fr) minmax(0,1fr)" in css
     assert 'input[value="1"]' in css
     assert 'content:" 🛑"' in css
+    assert Path("ui/assets/styles/15-nav.css").is_file()
+    nav_css = Path("ui/assets/styles/15-nav.css").read_text(encoding="utf-8")
+    assert ".st-key-nav_panel" in nav_css
+    assert ".st-key-search_panel" in nav_css
+    assert "No results found" in Path("ui/panels/search.py").read_text(encoding="utf-8")
+    nav_py = Path("ui/panels/nav.py").read_text(encoding="utf-8")
+    assert "New chat" in nav_py
+    assert "Search chats" in nav_py
+    assert "Library" in nav_py
+    assert "Rename" in nav_py
+    assert "Delete" in nav_py
+    assert "Share conversation" not in nav_py
+    assert "Add to notebook" not in nav_py
+    assert "Pin" not in nav_py
+    assert "open-notebooks" not in Path("ui/topbar.py").read_text(encoding="utf-8")
+    assert "topbar-download-transcript" in Path("ui/topbar.py").read_text(encoding="utf-8")
     title_block = source.split("def _render_journey_stage_title_row", 1)[1].split(
         "def _render_journey_stage_select_cta", 1
     )[0]
