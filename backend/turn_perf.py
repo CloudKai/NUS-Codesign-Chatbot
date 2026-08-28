@@ -129,6 +129,8 @@ SAFE_PERF_FIELDS = frozenset(
         "kb_session_narrowed_count",
         "hydrate_total_ms",
         "qa_evidence_gap_authored",
+        "course_catalog_retrieval",
+        "course_catalog_source_count",
         "event_loop_cycle_count",
         "structured_output_recovery_used",
         "structured_output_failure_category",

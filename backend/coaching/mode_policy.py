@@ -197,8 +197,10 @@ _ATTACHMENT_REFERENCE = re.compile(
 _DEICTIC_EVIDENCE = re.compile(
     r"\b(?:this|that|the|my)\s+"
     r"(?:article|paper|study|pdf|document|file|report|source|attachment|"
-    r"upload|image|photo|diagram|scan)s?\b"
-    r"|\b(?:like|see|per|from)\s+this\b",
+    r"upload|image|photo|diagram|scan|material)s?\b"
+    r"|\bsource materials?\b"
+    r"|\b(?:like|see|per|from)\s+this\b"
+    r"|\bi just (?:added|uploaded|attached)\b",
     re.IGNORECASE,
 )
 _ATTACHMENT_ACTION = re.compile(
@@ -556,15 +558,17 @@ def should_author_qa_evidence_gap(request: object) -> bool:
     if getattr(request, "retrieved_chunks", None):
         return False
     source_ids = getattr(request, "source_ids", None) or []
-    if not source_ids:
-        return False
     retrieved_context = str(getattr(request, "retrieved_course_context", "") or "")
     gap_note = (
         COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT in retrieved_context
         or COURSE_RETRIEVAL_EMPTY_CONTEXT in retrieved_context
     )
+    # Course-catalog Q&A may leave personal ``source_ids`` empty while still
+    # fail-closing on an empty or unavailable Knowledge Base Retrieve.
     if gap_note:
         return True
+    if not source_ids:
+        return False
     # Image-only Q&A has selected sources but no textual retrieve. The model
     # still needs the vision turn; do not author a course-material gap. A
     # mixed image + textual-source turn remains grounded: its course claims

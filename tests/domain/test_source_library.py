@@ -169,7 +169,7 @@ def test_lecture_notes_folder_syncs_updates_and_removes_sources(tmp_path, monkey
 
     assert first.added == 1
     assert first.skipped == 0
-    assert source["selected"] is True
+    assert source["selected"] is False
     assert source["metadata"]["origin"] == "lecture_notes_folder"
     assert source["metadata"]["lecture_note_relative_path"] == "lectureNotes/week-01.txt"
     assert source["metadata"]["course_material_group"] == "Lecture Notes"
@@ -196,7 +196,7 @@ def test_lecture_notes_folder_syncs_updates_and_removes_sources(tmp_path, monkey
     assert store.list_sources(thread_id) == []
 
 
-def test_locked_course_sources_cannot_be_unselected(tmp_path, monkeypatch):
+def test_locked_course_sources_are_view_only_not_chat_selected(tmp_path, monkeypatch):
     from backend import source_library
 
     store, thread_id, _files_dir = make_notebook(tmp_path, monkeypatch)
@@ -216,21 +216,23 @@ def test_locked_course_sources_cannot_be_unselected(tmp_path, monkeypatch):
         [("mine.txt", b"Personal upload", "text/plain")],
     )[0]
 
-    with pytest.raises(ValueError, match="cannot be unselected"):
-        store.set_source_selected(thread_id, locked["id"], False)
-    assert store.get_source(thread_id, locked["id"])["selected"] is True
+    assert locked["selected"] is False
+    with pytest.raises(ValueError, match="view-only"):
+        store.set_source_selected(thread_id, locked["id"], True)
+    assert store.get_source(thread_id, locked["id"])["selected"] is False
 
     store.set_source_selected(thread_id, personal["id"], False)
     store.set_all_sources_selected(thread_id, False)
     sources = {item["id"]: item for item in store.list_sources(thread_id)}
-    assert sources[locked["id"]]["selected"] is True
+    assert sources[locked["id"]]["selected"] is False
     assert sources[personal["id"]]["selected"] is False
 
     store.set_all_sources_selected(thread_id, True)
     sources = {item["id"]: item for item in store.list_sources(thread_id)}
-    assert sources[locked["id"]]["selected"] is True
+    assert sources[locked["id"]]["selected"] is False
     assert sources[personal["id"]]["selected"] is True
-
+    selected_only = list_visible_sources(store, thread_id, selected_only=True)
+    assert [item["id"] for item in selected_only] == [personal["id"]]
 
 def test_lecture_notes_sync_skips_upload_compression(tmp_path, monkeypatch):
     from backend import source_library
@@ -712,20 +714,18 @@ def test_shared_course_catalog_excludes_bedrock_metadata_sidecars(tmp_path, monk
     assert course_material_ids == {course_material_id_from_object_key(key) for key in pdf_keys}
     assert "lecture_week1_pdf_metadata" not in course_material_ids
     assert all(
-        item["selected"] is True and item["metadata"]["locked_source"] is True
+        item["selected"] is False and item["metadata"]["locked_source"] is True
         for item in course_visible
     )
     selected_course_keys = {
         item["object_key"] for item in selected if item["metadata"].get("shared_course_object")
     }
-    assert selected_course_keys == set(pdf_keys)
+    assert selected_course_keys == set()
     assert personal["title"] == "mine.json"
     assert any(item["id"] == personal["id"] for item in visible)
     assert any(item["id"] == personal["id"] for item in selected)
 
-    retrieval = retrieval_sources_from_notebook(
-        [item for item in selected if item["metadata"].get("shared_course_object")]
-    )
+    retrieval = retrieval_sources_from_notebook(course_visible)
     retrieval_keys = {item.object_key for item in retrieval}
     retrieval_ids = {item.course_material_id for item in retrieval}
     assert retrieval_keys == set(pdf_keys)

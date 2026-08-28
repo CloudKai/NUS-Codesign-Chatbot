@@ -7,6 +7,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from backend.retrieval import RetrievalSource
+from backend.source_library import is_locked_course_source
 
 
 def _freeze_mapping(value: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -30,9 +31,10 @@ class TurnSnapshot:
         current_stage: Server-authoritative Thinking Path stage.
         metadata: Metadata mapping from that row.
         visible_sources: Personal plus shared-catalog sources visible now.
-        selected_sources: Visible sources selected for grounding.
+        selected_sources: Personal My Sources selected for Chat grounding.
+            Locked Lecture Notes / Readings are never included.
         sources_by_id: Id-keyed view of ``visible_sources``.
-        retrieval_sources: Hydrated selected retrieval sources. Empty until
+        retrieval_sources: Hydrated retrieval sources. Empty until
             the application service attaches them after authorization and
             the retrieval gate (or RAG fallback) requires evidence.
             This class never performs storage I/O.
@@ -81,7 +83,9 @@ class TurnSnapshot:
         )
         visible_tuple = tuple(dict(source) for source in visible_sources)
         selected_tuple = tuple(
-            source for source in visible_tuple if source.get("selected")
+            source
+            for source in visible_tuple
+            if source.get("selected") and not is_locked_course_source(source)
         )
         by_id = {
             str(source.get("id") or ""): source

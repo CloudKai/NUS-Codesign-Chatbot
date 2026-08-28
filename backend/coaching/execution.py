@@ -33,6 +33,8 @@ from backend.coaching.mode_policy import (
     resolve_mode_policy,
     should_author_qa_evidence_gap,
 )
+from backend.retrieval_gate import classify_retrieval_intent
+from backend.specialists.routing import looks_like_course_question
 from backend.coaching.workflow_navigation import (
     apply_progression_effect,
     is_compound_status_guidance_request,
@@ -105,6 +107,7 @@ from backend.specialists.review_orchestration import (
 from backend.source_library import (
     CHAT_ATTACHMENT_ORIGIN,
     image_inputs_for_sources,
+    is_locked_course_source,
     list_visible_sources,
     selected_source_context,
     shared_course_catalog_scope,
@@ -145,7 +148,55 @@ _CITATION_LABEL = re.compile(r"\[(S\d+)\]")
 IDEMPOTENCY_SURFACE_COACH_TURN = "coach_turn"
 IDEMPOTENCY_SURFACE_DEEP_REVIEW = "deep_review"
 
+# Cues that mean Bedrock KB should search the official course catalog even
+# when Lecture Notes / Readings are not Chat-selected.
+_COURSE_CATALOG_RETRIEVAL_CUES = frozenset(
+    {
+        "conservative_course_question",
+        "week_or_session",
+        "course_grounding",
+        "according_to_source",
+        "what_source_says",
+        "based_on_source",
+        "material_noun",
+        "compare_to_source",
+    }
+)
+
 logger = logging.getLogger(__name__)
+
+
+def _wants_course_catalog_retrieval(
+    student_message: str,
+    *,
+    mode_retrieve: bool,
+) -> bool:
+    """Return whether this turn should Retrieve against the course library.
+
+    Course library items are view-only in Sources. Genuine course questions
+    still need Bedrock KB over the official catalog, decided by intent cues
+    rather than Sources selection or title overlap.
+
+    Args:
+        student_message: Current student contribution.
+        mode_retrieve: Effective mode-policy retrieve flag after workflow
+            and attachment overrides.
+
+    Returns:
+        True when the Knowledge Base course catalog should be included in
+        ``retrieval_sources``.
+    """
+    if not mode_retrieve:
+        return False
+    if looks_like_course_question(student_message):
+        return True
+    classification = classify_retrieval_intent(
+        student_message,
+        has_selected_sources=False,
+    )
+    if not classification.retrieve:
+        return False
+    return bool(set(classification.cues).intersection(_COURSE_CATALOG_RETRIEVAL_CUES))
 
 
 def _quote_offsets(text: str, quote: str) -> tuple[int, int] | None:
@@ -2046,8 +2097,13 @@ class CoachApplicationService:
             )
         return retrieved_chunks, retrieval_result.context
 
-    def _hydrate_retrieval_sources(self, snapshot: TurnSnapshot) -> TurnSnapshot:
-        """Load selected student chunk artifacts once for this request.
+    def _hydrate_retrieval_sources(
+        self,
+        snapshot: TurnSnapshot,
+        *,
+        include_course_catalog: bool = False,
+    ) -> TurnSnapshot:
+        """Load retrieval sources once for this request.
 
         Idle first passes skip this so selected files do not pay ``get_bytes``.
         RAG fallback calls it when the first pass left ``retrieval_sources``
@@ -2057,17 +2113,38 @@ class CoachApplicationService:
         Args:
             snapshot: Authoritative notebook snapshot after source
                 authorization.
+            include_course_catalog: When True, merge view-only Lecture Notes /
+                Readings into retrieval (Bedrock KB path) without treating them
+                as Chat-selected My Sources.
 
         Returns:
             The same snapshot when retrieval sources are already attached,
-            otherwise a copy with hydrated selected student sources.
+            otherwise a copy with hydrated personal and optional course sources.
         """
         if snapshot.retrieval_sources:
             return snapshot
+        personal = [
+            dict(source)
+            for source in snapshot.selected_sources
+            if not is_locked_course_source(source)
+        ]
+        sources_for_retrieve = list(personal)
+        if include_course_catalog:
+            seen = {str(source.get("id") or "") for source in sources_for_retrieve}
+            for source in snapshot.visible_sources:
+                if not is_locked_course_source(source):
+                    continue
+                source_id = str(source.get("id") or "")
+                if not source_id or source_id in seen:
+                    continue
+                sources_for_retrieve.append(dict(source))
+                seen.add(source_id)
+            record_field("course_catalog_retrieval", True)
+            record_field("course_catalog_source_count", len(seen) - len(personal))
         return replace(
             snapshot,
             retrieval_sources=hydrate_selected_retrieval_sources(
-                snapshot.selected_sources,
+                sources_for_retrieve,
                 owner_id=self._store.owner_id,
                 notebook_id=snapshot.thread_id,
             ),
@@ -2242,7 +2319,13 @@ class CoachApplicationService:
                         str(item).strip() for item in frozen_source_ids if str(item).strip()
                     }
                     visible_sources = [
-                        {**dict(source), "selected": str(source.get("id") or "") in frozen_set}
+                        {
+                            **dict(source),
+                            "selected": (
+                                str(source.get("id") or "") in frozen_set
+                                and not is_locked_course_source(source)
+                            ),
+                        }
                         for source in visible_sources
                     ]
                 return visible_sources
@@ -2318,6 +2401,17 @@ class CoachApplicationService:
             ]
             if unknown:
                 raise ValueError("One or more source_ids are unknown for this notebook")
+            course_claimed = [
+                source_id
+                for source_id in request.source_ids
+                if is_locked_course_source(
+                    snapshot.sources_by_id.get(source_id) or {}
+                )
+            ]
+            if course_claimed:
+                raise ValueError(
+                    "Course materials are view-only and cannot be selected for Chat"
+                )
             unselected = [
                 source_id
                 for source_id in request.source_ids
@@ -2525,13 +2619,31 @@ class CoachApplicationService:
             needs_retrieval = True
         if force_retrieval and selected_sources:
             needs_retrieval = True
+        include_course_catalog = (
+            needs_retrieval
+            and not attachment_only_question
+            and not stage_status_request
+            and not progression_request
+            and not (
+                workflow_no_retrieve and not stage_status_request
+            )
+            and _wants_course_catalog_retrieval(
+                request.student_message,
+                mode_retrieve=bool(mode_policy.retrieve) or force_retrieval,
+            )
+        )
+        if include_course_catalog:
+            needs_retrieval = True
         record_field("retrieval_gate_ms", elapsed_ms(gate_started))
         record_field("retrieval_required", bool(needs_retrieval))
         record_field("mode_policy_intent", mode_policy.intent)
         retrieved_chunks: list[RetrievalChunkReference] = []
         retrieval_result_context = ""
         if needs_retrieval:
-            snapshot = self._hydrate_retrieval_sources(snapshot)
+            snapshot = self._hydrate_retrieval_sources(
+                snapshot,
+                include_course_catalog=include_course_catalog,
+            )
         if unresolved_image_ids and snapshot.retrieval_sources:
             snapshot = replace(
                 snapshot,
@@ -2595,12 +2707,10 @@ class CoachApplicationService:
         response_language = " ".join(
             str(metadata.get("response_language") or "English").split()
         )[:50]
-        # The selected-source set is server-authoritative. It is the only
-        # grounding switch exposed by the current UI, so stale compatibility
-        # metadata must not leave a source-free notebook in source-only mode.
-        # Conversely, a client cannot enable broader knowledge while any
-        # selected source exists.
-        allow_model_knowledge = not effective_source_ids
+        # Personal My Sources remain the Chat selection switch. Course-catalog
+        # Knowledge Base turns also disallow free model knowledge so empty
+        # Retrieve fail-closes instead of inventing course facts.
+        allow_model_knowledge = not effective_source_ids and not include_course_catalog
         if frozen_history_revision is not None:
             conversation_revision = max(0, int(frozen_history_revision))
         else:
@@ -2816,7 +2926,21 @@ class CoachApplicationService:
             retrieved_by_source.setdefault(chunk.source_id, chunk)
         resolved_image_ids = {str(image.source_id) for image in request.image_inputs}
         resolved = 0
-        for index, source_id in enumerate(request.source_ids, start=1):
+        citation_ids: list[str] = []
+        seen_ids: set[str] = set()
+        for source_id in list(request.source_ids):
+            cleaned = str(source_id or "").strip()
+            if cleaned and cleaned not in seen_ids:
+                citation_ids.append(cleaned)
+                seen_ids.add(cleaned)
+        # Course-library KB hits are not Chat-selected My Sources, but still
+        # need citation labels when the coach cites them.
+        for source_id in retrieved_by_source:
+            cleaned = str(source_id or "").strip()
+            if cleaned and cleaned not in seen_ids and cleaned in sources_by_id:
+                citation_ids.append(cleaned)
+                seen_ids.add(cleaned)
+        for index, source_id in enumerate(citation_ids, start=1):
             retrieved = retrieved_by_source.get(source_id)
             source = sources_by_id.get(source_id)
             direct_image = (

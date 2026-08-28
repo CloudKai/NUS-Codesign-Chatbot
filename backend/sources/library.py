@@ -398,6 +398,9 @@ def project_shared_course_item(item: SharedCourseItem) -> dict[str, Any]:
     """Project one shared catalog object into a locked source dict.
 
     The dict is UI/retrieval shaped. It is not a ``sources`` row.
+    ``selected`` is always false: Lecture Notes / Readings are view-only in
+    Sources and never enter personal selected Chat context. Course Q&A uses
+    the Bedrock Knowledge Base over the catalog instead.
     """
     mime = mimetypes.guess_type(item.filename)[0] or "application/octet-stream"
     kind = (
@@ -411,7 +414,7 @@ def project_shared_course_item(item: SharedCourseItem) -> dict[str, Any]:
         "title": item.filename,
         "mime": mime,
         "size": item.size,
-        "selected": True,
+        "selected": False,
         "path": item.object_key,
         "object_key": item.object_key,
         "extractedText": "",
@@ -460,14 +463,15 @@ def list_visible_sources(
     Args:
         store: Owner-scoped student store.
         thread_id: Notebook id whose personal sources are listed.
-        selected_only: When True, filter the merged catalog to selected rows
-            after listing every visible source. The store query stays
-            unfiltered so shared-catalog merge can run.
+        selected_only: When True, return only personal selected My Sources.
+            Locked Lecture Notes / Readings are never included, even when a
+            stale row still has ``selected=True``.
         include_extracted_text: When False, skip object-storage reads of
             extracted text on persisted rows.
 
     Returns:
-        Merged personal and shared-catalog source dictionaries.
+        Merged personal and shared-catalog source dictionaries, or personal
+        selected sources only when ``selected_only`` is True.
     """
     persisted = store.list_sources(
         thread_id,
@@ -492,8 +496,44 @@ def list_visible_sources(
     ]
     merged = persisted + catalog
     if selected_only:
-        return [source for source in merged if source.get("selected")]
+        return [
+            source
+            for source in merged
+            if source.get("selected") and not is_locked_course_source(source)
+        ]
     return merged
+
+
+def list_course_library_sources(
+    store: StudentStore,
+    thread_id: str,
+    *,
+    include_extracted_text: bool = False,
+) -> list[dict[str, Any]]:
+    """Return view-only Lecture Notes / Readings for catalog-scoped course Q&A.
+
+    These rows are never Chat-selected context. Callers use them only as
+    Knowledge Base retrieval / citation authorization against the official
+    course pack.
+
+    Args:
+        store: Owner-scoped student store.
+        thread_id: Notebook id whose visible catalog is merged.
+        include_extracted_text: Forwarded to :func:`list_visible_sources`.
+
+    Returns:
+        Locked course-library source dictionaries (local and/or virtual).
+    """
+    return [
+        source
+        for source in list_visible_sources(
+            store,
+            thread_id,
+            selected_only=False,
+            include_extracted_text=include_extracted_text,
+        )
+        if is_locked_course_source(source)
+    ]
 
 
 CHAT_ATTACHMENT_ORIGIN = "chat_attachment"
@@ -986,6 +1026,8 @@ def _sync_lecture_notes_folder(
                 # Shared lecture files are prepared offline; skip MuPDF/Pillow
                 # rewrite so new-notebook sync stays a fast copy + extract.
                 compress=False,
+                # Course library is view-only; never Chat-selected context.
+                selected=False,
             )
         except (OSError, ValueError) as exc:
             errors.append(f"{relative_text}: {exc}")

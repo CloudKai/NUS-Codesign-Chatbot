@@ -271,10 +271,13 @@ class SourceOperations:
         if not source:
             raise ValueError("Source not found")
         if is_locked_course_source(source):
-            if not selected:
-                raise ValueError("Course materials stay selected and cannot be unselected.")
-            if source.get("selected"):
+            if selected:
+                raise ValueError(
+                    "Course materials are view-only and cannot be selected for Chat."
+                )
+            if not source.get("selected"):
                 return
+            # Clear stale selected flags from older deployments.
         with self._store._lock, self._store._connect() as connection:
             changed = connection.execute(
                 """
@@ -302,7 +305,7 @@ class SourceOperations:
         *,
         deserialize: Callable[[str | None, Any], Any] = load_json,
     ) -> None:
-        """Select or deselect personal sources while retaining course materials."""
+        """Select or deselect personal sources; course library stays unselected."""
         from backend.source_library import is_locked_course_source
 
         if not self._store.get_thread(thread_id):
@@ -321,10 +324,10 @@ class SourceOperations:
                     {"metadata": metadata, "selected": bool(row["selected"])}
                 )
                 if locked:
-                    if not bool(row["selected"]):
+                    if bool(row["selected"]):
                         connection.execute(
                             """
-                            UPDATE sources SET selected=1, updated_at=?
+                            UPDATE sources SET selected=0, updated_at=?
                             WHERE id=? AND notebook_id=?
                             """,
                             (now, row["id"], thread_id),

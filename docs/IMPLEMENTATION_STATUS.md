@@ -2,6 +2,37 @@
 
 ## CURRENT STATUS
 
+### Course library is UI-only; Chat routing local/prod parity (2026-08-28)
+
+**Change.** Lecture Notes / Readings are a view-only course library. They never
+enter personal selected Chat context (``list_visible_sources(...,
+selected_only=True)`` excludes locked course rows; shared virtual items project
+``selected=False``; local folder sync creates course rows unselected). Course
+Q&A uses Bedrock KB Retrieve over the official catalog when intent cues fire,
+without requiring Sources checkboxes. My Sources stay selectable. Current-turn
+attachments stay turn-scoped; phrases like “source material I just added” do
+not pull course KB. Visible course material no longer implies model context.
+
+**Invariant.**
+
+- Course Library = UI view/open only
+- My Sources = selectable Chat context
+- Attachments = turn-scoped context
+- Course Q&A = Bedrock KB over the catalog
+
+**Files.** ``backend/sources/library.py``,
+``backend/persistence/store/operations/sources.py``,
+``backend/coaching/turn_snapshot.py``, ``backend/coaching/execution.py``,
+``backend/coaching/mode_policy.py``, ``backend/turn_perf.py``,
+``ui/panels/sources.py``, ``tests/domain/test_course_library_chat_context.py``,
+``tests/domain/test_source_library.py``, ``docs/IMPLEMENTATION_STATUS.md``.
+
+**Validation.** Focused domain source/routing tests pass. App rebuild/redeploy
+required; no AgentCore publish, generation bump, KB resync, or DSQL migration.
+
+**Next exact action.** Rebuild immutable ``APP_IMAGE`` from this SHA and refresh
+EC2 Compose so CloudFront matches local routing.
+
 ### Production stage policy matches local selection mode (2026-08-28)
 
 **Change.** ``compose.prod.yaml`` now sets ``STUDENT_STAGE_SELECTION=true`` and
