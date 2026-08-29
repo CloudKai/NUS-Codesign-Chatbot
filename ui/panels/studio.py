@@ -491,8 +491,6 @@ def render_journey_track() -> None:
         ),
         unsafe_allow_html=True,
     )
-    if selection_enabled:
-        st.caption("Choose a stage to work on.")
     if explicit_deep_review_available(
         completed_stages=list(completed),
     ) and not isinstance(thread_meta.get(DEEP_REVIEW_SNAPSHOT_KEY), dict):

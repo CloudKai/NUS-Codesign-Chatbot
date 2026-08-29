@@ -36,10 +36,11 @@ Review content should summarize the discussion, identify what is working, name c
 improvements, and provide a useful next action. Do not repeat progress indicators already
 shown in the Journey view.
 
-### Sources stay visible
+### Sources remain easy to reach
 
 Students should always know whether responses are grounded in selected sources or general
-model knowledge. Source selection is part of the main workspace, not a hidden setting.
+model knowledge. Source selection is a first-class Library destination in the center
+workspace, not a hidden setting or a permanently competing side column.
 
 ### Calm, professional density
 
@@ -68,55 +69,48 @@ copy or presented as a warning.
 ## 3. Information architecture
 
 ```text
-Top bar
-├── Product identity
-├── Current chat title
-├── Transcript download
-└── Profile avatar
-    ├── Display name
-    ├── Appearance
-    ├── Coaching style (Quick / Strict; new chats default to Quick)
-    └── Logout
-
 Workspace
 ├── Left nav (collapsible)
+│   ├── CDE2300 identity
 │   ├── New chat
 │   ├── Search chats
-│   ├── Library (toggles Sources)
-│   └── Recents (rename / delete)
+│   ├── Library
+│   ├── Recents (rename / download / delete)
+│   └── Profile and settings
 ├── Center
-│   ├── Chat (conversation + composer) or Search pane
-│   └── Sources when Library is on
-└── Thinking Path (right)
+│   ├── Chat (conversation + composer)
+│   ├── Search chats
+│   └── Library (Sources)
+└── Analyse / Thinking Path (right, collapsible)
     ├── Journey roadmap
     └── Review insights
 ```
 
-Desktop keeps Chat visible while Library opens Sources beside it. Search chats
-swaps the center pane only. Tablet and mobile use Chats | Chat | Library | Journey.
+Desktop uses one center destination at a time. Search and Library replace Chat in
+the center pane; selecting a chat returns to Chat, and selecting an already-active
+Library destination returns to Chat. Tablet and mobile keep the selected center
+destination visible beneath two temporary drawers: Navigation enters from the left
+and Thinking Path enters from the right.
 
 ## 4. Desktop layout
 
-The application fills the viewport and uses a compact header above one continuous workspace.
+The application fills the viewport with one continuous, header-free workspace.
 
 
-| Region        | Relative width | Purpose                                  |
+| Region        | Width          | Purpose                                  |
 | ------------- | -------------- | ---------------------------------------- |
-| Left nav      | fixed px       | New / Search / Library + Recents         |
-| Discussion    | 2.35           | Primary student–coach interaction        |
-| Sources       | 1.05           | Library column when toggled on           |
-| Thinking Path | 1.05           | Journey guidance and actionable review   |
+| Left nav      | 284 / 72 px    | Identity, destinations, Recents, profile |
+| Center        | flexible       | Chat, Search, or Library                  |
+| Thinking Path | flexible / 72 px | Journey guidance and actionable review |
 
 
 The areas share one outer surface. Thin vertical dividers create structure without
-turning each area into a floating card. Library off hides Sources completely (no
-skinny rail). Thinking Path can collapse to a right-hand rail.
+turning each area into a floating card. The two edge regions collapse symmetrically
+to icon rails; resizing between the open center and Thinking Path remains available.
 
 ### Spacing
 
-- Page inset: `16px`
-- Header vertical padding: approximately `10px`
-- Workspace top gap: approximately `10px`
+- Page inset: `0px`
 - Panel padding: `16–17px`
 - Standard control height: approximately `40px`
 - Compact radius: `10–14px`
@@ -158,16 +152,16 @@ headings.
 
 | Token         | Value     | Usage                                     |
 | ------------- | --------- | ----------------------------------------- |
-| Background    | `#F3F5F7` | Cool-slate application canvas             |
+| Background    | `#F7F9FC` | Cool-neutral application canvas           |
 | Surface       | `#FFFFFF` | Discussion, header, dialogs, and controls |
-| Panel         | `#EEF1F4` | Thinking Path and Sources columns         |
-| Muted surface | `#F7F9FA` | Low-emphasis controls and states          |
-| Text          | `#15202B` | Primary slate copy                        |
-| Muted text    | `#5B6B7C` | Supporting copy and metadata              |
-| Border        | `#D5DCE3` | Soft dividers and control outlines        |
-| Accent        | `#0F766E` | Teal selected states and primary actions  |
-| Accent hover  | `#0D9488` | Primary-action hover                      |
-| Accent soft   | `#E6F5F3` | Active stage and user messages            |
+| Panel         | `#F7F9FB` | Thinking Path surface                     |
+| Muted surface | `#F1F4F8` | Low-emphasis controls and states          |
+| Text          | `#1F2933` | Primary slate copy                        |
+| Muted text    | `#66727F` | Supporting copy and metadata              |
+| Border        | `#DDE3E9` | Soft dividers and control outlines        |
+| Accent        | `#179E90` | Teal selected states and primary actions  |
+| Accent hover  | `#11877B` | Primary-action hover                      |
+| Accent soft   | `#DFF6F2` | Active stage and user messages            |
 | Success       | `#15803D` | Positive status                           |
 | Warning dot   | `#E11D48` | Review change notification                |
 
@@ -181,15 +175,15 @@ Avoid flat all-white layouts and avoid using accent color for passive decoration
 
 | Token         | Value     | Usage                               |
 | ------------- | --------- | ----------------------------------- |
-| Background    | `#0e1420` | Application canvas                  |
-| Surface       | `#151c2a` | Header, workspace, dialogs          |
-| Muted surface | `#1a2232` | Low-emphasis controls and states    |
-| Text          | `#f3f5fb` | Primary copy                        |
-| Muted text    | `#a6afc1` | Supporting copy and metadata        |
-| Border        | `#2b3548` | Dividers and control outlines       |
-| Accent        | `#2DD4BF` | Teal selected states and primary actions |
-| Accent hover  | `#5EEAD4` | Primary-action hover                |
-| Accent soft   | `#14352F` | Active stage and user messages      |
+| Background    | `#0F1011` | Application canvas                  |
+| Surface       | `#101112` | Main workspace and dialogs          |
+| Muted surface | `#1D1F20` | Low-emphasis controls and states    |
+| Text          | `#E8EAED` | Primary copy                        |
+| Muted text    | `#9AA0A6` | Supporting copy and metadata        |
+| Border        | `#2D3033` | Dividers and control outlines       |
+| Accent        | `#39CDBA` | Teal selected states and primary actions |
+| Accent hover  | `#63DECF` | Primary-action hover                |
+| Accent soft   | `#123A35` | Active stage and user messages      |
 | Success       | `#53c9a2` | Source-grounding status             |
 
 
@@ -220,27 +214,18 @@ controls with accessible names.
 
 
 
-### Top bar
+### Application shell and sidebar
 
-The top bar contains:
+The CDE2300 mark and wordmark anchor the top of the left sidebar. New Chat,
+Search chats, and Library use quiet rounded navigation rows; teal appears only
+for the active destination. Recents are compact and keep rename, transcript
+download, and delete in their overflow menus.
 
-- Co-design identity and “Critical Thinking Companion” descriptor.
-- Current notebook as the single page-level heading with an aligned edit action.
-- Grouped Notebooks and New actions with no decorative space between them.
-- A visible `Short` or `Long` response-detail selector.
-- A compact Preferences trigger contained inside one bordered control.
-
-Response detail remains visible because it changes the conversational experience. Appearance
-and notebook details live in Preferences.
-
-Inside the Preferences trigger, treat the tune icon and chevron as one compact group. Center
-that group with a slight optical shift toward the chevron; do not distribute the two icons
-across the full button width.
-
-On desktop, center the complete notebook-title group against the page viewport rather than
-against its layout column. The title and edit icon share one vertical axis. Apply a
-pronounced downward optical offset to the pencil glyph inside its square action target so
-its visible stroke aligns with the title, without moving the target itself.
+The profile avatar, display name, appearance, coaching style, notebook actions,
+and logout remain anchored to the bottom of the sidebar. The same placement is
+used in the mobile Chats destination. Collapsed navigation uses accessible
+icon-only controls, while the collapsed right rail uses the Material Analytics
+icon labeled “Analyse / Thinking Path.”
 
 ### Thinking Path: Journey
 
@@ -312,8 +297,8 @@ Avoid:
 
 The discussion is the primary workspace.
 
-- Use the notebook title once, in the top bar, as the page-level heading. Do not
-repeat it above the discussion.
+- Use the selected Recent row as the notebook title and avoid repeating it as
+  a page-level heading above the discussion.
 - Immediately state whether selected sources or model knowledge ground the response.
 - Right-align student messages in a soft accent surface.
 - Do not show a redundant student avatar; bubble alignment and surface color already
@@ -437,15 +422,22 @@ enablement step.
 
 ### Tablet and mobile: `1050px` and below
 
-- Replace the three simultaneous columns with a panel switcher.
-- Panels are labeled Sources, Discussion, and Thinking Path.
-- Show only the selected panel.
-- Hide the full brand descriptor and current notebook identity when space is constrained.
-- Keep Notebooks, New, response detail, and Preferences available as compact controls.
-- Preserve full-width tap targets and avoid horizontally scrolling controls.
+- Show one compact, non-wrapping header row: Navigation, the ellipsized current
+  chat name, Analyse / Thinking Path, New chat, and chat actions.
+- Reuse the desktop Navigation and Thinking Path panels as full-height off-canvas
+  drawers. Navigation enters from the left; Thinking Path enters from the right.
+- Use one dimmed backdrop and allow only one drawer to be open at a time. Closing
+  a drawer restores the exact Chat, Search, or Library view beneath it.
+- Keep drawer width at `min(20.5rem, 88vw)` and use a short eased transition
+  (approximately `220ms`). Disable the movement when reduced motion is requested.
+- Keep rename, transcript download, and delete in chat actions. The dedicated
+  Material Analytics control opens Thinking Path and carries its review-attention
+  indicator.
+- Preserve full-width drawer destinations, compact Recents, profile/settings at
+  the bottom of Navigation, and the fixed chat composer.
 
-Mobile controls should remain usable at `390px` width. Long labels may wrap to two lines but
-must not overlap adjacent controls.
+Mobile controls must remain in one row at `390px` width. The current chat name
+truncates with an ellipsis; icon controls never overlap or wrap.
 
 ## 9. Accessibility
 
@@ -506,7 +498,8 @@ must not overlap adjacent controls.
 | Review                                | `ui/studio.py` → `render_learning_review()`           |
 | Notebook library                      | `ui/notebooks.py` → `notebooks_dialog()`              |
 | Profile / preferences                 | `ui/profile.py` → `render_profile_menu()`             |
-| Top bar and section nav               | `ui/topbar.py` → `render_topbar()`                    |
+| Startup title/model preparation       | `ui/topbar.py` → `prepare_workspace_context()`        |
+| Workspace shell and routing           | `ui/workspace.py`, `ui/panels/nav.py`, `ui/layout/`   |
 | Sources library UI                    | `ui/sources.py` → `render_sources_panel()`            |
 | Critical-thinking state               | `backend/student_journey.py`                          |
 | Language-aware coaching prompt        | `backend/student_support.py`                          |

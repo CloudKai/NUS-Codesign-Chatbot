@@ -428,7 +428,7 @@ def _render_source_sort_dropdown(thread_id: str) -> str:
 
 
 def render_sources_panel() -> None:
-    """Render the Sources column.
+    """Render the Sources library center destination.
 
     Auto-refresh (``run_every``) runs only while course-material sync is in
     progress. A permanent 1s timer leaves stale fragment IDs after full-app

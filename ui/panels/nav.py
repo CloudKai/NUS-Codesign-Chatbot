@@ -12,16 +12,14 @@ from typing import Any
 import streamlit as st
 
 from ui.constants import PRODUCT_TITLE
-from ui.layout.column_resize import (
-    library_open,
-    nav_collapsed,
-    set_library_open,
-    set_nav_collapsed,
-)
+from ui.layout.column_resize import nav_collapsed, set_nav_collapsed
+from ui.profile import render_profile_menu
+from ui.menu_popovers import close_menu_popover, menu_popover_widget_key
 from ui.rename import (
     bump_rename_epoch,
     discard_rename_draft,
     render_enter_to_apply_rename,
+    sync_rename_select_all,
 )
 from ui.runtime import rerun_app, store
 from ui.session import (
@@ -32,9 +30,27 @@ from ui.session import (
 )
 
 
+def close_mobile_nav_overlay() -> None:
+    """Dismiss the Gemini-style mobile nav drawer when open."""
+    if st.session_state.get("mobile_nav_open"):
+        st.session_state.mobile_nav_open = False
+
+
+def close_mobile_drawers() -> None:
+    """Dismiss both mobile drawers without changing the center destination."""
+    st.session_state.mobile_nav_open = False
+    st.session_state.mobile_studio_open = False
+
+
+def _finish_mobile_nav_destination() -> None:
+    """Close both mobile drawers after a nav destination is chosen."""
+    close_mobile_drawers()
+
+
 def render_nav_panel() -> None:
     """Render the collapsible left chat rail (expanded or icon-only)."""
-    collapsed = nav_collapsed()
+    # Mobile overlay always uses the full rail, not the icon-only strip.
+    collapsed = nav_collapsed() and not bool(st.session_state.get("mobile_nav_open"))
     with st.container(key="nav_panel"):
         if collapsed:
             _render_collapsed_nav()
@@ -46,7 +62,7 @@ def _render_collapsed_nav() -> None:
     """Icon-only New / Search / Library plus expand control."""
     with st.container(key="nav_collapsed_actions"):
         if st.button(
-            "",
+            "Expand sidebar",
             icon=":material/dock_to_right:",
             type="tertiary",
             key="nav-expand",
@@ -56,41 +72,48 @@ def _render_collapsed_nav() -> None:
             rerun_app()
         locked = notebook_switch_locked()
         if st.button(
-            "",
+            "New chat",
             icon=":material/edit_square:",
             type="tertiary",
             key="nav-new-chat-collapsed",
             help="New chat",
             disabled=locked,
         ):
+            _finish_mobile_nav_destination()
             st.session_state.center_view = "chat"
+            st.session_state.mobile_panel = "Chat"
             new_notebook()
         if st.button(
-            "",
+            "Search chats",
             icon=":material/search:",
             type="tertiary",
             key="nav-search-collapsed",
             help="Search chats",
         ):
+            _finish_mobile_nav_destination()
             st.session_state.center_view = "search"
             st.session_state.pending_mobile_panel = "Chat"
             rerun_app()
-        library_on = library_open()
+        library_on = st.session_state.get("center_view") == "library"
         if st.button(
-            "",
+            "Library",
             icon=":material/grid_view:",
             type="primary" if library_on else "tertiary",
             key="nav-library-collapsed",
             help="Library",
         ):
-            set_library_open(not library_on)
+            _finish_mobile_nav_destination()
+            st.session_state.center_view = "chat" if library_on else "library"
+            st.session_state.pending_mobile_panel = "Chat" if library_on else "Sources"
             rerun_app()
+    render_profile_menu(collapsed=True)
 
 
 def _render_expanded_nav() -> None:
     """Full rail: brand, primary actions, scrollable Recents."""
+    overlay_open = bool(st.session_state.get("mobile_nav_open"))
     with st.container(key="nav_header"):
-        brand_col, collapse_col = st.columns([0.82, 0.18], gap="small")
+        brand_col, collapse_col = st.columns([0.78, 0.22], gap="small")
         brand_col.markdown(
             f'<div class="cd-nav-brand">'
             f'<span class="brand-mark">C</span>'
@@ -98,8 +121,18 @@ def _render_expanded_nav() -> None:
             f"</div>",
             unsafe_allow_html=True,
         )
-        if collapse_col.button(
-            "",
+        if overlay_open:
+            if collapse_col.button(
+                "Close menu",
+                icon=":material/close:",
+                type="tertiary",
+                key="mobile-nav-close",
+                help="Close menu",
+            ):
+                close_mobile_nav_overlay()
+                rerun_app()
+        elif collapse_col.button(
+            "Collapse sidebar",
             icon=":material/dock_to_right:",
             type="tertiary",
             key="nav-collapse",
@@ -119,7 +152,9 @@ def _render_expanded_nav() -> None:
             disabled=locked,
             help="Wait for the coach reply" if locked else None,
         ):
+            _finish_mobile_nav_destination()
             st.session_state.center_view = "chat"
+            st.session_state.mobile_panel = "Chat"
             new_notebook()
         if st.button(
             "Search chats",
@@ -128,10 +163,11 @@ def _render_expanded_nav() -> None:
             key="nav-search-chats",
             use_container_width=True,
         ):
+            _finish_mobile_nav_destination()
             st.session_state.center_view = "search"
             st.session_state.pending_mobile_panel = "Chat"
             rerun_app()
-        library_on = library_open()
+        library_on = st.session_state.get("center_view") == "library"
         if st.button(
             "Library",
             icon=":material/grid_view:",
@@ -139,11 +175,10 @@ def _render_expanded_nav() -> None:
             key="nav-library",
             use_container_width=True,
         ):
-            set_library_open(not library_on)
-            if not library_on:
-                st.session_state.pending_mobile_panel = "Sources"
+            _finish_mobile_nav_destination()
+            st.session_state.center_view = "chat" if library_on else "library"
+            st.session_state.pending_mobile_panel = "Chat" if library_on else "Sources"
             rerun_app()
-
     st.markdown(
         '<div class="cd-nav-section-label">Recents</div>',
         unsafe_allow_html=True,
@@ -156,9 +191,10 @@ def _render_expanded_nav() -> None:
     with st.container(key="nav_recents_scroll", height="stretch"):
         if not threads:
             st.caption("No chats yet.")
-            return
-        for thread in threads:
-            _render_recent_row(thread, active_id=active_id, locked=locked)
+        else:
+            for thread in threads:
+                _render_recent_row(thread, active_id=active_id, locked=locked)
+    render_profile_menu()
 
 
 def _render_recent_row(
@@ -167,7 +203,7 @@ def _render_recent_row(
     active_id: str,
     locked: bool,
 ) -> None:
-    """One Recents row: open chat + ⋮ Rename / Delete."""
+    """One Recents row with open, rename, download, and delete actions."""
     thread_id = str(thread.get("id") or "")
     if not thread_id:
         return
@@ -187,64 +223,119 @@ def _render_recent_row(
                 disabled=open_disabled,
                 help="Wait for the coach reply" if open_disabled else None,
             ):
+                _finish_mobile_nav_destination()
                 st.session_state.center_view = "chat"
+                st.session_state.mobile_panel = "Chat"
                 select_thread(thread_id)
         with menu_col:
-            with st.popover(
-                "",
-                icon=":material/more_vert:",
+            # Icon in the label (not icon=) so Streamlit omits expand_more chrome.
+            menu = st.popover(
+                ":material/more_vert:",
+                type="tertiary",
                 help="Chat actions",
                 disabled=locked,
-                key=f"nav-menu-{thread_id}",
-            ):
-                _render_recent_menu(thread_id, title=title)
+                key=menu_popover_widget_key("nav-chat", thread_id),
+            )
+            was_open_key = f"nav-menu-was-open-{thread_id}"
+            was_open = bool(st.session_state.get(was_open_key))
+            is_open = bool(menu.open)
+            if was_open and not is_open:
+                discard_rename_draft("notebook", thread_id)
+                bump_rename_epoch("notebook", thread_id)
+            st.session_state[was_open_key] = is_open
+            with menu:
+                render_chat_actions_menu(
+                    thread_id,
+                    title=title,
+                    menu_scope="nav-chat",
+                )
 
 
-def _render_recent_menu(thread_id: str, *, title: str) -> None:
-    """Popover actions: Rename and Delete only."""
-    if st.button(
-        "Rename",
-        icon=":material/edit:",
-        type="tertiary",
-        key=f"nav-rename-open-{thread_id}",
-        use_container_width=True,
-    ):
-        st.session_state[f"nav_renaming_{thread_id}"] = True
-        rerun_app()
-    if st.button(
-        "Delete",
-        icon=":material/delete:",
-        type="tertiary",
-        key=f"nav-delete-open-{thread_id}",
-        use_container_width=True,
-    ):
-        st.session_state.pending_delete_chat_id = thread_id
-        rerun_app()
-
-    if st.session_state.get(f"nav_renaming_{thread_id}"):
+def render_chat_actions_menu(
+    thread_id: str,
+    *,
+    title: str,
+    menu_scope: str = "nav-chat",
+) -> None:
+    """Popover body: Rename, download transcript, and Delete."""
+    safe_id = thread_id.replace("-", "_")
+    rename_key = (
+        f"nav_rename_{safe_id}"
+        if menu_scope == "nav-chat"
+        else f"mobile_rename_{safe_id}"
+    )
+    danger_key = (
+        f"nav_action_danger_{safe_id}"
+        if menu_scope == "nav-chat"
+        else f"mobile_action_danger_{safe_id}"
+    )
+    with st.container(key=rename_key):
         applied, cleaned = render_enter_to_apply_rename(
             kind="notebook",
             item_id=str(thread_id),
             label="Rename",
             current_value=title,
+            key_namespace=menu_scope,
         )
-        if applied and cleaned and cleaned != title:
-            store.update_thread(thread_id, name=cleaned)
-            st.session_state.pop(f"nav_renaming_{thread_id}", None)
-            bump_rename_epoch("notebook", thread_id)
-            rerun_app()
-        if st.button(
-            "Cancel rename",
+    if applied and cleaned and cleaned != title:
+        store.update_thread(thread_id, name=cleaned)
+        close_menu_popover(menu_scope, thread_id)
+        bump_rename_epoch("notebook", thread_id)
+        rerun_app()
+    sync_rename_select_all(
+        root_selector=(
+            f'[data-testid="stPopoverBody"]'
+            f":has(.st-key-{rename_key})"
+        ),
+        aria_label="Rename",
+    )
+
+    try:
+        transcript = store.download_transcript(thread_id)
+    except ValueError:
+        transcript = None
+    if transcript is not None:
+        st.download_button(
+            "Download transcript",
+            data=transcript.data,
+            file_name=transcript.filename,
+            mime="text/plain",
+            key=f"{menu_scope}-download-transcript-{thread_id}",
             type="tertiary",
-            key=f"nav-rename-cancel-{thread_id}",
+            icon=":material/download:",
+            help="Save this chat transcript",
+            use_container_width=True,
+        )
+
+    with st.container(key=danger_key):
+        if st.button(
+            "Delete",
+            icon=":material/delete:",
+            type="tertiary",
+            key=f"{menu_scope}-delete-open-{thread_id}",
+            use_container_width=True,
         ):
-            discard_rename_draft("notebook", thread_id)
-            bump_rename_epoch("notebook", thread_id)
-            st.session_state.pop(f"nav_renaming_{thread_id}", None)
+            st.session_state.pending_delete_chat_id = thread_id
+            close_menu_popover(menu_scope, thread_id)
             rerun_app()
 
 
-@st.dialog("Delete chat?")
+def _render_recent_menu(thread_id: str, *, title: str, safe_id: str) -> None:
+    """Backward-compatible wrapper for Recents popover body."""
+    del safe_id
+    render_chat_actions_menu(thread_id, title=title, menu_scope="nav-chat")
+
+
+def dismiss_delete_chat_dialog() -> None:
+    """Clear pending delete when the dialog is closed via X / outside / Esc.
+
+    Without this, clicking away leaves ``pending_delete_chat_id`` set and the
+    confirmation remounts on every later rerun (including New chat).
+    """
+    st.session_state.pop("pending_delete_chat_id", None)
+
+
+@st.dialog("Delete chat?", on_dismiss=dismiss_delete_chat_dialog)
 def confirm_delete_chat_dialog() -> None:
     """Confirm permanent chat deletion from the Recents ⋮ menu."""
     thread_id = str(st.session_state.get("pending_delete_chat_id") or "").strip()
@@ -258,7 +349,7 @@ def confirm_delete_chat_dialog() -> None:
     )
     cancel_col, delete_col = st.columns(2)
     if cancel_col.button("Cancel", use_container_width=True, key="nav-delete-cancel"):
-        st.session_state.pop("pending_delete_chat_id", None)
+        dismiss_delete_chat_dialog()
         rerun_app()
     locked = notebook_switch_locked()
     if delete_col.button(
@@ -269,7 +360,7 @@ def confirm_delete_chat_dialog() -> None:
         key="nav-delete-confirm",
     ):
         delete_notebook(thread_id)
-        st.session_state.pop("pending_delete_chat_id", None)
+        dismiss_delete_chat_dialog()
         # Defer notebook switch until the next script run (before widgets).
         if not st.session_state.get("thread_id"):
             threads = store.list_threads()

@@ -964,6 +964,219 @@
         height:100% !important;
     }
 
+    /* Profile now lives at the bottom of the Gemini-style navigation rail. */
+    .st-key-sidebar_profile {
+        flex:0 0 auto !important;
+        margin-top:auto !important;
+        padding:.65rem .05rem 0;
+        border-top:1px solid color-mix(in srgb,var(--cd-border) 74%,transparent);
+    }
+
+    .st-key-sidebar_profile > [data-testid="stVerticalBlock"],
+    .st-key-sidebar_profile > [data-testid="stLayoutWrapper"],
+    .st-key-sidebar_profile [data-testid="stHorizontalBlock"] {
+        align-items:center !important;
+        gap:0 !important;
+        width:100% !important;
+        min-height:2.35rem !important;
+    }
+
+    .st-key-sidebar_profile [data-testid="stColumn"],
+    .st-key-sidebar_profile [data-testid="stColumn"]
+    > [data-testid="stVerticalBlock"],
+    .st-key-sidebar_profile [data-testid="stColumn"]
+    > [data-testid="stLayoutWrapper"] {
+        display:flex !important;
+        flex-direction:column !important;
+        justify-content:center !important;
+        align-items:stretch !important;
+        min-height:2.35rem !important;
+        height:100% !important;
+        margin:0 !important;
+        padding:0 !important;
+        gap:0 !important;
+    }
+
+    .st-key-sidebar_profile
+    [data-testid="stElementContainer"]:has(.cd-sidebar-profile-identity),
+    .st-key-sidebar_profile
+    [data-testid="stElementContainer"]:has(.cd-sidebar-profile-identity)
+    > div,
+    .st-key-sidebar_profile
+    [data-testid="stMarkdownContainer"]:has(.cd-sidebar-profile-identity) {
+        display:flex !important;
+        align-items:center !important;
+        margin:0 !important;
+        padding:0 !important;
+        min-height:2.35rem !important;
+        height:2.35rem !important;
+    }
+
+    .cd-sidebar-profile-identity {
+        display:flex;
+        align-items:center;
+        gap:10px;
+        min-width:0;
+        width:100%;
+        height:2.35rem;
+        min-height:2.35rem;
+        margin:0;
+        padding:0 .15rem 0 0;
+        pointer-events:none;
+        user-select:none;
+    }
+
+    .cd-sidebar-profile-avatar {
+        flex:0 0 auto;
+        width:1.9rem;
+        height:1.9rem;
+        display:grid;
+        place-items:center;
+        border-radius:999px;
+        color:#fff;
+        background:var(--cd-accent);
+        font-family:"IBM Plex Sans",ui-sans-serif,sans-serif;
+        font-size:.72rem;
+        font-weight:700;
+        letter-spacing:.01em;
+        line-height:1;
+    }
+
+    .cd-sidebar-profile-name {
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+        color:var(--cd-text);
+        font-size:.86rem;
+        font-weight:500;
+        line-height:1.2;
+    }
+
+    .st-key-sidebar_profile_settings,
+    .st-key-sidebar_profile_settings > [data-testid="stVerticalBlock"],
+    .st-key-sidebar_profile_settings > [data-testid="stLayoutWrapper"] {
+        display:flex !important;
+        justify-content:flex-end !important;
+        align-items:center !important;
+        width:100% !important;
+        min-height:2.35rem !important;
+        height:2.35rem !important;
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .st-key-sidebar_profile [data-testid="stPopover"],
+    .st-key-sidebar_profile [data-testid="stPopover"] > div {
+        width:auto !important;
+        height:2.35rem !important;
+        margin:0 0 0 auto !important;
+        display:flex !important;
+        align-items:center !important;
+    }
+
+    .st-key-sidebar_profile [data-testid="stPopover"] button,
+    .st-key-sidebar_profile [data-testid="stPopover"] [data-testid="stPopoverButton"] {
+        width:2.35rem !important;
+        min-width:2.35rem !important;
+        max-width:2.35rem !important;
+        height:2.35rem !important;
+        min-height:2.35rem !important;
+        justify-content:center !important;
+        gap:0 !important;
+        padding:0 !important;
+        border:0 !important;
+        border-radius:.75rem !important;
+        color:var(--cd-muted) !important;
+        background:transparent !important;
+        box-shadow:none !important;
+        overflow:hidden !important;
+    }
+
+    .st-key-sidebar_profile [data-testid="stPopover"] button:hover {
+        color:var(--cd-text) !important;
+        background:color-mix(in srgb,var(--cd-text) 7%,transparent) !important;
+    }
+
+    .st-key-sidebar_profile [data-testid="stPopover"] button > div,
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    span[data-has-shortcut] {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        gap:0 !important;
+        width:100% !important;
+        height:100% !important;
+        margin:0 !important;
+    }
+
+    .st-key-sidebar_profile [data-testid="stPopover"] button p {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        margin:0 !important;
+        padding:0 !important;
+        line-height:1 !important;
+        color:inherit !important;
+    }
+
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    [data-testid="stIconMaterial"],
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    [data-testid="stMarkdownContainer"] {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        margin:0 !important;
+        width:auto !important;
+        height:auto !important;
+        border-radius:0 !important;
+        background:transparent !important;
+        color:inherit !important;
+        font-size:1.25rem !important;
+        line-height:1 !important;
+    }
+
+    /* Drop Streamlit's expand_more chevron; keep the settings glyph. */
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    [aria-hidden="true"],
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    [data-testid="stIconMaterial"]:nth-of-type(n+2),
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    [data-testid="stMarkdownContainer"] ~ [data-testid="stIconMaterial"],
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    span[data-has-shortcut] > span:last-child:not(:only-child) {
+        display:none !important;
+        width:0 !important;
+        height:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+        overflow:hidden !important;
+    }
+
+    .st-key-nav_panel:has(.st-key-nav_collapsed_actions) .st-key-sidebar_profile {
+        width:100%;
+        padding:.65rem 0 0;
+        display:flex;
+        justify-content:center;
+    }
+
+    .st-key-nav_panel:has(.st-key-nav_collapsed_actions)
+    .st-key-sidebar_profile [data-testid="stPopover"],
+    .st-key-nav_panel:has(.st-key-nav_collapsed_actions)
+    .st-key-sidebar_profile [data-testid="stPopover"] > div {
+        margin:0 auto !important;
+    }
+
+    .st-key-nav_panel:has(.st-key-nav_collapsed_actions)
+    .st-key-sidebar_profile [data-testid="stPopover"] button {
+        width:2.75rem !important;
+        min-width:2.75rem !important;
+        height:2.75rem !important;
+        min-height:2.75rem !important;
+        border-radius:1rem !important;
+    }
+
     .st-key-topbar_actions,
     .st-key-topbar_actions > [data-testid="stVerticalBlock"],
     .st-key-topbar_actions > [data-testid="stLayoutWrapper"],
@@ -1016,4 +1229,3 @@
     .st-key-topbar_mode {
         width:max-content !important;
     }
-

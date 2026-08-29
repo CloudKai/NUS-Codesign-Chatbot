@@ -153,12 +153,9 @@ def test_queued_stage_review_shows_journey_stop_badge_before_unread() -> None:
     store.update_thread(thread_id, metadata=metadata)
     app.run()
     assert not app.exception
-    workspace_panel = next(
-        radio for radio in app.radio if radio.label == "Workspace panel"
-    )
-    # Radio option string stays Journey; CSS paints 🛑 from this DOM flag.
-    assert "Journey" in workspace_panel.options
-    assert "Journey 🛑" not in workspace_panel.options
+    assert not any(radio.label == "Workspace panel" for radio in app.radio)
+    assert any((button.key or "") == "mobile-nav-menu" for button in app.button)
+    # Attention flag still mounts so CSS can badge the menu control.
     assert _MOBILE_JOURNEY_ATTENTION_MARKUP in _markdown_blob(app)
     studio_section = next(
         radio for radio in app.radio if radio.label == "Thinking Path section"
@@ -202,12 +199,8 @@ def test_stage_review_checkpoint_renders_on_review_tab_with_stop_badge() -> None
     ]
     app.run()
     assert not app.exception
-    workspace_panel = next(
-        radio for radio in app.radio if radio.label == "Workspace panel"
-    )
-    assert "Journey" in workspace_panel.options
-    assert "Journey 🛑" not in workspace_panel.options
-    assert "Journey !" not in workspace_panel.options
+    assert not any(radio.label == "Workspace panel" for radio in app.radio)
+    assert any((button.key or "") == "mobile-nav-menu" for button in app.button)
     assert _MOBILE_JOURNEY_ATTENTION_MARKUP in _markdown_blob(app)
     studio_section = next(
         radio for radio in app.radio if radio.label == "Thinking Path section"
@@ -239,12 +232,7 @@ def test_stage_review_checkpoint_renders_on_review_tab_with_stop_badge() -> None
         )
     )
     assert cleared.get("unread") is False
-    workspace_panel = next(
-        radio for radio in app.radio if radio.label == "Workspace panel"
-    )
-    assert "Journey 🛑" not in workspace_panel.options
-    assert "Journey" in workspace_panel.options
-    assert "Review" not in workspace_panel.options
+    assert not any(radio.label == "Workspace panel" for radio in app.radio)
     assert _MOBILE_JOURNEY_ATTENTION_MARKUP not in _markdown_blob(app)
     studio_section = next(
         radio for radio in app.radio if radio.label == "Thinking Path section"

@@ -1,3 +1,24 @@
+    .st-key-mobile_studio_close,
+    .st-key-mobile_drawer_backdrop {
+        display:none !important;
+    }
+
+    @media (min-width:1051px) {
+        .st-key-mobile_studio_close,
+        .st-key-mobile_drawer_backdrop {
+            display:none !important;
+            position:absolute !important;
+            width:0 !important;
+            height:0 !important;
+            min-height:0 !important;
+            max-height:0 !important;
+            overflow:hidden !important;
+            visibility:hidden !important;
+            opacity:0 !important;
+            pointer-events:none !important;
+        }
+    }
+
     @media (max-width:1050px) {
         .block-container {
             padding:0 .7rem 0;
@@ -109,107 +130,194 @@
             border-radius:.75rem !important;
         }
 
+        /* Gemini mobile chrome: menu | title | Analytics | new chat | ⋮ */
         .st-key-mobile_panel {
             display:block;
             width:100%;
             flex:0 0 auto;
-            margin:.65rem 0 .7rem;
+            margin:0;
+            padding:.35rem .7rem;
+            border-bottom:1px solid var(--cd-border);
+            background:var(--cd-nav);
         }
 
-        .st-key-mobile_panel [data-testid="stRadio"] {
-            width:100%;
+        .st-key-mobile_panel > [data-testid="stVerticalBlock"],
+        .st-key-mobile_panel > [data-testid="stLayoutWrapper"] {
+            gap:.15rem !important;
         }
 
-        .st-key-mobile_panel [data-testid="stRadio"] > div {
-            width:100%;
-            display:grid;
-            grid-template-columns:repeat(4,1fr);
-            gap:.2rem;
-            padding:.25rem;
-            border:1px solid var(--cd-border);
-            border-radius:.75rem;
-            background:var(--cd-surface-muted);
+        .st-key-mobile_panel > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"],
+        .st-key-mobile_panel > [data-testid="stVerticalBlock"]
+        > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"],
+        .st-key-mobile_panel > [data-testid="stVerticalBlock"]
+        > [data-testid="stHorizontalBlock"] {
+            display:grid !important;
+            grid-template-columns:2.55rem minmax(0,1fr) repeat(3,2.55rem);
+            align-items:center !important;
+            flex-wrap:nowrap !important;
+            gap:.2rem !important;
+            min-height:2.75rem;
         }
 
-        .st-key-mobile_panel [role="radiogroup"] {
-            width:100%;
-            display:grid;
-            grid-template-columns:repeat(4,minmax(0,1fr));
-            gap:.2rem;
-            padding:.24rem;
+        .st-key-mobile_panel > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+        .st-key-mobile_panel > [data-testid="stVerticalBlock"]
+        > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+        .st-key-mobile_panel > [data-testid="stVerticalBlock"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+            width:auto !important;
+            min-width:0 !important;
+            max-width:none !important;
+            flex:none !important;
         }
 
-        .st-key-mobile_panel label[data-testid="stRadioOption"] {
-            min-height:2.55rem;
-            display:flex;
-            align-items:center;
-            justify-content:center;
+        .cd-mobile-view,
+        .cd-mobile-nav-open,
+        .cd-mobile-studio-open,
+        [data-testid="stElementContainer"]:has(.cd-mobile-view),
+        [data-testid="stElementContainer"]:has(.cd-mobile-nav-open),
+        [data-testid="stElementContainer"]:has(.cd-mobile-studio-open) {
+            display:none !important;
+            height:0 !important;
             margin:0 !important;
-            padding:.35rem .25rem;
-            border-radius:.55rem;
-            color:var(--cd-muted);
-            background:transparent;
+            padding:0 !important;
+            overflow:hidden !important;
         }
 
-        .st-key-mobile_panel label[data-testid="stRadioOption"][data-selected="true"] {
-            color:var(--cd-accent);
-            background:var(--cd-accent-soft);
+        /* Match icon-button hit height (2.55rem) and vertically center the label. */
+        .st-key-mobile_panel [data-testid="stColumn"]:nth-child(2)
+        [data-testid="stElementContainer"]:has(.cd-mobile-header-title),
+        .st-key-mobile_panel [data-testid="stColumn"]:nth-child(2)
+        [data-testid="stMarkdown"]:has(.cd-mobile-header-title),
+        .st-key-mobile_panel [data-testid="stColumn"]:nth-child(2)
+        [data-testid="stMarkdownContainer"]:has(.cd-mobile-header-title),
+        .st-key-mobile_panel [data-testid="stColumn"]:nth-child(2)
+        [data-testid="stMarkdown"] > div:has(.cd-mobile-header-title) {
+            display:flex !important;
+            align-items:center !important;
+            justify-content:flex-start !important;
+            width:100% !important;
+            min-width:0 !important;
+            height:2.55rem !important;
+            min-height:2.55rem !important;
+            max-height:2.55rem !important;
+            margin:0 !important;
+            padding:0 !important;
         }
 
-        .st-key-mobile_panel label[data-testid="stRadioOption"]
-        > div > div > div:first-child {
+        .cd-mobile-header-title {
+            display:block !important;
+            box-sizing:border-box !important;
+            width:100% !important;
+            min-width:0 !important;
+            height:2.55rem !important;
+            min-height:2.55rem !important;
+            max-height:2.55rem !important;
+            margin:0 !important;
+            padding:0 .35rem !important;
+            overflow:hidden !important;
+            text-overflow:ellipsis !important;
+            white-space:nowrap !important;
+            text-align:left !important;
+            color:var(--cd-text) !important;
+            font-size:.95rem !important;
+            font-weight:600 !important;
+            line-height:2.55rem !important;
+        }
+
+        .st-key-mobile_nav_menu div[data-testid="stButton"] button,
+        .st-key-mobile_analyse div[data-testid="stButton"] button,
+        .st-key-mobile_panel [class*="st-key-mobile-new-chat"]
+        div[data-testid="stButton"] button,
+        .st-key-mobile_chat_menu [data-testid="stPopover"] button,
+        .st-key-mobile_chat_menu div[data-testid="stButton"] button {
+            width:2.55rem !important;
+            min-width:2.55rem !important;
+            height:2.55rem !important;
+            min-height:2.55rem !important;
+            padding:0 !important;
+            border:0 !important;
+            border-radius:.85rem !important;
+            color:var(--cd-text) !important;
+            background:transparent !important;
+            box-shadow:none !important;
+            justify-content:center !important;
+        }
+
+        .st-key-mobile_nav_menu div[data-testid="stButton"] button:hover,
+        .st-key-mobile_analyse div[data-testid="stButton"] button:hover,
+        .st-key-mobile_panel [class*="st-key-mobile-new-chat"]
+        div[data-testid="stButton"] button:hover,
+        .st-key-mobile_chat_menu [data-testid="stPopover"] button:hover,
+        .st-key-mobile_chat_menu div[data-testid="stButton"] button:hover {
+            background:color-mix(in srgb,var(--cd-text) 8%,transparent) !important;
+        }
+
+        .st-key-mobile_nav_menu div[data-testid="stButton"] button p,
+        .st-key-mobile_analyse div[data-testid="stButton"] button p,
+        .st-key-mobile_panel [class*="st-key-mobile-new-chat"]
+        div[data-testid="stButton"] button p,
+        .st-key-mobile_chat_menu div[data-testid="stButton"] button p {
+            position:absolute !important;
+            width:1px !important;
+            height:1px !important;
+            overflow:hidden !important;
+            clip:rect(0,0,0,0) !important;
+        }
+
+        .st-key-mobile_chat_menu [data-testid="stPopover"] button p {
+            display:inline-flex !important;
+            margin:0 !important;
+            line-height:1 !important;
+        }
+
+        .st-key-mobile_chat_menu [data-testid="stPopover"] button
+        [data-testid="stIconMaterial"]:last-child:not(:only-child),
+        .st-key-mobile_chat_menu [data-testid="stPopover"] button
+        [aria-hidden="true"] {
             display:none !important;
         }
 
-        .st-key-mobile_panel label[data-testid="stRadioOption"] p {
-            color:inherit !important;
-            -webkit-text-fill-color:currentColor !important;
-        }
-
-        /* Paint 🛑 on the Journey (Studio) label without remounting options.
-           Studio is the 4th radio (index 3) after Chats / Chat / Library. */
+        /* Review attention belongs to the dedicated Analytics control. */
         body:has(.st-key-mobile_journey_attention)
-        .st-key-mobile_panel [role="radiogroup"] > label[data-testid="stRadioOption"]:nth-child(4) p,
+        .st-key-mobile_analyse div[data-testid="stButton"] button,
         body:has(.cd-mobile-journey-attention)
-        .st-key-mobile_panel [role="radiogroup"] > label[data-testid="stRadioOption"]:nth-child(4) p,
-        body:has(.st-key-mobile_journey_attention)
-        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="Studio"]) p,
-        body:has(.cd-mobile-journey-attention)
-        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="Studio"]) p,
-        body:has(.st-key-mobile_journey_attention)
-        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="3"]) p,
-        body:has(.cd-mobile-journey-attention)
-        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="3"]) p {
-            white-space:nowrap;
+        .st-key-mobile_analyse div[data-testid="stButton"] button {
+            position:relative !important;
         }
 
         body:has(.st-key-mobile_journey_attention)
-        .st-key-mobile_panel [role="radiogroup"] > label[data-testid="stRadioOption"]:nth-child(4) p::after,
+        .st-key-mobile_analyse div[data-testid="stButton"] button::after,
         body:has(.cd-mobile-journey-attention)
-        .st-key-mobile_panel [role="radiogroup"] > label[data-testid="stRadioOption"]:nth-child(4) p::after,
-        body:has(.st-key-mobile_journey_attention)
-        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="Studio"]) p::after,
-        body:has(.cd-mobile-journey-attention)
-        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="Studio"]) p::after,
-        body:has(.st-key-mobile_journey_attention)
-        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="3"]) p::after,
-        body:has(.cd-mobile-journey-attention)
-        .st-key-mobile_panel label[data-testid="stRadioOption"]:has(input[value="3"]) p::after {
-            content:" 🛑";
-            font-size:1.05rem;
-            line-height:1;
-            margin-left:.12rem;
-            -webkit-text-fill-color:initial;
-            vertical-align:-0.12em;
+        .st-key-mobile_analyse div[data-testid="stButton"] button::after {
+            content:"";
+            position:absolute;
+            top:.42rem;
+            right:.42rem;
+            width:.42rem;
+            height:.42rem;
+            border-radius:999px;
+            background:#e11d48;
+            box-shadow:0 0 0 2px var(--cd-nav);
+        }
+
+        /* Mobile chat ⋮ opens downward under the header control. */
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"]),
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_action_danger"]) {
+            min-width:14rem !important;
+            transform:translateY(.35rem) !important;
         }
 
         .st-key-notebook_workspace {
             border:1px solid var(--cd-border);
             border-radius:.85rem;
-            /* Fill remaining viewport under topbar + panel switcher. */
+            /* Fill remaining viewport under topbar + mobile chrome. */
             min-height:0 !important;
-            height:calc(100dvh - 9.2rem) !important;
-            max-height:calc(100dvh - 9.2rem) !important;
+            height:calc(100dvh - 8.2rem) !important;
+            max-height:calc(100dvh - 8.2rem) !important;
         }
 
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
@@ -233,64 +341,153 @@
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel),
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-search_panel),
-        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel),
-        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-nav_panel),
-        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-sources_hidden) {
-            display:none;
-        }
-
-        body:has(.st-key-mobile_panel input[value="Studio"]:checked)
-        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel),
-        body:has(.st-key-mobile_panel label:nth-child(4) input:checked)
-        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel) {
-            display:block;
-        }
-
-        body:has(.st-key-mobile_panel input[value="Chat"]:checked)
-        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel),
-        body:has(.st-key-mobile_panel input[value="Chat"]:checked)
-        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-search_panel),
-        body:has(.st-key-mobile_panel label:nth-child(2) input:checked)
-        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel),
-        body:has(.st-key-mobile_panel label:nth-child(2) input:checked)
-        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-search_panel) {
             display:block;
         }
 
-        body:has(.st-key-mobile_panel input[value="Sources"]:checked)
-        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-sources_panel),
-        body:has(.st-key-mobile_panel label:nth-child(3) input:checked)
-        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-sources_panel) {
-            display:block;
-        }
-
-        body:has(.st-key-mobile_panel input[value="Chats"]:checked)
-        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-nav_panel),
-        body:has(.st-key-mobile_panel label:nth-child(1) input:checked)
+        /* Both side panels stay mounted as fixed, full-height surfaces. */
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-nav_panel) {
-            display:block;
+            display:block !important;
+            position:fixed !important;
+            top:0 !important;
+            left:0 !important;
+            bottom:0 !important;
+            width:min(20.5rem,88vw) !important;
+            min-width:0 !important;
+            max-width:88vw !important;
+            z-index:430 !important;
+            background:var(--cd-nav) !important;
+            box-shadow:8px 0 28px rgba(0,0,0,.28);
+            overflow:auto !important;
+            visibility:hidden;
+            pointer-events:none;
+            transform:translateX(-100%);
+            transition:transform 220ms ease, visibility 0s linear 220ms;
         }
 
-        /* If the switcher remounts with no checked option, show Chat rather
-           than a blank white workspace. */
-        body:has(.st-key-mobile_panel):not(:has(.st-key-mobile_panel input:checked))
+        body:has(.cd-mobile-nav-open)
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
-        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel) {
-            display:block;
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-nav_panel) {
+            visibility:visible;
+            pointer-events:auto;
+            transform:translateX(0);
+            transition:transform 220ms ease, visibility 0s linear 0s;
+        }
+
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel) {
+            display:block !important;
+            position:fixed !important;
+            top:0 !important;
+            right:0 !important;
+            bottom:0 !important;
+            width:min(20.5rem,88vw) !important;
+            min-width:0 !important;
+            max-width:88vw !important;
+            z-index:430 !important;
+            background:var(--cd-surface) !important;
+            box-shadow:-8px 0 28px rgba(0,0,0,.28);
+            overflow:auto !important;
+            visibility:hidden;
+            pointer-events:none;
+            transform:translateX(100%);
+            transition:transform 220ms ease, visibility 0s linear 220ms;
+        }
+
+        body:has(.cd-mobile-studio-open)
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel) {
+            visibility:visible;
+            pointer-events:auto;
+            transform:translateX(0);
+            transition:transform 220ms ease, visibility 0s linear 0s;
+        }
+
+        body:has(.cd-mobile-nav-open) .st-key-nav_panel,
+        body:has(.cd-mobile-studio-open) .st-key-studio_panel {
+            height:100% !important;
+            min-height:100dvh !important;
+            max-height:100dvh !important;
+        }
+
+        body:has(.cd-mobile-nav-open) .st-key-nav_panel {
+            border-right:0 !important;
+        }
+
+        body:has(.cd-mobile-studio-open) .st-key-studio_panel {
+            border-left:0 !important;
+        }
+
+        /* One shared mobile-drawer-backdrop serves either exclusive drawer. */
+        .st-key-mobile_drawer_backdrop {
+            display:block !important;
+            position:fixed !important;
+            inset:0 !important;
+            z-index:420 !important;
+            margin:0 !important;
+            padding:0 !important;
+            border:0 !important;
+            background:rgba(0,0,0,.45) !important;
+            opacity:0;
+            visibility:hidden;
+            pointer-events:none;
+            transition:opacity 220ms ease, visibility 0s linear 220ms;
+        }
+
+        body:has(.cd-mobile-nav-open) .st-key-mobile_drawer_backdrop,
+        body:has(.cd-mobile-studio-open) .st-key-mobile_drawer_backdrop {
+            opacity:1;
+            visibility:visible;
+            pointer-events:auto;
+            transition:opacity 220ms ease, visibility 0s linear 0s;
+        }
+
+        .st-key-mobile_drawer_backdrop div[data-testid="stButton"],
+        .st-key-mobile_drawer_backdrop div[data-testid="stButton"] button {
+            width:100% !important;
+            height:100% !important;
+            min-height:100dvh !important;
+            margin:0 !important;
+            padding:0 !important;
+            border:0 !important;
+            border-radius:0 !important;
+            background:transparent !important;
+            box-shadow:none !important;
+            color:transparent !important;
+        }
+
+        body:has(.cd-mobile-studio-open) .st-key-mobile_studio_close {
+            display:block !important;
+            position:fixed !important;
+            top:.72rem !important;
+            right:.72rem !important;
+            left:auto !important;
+            width:2.5rem !important;
+            height:2.5rem !important;
+            z-index:440 !important;
+            pointer-events:none !important;
+        }
+
+        .st-key-mobile_studio_close div[data-testid="stButton"] button {
+            width:2.5rem !important;
+            min-width:2.5rem !important;
+            height:2.5rem !important;
+            min-height:2.5rem !important;
+            padding:0 !important;
+            border:0 !important;
+            border-radius:.85rem !important;
+            background:transparent !important;
+            color:var(--cd-muted) !important;
+            pointer-events:auto !important;
+        }
+
+        .st-key-mobile_studio_close div[data-testid="stButton"] button p {
+            position:absolute !important;
+            width:1px !important;
+            height:1px !important;
+            overflow:hidden !important;
+            clip:rect(0,0,0,0) !important;
         }
 
         .cd-col-resize-handle,
@@ -481,5 +678,113 @@
             width:auto !important;
             min-width:0 !important;
             max-width:100% !important;
+        }
+    }
+
+    /* Top-bar-free responsive shell. */
+    @media (max-width:1050px) {
+        .block-container {
+            padding:0 !important;
+        }
+
+        .st-key-notebook_workspace {
+            height:calc(100dvh - 3.5rem) !important;
+            max-height:calc(100dvh - 3.5rem) !important;
+            min-height:0 !important;
+        }
+
+        .st-key-mobile_panel {
+            margin:0 !important;
+            padding:.25rem .7rem !important;
+            height:3.5rem !important;
+            min-height:3.5rem !important;
+            max-height:3.5rem !important;
+            border-bottom:1px solid var(--cd-border);
+            background:var(--cd-nav);
+            overflow:hidden;
+        }
+
+        .st-key-nav_panel {
+            width:100% !important;
+            min-width:0 !important;
+            max-width:none !important;
+            padding:1rem .85rem .75rem !important;
+        }
+
+        /* Keep the overlay close (X); hide desktop dock collapse on mobile. */
+        .st-key-nav_header [class*="st-key-nav-collapse"] {
+            display:none !important;
+        }
+
+        body:has(.cd-mobile-nav-open)
+        .st-key-nav_header [class*="st-key-mobile-nav-close"] {
+            display:flex !important;
+        }
+
+        body:has(.cd-mobile-studio-open) .st-key-mobile_studio_close {
+            display:block !important;
+        }
+
+        [class*="st-key-nav_recent_"] [data-testid="stHorizontalBlock"] {
+            display:flex !important;
+            flex-direction:row !important;
+            flex-wrap:nowrap !important;
+        }
+
+        [class*="st-key-nav_recent_"] [data-testid="stColumn"]:first-child {
+            flex:1 1 0 !important;
+            width:auto !important;
+            min-width:0 !important;
+        }
+
+        [class*="st-key-nav_recent_"] [data-testid="stColumn"]:last-child {
+            flex:0 0 2.25rem !important;
+            width:2.25rem !important;
+            min-width:2.25rem !important;
+            max-width:2.25rem !important;
+        }
+
+        .st-key-chat_panel,
+        .st-key-search_panel,
+        .st-key-sources_panel,
+        .st-key-studio_panel {
+            padding:1.2rem 1rem calc(.65rem + 10px) !important;
+        }
+
+        .st-key-search_panel > [data-testid="stVerticalBlock"],
+        .st-key-sources_panel > [data-testid="stVerticalBlock"] {
+            max-width:100% !important;
+        }
+    }
+
+    @media (max-width:520px) {
+        .st-key-mobile_panel {
+            padding:.2rem .5rem !important;
+        }
+
+        .cd-mobile-header-title {
+            font-size:.88rem;
+        }
+
+        .st-key-chat_panel,
+        .st-key-search_panel,
+        .st-key-sources_panel,
+        .st-key-studio_panel {
+            padding:1rem .8rem calc(.6rem + 10px) !important;
+        }
+
+        .st-key-search_panel [data-testid="stTextInput"] input,
+        .st-key-sources_panel [data-testid="stTextInput"] input {
+            min-height:3.1rem !important;
+        }
+    }
+
+    @media (prefers-reduced-motion:reduce) and (max-width:1050px) {
+        .st-key-mobile_drawer_backdrop,
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-nav_panel),
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel) {
+            transition:none !important;
         }
     }

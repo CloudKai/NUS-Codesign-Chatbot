@@ -79,56 +79,58 @@ def inject_template_css() -> None:
 def render_theme_css() -> None:
     light_tokens = """
         color-scheme:light;
-        --cd-bg:#F3F5F7;--cd-surface:#FFFFFF;--cd-surface-muted:#F7F9FA;
-        --cd-text:#15202B;--cd-muted:#5B6B7C;--cd-border:#D5DCE3;
-        --cd-panel:#EEF1F4;--cd-subtle:#E8ECF0;--cd-accent-soft:#E6F5F3;
-        --cd-accent:#0F766E;--cd-accent-hover:#0D9488;--cd-success:#15803D;
-        --cd-scrollbar:#C4CBD4;
+        --cd-bg:#F7F9FC;--cd-surface:#FFFFFF;--cd-surface-muted:#F1F4F8;
+        --cd-nav:#EEF2F6;--cd-text:#1F2933;--cd-muted:#66727F;
+        --cd-border:#DDE3E9;--cd-panel:#F7F9FB;--cd-subtle:#E9EEF3;
+        --cd-accent-soft:#DFF6F2;--cd-accent:#179E90;
+        --cd-accent-hover:#11877B;--cd-success:#15803D;
+        --cd-scrollbar:#C8D0D8;
         --cd-checkbox-bg:#FFFFFF;--cd-checkbox-border:#D5DCE3;
-        --cd-shadow:0 8px 24px rgba(21,32,43,.08);
+        --cd-shadow:0 10px 30px rgba(31,41,51,.09);
         --cd-placeholder-opacity:.48;
     """
     dark_tokens = """
         color-scheme:dark;
-        --cd-bg:#0F1419;--cd-surface:#171C22;--cd-surface-muted:#1C232B;
-        --cd-text:#F2F5F7;--cd-muted:#9AA8B5;--cd-border:#2A343E;
-        --cd-panel:#171C22;--cd-subtle:#1C232B;--cd-accent-soft:#14352F;
-        --cd-accent:#2DD4BF;--cd-accent-hover:#5EEAD4;--cd-success:#4ADE80;
-        --cd-scrollbar:#4A5560;
-        --cd-checkbox-bg:#1C232B;--cd-checkbox-border:#2A343E;
-        --cd-shadow:0 18px 50px rgba(0,0,0,.34);
+        --cd-bg:#0F1011;--cd-surface:#101112;--cd-surface-muted:#1D1F20;
+        --cd-nav:#1D1F20;--cd-text:#E8EAED;--cd-muted:#9AA0A6;
+        --cd-border:#2D3033;--cd-panel:#151718;--cd-subtle:#252729;
+        --cd-accent-soft:#123A35;--cd-accent:#39CDBA;
+        --cd-accent-hover:#63DECF;--cd-success:#4ADE80;
+        --cd-scrollbar:#4B4F54;
+        --cd-checkbox-bg:#202223;--cd-checkbox-border:#3A3D40;
+        --cd-shadow:0 18px 50px rgba(0,0,0,.38);
         --cd-placeholder-opacity:.48;
     """
     mode = st.session_state.get("appearance", "System")
     tokens = dark_tokens if mode == "Dark" else light_tokens
-    portal_background = "#171C22" if mode == "Dark" else "#FFFFFF"
-    portal_text = "#F2F5F7" if mode == "Dark" else "#15202B"
-    portal_muted = "#9AA8B5" if mode == "Dark" else "#5B6B7C"
+    portal_background = "#1D1F20" if mode == "Dark" else "#FFFFFF"
+    portal_text = "#E8EAED" if mode == "Dark" else "#1F2933"
+    portal_muted = "#9AA0A6" if mode == "Dark" else "#66727F"
     system_portal_dark = (
         """
         @media (prefers-color-scheme:dark) {
             [data-testid="stPopoverBody"],
             [data-testid="stPopoverBody"] > div {
-                background:#171C22 !important;
+                background:#1D1F20 !important;
             }
             [data-testid="stPopoverBody"] p,
             [data-testid="stPopoverBody"] h3,
             [data-testid="stPopoverBody"] label {
-                color:#F2F5F7 !important;
-                -webkit-text-fill-color:#F2F5F7 !important;
+                color:#E8EAED !important;
+                -webkit-text-fill-color:#E8EAED !important;
             }
             [data-testid="stPopoverBody"] [data-testid="stTooltipHoverTarget"],
             [data-testid="stPopoverBody"] [data-testid="stTooltipHoverTarget"] [data-testid="stIconMaterial"],
             [data-testid="stPopoverBody"] [data-testid="stTooltipHoverTarget"] svg {
                 opacity:1 !important;
-                color:#9AA8B5 !important;
-                -webkit-text-fill-color:#9AA8B5 !important;
+                color:#9AA0A6 !important;
+                -webkit-text-fill-color:#9AA0A6 !important;
                 fill:currentColor !important;
             }
             [data-testid="stPopoverBody"] [data-testid="stCaptionContainer"],
             [data-testid="stPopoverBody"] [data-testid="stCaptionContainer"] p {
-                color:#9AA8B5 !important;
-                -webkit-text-fill-color:#9AA8B5 !important;
+                color:#9AA0A6 !important;
+                -webkit-text-fill-color:#9AA0A6 !important;
             }
         }
         """

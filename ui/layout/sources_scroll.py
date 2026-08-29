@@ -1,6 +1,6 @@
-"""Keep the Sources folder list scrollable inside the side panel.
+"""Keep the Sources folder list scrollable inside the Library destination.
 
-``sync_sources_scroll`` measures the Sources column and assigns a max height to
+``sync_sources_scroll`` measures the Library panel and assigns a max height to
 ``.st-key-sources_scroll`` so long libraries scroll without stretching the page.
 Prefer ``ui.layout.sources_scroll``.
 """

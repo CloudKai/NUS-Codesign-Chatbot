@@ -128,7 +128,9 @@ def test_run_scoped_memo_cuts_duplicate_workspace_reads() -> None:
         assert after_load.get("get_pending", 0) <= 1
         assert after_load.get("request", 0) <= 1
         assert after_load.get("get_source", 0) == 0
-        assert load_total == 16
+        # Chat no longer mounts the Library destination, avoiding its three
+        # source-list reads during a normal workspace load.
+        assert load_total == 13
         assert send_total == 13
         assert after_send.get("get_source", 0) == 0
         assert rerun_total == 7

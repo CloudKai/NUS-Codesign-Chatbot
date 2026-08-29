@@ -3,8 +3,8 @@
 Startup order matters: inject static CSS, drop the one-shot
 ``auth_refreshed`` query marker, gate on the FastAPI application session
 (``/api/v1/auth/me``), then initialize session (including appearance from
-the store), sync appearance, apply theme tokens, and render the top bar
-and three-column workspace. Unauthenticated visitors see only a static shell
+the store), sync appearance, apply theme tokens, run nonvisual workspace
+preparation, and render the three-region workspace. Unauthenticated visitors see only a static shell
 plus the login dialog. Prefer ``sh scripts/start.sh`` so the local API is
 running.
 
@@ -34,7 +34,8 @@ from ui.runtime import bind_owner_identifier, configure_ui_perf_logger
 from ui.session import initialize_session, new_notebook, select_thread
 from ui.settings import sync_appearance_from_widget
 from ui.theme import inject_template_css, render_theme_css
-from ui.topbar import render_topbar
+from ui.profile import inject_profile_leave_helper
+from ui.topbar import prepare_workspace_context
 from ui.professor import render_professor_dashboard
 from ui.workspace import render_workspace
 
@@ -126,8 +127,9 @@ sync_appearance_from_widget()
 render_theme_css()
 if st.session_state.pop("toast_course_materials_loading", False):
     show_corner_toasts("Course materials are loading.")
-model_id, reasoning_effort = render_topbar()
+model_id, reasoning_effort = prepare_workspace_context()
 render_workspace(model_id, reasoning_effort)
+inject_profile_leave_helper()
 
 # Single Your Notebooks dialog: remount while an inline actions panel is pending
 # or after delete asks for the list view. No nested Notebook Actions dialog.

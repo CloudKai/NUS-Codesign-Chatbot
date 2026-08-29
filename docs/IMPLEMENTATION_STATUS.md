@@ -2,6 +2,113 @@
 
 ## CURRENT STATUS
 
+### Gemini-inspired mobile drawer refresh (2026-08-29)
+
+**Behavior.** Widths at or below 1050 px now use one fixed, non-wrapping
+mobile row with hamburger, ellipsized current chat title, dedicated Material
+Analytics / **Analyse / Thinking Path**, New chat, and chat actions. Navigation
+and Thinking Path reuse the existing panels as mutually exclusive full-height
+drawers: Navigation enters from the left and Thinking Path from the right at
+`min(20.5rem, 88vw)`, with a shared dismissible backdrop, close controls,
+220 ms eased transitions, and reduced-motion support. Search, Library, Chat,
+composer state, and scrolling remain mounted beneath the overlay. Thinking Path
+review attention now badges Analytics; the chat actions menu remains limited to
+rename, transcript download, and delete. Desktop three-region resize/collapse
+behavior is unchanged.
+
+**Files.** `ui/workspace.py`, `ui/session.py`, `ui/panels/nav.py`,
+`ui/rename.py`, `ui/layout/column_resize.py`,
+`ui/assets/styles/15-nav.css`, `ui/assets/styles/90-responsive.css`,
+`tests/ui/test_mobile_drawers.py`, related UI contract/AppTest updates,
+`DESIGN.md`, `design-qa.md`, and this status handoff.
+
+**Validation.** All 14 dedicated mobile-drawer AppTest/CSS-contract tests
+passed. The complete `tests/ui` suite passed (219 tests). The previously
+failing authoritative stage-selection/chat AppTest and rename tests pass after
+stabilizing rename widget identity across automatic title changes. `compileall`
+and `git diff --check` passed. In-app browser QA passed at 390 × 844 in Dark
+and Light across closed Chat, both drawers, backdrop/close dismissal, Library
+state restoration, profile/settings, and chat actions; desktop regression QA
+passed at 1440 × 790. Reference and implementation captures were compared in
+combined inputs and all P0–P2 findings were resolved in `design-qa.md`. No paid
+model call was made. The repository-wide deterministic run completed with the
+same 15 documented non-UI failures in prompt budgets/baselines, retrieval and
+workflow expectations, architecture inventories, atomic persistence, and
+production stage-policy assertions; none of those failing areas changed in
+this mobile UI phase.
+
+**Compatibility and rollback.** No backend, API, database, provider,
+retrieval, coaching, source-selection, fragment, dialog, or persistence
+contract changed. Existing widget keys and desktop column state remain
+compatible. Legacy `mobile_panel="Studio"` and
+`pending_mobile_panel="Studio"` requests now open the right drawer while
+preserving the current Chat/Search/Library center view. Rollback is code-only;
+there is no data or schema migration.
+
+**Known risk.** The in-app browser still records the previously documented,
+unattributed Streamlit component iframe `MutationObserver.observe` lifecycle
+message with no observed layout or interaction impact. A P3-only visual option
+is to left-align more drawer navigation labels after student testing; the
+current centered treatment intentionally preserves the existing CDE2300 panel
+components.
+
+**Next exact action.** Have a student exercise the 390 px preview on a real
+touch device—open both drawers, switch Search/Library/Recent, rename and
+download one chat, and send one prompt—then record any tap-target or drawer-
+density feedback before deployment.
+
+### Gemini-inspired CDE2300 shell refresh (2026-08-29)
+
+**Behavior.** Removed the visual desktop top bar and moved CDE2300 identity,
+primary navigation, Recents, and profile/settings into a calm 284 px left
+sidebar with a matching 72 px collapsed rail. Search and Library are now center
+destinations; Library replaces Chat instead of opening a fourth Sources column,
+and selecting the active Library item returns to Chat. Thinking Path now
+collapses symmetrically to a 72 px Material Analytics / Analyse rail while the
+open center-to-panel resize behavior remains. Mobile keeps Chats, Chat, Library,
+and Journey as four exclusive destinations and anchors profile/settings to the
+bottom of Chats. Light and Dark themes use neutral Gemini-inspired surfaces and
+CDE2300 teal only for meaningful active states.
+
+**Files.** `streamlit_app.py`, `ui/topbar.py`, `ui/workspace.py`,
+`ui/panels/nav.py`, `ui/panels/sources.py`, `ui/profile.py`, `ui/session.py`,
+`ui/theme.py`, `ui/layout/column_resize.py`,
+`ui/layout/sources_scroll.py`, `ui/assets/styles/00-foundations.css`,
+`ui/assets/styles/10-workspace.css`, `ui/assets/styles/15-nav.css`,
+`ui/assets/styles/40-sources.css`, `ui/assets/styles/60-profile-topbar.css`,
+`ui/assets/styles/90-responsive.css`, UI tests, `DESIGN.md`, and
+`design-qa.md`.
+
+**Validation.** Focused navigation/theme/Streamlit/rerun/read-count coverage
+passed (61 tests). The complete `tests/ui` suite passed (204 tests).
+`compileall` and `git diff --check` passed. In-app browser QA passed at
+1440 × 790 and 390 × 844 in Light and Dark modes across Chat, Search, Library,
+Journey, both sidebar states, both Thinking Path states, profile, Recent menus,
+and Library controls. No paid model call was made. The repository-wide
+deterministic run completed with 15 existing non-UI failures in prompt budgets,
+retrieval/workflow expectations, stale architecture inventories, and production
+stage-policy assertions; none of those failing modules or contracts changed in
+this UI phase.
+
+**Compatibility and rollback.** Backend, API, persistence, provider,
+retrieval, coaching, source-selection, and database contracts are unchanged.
+Legacy title normalization and model preference application continue through
+the nonvisual `prepare_workspace_context()` helper. Existing widget keys,
+dialogs, polling, fragment boundaries, stored chats, notebooks, sources, and
+profile preferences remain compatible. Rollback is code-only; no data or schema
+migration is required.
+
+**Known risk.** The in-app browser records an unattributed Streamlit component
+iframe `MutationObserver.observe` lifecycle message on clean loads. It has no
+source URL or observed interaction impact and is tracked in `design-qa.md` as
+framework/tooling noise. Retired top-bar CSS selectors remain inert for
+compatibility and can be removed in a later cleanup after another complete
+responsive regression pass.
+
+**Next exact action.** Have a CDE2300 student complete one real local session
+through Chat → Library → Journey at desktop and mobile widths, then record any
+density or terminology feedback before removing the inert legacy top-bar CSS.
+
 ### Course library is UI-only; Chat routing local/prod parity (2026-08-28)
 
 **Change.** Lecture Notes / Readings are a view-only course library. They never

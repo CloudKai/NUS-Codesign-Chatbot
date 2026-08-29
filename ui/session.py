@@ -32,7 +32,6 @@ from backend.student_support import DEFAULT_SUPPORT_MODE
 
 from ui.coach_welcome import seed_coach_welcome
 from ui.constants import APPEARANCE_MODES, DEFAULT_APPEARANCE, RESPONSE_LANGUAGES
-from ui.layout.column_resize import set_side_panel_collapsed
 from ui.rename import bump_rename_epoch, discard_rename_draft
 from ui.runtime import rerun_app, store
 from ui.retry_keys import purge_notebook_retry_keys
@@ -81,11 +80,13 @@ def initialize_session() -> None:
         "reopen_notebooks_dialog": False,
         "pending_delete_chat_id": None,
         "mobile_panel": "Chat",
+        "mobile_nav_open": False,
+        "mobile_studio_open": False,
         "center_view": "chat",
         "nav_section": "Chat",
         "studio_tab": "Journey",
         "workspace_nav_collapsed": False,
-        "workspace_sources_collapsed": False,
+        "workspace_studio_collapsed": False,
         "display_name": "Student",
         "review_fingerprint": "",
         "review_seen_fingerprint": "",
@@ -174,11 +175,12 @@ def new_notebook(should_rerun: bool = True) -> None:
     st.session_state.edit_confirm_message_id = None
     clear_stage_move_notice()
     _persist_active_thread(thread_id)
+    st.session_state.mobile_nav_open = False
+    st.session_state.mobile_studio_open = False
     if should_rerun:
-        st.session_state.mobile_panel = "Chat"
+        st.session_state.pending_mobile_panel = "Chat"
         st.session_state.center_view = "chat"
         st.session_state.nav_section = "Chat"
-        set_side_panel_collapsed("sources", False)
         st.session_state.toast_course_materials_loading = True
         rerun_app()
 

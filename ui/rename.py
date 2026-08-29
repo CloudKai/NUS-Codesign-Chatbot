@@ -22,16 +22,19 @@ _KEY_PREFIXES: dict[RenameKind, tuple[str, ...]] = {
         "rename-notebook-form-",
         "rename-notebook-",
         "FormSubmitter:rename-notebook-form-",
+        "_rename-seed-notebook-",
     ),
     "source": (
         "rename-source-form-",
         "rename-source-input-",
         "FormSubmitter:rename-source-form-",
+        "_rename-seed-source-",
     ),
     "topbar": (
         "rename-topbar-form-",
         "topbar-notebook-title-",
         "FormSubmitter:rename-topbar-form-",
+        "_rename-seed-topbar-",
     ),
 }
 
@@ -72,24 +75,46 @@ def render_enter_to_apply_rename(
     current_value: str,
     max_chars: int | None = None,
     label_visibility: Literal["visible", "hidden", "collapsed"] = "visible",
+    key_namespace: str = "",
 ) -> tuple[bool, str]:
     """Render an Enter-only rename form and return ``(applied, cleaned_value)``.
 
     The Apply submit control is present for Streamlit form Enter handling and is
     visually hidden by CSS. Focused fields still show ``Press Enter to apply``
     via CSS; no Streamlit help icon is attached to the label.
+
+    Args:
+        key_namespace: Optional disambiguator when the same item is renamed from
+            more than one mounted popover (e.g. mobile header vs Recents).
     """
     epoch = rename_epoch(kind, str(item_id))
     safe_value = str(current_value or "").strip()
+    ns = f"{key_namespace}-" if key_namespace else ""
+    stable_mobile_chat_key = kind == "notebook" and key_namespace == "mobile-chat"
     if kind == "notebook":
-        form_key = f"rename-notebook-form-{item_id}-{epoch}"
-        input_key = f"rename-notebook-{item_id}-{epoch}-{safe_value}"
+        form_key = f"rename-notebook-form-{ns}{item_id}-{epoch}"
+        input_key = (
+            f"rename-notebook-{ns}{item_id}-{epoch}"
+            if stable_mobile_chat_key
+            else f"rename-notebook-{ns}{item_id}-{epoch}-{safe_value}"
+        )
     elif kind == "source":
-        form_key = f"rename-source-form-{item_id}-{epoch}"
-        input_key = f"rename-source-input-{item_id}-{epoch}-{safe_value}"
+        form_key = f"rename-source-form-{ns}{item_id}-{epoch}"
+        input_key = f"rename-source-input-{ns}{item_id}-{epoch}-{safe_value}"
     else:
-        form_key = f"rename-topbar-form-{item_id}-{epoch}"
-        input_key = f"topbar-notebook-title-{item_id}-{epoch}-{safe_value}"
+        form_key = f"rename-topbar-form-{ns}{item_id}-{epoch}"
+        input_key = f"topbar-notebook-title-{ns}{item_id}-{epoch}-{safe_value}"
+
+    # Keep the widget id stable while an automatic chat title changes beneath
+    # a mounted popover. Streamlit's AppTest (and browser widget reconciliation)
+    # can otherwise retain an element-tree node whose title-derived key no
+    # longer exists. The seed marker updates the field only when the persisted
+    # value actually changes, so an in-progress rename draft is preserved.
+    if stable_mobile_chat_key:
+        seed_key = f"_rename-seed-{kind}-{ns}{item_id}-{epoch}"
+        if st.session_state.get(seed_key) != safe_value:
+            st.session_state[input_key] = safe_value
+            st.session_state[seed_key] = safe_value
 
     with st.form(key=form_key, border=False, enter_to_submit=True):
         kwargs: dict[str, object] = {

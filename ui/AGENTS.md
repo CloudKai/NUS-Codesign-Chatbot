@@ -42,7 +42,7 @@ Only read that for UI tasks that touch API migration or coaching flow.
 | `rename.py` | Shared Enter-only rename forms, draft discard, select-all helper |
 | `topbar.py` | Brand, title, section switcher, Guidance, profile entry |
 | `profile.py` | Compact settings popover (display name, Coaching style Quick/Strict, appearance, logout) |
-| `workspace.py` | Mobile panel radio and four-column nav/chat/sources/studio layout |
+| `workspace.py` | Gemini mobile header (menu overlay / new chat / chat ⋮) and three-column nav/chat/studio layout |
 | `chat.py` | Compatibility alias for `panels/chat.py` (messages, citations, composer, `handle_prompt()`) |
 | `sources.py` | Compatibility alias for `panels/sources.py` (library, search/filter, add/viewer dialogs) |
 | `studio.py` | Compatibility alias for `panels/studio.py` (five-phase Journey/Review, pending transitions). Review stage expanders remount when notebook or current stage changes; keys stay stable within a stage. |

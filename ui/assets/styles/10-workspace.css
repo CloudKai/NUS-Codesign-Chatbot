@@ -307,15 +307,21 @@
         overflow:hidden !important;
     }
 
-    /* Responsive panel selector */
+    /* Responsive Gemini mobile chrome (visible under 1051px). */
     .st-key-mobile_panel {
         display:none;
         flex:0 0 auto;
     }
 
+    .st-key-mobile_nav_backdrop {
+        display:none !important;
+    }
+
     @media (min-width:1051px) {
         .block-container > [data-testid="stVerticalBlock"]
-        > [data-testid="stLayoutWrapper"]:has(.st-key-mobile_panel) {
+        > [data-testid="stLayoutWrapper"]:has(.st-key-mobile_panel),
+        .block-container > [data-testid="stVerticalBlock"]
+        > [data-testid="stLayoutWrapper"]:has(.st-key-mobile_nav_backdrop) {
             display:none !important;
         }
     }
@@ -478,8 +484,7 @@
         background:transparent;
     }
 
-    /* Chat|Sources handle lives on the Sources column so it (and its
-       tooltip) paint above Chat and open toward the center. */
+    /* Legacy leading-edge handle support for resizable panels. */
     .cd-col-resize-handle-start {
         left:-3px;
         right:auto;
@@ -1467,4 +1472,148 @@
     .st-key-chat_feed::-webkit-scrollbar-thumb {
         background:var(--cd-scrollbar);
         border-radius:999px;
+    }
+
+    /* Gemini-inspired full-height shell: navigation | center | Thinking Path. */
+    .st-key-notebook_workspace,
+    .st-key-notebook_workspace > [data-testid="stVerticalBlock"] {
+        background:var(--cd-surface) !important;
+    }
+
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-nav_panel) {
+        background:var(--cd-nav) !important;
+    }
+
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-sources_panel),
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-search_panel),
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel) {
+        background:var(--cd-surface) !important;
+    }
+
+    .st-key-chat_panel {
+        padding:1.45rem clamp(1.35rem,3.8vw,4.6rem) calc(.65rem + 10px) !important;
+        background:var(--cd-surface) !important;
+    }
+
+    /* The fixed chat scroll control survives Streamlit destination remounts.
+       Keep it out of Search and Library until Chat is mounted again. */
+    body:has(.st-key-search_panel) #cd-chat-scroll-down,
+    body:has(.st-key-sources_panel) #cd-chat-scroll-down {
+        display:none !important;
+    }
+
+    .st-key-studio_panel {
+        padding:1.35rem 1.15rem .9rem !important;
+        border-right:0 !important;
+        border-left:1px solid var(--cd-border) !important;
+        background:var(--cd-surface) !important;
+    }
+
+    .st-key-studio_panel .pane-heading {
+        padding-right:2.75rem;
+    }
+
+    /* The expanded Thinking Path collapses from its own header, like nav. */
+    [class*="st-key-collapse-studio"] {
+        top:.72rem !important;
+        right:.72rem !important;
+        left:auto !important;
+        width:2.5rem !important;
+        height:2.5rem !important;
+        min-height:2.5rem !important;
+        max-height:2.5rem !important;
+        transform:none !important;
+    }
+
+    [class*="st-key-collapse-studio"] div[data-testid="stButton"],
+    [class*="st-key-collapse-studio"] div[data-testid="stButton"] button {
+        width:2.5rem !important;
+        min-width:2.5rem !important;
+        height:2.5rem !important;
+        min-height:2.5rem !important;
+        padding:0 !important;
+        border:0 !important;
+        border-radius:.85rem !important;
+        color:var(--cd-muted) !important;
+        background:transparent !important;
+        box-shadow:none !important;
+    }
+
+    [class*="st-key-collapse-studio"] div[data-testid="stButton"] button:hover {
+        color:var(--cd-text) !important;
+        background:var(--cd-subtle) !important;
+    }
+
+    [class*="st-key-collapse-studio"] div[data-testid="stButton"] button p,
+    [class*="st-key-expand-studio"] div[data-testid="stButton"] button p {
+        position:absolute !important;
+        width:1px !important;
+        height:1px !important;
+        padding:0 !important;
+        margin:-1px !important;
+        overflow:hidden !important;
+        clip:rect(0,0,0,0) !important;
+        white-space:nowrap !important;
+        border:0 !important;
+    }
+
+    .st-key-studio_rail {
+        justify-content:flex-start !important;
+        padding:1rem .75rem !important;
+        border-right:0 !important;
+        border-left:1px solid var(--cd-border) !important;
+        background:var(--cd-surface-muted) !important;
+    }
+
+    .st-key-studio_rail > [data-testid="stVerticalBlock"] {
+        justify-content:flex-start !important;
+        align-items:center !important;
+    }
+
+    [class*="st-key-expand-studio"] {
+        position:static !important;
+        width:auto !important;
+        height:auto !important;
+        min-height:0 !important;
+        max-height:none !important;
+        transform:none !important;
+    }
+
+    [class*="st-key-expand-studio"] div[data-testid="stButton"] button {
+        width:2.75rem !important;
+        min-width:2.75rem !important;
+        height:2.75rem !important;
+        min-height:2.75rem !important;
+        padding:0 !important;
+        border:0 !important;
+        border-radius:1rem !important;
+        color:var(--cd-accent) !important;
+        background:var(--cd-accent-soft) !important;
+        box-shadow:none !important;
+    }
+
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"].cd-col-rail,
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_rail) {
+        flex:0 0 4.5rem !important;
+        width:4.5rem !important;
+        min-width:4.5rem !important;
+        max-width:4.5rem !important;
+    }
+
+    .cd-col-resize-handle {
+        right:-4px;
+        width:8px;
+        z-index:80;
+    }
+
+    .cd-col-resize-handle:hover,
+    .cd-col-resize-handle:focus-visible,
+    body.cd-col-resizing .cd-col-resize-handle {
+        background:color-mix(in srgb,var(--cd-accent) 30%,transparent);
     }

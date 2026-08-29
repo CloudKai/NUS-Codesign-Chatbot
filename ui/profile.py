@@ -47,19 +47,25 @@ def persist_display_name() -> None:
     )
 
 
-def _sync_profile_avatar_initial(initial: str) -> None:
-    """Update the popover trigger after a fragment-local display-name edit."""
-    encoded_initial = json.dumps(initial)
+def _sync_profile_trigger_label(display_name: str) -> None:
+    """Update the static sidebar identity after a fragment-local name edit."""
+    encoded_name = json.dumps(display_name)
+    encoded_initials = json.dumps(profile_initial(display_name))
     components.html(
         f"""
 <script>
 (() => {{
-  const button = window.parent.document.querySelector(
-    '.st-key-topbar_profile [data-testid="stPopover"] button'
-  );
-  const label = button?.querySelector('p');
-  if (label) {{
-    label.textContent = {encoded_initial};
+  const root = window.parent.document.querySelector('.st-key-sidebar_profile');
+  if (!root) {{
+    return;
+  }}
+  const name = root.querySelector('.cd-sidebar-profile-name');
+  const avatar = root.querySelector('.cd-sidebar-profile-avatar');
+  if (name) {{
+    name.textContent = {encoded_name};
+  }}
+  if (avatar) {{
+    avatar.textContent = {encoded_initials};
   }}
 }})();
 </script>
@@ -70,7 +76,7 @@ def _sync_profile_avatar_initial(initial: str) -> None:
 
 
 @st.fragment
-def _render_display_name_fragment(display_name: str) -> None:
+def _render_display_name_fragment(display_name: str, *, collapsed: bool) -> None:
     """Render display-name editing without redrawing the workspace."""
     st.text_input(
         "Display name",
@@ -81,7 +87,8 @@ def _render_display_name_fragment(display_name: str) -> None:
         placeholder="Student",
     )
     current_name = str(st.session_state.get("display_name") or "Student")
-    _sync_profile_avatar_initial(profile_initial(current_name))
+    if not collapsed:
+        _sync_profile_trigger_label(current_name)
 
 
 def _select_coaching_style(detail: str) -> None:
@@ -129,50 +136,87 @@ def _render_coaching_style_fragment() -> None:
         )
 
 
-def render_profile_menu() -> None:
-    """Render the upper-right profile avatar that opens a compact settings menu."""
-    display_name = str(st.session_state.get("display_name") or "Student")
-    initial = profile_initial(display_name)
-    with st.container(key="topbar_profile"):
-        with st.popover(initial):
-            with st.container(key="profile_menu_root"):
+def _render_profile_menu_body(*, display_name: str, collapsed: bool) -> None:
+    """Render the settings popover contents shared by expanded and collapsed rails."""
+    with st.container(key="profile_menu_root"):
+        st.markdown(
+            '<div class="cd-profile-menu" hidden></div>',
+            unsafe_allow_html=True,
+        )
+        _render_display_name_fragment(display_name, collapsed=collapsed)
+        st.segmented_control(
+            "Appearance",
+            APPEARANCE_MODES,
+            key="setting_appearance",
+            # This widget intentionally stays outside a fragment. Its
+            # normal widget rerun must re-execute streamlit_app.py so
+            # the complete theme and layout stylesheet is re-injected.
+            on_change=persist_appearance,
+        )
+        _render_coaching_style_fragment()
+        st.divider()
+        # --- Logout (same-tab) ---
+        # Prefer a real <a target="_self"> to the local API logout callback.
+        # st.link_button opens a new tab; components.html top-navigation is
+        # sandboxed and was leaving the authenticated session stuck.
+        logout_url = app_logout_url()
+        with st.container(key="profile-logout"):
+            if logout_url:
                 st.markdown(
-                    '<div class="cd-profile-menu" hidden></div>',
+                    '<a class="cd-profile-logout-link" '
+                    f'href="{escape(logout_url, quote=True)}" '
+                    'target="_self" rel="noopener">Logout</a>',
                     unsafe_allow_html=True,
                 )
-                _render_display_name_fragment(display_name)
-                st.segmented_control(
-                    "Appearance",
-                    APPEARANCE_MODES,
-                    key="setting_appearance",
-                    # This widget intentionally stays outside a fragment. Its
-                    # normal widget rerun must re-execute streamlit_app.py so
-                    # the complete theme and layout stylesheet is re-injected.
-                    on_change=persist_appearance,
+            else:
+                if st.button(
+                    "Logout",
+                    key="profile-logout-fallback",
+                    use_container_width=True,
+                    type="secondary",
+                ):
+                    logout_user()
+
+
+def render_profile_menu(*, collapsed: bool = False) -> None:
+    """Render the sidebar identity row; only the settings icon opens the menu."""
+    display_name = str(st.session_state.get("display_name") or "Student")
+    initials = profile_initial(display_name)
+    with st.container(key="sidebar_profile"):
+        if collapsed:
+            with st.popover(
+                ":material/settings:",
+                type="tertiary",
+                help="Settings",
+            ):
+                _render_profile_menu_body(
+                    display_name=display_name,
+                    collapsed=True,
                 )
-                _render_coaching_style_fragment()
-                st.divider()
-                # --- Logout (same-tab) ---
-                # Prefer a real <a target="_self"> to the local API logout callback.
-                # st.link_button opens a new tab; components.html top-navigation is
-                # sandboxed and was leaving the authenticated session stuck.
-                logout_url = app_logout_url()
-                with st.container(key="profile-logout"):
-                    if logout_url:
-                        st.markdown(
-                            '<a class="cd-profile-logout-link" '
-                            f'href="{escape(logout_url, quote=True)}" '
-                            'target="_self" rel="noopener">Logout</a>',
-                            unsafe_allow_html=True,
-                        )
-                    else:
-                        if st.button(
-                            "Logout",
-                            key="profile-logout-fallback",
-                            use_container_width=True,
-                            type="secondary",
-                        ):
-                            logout_user()
+            return
+
+        identity_col, settings_col = st.columns([0.82, 0.18], gap="small")
+        with identity_col:
+            # Static identity — avatar and name are not interactive.
+            st.markdown(
+                '<div class="cd-sidebar-profile-identity" aria-hidden="false">'
+                f'<span class="cd-sidebar-profile-avatar" aria-hidden="true">'
+                f"{escape(initials)}</span>"
+                f'<span class="cd-sidebar-profile-name">{escape(display_name)}</span>'
+                "</div>",
+                unsafe_allow_html=True,
+            )
+        with settings_col:
+            with st.container(key="sidebar_profile_settings"):
+                with st.popover(
+                    ":material/settings:",
+                    type="tertiary",
+                    help="Settings",
+                ):
+                    _render_profile_menu_body(
+                        display_name=display_name,
+                        collapsed=False,
+                    )
 
 
 def inject_profile_leave_helper() -> None:
@@ -206,7 +250,7 @@ def _sync_profile_popover_close_on_leave() -> None:
 
   function profileButton() {
     return doc.querySelector(
-      '.st-key-topbar_profile [data-testid="stPopover"] button'
+      '.st-key-sidebar_profile [data-testid="stPopover"] button'
     );
   }
 
@@ -227,7 +271,7 @@ def _sync_profile_popover_close_on_leave() -> None:
       return false;
     }
     if (
-      node.closest(".st-key-topbar_profile") ||
+      node.closest(".st-key-sidebar_profile") ||
       node.closest(".st-key-profile_menu_root") ||
       node.closest('[data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)') ||
       node.closest('[data-testid="stPopoverBody"]:has(.cd-profile-menu)')

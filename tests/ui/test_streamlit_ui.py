@@ -34,6 +34,22 @@ def _implementation_source(module: object) -> str:
     return Path(inspect.getfile(module)).read_text(encoding="utf-8")
 
 
+def _open_library(app: AppTest) -> AppTest:
+    """Open the center Library through the same navigation control as users."""
+    next(button for button in app.button if button.label == "Library").click().run()
+    assert app.session_state["center_view"] == "library"
+    assert not app.exception
+    return app
+
+
+def _return_to_chat_from_library(app: AppTest) -> AppTest:
+    """Toggle the active Library navigation item back to Chat."""
+    next(button for button in app.button if button.label == "Library").click().run()
+    assert app.session_state["center_view"] == "chat"
+    assert not app.exception
+    return app
+
+
 def test_facione_score_shows_numeric_value_before_icon():
     html = facione_scores_table_html({"analysis": 3, "evaluation": 1})
     analysis = html.index("Analysis")
@@ -254,11 +270,12 @@ def test_streamlit_notebook_workspace_smoke():
         (button.key or "").startswith("profile-language-") for button in app.button
     )
     assert any(control.label == "Appearance" for control in app.segmented_control)
-    workspace_panel = next(
-        radio for radio in app.radio if radio.label == "Workspace panel"
-    )
-    assert workspace_panel.options == ["Chats", "Chat", "Library", "Journey"]
+    assert not any(radio.label == "Workspace panel" for radio in app.radio)
+    assert any((button.key or "") == "mobile-nav-menu" for button in app.button)
+    assert any((button.key or "") == "mobile-new-chat" for button in app.button)
+    assert app.session_state["mobile_panel"] == "Chat"
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert "cd-mobile-view" in rendered or 'data-panel="Chat"' in rendered
     assert "Guidance Level:" not in rendered
     assert any(control.label == "Coaching style" for control in app.radio)
     coaching_style = _coaching_style_radio(app)
@@ -275,17 +292,11 @@ def test_streamlit_notebook_workspace_smoke():
     assert not app.exception
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Guidance Level:" not in rendered
-    assert '<span class="pane-title">Sources</span>' in rendered
-    assert f"Max {settings.max_file_size_mb} MB per file" in rendered
+    assert '<span class="pane-title">Sources</span>' not in rendered
     assert "Welcome to your critical-thinking coach" in rendered
     assert "What design challenge or problem are you working on today?" in rendered
-    notebook_title = next(
-        text_input for text_input in app.text_input if text_input.label == "Notebook title"
-    )
-    assert notebook_title.value == "Untitled notebook"
     assert '<span class="pane-title">Thinking Path</span>' in rendered
-    assert "CDE2300 Design Thinking Companion" in rendered
-    assert "Product Design and Innovation" in rendered
+    assert "CDE2300" in rendered
     assert 'aria-label="Critical-thinking journey"' not in rendered
     assert "Critical thinking (Facione)" in rendered
     assert "0/4" in rendered
@@ -298,9 +309,6 @@ def test_streamlit_notebook_workspace_smoke():
         "Working conclusion",
         "Problem identification",
         "Concept generation",
-        "Lecture Notes · 0",
-        "Readings · 0",
-        "My Sources · 0",
     }
     assert "Critical Thinking" not in expander_labels
     assert expander_labels.index("Working conclusion") < expander_labels.index(
@@ -324,6 +332,16 @@ def test_streamlit_notebook_workspace_smoke():
     assert 'class="journey-short-label">Specification</span>' not in rendered
     assert 'class="journey-short-label">Ethics & CT</span>' not in rendered
     assert "Frame the design problem, who it affects, and why it matters." in rendered
+    chat_rendered = rendered
+    _open_library(app)
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert '<span class="pane-title">Sources</span>' in rendered
+    assert f"Max {settings.max_file_size_mb} MB per file" in rendered
+    assert "Welcome to your critical-thinking coach" not in rendered
+    expander_labels = [expander.label for expander in app.expander]
+    assert {"Lecture Notes · 0", "Readings · 0", "My Sources · 0"} <= set(
+        expander_labels
+    )
     sources_py = _implementation_source(sources_module)
     my_sources_at = sources_py.index('f"My Sources · {len(personal_sources)}"')
     lecture_at = sources_py.index('f"{group} · {len(group_all)}"')
@@ -337,7 +355,6 @@ def test_streamlit_notebook_workspace_smoke():
     assert "_render_source_sort_dropdown" in sources_py
     assert "personal_sources_all" in sources_py
     assert "Select all sources" in sources_py
-    assert "Frame the design problem, who it affects, and why it matters." in rendered
     assert "Add your first source" in rendered
     assert "Loading course materials in the background…" in _implementation_source(
         sources_module
@@ -358,10 +375,13 @@ def test_streamlit_notebook_workspace_smoke():
     assert "logger.exception" in sources_py
     assert "st.caption(_SOURCE_IMPORT_PARTIAL_ERROR)" in sources_py
     assert 'st.caption(\n                "Some lecture notes could not be imported:' not in sources_py
-    # Chat center renders before Sources and Thinking Path (right column).
-    assert rendered.index('class="message-meta coach-welcome"') < rendered.index(
-        '<span class="pane-title">Sources</span>'
-    ) < rendered.index('<span class="pane-title">Thinking Path</span>')
+    # Library replaces Chat in the center while Thinking Path remains visible.
+    assert rendered.index('<span class="pane-title">Sources</span>') < rendered.index(
+        '<span class="pane-title">Thinking Path</span>'
+    )
+    assert 'class="message-meta coach-welcome"' in chat_rendered
+    _return_to_chat_from_library(app)
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert ".st-key-chat_log" in rendered
     assert ".st-key-chat_inflight" in rendered
     assert ".st-key-chat_panel" in rendered
@@ -447,7 +467,7 @@ def test_streamlit_notebook_workspace_smoke():
     ) in rendered
     assert "stChatInputMicButton" in rendered
     assert "coach-welcome-title" in rendered
-    assert "st-key-topbar_navigation" in rendered
+    assert "st-key-notebook_topbar" in rendered  # retired selectors remain harmless
     assert "color:var(--cd-text) !important" in rendered
     assert "background:transparent !important" in rendered
     assert "place-items:center" in rendered
@@ -455,7 +475,7 @@ def test_streamlit_notebook_workspace_smoke():
         '[data-testid="stChatMessageAvatarCustom"] {\n'
         "        display:none !important;"
     ) in rendered
-    assert "st-key-topbar_profile" in rendered
+    assert "st-key-sidebar_profile" in rendered
     assert "gap:.82rem" in rendered
     assert "margin-bottom:.34rem" in rendered
     assert "journey-stage-detail" in rendered
@@ -468,31 +488,24 @@ def test_streamlit_notebook_workspace_smoke():
     assert ".journey-question-list {" in rendered
     assert '[role="listbox"] [role="option"]' in rendered
     assert "-webkit-text-fill-color:currentColor" in rendered
-    assert "--cd-bg:#F3F5F7" in rendered
-    assert "--cd-panel:#EEF1F4" in rendered
-    assert "--cd-text:#15202B" in rendered
-    assert "--cd-accent:#0F766E" in rendered
+    assert "--cd-bg:#F7F9FC" in rendered
+    assert "--cd-panel:#F7F9FB" in rendered
+    assert "--cd-text:#1F2933" in rendered
+    assert "--cd-accent:#179E90" in rendered
     assert "cd-col-resize-handle" in rendered
     assert "cd-col-rail" in rendered
     assert ":has(.st-key-studio_rail)" in rendered
-    assert any(button.label == "›" for button in app.button)
+    assert any((button.key or "") == "collapse-studio" for button in app.button)
     assert "cd-roadmap" in rendered
     assert "IBM Plex Sans" in rendered
-    assert "background:var(--cd-panel)" in rendered
+    assert "background:var(--cd-nav)" in rendered
 
     button_labels = {button.label for button in app.button}
     assert "New chat" in button_labels
     assert "Search chats" in button_labels
     assert "Library" in button_labels
     assert "Notebooks" not in button_labels
-    assert len(app.file_uploader) >= 1
-    add_uploader = next(
-        uploader
-        for uploader in app.file_uploader
-        if (uploader.label or "") == "Add"
-    )
-    assert add_uploader.help == f"Max {settings.max_file_size_mb} MB per file"
-    assert add_uploader.proto.max_upload_size_mb == settings.max_file_size_mb
+    assert '<span class="pane-title">Sources</span>' not in rendered
 
     assert any(input_widget.label == "Display name" for input_widget in app.text_input)
     assert any(control.label == "Appearance" for control in app.segmented_control)
@@ -545,6 +558,7 @@ def test_add_pasted_source_then_chat_with_citation():
     from backend.student_store import StudentStore
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    _open_library(app)
     assert any((uploader.label or "") == "Add" for uploader in app.file_uploader)
 
     local_store = StudentStore()
@@ -563,6 +577,9 @@ def test_add_pasted_source_then_chat_with_citation():
         button.label == "Lecture evidence" for button in app.button
     )
 
+    # Start a clean AppTest tree when leaving Library; Streamlit's test harness
+    # otherwise retains removed source rename-form widget ids.
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     app.chat_input[0].set_value("What evidence does my source provide?").run()
     assert not app.exception
     thread_id = app.session_state["thread_id"]
@@ -606,7 +623,7 @@ def test_select_all_sources_renders_indeterminate_marker_for_partial_selection()
     thread_id = app.session_state["thread_id"]
     add_text_source(local_store, thread_id, "First source", "First source text.")
     add_text_source(local_store, thread_id, "Second source", "Second source text.")
-    app.run()
+    _open_library(app)
 
     next(
         checkbox
@@ -665,7 +682,7 @@ def test_pdf_source_opens_in_installed_viewer():
         [("Preview test.pdf", pdf_buffer.getvalue(), "application/pdf")],
     )
 
-    app.run()
+    _open_library(app)
     next(button for button in app.button if button.label == "Preview test.pdf").click().run()
 
     assert not app.exception
@@ -694,8 +711,8 @@ def test_learning_studio_and_notebook_history_controls():
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Recents" in rendered
     assert "cd-nav-section-label" in rendered
-    assert "notebook-card-meta" not in rendered
-    assert "of 5 stages" in rendered
+    assert 'class="notebook-card-meta"' not in rendered
+    assert "Stage Progression" in rendered
 
 
 def test_notebook_activity_helpers_format_relative_time_and_counts():
@@ -839,7 +856,7 @@ def test_journey_fresh_problem_stage_keeps_next_stage_locked(monkeypatch):
     compact_buttons = [button for button in app.button if button.label == "Work on.."]
     assert compact_buttons == []
     captions = "\n".join(caption.value or "" for caption in app.caption)
-    assert "Choose a stage to work on." in captions
+    assert "Choose a stage to work on." not in captions
     assert not app.exception
 
 
@@ -1014,6 +1031,7 @@ def test_collapsed_sources_expander_survives_refresh():
     from ui.sources import _sources_expander_widget_key
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    _open_library(app)
     key = _sources_expander_widget_key("Lecture Notes")
     app.session_state[key] = False
     app.run()
@@ -1053,25 +1071,37 @@ def test_refresh_restores_last_open_notebook():
     assert not app.exception
 
 
-def test_current_notebook_title_is_directly_editable_and_syncs_with_history():
+def test_current_notebook_title_is_editable_from_recent_chat_menu():
     from backend.student_store import StudentStore
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     next(button for button in app.button if button.label == "New chat").click().run()
     current = StudentStore().get_thread(app.session_state["thread_id"])
     assert current
+    thread_id = str(app.session_state["thread_id"])
     title = next(
-        text_input for text_input in app.text_input if text_input.label == "Notebook title"
+        text_input
+        for text_input in app.text_input
+        if text_input.label == "Rename"
+        and "mobile-chat" in (text_input.key or "")
     )
     assert title.value == current["name"]
     # Enter-only form: value changes alone must not persist until Apply/Enter.
     title.set_value("Should Not Persist").run()
     assert StudentStore().get_thread(app.session_state["thread_id"])["name"] == current["name"]
     title = next(
-        text_input for text_input in app.text_input if text_input.label == "Notebook title"
+        text_input
+        for text_input in app.text_input
+        if text_input.label == "Rename"
+        and "mobile-chat" in (text_input.key or "")
     )
     title.set_value("Road Safety Research")
-    next(button for button in app.button if button.label == "Apply").click().run()
+    next(
+        button
+        for button in app.button
+        if button.label == "Apply"
+        and "mobile-chat" in (button.key or "")
+    ).click().run()
     assert StudentStore().get_thread(app.session_state["thread_id"])["name"] == (
         "Road Safety Research"
     )
@@ -1098,21 +1128,21 @@ def test_rename_and_icon_controls_expose_accessible_instructions():
     assert "Max {settings.max_file_size_mb} MB per file" in sources
     assert ".cd-sources-add-face::after" in css
     assert 'content:attr(data-tooltip)' in css
-    assert "with st.popover(initial)" in profile
-    assert 'help="Settings"' not in profile
+    assert ":material/settings:" in profile
+    assert 'icon=":material/account_circle:"' not in profile
+    assert 'help="Settings"' in profile
+    assert "cd-sidebar-profile-avatar" in profile
+    assert "cd-sidebar-profile-name" in profile
+    assert "profile_initial" in profile
     assert 'help="Collapse Thinking Path"' in workspace
-    assert 'help="Collapse Sources"' in workspace
-    assert 'help=f"Expand {label}"' in workspace
+    assert 'help=f"Expand Analyse / {label}"' in workspace
     assert (
         '[class*="st-key-source_card_"] [data-testid="stPopover"] button:focus-visible'
         in css
     )
     assert 'content:"Press Enter to apply"' in css
-    assert (
-        '.st-key-current_notebook_identity [data-testid="stFormSubmitButton"]' in css
-    )
     assert "position:relative !important" in css
-    assert "calc(100dvh - 9.2rem)" in css
+    assert "height:100vh" in css
     assert "ResizeObserver" in Path("ui/layout/sources_scroll.py").read_text(
         encoding="utf-8"
     )
@@ -1135,11 +1165,6 @@ def test_notebook_history_card_highlights_active_notebook_without_folders():
     local_store.update_thread(thread_id, name="Active research notebook")
 
     app.run()
-    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
-    title = next(
-        text_input for text_input in app.text_input if text_input.label == "Notebook title"
-    )
-    assert title.value == local_store.get_thread(thread_id)["name"]
     assert "Active research notebook" in {
         button.label for button in app.button
     }
@@ -1171,13 +1196,14 @@ def test_notebook_history_confirmed_delete_removes_the_selected_notebook():
 
 
 def test_notebook_actions_offers_transcript_download():
-    """Top bar download saves the persisted chat transcript."""
+    """Recent chat menus expose persisted transcript downloads."""
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     download = next(
         control
         for control in app.download_button
-        if control.key == "topbar-download-transcript"
-        or control.label == "Download"
+        if (control.key or "").startswith(
+            ("nav-chat-download-transcript-", "mobile-chat-download-transcript-")
+        )
     )
     assert "transcript" in str(download.help).lower()
     assert not app.exception

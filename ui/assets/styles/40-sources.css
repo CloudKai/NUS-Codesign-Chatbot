@@ -695,6 +695,57 @@
         background:transparent;
     }
 
+    /* Library is a spacious center destination, not a squeezed side column. */
+    .st-key-sources_panel {
+        padding:clamp(2rem,5vh,4rem) clamp(1.4rem,4vw,4rem) 1.25rem !important;
+        border:0 !important;
+        background:var(--cd-surface) !important;
+        overflow:hidden !important;
+    }
+
+    .st-key-sources_panel > [data-testid="stVerticalBlock"] {
+        width:100% !important;
+        max-width:58rem !important;
+        margin:0 auto !important;
+        gap:.75rem !important;
+    }
+
+    .st-key-sources_panel .pane-title {
+        font-size:1.3rem !important;
+        font-weight:600 !important;
+        letter-spacing:-.02em;
+    }
+
+    .st-key-sources_panel .pane-count {
+        font-size:.76rem !important;
+        color:var(--cd-muted) !important;
+    }
+
+    .st-key-sources_panel [data-testid="stTextInput"] input {
+        min-height:3.5rem !important;
+        padding:0 1.25rem !important;
+        border:0 !important;
+        border-radius:1.75rem !important;
+        background:var(--cd-subtle) !important;
+        box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--cd-border) 72%,transparent);
+    }
+
+    .st-key-sources_panel .st-key-sources_filters {
+        margin-top:.15rem;
+    }
+
+    .st-key-sources_panel [class*="st-key-source_group_"] [data-testid="stExpander"],
+    .st-key-sources_panel [class*="st-key-source_card_"] {
+        border-color:var(--cd-border) !important;
+        border-radius:1rem !important;
+        background:transparent !important;
+        box-shadow:none !important;
+    }
+
+    .st-key-sources_panel .st-key-sources_scroll {
+        margin-top:.35rem !important;
+    }
+
     [class*="st-key-source_card_"][data-testid="stVerticalBlock"] {
         gap:0 !important;
         row-gap:0 !important;

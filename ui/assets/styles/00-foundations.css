@@ -9,24 +9,24 @@
  * This file: :root tokens, brand, progress, and shared baseline controls.
  */
     :root {
-        --cd-bg:#F3F5F7;
+        --cd-bg:#F7F9FC;
         --cd-surface:#FFFFFF;
-        --cd-surface-muted:#F7F9FA;
-        --cd-text:#15202B;
-        --cd-muted:#5B6B7C;
-        --cd-border:#D5DCE3;
-        --cd-accent:#0F766E;
-        --cd-accent-hover:#0D9488;
-        --cd-accent-soft:#E6F5F3;
+        --cd-surface-muted:#F1F4F8;
+        --cd-nav:#EEF2F6;
+        --cd-text:#1F2933;
+        --cd-muted:#66727F;
+        --cd-border:#DDE3E9;
+        --cd-accent:#179E90;
+        --cd-accent-hover:#11877B;
+        --cd-accent-soft:#DFF6F2;
         --cd-success:#15803D;
         --cd-danger:#B42318;
-        --cd-panel:#EEF1F4;
-        --cd-subtle:#E8ECF0;
+        --cd-panel:#F7F9FB;
+        --cd-subtle:#E9EEF3;
         --cd-shadow:0 8px 24px rgba(21,32,43,.08);
         --cd-scrollbar:#C4CBD4;
         --cd-checkbox-bg:#FFFFFF;
         --cd-checkbox-border:#D5DCE3;
-        --cd-header-height:5.4rem;
         --cd-user-bubble-max-rows:8;
         --cd-user-bubble-row-height:calc(0.9rem * 1.45);
         --cd-user-bubble-max-height:calc(var(--cd-user-bubble-row-height) * var(--cd-user-bubble-max-rows));
@@ -423,4 +423,3 @@
         min-height:0;
         flex:1 1 auto;
     }
-

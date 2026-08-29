@@ -41,7 +41,7 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     assert css in wrapped
 
     markers = {
-        "00-foundations.css": "--cd-header-height",
+        "00-foundations.css": "--cd-nav",
         "10-workspace.css": ".st-key-notebook_topbar",
         "20-studio.css": ".st-key-journey_track",
         "30-chat.css": ".chat-context-line",
@@ -126,11 +126,11 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
 
     responsive_css = Path(_STYLES_DIR / "90-responsive.css").read_text(encoding="utf-8")
     assert "min-height:11rem" not in responsive_css
-    topbar_narrow = _css_rule_body(
+    mobile_shell = _css_rule_body(
         responsive_css,
-        ".st-key-notebook_topbar {",
+        ".block-container {",
     )
-    assert "padding-left:2rem" in topbar_narrow
+    assert "padding:0" in mobile_shell
     assert "margin-left:.4rem" not in responsive_css
     assert "margin-left:.45rem" not in responsive_css
     assert "/* Journey's icon/content pair stays horizontal" in responsive_css
@@ -146,6 +146,7 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     )
 
     profile_css = Path(_STYLES_DIR / "60-profile-topbar.css").read_text(encoding="utf-8")
+    assert ".st-key-sidebar_profile" in profile_css
     assert ".st-key-profile_menu_root" in profile_css
     assert ".st-key-profile_coaching_style" in profile_css
     assert "[data-testid=\"stRadio\"]" in profile_css
