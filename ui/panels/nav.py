@@ -77,6 +77,24 @@ def _on_toggle_library() -> None:
     st.session_state.pending_mobile_panel = "Chat" if library_on else "Sources"
 
 
+def _on_new_chat() -> None:
+    """Create a notebook before Chat paints so one remount owns the new thread.
+
+    Runs as ``on_click`` (before the script body) so Recents, Chat, and Thinking
+    Path all see the new ``thread_id`` without a nested full-app remount. Sets
+    the course-materials toast flag here because
+    ``new_notebook(should_rerun=False)`` skips that path (session init must not
+    toast).
+    """
+    _finish_mobile_nav_destination()
+    st.session_state.center_view = "chat"
+    st.session_state.mobile_panel = "Chat"
+    st.session_state.pending_mobile_panel = "Chat"
+    st.session_state.nav_section = "Chat"
+    st.session_state.toast_course_materials_loading = True
+    new_notebook(should_rerun=False)
+
+
 def open_chat_destination(thread_id: str) -> None:
     """Route to a chat before render; natural click remount loads the transcript.
 
@@ -123,20 +141,15 @@ def _render_collapsed_nav() -> None:
             on_click=_on_expand_nav,
         )
         locked = notebook_switch_locked()
-        if st.button(
+        st.button(
             "New chat",
             icon=":material/edit_square:",
             type="tertiary",
             key="nav-new-chat-collapsed",
             help="New chat",
             disabled=locked,
-        ):
-            # Create still remounts via ``new_notebook`` so Recents + transcript
-            # load the new thread (do not use on_click for notebook create).
-            _finish_mobile_nav_destination()
-            st.session_state.center_view = "chat"
-            st.session_state.mobile_panel = "Chat"
-            new_notebook()
+            on_click=_on_new_chat,
+        )
         st.button(
             "Search chats",
             icon=":material/search:",
@@ -190,7 +203,7 @@ def _render_expanded_nav() -> None:
 
     locked = notebook_switch_locked()
     with st.container(key="nav_primary"):
-        if st.button(
+        st.button(
             "New chat",
             icon=":material/edit_square:",
             type="tertiary",
@@ -198,11 +211,8 @@ def _render_expanded_nav() -> None:
             use_container_width=True,
             disabled=locked,
             help="Wait for the coach reply" if locked else None,
-        ):
-            _finish_mobile_nav_destination()
-            st.session_state.center_view = "chat"
-            st.session_state.mobile_panel = "Chat"
-            new_notebook()
+            on_click=_on_new_chat,
+        )
         st.button(
             "Search chats",
             icon=":material/search:",

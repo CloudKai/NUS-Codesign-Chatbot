@@ -90,7 +90,14 @@ def test_show_corner_toasts_falls_back_to_st_toast(monkeypatch) -> None:
 def test_new_notebook_still_triggers_course_materials_toast() -> None:
     """User-initiated notebooks still pop the one-shot loading toast flag."""
     session = Path("ui/session.py").read_text(encoding="utf-8")
+    nav = Path("ui/panels/nav.py").read_text(encoding="utf-8")
+    workspace = Path("ui/workspace.py").read_text(encoding="utf-8")
     app = Path("streamlit_app.py").read_text(encoding="utf-8")
+    # Dialog path (should_rerun=True) and on_click New chat both arm the toast.
     assert 'st.session_state.toast_course_materials_loading = True' in session
+    new_chat = nav.split("def _on_new_chat", 1)[1].split("\ndef ", 1)[0]
+    mobile_new = workspace.split("def _on_mobile_new_chat", 1)[1].split("\ndef ", 1)[0]
+    assert "toast_course_materials_loading = True" in new_chat
+    assert "toast_course_materials_loading = True" in mobile_new
     assert 'st.session_state.pop("toast_course_materials_loading", False)' in app
     assert 'show_corner_toasts("Course materials are loading.")' in app

@@ -63,7 +63,7 @@ def test_nav_rail_exposes_new_search_library_and_recents_actions() -> None:
     )
     assert hide_submit not in css_nav
     assert "set_nav_collapsed" in nav
-    assert "new_notebook()" in nav
+    assert "new_notebook(should_rerun=False)" in nav
     assert "select_thread(" in nav
     assert "delete_notebook(" in nav
     assert "on_click=_on_open_search" in nav
@@ -71,7 +71,7 @@ def test_nav_rail_exposes_new_search_library_and_recents_actions() -> None:
     assert "on_click=_on_collapse_nav" in nav
     assert "on_click=_on_expand_nav" in nav
     assert "on_click=_on_close_mobile_nav" in nav
-    assert "on_click=_on_new_chat" not in nav
+    assert "on_click=_on_new_chat" in nav
     assert "on_click=open_chat_destination" in nav
     assert "select_thread(target, should_rerun=False)" in nav
     open_search = nav.split("def _on_open_search", 1)[1].split("\ndef ", 1)[0]
@@ -80,6 +80,7 @@ def test_nav_rail_exposes_new_search_library_and_recents_actions() -> None:
     expand_nav = nav.split("def _on_expand_nav", 1)[1].split("\ndef ", 1)[0]
     close_mobile = nav.split("def _on_close_mobile_nav", 1)[1].split("\ndef ", 1)[0]
     open_chat = nav.split("def open_chat_destination", 1)[1].split("\ndef ", 1)[0]
+    new_chat = nav.split("def _on_new_chat", 1)[1].split("\ndef ", 1)[0]
     for callback_body in (
         open_search,
         toggle_library,
@@ -87,10 +88,12 @@ def test_nav_rail_exposes_new_search_library_and_recents_actions() -> None:
         expand_nav,
         close_mobile,
         open_chat,
+        new_chat,
     ):
         assert "rerun_app()" not in callback_body
     assert 'if target == current:' in open_chat
-    # Create/delete still remount so Recents + transcript stay consistent.
+    assert 'toast_course_materials_loading = True' in new_chat
+    # Delete still remounts so Recents + transcript stay consistent.
     assert "rerun_app()" in nav
     css = Path("ui/assets/styles/15-nav.css").read_text(encoding="utf-8")
     assert "stIconMaterial" in css
@@ -208,8 +211,8 @@ def test_workspace_chrome_uses_on_click_without_extra_rerun() -> None:
     assert "on_click=_on_expand_side_panel" in workspace
     assert "on_click=_on_close_mobile_studio" in workspace
     assert "on_click=_on_collapse_studio" in workspace
-    assert "on_click=_on_mobile_new_chat" not in workspace
-    assert "new_notebook()" in workspace
+    assert "on_click=_on_mobile_new_chat" in workspace
+    assert "new_notebook(should_rerun=False)" in workspace
     for name in (
         "_on_open_mobile_nav",
         "_on_open_mobile_studio",
@@ -217,7 +220,10 @@ def test_workspace_chrome_uses_on_click_without_extra_rerun() -> None:
         "_on_expand_side_panel",
         "_on_close_mobile_studio",
         "_on_collapse_studio",
+        "_on_mobile_new_chat",
     ):
         body = workspace.split(f"def {name}", 1)[1].split("\ndef ", 1)[0]
         assert "rerun_app()" not in body
+    mobile_new = workspace.split("def _on_mobile_new_chat", 1)[1].split("\ndef ", 1)[0]
+    assert 'toast_course_materials_loading = True' in mobile_new
     assert "rerun_app" not in workspace

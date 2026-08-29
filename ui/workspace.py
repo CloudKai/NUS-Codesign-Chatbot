@@ -180,6 +180,21 @@ def _on_collapse_studio() -> None:
     set_side_panel_collapsed("studio", True)
 
 
+def _on_mobile_new_chat() -> None:
+    """Create a notebook before Chat paints so one remount owns the new thread.
+
+    Mirrors desktop ``_on_new_chat``: close drawers, route to Chat, toast that
+    course materials are loading, then create without a nested full-app remount.
+    """
+    close_mobile_drawers()
+    st.session_state.center_view = "chat"
+    st.session_state.mobile_panel = "Chat"
+    st.session_state.pending_mobile_panel = "Chat"
+    st.session_state.nav_section = "Chat"
+    st.session_state.toast_course_materials_loading = True
+    new_notebook(should_rerun=False)
+
+
 def _render_mobile_header(panel: str) -> None:
     """Gemini mobile chrome: menu, title, Analytics, new chat, and chat ⋮."""
     nav_open = bool(st.session_state.get("mobile_nav_open"))
@@ -229,19 +244,15 @@ def _render_mobile_header(panel: str) -> None:
                     on_click=_on_open_mobile_studio,
                 )
         with new_col:
-            if st.button(
+            st.button(
                 "New chat",
                 icon=":material/edit_square:",
                 type="tertiary",
                 key="mobile-new-chat",
                 help="New chat",
                 disabled=locked,
-            ):
-                # Notebook create remounts via ``new_notebook`` (not on_click).
-                close_mobile_drawers()
-                st.session_state.center_view = "chat"
-                st.session_state.mobile_panel = "Chat"
-                new_notebook()
+                on_click=_on_mobile_new_chat,
+            )
         with more_col:
             with st.container(key="mobile_chat_menu"):
                 if not thread_id:

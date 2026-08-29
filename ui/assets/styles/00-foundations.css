@@ -52,11 +52,33 @@
     /* Streamlit marks the previous element tree as stale while a rerun is
        reconciled. Its built-in delayed opacity fade makes quick button
        interactions look like a page refresh. Keep the already-rendered shell
-       fully opaque until the replacement tree is ready instead. */
+       fully opaque until the replacement tree is ready instead.
+
+       Take only the layout wrappers that own the full mobile header or
+       notebook workspace out of document flow so leftover 100vh shells overlay
+       the incoming tree instead of stacking vertically. Do not force overlay
+       layout onto every nested stale widget (errors, inputs, auth). */
     .st-key-mobile_panel[data-stale="true"],
-    .st-key-mobile_panel [data-stale="true"],
-    .st-key-notebook_workspace[data-stale="true"],
-    .st-key-notebook_workspace [data-stale="true"] {
+    .st-key-notebook_workspace[data-stale="true"] {
+        opacity:1 !important;
+        transition:none !important;
+    }
+
+    [data-testid="stLayoutWrapper"]:has(> .st-key-mobile_panel[data-stale="true"]),
+    [data-testid="stLayoutWrapper"]:has(> .st-key-notebook_workspace[data-stale="true"]),
+    [data-testid="stLayoutWrapper"]:has(
+        > [data-testid="stElementContainer"].st-key-mobile_panel[data-stale="true"]
+    ),
+    [data-testid="stLayoutWrapper"]:has(
+        > [data-testid="stElementContainer"].st-key-notebook_workspace[data-stale="true"]
+    ) {
+        position:absolute !important;
+        inset:0 !important;
+        width:100% !important;
+        height:100% !important;
+        margin:0 !important;
+        z-index:0 !important;
+        pointer-events:none !important;
         opacity:1 !important;
         transition:none !important;
     }

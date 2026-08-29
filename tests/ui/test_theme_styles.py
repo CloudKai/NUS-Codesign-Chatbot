@@ -59,15 +59,27 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     foundations_css = Path(_STYLES_DIR / "00-foundations.css").read_text(encoding="utf-8")
     assert "family=Caveat" in foundations_css
     assert '.st-key-mobile_panel[data-stale="true"]' in foundations_css
-    assert '.st-key-mobile_panel [data-stale="true"]' in foundations_css
     assert '.st-key-notebook_workspace[data-stale="true"]' in foundations_css
-    assert '.st-key-notebook_workspace [data-stale="true"]' in foundations_css
-    stale_rule = _css_rule_body(
+    # Nested stale widgets must not inherit a global opacity override — only
+    # the shell keys and their owning layout wrappers stay opaque/out of flow.
+    assert '.st-key-mobile_panel [data-stale="true"]' not in foundations_css
+    assert '.st-key-notebook_workspace [data-stale="true"]' not in foundations_css
+    stale_shell = _css_rule_body(
         foundations_css,
-        '.st-key-mobile_panel [data-stale="true"]',
+        '.st-key-notebook_workspace[data-stale="true"]',
     )
-    assert "opacity:1 !important" in stale_rule
-    assert "transition:none !important" in stale_rule
+    assert "opacity:1 !important" in stale_shell
+    assert "transition:none !important" in stale_shell
+    assert "position:absolute !important" in foundations_css
+    assert "pointer-events:none !important" in foundations_css
+    assert (
+        '[data-testid="stLayoutWrapper"]:has(> .st-key-notebook_workspace[data-stale="true"])'
+        in foundations_css
+    )
+    assert (
+        '[data-testid="stLayoutWrapper"]:has(> .st-key-mobile_panel[data-stale="true"])'
+        in foundations_css
+    )
 
     studio_css = Path(_STYLES_DIR / "20-studio.css").read_text(encoding="utf-8")
     assert ':has(.journey-state.preview-open)' in studio_css
