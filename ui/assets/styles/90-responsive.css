@@ -3,6 +3,27 @@
         display:none !important;
     }
 
+    /* Backdrop keeps the Streamlit label for a11y; never paint "Close drawer". */
+    .st-key-mobile_drawer_backdrop div[data-testid="stButton"] button,
+    .st-key-mobile-drawer-backdrop button {
+        color:transparent !important;
+        -webkit-text-fill-color:transparent !important;
+    }
+
+    .st-key-mobile_drawer_backdrop div[data-testid="stButton"] button > div,
+    .st-key-mobile_drawer_backdrop div[data-testid="stButton"] button p,
+    .st-key-mobile_drawer_backdrop div[data-testid="stButton"] button span,
+    .st-key-mobile-drawer-backdrop button > div,
+    .st-key-mobile-drawer-backdrop button p,
+    .st-key-mobile-drawer-backdrop button span {
+        color:transparent !important;
+        -webkit-text-fill-color:transparent !important;
+        font-size:0 !important;
+        line-height:0 !important;
+        opacity:0 !important;
+        visibility:hidden !important;
+    }
+
     @media (min-width:1051px) {
         .st-key-mobile_studio_close,
         .st-key-mobile_drawer_backdrop {
@@ -259,6 +280,42 @@
             overflow:visible !important;
         }
 
+        /* Fill the hit box so Material icons sit in the geometric center. */
+        .st-key-mobile_nav_menu div[data-testid="stButton"] button > div,
+        .st-key-mobile_analyse div[data-testid="stButton"] button > div,
+        .st-key-mobile_panel [class*="st-key-mobile-new-chat"]
+        div[data-testid="stButton"] button > div,
+        .st-key-mobile_nav_menu div[data-testid="stButton"] button
+        span[data-has-shortcut],
+        .st-key-mobile_analyse div[data-testid="stButton"] button
+        span[data-has-shortcut],
+        .st-key-mobile_panel [class*="st-key-mobile-new-chat"]
+        div[data-testid="stButton"] button span[data-has-shortcut] {
+            display:inline-flex !important;
+            align-items:center !important;
+            justify-content:center !important;
+            width:100% !important;
+            height:100% !important;
+            margin:0 !important;
+            padding:0 !important;
+            gap:0 !important;
+        }
+
+        .st-key-mobile_nav_menu div[data-testid="stButton"] button
+        [data-testid="stIconMaterial"],
+        .st-key-mobile_analyse div[data-testid="stButton"] button
+        [data-testid="stIconMaterial"],
+        .st-key-mobile_panel [class*="st-key-mobile-new-chat"]
+        div[data-testid="stButton"] button [data-testid="stIconMaterial"] {
+            display:inline-flex !important;
+            align-items:center !important;
+            justify-content:center !important;
+            margin:0 !important;
+            font-size:16px !important;
+            line-height:1 !important;
+            color:inherit !important;
+        }
+
         .st-key-mobile_nav_menu div[data-testid="stButton"] button:hover,
         .st-key-mobile_analyse div[data-testid="stButton"] button:hover,
         .st-key-mobile_panel [class*="st-key-mobile-new-chat"]
@@ -269,19 +326,43 @@
             background:color-mix(in srgb,var(--cd-text) 8%,transparent) !important;
         }
 
+        /* Collapse the visible label so it cannot shift the icon off-center. */
+        .st-key-mobile_nav_menu div[data-testid="stButton"] button
+        [data-testid="stMarkdownContainer"],
+        .st-key-mobile_analyse div[data-testid="stButton"] button
+        [data-testid="stMarkdownContainer"],
+        .st-key-mobile_panel [class*="st-key-mobile-new-chat"]
+        div[data-testid="stButton"] button [data-testid="stMarkdownContainer"],
         .st-key-mobile_nav_menu div[data-testid="stButton"] button p,
         .st-key-mobile_analyse div[data-testid="stButton"] button p,
         .st-key-mobile_panel [class*="st-key-mobile-new-chat"]
         div[data-testid="stButton"] button p,
         .st-key-mobile_chat_menu div[data-testid="stButton"] button p {
             position:absolute !important;
-            width:1px !important;
-            height:1px !important;
+            width:0 !important;
+            height:0 !important;
+            margin:0 !important;
+            padding:0 !important;
             overflow:hidden !important;
             clip:rect(0,0,0,0) !important;
+            border:0 !important;
+            opacity:0 !important;
+            pointer-events:none !important;
         }
 
         /* Keep ⋮ vertically aligned with New chat / Analytics hit boxes. */
+        .st-key-mobile_nav_menu,
+        .st-key-mobile_analyse,
+        .st-key-mobile_nav_menu > [data-testid="stVerticalBlock"],
+        .st-key-mobile_analyse > [data-testid="stVerticalBlock"],
+        .st-key-mobile_nav_menu > [data-testid="stLayoutWrapper"],
+        .st-key-mobile_analyse > [data-testid="stLayoutWrapper"],
+        .st-key-mobile_nav_menu [data-testid="stButton"],
+        .st-key-mobile_analyse [data-testid="stButton"],
+        .st-key-mobile_nav_menu .stTooltipIcon,
+        .st-key-mobile_analyse .stTooltipIcon,
+        .st-key-mobile_nav_menu .stTooltipHoverTarget,
+        .st-key-mobile_analyse .stTooltipHoverTarget,
         .st-key-mobile_chat_menu,
         .st-key-mobile_chat_menu > [data-testid="stVerticalBlock"],
         .st-key-mobile_chat_menu > [data-testid="stLayoutWrapper"],
@@ -658,6 +739,22 @@
             background:transparent !important;
             box-shadow:none !important;
             color:transparent !important;
+            -webkit-text-fill-color:transparent !important;
+        }
+
+        /* Keep the accessible name; never show "Close drawer" on the dimmer. */
+        .st-key-mobile_drawer_backdrop div[data-testid="stButton"] button > div,
+        .st-key-mobile_drawer_backdrop div[data-testid="stButton"] button p,
+        .st-key-mobile_drawer_backdrop div[data-testid="stButton"] button span,
+        .st-key-mobile-drawer-backdrop button > div,
+        .st-key-mobile-drawer-backdrop button p,
+        .st-key-mobile-drawer-backdrop button span {
+            color:transparent !important;
+            -webkit-text-fill-color:transparent !important;
+            font-size:0 !important;
+            line-height:0 !important;
+            opacity:0 !important;
+            visibility:hidden !important;
         }
 
         body:has(.cd-mobile-studio-open) .st-key-mobile_studio_close {

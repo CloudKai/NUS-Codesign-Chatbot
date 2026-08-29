@@ -47,6 +47,36 @@ def _finish_mobile_nav_destination() -> None:
     close_mobile_drawers()
 
 
+def _on_expand_nav() -> None:
+    """Expand the left rail before the script body chooses collapsed vs full."""
+    set_nav_collapsed(False)
+
+
+def _on_collapse_nav() -> None:
+    """Collapse the left rail before the script body chooses collapsed vs full."""
+    set_nav_collapsed(True)
+
+
+def _on_close_mobile_nav() -> None:
+    """Dismiss the mobile nav overlay before chrome markers are rendered."""
+    close_mobile_nav_overlay()
+
+
+def _on_open_search() -> None:
+    """Route to Search and close drawers before ``center_view`` is read."""
+    _finish_mobile_nav_destination()
+    st.session_state.center_view = "search"
+    st.session_state.pending_mobile_panel = "Chat"
+
+
+def _on_toggle_library() -> None:
+    """Toggle Library/Chat and close drawers before ``center_view`` is read."""
+    _finish_mobile_nav_destination()
+    library_on = st.session_state.get("center_view") == "library"
+    st.session_state.center_view = "chat" if library_on else "library"
+    st.session_state.pending_mobile_panel = "Chat" if library_on else "Sources"
+
+
 def render_nav_panel() -> None:
     """Render the collapsible left chat rail (expanded or icon-only)."""
     # Mobile overlay always uses the full rail, not the icon-only strip.
@@ -61,15 +91,14 @@ def render_nav_panel() -> None:
 def _render_collapsed_nav() -> None:
     """Icon-only New / Search / Library plus expand control."""
     with st.container(key="nav_collapsed_actions"):
-        if st.button(
+        st.button(
             "Expand sidebar",
             icon=":material/dock_to_right:",
             type="tertiary",
             key="nav-expand",
             help="Open sidebar",
-        ):
-            set_nav_collapsed(False)
-            rerun_app()
+            on_click=_on_expand_nav,
+        )
         locked = notebook_switch_locked()
         if st.button(
             "New chat",
@@ -79,33 +108,29 @@ def _render_collapsed_nav() -> None:
             help="New chat",
             disabled=locked,
         ):
+            # Create still remounts via ``new_notebook`` so Recents + transcript
+            # load the new thread (do not use on_click for notebook create).
             _finish_mobile_nav_destination()
             st.session_state.center_view = "chat"
             st.session_state.mobile_panel = "Chat"
             new_notebook()
-        if st.button(
+        st.button(
             "Search chats",
             icon=":material/search:",
             type="tertiary",
             key="nav-search-collapsed",
             help="Search chats",
-        ):
-            _finish_mobile_nav_destination()
-            st.session_state.center_view = "search"
-            st.session_state.pending_mobile_panel = "Chat"
-            rerun_app()
+            on_click=_on_open_search,
+        )
         library_on = st.session_state.get("center_view") == "library"
-        if st.button(
+        st.button(
             "Library",
             icon=":material/grid_view:",
             type="primary" if library_on else "tertiary",
             key="nav-library-collapsed",
             help="Library",
-        ):
-            _finish_mobile_nav_destination()
-            st.session_state.center_view = "chat" if library_on else "library"
-            st.session_state.pending_mobile_panel = "Chat" if library_on else "Sources"
-            rerun_app()
+            on_click=_on_toggle_library,
+        )
     render_profile_menu(collapsed=True)
 
 
@@ -122,24 +147,23 @@ def _render_expanded_nav() -> None:
             unsafe_allow_html=True,
         )
         if overlay_open:
-            if collapse_col.button(
+            collapse_col.button(
                 "Close menu",
                 icon=":material/close:",
                 type="tertiary",
                 key="mobile-nav-close",
                 help="Close menu",
-            ):
-                close_mobile_nav_overlay()
-                rerun_app()
-        elif collapse_col.button(
-            "Collapse sidebar",
-            icon=":material/dock_to_right:",
-            type="tertiary",
-            key="nav-collapse",
-            help="Close sidebar",
-        ):
-            set_nav_collapsed(True)
-            rerun_app()
+                on_click=_on_close_mobile_nav,
+            )
+        else:
+            collapse_col.button(
+                "Collapse sidebar",
+                icon=":material/dock_to_right:",
+                type="tertiary",
+                key="nav-collapse",
+                help="Close sidebar",
+                on_click=_on_collapse_nav,
+            )
 
     locked = notebook_switch_locked()
     with st.container(key="nav_primary"):
@@ -156,29 +180,23 @@ def _render_expanded_nav() -> None:
             st.session_state.center_view = "chat"
             st.session_state.mobile_panel = "Chat"
             new_notebook()
-        if st.button(
+        st.button(
             "Search chats",
             icon=":material/search:",
             type="tertiary",
             key="nav-search-chats",
             use_container_width=True,
-        ):
-            _finish_mobile_nav_destination()
-            st.session_state.center_view = "search"
-            st.session_state.pending_mobile_panel = "Chat"
-            rerun_app()
+            on_click=_on_open_search,
+        )
         library_on = st.session_state.get("center_view") == "library"
-        if st.button(
+        st.button(
             "Library",
             icon=":material/grid_view:",
             type="primary" if library_on else "tertiary",
             key="nav-library",
             use_container_width=True,
-        ):
-            _finish_mobile_nav_destination()
-            st.session_state.center_view = "chat" if library_on else "library"
-            st.session_state.pending_mobile_panel = "Chat" if library_on else "Sources"
-            rerun_app()
+            on_click=_on_toggle_library,
+        )
     st.markdown(
         '<div class="cd-nav-section-label">Recents</div>',
         unsafe_allow_html=True,

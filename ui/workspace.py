@@ -34,7 +34,7 @@ from ui.panels.nav import (
     render_nav_panel,
 )
 from ui.panels.search import render_search_panel
-from ui.runtime import get_journey_stage_reviews, log_ui_timing, rerun_app, store
+from ui.runtime import get_journey_stage_reviews, log_ui_timing, store
 from ui.session import new_notebook, notebook_switch_locked
 from ui.sources import render_sources_panel
 from ui.studio import mount_stage_review_attention_watch, render_studio_panel
@@ -146,6 +146,40 @@ def _current_chat_title() -> str:
     return title or "Untitled notebook"
 
 
+def _on_open_mobile_nav() -> None:
+    """Open the nav overlay before chrome markers and column widths are read."""
+    st.session_state.mobile_nav_open = True
+    st.session_state.mobile_studio_open = False
+    set_nav_collapsed(False)
+
+
+def _on_open_mobile_studio() -> None:
+    """Open Thinking Path before studio collapse / drawer markers are read."""
+    st.session_state.mobile_nav_open = False
+    st.session_state.mobile_studio_open = True
+    set_side_panel_collapsed("studio", False)
+
+
+def _on_close_mobile_drawers() -> None:
+    """Dismiss both drawers before overlay markers are rendered."""
+    close_mobile_drawers()
+
+
+def _on_expand_side_panel(side: str) -> None:
+    """Restore a collapsed side panel before widths are chosen."""
+    set_side_panel_collapsed(side, False)
+
+
+def _on_close_mobile_studio() -> None:
+    """Close the mobile Thinking Path drawer before markers are rendered."""
+    st.session_state.mobile_studio_open = False
+
+
+def _on_collapse_studio() -> None:
+    """Collapse Thinking Path before column widths are chosen."""
+    set_side_panel_collapsed("studio", True)
+
+
 def _render_mobile_header(panel: str) -> None:
     """Gemini mobile chrome: menu, title, Analytics, new chat, and chat ⋮."""
     nav_open = bool(st.session_state.get("mobile_nav_open"))
@@ -171,17 +205,14 @@ def _render_mobile_header(panel: str) -> None:
         )
         with menu_col:
             with st.container(key="mobile_nav_menu"):
-                if st.button(
+                st.button(
                     "Open menu",
                     icon=":material/menu:",
                     type="tertiary",
                     key="mobile-nav-menu",
                     help="Open menu",
-                ):
-                    st.session_state.mobile_nav_open = True
-                    st.session_state.mobile_studio_open = False
-                    set_nav_collapsed(False)
-                    rerun_app()
+                    on_click=_on_open_mobile_nav,
+                )
         with title_col:
             st.markdown(
                 f'<div class="cd-mobile-header-title">{escape(title)}</div>',
@@ -189,17 +220,14 @@ def _render_mobile_header(panel: str) -> None:
             )
         with analyse_col:
             with st.container(key="mobile_analyse"):
-                if st.button(
+                st.button(
                     "Analyse / Thinking Path",
                     icon=":material/analytics:",
                     type="tertiary",
                     key="mobile-analytics",
                     help="Analyse / Thinking Path",
-                ):
-                    st.session_state.mobile_nav_open = False
-                    st.session_state.mobile_studio_open = True
-                    set_side_panel_collapsed("studio", False)
-                    rerun_app()
+                    on_click=_on_open_mobile_studio,
+                )
         with new_col:
             if st.button(
                 "New chat",
@@ -209,6 +237,7 @@ def _render_mobile_header(panel: str) -> None:
                 help="New chat",
                 disabled=locked,
             ):
+                # Notebook create remounts via ``new_notebook`` (not on_click).
                 close_mobile_drawers()
                 st.session_state.center_view = "chat"
                 st.session_state.mobile_panel = "Chat"
@@ -240,28 +269,27 @@ def _render_mobile_header(panel: str) -> None:
                         )
 
     with st.container(key="mobile_drawer_backdrop"):
-        if st.button(
+        st.button(
             "Close drawer",
             key="mobile-drawer-backdrop",
             type="tertiary",
             use_container_width=True,
-        ):
-            close_mobile_drawers()
-            rerun_app()
+            on_click=_on_close_mobile_drawers,
+        )
 
 
 def _render_collapsed_rail(*, side: str, label: str) -> None:
     """Render an icon rail that restores the collapsed Thinking Path."""
     with st.container(key=f"{side}_rail"):
-        if st.button(
+        st.button(
             "Analyse",
             icon=":material/analytics:",
             type="tertiary",
             key=f"expand-{side}",
             help=f"Expand Analyse / {label}",
-        ):
-            set_side_panel_collapsed(side, False)
-            rerun_app()
+            on_click=_on_expand_side_panel,
+            args=(side,),
+        )
 
 
 def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
@@ -373,15 +401,14 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
             else:
                 with st.container(key="studio_panel"):
                     with st.container(key="mobile_studio_close"):
-                        if st.button(
+                        st.button(
                             "Close Thinking Path",
                             icon=":material/close:",
                             type="tertiary",
                             key="mobile-studio-close",
                             help="Close Thinking Path",
-                        ):
-                            st.session_state.mobile_studio_open = False
-                            rerun_app()
+                            on_click=_on_close_mobile_studio,
+                        )
                     studio_started = time.perf_counter()
                     render_studio_panel()
                     log_ui_timing(
@@ -390,15 +417,14 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                             1,
                         )
                     )
-                    if st.button(
+                    st.button(
                         "Collapse Thinking Path",
                         icon=":material/dock_to_left:",
                         type="tertiary",
                         key="collapse-studio",
                         help="Collapse Thinking Path",
-                    ):
-                        set_side_panel_collapsed("studio", True)
-                        rerun_app()
+                        on_click=_on_collapse_studio,
+                    )
                     sync_studio_scroll()
         sync_workspace_column_resize()
 

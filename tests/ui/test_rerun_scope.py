@@ -424,6 +424,14 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
         "def _watch_stage_review_attention_fragment", 1
     )[0]
     assert "student_stage_selection" in footer_block
+    watch_block = source.split(
+        "def _watch_stage_review_attention_fragment", 1
+    )[1].split("def mount_stage_review_attention_watch", 1)[0]
+    assert "_stage_review_poll_app_run" in watch_block
+    assert "force_read" in watch_block
+    assert "rerun_app()" in watch_block
+    assert "not prev_attention and attention" in watch_block
+    assert "prev_active and not active" in watch_block
     journey_block = source.split("def render_journey_track", 1)[1].split(
         "def _dedupe_feedback_items", 1
     )[0]

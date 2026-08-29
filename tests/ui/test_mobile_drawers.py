@@ -294,6 +294,12 @@ def test_mobile_drawer_css_contract() -> None:
     assert "text-align:left" in title_css
     assert "height:2.55rem" in title_css
     assert "min-height:2.55rem" in title_css
+    # Menu / Analytics / New chat icons must sit in the geometric button center.
+    assert "st-key-mobile_nav_menu div[data-testid=\"stButton\"] button" in mobile
+    assert (
+        "span[data-has-shortcut]" in mobile
+        and "width:100% !important" in mobile
+    )
     assert 'st-key-mobile_rename_' in mobile
     assert "right:.5rem" in mobile
     assert "grid-template-columns:minmax(0,1fr) auto" in mobile
@@ -302,6 +308,9 @@ def test_mobile_drawer_css_contract() -> None:
         marker in mobile
         for marker in ("mobile_nav_backdrop", "mobile_drawer_backdrop", "mobile-drawer-backdrop")
     )
+    # Dimmer keeps an accessible label but must not paint "Close drawer".
+    assert "st-key-mobile-drawer-backdrop button p" in css
+    assert "font-size:0 !important" in css
     assert "st-key-nav_panel" in mobile
     assert "st-key-studio_panel" in mobile
     assert re.search(r"transform\s*:\s*translateX\(-100%\)", mobile)

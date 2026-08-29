@@ -54,6 +54,27 @@ def test_nav_rail_exposes_new_search_library_and_recents_actions() -> None:
     assert "new_notebook()" in nav
     assert "select_thread(" in nav
     assert "delete_notebook(" in nav
+    assert "on_click=_on_open_search" in nav
+    assert "on_click=_on_toggle_library" in nav
+    assert "on_click=_on_collapse_nav" in nav
+    assert "on_click=_on_expand_nav" in nav
+    assert "on_click=_on_close_mobile_nav" in nav
+    assert "on_click=_on_new_chat" not in nav
+    open_search = nav.split("def _on_open_search", 1)[1].split("\ndef ", 1)[0]
+    toggle_library = nav.split("def _on_toggle_library", 1)[1].split("\ndef ", 1)[0]
+    collapse_nav = nav.split("def _on_collapse_nav", 1)[1].split("\ndef ", 1)[0]
+    expand_nav = nav.split("def _on_expand_nav", 1)[1].split("\ndef ", 1)[0]
+    close_mobile = nav.split("def _on_close_mobile_nav", 1)[1].split("\ndef ", 1)[0]
+    for callback_body in (
+        open_search,
+        toggle_library,
+        collapse_nav,
+        expand_nav,
+        close_mobile,
+    ):
+        assert "rerun_app()" not in callback_body
+    # Create/select/delete still remount so Recents + transcript stay consistent.
+    assert "rerun_app()" in nav
     css = Path("ui/assets/styles/15-nav.css").read_text(encoding="utf-8")
     assert "stIconMaterial" in css
     assert "font-size:0" not in css.split("st-key-nav_recent_")[1].split("st-key-nav_collapsed")[0]
@@ -128,3 +149,27 @@ def test_mobile_library_updates_the_rendered_center_in_the_same_pass() -> None:
     )[0]
     assert 'st.session_state.center_view = "library"' in sources_branch
     assert 'center_view = "library"' in sources_branch
+
+
+def test_workspace_chrome_uses_on_click_without_extra_rerun() -> None:
+    """Drawer/collapse chrome applies flags before render; no second remount."""
+    workspace = Path("ui/workspace.py").read_text(encoding="utf-8")
+    assert "on_click=_on_open_mobile_nav" in workspace
+    assert "on_click=_on_open_mobile_studio" in workspace
+    assert "on_click=_on_close_mobile_drawers" in workspace
+    assert "on_click=_on_expand_side_panel" in workspace
+    assert "on_click=_on_close_mobile_studio" in workspace
+    assert "on_click=_on_collapse_studio" in workspace
+    assert "on_click=_on_mobile_new_chat" not in workspace
+    assert "new_notebook()" in workspace
+    for name in (
+        "_on_open_mobile_nav",
+        "_on_open_mobile_studio",
+        "_on_close_mobile_drawers",
+        "_on_expand_side_panel",
+        "_on_close_mobile_studio",
+        "_on_collapse_studio",
+    ):
+        body = workspace.split(f"def {name}", 1)[1].split("\ndef ", 1)[0]
+        assert "rerun_app()" not in body
+    assert "rerun_app" not in workspace

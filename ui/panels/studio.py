@@ -1073,11 +1073,29 @@ def _watch_stage_review_attention_fragment() -> None:
     """Remount the workspace when a stage Haiku job needs a badge refresh.
 
     Mounted outside ``studio_panel`` so ticks do not churn Thinking Path DOM.
-    Idle notebooks no-op after reading the durable blob.
+    Idle notebooks skip durable store reads between full-script remounts.
+    Enqueueing a job always remounts first, so the next tick still discovers
+    ``QUEUED``/``RUNNING`` via the forced post-remount read.
     """
     thread_id = str(st.session_state.get("thread_id") or "").strip()
     if not thread_id:
         return
+
+    app_runs = st.session_state.get("_app_runs")
+    force_read = st.session_state.get("_stage_review_poll_app_run") != app_runs
+    if force_read:
+        st.session_state["_stage_review_poll_app_run"] = app_runs
+
+    prev_attention = st.session_state.get("_stage_review_attention")
+    prev_active = bool(st.session_state.get("_stage_review_active"))
+    if (
+        not force_read
+        and prev_attention is not None
+        and not prev_attention
+        and not prev_active
+    ):
+        return
+
     try:
         blob = get_journey_stage_reviews(thread_id)
     except Exception:
@@ -1090,8 +1108,6 @@ def _watch_stage_review_attention_fragment() -> None:
         for job in (blob.get("jobs") or {}).values()
         if isinstance(job, dict)
     )
-    prev_attention = st.session_state.get("_stage_review_attention")
-    prev_active = bool(st.session_state.get("_stage_review_active"))
     st.session_state["_stage_review_attention"] = attention
     st.session_state["_stage_review_active"] = active
     if prev_attention is None:
@@ -1104,7 +1120,8 @@ def mount_stage_review_attention_watch() -> None:
     """Register the stage-review badge poller outside ``.st-key-studio_panel``.
 
     Call from the workspace on every paint so Streamlit keeps the ``run_every``
-    timer registered. Idle ticks no-op when no checkpoint job is in flight.
+    timer registered. Idle ticks skip store work when no attention or job was
+    pending since the last full remount; ``rerun_app`` only on real flips.
     """
     _watch_stage_review_attention_fragment()
 
