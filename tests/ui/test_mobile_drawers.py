@@ -243,6 +243,17 @@ def test_recent_selection_and_new_chat_close_both_drawers() -> None:
     assert app.session_state["mobile_nav_open"] is False
     assert app.session_state["mobile_studio_open"] is False
 
+    # Tapping the already-active chat only dismisses drawers (no thread change).
+    app.session_state["mobile_nav_open"] = True
+    app.session_state["mobile_studio_open"] = True
+    app.run()
+    active_before = app.session_state["thread_id"]
+    _button(app, f"nav-open-{active_before}").click().run()
+    assert app.session_state["thread_id"] == active_before
+    assert app.session_state["center_view"] == "chat"
+    assert app.session_state["mobile_nav_open"] is False
+    assert app.session_state["mobile_studio_open"] is False
+
     app.session_state["mobile_nav_open"] = True
     app.session_state["mobile_studio_open"] = True
     app.run()

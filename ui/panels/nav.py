@@ -77,6 +77,29 @@ def _on_toggle_library() -> None:
     st.session_state.pending_mobile_panel = "Chat" if library_on else "Sources"
 
 
+def open_chat_destination(thread_id: str) -> None:
+    """Route to a chat before render; natural click remount loads the transcript.
+
+    Closes mobile drawers and sets Chat as the center destination. When the
+    tapped notebook is already active, skips ``select_thread`` so the menu
+    dismiss does not re-fetch metadata. Otherwise loads the thread with
+    ``should_rerun=False`` so the click's single remount is enough.
+
+    Args:
+        thread_id: Persisted notebook identifier to open.
+    """
+    _finish_mobile_nav_destination()
+    st.session_state.center_view = "chat"
+    st.session_state.mobile_panel = "Chat"
+    target = str(thread_id or "").strip()
+    if not target:
+        return
+    current = str(st.session_state.get("thread_id") or "").strip()
+    if target == current:
+        return
+    select_thread(target, should_rerun=False)
+
+
 def render_nav_panel() -> None:
     """Render the collapsible left chat rail (expanded or icon-only)."""
     # Mobile overlay always uses the full rail, not the icon-only strip.
@@ -233,18 +256,16 @@ def _render_recent_row(
     with st.container(key=row_key):
         title_col, menu_col = st.columns([0.86, 0.14], gap="small")
         with title_col:
-            if st.button(
+            st.button(
                 title,
                 type="primary" if is_active else "tertiary",
                 key=f"nav-open-{thread_id}",
                 use_container_width=True,
                 disabled=open_disabled,
                 help="Wait for the coach reply" if open_disabled else None,
-            ):
-                _finish_mobile_nav_destination()
-                st.session_state.center_view = "chat"
-                st.session_state.mobile_panel = "Chat"
-                select_thread(thread_id)
+                on_click=open_chat_destination,
+                args=(thread_id,),
+            )
         with menu_col:
             # Icon in the label (not icon=) so Streamlit omits expand_more chrome.
             menu = st.popover(

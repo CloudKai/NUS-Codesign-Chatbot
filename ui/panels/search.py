@@ -12,8 +12,9 @@ from typing import Any
 import streamlit as st
 
 from ui.notebooks import thread_overview
+from ui.panels.nav import open_chat_destination
 from ui.runtime import store
-from ui.session import notebook_switch_locked, select_thread
+from ui.session import notebook_switch_locked
 
 _FUZZY_THRESHOLD = 0.42
 
@@ -150,16 +151,16 @@ def _render_result_row(
     label = "\n".join(label_lines)
 
     with st.container(key=f"search_row_{thread_id.replace('-', '_')}"):
-        if st.button(
+        st.button(
             label,
             key=f"search-open-{thread_id}",
             use_container_width=True,
             type="primary" if is_active else "tertiary",
             disabled=open_disabled,
             help="Wait for the coach reply" if open_disabled else "Open chat",
-        ):
-            st.session_state.center_view = "chat"
-            select_thread(thread_id)
+            on_click=open_chat_destination,
+            args=(thread_id,),
+        )
 
 
 def _match_snippet(thread: dict[str, Any], needle: str) -> str:

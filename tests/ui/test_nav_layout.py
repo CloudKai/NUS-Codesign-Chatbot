@@ -60,20 +60,25 @@ def test_nav_rail_exposes_new_search_library_and_recents_actions() -> None:
     assert "on_click=_on_expand_nav" in nav
     assert "on_click=_on_close_mobile_nav" in nav
     assert "on_click=_on_new_chat" not in nav
+    assert "on_click=open_chat_destination" in nav
+    assert "select_thread(target, should_rerun=False)" in nav
     open_search = nav.split("def _on_open_search", 1)[1].split("\ndef ", 1)[0]
     toggle_library = nav.split("def _on_toggle_library", 1)[1].split("\ndef ", 1)[0]
     collapse_nav = nav.split("def _on_collapse_nav", 1)[1].split("\ndef ", 1)[0]
     expand_nav = nav.split("def _on_expand_nav", 1)[1].split("\ndef ", 1)[0]
     close_mobile = nav.split("def _on_close_mobile_nav", 1)[1].split("\ndef ", 1)[0]
+    open_chat = nav.split("def open_chat_destination", 1)[1].split("\ndef ", 1)[0]
     for callback_body in (
         open_search,
         toggle_library,
         collapse_nav,
         expand_nav,
         close_mobile,
+        open_chat,
     ):
         assert "rerun_app()" not in callback_body
-    # Create/select/delete still remount so Recents + transcript stay consistent.
+    assert 'if target == current:' in open_chat
+    # Create/delete still remount so Recents + transcript stay consistent.
     assert "rerun_app()" in nav
     css = Path("ui/assets/styles/15-nav.css").read_text(encoding="utf-8")
     assert "stIconMaterial" in css
@@ -105,11 +110,12 @@ def test_search_pane_uses_fuzzy_ranking_and_clickable_rows() -> None:
     assert "No results found" in search
     assert "Results" in search
     assert "Recent" in search
-    assert 'center_view = "chat"' in search
-    assert "select_thread(" in search
+    assert "on_click=open_chat_destination" in search
+    assert "open_chat_destination" in search
     assert 'key=f"search-open-{thread_id}"' in search
     assert '"Open"' not in search
     assert "st.markdown(body" not in search
+    assert "select_thread(" not in search
     css = Path("ui/assets/styles/15-nav.css").read_text(encoding="utf-8")
     assert "st-key-search_row_" in css
     assert "white-space:pre-line" in css
