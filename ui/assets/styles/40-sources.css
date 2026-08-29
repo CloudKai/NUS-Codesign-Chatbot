@@ -1190,39 +1190,10 @@
         border:0 !important;
     }
 
-    /* Replace Streamlit form hint "Press Enter to submit form". */
+    /* Hide Streamlit form hint "Press Enter to submit form" on rename fields. */
     [class*="st-key-source_rename_"] [data-testid="InputInstructions"],
     .st-key-notebook_actions_panel [data-testid="InputInstructions"] {
-        position:relative !important;
-        color:transparent !important;
-        font-size:0 !important;
-        line-height:0 !important;
-        min-height:0 !important;
-        height:auto !important;
-        margin:0 !important;
-        padding:0 !important;
-    }
-
-    [class*="st-key-source_rename_"] [data-testid="InputInstructions"] *,
-    .st-key-notebook_actions_panel [data-testid="InputInstructions"] * {
-        visibility:hidden !important;
-        font-size:0 !important;
-    }
-
-    [class*="st-key-source_rename_"] [data-testid="InputInstructions"]::after,
-    .st-key-notebook_actions_panel [data-testid="InputInstructions"]::after {
-        content:"Press Enter to apply";
-        visibility:visible !important;
-        position:absolute;
-        right:0;
-        top:50%;
-        transform:translateY(-50%);
-        color:var(--cd-muted);
-        font-size:.68rem;
-        font-weight:500;
-        letter-spacing:.01em;
-        line-height:1;
-        white-space:nowrap;
+        display:none !important;
     }
 
     [class*="st-key-source_card_"] .source-meta,

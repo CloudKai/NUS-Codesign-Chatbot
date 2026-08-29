@@ -14,9 +14,6 @@ import streamlit.components.v1 as components
 
 RenameKind = Literal["notebook", "source", "topbar"]
 
-# Mirrored by ``content:"Press Enter to apply"`` in ``ui/assets/styles/``.
-_ENTER_HINT = "Press Enter to apply"
-
 _KEY_PREFIXES: dict[RenameKind, tuple[str, ...]] = {
     "notebook": (
         "rename-notebook-form-",
@@ -79,9 +76,10 @@ def render_enter_to_apply_rename(
 ) -> tuple[bool, str]:
     """Render an Enter-only rename form and return ``(applied, cleaned_value)``.
 
-    The Apply submit control is present for Streamlit form Enter handling and is
-    visually hidden by CSS. Focused fields still show ``Press Enter to apply``
-    via CSS; no Streamlit help icon is attached to the label.
+    The Apply submit control is present for Streamlit form Enter handling.
+    Chat Setting popovers (Recents and mobile) show Apply beside the field;
+    other surfaces may hide it with CSS. Streamlit's ``Press Enter to submit
+    form`` hint is hidden on rename fields; no help icon is attached.
 
     Args:
         key_namespace: Optional disambiguator when the same item is renamed from

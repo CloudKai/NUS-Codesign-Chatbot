@@ -1123,8 +1123,8 @@ def test_rename_and_icon_controls_expose_accessible_instructions():
     workspace = Path("ui/workspace.py").read_text(encoding="utf-8")
     css = _template_stylesheet()
 
-    assert '_ENTER_HINT = "Press Enter to apply"' in rename_source
     assert '"help": _ENTER_HINT' not in rename_source
+    assert '_ENTER_HINT' not in rename_source
     assert 'help="Source actions"' in sources
     assert "data-tooltip=" in sources
     assert "Max {settings.max_file_size_mb} MB per file" in sources
@@ -1142,7 +1142,11 @@ def test_rename_and_icon_controls_expose_accessible_instructions():
         '[class*="st-key-source_card_"] [data-testid="stPopover"] button:focus-visible'
         in css
     )
-    assert 'content:"Press Enter to apply"' in css
+    # Rename fields hide Streamlit's "Press Enter to submit form" chrome.
+    assert 'st-key-nav_rename_"] [data-testid="InputInstructions"]' in css
+    assert 'st-key-mobile_rename_"] [data-testid="InputInstructions"]' in css
+    assert 'st-key-source_rename_"] [data-testid="InputInstructions"]' in css
+    assert 'content:"Press Enter to apply"' not in css
     assert "position:relative !important" in css
     assert "height:100vh" in css
     assert "ResizeObserver" in Path("ui/layout/sources_scroll.py").read_text(

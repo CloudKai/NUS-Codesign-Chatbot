@@ -423,3 +423,12 @@
         min-height:0;
         flex:1 1 auto;
     }
+
+    /* Hide Streamlit's "Press Enter to submit form" on every rename field. */
+    [class*="st-key-nav_rename_"] [data-testid="InputInstructions"],
+    [class*="st-key-mobile_rename_"] [data-testid="InputInstructions"],
+    [class*="st-key-source_rename_"] [data-testid="InputInstructions"],
+    .st-key-notebook_actions_panel [data-testid="InputInstructions"],
+    .st-key-current_notebook_identity [data-testid="InputInstructions"] {
+        display:none !important;
+    }
