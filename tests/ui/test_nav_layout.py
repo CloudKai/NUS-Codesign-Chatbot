@@ -157,6 +157,36 @@ def test_column_resize_supports_nav_and_studio_dividers() -> None:
     assert 'role === "nav" || role === "studio"' in resize
     assert '"min(20.5rem, 88vw)"' in resize
     assert "cd_workspace_column_widths_v4" in resize
+    assert "APP_RUN" in resize
+    assert "navCollapsed = NAV_COLLAPSED" in resize
+    assert "studioCollapsed = STUDIO_COLLAPSED" in resize
+    assert '"cd-shell-optimistic-resize"' in resize
+    assert "setOptimisticResize(\"nav-collapsed\")" in resize
+    assert "applyLayout(found.columns, found.roles, ratios, true" in resize
+    assert "applyLayout(found.columns, found.roles, ratios, false" in resize
+    assert "function install(authoritative = false)" in resize
+    assert "if (authoritative) clearOptimisticStateWhenAuthoritative();" in resize
+    assert "if (!install(true))" in resize
+    assert "if (install(false) || attempts > 50)" in resize
+    assert "if (install(true) || attempts > 50)" not in resize
+    assert "reinstall(false)" in resize
+    assert "OPTIMISTIC_SHELL_CLASSES" in resize
+    assert "function columnIsCollapsed(found, role)" in resize
+    assert "const navCollapsed = columnIsCollapsed(found, \"nav\")" in resize
+    assert "const studioCollapsed = columnIsCollapsed(found, \"studio\")" in resize
+    assert "ratios, true, studioCollapsed" in resize
+    assert "ratios, false, studioCollapsed" in resize
+    assert "ratios, navCollapsed, true" in resize
+    assert "ratios, navCollapsed, false" in resize
+    assert "__cdWorkspaceLayoutGeneration" in resize
+    assert "__cdWorkspaceLayoutRetryTimer" in resize
+    workspace_css = Path("ui/assets/styles/10-workspace.css").read_text(
+        encoding="utf-8"
+    )
+    assert "body.cd-shell-optimistic-resize" in workspace_css
+    assert "body.cd-shell-optimistic-resize .cd-col-resize-handle" in workspace_css
+    assert "pointer-events:none !important" in workspace_css
+    assert "transition:flex-basis 180ms ease" in workspace_css
 
 
 def test_mobile_library_updates_the_rendered_center_in_the_same_pass() -> None:

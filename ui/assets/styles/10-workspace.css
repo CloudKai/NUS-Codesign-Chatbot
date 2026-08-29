@@ -409,6 +409,25 @@
         min-height:0;
     }
 
+    body.cd-shell-optimistic-resize
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+        transition:flex-basis 180ms ease, width 180ms ease,
+            min-width 180ms ease, max-width 180ms ease;
+    }
+
+    body.cd-shell-optimistic-resize .cd-col-resize-handle {
+        pointer-events:none !important;
+    }
+
+    @media (prefers-reduced-motion:reduce) {
+        body.cd-shell-optimistic-resize
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+            transition:none !important;
+        }
+    }
+
     .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
     > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel) {
         background:var(--cd-panel);

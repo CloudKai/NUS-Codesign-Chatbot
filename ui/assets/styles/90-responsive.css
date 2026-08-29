@@ -652,6 +652,9 @@
 
         body:has(.cd-mobile-nav-open)
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-nav_panel),
+        body.cd-mobile-nav-optimistic
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-nav_panel) {
             visibility:visible;
             pointer-events:auto;
@@ -681,6 +684,9 @@
 
         body:has(.cd-mobile-studio-open)
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel),
+        body.cd-mobile-studio-optimistic
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
         > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel) {
             visibility:visible;
             pointer-events:auto;
@@ -689,17 +695,21 @@
         }
 
         body:has(.cd-mobile-nav-open) .st-key-nav_panel,
-        body:has(.cd-mobile-studio-open) .st-key-studio_panel {
+        body.cd-mobile-nav-optimistic .st-key-nav_panel,
+        body:has(.cd-mobile-studio-open) .st-key-studio_panel,
+        body.cd-mobile-studio-optimistic .st-key-studio_panel {
             height:100% !important;
             min-height:100dvh !important;
             max-height:100dvh !important;
         }
 
-        body:has(.cd-mobile-nav-open) .st-key-nav_panel {
+        body:has(.cd-mobile-nav-open) .st-key-nav_panel,
+        body.cd-mobile-nav-optimistic .st-key-nav_panel {
             border-right:0 !important;
         }
 
-        body:has(.cd-mobile-studio-open) .st-key-studio_panel {
+        body:has(.cd-mobile-studio-open) .st-key-studio_panel,
+        body.cd-mobile-studio-optimistic .st-key-studio_panel {
             border-left:0 !important;
         }
 
@@ -720,7 +730,9 @@
         }
 
         body:has(.cd-mobile-nav-open) .st-key-mobile_drawer_backdrop,
-        body:has(.cd-mobile-studio-open) .st-key-mobile_drawer_backdrop {
+        body.cd-mobile-nav-optimistic .st-key-mobile_drawer_backdrop,
+        body:has(.cd-mobile-studio-open) .st-key-mobile_drawer_backdrop,
+        body.cd-mobile-studio-optimistic .st-key-mobile_drawer_backdrop {
             opacity:1;
             visibility:visible;
             pointer-events:auto;
@@ -757,7 +769,8 @@
             visibility:hidden !important;
         }
 
-        body:has(.cd-mobile-studio-open) .st-key-mobile_studio_close {
+        body:has(.cd-mobile-studio-open) .st-key-mobile_studio_close,
+        body.cd-mobile-studio-optimistic .st-key-mobile_studio_close {
             display:block !important;
             position:fixed !important;
             top:.72rem !important;
@@ -767,6 +780,46 @@
             height:2.5rem !important;
             z-index:440 !important;
             pointer-events:none !important;
+        }
+
+        /* Capture-phase shell feedback starts before Streamlit reaches the
+           server. These overrides also hide the outgoing drawer while its old
+           open marker is still present in the stale DOM. */
+        body.cd-mobile-studio-optimistic
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-nav_panel),
+        body.cd-mobile-nav-optimistic:has(.cd-mobile-studio-open)
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-nav_panel),
+        body.cd-mobile-drawer-closing
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-nav_panel) {
+            visibility:hidden !important;
+            pointer-events:none !important;
+            transform:translateX(-100%) !important;
+            transition:transform 220ms ease, visibility 0s linear 220ms !important;
+        }
+
+        body.cd-mobile-nav-optimistic
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel),
+        body.cd-mobile-studio-optimistic:has(.cd-mobile-nav-open)
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel),
+        body.cd-mobile-drawer-closing
+        .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+        > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-studio_panel) {
+            visibility:hidden !important;
+            pointer-events:none !important;
+            transform:translateX(100%) !important;
+            transition:transform 220ms ease, visibility 0s linear 220ms !important;
+        }
+
+        body.cd-mobile-drawer-closing .st-key-mobile_drawer_backdrop {
+            opacity:0 !important;
+            visibility:hidden !important;
+            pointer-events:none !important;
+            transition:opacity 220ms ease, visibility 0s linear 220ms !important;
         }
 
         .st-key-mobile_studio_close div[data-testid="stButton"] button {

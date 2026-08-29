@@ -92,10 +92,12 @@ def sync_workspace_column_resize() -> None:
     stored = get_workspace_widths()
     studio_collapsed = side_panel_collapsed("studio")
     nav_is_collapsed = nav_collapsed()
+    app_run = int(st.session_state.get("_app_runs") or 0)
     components.html(
         f"""
 <script>
 (() => {{
+  const APP_RUN = {app_run};
   const STORED = {json.dumps(stored)};
   const MIN_RATIO = {_MIN_RATIO};
   const RAIL_PX = {_RAIL_WIDTH_PX};
@@ -109,6 +111,12 @@ def sync_workspace_column_resize() -> None:
   const MOBILE_QUERY = "(max-width: 1050px)";
   const doc = window.parent.document;
   const win = window.parent;
+  const previousRetryTimer = win.__cdWorkspaceLayoutRetryTimer;
+  if (previousRetryTimer) win.clearInterval(previousRetryTimer);
+  win.__cdWorkspaceLayoutRetryTimer = null;
+  const layoutGeneration =
+    String(APP_RUN) + ":" + ((Number(win.__cdWorkspaceLayoutGeneration) || 0) + 1);
+  win.__cdWorkspaceLayoutGeneration = layoutGeneration;
 
   function writeStored(ratios) {{
     try {{
@@ -212,31 +220,37 @@ def sync_workspace_column_resize() -> None:
     column.style.setProperty("max-width", "100%", "important");
   }}
 
-  function applyLayout(columns, roles, ratios) {{
+  function applyLayout(
+    columns,
+    roles,
+    ratios,
+    navCollapsed = NAV_COLLAPSED,
+    studioCollapsed = STUDIO_COLLAPSED
+  ) {{
     const byRole = {{}};
     roles.forEach((role, index) => {{
       if (role) byRole[role] = columns[index];
     }});
     Object.values(byRole).forEach(clearSizing);
 
-    if (NAV_COLLAPSED) {{
+    if (navCollapsed) {{
       setFixed(byRole.nav, NAV_COLLAPSED_PX, "cd-col-nav");
     }}
-    if (STUDIO_COLLAPSED) {{
+    if (studioCollapsed) {{
       setFixed(byRole.studio, RAIL_PX, "cd-col-rail");
     }}
 
-    if (NAV_COLLAPSED && STUDIO_COLLAPSED) {{
+    if (navCollapsed && studioCollapsed) {{
       setFlex(byRole.center, 1);
       return;
     }}
-    if (NAV_COLLAPSED) {{
+    if (navCollapsed) {{
       const total = ratios[1] + ratios[2] || 1;
       setFlex(byRole.center, ratios[1] / total);
       setFlex(byRole.studio, ratios[2] / total);
       return;
     }}
-    if (STUDIO_COLLAPSED) {{
+    if (studioCollapsed) {{
       const total = ratios[0] + ratios[1] || 1;
       setFlex(byRole.nav, ratios[0] / total);
       setFlex(byRole.center, ratios[1] / total);
@@ -249,6 +263,133 @@ def sync_workspace_column_resize() -> None:
     setFlex(byRole.studio, ratios[2] / total);
   }}
 
+  const OPTIMISTIC_SHELL_CLASSES = [
+    "cd-shell-optimistic-resize",
+    "cd-shell-nav-collapsed",
+    "cd-shell-nav-expanded",
+    "cd-shell-studio-collapsed",
+    "cd-shell-studio-expanded",
+    "cd-mobile-nav-optimistic",
+    "cd-mobile-studio-optimistic",
+    "cd-mobile-drawer-closing",
+  ];
+
+  function clearOptimisticStateWhenAuthoritative() {{
+    const body = doc.body;
+    if (!body) return;
+
+    /* Only the helper script emitted by a new Streamlit render calls
+       install(true). Resize/observer callbacks use install(false), so they
+       cannot cancel an in-flight optimistic transition. Clearing as soon as
+       the authoritative helper mounts also covers empty or error renders that
+       do not contain a discoverable workspace row. */
+    body.classList.remove(...OPTIMISTIC_SHELL_CLASSES);
+  }}
+
+  function hitsKey(target, token) {{
+    if (!(target instanceof win.Element)) return false;
+    return Boolean(target.closest('[class*="st-key-' + token + '"]'));
+  }}
+
+  function hitsAnyKey(target, tokens) {{
+    return tokens.some((token) => hitsKey(target, token));
+  }}
+
+  function setOptimisticDrawer(side) {{
+    doc.body.classList.remove(
+      "cd-mobile-nav-optimistic",
+      "cd-mobile-studio-optimistic",
+      "cd-mobile-drawer-closing"
+    );
+    if (side) doc.body.classList.add("cd-mobile-" + side + "-optimistic");
+  }}
+
+  function closeOptimisticDrawers() {{
+    doc.body.classList.remove(
+      "cd-mobile-nav-optimistic",
+      "cd-mobile-studio-optimistic"
+    );
+    doc.body.classList.add("cd-mobile-drawer-closing");
+  }}
+
+  function setOptimisticResize(target) {{
+    doc.body.classList.remove(
+      "cd-shell-optimistic-resize",
+      "cd-shell-nav-collapsed",
+      "cd-shell-nav-expanded",
+      "cd-shell-studio-collapsed",
+      "cd-shell-studio-expanded"
+    );
+    if (target) {{
+      doc.body.classList.add(
+        "cd-shell-optimistic-resize",
+        "cd-shell-" + target
+      );
+    }}
+  }}
+
+  function columnIsCollapsed(found, role) {{
+    const index = found.roles.indexOf(role);
+    const column = index >= 0 ? found.columns[index] : null;
+    if (!column) return false;
+    if (role === "nav") {{
+      return column.classList.contains("cd-col-nav") ||
+        Boolean(column.querySelector(".st-key-nav_collapsed_actions"));
+    }}
+    if (role === "studio") {{
+      return column.classList.contains("cd-col-rail") ||
+        Boolean(column.querySelector(".st-key-studio_rail"));
+    }}
+    return false;
+  }}
+
+  function handleOptimisticShellAction(event) {{
+    const target = event.target;
+    if (!(target instanceof win.Element) || !target.closest("button")) return;
+
+    if (win.matchMedia(MOBILE_QUERY).matches) {{
+      if (hitsKey(target, "mobile_nav_menu")) {{
+        setOptimisticDrawer("nav");
+        return;
+      }}
+      if (hitsKey(target, "mobile_analyse")) {{
+        setOptimisticDrawer("studio");
+        return;
+      }}
+      if (hitsAnyKey(target, [
+        "mobile-nav-close",
+        "mobile_studio_close",
+        "mobile_drawer_backdrop",
+        "nav-new-chat",
+        "nav-search-chats",
+        "nav-library",
+        "nav-open-",
+      ])) {{
+        closeOptimisticDrawers();
+      }}
+      return;
+    }}
+
+    const found = findWorkspaceColumns();
+    if (!found) return;
+    const ratios = readStored();
+    const navCollapsed = columnIsCollapsed(found, "nav");
+    const studioCollapsed = columnIsCollapsed(found, "studio");
+    if (hitsKey(target, "nav-collapse")) {{
+      setOptimisticResize("nav-collapsed");
+      applyLayout(found.columns, found.roles, ratios, true, studioCollapsed);
+    }} else if (hitsKey(target, "nav-expand")) {{
+      setOptimisticResize("nav-expanded");
+      applyLayout(found.columns, found.roles, ratios, false, studioCollapsed);
+    }} else if (hitsKey(target, "collapse-studio")) {{
+      setOptimisticResize("studio-collapsed");
+      applyLayout(found.columns, found.roles, ratios, navCollapsed, true);
+    }} else if (hitsKey(target, "expand-studio")) {{
+      setOptimisticResize("studio-expanded");
+      applyLayout(found.columns, found.roles, ratios, navCollapsed, false);
+    }}
+  }}
+
   function bindHandle(handle, onDown) {{
     handle.addEventListener("mousedown", (event) => {{
       if (event.button !== 0) return;
@@ -258,7 +399,8 @@ def sync_workspace_column_resize() -> None:
     }});
   }}
 
-  function install() {{
+  function install(authoritative = false) {{
+    if (authoritative) clearOptimisticStateWhenAuthoritative();
     const found = findWorkspaceColumns();
     if (!found) return false;
     const {{ row, columns, roles }} = found;
@@ -384,22 +526,47 @@ def sync_workspace_column_resize() -> None:
   }}
 
   win.__cdWorkspaceLayoutInstall = install;
+  win.__cdOptimisticShellAction = handleOptimisticShellAction;
+  if (!win.__cdOptimisticShellActionBound) {{
+    /* Use click capture instead of pointerdown. Adding the backdrop during
+       pointerdown changes hit testing before Streamlit receives activation,
+       which can swallow the original drawer button click. Click capture still
+       updates the shell in the same frame while preserving native dispatch. */
+    doc.addEventListener("click", (event) => {{
+      const handler = win.__cdOptimisticShellAction;
+      if (typeof handler === "function") handler(event);
+    }}, true);
+    win.__cdOptimisticShellActionBound = true;
+  }}
   if (!win.__cdWorkspaceLayoutResizeBound) {{
     win.addEventListener("resize", () => {{
       win.requestAnimationFrame(() => {{
         const reinstall = win.__cdWorkspaceLayoutInstall;
-        if (typeof reinstall === "function") reinstall();
+        if (typeof reinstall === "function") reinstall(false);
       }});
     }});
     win.__cdWorkspaceLayoutResizeBound = true;
   }}
 
-  if (!install()) {{
+  if (!install(true)) {{
     let attempts = 0;
     const timer = win.setInterval(() => {{
+      if (win.__cdWorkspaceLayoutGeneration !== layoutGeneration) {{
+        win.clearInterval(timer);
+        if (win.__cdWorkspaceLayoutRetryTimer === timer) {{
+          win.__cdWorkspaceLayoutRetryTimer = null;
+        }}
+        return;
+      }}
       attempts += 1;
-      if (install() || attempts > 50) win.clearInterval(timer);
+      if (install(false) || attempts > 50) {{
+        win.clearInterval(timer);
+        if (win.__cdWorkspaceLayoutRetryTimer === timer) {{
+          win.__cdWorkspaceLayoutRetryTimer = null;
+        }}
+      }}
     }}, 80);
+    win.__cdWorkspaceLayoutRetryTimer = timer;
   }}
 }})();
 </script>

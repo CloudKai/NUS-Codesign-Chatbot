@@ -2,6 +2,55 @@
 
 ## CURRENT STATUS
 
+### Streamlit anti-flash and instant-response UI (2026-08-30)
+
+**Behavior.** Ordinary controls no longer fade or clear the notebook workspace
+while Streamlit reconciles. The stale-frame override is strictly scoped to the
+mobile header and workspace; it does not conceal errors, status, or
+authentication. One capture-phase browser listener gives Navigation, Thinking
+Path, desktop rail collapse/expand, close/backdrop, and routing controls
+immediate optical feedback while the existing Streamlit callback remains
+authoritative. Mobile drawers retain their 220 ms motion; desktop panel sizing
+gets a restrained 180 ms transition, both disabled for reduced-motion users.
+Latest-message Edit uses the existing chat fragment callback; earlier-message
+Edit deliberately remains the existing confirmation-dialog/full-rerun path.
+There is no timer-based delay, loading screen, or session-state contract.
+
+**Files.** `ui/layout/column_resize.py`, `ui/panels/chat.py`,
+`ui/assets/styles/00-foundations.css`,
+`ui/assets/styles/10-workspace.css`,
+`ui/assets/styles/90-responsive.css`, focused UI/AppTest/CSS-contract files,
+`design-qa.md`, and this handoff. The phase also retains compatible existing
+chat scroll/edit-layout test coverage.
+
+**Validation.** Focused anti-flash coverage passed (77 tests); the complete
+deterministic `tests/ui` suite passed (223 tests). `compileall` over `backend`,
+`ui`, `streamlit_app.py`, `tests`, and `scripts` passed, as did `git diff
+--check`; no paid model call was made. In-app browser QA passed at 390 x 844
+and 1440 x 790: both drawers, backdrop/close, Search/Library routing, active
+Library return-to-Chat, latest Edit/Cancel, Navigation and Thinking Path rail
+states, Light/Dark/System appearance restoration, profile settings, and
+workspace opacity/stale-element checks. Findings and visual evidence are
+recorded in `design-qa.md`.
+
+**Compatibility and rollback.** Backend, API, database, provider, retrieval,
+coaching, persistence, source-selection, dialog, polling, widget-key, and
+local-storage width contracts are unchanged. Existing `mobile_panel="Studio"`
+normalization and desktop/mobile routing remain intact. Rollback is code-only;
+there is no data or preference migration.
+
+**Known risk.** The in-app browser retains pre-existing, unattributed
+component-iframe `MutationObserver.observe` errors dated 2026-08-29; none was
+created by this phase or affected the tested controls. A P3-only refinement is
+available for a browser-dependent desktop flex micro-snap before a 72 px rail
+settles; no persisted state or functionality is affected.
+
+**Next exact action.** Have a student rapidly alternate the 390 px Navigation
+and Thinking Path controls and desktop rail controls on their target browser.
+If the P3 flex micro-motion is perceptible, replace the desktop width
+transition with a fixed-width transform strategy without changing the current
+authoritative callbacks.
+
 ### Gemini-inspired mobile drawer refresh (2026-08-29)
 
 **Behavior.** Widths at or below 1050 px now use one fixed, non-wrapping

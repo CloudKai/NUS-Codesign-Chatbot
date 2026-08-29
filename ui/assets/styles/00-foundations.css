@@ -49,6 +49,18 @@
         }
     }
 
+    /* Streamlit marks the previous element tree as stale while a rerun is
+       reconciled. Its built-in delayed opacity fade makes quick button
+       interactions look like a page refresh. Keep the already-rendered shell
+       fully opaque until the replacement tree is ready instead. */
+    .st-key-mobile_panel[data-stale="true"],
+    .st-key-mobile_panel [data-stale="true"],
+    .st-key-notebook_workspace[data-stale="true"],
+    .st-key-notebook_workspace [data-stale="true"] {
+        opacity:1 !important;
+        transition:none !important;
+    }
+
     /* Fainter placeholders across inputs, textareas, and chat composer. */
     input::placeholder,
     textarea::placeholder,

@@ -342,6 +342,18 @@ def test_mobile_drawer_css_contract() -> None:
     )[0]
     assert "mobile_nav_menu" not in attention
     assert "mobile_analyse" in attention
+    # Capture-phase feedback opens/closes immediately while Streamlit's
+    # authoritative rerun is still reconciling the drawer markers.
+    assert "cd-mobile-nav-optimistic" in mobile
+    assert "cd-mobile-studio-optimistic" in mobile
+    assert "cd-mobile-drawer-closing" in mobile
+    helper = Path("ui/layout/column_resize.py").read_text(encoding="utf-8")
+    assert 'doc.addEventListener("click"' in helper
+    assert 'doc.addEventListener("pointerdown"' not in helper
+    assert "handleOptimisticShellAction" in helper
+    assert 'setOptimisticDrawer("nav")' in helper
+    assert 'setOptimisticDrawer("studio")' in helper
+    assert "closeOptimisticDrawers()" in helper
 
 
 def test_mobile_column_helper_preserves_drawer_widths() -> None:

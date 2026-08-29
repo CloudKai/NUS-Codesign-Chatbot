@@ -58,3 +58,68 @@ The browser console contains only the previously documented, unattributed Stream
 - P2: Light-theme active navigation labels inherited Streamlit primary-button white. Fixed with explicit CDE2300 accent/text token colors; post-fix computed selected-chat text is `rgb(31, 41, 51)`.
 
 No actionable P0, P1, or P2 findings remain. A possible P3 follow-up is to left-align more drawer navigation labels if future student testing prefers Gemini's exact list rhythm over the existing centered CDE2300 navigation treatment.
+
+## Streamlit anti-flash and instant-response QA (2026-08-30)
+
+Final result: passed
+
+### Scope and evidence
+
+- Scoped Streamlit stale-element continuity to the mobile header and notebook
+  workspace. Ordinary clicks keep the previous workspace frame fully opaque
+  while the authoritative render arrives; errors, authentication, and other
+  application surfaces are not globally suppressed.
+- The column helper now applies browser-only optimistic classes in capture
+  phase, then removes them when the next authoritative helper mount completes.
+  It guards retries by render generation and clears the previous timer, leaving
+  Streamlit session state as the source of truth.
+- Desktop and 390 x 844 mobile were exercised in the in-app browser. Mobile
+  checks covered Navigation and Thinking Path drawers, close/backdrop,
+  Search, Library, active-Library-to-Chat, and the latest-message Edit/Cancel
+  path. Desktop checks covered Navigation and Thinking Path rail/panel states.
+  The workspace computed opacity remained `1` and there were no stale elements
+  after each settled authoritative render.
+- Appearance verification covered explicit Light (`--cd-bg: #F7F9FC`) and
+  Dark (`--cd-bg: #0F1011`) modes, followed by restoration of the original
+  System preference.
+
+### Automated validation
+
+| Check | Result |
+| --- | --- |
+| Focused anti-flash UI/AppTest/CSS contracts | Pass — 77 tests |
+| Complete deterministic UI suite | Pass — 223 tests |
+| `compileall` for `backend ui streamlit_app.py tests scripts` | Pass |
+| `git diff --check` | Pass |
+| Paid model calls | None |
+
+### Findings and resolution
+
+- P0: applying a mobile overlay on `pointerdown` could change hit testing and
+  swallow the original Streamlit button click. The helper now uses one capture
+  phase `click` listener, which preserves native keyboard, pointer, and touch
+  activation while updating the frame before the rerun is painted.
+- P1: retries from a prior component mount could clear newer optimistic state.
+  The helper is keyed by the application render counter, cancels its previous
+  retry interval, and ignores obsolete generations.
+- P1: rapid cross-panel desktop collapse could calculate from stale server
+  state. The immediate layout calculation reads the live DOM collapse state,
+  and resize handles are disabled for the short optimistic transition.
+- P2: latest-message Edit now enters the existing chat-fragment editor through
+  its callback; earlier-message Edit intentionally retains its confirmation
+  dialog and full authoritative reconciliation.
+
+No P0–P2 issue remains. One P3 visual follow-up is possible: in some browser
+timings, flex sizing during a desktop rail transition may briefly resolve below
+the final 72 px rail before settling. It does not alter persisted widths,
+drawer/panel state, or interaction behavior; it can be refined later if user
+testing makes the micro-motion noticeable.
+
+### Console and compatibility
+
+The in-app browser log still contains only the previously documented,
+unattributed component-iframe `MutationObserver.observe` errors dated
+2026-08-29. No new error was emitted by the controls exercised in this QA
+session. There are no backend, API, persistence, provider, retrieval,
+coaching, source, widget-key, polling, dialog, or stored-layout migrations.
+Rollback is code-only.
