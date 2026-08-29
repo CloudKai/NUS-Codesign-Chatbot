@@ -269,6 +269,10 @@ def render_chat_actions_menu(
         if menu_scope == "nav-chat"
         else f"mobile_action_danger_{safe_id}"
     )
+    st.markdown(
+        '<div class="cd-chat-setting-heading">Chat Setting</div>',
+        unsafe_allow_html=True,
+    )
     with st.container(key=rename_key):
         applied, cleaned = render_enter_to_apply_rename(
             kind="notebook",

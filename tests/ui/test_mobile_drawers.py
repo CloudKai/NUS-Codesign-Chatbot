@@ -271,6 +271,7 @@ def test_mobile_more_menu_has_only_chat_actions_and_analytics_is_dedicated() -> 
         "def _render_recent_menu", 1
     )[0]
     assert "Rename" in actions
+    assert "Chat Setting" in actions
     assert "Download transcript" in actions
     assert "Delete" in actions
     assert "Thinking Path" not in actions
@@ -293,6 +294,9 @@ def test_mobile_drawer_css_contract() -> None:
     assert "text-align:left" in title_css
     assert "height:2.55rem" in title_css
     assert "min-height:2.55rem" in title_css
+    assert 'st-key-mobile_rename_' in mobile
+    assert "right:.5rem" in mobile
+    assert "grid-template-columns:minmax(0,1fr) auto" in mobile
     assert "width:min(20.5rem,88vw)" in mobile
     assert any(
         marker in mobile

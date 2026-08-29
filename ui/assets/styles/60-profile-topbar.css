@@ -1,13 +1,26 @@
     [data-testid="stPopoverBody"][aria-label="Settings"],
+    [data-testid="stPopoverBody"][aria-label=":material/settings:"],
     [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root) {
         width:min(19.5rem,calc(100vw - 1.5rem)) !important;
         max-width:min(19.5rem,calc(100vw - 1.5rem)) !important;
         padding:.5rem 1rem .85rem !important;
         border:1px solid var(--cd-border) !important;
         border-radius:.72rem !important;
-        background:var(--cd-surface) !important;
+        /* Match the nav rail the menu opens from (not darker --cd-surface). */
+        background:var(--cd-nav) !important;
         box-shadow:var(--cd-shadow) !important;
         overflow:visible !important;
+    }
+
+    [data-testid="stPopoverBody"][aria-label=":material/settings:"]
+    > [data-testid="stVerticalBlock"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    > [data-testid="stVerticalBlock"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_menu_root,
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile_menu_root > [data-testid="stVerticalBlock"] {
+        background:transparent !important;
     }
 
     /* Marker-only markdown must not add top gap above Display name. */
@@ -232,7 +245,7 @@
         overflow:hidden !important;
         border:1px solid var(--cd-border) !important;
         border-radius:.62rem !important;
-        background:var(--cd-surface) !important;
+        background:var(--cd-nav) !important;
     }
 
     .st-key-profile_coaching_style [data-testid="stRadioOption"],
@@ -250,7 +263,7 @@
         border-right:0 !important;
         border-radius:0 !important;
         border-bottom:1px solid var(--cd-border) !important;
-        background:var(--cd-surface) !important;
+        background:var(--cd-nav) !important;
         color:var(--cd-text) !important;
         cursor:pointer !important;
         white-space:normal !important;
@@ -370,10 +383,10 @@
     > [role="radio"][aria-checked="true"],
     .st-key-profile_coaching_style [role="radiogroup"]
     > [role="radio"][aria-pressed="true"] {
-        /* Match Appearance / design-system selected fill: soft darker teal,
-           not the bright dark-mode --cd-accent used for text accents. */
-        background:var(--cd-accent-soft) !important;
-        border-color:var(--cd-accent) !important;
+        /* Soft selected fill on nav chrome — avoid a solid teal slab. */
+        background:color-mix(in srgb,var(--cd-accent) 14%,var(--cd-nav)) !important;
+        border-color:var(--cd-border) !important;
+        box-shadow:inset 3px 0 0 var(--cd-accent) !important;
         color:var(--cd-accent) !important;
     }
 
@@ -1077,12 +1090,14 @@
 
     .st-key-sidebar_profile [data-testid="stPopover"] button,
     .st-key-sidebar_profile [data-testid="stPopover"] [data-testid="stPopoverButton"] {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
         width:2.35rem !important;
         min-width:2.35rem !important;
         max-width:2.35rem !important;
         height:2.35rem !important;
         min-height:2.35rem !important;
-        justify-content:center !important;
         gap:0 !important;
         padding:0 !important;
         border:0 !important;
@@ -1098,9 +1113,7 @@
         background:color-mix(in srgb,var(--cd-text) 7%,transparent) !important;
     }
 
-    .st-key-sidebar_profile [data-testid="stPopover"] button > div,
-    .st-key-sidebar_profile [data-testid="stPopover"] button
-    span[data-has-shortcut] {
+    .st-key-sidebar_profile [data-testid="stPopover"] button > div {
         display:inline-flex !important;
         align-items:center !important;
         justify-content:center !important;
@@ -1108,50 +1121,71 @@
         width:100% !important;
         height:100% !important;
         margin:0 !important;
+        padding:0 !important;
     }
 
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    span[data-has-shortcut],
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    [data-testid="stMarkdownContainer"],
     .st-key-sidebar_profile [data-testid="stPopover"] button p {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        width:100% !important;
+        height:100% !important;
+        margin:0 !important;
+        padding:0 !important;
+        line-height:1 !important;
+        color:inherit !important;
+        font-size:inherit !important;
+    }
+
+    /* Settings glyph is a Material Symbols span inside markdown, not stIconMaterial. */
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    span[role="img"],
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    [aria-label="settings icon"] {
         display:inline-flex !important;
         align-items:center !important;
         justify-content:center !important;
         margin:0 !important;
         padding:0 !important;
+        font-size:16px !important;
         line-height:1 !important;
+        vertical-align:middle !important;
         color:inherit !important;
+        opacity:1 !important;
+        visibility:visible !important;
     }
 
+    /* Hide Streamlit's trailing expand_more control only. */
     .st-key-sidebar_profile [data-testid="stPopover"] button
-    [data-testid="stIconMaterial"],
+    > div > div[aria-hidden="true"],
     .st-key-sidebar_profile [data-testid="stPopover"] button
-    [data-testid="stMarkdownContainer"] {
-        display:inline-flex !important;
-        align-items:center !important;
-        justify-content:center !important;
-        margin:0 !important;
-        width:auto !important;
-        height:auto !important;
-        border-radius:0 !important;
-        background:transparent !important;
-        color:inherit !important;
-        font-size:1.25rem !important;
-        line-height:1 !important;
-    }
-
-    /* Drop Streamlit's expand_more chevron; keep the settings glyph. */
-    .st-key-sidebar_profile [data-testid="stPopover"] button
-    [aria-hidden="true"],
-    .st-key-sidebar_profile [data-testid="stPopover"] button
-    [data-testid="stIconMaterial"]:nth-of-type(n+2),
-    .st-key-sidebar_profile [data-testid="stPopover"] button
-    [data-testid="stMarkdownContainer"] ~ [data-testid="stIconMaterial"],
-    .st-key-sidebar_profile [data-testid="stPopover"] button
-    span[data-has-shortcut] > span:last-child:not(:only-child) {
+    [data-testid="stIconMaterial"] {
         display:none !important;
         width:0 !important;
         height:0 !important;
         margin:0 !important;
         padding:0 !important;
         overflow:hidden !important;
+    }
+
+    /* Keep the settings column from collapsing beside a wide identity label. */
+    .st-key-sidebar_profile [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]:last-child {
+        flex:0 0 2.35rem !important;
+        width:2.35rem !important;
+        min-width:2.35rem !important;
+        max-width:2.35rem !important;
+    }
+
+    .st-key-sidebar_profile [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]:first-child {
+        flex:1 1 0 !important;
+        min-width:0 !important;
+        width:auto !important;
     }
 
     .st-key-nav_panel:has(.st-key-nav_collapsed_actions) .st-key-sidebar_profile {
@@ -1166,6 +1200,9 @@
     .st-key-nav_panel:has(.st-key-nav_collapsed_actions)
     .st-key-sidebar_profile [data-testid="stPopover"] > div {
         margin:0 auto !important;
+        width:2.75rem !important;
+        display:flex !important;
+        justify-content:center !important;
     }
 
     .st-key-nav_panel:has(.st-key-nav_collapsed_actions)
@@ -1175,6 +1212,30 @@
         height:2.75rem !important;
         min-height:2.75rem !important;
         border-radius:1rem !important;
+        color:var(--cd-text) !important;
+        background:transparent !important;
+        gap:0 !important;
+    }
+
+    .st-key-nav_panel:has(.st-key-nav_collapsed_actions)
+    .st-key-sidebar_profile [data-testid="stPopover"] button:hover {
+        color:var(--cd-text) !important;
+        background:color-mix(in srgb,var(--cd-text) 7%,transparent) !important;
+    }
+
+    /* Match collapsed nav Material icon size/weight (not the larger markdown glyph). */
+    .st-key-nav_panel:has(.st-key-nav_collapsed_actions)
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    span[role="img"],
+    .st-key-nav_panel:has(.st-key-nav_collapsed_actions)
+    .st-key-sidebar_profile [data-testid="stPopover"] button
+    [aria-label="settings icon"] {
+        font-size:16px !important;
+        font-weight:400 !important;
+        font-variation-settings:"FILL" 0,"wght" 400,"GRAD" 0,"opsz" 20 !important;
+        line-height:1 !important;
+        color:inherit !important;
+        -webkit-text-fill-color:inherit !important;
     }
 
     .st-key-topbar_actions,

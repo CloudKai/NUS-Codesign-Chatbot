@@ -149,6 +149,14 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     assert ".st-key-sidebar_profile" in profile_css
     assert ".st-key-profile_menu_root" in profile_css
     assert ".st-key-profile_coaching_style" in profile_css
+    # Settings Material icons are aria-hidden; never blanket-hide that attribute.
+    sidebar_profile = profile_css.split(".st-key-sidebar_profile", 1)[1]
+    assert 'font-size:0 !important' not in sidebar_profile.split(
+        "Keep the settings column", 1
+    )[0]
+    assert 'aria-label="settings icon"' in sidebar_profile
+    assert 'div[aria-hidden="true"]' in sidebar_profile
+    assert "[data-testid=\"stIconMaterial\"]" in sidebar_profile
     assert "[data-testid=\"stRadio\"]" in profile_css
     assert "[data-testid=\"stRadioGroup\"]" in profile_css
     assert "[data-testid=\"stRadioOption\"]" in profile_css
@@ -168,8 +176,21 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     workspace_css = Path(_STYLES_DIR / "10-workspace.css").read_text(encoding="utf-8")
     assert ".st-key-chat_inflight" in workspace_css
     assert ".st-key-chat_transcript" in workspace_css
+    workspace_shell = _css_rule_body(workspace_css, ".st-key-notebook_workspace {")
+    assert "gap:0 !important" in workspace_shell
+    assert "row-gap:0 !important" in workspace_shell
+    expand_studio = workspace_css.rsplit(
+        '[class*="st-key-expand-studio"] div[data-testid="stButton"] button {', 1
+    )[1]
+    assert "gap:0 !important" in expand_studio.split(
+        "[data-testid=\"stIconMaterial\"]", 1
+    )[0]
+    assert "font-size:16px !important" in workspace_css.rsplit(
+        "st-key-expand-studio", 1
+    )[1]
     panel_scroll = _css_rule_body(workspace_css, ".st-key-chat_panel {")
     assert "overflow-y:hidden" in panel_scroll
+    assert "padding:1.1rem 1.25rem 10px" in panel_scroll
     transcript_flex = _css_rule_body(
         workspace_css,
         ".st-key-chat_transcript,\n    [data-testid=\"stElementContainer\"].st-key-chat_transcript",
@@ -265,6 +286,7 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
         in chat_css
     )
     assert ".cd-attach-tooltip" in chat_css
+    assert ".cd-native-upload-tip" in chat_css
     assert "body[data-cd-attach-hover=\"1\"]" in chat_css
     assert "stChatInputStopButton" in chat_css
     assert "stExpanderIconSpinner" in chat_css

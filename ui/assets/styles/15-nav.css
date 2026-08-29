@@ -108,12 +108,51 @@
         padding-top:.2rem;
     }
 
+    .st-key-nav_collapsed_actions > [data-testid="stVerticalBlock"],
+    .st-key-nav_collapsed_actions > [data-testid="stLayoutWrapper"],
+    .st-key-nav_collapsed_actions [data-testid="stElementContainer"],
+    .st-key-nav_collapsed_actions div[data-testid="stButton"],
+    .st-key-nav_collapsed_actions span.stTooltipHoverTarget,
+    .st-key-nav_collapsed_actions span.stTooltipIcon {
+        display:flex !important;
+        justify-content:center !important;
+        align-items:center !important;
+        width:100% !important;
+        margin:0 !important;
+    }
+
     .st-key-nav_collapsed_actions div[data-testid="stButton"] button {
         width:2.55rem !important;
         min-width:2.55rem !important;
         height:2.55rem !important;
         border-radius:.8rem !important;
         padding:0 !important;
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        gap:0 !important;
+    }
+
+    /* Hidden labels still reserve Streamlit's icon/label gap and shift glyphs. */
+    .st-key-nav_collapsed_actions div[data-testid="stButton"] button > div,
+    .st-key-nav_collapsed_actions div[data-testid="stButton"] button
+    span[data-has-shortcut],
+    .st-key-nav_collapsed_actions div[data-testid="stButton"] button > div > span {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        gap:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+        width:100% !important;
+        height:100% !important;
+    }
+
+    .st-key-nav_collapsed_actions div[data-testid="stButton"] button
+    [data-testid="stIconMaterial"] {
+        margin:0 !important;
+        font-size:16px !important;
+        line-height:1 !important;
     }
 
     .st-key-search_panel {
@@ -423,8 +462,42 @@
         color:var(--cd-muted) !important;
         background:transparent !important;
         box-shadow:none !important;
+        display:inline-flex !important;
+        align-items:center !important;
         justify-content:center !important;
-        overflow:visible !important;
+        gap:0 !important;
+        overflow:hidden !important;
+    }
+
+    .st-key-nav_header [class*="st-key-nav-collapse"]
+    div[data-testid="stButton"] button > div,
+    .st-key-nav_header [class*="st-key-mobile-nav-close"]
+    div[data-testid="stButton"] button > div,
+    .st-key-nav_header [class*="st-key-nav-collapse"]
+    div[data-testid="stButton"] button span[data-has-shortcut],
+    .st-key-nav_header [class*="st-key-mobile-nav-close"]
+    div[data-testid="stButton"] button span[data-has-shortcut],
+    .st-key-nav_header [class*="st-key-nav-collapse"]
+    div[data-testid="stButton"] button > div > span,
+    .st-key-nav_header [class*="st-key-mobile-nav-close"]
+    div[data-testid="stButton"] button > div > span {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        gap:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+        width:100% !important;
+        height:100% !important;
+    }
+
+    .st-key-nav_header [class*="st-key-nav-collapse"]
+    div[data-testid="stButton"] button [data-testid="stIconMaterial"],
+    .st-key-nav_header [class*="st-key-mobile-nav-close"]
+    div[data-testid="stButton"] button [data-testid="stIconMaterial"] {
+        margin:0 !important;
+        font-size:16px !important;
+        line-height:1 !important;
     }
 
     .st-key-nav_header [class*="st-key-nav-collapse"]
@@ -440,7 +513,11 @@
     }
 
     .st-key-nav_header div[data-testid="stButton"] button p,
-    .st-key-nav_collapsed_actions div[data-testid="stButton"] button p {
+    .st-key-nav_header div[data-testid="stButton"] button
+    [data-testid="stMarkdownContainer"],
+    .st-key-nav_collapsed_actions div[data-testid="stButton"] button p,
+    .st-key-nav_collapsed_actions div[data-testid="stButton"] button
+    [data-testid="stMarkdownContainer"] {
         position:absolute !important;
         width:1px !important;
         height:1px !important;
@@ -450,6 +527,8 @@
         clip:rect(0,0,0,0) !important;
         white-space:nowrap !important;
         border:0 !important;
+        /* Prefer display:none so the flex gap next to the icon collapses. */
+        display:none !important;
     }
 
     .st-key-nav_primary {
@@ -611,7 +690,7 @@
         align-items:center !important;
         justify-content:center !important;
         margin:0 !important;
-        font-size:1.25rem !important;
+        font-size:16px !important;
         line-height:1 !important;
         color:inherit !important;
         opacity:1 !important;
@@ -630,6 +709,24 @@
     [data-testid="stPopoverBody"]:has([class*="st-key-nav_action_danger"]) {
         min-width:14rem !important;
         padding:.55rem .7rem .65rem !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.cd-chat-setting-heading)
+    [data-testid="stElementContainer"]:has(.cd-chat-setting-heading),
+    [data-testid="stPopoverBody"]:has(.cd-chat-setting-heading)
+    [data-testid="stMarkdownContainer"]:has(.cd-chat-setting-heading) {
+        margin:0 !important;
+        padding:0 !important;
+    }
+
+    .cd-chat-setting-heading {
+        margin:0 0 .35rem !important;
+        padding:0 !important;
+        color:var(--cd-text);
+        font-size:.95rem;
+        font-weight:650;
+        line-height:1.25;
+        letter-spacing:.01em;
     }
 
     [data-testid="stPopoverBody"]:has([class*="st-key-nav_rename_"])
@@ -663,6 +760,12 @@
         min-width:2.75rem !important;
         height:2.75rem !important;
         border-radius:1rem !important;
+        gap:0 !important;
+    }
+
+    .st-key-nav_collapsed_actions div[data-testid="stButton"] button
+    [data-testid="stIconMaterial"] {
+        font-size:16px !important;
     }
 
     .st-key-nav_collapsed_actions div[data-testid="stButton"] button[kind="primary"],

@@ -1381,8 +1381,9 @@
     }
 
     /*
-     * Attach size-limit tooltip lives on document.body. Streamlit's native
-     * tooltip is a portal we cannot restyle, so hide it while ours is armed.
+     * Attach size-limit tip is .cd-attach-tooltip. Streamlit's native
+     * "Upload or drag and drop files" portal is marked .cd-native-upload-tip
+     * by composer_layout and suppressed always (not only while hovering).
      */
     .cd-attach-tooltip {
         position:fixed !important;
@@ -1409,6 +1410,9 @@
         visibility:visible !important;
     }
 
+    .cd-native-upload-tip,
+    [data-baseweb="tooltip"]:has(.cd-native-upload-tip),
+    [role="tooltip"]:has(.cd-native-upload-tip),
     body[data-cd-attach-hover="1"] [data-testid="stTooltipContent"],
     body[data-cd-attach-hover="1"] [data-testid="stTooltipErrorContent"],
     body[data-cd-attach-hover="1"] [data-baseweb="tooltip"] {

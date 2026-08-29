@@ -172,6 +172,10 @@
             min-width:0 !important;
             max-width:none !important;
             flex:none !important;
+            display:flex !important;
+            align-items:center !important;
+            justify-content:center !important;
+            min-height:2.55rem !important;
         }
 
         .cd-mobile-view,
@@ -233,18 +237,26 @@
         .st-key-mobile_panel [class*="st-key-mobile-new-chat"]
         div[data-testid="stButton"] button,
         .st-key-mobile_chat_menu [data-testid="stPopover"] button,
+        .st-key-mobile_chat_menu [data-testid="stPopover"] [data-testid="stPopoverButton"],
         .st-key-mobile_chat_menu div[data-testid="stButton"] button {
+            display:inline-flex !important;
+            align-items:center !important;
+            justify-content:center !important;
             width:2.55rem !important;
             min-width:2.55rem !important;
+            max-width:2.55rem !important;
             height:2.55rem !important;
             min-height:2.55rem !important;
+            max-height:2.55rem !important;
+            margin:0 !important;
             padding:0 !important;
             border:0 !important;
             border-radius:.85rem !important;
             color:var(--cd-text) !important;
             background:transparent !important;
             box-shadow:none !important;
-            justify-content:center !important;
+            gap:0 !important;
+            overflow:visible !important;
         }
 
         .st-key-mobile_nav_menu div[data-testid="stButton"] button:hover,
@@ -252,6 +264,7 @@
         .st-key-mobile_panel [class*="st-key-mobile-new-chat"]
         div[data-testid="stButton"] button:hover,
         .st-key-mobile_chat_menu [data-testid="stPopover"] button:hover,
+        .st-key-mobile_chat_menu [data-testid="stPopover"] [data-testid="stPopoverButton"]:hover,
         .st-key-mobile_chat_menu div[data-testid="stButton"] button:hover {
             background:color-mix(in srgb,var(--cd-text) 8%,transparent) !important;
         }
@@ -268,12 +281,65 @@
             clip:rect(0,0,0,0) !important;
         }
 
-        .st-key-mobile_chat_menu [data-testid="stPopover"] button p {
-            display:inline-flex !important;
+        /* Keep ⋮ vertically aligned with New chat / Analytics hit boxes. */
+        .st-key-mobile_chat_menu,
+        .st-key-mobile_chat_menu > [data-testid="stVerticalBlock"],
+        .st-key-mobile_chat_menu > [data-testid="stLayoutWrapper"],
+        .st-key-mobile_chat_menu [class*="st-key-mobile-chat-popover"],
+        .st-key-mobile_chat_menu [data-testid="stPopover"],
+        .st-key-mobile_chat_menu [data-testid="stPopover"] > div {
+            display:flex !important;
+            align-items:center !important;
+            justify-content:center !important;
+            width:2.55rem !important;
+            min-width:2.55rem !important;
+            height:2.55rem !important;
+            min-height:2.55rem !important;
+            max-height:2.55rem !important;
             margin:0 !important;
-            line-height:1 !important;
+            padding:0 !important;
+            gap:0 !important;
         }
 
+        .st-key-mobile_chat_menu [data-testid="stPopover"] button > div,
+        .st-key-mobile_chat_menu [data-testid="stPopover"] button
+        span[data-has-shortcut] {
+            display:inline-flex !important;
+            align-items:center !important;
+            justify-content:center !important;
+            gap:0 !important;
+            margin:0 !important;
+            width:100% !important;
+            height:100% !important;
+        }
+
+        .st-key-mobile_chat_menu [data-testid="stPopover"] button p {
+            display:inline-flex !important;
+            align-items:center !important;
+            justify-content:center !important;
+            margin:0 !important;
+            padding:0 !important;
+            line-height:1 !important;
+            color:inherit !important;
+        }
+
+        .st-key-mobile_chat_menu [data-testid="stPopover"] button
+        [data-testid="stIconMaterial"],
+        .st-key-mobile_chat_menu [data-testid="stPopover"] button
+        [data-testid="stMarkdownContainer"] {
+            display:inline-flex !important;
+            align-items:center !important;
+            justify-content:center !important;
+            margin:0 !important;
+            font-size:16px !important;
+            line-height:1 !important;
+            color:inherit !important;
+            opacity:1 !important;
+            visibility:visible !important;
+        }
+
+        .st-key-mobile_chat_menu [data-testid="stPopover"] button
+        span[data-has-shortcut] > span:has([data-testid="stIconMaterial"]):last-child:not(:only-child),
         .st-key-mobile_chat_menu [data-testid="stPopover"] button
         [data-testid="stIconMaterial"]:last-child:not(:only-child),
         .st-key-mobile_chat_menu [data-testid="stPopover"] button
@@ -304,11 +370,146 @@
             box-shadow:0 0 0 2px var(--cd-nav);
         }
 
-        /* Mobile chat ⋮ opens downward under the header control. */
+        /* Mobile chat ⋮: pin under the right-side trigger (do not replace
+           Streamlit's translate with translateY alone — that snaps left). */
         [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"]),
         [data-testid="stPopoverBody"]:has([class*="st-key-mobile_action_danger"]) {
+            left:auto !important;
+            right:.5rem !important;
+            top:3.6rem !important;
+            bottom:auto !important;
+            width:min(22rem, calc(100vw - 1rem)) !important;
             min-width:14rem !important;
-            transform:translateY(.35rem) !important;
+            max-width:calc(100vw - 1rem) !important;
+            transform:none !important;
+            will-change:auto !important;
+            padding:.55rem .7rem .65rem !important;
+        }
+
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        > div,
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        > [data-testid="stVerticalBlock"] {
+            gap:.35rem !important;
+            row-gap:.35rem !important;
+        }
+
+        /* Rename field + Apply share one full-width row matching Download/Delete. */
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [class*="st-key-mobile_rename_"],
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [class*="st-key-mobile_rename_"] > [data-testid="stVerticalBlock"],
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [class*="st-key-mobile_rename_"] > [data-testid="stLayoutWrapper"],
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [class*="st-key-mobile_rename_"] [data-testid="stForm"],
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [class*="st-key-mobile_rename_"] form {
+            width:100% !important;
+            max-width:100% !important;
+            min-width:0 !important;
+            box-sizing:border-box !important;
+        }
+
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [class*="st-key-mobile_rename_"] [data-testid="stForm"]
+        > [data-testid="stVerticalBlock"],
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [class*="st-key-mobile_rename_"] form
+        > [data-testid="stVerticalBlock"] {
+            display:grid !important;
+            grid-template-columns:minmax(0,1fr) auto !important;
+            align-items:end !important;
+            gap:.4rem !important;
+            row-gap:0 !important;
+            width:100% !important;
+            max-width:100% !important;
+            box-sizing:border-box !important;
+        }
+
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [class*="st-key-mobile_rename_"]
+        [data-testid="stElementContainer"]:has([data-testid="stTextInput"]),
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [class*="st-key-mobile_rename_"]
+        [data-testid="stLayoutWrapper"]:has([data-testid="stTextInput"]) {
+            min-width:0 !important;
+            width:100% !important;
+            max-width:100% !important;
+            margin:0 !important;
+            padding:0 !important;
+            box-sizing:border-box !important;
+        }
+
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [class*="st-key-mobile_rename_"] [data-testid="stTextInput"],
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [class*="st-key-mobile_rename_"] [data-testid="stTextInput"] > div,
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [class*="st-key-mobile_rename_"] [data-testid="stTextInputRootElement"],
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [class*="st-key-mobile_rename_"] .react-aria-TextField {
+            width:100% !important;
+            min-width:0 !important;
+            max-width:100% !important;
+            box-sizing:border-box !important;
+        }
+
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [class*="st-key-mobile_rename_"] [data-testid="stTextInput"] input {
+            width:100% !important;
+            min-width:0 !important;
+            max-width:100% !important;
+            box-sizing:border-box !important;
+        }
+
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [class*="st-key-mobile_rename_"]
+        [data-testid="stElementContainer"]:has([data-testid="stFormSubmitButton"]),
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [class*="st-key-mobile_rename_"]
+        [data-testid="stElementContainer"]:has(> div > [data-testid="stFormSubmitButton"]),
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [class*="st-key-mobile_rename_"] [data-testid="stFormSubmitButton"] {
+            display:flex !important;
+            align-items:center !important;
+            justify-content:center !important;
+            width:auto !important;
+            min-width:0 !important;
+            height:auto !important;
+            margin:0 !important;
+            padding:0 !important;
+            flex:0 0 auto !important;
+        }
+
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [class*="st-key-mobile_rename_"] [data-testid="stFormSubmitButton"] button {
+            width:auto !important;
+            min-width:0 !important;
+            height:2.5rem !important;
+            min-height:2.5rem !important;
+            padding:0 .85rem !important;
+            white-space:nowrap !important;
+            border-radius:.7rem !important;
+        }
+
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [class*="st-key-mobile_rename_"] [data-testid="stWidgetLabel"] {
+            margin-bottom:.18rem !important;
+        }
+
+        /* Keep Download / Delete full-bleed under the rename row. */
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [data-testid="stDownloadButton"],
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
+        [data-testid="stDownloadButton"] button,
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_action_danger"])
+        div[data-testid="stButton"],
+        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_action_danger"])
+        div[data-testid="stButton"] button {
+            width:100% !important;
+            max-width:100% !important;
+            box-sizing:border-box !important;
         }
 
         .st-key-notebook_workspace {
@@ -318,6 +519,8 @@
             min-height:0 !important;
             height:calc(100dvh - 8.2rem) !important;
             max-height:calc(100dvh - 8.2rem) !important;
+            gap:0 !important;
+            row-gap:0 !important;
         }
 
         .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
@@ -508,16 +711,19 @@
             height:100% !important;
             min-height:0 !important;
             max-height:100% !important;
-            padding:1.2rem 1rem calc(.45rem + 10px);
+            padding:1.2rem 1rem 0;
             border:0;
+        }
+
+        /* No top pad on mobile: the opaque panel background read as a black
+           bar over the first visible message when the feed was scrolled. */
+        .st-key-chat_panel {
+            padding:0 .85rem 10px !important;
+            overflow:hidden !important;
         }
 
         .st-key-studio_panel,
         .st-key-sources_panel {
-            overflow:hidden !important;
-        }
-
-        .st-key-chat_panel {
             overflow:hidden !important;
         }
 
@@ -612,7 +818,11 @@
         .st-key-studio_panel,
         .st-key-chat_panel,
         .st-key-sources_panel {
-            padding:1rem .8rem calc(.45rem + 10px);
+            padding:1rem .8rem 0;
+        }
+
+        .st-key-chat_panel {
+            padding:0 .7rem 10px !important;
         }
 
         [class*="st-key-journey-select-"] div[data-testid="stButton"] button,
@@ -691,6 +901,8 @@
             height:calc(100dvh - 3.5rem) !important;
             max-height:calc(100dvh - 3.5rem) !important;
             min-height:0 !important;
+            gap:0 !important;
+            row-gap:0 !important;
         }
 
         .st-key-mobile_panel {
@@ -748,7 +960,11 @@
         .st-key-search_panel,
         .st-key-sources_panel,
         .st-key-studio_panel {
-            padding:1.2rem 1rem calc(.65rem + 10px) !important;
+            padding:1.2rem 1rem 0 !important;
+        }
+
+        .st-key-chat_panel {
+            padding:0 .85rem 10px !important;
         }
 
         .st-key-search_panel > [data-testid="stVerticalBlock"],
@@ -770,7 +986,11 @@
         .st-key-search_panel,
         .st-key-sources_panel,
         .st-key-studio_panel {
-            padding:1rem .8rem calc(.6rem + 10px) !important;
+            padding:1rem .8rem 0 !important;
+        }
+
+        .st-key-chat_panel {
+            padding:0 .7rem 10px !important;
         }
 
         .st-key-search_panel [data-testid="stTextInput"] input,

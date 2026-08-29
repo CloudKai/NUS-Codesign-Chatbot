@@ -38,6 +38,7 @@ def test_nav_rail_exposes_new_search_library_and_recents_actions() -> None:
     assert "Rename" in nav
     assert "Download transcript" in nav
     assert "Delete" in nav
+    assert "Chat Setting" in nav
     assert "Delete chat?" in nav
     assert "on_dismiss=dismiss_delete_chat_dialog" in nav
     assert "def dismiss_delete_chat_dialog" in nav
@@ -56,6 +57,21 @@ def test_nav_rail_exposes_new_search_library_and_recents_actions() -> None:
     css = Path("ui/assets/styles/15-nav.css").read_text(encoding="utf-8")
     assert "stIconMaterial" in css
     assert "font-size:0" not in css.split("st-key-nav_recent_")[1].split("st-key-nav_collapsed")[0]
+    collapsed = css.split(".st-key-nav_collapsed_actions", 1)[1]
+    assert "gap:0 !important" in collapsed
+    assert 'display:none !important' in collapsed
+    assert "font-size:16px !important" in collapsed
+    collapse_btn = css.split('st-key-nav-collapse"]', 1)[1]
+    assert "gap:0 !important" in collapse_btn
+    assert "align-items:center !important" in collapse_btn
+    profile_css = Path("ui/assets/styles/60-profile-topbar.css").read_text(
+        encoding="utf-8"
+    )
+    collapsed_settings = profile_css.split(
+        ".st-key-nav_panel:has(.st-key-nav_collapsed_actions)", 1
+    )[1]
+    assert "font-size:16px !important" in collapsed_settings
+    assert "color:var(--cd-text) !important" in collapsed_settings
 
 
 def test_search_pane_uses_fuzzy_ranking_and_clickable_rows() -> None:

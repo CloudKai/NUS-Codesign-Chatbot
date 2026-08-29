@@ -336,6 +336,11 @@
         border:0;
         border-radius:0;
         background:var(--cd-surface);
+        /* Streamlit vertical blocks default to 1rem gap; zero-height layout
+           iframes still consume that gap and float the composer above the
+           viewport edge. */
+        gap:0 !important;
+        row-gap:0 !important;
     }
 
     .st-key-notebook_workspace > [data-testid="stVerticalBlock"] {
@@ -344,6 +349,8 @@
         height:100%;
         min-height:0;
         flex:1 1 auto;
+        gap:0 !important;
+        row-gap:0 !important;
     }
 
     .st-key-notebook_workspace > [data-testid="stVerticalBlock"]
@@ -369,8 +376,22 @@
     .st-key-notebook_workspace > [data-testid="stLayoutWrapper"],
     .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
     > [data-testid="stHorizontalBlock"] {
-        height:100%;
-        min-height:0;
+        flex:1 1 auto !important;
+        height:100% !important;
+        min-height:0 !important;
+    }
+
+    /* Collapse zero-height helper iframes so they cannot reserve flex gap. */
+    .st-key-notebook_workspace > [data-testid="stElementContainer"]:has(iframe[height="0"]),
+    .st-key-notebook_workspace > [data-testid="stElementContainer"]:has(iframe[style*="height: 0"]),
+    .st-key-notebook_workspace > [data-testid="stElementContainer"]:has(iframe[height="0px"]) {
+        flex:0 0 0 !important;
+        height:0 !important;
+        min-height:0 !important;
+        max-height:0 !important;
+        overflow:hidden !important;
+        margin:0 !important;
+        padding:0 !important;
     }
 
     .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
@@ -714,7 +735,7 @@
 
     .st-key-chat_panel {
         /* Same top inset as Thinking Path / Sources so Coach aligns on one line. */
-        padding:1.1rem 1.25rem calc(.45rem + 10px);
+        padding:1.1rem 1.25rem 10px;
         background:var(--cd-surface);
         overflow-x:hidden !important;
         overflow-y:hidden !important;
@@ -736,6 +757,29 @@
         flex-direction:column !important;
         height:100% !important;
         min-height:0 !important;
+        gap:0 !important;
+        row-gap:0 !important;
+    }
+
+    /* Chat column: grow the panel wrapper; collapse trailing helper iframes. */
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel)
+    > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(.st-key-chat_panel) {
+        flex:1 1 auto !important;
+        min-height:0 !important;
+        height:100% !important;
+    }
+
+    .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]
+    > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:has(.st-key-chat_panel)
+    > [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"]:has(iframe) {
+        flex:0 0 0 !important;
+        height:0 !important;
+        min-height:0 !important;
+        max-height:0 !important;
+        overflow:hidden !important;
+        margin:0 !important;
+        padding:0 !important;
     }
 
     [data-testid="stElementContainer"].st-key-studio_panel,
@@ -1495,7 +1539,7 @@
     }
 
     .st-key-chat_panel {
-        padding:1.45rem clamp(1.35rem,3.8vw,4.6rem) calc(.65rem + 10px) !important;
+        padding:1.45rem clamp(1.35rem,3.8vw,4.6rem) 10px !important;
         background:var(--cd-surface) !important;
     }
 
@@ -1549,7 +1593,11 @@
     }
 
     [class*="st-key-collapse-studio"] div[data-testid="stButton"] button p,
-    [class*="st-key-expand-studio"] div[data-testid="stButton"] button p {
+    [class*="st-key-expand-studio"] div[data-testid="stButton"] button p,
+    [class*="st-key-collapse-studio"] div[data-testid="stButton"] button
+    [data-testid="stMarkdownContainer"],
+    [class*="st-key-expand-studio"] div[data-testid="stButton"] button
+    [data-testid="stMarkdownContainer"] {
         position:absolute !important;
         width:1px !important;
         height:1px !important;
@@ -1559,6 +1607,8 @@
         clip:rect(0,0,0,0) !important;
         white-space:nowrap !important;
         border:0 !important;
+        /* Prefer display:none so the flex gap next to the icon collapses. */
+        display:none !important;
     }
 
     .st-key-studio_rail {
@@ -1581,6 +1631,19 @@
         min-height:0 !important;
         max-height:none !important;
         transform:none !important;
+        display:flex !important;
+        justify-content:center !important;
+        align-items:center !important;
+    }
+
+    [class*="st-key-expand-studio"] div[data-testid="stButton"],
+    [class*="st-key-expand-studio"] span.stTooltipHoverTarget,
+    [class*="st-key-expand-studio"] span.stTooltipIcon {
+        display:flex !important;
+        justify-content:center !important;
+        align-items:center !important;
+        width:100% !important;
+        margin:0 !important;
     }
 
     [class*="st-key-expand-studio"] div[data-testid="stButton"] button {
@@ -1594,6 +1657,33 @@
         color:var(--cd-accent) !important;
         background:var(--cd-accent-soft) !important;
         box-shadow:none !important;
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        gap:0 !important;
+    }
+
+    [class*="st-key-expand-studio"] div[data-testid="stButton"] button > div,
+    [class*="st-key-expand-studio"] div[data-testid="stButton"] button
+    span[data-has-shortcut],
+    [class*="st-key-expand-studio"] div[data-testid="stButton"] button > div > span {
+        display:inline-flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        gap:0 !important;
+        margin:0 !important;
+        padding:0 !important;
+        width:100% !important;
+        height:100% !important;
+    }
+
+    [class*="st-key-expand-studio"] div[data-testid="stButton"] button
+    [data-testid="stIconMaterial"],
+    [class*="st-key-collapse-studio"] div[data-testid="stButton"] button
+    [data-testid="stIconMaterial"] {
+        margin:0 !important;
+        font-size:16px !important;
+        line-height:1 !important;
     }
 
     .st-key-notebook_workspace > [data-testid="stLayoutWrapper"]

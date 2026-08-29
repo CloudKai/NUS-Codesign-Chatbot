@@ -228,8 +228,10 @@ def inject_profile_leave_helper() -> None:
 def _sync_profile_popover_close_on_leave() -> None:
     """Close the profile menu only after the pointer leaves its chrome.
 
-    Uses mouseenter/mouseleave on the popover body (not document mousemove) so
-    widget rerenders do not false-close the menu.
+    Desktop (fine pointer + hover): mouseleave closes after a short delay.
+    Touch / coarse pointers: leave-to-close is disabled — the first tap inside
+    the menu otherwise looks like a leave (no :hover) and closes immediately.
+    Streamlit already closes on outside tap / Escape.
     """
     components.html(
         """
@@ -237,10 +239,21 @@ def _sync_profile_popover_close_on_leave() -> None:
 (() => {
   const doc = window.parent.document;
   const win = window.parent;
-  const LEAVE_MS = 320;
+  const LEAVE_MS = 420;
+  const INTERACT_MS = 1800;
+  const finePointer = win.matchMedia(
+    "(hover: hover) and (pointer: fine)"
+  ).matches;
 
   if (typeof win.__cdProfileLeaveCleanup === "function") {
     try { win.__cdProfileLeaveCleanup(); } catch (_) {}
+  }
+
+  // Touch / stylus: do not auto-close on leave — first in-menu tap would
+  // schedule a close because :hover never sticks on those devices.
+  if (!finePointer) {
+    win.__cdProfileLeaveCleanup = () => {};
+    return;
   }
 
   let leaveTimer = null;
@@ -257,13 +270,27 @@ def _sync_profile_popover_close_on_leave() -> None:
   function profileBody() {
     return doc.querySelector(
       '[data-testid="stPopoverBody"]:has(.st-key-profile_menu_root), ' +
-      '[data-testid="stPopoverBody"]:has(.cd-profile-menu)'
+      '[data-testid="stPopoverBody"]:has(.cd-profile-menu), ' +
+      '[data-testid="stPopoverBody"][aria-label=":material/settings:"], ' +
+      '[data-testid="stPopoverBody"][aria-label="Settings"]'
     );
   }
 
   function isOpen() {
     const button = profileButton();
     return !!(button && button.getAttribute("aria-expanded") === "true");
+  }
+
+  function markInteract() {
+    win.__cdProfileInteractUntil = Date.now() + INTERACT_MS;
+    cancelClose();
+  }
+
+  function recentlyInteracted() {
+    return !!(
+      win.__cdProfileInteractUntil &&
+      Date.now() < win.__cdProfileInteractUntil
+    );
   }
 
   function nodeInsideProfile(node) {
@@ -274,7 +301,9 @@ def _sync_profile_popover_close_on_leave() -> None:
       node.closest(".st-key-sidebar_profile") ||
       node.closest(".st-key-profile_menu_root") ||
       node.closest('[data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)') ||
-      node.closest('[data-testid="stPopoverBody"]:has(.cd-profile-menu)')
+      node.closest('[data-testid="stPopoverBody"]:has(.cd-profile-menu)') ||
+      node.closest('[data-testid="stPopoverBody"][aria-label=":material/settings:"]') ||
+      node.closest('[data-testid="stPopoverBody"][aria-label="Settings"]')
     ) {
       return true;
     }
@@ -301,12 +330,32 @@ def _sync_profile_popover_close_on_leave() -> None:
     if (button && button.matches(":hover")) {
       return true;
     }
+    if (nodeInsideProfile(doc.activeElement)) {
+      return true;
+    }
     if (
       doc.querySelector(
         '[data-baseweb="popover"]:hover, [data-baseweb="menu"]:hover, ' +
         '[role="listbox"]:hover, [data-testid="stTooltipContent"]:hover'
       )
     ) {
+      return true;
+    }
+    return false;
+  }
+
+  function shouldStayOpen() {
+    if (!isOpen()) {
+      return false;
+    }
+    if (recentlyInteracted()) {
+      return true;
+    }
+    if (pointerStillInside()) {
+      return true;
+    }
+    // Popover DOM can briefly detach during a widget/fragment rerun.
+    if (!profileBody() && isOpen()) {
       return true;
     }
     return false;
@@ -320,6 +369,9 @@ def _sync_profile_popover_close_on_leave() -> None:
   }
 
   function closeProfile() {
+    if (shouldStayOpen()) {
+      return;
+    }
     const button = profileButton();
     if (button && button.getAttribute("aria-expanded") === "true") {
       button.click();
@@ -330,21 +382,7 @@ def _sync_profile_popover_close_on_leave() -> None:
     cancelClose();
     leaveTimer = win.setTimeout(() => {
       leaveTimer = null;
-      if (!isOpen()) {
-        return;
-      }
-      const body = profileBody();
-      if (!body) {
-        // Popover DOM may be rebuilding after a widget rerun — retry once.
-        leaveTimer = win.setTimeout(() => {
-          leaveTimer = null;
-          if (isOpen() && profileBody() && !pointerStillInside()) {
-            closeProfile();
-          }
-        }, 180);
-        return;
-      }
-      if (pointerStillInside()) {
+      if (!isOpen() || shouldStayOpen()) {
         return;
       }
       closeProfile();
@@ -361,6 +399,12 @@ def _sync_profile_popover_close_on_leave() -> None:
       return;
     }
     scheduleClose();
+  }
+
+  function onPointerDown(event) {
+    if (nodeInsideProfile(event.target)) {
+      markInteract();
+    }
   }
 
   function unbind(node, enter, leave) {
@@ -388,11 +432,13 @@ def _sync_profile_popover_close_on_leave() -> None:
       body.addEventListener("mouseenter", onEnter);
       body.addEventListener("mouseleave", onLeave);
       cancelClose();
+      markInteract();
     }
   }
 
   const body = doc.body;
   if (body instanceof win.Node) {
+    body.addEventListener("pointerdown", onPointerDown, true);
     observer = new win.MutationObserver(() => {
       bind();
     });
@@ -406,6 +452,9 @@ def _sync_profile_popover_close_on_leave() -> None:
     unbind(boundBody, onEnter, onLeave);
     boundButton = null;
     boundBody = null;
+    if (body instanceof win.Node) {
+      body.removeEventListener("pointerdown", onPointerDown, true);
+    }
     if (observer) {
       observer.disconnect();
       observer = null;

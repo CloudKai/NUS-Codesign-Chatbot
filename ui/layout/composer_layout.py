@@ -381,19 +381,56 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
 
   function hideNativeUploadTooltips() {
     profileCount("native_tooltip_scan_calls");
-    const nodes = doc.querySelectorAll('[data-testid="stTooltipContent"]');
+    const nodes = doc.querySelectorAll(
+      '[data-testid="stTooltipContent"], [data-testid="stTooltipErrorContent"]'
+    );
     for (const node of nodes) {
       const text = (node.textContent || "").trim();
       if (!text.startsWith("Upload or drag and drop files")) continue;
+      node.classList.add("cd-native-upload-tip");
       const layer =
         node.closest('[data-baseweb="tooltip"]') ||
         node.closest('[role="tooltip"]') ||
         node.parentElement ||
         node;
+      layer.classList.add("cd-native-upload-tip");
       layer.style.setProperty("display", "none", "important");
       layer.style.setProperty("visibility", "hidden", "important");
       layer.style.setProperty("opacity", "0", "important");
+      layer.style.setProperty("pointer-events", "none", "important");
     }
+  }
+
+  function watchNativeUploadTooltips() {
+    if (doc.body.dataset.cdNativeUploadTipWatch === "1") return;
+    doc.body.dataset.cdNativeUploadTipWatch = "1";
+    const uploadTipObserver = new win.MutationObserver((records) => {
+      const started = now();
+      profileCount("tooltip_mutation_callbacks");
+      const maybeTip = records.some((record) =>
+        Array.from(record.addedNodes).some((node) => {
+          if (node.nodeType !== 1) return false;
+          if (
+            node.matches &&
+            (node.matches('[data-testid="stTooltipContent"]') ||
+              node.matches('[data-testid="stTooltipErrorContent"]') ||
+              node.matches('[data-baseweb="tooltip"]') ||
+              node.matches('[role="tooltip"]'))
+          ) {
+            return true;
+          }
+          return Boolean(
+            node.querySelector &&
+              node.querySelector(
+                '[data-testid="stTooltipContent"], [data-testid="stTooltipErrorContent"]'
+              )
+          );
+        })
+      );
+      if (maybeTip) hideNativeUploadTooltips();
+      if (profile) profileCount("tooltip_mutation_ms", now() - started);
+    });
+    uploadTipObserver.observe(doc.body, { childList: true, subtree: true });
   }
 
   function rewriteDropOverlay() {
@@ -860,8 +897,9 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
       if (profile) profileCount("overlay_mutation_ms", now() - started);
     });
     overlayObserver.observe(input, { childList: true, subtree: true });
-    // Native upload tooltips are cleared in apply() and on attach hover/focus
-    // instead of watching document.body with a MutationObserver.
+    // Streamlit mounts the native attach tip as a body portal; scrub it so only
+    // .cd-attach-tooltip (with the size limit) remains.
+    watchNativeUploadTooltips();
     const slot = modelSlot(composer);
     if (slot) observer.observe(slot, { childList: true, subtree: true });
     observeTextareaWidth(textarea);

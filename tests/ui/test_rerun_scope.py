@@ -537,6 +537,8 @@ def test_topbar_guidance_and_profile_use_correct_rerun_scope() -> None:
     )[0]
     assert "on_change=persist_appearance" in profile_render_block
     assert 'key="profile_coaching_style"' in profile
+    assert "(hover: hover) and (pointer: fine)" in profile
+    assert "__cdProfileInteractUntil" in profile
     assert "_render_language_dropdown" not in profile
     display_block = profile.split("def persist_display_name", 1)[1].split(
         "def _sync_profile_trigger_label", 1
