@@ -316,7 +316,7 @@ def test_professor_student_and_workspace_calls_are_progressive(monkeypatch):
     workspace_tabs.set_value("Sources").run()
     assert _AnalyticsClient.sources_calls == 1
     assert _AnalyticsClient.journey_calls == 0
-    workspace_tabs.set_value("Journey").run()
+    workspace_tabs.set_value("Progression").run()
     assert _AnalyticsClient.journey_calls == 1
     workspace_tabs.set_value("Review").run()
     assert _AnalyticsClient.review_calls == 1
@@ -333,7 +333,7 @@ def test_professor_journey_does_not_infer_completion(monkeypatch):
         button for button in app.button
         if button.key == "professor_open_notebook_btn_student-1_notebook-1"
     ).click().run()
-    next(radio for radio in app.radio if radio.label == "Notebook workspace").set_value("Journey").run()
+    next(radio for radio in app.radio if radio.label == "Notebook workspace").set_value("Progression").run()
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Problem Identification" in rendered
     assert "Not completed" in rendered

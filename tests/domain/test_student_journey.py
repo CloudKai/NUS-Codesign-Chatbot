@@ -264,7 +264,7 @@ def test_selection_pending_ready_response_is_heading_plus_how_to_move():
     assert "You can also stay in **Problem identification**" in display
     assert "Clarify the most consequential user outcome." in display
     assert "Enter `Move to Concept generation`" in display
-    assert "go to Journey and click **Work on this stage**" in display
+    assert "Go to Analytics -> Progression and click `Work on this stage`" in display
     assert "**Questions to explore**" not in display
 
 

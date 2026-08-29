@@ -813,7 +813,7 @@ def test_phase2_validated_advance_completes_current_without_changing_focus(
         f"**[{from_label}] -> [{to_label}] is Ready.**"
     )
     assert f"Enter `Move to {to_label}`" in turn.response_text
-    assert "Work on this stage" in turn.response_text
+    assert "Go to Analytics -> Progression and click `Work on this stage`" in turn.response_text
     assert f"You can also stay in **{from_label}**" in turn.response_text
     assert "where your current reasoning is still weakest" in turn.response_text
     assert "Type exact `confirm` to advance." not in turn.response_text
@@ -883,6 +883,7 @@ def test_phase2_pending_followup_keeps_ready_and_allows_refinement(
     assert repeated.response_text.startswith(
         "**[Problem identification] -> [Concept generation] is Ready.**"
     )
+    assert "Go to Analytics -> Progression and click `Work on this stage`" in repeated.response_text
     assert "Enter `Move to Concept generation`" in repeated.response_text
     assert store.get_pending_phase_transition(thread_id) is not None
 
@@ -909,8 +910,8 @@ def test_phase2_pending_followup_keeps_ready_and_allows_refinement(
     assert reminder.response_text.startswith(
         "**[Problem identification] -> [Concept generation] is Ready.**"
     )
+    assert "Go to Analytics -> Progression and click `Work on this stage`" in reminder.response_text
     assert "Enter `Move to Concept generation`" in reminder.response_text
-    assert "Work on this stage" in reminder.response_text
     assert "keep refining the problem" in reminder.response_text.casefold()
     assert "You can also stay in **Problem identification**" in reminder.response_text
     assert store.get_pending_phase_transition(thread_id) is not None

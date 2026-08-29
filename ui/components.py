@@ -201,7 +201,7 @@ def notification_dot_html(*, visible: bool) -> str:
     if not visible:
         return ""
     return (
-        '<span class="cd-nav-dot" aria-label="New Journey updates">!</span>'
+        '<span class="cd-nav-dot" aria-label="New Progression updates">!</span>'
     )
 
 

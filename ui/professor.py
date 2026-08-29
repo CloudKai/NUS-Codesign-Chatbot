@@ -23,7 +23,7 @@ from ui.runtime import local_api_client
 
 _PAGES = ("Overview", "Students", "Learning", "Engagement", "Research")
 _PHASE_LABELS = tuple(stage.label.title() for stage in THINKING_STAGES)
-_WORKSPACE_TABS = ("Chat", "Sources", "Journey", "Review")
+_WORKSPACE_TABS = ("Chat", "Sources", "Progression", "Review")
 _ROSTER_CACHE_KEY = "professor_roster_cache"
 _DETAIL_CACHE_KEY = "professor_student_detail_cache"
 _CHAT_CACHE_KEY = "professor_chat_cache"
@@ -652,7 +652,7 @@ def _render_professor_workspace(
             _invalidate_chat_cache(student_id, notebook_id)
         elif tab == "Sources":
             _invalidate_sources_cache(student_id, notebook_id)
-        elif tab == "Journey":
+        elif tab == "Progression":
             _invalidate_journey_cache(student_id, notebook_id)
         else:
             _invalidate_review_cache(student_id, notebook_id)
@@ -668,7 +668,7 @@ def _render_professor_workspace(
     elif tab == "Sources":
         sources_payload = _cached_professor_sources(client, student_id, notebook_id)
         _render_professor_sources_tab(client, student_id, notebook_id, sources_payload)
-    elif tab == "Journey":
+    elif tab == "Progression":
         journey_payload = _cached_professor_journey(client, student_id, notebook_id)
         _render_professor_journey_tab(journey_payload)
     else:

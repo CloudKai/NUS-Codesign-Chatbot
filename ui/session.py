@@ -84,7 +84,7 @@ def initialize_session() -> None:
         "mobile_studio_open": False,
         "center_view": "chat",
         "nav_section": "Chat",
-        "studio_tab": "Journey",
+        "studio_tab": "Progression",
         "workspace_nav_collapsed": False,
         "workspace_studio_collapsed": False,
         "display_name": "Student",
@@ -95,6 +95,9 @@ def initialize_session() -> None:
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+    # Pre-rename sessions may still hold the old Thinking Path tab label.
+    if st.session_state.get("studio_tab") == "Journey":
+        st.session_state.studio_tab = "Progression"
     st.session_state.support_mode = DEFAULT_SUPPORT_MODE
     st.session_state.web_search = False
     st.session_state.image_generation = False

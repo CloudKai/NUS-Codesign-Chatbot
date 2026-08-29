@@ -11,8 +11,10 @@ zero-height helper that:
   latest coach message to the top of the feed (clamped for short replies)
 - on reconcile, pins only when follow or a pending reply-reveal is still armed
 - stops the pending reveal when the student scrolls/swipes away from the bottom
-- hosts the scroll-down control on ``document.body`` (fixed), retrying placement
-  briefly after remount when the chat panel is not yet sized
+- hosts the scroll-down control on ``document.body`` (fixed) and keeps a
+  parent-owned rAF ensure loop (``ensureGeneration``) so Review / New chat
+  remounts that paint Chat after the iframe is torn down still recover the
+  control once the feed has real geometry
 - does not poll, observe the whole app, or chase Thinking height changes
 
 Click / scroll handlers live on ``window.parent.__cdChatScroll`` so they keep
@@ -35,6 +37,10 @@ NEAR_BOTTOM_PX = 120
 # Extra frames after Send / reply remount so Streamlit can finish painting
 # the new bubble height before scrollTop is applied.
 FOLLOW_SNAP_FRAMES = 8
+# Review / New chat remounts often finish painting Chat well after the
+# components.html iframe is gone. Keep a parent-owned rAF ensure for this
+# many frames (~1.5s) or until feed geometry is stable.
+SCROLL_DOWN_ENSURE_FRAMES = 90
 
 
 def sync_chat_scroll(*, mode: str = "reconcile") -> None:
@@ -58,6 +64,7 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
   const MODE = __CD_MODE__;
   const NEAR_BOTTOM_PX = __CD_NEAR_BOTTOM__;
   const FOLLOW_SNAP_FRAMES = __CD_FOLLOW_FRAMES__;
+  const SCROLL_DOWN_ENSURE_FRAMES = __CD_ENSURE_FRAMES__;
 
   function api() {
     if (!win.__cdChatScroll) {
@@ -67,12 +74,24 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
         snapping: false,
         nearBottomPx: NEAR_BOTTOM_PX,
         listenersBound: false,
+        ensureGeneration: 0,
+        ensureStableFrames: 0,
+        ensureLastScrollHeight: -1,
       };
     }
     const current = win.__cdChatScroll;
     current.nearBottomPx = NEAR_BOTTOM_PX;
     if (typeof current.awaitingReplyReveal !== "boolean") {
       current.awaitingReplyReveal = false;
+    }
+    if (typeof current.ensureGeneration !== "number") {
+      current.ensureGeneration = 0;
+    }
+    if (typeof current.ensureStableFrames !== "number") {
+      current.ensureStableFrames = 0;
+    }
+    if (typeof current.ensureLastScrollHeight !== "number") {
+      current.ensureLastScrollHeight = -1;
     }
     return current;
   }
@@ -94,6 +113,7 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
   }
 
   function isNearBottom(root) {
+    // Unsized feeds are not "near bottom"; keep ensuring until layout lands.
     if (!root || root.clientHeight <= 0) return false;
     return distanceFromBottom(root) <= api().nearBottomPx;
   }
@@ -143,13 +163,23 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
 
   function placeScrollDownButton(button) {
     const panel = chatPanel();
-    const composer = doc.querySelector(".st-key-chat_composer");
     if (!panel) return;
     const panelRect = panel.getBoundingClientRect();
+    // Mid-remount panels can report empty boxes; keep the last good spot.
+    if (panelRect.width < 8 || panelRect.height < 8) return;
+    const composer = doc.querySelector(".st-key-chat_composer");
     const composerRect = composer ? composer.getBoundingClientRect() : null;
-    const bottom = composerRect
-      ? Math.max(8, win.innerHeight - composerRect.top + 8)
-      : Math.max(8, win.innerHeight - panelRect.bottom + 56);
+    let bottom = Math.max(8, win.innerHeight - panelRect.bottom + 56);
+    if (
+      composerRect &&
+      composerRect.height > 8 &&
+      composerRect.top > 8 &&
+      composerRect.top < win.innerHeight
+    ) {
+      bottom = Math.max(8, win.innerHeight - composerRect.top + 8);
+    }
+    // Composer at y≈0 during remount used to push bottom past the viewport.
+    bottom = Math.min(bottom, Math.max(8, win.innerHeight - 40));
     button.style.left = panelRect.left + panelRect.width / 2 + "px";
     button.style.bottom = bottom + "px";
   }
@@ -164,7 +194,7 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     const show = !!(
       surfaceVisible &&
       root &&
-      root.clientHeight > 0 &&
+      root.clientHeight > 8 &&
       !isNearBottom(root)
     );
     button.classList.toggle("cd-chat-scroll-down-visible", show);
@@ -343,22 +373,56 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     current.listenersBound = true;
   }
 
-  function ensureScrollDownAfterRemount(framesLeft) {
-    // Stage-move / reply remounts can paint chat_panel after this iframe.
-    // Retry placement on the same rAF loop only (no timers or DOM observers).
+  function feedGeometryReady(root) {
+    if (!root || root.clientHeight <= 8) return false;
+    const height = root.scrollHeight;
+    const state = api();
+    if (height === state.ensureLastScrollHeight) {
+      state.ensureStableFrames += 1;
+    } else {
+      state.ensureLastScrollHeight = height;
+      state.ensureStableFrames = 0;
+    }
+    // Two consecutive frames with the same scrollHeight means layout settled.
+    return state.ensureStableFrames >= 2;
+  }
+
+  function ensureScrollDown(generation, framesLeft) {
+    // Parent-owned: scheduled via win.__cdChatScroll so iframe teardown cannot
+    // drop the chain after Review / New chat remounts Chat.
+    const state = win.__cdChatScroll;
+    if (!state || state.ensureGeneration !== generation) return;
+    if (typeof state.updateScrollDownButton === "function") {
+      state.updateScrollDownButton();
+    }
+    const root =
+      typeof state.scrollRoot === "function" ? state.scrollRoot() : null;
+    const ready = feedGeometryReady(root);
+    if (ready || framesLeft <= 1) {
+      if (typeof state.updateScrollDownButton === "function") {
+        state.updateScrollDownButton();
+      }
+      return;
+    }
+    schedule(() => ensureScrollDown(generation, framesLeft - 1));
+  }
+
+  function startEnsureScrollDown() {
+    const state = api();
+    state.ensureGeneration += 1;
+    state.ensureStableFrames = 0;
+    state.ensureLastScrollHeight = -1;
+    state.ensureScrollDown = ensureScrollDown;
+    const generation = state.ensureGeneration;
     scrollDownButton();
     updateScrollDownButton();
-    const panel = chatPanel();
-    if (panel && isChatSurfaceVisible(panel)) return;
-    if (framesLeft > 1) {
-      schedule(() => ensureScrollDownAfterRemount(framesLeft - 1));
-    }
+    schedule(() => ensureScrollDown(generation, SCROLL_DOWN_ENSURE_FRAMES));
   }
 
   scrollDownButton();
   const root = scrollRoot();
   if (!root) {
-    ensureScrollDownAfterRemount(FOLLOW_SNAP_FRAMES);
+    startEnsureScrollDown();
     return;
   }
   if (MODE === "send") {
@@ -366,11 +430,12 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     api().awaitingReplyReveal = true;
     // Pending user + thinking are not yet a coach bubble in chat_log.
     keepSnappingToBottom(FOLLOW_SNAP_FRAMES);
+    startEnsureScrollDown();
     return;
   }
   if (MODE === "settle") {
     syncFollowFromViewport();
-    updateScrollDownButton();
+    startEnsureScrollDown();
     return;
   }
   if (MODE === "reply") {
@@ -379,16 +444,15 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     api().follow = true;
     api().awaitingReplyReveal = true;
     keepRevealingCoachReply(FOLLOW_SNAP_FRAMES);
-    ensureScrollDownAfterRemount(FOLLOW_SNAP_FRAMES);
+    startEnsureScrollDown();
     return;
   }
   // reconcile: pin latest coach top only when follow / pending reveal is
   // still armed. Do not steal the viewport after the student scrolled away.
   if (shouldRevealReply()) {
     keepRevealingCoachReply(FOLLOW_SNAP_FRAMES);
-    return;
   }
-  updateScrollDownButton();
+  startEnsureScrollDown();
 })();
 </script>
 """
@@ -396,5 +460,6 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
         script.replace("__CD_MODE__", repr(cleaned))
         .replace("__CD_NEAR_BOTTOM__", str(int(NEAR_BOTTOM_PX)))
         .replace("__CD_FOLLOW_FRAMES__", str(int(FOLLOW_SNAP_FRAMES)))
+        .replace("__CD_ENSURE_FRAMES__", str(int(SCROLL_DOWN_ENSURE_FRAMES)))
     )
     components.html(script, height=0, width=0)

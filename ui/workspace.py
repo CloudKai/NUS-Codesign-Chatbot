@@ -73,12 +73,12 @@ def _render_mobile_journey_attention_flag() -> None:
 
 
 def _mobile_panel_label(value: str) -> str:
-    """Human labels for mobile panel ids (Journey for the Thinking Path)."""
+    """Human labels for mobile panel ids (Progression for the Thinking Path)."""
     return {
         "Chats": "Chats",
         "Chat": "Chat",
         "Sources": "Library",
-        "Studio": "Journey",
+        "Studio": "Progression",
     }.get(value, value)
 
 

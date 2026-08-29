@@ -465,7 +465,8 @@ def _selection_pending_ready_reminder_turn(
             ),
             recommendation=StageDecision.STAY,
             recommendation_rationale=(
-                "Keep focus until Move to <stage> or Journey Work on this stage."
+                "Keep focus until Move to <stage> or Analytics -> Progression "
+                "Work on this stage."
             ),
             response_mode="qa",
         ),

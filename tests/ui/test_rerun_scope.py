@@ -462,7 +462,7 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
     assert '"Journey !"' not in source
     assert Path("ui/layout/journey_tab_unread.py").exists() is False
     workspace = Path("ui/workspace.py").read_text(encoding="utf-8")
-    assert '"Studio": "Journey"' in workspace.split("def _mobile_panel_label", 1)[1].split(
+    assert '"Studio": "Progression"' in workspace.split("def _mobile_panel_label", 1)[1].split(
         "def _apply_pending_mobile_panel", 1
     )[0]
     assert "Journey 🛑" not in workspace
@@ -487,6 +487,17 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
     assert "st-key-mobile_journey_attention" in responsive
     assert "st-key-mobile_nav_menu" in responsive
     assert ".st-key-nav_panel" in responsive
+    workspace_css = Path("ui/assets/styles/10-workspace.css").read_text(encoding="utf-8")
+    # Review uses the same red-dot attention badge as mobile Analytics.
+    assert 'content:" 🛑"' not in workspace_css
+    assert "Red attention dot on Review" in workspace_css
+    review_dot = workspace_css.split("Red attention dot on Review", 1)[1].split(
+        ".st-key-studio_scroll", 1
+    )[0]
+    assert "background:#e11d48" in review_dot
+    assert "border-radius:999px" in review_dot
+    assert 'content:""' in review_dot
+    assert "label:last-child::after" in review_dot
     assert ".st-key-search_panel" in responsive
     css = Path("ui/assets/styles/10-workspace.css").read_text(encoding="utf-8")
     assert ".st-key-studio_section_tabs" in css

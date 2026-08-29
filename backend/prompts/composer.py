@@ -282,9 +282,9 @@ def _runtime_instructions(context: PromptContext) -> str:
                 "why it is ready and name one optional way the student could improve "
                 "the current work if they choose to stay. The application will open "
                 "with `**[<current stage label>] -> [<next stage label>] is Ready.**`, "
-                "then tell the student to enter `Move to <next stage label>` or open "
-                "Journey and click Work on this stage. Do not claim the stage already "
-                "changed, and do not ask for Next or a confirm command."
+                "then tell the student to enter `Move to <next stage label>` or Go to "
+                "Analytics -> Progression and click `Work on this stage`. Do not claim "
+                "the stage already changed, and do not ask for Next or a confirm command."
             )
         else:
             parts.append(

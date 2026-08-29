@@ -129,7 +129,7 @@ def test_review_tab_renders_projected_deep_review_feedback() -> None:
 
 
 def test_queued_stage_review_shows_journey_stop_badge_before_unread() -> None:
-    """Mobile Journey shows 🛑 as soon as a stage Haiku job is queued."""
+    """Mobile Review attention uses a CSS red dot, not a radio-option emoji."""
     from backend.specialists.review_orchestration import (
         JOURNEY_STAGE_REVIEWS_KEY,
         STAGE_REVIEW_QUEUED,

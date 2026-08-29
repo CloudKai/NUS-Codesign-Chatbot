@@ -415,8 +415,8 @@ def test_composer_navigation_overrides_auto_advance_confirmation_copy(monkeypatc
     assert "no confirmation language" not in text
 
 
-def test_composer_selection_mode_points_to_move_to_and_journey_cta(monkeypatch):
-    """Selection ADVANCE copy uses Ready heading and Move to / Work on this stage."""
+def test_composer_selection_mode_points_to_analytics_progression_cta(monkeypatch):
+    """Selection ADVANCE copy uses Ready heading and Analytics → Progression CTA."""
     from backend.prompts import composer as composer_module
 
     monkeypatch.setattr(composer_module.settings, "auto_advance_stages", False)
@@ -432,8 +432,9 @@ def test_composer_selection_mode_points_to_move_to_and_journey_cta(monkeypatch):
         )
     )
     text = prepared.runtime_instructions
+    assert "Analytics -> Progression" in text
+    assert "`Work on this stage`" in text
     assert "Move to <next stage label>" in text
-    assert "Work on this stage" in text
     assert "] -> [" in text and "is Ready.**" in text
     assert "one optional way" in text
     assert "do not ask for Next or a confirm command" in text

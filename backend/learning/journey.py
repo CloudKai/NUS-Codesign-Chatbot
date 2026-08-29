@@ -321,13 +321,13 @@ def selection_pending_move_footer(next_stage_id: str) -> str:
         next_stage_id: Canonical destination Thinking Path stage id.
 
     Returns:
-        Markdown lines telling the student to enter ``Move to <label>`` or use
-        Journey **Work on this stage**.
+        Markdown telling the student to enter ``Move to <label>`` or open
+        Analytics → Progression and click ``Work on this stage``.
     """
     next_stage_value = STAGE_BY_ID[next_stage_id]
     return (
-        f"Enter `Move to {next_stage_value.label}`\n"
-        "or go to Journey and click **Work on this stage**."
+        f"Enter `Move to {next_stage_value.label}` or Go to Analytics -> "
+        "Progression and click `Work on this stage`."
     )
 
 
@@ -375,7 +375,7 @@ def selection_pending_ready_response(
         if response_body.startswith(heading):
             response_body = response_body[len(heading) :].strip()
             break
-    # Drop explore-question blocks; selection mode points to Journey / Move to.
+    # Drop explore-question blocks; selection mode points to Progression.
     if "**Questions to explore**" in response_body:
         response_body = response_body.split("**Questions to explore**", 1)[0].strip()
     cleaned_guidance = " ".join(str(stay_guidance or "").split()).strip()

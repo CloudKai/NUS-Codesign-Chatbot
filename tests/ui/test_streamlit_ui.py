@@ -288,7 +288,7 @@ def test_streamlit_notebook_workspace_smoke():
     studio_section = next(
         radio for radio in app.radio if radio.label == "Thinking Path section"
     )
-    assert studio_section.options == ["Journey", "Review"]
+    assert studio_section.options == ["Progression", "Review"]
     app.session_state["studio_tab"] = "Review"
     app.run()
     assert not app.exception
@@ -319,7 +319,7 @@ def test_streamlit_notebook_workspace_smoke():
     assert expander_labels.index("Strengths") < expander_labels.index(
         "Areas for improvement"
     )
-    app.session_state["studio_tab"] = "Journey"
+    app.session_state["studio_tab"] = "Progression"
     app.run()
     assert not app.exception
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)

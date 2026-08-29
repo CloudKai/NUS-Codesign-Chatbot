@@ -1353,33 +1353,38 @@
         box-shadow:inset 0 -2px 0 var(--cd-accent);
     }
 
-    /* Paint 🛑 on the stable "Review" label. Changing the radio option string
-       remounts the widget and drops this selected highlight. */
+    /* Red attention dot on Review (same pattern as mobile Analytics).
+       Keep the radio option string stable — changing it remounts the widget
+       and drops the selected highlight. */
     body:has(.st-key-mobile_journey_attention)
-    .st-key-studio_section_tabs [role="radiogroup"] > label:last-child p,
+    .st-key-studio_section_tabs [role="radiogroup"] > label:last-child,
     body:has(.cd-mobile-journey-attention)
-    .st-key-studio_section_tabs [role="radiogroup"] > label:last-child p,
+    .st-key-studio_section_tabs [role="radiogroup"] > label:last-child,
     body:has(.st-key-mobile_journey_attention)
-    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:has(input[value="1"]) p,
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:has(input[value="1"]),
     body:has(.cd-mobile-journey-attention)
-    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:has(input[value="1"]) p {
-        white-space:nowrap;
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:has(input[value="1"]) {
+        position:relative !important;
     }
 
     body:has(.st-key-mobile_journey_attention)
-    .st-key-studio_section_tabs [role="radiogroup"] > label:last-child p::after,
+    .st-key-studio_section_tabs [role="radiogroup"] > label:last-child::after,
     body:has(.cd-mobile-journey-attention)
-    .st-key-studio_section_tabs [role="radiogroup"] > label:last-child p::after,
+    .st-key-studio_section_tabs [role="radiogroup"] > label:last-child::after,
     body:has(.st-key-mobile_journey_attention)
-    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:has(input[value="1"]) p::after,
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:has(input[value="1"])::after,
     body:has(.cd-mobile-journey-attention)
-    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:has(input[value="1"]) p::after {
-        content:" 🛑";
-        font-size:1.05rem;
-        line-height:1;
-        margin-left:.12rem;
-        -webkit-text-fill-color:initial;
-        vertical-align:-0.12em;
+    .st-key-studio_section_tabs label[data-testid="stRadioOption"]:has(input[value="1"])::after {
+        content:"";
+        position:absolute;
+        top:.35rem;
+        right:.55rem;
+        width:.42rem;
+        height:.42rem;
+        border-radius:999px;
+        background:#e11d48;
+        box-shadow:0 0 0 2px var(--cd-surface);
+        pointer-events:none;
     }
 
     /* Hide the native radio glyph so this control reads like the old tabs. */

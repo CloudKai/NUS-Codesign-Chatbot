@@ -53,6 +53,7 @@ from ui.components import (
     review_card_html,
     review_feedback_items_html,
 )
+from ui.layout.chat_scroll import sync_chat_scroll
 from ui.runtime import (
     coach_turn_is_streaming,
     get_deep_review_job,
@@ -1155,18 +1156,22 @@ def render_studio_panel() -> None:
     )
     with st.container(key="studio_scroll", height="stretch"):
         with st.container(key="studio_section_tabs"):
-            # Keep option strings identical across unread/read. Appending 🛑
-            # remounts the radio and drops the selected highlight on Review.
+            # Keep option strings identical across unread/read. Appending a
+            # badge character remounts the radio and drops the Review highlight.
+            # Migrate pre-rename session values so the radio options stay valid.
+            if st.session_state.get("studio_tab") == "Journey":
+                st.session_state.studio_tab = "Progression"
             selected = st.radio(
                 "Thinking Path section",
-                ["Journey", "Review"],
+                ["Progression", "Review"],
                 horizontal=True,
                 key="studio_tab",
                 label_visibility="collapsed",
             )
         # Clear durable unread when Review is opened, but still render the
         # Review body in this run. An early return left a blank Studio pane.
-        # A follow-up rerun drops the CSS 🛑 flag without remounting options.
+        # A follow-up rerun drops the CSS attention-dot flag without remounting
+        # options.
         clear_unread_rerun = False
         if (
             selected == "Review"
@@ -1194,5 +1199,8 @@ def render_studio_panel() -> None:
         render_thinking_path_footer(pending)
     if st.session_state.get("confirm_next_transition_id"):
         _confirm_next_stage_dialog()
+    # Progression/Review clicks remount only this fragment. Re-place the
+    # body-hosted scroll-down control without stealing the chat viewport.
+    sync_chat_scroll(mode="settle")
     if clear_unread_rerun:
         rerun_app()

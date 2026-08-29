@@ -12,6 +12,7 @@ def test_chat_scroll_helper_uses_near_bottom_gating() -> None:
     helper = Path("ui/layout/chat_scroll.py").read_text(encoding="utf-8")
     assert "NEAR_BOTTOM_PX = 120" in helper
     assert "FOLLOW_SNAP_FRAMES = 8" in helper
+    assert "SCROLL_DOWN_ENSURE_FRAMES = 90" in helper
     assert NEAR_BOTTOM_PX == 120
     assert 'querySelector(".st-key-chat_log")' not in helper
     assert "Element.prototype" not in helper
@@ -43,13 +44,23 @@ def test_chat_scroll_helper_uses_near_bottom_gating() -> None:
     assert "api().awaitingReplyReveal = true" in helper
     assert "keepRevealingCoachReply(FOLLOW_SNAP_FRAMES)" in helper
     assert "shouldRevealReply()" in helper
-    assert "ensureScrollDownAfterRemount" in helper
+    assert "startEnsureScrollDown" in helper
+    assert "ensureGeneration" in helper
+    assert "SCROLL_DOWN_ENSURE_FRAMES" in helper
+    # Parent-owned ensure survives iframe teardown; do not early-exit on
+    # first visible panel (that hid the control after Review / New chat).
+    assert "function ensureScrollDown(" in helper
+    assert "state.ensureGeneration !== generation" in helper
+    assert "feedGeometryReady" in helper
+    assert "isChatSurfaceVisible(panel)) return" not in helper
+    assert "win.innerHeight - 40" in helper
     send_branch = helper.split('MODE === "send"', 1)[1].split(
         'MODE === "settle"', 1
     )[0]
     assert "keepSnappingToBottom" in send_branch
     assert "awaitingReplyReveal = true" in send_branch
     assert "keepRevealingCoachReply" not in send_branch
+    assert "startEnsureScrollDown()" in send_branch
     # Reply arms reveal like Send (stage-move remount never went through Send).
     reply_branch = helper.split('MODE === "reply"', 1)[1].split(
         "// reconcile:", 1
@@ -57,14 +68,20 @@ def test_chat_scroll_helper_uses_near_bottom_gating() -> None:
     assert "awaitingReplyReveal = true" in reply_branch
     assert "api().follow = true" in reply_branch
     assert "keepRevealingCoachReply(FOLLOW_SNAP_FRAMES)" in reply_branch
-    assert "ensureScrollDownAfterRemount" in reply_branch
+    assert "startEnsureScrollDown()" in reply_branch
     assert "shouldRevealReply()" not in reply_branch
-    # Reconcile stays gated so ordinary paints do not steal the viewport.
+    # Reconcile stays gated so ordinary paints do not steal the viewport, but
+    # always re-places the scroll-down control after chat switches.
     reconcile_tail = helper.split("// reconcile:", 1)[1].split(
         "})();", 1
     )[0]
     assert "shouldRevealReply()" in reconcile_tail
     assert "keepRevealingCoachReply(FOLLOW_SNAP_FRAMES)" in reconcile_tail
+    assert "startEnsureScrollDown()" in reconcile_tail
+    settle_branch = helper.split('MODE === "settle"', 1)[1].split(
+        'MODE === "reply"', 1
+    )[0]
+    assert "startEnsureScrollDown()" in settle_branch
     assert 'querySelector(".st-key-chat_feed")' in helper
     scroll_root_fn = helper.split("function scrollRoot()", 1)[1].split(
         "function chatPanel()", 1
@@ -106,6 +123,11 @@ def test_chat_scroll_helper_uses_near_bottom_gating() -> None:
         "function onFeedScroll(", 1
     )[0]
     assert "awaitingReplyReveal = false" in mark_fn
+    # Thinking Path tab clicks re-sync the overlay without stealing viewport.
+    studio = Path("ui/panels/studio.py").read_text(encoding="utf-8")
+    studio_panel = studio.split("def render_studio_panel(", 1)[1]
+    assert 'sync_chat_scroll(mode="settle")' in studio_panel
+    assert "from ui.layout.chat_scroll import sync_chat_scroll" in studio
 
 
 def test_inflight_wrapper_has_no_card_chrome() -> None:
