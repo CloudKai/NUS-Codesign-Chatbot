@@ -73,6 +73,7 @@ def test_nav_rail_exposes_new_search_library_and_recents_actions() -> None:
     assert "on_click=_on_close_mobile_nav" in nav
     assert "on_click=_on_new_chat" in nav
     assert "on_click=open_chat_destination" in nav
+    assert "on_click=_on_open_delete_chat" in nav
     assert "select_thread(target, should_rerun=False)" in nav
     open_search = nav.split("def _on_open_search", 1)[1].split("\ndef ", 1)[0]
     toggle_library = nav.split("def _on_toggle_library", 1)[1].split("\ndef ", 1)[0]
@@ -81,6 +82,7 @@ def test_nav_rail_exposes_new_search_library_and_recents_actions() -> None:
     close_mobile = nav.split("def _on_close_mobile_nav", 1)[1].split("\ndef ", 1)[0]
     open_chat = nav.split("def open_chat_destination", 1)[1].split("\ndef ", 1)[0]
     new_chat = nav.split("def _on_new_chat", 1)[1].split("\ndef ", 1)[0]
+    open_delete = nav.split("def _on_open_delete_chat", 1)[1].split("\ndef ", 1)[0]
     for callback_body in (
         open_search,
         toggle_library,
@@ -89,11 +91,14 @@ def test_nav_rail_exposes_new_search_library_and_recents_actions() -> None:
         close_mobile,
         open_chat,
         new_chat,
+        open_delete,
     ):
         assert "rerun_app()" not in callback_body
     assert 'if target == current:' in open_chat
     assert 'toast_course_materials_loading = True' in new_chat
-    # Delete still remounts so Recents + transcript stay consistent.
+    assert "pending_delete_chat_id" in open_delete
+    assert "close_menu_popover" in open_delete
+    # Rename apply and delete confirm still remount so titles / transcript stay consistent.
     assert "rerun_app()" in nav
     css = Path("ui/assets/styles/15-nav.css").read_text(encoding="utf-8")
     assert "stIconMaterial" in css

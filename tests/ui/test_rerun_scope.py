@@ -290,6 +290,18 @@ def test_awaiting_coach_turn_survives_panel_remount_and_locks_notebooks() -> Non
     assert "Wait for the coach reply before switching notebooks." in notebooks
     assert "disabled=locked" in notebooks
     assert "disabled=open_disabled" in notebooks
+    assert "on_click=_on_dialog_new_notebook" in notebooks
+    assert "on_click=_on_dialog_open_notebook" in notebooks
+    dialog_new = notebooks.split("def _on_dialog_new_notebook", 1)[1].split(
+        "\ndef ", 1
+    )[0]
+    dialog_open = notebooks.split("def _on_dialog_open_notebook", 1)[1].split(
+        "\ndef ", 1
+    )[0]
+    assert "new_notebook(should_rerun=False)" in dialog_new
+    assert "select_thread(target, should_rerun=False)" in dialog_open
+    assert "rerun_app()" not in dialog_new
+    assert "rerun_app()" not in dialog_open
     assert "if notebook_switch_locked():" in session
     # Journey/Sources stay switchable; only notebooks are locked.
     workspace = Path("ui/workspace.py").read_text(encoding="utf-8")

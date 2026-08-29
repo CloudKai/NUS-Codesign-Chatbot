@@ -300,6 +300,20 @@ def _render_recent_row(
                 )
 
 
+def _on_open_delete_chat(thread_id: str, menu_scope: str) -> None:
+    """Arm the delete dialog before render so one remount opens it.
+
+    Closes the Recents/mobile chat ⋮ popover via epoch bump. Does not call a
+    nested full-app remount; ``mount_pending_delete_chat_dialog`` at the end of
+    the workspace paint opens the confirmation on this same script run.
+    """
+    target = str(thread_id or "").strip()
+    if not target:
+        return
+    st.session_state.pending_delete_chat_id = target
+    close_menu_popover(menu_scope, target)
+
+
 def render_chat_actions_menu(
     thread_id: str,
     *,
@@ -361,17 +375,15 @@ def render_chat_actions_menu(
         )
 
     with st.container(key=danger_key):
-        if st.button(
+        st.button(
             "Delete",
             icon=":material/delete:",
             type="tertiary",
             key=f"{menu_scope}-delete-open-{thread_id}",
             use_container_width=True,
-        ):
-            st.session_state.pending_delete_chat_id = thread_id
-            close_menu_popover(menu_scope, thread_id)
-            rerun_app()
-
+            on_click=_on_open_delete_chat,
+            args=(thread_id, menu_scope),
+        )
 
 def _render_recent_menu(thread_id: str, *, title: str, safe_id: str) -> None:
     """Backward-compatible wrapper for Recents popover body."""

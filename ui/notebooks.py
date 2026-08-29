@@ -137,6 +137,28 @@ def _return_to_notebook_list() -> None:
     rerun_app()
 
 
+def _on_dialog_new_notebook() -> None:
+    """Create a notebook before the workspace paints; leave Your Notebooks closed.
+
+    Runs as ``on_click`` so Chat/Recents see the new ``thread_id`` on the click's
+    single remount. Arms the course-materials toast; session init must not.
+    """
+    st.session_state.pending_notebook_actions = None
+    st.session_state.reopen_notebooks_dialog = False
+    st.session_state.toast_course_materials_loading = True
+    new_notebook(should_rerun=False)
+
+
+def _on_dialog_open_notebook(thread_id: str) -> None:
+    """Open a notebook before the workspace paints; leave Your Notebooks closed."""
+    target = str(thread_id or "").strip()
+    if not target:
+        return
+    st.session_state.pending_notebook_actions = None
+    st.session_state.reopen_notebooks_dialog = False
+    select_thread(target, should_rerun=False)
+
+
 def _render_notebook_library_list() -> None:
     """Search, create, open, and open the inline actions panel."""
     locked = notebook_switch_locked()
@@ -150,15 +172,15 @@ def _render_notebook_library_list() -> None:
         label_visibility="collapsed",
         key="notebook-search",
     )
-    if new_column.button(
+    new_column.button(
         "New notebook",
         icon=":material/add:",
         type="primary",
         use_container_width=True,
         disabled=locked,
         help="Wait for the coach reply" if locked else None,
-    ):
-        new_notebook()
+        on_click=_on_dialog_new_notebook,
+    )
 
     threads = store.list_threads(search, None)
     st.caption(f"{len(threads)} notebook{'s' if len(threads) != 1 else ''}")
@@ -207,15 +229,16 @@ def _render_notebook_library_list() -> None:
                         unsafe_allow_html=True,
                     )
                     open_disabled = locked and not is_active
-                    if open_column.button(
+                    open_column.button(
                         "Open",
                         use_container_width=True,
                         type="secondary",
                         key=f"open-notebook-{thread['id']}",
                         disabled=open_disabled,
                         help="Wait for the coach reply" if open_disabled else None,
-                    ):
-                        select_thread(thread["id"])
+                        on_click=_on_dialog_open_notebook,
+                        args=(thread["id"],),
+                    )
                     actions_disabled = locked
                     if menu_column.button(
                         "⋯",
