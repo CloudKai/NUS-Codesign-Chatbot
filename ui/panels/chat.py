@@ -405,10 +405,29 @@ def _render_copy_control(text: str) -> None:
     )
 
 
+def _begin_latest_edit_message(message_id: str) -> None:
+    """Enter the latest user-turn editor during the current fragment rerun.
+
+    Args:
+        message_id: Persisted user-message identifier selected for editing.
+
+    Side effects:
+        Sets the in-bubble editor session state. Streamlit's widget callback
+        then reruns only the owning chat fragment.
+    """
+    selected_id = str(message_id or "").strip()
+    if not selected_id:
+        return
+    st.session_state.editing_message = selected_id
+    st.session_state.edit_confirm_message_id = None
+
+
 def render_message(
     message: dict[str, Any],
     *,
     visible_source_ids: set[str] | None = None,
+    latest_user_message_id: str | None = None,
+    allow_edit: bool = True,
 ) -> None:
     role = message["role"]
     with st.chat_message(
@@ -520,7 +539,14 @@ def render_message(
         if role == "user":
             safe_id = message["id"].replace("-", "_")
             content = str(message["content"])
-            with st.container(key=f"user_message_row_{safe_id}"):
+            # Pending-edit inflight uses a distinct container key. Cancel-only
+            # reclaims the edit-actions slot so Streamlit does not remount Send.
+            row_key = (
+                f"user_message_pending_{safe_id}"
+                if not allow_edit
+                else f"user_message_row_{safe_id}"
+            )
+            with st.container(key=row_key):
                 # Own the bubble padding in HTML we control (Streamlit chat chrome
                 # keeps resetting padding on stChatMessage).
                 escaped = html.escape(content).replace("\n", "<br />")
@@ -548,6 +574,19 @@ def render_message(
                                 width="content",
                             ):
                                 source_viewer_dialog(attachment_id)
+                if not allow_edit:
+                    # Reclaim the edit-actions slot with Cancel only so Streamlit
+                    # does not remount the previous Cancel/Send pair into this
+                    # pending bubble. Cancel aborts the revise with no change.
+                    with st.container(key=f"user_message_edit_actions_{safe_id}"):
+                        if st.button(
+                            "Cancel",
+                            key=f"cancel-{message['id']}",
+                            type="secondary",
+                            use_container_width=True,
+                        ):
+                            _abort_pending_edit_noop()
+                    return
                 with st.container(key=f"user_message_actions_{safe_id}"):
                     _, copy_column, edit_column = st.columns(
                         [0.76, 0.12, 0.12],
@@ -555,23 +594,27 @@ def render_message(
                     )
                     with copy_column:
                         _render_copy_control(content)
-                    if edit_column.button(
-                        "",
-                        icon=":material/edit:",
-                        key=f"edit-{message['id']}",
-                        help="Edit",
-                        type="tertiary",
-                    ):
-                        messages = store.get_messages(st.session_state.thread_id)
-                        latest_user = next(
-                            (item for item in reversed(messages) if item.get("role") == "user"),
-                            None,
+                    edit_kwargs: dict[str, Any] = {
+                        "icon": ":material/edit:",
+                        "key": f"edit-{message['id']}",
+                        "help": "Edit",
+                        "type": "tertiary",
+                    }
+                    if latest_user_message_id == message["id"]:
+                        # The button is rendered inside the composer fragment.
+                        # Its callback runs before that fragment rerenders, so
+                        # editing the latest turn does not remount the whole
+                        # workspace.
+                        edit_column.button(
+                            "",
+                            **edit_kwargs,
+                            on_click=_begin_latest_edit_message,
+                            args=(message["id"],),
                         )
-                        if latest_user and latest_user.get("id") != message["id"]:
-                            st.session_state.edit_confirm_message_id = message["id"]
-                        else:
-                            st.session_state.editing_message = message["id"]
-                            st.session_state.edit_confirm_message_id = None
+                    elif edit_column.button("", **edit_kwargs):
+                        # Earlier turns retain the app-scoped confirmation
+                        # dialog, whose owner is render_chat_panel().
+                        st.session_state.edit_confirm_message_id = message["id"]
                         rerun_app()
             return
 
@@ -946,7 +989,9 @@ def _edit_render_plan(
     The prefix is intentionally a transient render value only.  The persisted
     transcript remains authoritative; this helper merely prevents a fragment
     rerun from replacing the visible branch with an empty feed while revise is
-    running.
+    running. While the in-bubble editor is open, callers use this prefix for
+    snapshots; pending-edit loading then appends the draft row via
+    ``_pending_edit_history_messages``.
 
     Args:
         messages: Active messages loaded before the edit rerun.
@@ -964,6 +1009,74 @@ def _edit_render_plan(
         if str(message.get("id") or "") == target:
             return rows[:index], True
     return rows, False
+
+
+def _pending_edit_history_messages(
+    messages: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None,
+    pending: dict[str, Any],
+) -> tuple[list[dict[str, Any]], bool]:
+    """Build the truncated transcript for in-place pending-edit loading.
+
+    Returns the messages above the edit plus one user row that shows the draft
+    text in the original bubble position. Later turns are omitted so Coach
+    thinking can appear directly under that bubble (ChatGPT/Gemini style).
+
+    Args:
+        messages: Active persisted messages for this branch.
+        pending: ``pending_edit`` session payload (message id, draft, attachments).
+
+    Returns:
+        ``(visible_rows, found)`` where ``found`` is False when the target
+        cannot be matched (including stale-prefix fallback failure).
+    """
+    message_id = str(pending.get("message_id") or "")
+    draft = str(pending.get("prompt") or "").strip()
+    rows = [message for message in (messages or ()) if isinstance(message, dict)]
+    prefix, found = _edit_render_plan(rows, message_id)
+    original: dict[str, Any] | None = None
+    if found:
+        original = next(
+            (
+                message
+                for message in rows
+                if str(message.get("id") or "") == message_id
+            ),
+            None,
+        )
+    elif pending.get("render_target_found"):
+        saved_prefix = pending.get("render_prefix")
+        if isinstance(saved_prefix, list):
+            prefix = [item for item in saved_prefix if isinstance(item, dict)]
+            found = True
+    if not found or not message_id:
+        return [], False
+
+    attachments = pending.get("attachments")
+    if not isinstance(attachments, list):
+        attachments = []
+    attachment_rows = [item for item in attachments if isinstance(item, dict)]
+    metadata: dict[str, Any] = {}
+    if isinstance(original, dict):
+        raw_meta = original.get("metadata")
+        if isinstance(raw_meta, dict):
+            metadata = dict(raw_meta)
+        if not attachment_rows:
+            attachment_rows = [
+                item
+                for item in (metadata.get("attachments") or [])
+                if isinstance(item, dict)
+            ]
+    metadata["attachments"] = attachment_rows
+    content = draft
+    if not content and isinstance(original, dict):
+        content = str(original.get("content") or "")
+    edited_row: dict[str, Any] = {
+        "id": message_id,
+        "role": "user",
+        "content": content,
+        "metadata": metadata,
+    }
+    return [*prefix, edited_row], True
 
 
 def handle_prompt(
@@ -1319,18 +1432,39 @@ def _restore_pending_edit_draft(message_id: str, draft: str) -> None:
         st.session_state[f"edit-text-{message_id}"] = draft
 
 
+def _abort_pending_edit_noop() -> None:
+    """Stop an in-flight edit and restore the pre-edit transcript view.
+
+    Clears the pending revise attempt without reopening the editor and without
+    applying a replacement coach turn. Server work already in flight may still
+    finish; the UI ignores that result for this attempt.
+    """
+    st.session_state.pop("pending_edit", None)
+    st.session_state.pop("_chat_edit_prefix_snapshot", None)
+    st.session_state.pop("_pending_edit_worker", None)
+    st.session_state.editing_message = None
+    clear_awaiting_coach_turn()
+    set_coach_turn_streaming(False)
+    st.session_state.composer_nonce = int(
+        st.session_state.get("composer_nonce") or 0
+    ) + 1
+    _rerun_edit_fragment()
+
+
 def _rerun_edit_fragment() -> None:
     """Rerun the chat fragment when already in a fragment-scoped run.
 
     A pending edit can also be restored by a full app rerun (for example after
     a browser refresh or an explicit retry). Streamlit rejects fragment scope
-    in that context; the caller can continue rendering the safe error there.
+    in that context; fall back to a full app remount so the restored editor is
+    painted instead of leaving the truncated pending-edit view on screen.
     """
     try:
         rerun_fragment()
     except StreamlitAPIException as error:
         if 'scope="fragment"' not in str(error):
             raise
+        rerun_app()
 
 
 def _submit_pending_edit(
@@ -1344,6 +1478,9 @@ def _submit_pending_edit(
     succeeds or the student abandons editing. When the append-only revision
     already committed but provider generation failed, the same key + original
     message id lets the server resume the replacement without bumping again.
+
+    Runs on the Streamlit script thread so auth cookies and session state stay
+    valid (background workers cannot read script-thread cookie context).
 
     On failure, clears ``pending_edit`` so a later rerun does not auto-resubmit;
     the student must click Send again. The revise retry key stays in session.
@@ -1413,8 +1550,10 @@ def _submit_pending_edit(
                 idempotency_key=idempotency_key,
                 model_id=model_id,
                 reasoning_effort=reasoning_effort,
-                response_detail=st.session_state.get("response_detail") or DEFAULT_RESPONSE_DETAIL,
-                response_language=st.session_state.get("response_language") or "English",
+                response_detail=st.session_state.get("response_detail")
+                or DEFAULT_RESPONSE_DETAIL,
+                response_language=st.session_state.get("response_language")
+                or "English",
             )
             thinking.update(label="Coach reply ready", state="complete")
         except Exception:
@@ -1463,13 +1602,28 @@ def _render_chat_history(
     hmw_available: bool,
     visible_source_ids: set[str],
     stop_before_message_id: str | None = None,
+    allow_edit: bool = True,
 ) -> bool:
     """Render persisted history, optionally stopping before an edited message.
+
+    Args:
+        messages: Rows to paint (full branch, or truncated pending-edit view).
+        hmw_available: Whether the HMW scaffold may appear in this branch.
+        visible_source_ids: Source ids currently shown in this notebook.
+        stop_before_message_id: Optional id to stop before (editor-open paths).
+        allow_edit: When False, hide Edit on user bubbles (pending-edit inflight).
 
     Returns:
         True when ``stop_before_message_id`` was found. The edit flow uses this
         to hide the obsolete branch while the replacement turn is running.
     """
+    latest_user = next(
+        (item for item in reversed(messages) if item.get("role") == "user"),
+        None,
+    )
+    latest_user_message_id = (
+        str(latest_user.get("id") or "") if latest_user else None
+    )
     found = False
     for kind, message in transcript_hmw_render_plan(
         messages,
@@ -1483,7 +1637,12 @@ def _render_chat_history(
         if stop_before_message_id and message.get("id") == stop_before_message_id:
             found = True
             break
-        render_message(message, visible_source_ids=visible_source_ids)
+        render_message(
+            message,
+            visible_source_ids=visible_source_ids,
+            latest_user_message_id=latest_user_message_id,
+            allow_edit=allow_edit,
+        )
     return found
 
 
@@ -1528,51 +1687,33 @@ def _render_composer_submit_fragment(
         else:
             st.session_state.pop("_chat_edit_prefix_snapshot", None)
     pending_message_id = ""
-    pending_prompt = ""
     if isinstance(pending, dict):
         pending_message_id = str(pending.get("message_id") or "")
-        pending_prompt = str(pending.get("prompt") or "").strip()
 
     with st.container(key="chat_transcript"):
         with st.container(key="chat_feed"):
             chat_log = st.container(key="chat_log")
             with chat_log:
                 history_started = time.perf_counter()
-                render_messages = messages
-                render_stop_id = pending_message_id or None
                 found_edit = False
-                if pending_message_id:
-                    _, found_edit = _edit_render_plan(
+                if pending_message_id and isinstance(pending, dict):
+                    # In-place edit: keep the edited bubble (draft text) in
+                    # chat_log and drop later turns. Thinking belongs only in
+                    # chat_inflight — do not paint a second inflight user bubble.
+                    render_messages, found_edit = _pending_edit_history_messages(
                         messages,
-                        pending_message_id,
+                        pending,
                     )
-                    if not found_edit and pending.get("render_target_found"):
-                        saved_prefix = pending.get("render_prefix")
-                        if isinstance(saved_prefix, list):
-                            # The saved value is only the already-visible
-                            # prefix, so render it without looking for the
-                            # target again.  This avoids a blank feed if the
-                            # fragment's captured args are stale.
-                            render_messages = saved_prefix
-                            render_stop_id = None
-                            found_edit = True
-                if pending_message_id and found_edit:
-                    if render_stop_id is None:
+                    if found_edit:
                         _render_chat_history(
                             render_messages,
                             hmw_available=hmw_available,
                             visible_source_ids=visible_source_ids,
-                        )
-                    else:
-                        _render_chat_history(
-                            render_messages,
-                            hmw_available=hmw_available,
-                            visible_source_ids=visible_source_ids,
-                            stop_before_message_id=pending_message_id or None,
+                            allow_edit=False,
                         )
                 elif not pending_message_id:
                     _render_chat_history(
-                        render_messages,
+                        messages,
                         hmw_available=hmw_available,
                         visible_source_ids=visible_source_ids,
                     )
@@ -1586,15 +1727,13 @@ def _render_composer_submit_fragment(
             chat_inflight = st.container(key="chat_inflight")
             with chat_inflight:
                 if pending_message_id and found_edit:
-                    if pending_prompt:
-                        _render_inflight_user_prompt(
-                            pending_prompt,
-                            list(pending.get("attachments") or []),
+                    # Cancel in the pending bubble may have already cleared
+                    # pending_edit; only submit while the attempt is still armed.
+                    if isinstance(st.session_state.get("pending_edit"), dict):
+                        _submit_pending_edit(
+                            model_id=model_id,
+                            reasoning_effort=reasoning_effort,
                         )
-                    _submit_pending_edit(
-                        model_id=model_id,
-                        reasoning_effort=reasoning_effort,
-                    )
                 elif pending_message_id and not found_edit:
                     st.session_state.pop("pending_edit", None)
                     st.session_state.pop("_chat_edit_prefix_snapshot", None)

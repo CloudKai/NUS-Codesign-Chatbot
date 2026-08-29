@@ -231,9 +231,13 @@ def test_chat_feed_owns_history_and_inflight_with_composer_as_footer() -> None:
     assert fragment.index('st.container(key="chat_feed")') < fragment.index(
         'st.container(key="chat_composer")'
     )
-    assert "stop_before_message_id" in fragment
-    assert "_render_inflight_user_prompt(" in fragment
-    assert "list(pending.get(\"attachments\") or [])" in fragment
+    assert "_pending_edit_history_messages(" in fragment
+    assert "allow_edit=False" in fragment
+    assert "_submit_pending_edit(" in fragment
+    assert "_abort_pending_edit_noop(" in chat
+    assert "_render_pending_edit_stop_control(" not in fragment
+    # Normal Send still paints an inflight user bubble; pending edit does not.
+    assert "_render_inflight_user_prompt(" in chat
     assert "rerun_fragment()" in chat
     workspace = Path("ui/assets/styles/10-workspace.css").read_text(encoding="utf-8")
     feed_rule = workspace.split(".st-key-chat_feed,", 1)[1].split("}", 1)[0]
@@ -314,7 +318,11 @@ def test_narrow_chat_feed_owns_touch_scroll_without_changing_textarea_ownership(
     assert "max-height:var(--cd-user-bubble-max-height)" in desktop_bubble
     assert "overflow-y:auto" in desktop_bubble
     assert "max-height:var(--cd-user-bubble-max-height) !important" in edit_textarea
+    assert "min-height:var(--cd-user-bubble-row-height) !important" in edit_textarea
+    assert "field-sizing:content" in edit_textarea.replace(" ", "")
+    assert "height:auto !important" in edit_textarea
     assert "overflow-y:auto !important" in edit_textarea
+    assert "field-sizing:fixed" not in edit_textarea
     assert "max-height:calc(1em * 1.45 * 5) !important" in composer_textarea
     assert "overflow-y:auto !important" in composer_textarea
 

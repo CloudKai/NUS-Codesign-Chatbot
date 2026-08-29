@@ -341,9 +341,24 @@ def test_edit_send_stays_in_chat_fragment_until_revision_completes() -> None:
     composer_block = chat.split("def _render_composer_submit_fragment(", 1)[1].split(
         "def render_chat_panel(", 1
     )[0]
-    assert "stop_before_message_id=pending_message_id or None" in composer_block
-    assert "_render_inflight_user_prompt(" in composer_block
-    assert "list(pending.get(\"attachments\") or [])" in composer_block
+    # In-place edit: draft bubble stays in chat_log; thinking only in inflight.
+    assert "_pending_edit_history_messages(" in composer_block
+    assert "allow_edit=False" in composer_block
+    assert "user_message_pending_" in chat
+    assert 'key=f"user_message_edit_actions_{safe_id}"' in chat
+    assert "_abort_pending_edit_noop(" in chat
+    assert "stop_before_message_id=pending_message_id" not in composer_block
+    # Pending-edit path must not paint a second inflight user bubble.
+    pending_inflight = composer_block.split(
+        "if pending_message_id and found_edit:", 1
+    )[1].split("elif pending_message_id and not found_edit:", 1)[0]
+    assert "_render_inflight_user_prompt(" not in pending_inflight
+    assert "_render_pending_edit_stop_control(" not in pending_inflight
+    assert "_submit_pending_edit(" in pending_inflight
+    assert 'key="stop_pending_edit"' not in chat
+    assert "threading.Thread(" not in chat.split("def _submit_pending_edit(", 1)[1].split(
+        "def _render_chat_history(", 1
+    )[0]
     assert '"attachments": [' in edit_block
     assert "inflight_attachment_card_" in chat
     assert "user_edit_attachment_card_" in chat
@@ -352,6 +367,75 @@ def test_edit_send_stays_in_chat_fragment_until_revision_completes() -> None:
         "def _render_chat_history(", 1
     )[0]
     assert "rerun_app()" in revise_block
+
+
+def test_pending_edit_history_includes_draft_bubble_in_place() -> None:
+    """Pending edit truncates after the edited bubble with draft text."""
+    from ui.panels.chat import _pending_edit_history_messages
+
+    messages = [
+        {"id": "u1", "role": "user", "content": "U1", "metadata": {}},
+        {"id": "a1", "role": "assistant", "content": "A1"},
+        {
+            "id": "u2",
+            "role": "user",
+            "content": "U2 original",
+            "metadata": {
+                "attachments": [{"id": "att-1", "filename": "notes.pdf"}],
+            },
+        },
+        {"id": "a2", "role": "assistant", "content": "A2"},
+        {"id": "u3", "role": "user", "content": "U3"},
+    ]
+    visible, found = _pending_edit_history_messages(
+        messages,
+        {
+            "message_id": "u2",
+            "prompt": "U2 revised",
+            "attachments": [{"id": "att-1", "filename": "notes.pdf"}],
+        },
+    )
+    assert found is True
+    assert [item["id"] for item in visible] == ["u1", "a1", "u2"]
+    assert visible[-1]["content"] == "U2 revised"
+    assert visible[-1]["metadata"]["attachments"][0]["id"] == "att-1"
+
+    # Stale fragment args: fall back to saved prefix + draft row.
+    visible, found = _pending_edit_history_messages(
+        [],
+        {
+            "message_id": "u2",
+            "prompt": "U2 revised",
+            "attachments": [],
+            "render_prefix": messages[:2],
+            "render_target_found": True,
+        },
+    )
+    assert found is True
+    assert [item["id"] for item in visible] == ["u1", "a1", "u2"]
+    assert visible[-1]["content"] == "U2 revised"
+
+
+def test_edit_open_uses_fragment_for_latest_and_app_for_earlier() -> None:
+    """Only the branch-changing earlier edit requests an app remount."""
+    chat = Path("ui/panels/chat.py").read_text(encoding="utf-8")
+    assert "def _begin_latest_edit_message(" in chat
+    assert "latest_user_message_id" in chat
+    assert "on_click=_begin_latest_edit_message" in chat
+    edit_block = chat.split(
+        'if role == "user" and st.session_state.editing_message == message["id"]:',
+        1,
+    )[1].split('        if role == "user":', 1)[0]
+    assert "on_click=_begin_latest_edit_message" not in edit_block
+    assert "rerun_app()" not in edit_block
+    history_block = chat.split("def _render_chat_history(", 1)[1].split(
+        "@st.fragment\ndef _render_composer_submit_fragment", 1
+    )[0]
+    assert "latest_user_message_id" in history_block
+    assert "render_message(" in history_block
+    assert "rerun_app()" in chat.split(
+        'elif edit_column.button("", **edit_kwargs):', 1
+    )[1].split("return", 1)[0]
 
 
 def test_edit_render_plan_keeps_only_prefix_for_any_branch_position() -> None:

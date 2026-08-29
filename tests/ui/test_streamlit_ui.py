@@ -420,7 +420,8 @@ def test_streamlit_notebook_workspace_smoke():
     )
     assert "USER_BUBBLE_MAX_ROWS = 8" in edit_layout
     assert "USER_MESSAGE_EDIT_HEIGHT_PX" in edit_layout
-    assert "__cdUserEditCleanup" in edit_layout
+    assert "components.html" not in edit_layout
+    assert "def sync_user_message_edit_layout()" in edit_layout
     assert "--cd-user-bubble-max-rows:8" in rendered
     assert "--cd-user-bubble-max-height" in rendered
     chat_py = _implementation_source(chat_module)
@@ -1225,6 +1226,93 @@ def test_legacy_chat_turn_does_not_move_the_learning_stage_without_confirmation(
     assert not app.exception
     assert app.session_state["learning_journey"]["current_stage"] == "problem_identification"
     assert app.session_state["learning_journey"]["completed_stages"] == []
+
+
+def test_latest_message_edit_stays_in_the_chat_fragment():
+    """Editing the active user turn avoids an app-wide remount."""
+    from backend.student_store import StudentStore
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app.chat_input[0].set_value(
+        "I want to study safer street crossings for older pedestrians."
+    ).run()
+    assert not app.exception
+
+    thread_id = app.session_state["thread_id"]
+    user_message = next(
+        message
+        for message in StudentStore().get_messages(thread_id)
+        if message.get("role") == "user"
+    )
+    edit = next(
+        button
+        for button in app.button
+        if button.key == f"edit-{user_message['id']}"
+    )
+    before_edit_runs = app.session_state["_app_runs"]
+    edit.click().run()
+
+    assert not app.exception
+    # AppTest.run() always drives a full script run (it cannot issue a
+    # fragment-scoped websocket rerun); the source contract below proves the
+    # callback itself does not request an additional app rerun.
+    assert app.session_state["_app_runs"] == before_edit_runs + 1
+    assert app.session_state["editing_message"] == user_message["id"]
+    assert "edit_confirm_message_id" not in app.session_state or app.session_state[
+        "edit_confirm_message_id"
+    ] in (None, "")
+    assert any(
+        text_area.key == f"edit-text-{user_message['id']}"
+        for text_area in app.text_area
+    )
+
+
+def test_earlier_message_edit_keeps_the_app_scoped_confirmation_dialog():
+    """Editing an earlier turn still opens the existing confirmation dialog."""
+    from backend.student_store import StudentStore
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app.chat_input[0].set_value("First framing question.").run()
+    app.chat_input[0].set_value("Second framing question.").run()
+    assert not app.exception
+
+    messages = [
+        message
+        for message in StudentStore().get_messages(app.session_state["thread_id"])
+        if message.get("role") == "user"
+    ]
+    assert len(messages) >= 2
+    earlier_id = messages[0]["id"]
+    next(
+        button
+        for button in app.button
+        if button.key == f"edit-{earlier_id}"
+    ).click().run()
+
+    assert not app.exception
+    assert app.session_state["edit_confirm_message_id"] == earlier_id
+    assert any(button.label == "Edit & continue" for button in app.button)
+
+    cancel_runs = app.session_state["_app_runs"]
+    next(button for button in app.button if button.label == "Cancel").click().run()
+    assert not app.exception
+    assert app.session_state["_app_runs"] > cancel_runs
+    assert app.session_state["edit_confirm_message_id"] in (None, "")
+
+    next(
+        button
+        for button in app.button
+        if button.key == f"edit-{earlier_id}"
+    ).click().run()
+    assert not app.exception
+    continue_button = next(
+        button for button in app.button if button.label == "Edit & continue"
+    )
+    continue_runs = app.session_state["_app_runs"]
+    continue_button.click().run()
+    assert not app.exception
+    assert app.session_state["_app_runs"] > continue_runs
+    assert app.session_state["editing_message"] == earlier_id
 
 
 def test_pending_edit_failure_keeps_chat_visible(monkeypatch):

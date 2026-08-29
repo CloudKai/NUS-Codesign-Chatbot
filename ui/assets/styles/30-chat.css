@@ -217,7 +217,7 @@
 
     /* Edit mode must keep a full bubble width; fit-content collapses to the
        Cancel/Send row and makes the textarea a skinny right-side strip. */
-    [data-testid="stChatMessage"]:has([class*="st-key-user_message_edit_"]) {
+    [data-testid="stChatMessage"]:has([class*="st-key-user_message_edit_"]:not([class*="edit_actions"])) {
         width:min(72%, calc(80ch + 16px)) !important;
         max-width:min(72%, calc(80ch + 16px)) !important;
         min-width:min(100%, 22rem) !important;
@@ -227,9 +227,9 @@
         background:transparent !important;
     }
 
-    [data-testid="stChatMessage"]:has([class*="st-key-user_message_edit_"])
+    [data-testid="stChatMessage"]:has([class*="st-key-user_message_edit_"]:not([class*="edit_actions"]))
     [data-testid="stChatMessageContent"],
-    [data-testid="stChatMessage"]:has([class*="st-key-user_message_edit_"])
+    [data-testid="stChatMessage"]:has([class*="st-key-user_message_edit_"]:not([class*="edit_actions"]))
     [data-testid="stChatMessageContent"] > div {
         width:100% !important;
         max-width:100% !important;
@@ -306,6 +306,8 @@
 
     [class*="st-key-user_message_row_"],
     [data-testid="stElementContainer"]:has(> [class*="st-key-user_message_row_"]),
+    [class*="st-key-user_message_pending_"],
+    [data-testid="stElementContainer"]:has(> [class*="st-key-user_message_pending_"]),
     .st-key-inflight_user_message_row,
     [data-testid="stElementContainer"]:has(> .st-key-inflight_user_message_row) {
         position:relative !important;
@@ -319,8 +321,8 @@
         box-sizing:border-box !important;
     }
 
-    [class*="st-key-user_message_edit_"],
-    [data-testid="stElementContainer"]:has(> [class*="st-key-user_message_edit_"]) {
+    [class*="st-key-user_message_edit_"]:not([class*="edit_actions"]),
+    [data-testid="stElementContainer"]:has(> [class*="st-key-user_message_edit_"]:not([class*="edit_actions"])) {
         position:relative !important;
         display:block !important;
         width:100% !important;
@@ -333,12 +335,14 @@
         box-sizing:border-box !important;
     }
 
+    [class*="st-key-user_message_pending_"] > [data-testid="stVerticalBlock"],
+    [class*="st-key-user_message_pending_"] > [data-testid="stLayoutWrapper"],
     [class*="st-key-user_message_row_"] > [data-testid="stVerticalBlock"],
     [class*="st-key-user_message_row_"] > [data-testid="stLayoutWrapper"],
     .st-key-inflight_user_message_row > [data-testid="stVerticalBlock"],
     .st-key-inflight_user_message_row > [data-testid="stLayoutWrapper"],
-    [class*="st-key-user_message_edit_"] > [data-testid="stVerticalBlock"],
-    [class*="st-key-user_message_edit_"] > [data-testid="stLayoutWrapper"] {
+    [class*="st-key-user_message_edit_"]:not([class*="edit_actions"]) > [data-testid="stVerticalBlock"],
+    [class*="st-key-user_message_edit_"]:not([class*="edit_actions"]) > [data-testid="stLayoutWrapper"] {
         gap:.35rem !important;
         row-gap:.35rem !important;
         width:100% !important;
@@ -365,6 +369,8 @@
 
     [class*="st-key-user_message_row_"] [data-testid="stMarkdownContainer"],
     [class*="st-key-user_message_row_"] [data-testid="stMarkdownContainer"] p,
+    [class*="st-key-user_message_pending_"] [data-testid="stMarkdownContainer"],
+    [class*="st-key-user_message_pending_"] [data-testid="stMarkdownContainer"] p,
     .st-key-inflight_user_message_row [data-testid="stMarkdownContainer"],
     .st-key-inflight_user_message_row [data-testid="stMarkdownContainer"] p {
         margin:0 !important;
@@ -456,6 +462,7 @@
         width:100% !important;
         max-width:100% !important;
         min-width:0 !important;
+        height:auto !important;
         max-height:var(--cd-user-bubble-max-height) !important;
         margin:0 !important;
         border:0 !important;
@@ -464,10 +471,14 @@
         overflow:hidden !important;
     }
 
+    /* Grow with the draft (same idea as the composer); cap at 8 rows, then scroll.
+       Prefer field-sizing over per-keystroke JS so typing stays local and cheap. */
     [class*="st-key-user_message_edit_"] textarea {
         width:100% !important;
         max-width:100% !important;
         min-width:0 !important;
+        box-sizing:border-box !important;
+        field-sizing:content;
         min-height:var(--cd-user-bubble-row-height) !important;
         max-height:var(--cd-user-bubble-max-height) !important;
         height:auto !important;
@@ -480,8 +491,10 @@
         font-size:.9rem !important;
         line-height:1.45 !important;
         resize:none !important;
+        overflow-x:hidden !important;
         overflow-y:auto !important;
         overflow-wrap:anywhere;
+        white-space:pre-wrap !important;
     }
 
     /* Hide Streamlit's "Press ⌘+Enter to apply" hint inside the bubble editor. */
