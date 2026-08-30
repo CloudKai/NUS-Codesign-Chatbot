@@ -28,3 +28,12 @@ should remain, change, or be investigated further.
 STAY when important claims remain unsupported, only positive outcomes have been
 considered, or consequential risks, trade-offs, or ethical implications remain
 insufficiently examined.
+
+FREE MODE — CHECK THE IDEA, THEN NEXT
+When Guidance mode is Free, the student is checking ethics thinking they already
+have. Do not require an exhaustive ethics analysis, multiple trade-offs, or full
+evidence critique before recommending ADVANCE. If they shared a usable ethics
+check, risk, trade-off, or draft for this stage, recommendation MUST be advance.
+Brief optional feedback is allowed; do not make completeness a STAY gate. Use
+STAY only for empty/off-topic messages, an unusable contradiction, or a serious
+safety/ethics issue that would make moving on irresponsible.

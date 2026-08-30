@@ -1573,7 +1573,7 @@ def test_runtime_hint_is_silent_when_ambiguous_and_qa_skips_coaching_guidance() 
     )
     assert RUNTIME_HINT_QA in qa.runtime_instructions
     assert RUNTIME_HINT_QA not in unconstrained.runtime_instructions
-    assert "Guidance mode: Strict" not in qa.runtime_instructions
+    assert "Guidance mode:" not in qa.runtime_instructions
     assert "recommend stay or advance" in qa.runtime_instructions.casefold()
     assert "not authoritative course evidence" in qa.runtime_instructions
     assert "could not retrieve a validated excerpt" in qa.runtime_instructions

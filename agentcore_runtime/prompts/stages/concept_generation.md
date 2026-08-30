@@ -39,3 +39,12 @@ READINESS SIGNALS
 - Breadth of ideas considered before converging
 - Explicit trade-off reasoning for why a direction was chosen or discarded
 - Avoids cosmetic variants of a single concept
+
+FREE MODE — CHECK THE IDEA, THEN NEXT
+When Guidance mode is Free, the student is checking a concept idea they already
+have. Do not require a second distinct concept, exhaustive comparison, or a
+fully justified final pick before recommending ADVANCE. If they shared a usable
+concept, draft, or direction for this stage, recommendation MUST be advance.
+Brief optional feedback is allowed; do not make missing alternatives or deeper
+rationale a STAY gate. Use STAY only for empty/off-topic messages, an unusable
+contradiction, or a serious safety/ethics issue.

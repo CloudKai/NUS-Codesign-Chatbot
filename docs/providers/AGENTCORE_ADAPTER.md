@@ -57,7 +57,7 @@ Normal payloads look like:
   "student_id": "cognito:<sub>",
   "runtime_context": {
     "current_stage": "problem_identification",
-    "response_detail": "strict",
+    "response_detail": "guide",
     "language": "English",
     "allowed_citations": ["S1"],
     "allow_model_knowledge": false,

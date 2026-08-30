@@ -52,11 +52,12 @@ _FACIONE_BEHAVIORS_BY_STAGE = {
 
 
 def _prior_assessed_turns(request: CoachRequest) -> int:
-    """Count prior assessments eligible for the active Quick/Strict profile.
+    """Count prior assessments eligible for the active Guide/Free profile.
 
-    Profile-tagged Quick assessments do not satisfy Strict. Untagged legacy
-    assessments remain eligible for both profiles so existing conversations do
-    not lose progression after this internal metadata was introduced.
+    Profile-tagged Guide (quick) assessments do not satisfy Free. Untagged
+    legacy assessments remain eligible for both profiles so existing
+    conversations do not lose progression after this internal metadata was
+    introduced. Stored ``coaching_profile`` still uses quick/strict tokens.
     """
     active_profile = "strict" if request.response_detail == "long" else "quick"
     count = 0
@@ -238,10 +239,11 @@ class DeterministicCoachProvider:
         """Build a repeatable coaching turn with visible, guided progression.
 
         An explicit recommendation keeps unit tests fully controllable. In the
-        normal local demonstration, Quick guidance recommends advance after one
-        follow-up contribution at the stage; Strict waits for a second follow-up
-        so progression is a little stricter. This is turn-based demo behavior, not
-        a claim that the mock provider semantically evaluated the writing.
+        normal local demonstration, Guide recommends advance after one
+        follow-up contribution at the stage; Free recommends ADVANCE after the
+        first usable idea so the student can press Next without a structure
+        ladder. This is turn-based demo behavior, not a claim that the mock
+        provider semantically evaluated the writing.
         """
         prepared = compose_coach_prompt(request)
         self.last_prepared_prompt = prepared
@@ -256,7 +258,7 @@ class DeterministicCoachProvider:
             return self._review_result(request)
         stage = STAGE_BY_ID[request.current_stage]
         prior_stage_contributions = _prior_assessed_turns(request)
-        advance_after = 2 if request.response_detail == "long" else 1
+        advance_after = 0 if request.response_detail == "long" else 1
         guided_recommendation = (
             StageDecision.ADVANCE
             if prior_stage_contributions >= advance_after

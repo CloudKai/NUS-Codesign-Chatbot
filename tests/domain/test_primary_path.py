@@ -24,7 +24,7 @@ def _advance_message(stage_id: str) -> str:
 
 
 def _use_quick_style(store: StudentStore, thread_id: str) -> None:
-    """Pin Quick so two-turn mock ADVANCE stays independent of the Strict default."""
+    """Pin Guide so two-turn mock ADVANCE stays independent of Free first-idea ADVANCE."""
     store.update_thread(thread_id, metadata={"response_detail": "short"})
 
 

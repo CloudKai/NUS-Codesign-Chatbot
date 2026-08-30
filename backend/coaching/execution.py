@@ -1774,9 +1774,12 @@ class CoachApplicationService:
             not owned_review
             and progression_effect != "none"
             and manual_stage_target is None
-            and prepared_request.revise_user_message_id is None
             and turn.assessment.recommendation is StageDecision.ADVANCE
         ):
+            # Include revise/resubmit: append-only edit rolls completed_stages
+            # back to the restored focus, so a replacement ADVANCE must
+            # re-record validated completion or Chat Ready unlocks a stage
+            # Journey still treats as incomplete.
             if (
                 prepared_request.current_stage == THINKING_STAGES[-1].id
                 and turn.pending_transition is None
@@ -1955,6 +1958,7 @@ class CoachApplicationService:
                     }
                 ],
                 enabled=runtime_settings.hmw_scaffold_enabled,
+                response_detail=str(prepared_request.response_detail or ""),
             ),
         )
         return turn

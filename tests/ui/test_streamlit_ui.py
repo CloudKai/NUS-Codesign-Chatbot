@@ -281,8 +281,8 @@ def test_streamlit_notebook_workspace_smoke():
     assert "Guidance Level:" not in rendered
     assert any(control.label == "Coaching style" for control in app.radio)
     coaching_style = _coaching_style_radio(app)
-    assert coaching_style.options == ["Quick", "Strict"]
-    assert coaching_style.value == "Quick"
+    assert coaching_style.options == ["Guide", "Free"]
+    assert coaching_style.value == "Guide"
     assert app.session_state["response_detail"] == "short"
     assert app.session_state["learning_journey"]["response_detail"] == "short"
     studio_section = next(
@@ -732,21 +732,17 @@ def test_notebook_activity_helpers_format_relative_time_and_counts():
 
 
 def test_coaching_style_keeps_existing_short_long_mapping():
-    """Quick/Strict remain a display layer over persisted short/long values."""
+    """Guide/Free remain a display layer over persisted short/long values."""
     from ui.profile import _coaching_style_caption, _persist_coaching_style, _select_coaching_style
 
-    assert COACHING_STYLE_VALUES["Quick"] == "short"
-    assert COACHING_STYLE_VALUES["Strict"] == "long"
+    assert COACHING_STYLE_VALUES["Guide"] == "short"
+    assert COACHING_STYLE_VALUES["Free"] == "long"
     assert "quick" not in COACHING_STYLE_VALUES.values()
     assert "strict" not in COACHING_STYLE_VALUES.values()
     assert "Keep me moving" in _coaching_style_caption("short")
-    assert "Lighter guidance; progress once your thinking is workable." in (
-        _coaching_style_caption("short")
-    )
-    assert "Challenge my thinking" in _coaching_style_caption("long")
-    assert "More rigorous guidance; address important gaps before moving on." in (
-        _coaching_style_caption("long")
-    )
+    assert COACHING_STYLE_COPY["short"]["explanation"] in _coaching_style_caption("short")
+    assert "Check the idea I have" in _coaching_style_caption("long")
+    assert COACHING_STYLE_COPY["long"]["explanation"] in _coaching_style_caption("long")
     persist_source = inspect.getsource(_persist_coaching_style)
     select_source = inspect.getsource(_select_coaching_style)
     assert "COACHING_STYLE_VALUES" in persist_source
@@ -759,20 +755,20 @@ def test_coaching_style_keeps_existing_short_long_mapping():
 
 
 def test_persisted_long_coaching_style_renders_strict_selected():
-    """Reloading a notebook stored as long must select Strict, not the Quick default."""
+    """Reloading a notebook stored as long must select Free, not the Guide default."""
     from backend.student_store import StudentStore
 
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     thread_id = app.session_state["thread_id"]
-    assert _coaching_style_radio(app).value == "Quick"
+    assert _coaching_style_radio(app).value == "Guide"
     StudentStore().update_thread(thread_id, metadata={"response_detail": "long"})
 
     restored = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     assert restored.session_state["thread_id"] == thread_id
     assert restored.session_state["response_detail"] == "long"
     assert restored.session_state["learning_journey"]["response_detail"] == "long"
-    assert restored.session_state["setting_coaching_style"] == "Strict"
-    assert _coaching_style_radio(restored).value == "Strict"
+    assert restored.session_state["setting_coaching_style"] == "Free"
+    assert _coaching_style_radio(restored).value == "Free"
     assert any(item.label == "Display name" for item in restored.text_input)
     assert any(control.label == "Appearance" for control in restored.segmented_control)
     assert not restored.exception
@@ -792,35 +788,35 @@ def test_theme_coaching_style_and_journey_has_no_manual_progression_control():
     )
 
     coaching_style = _coaching_style_radio(app)
-    assert coaching_style.options == ["Quick", "Strict"]
-    assert coaching_style.value == "Quick"
+    assert coaching_style.options == ["Guide", "Free"]
+    assert coaching_style.value == "Guide"
     visible_copy = _visible_profile_copy(app)
     assert COACHING_STYLE_COPY["short"]["tagline"] in visible_copy
     assert COACHING_STYLE_COPY["short"]["explanation"] in visible_copy
     assert COACHING_STYLE_COPY["long"]["tagline"] in visible_copy
     assert COACHING_STYLE_COPY["long"]["explanation"] in visible_copy
-    coaching_style.set_value("Strict").run()
+    coaching_style.set_value("Free").run()
     assert app.session_state["response_detail"] == "long"
     assert app.session_state["learning_journey"]["response_detail"] == "long"
     assert StudentStore().get_thread(app.session_state["thread_id"])["metadata"][
         "response_detail"
     ] == "long"
     coaching_style = _coaching_style_radio(app)
-    assert coaching_style.value == "Strict"
-    coaching_style.set_value("Quick").run()
+    assert coaching_style.value == "Free"
+    coaching_style.set_value("Guide").run()
     assert app.session_state["response_detail"] == "short"
     assert app.session_state["learning_journey"]["response_detail"] == "short"
     assert StudentStore().get_thread(app.session_state["thread_id"])["metadata"][
         "response_detail"
     ] == "short"
 
-    # A later notebook must start Quick even if this session had Strict selected.
+    # A later notebook must start Guide even if this session had Free selected.
     next(button for button in app.button if button.label == "New chat").click().run()
     coaching_style = _coaching_style_radio(app)
-    assert coaching_style.value == "Quick"
+    assert coaching_style.value == "Guide"
     assert app.session_state["response_detail"] == "short"
     assert app.session_state["learning_journey"]["response_detail"] == "short"
-    assert app.session_state["setting_coaching_style"] == "Quick"
+    assert app.session_state["setting_coaching_style"] == "Guide"
     created = StudentStore().get_thread(app.session_state["thread_id"])
     assert created is not None
     assert created["metadata"]["response_detail"] == "short"
@@ -1430,3 +1426,91 @@ def test_pending_edit_failure_keeps_chat_visible(monkeypatch):
     roles = [message["role"] for message in StudentStore().get_messages(thread_id)]
     assert "assistant" in roles
     assert "user" in roles
+
+
+def test_edit_failure_message_distinguishes_busy_conflicts():
+    """429 / notebook-busy revise failures get a specific wait-and-retry hint."""
+    from ui.panels.chat import (
+        _EDIT_BUSY_RETRY_MESSAGE,
+        _EDIT_GENERIC_FAILURE_MESSAGE,
+        _edit_failure_message,
+        _exception_is_coach_busy,
+    )
+
+    class _Resp:
+        status_code = 429
+
+    class _HttpError(Exception):
+        def __init__(self) -> None:
+            super().__init__("429 Too Many Requests")
+            self.response = _Resp()
+
+    busy = _HttpError()
+    assert _exception_is_coach_busy(busy)
+    assert _edit_failure_message(busy) == _EDIT_BUSY_RETRY_MESSAGE
+    assert _edit_failure_message(RuntimeError("boom")) == _EDIT_GENERIC_FAILURE_MESSAGE
+
+
+def test_pending_edit_retries_when_coach_is_temporarily_busy(monkeypatch):
+    """Revise retries briefly when the notebook lease is held by a finishing turn."""
+    from ui import chat
+    from backend.domain import CoachTurn, EducationalAssessment
+    from backend.student_store import StudentStore
+
+    calls = {"n": 0}
+
+    def flaky_revise(*_args, **_kwargs):
+        calls["n"] += 1
+        if calls["n"] < 3:
+
+            class _Resp:
+                status_code = 429
+
+            error = Exception("429 Too Many Requests")
+            error.response = _Resp()  # type: ignore[attr-defined]
+            raise error
+        return CoachTurn(
+            response_text="Revised coach reply",
+            assessment=EducationalAssessment(current_stage="problem_identification"),
+        )
+
+    monkeypatch.setattr(chat.store, "revise_message", flaky_revise)
+    # Do not patch stdlib time.sleep — ui.panels.chat.time is the stdlib module.
+    monkeypatch.setattr(chat, "_REVISE_BUSY_SLEEP_SECONDS", 0)
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    assert not app.exception
+    app.chat_input[0].set_value(
+        "I want to study safer street crossings for older pedestrians."
+    ).run()
+    assert not app.exception
+
+    thread_id = app.session_state["thread_id"]
+    user_message = next(
+        message
+        for message in StudentStore().get_messages(thread_id)
+        if message.get("role") == "user"
+    )
+    app.session_state["pending_edit"] = {
+        "message_id": user_message["id"],
+        "prompt": "I want to study safer crossings near schools.",
+        "idempotency_key": "22222222-2222-2222-2222-222222222222",
+    }
+    app.run()
+
+    assert not app.exception
+    assert calls["n"] == 3
+    assert "pending_edit" not in app.session_state or app.session_state[
+        "pending_edit"
+    ] in (None, {})
+    editing = (
+        app.session_state["editing_message"]
+        if "editing_message" in app.session_state
+        else None
+    )
+    assert not editing
+    assert not any(
+        "Could not finish this edit" in (error.value or "")
+        or "still finishing another reply" in (error.value or "")
+        for error in app.error
+    )

@@ -137,7 +137,7 @@ Cover:
 8. Sync/stream final-result equivalence.
 9. Idempotent retry and restart recovery without duplicate messages or research
    observations.
-10. Quick/Strict and five-phase prompt parity with the mock provider.
+10. Guide/Free and five-phase prompt parity with the mock provider.
 
 After deterministic tests pass, an explicitly approved live smoke may make one
 short request with a stated model, token/request ceiling, and cost cap. Record

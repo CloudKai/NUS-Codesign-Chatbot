@@ -136,6 +136,25 @@ def _formative_review_stays(
     return assessment.model_copy(update={"recommendation": StageDecision.STAY})
 
 
+def _is_free_mode(request: CoachRequest) -> bool:
+    """Return whether the turn uses Free coaching (``response_detail=long``)."""
+    return str(request.response_detail or "").strip().lower() == "long"
+
+
+def _clear_hmw_scaffold_flags(
+    assessment: EducationalAssessment,
+) -> EducationalAssessment:
+    """Clear HMW scaffold unlock markers on an assessment."""
+    if (
+        assessment.hmw_scaffold_ready is False
+        and assessment.hmw_scaffold_guarded is False
+    ):
+        return assessment
+    return assessment.model_copy(
+        update={"hmw_scaffold_ready": False, "hmw_scaffold_guarded": False}
+    )
+
+
 def _require_student_hmw_for_problem_identification_advance(
     request: CoachRequest, assessment: EducationalAssessment
 ) -> EducationalAssessment:
@@ -144,7 +163,8 @@ def _require_student_hmw_for_problem_identification_advance(
     Haiku still judges HMW quality. This guard only checks whether the
     current active user contribution looks like a student-authored How
     Might We candidate. System copy, sources, Coach examples, Q&A, and
-    Deep Review cannot satisfy it.
+    Deep Review cannot satisfy it. Free mode skips this guard so a usable
+    idea can recommend Next without an HMW string.
 
     Args:
         request: Authoritative coach request for this turn.
@@ -157,6 +177,8 @@ def _require_student_hmw_for_problem_identification_advance(
     # This is application-owned metadata; never carry a provider-supplied
     # guarded marker into the persisted assessment.
     assessment = assessment.model_copy(update={"hmw_scaffold_guarded": False})
+    if _is_free_mode(request):
+        return _clear_hmw_scaffold_flags(assessment)
     if request.current_stage != HMW_SCAFFOLD_STAGE_ID:
         return assessment
     if assessment.recommendation is not StageDecision.ADVANCE:
@@ -200,6 +222,8 @@ def _hmw_guard_applies(
     needs_source_retrieval: bool = False,
 ) -> bool:
     """Return whether the server rejected this PI ADVANCE recommendation."""
+    if _is_free_mode(request):
+        return False
     return (
         request.current_stage == HMW_SCAFFOLD_STAGE_ID
         and assessment.recommendation is StageDecision.ADVANCE
@@ -209,6 +233,54 @@ def _hmw_guard_applies(
         # final retrieval-backed pass is still normalized below, with no
         # additional retrieval caused by the HMW guard itself.
         and not (needs_source_retrieval and not request.retrieval_required)
+    )
+
+
+def _promote_free_mode_advance(
+    request: CoachRequest,
+    assessment: EducationalAssessment,
+) -> EducationalAssessment:
+    """In Free mode, promote coaching STAY to ADVANCE for a usable idea.
+
+    Free must not require HMW wording, two concepts, a full specification,
+    exhaustive ethics, or a polished reflection. Empty messages, Q&A, and
+    Deep Review stay STAY. Meta/status turns are handled separately via
+    ``progression_effect=none`` after this helper runs.
+
+    Args:
+        request: Authoritative coach request for this turn.
+        assessment: Assessment after HMW guards and formative-review STAY.
+
+    Returns:
+        The same assessment, or an ADVANCE copy when Free coaching should
+        unlock Next without an artifact bar.
+    """
+    if not _is_free_mode(request):
+        return assessment
+    assessment = _clear_hmw_scaffold_flags(assessment)
+    if str(request.specialist or "").strip().lower() == "review":
+        return assessment
+    if str(assessment.response_mode or "").strip().lower() == "qa":
+        return assessment
+    if assessment.recommendation is None:
+        return assessment
+    if not str(request.student_message or "").strip():
+        return assessment
+    if assessment.recommendation is StageDecision.ADVANCE:
+        return assessment
+    rationale = str(assessment.recommendation_rationale or "").strip()
+    return assessment.model_copy(
+        update={
+            "recommendation": StageDecision.ADVANCE,
+            "readiness_candidate": True,
+            "hmw_scaffold_ready": False,
+            "hmw_scaffold_guarded": False,
+            "recommendation_rationale": rationale
+            or (
+                "Free mode: the student shared a usable idea or draft for "
+                "this stage and can press Next."
+            ),
+        }
     )
 
 
@@ -335,6 +407,7 @@ class CoachWorkflow:
         assessment, response_text = _promote_student_hmw_for_problem_identification_advance(
             request, assessment, response_text
         )
+        assessment = _promote_free_mode_advance(request, assessment)
         # Application-owned progression gate: AFTER HMW guard/promote, BEFORE
         # PendingPhaseTransition. Meta/status/prior-review cannot open Ready.
         assessment = apply_progression_effect(
@@ -518,6 +591,7 @@ def build_langgraph_workflow(workflow: CoachWorkflow):
         assessment, response_text = _promote_student_hmw_for_problem_identification_advance(
             request, assessment, response_text
         )
+        assessment = _promote_free_mode_advance(request, assessment)
         if assessment.current_stage != request.current_stage:
             raise ValueError(
                 "Assessment stage does not match the active journey stage"

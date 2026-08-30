@@ -54,7 +54,7 @@ MAX_CONVERSATION_MEMORY_CHARS = 8_000
 MAX_RECENT_MESSAGES = 6
 MAX_RECENT_MESSAGE_CHARS = 800
 MAX_STUDENT_MESSAGE_CHARS = 12_000
-MAX_RUNTIME_CHARS = 4_000
+MAX_RUNTIME_CHARS = 5_500  # Guide/Free overrides plus selection CTA must not clip.
 MAX_COMPOSED_PROMPT_CHARS = 200_000
 
 _EMPTY_PROJECT = "No student project context was provided for this turn."
@@ -181,26 +181,26 @@ def _runtime_instructions(context: PromptContext) -> str:
     if not is_qa:
         if context.response_detail == "short":
             parts.append(
-                "Guidance mode: Quick.\n"
-                "QUICK MODE OVERRIDE:\n"
-                "For ADVANCE/STAY decisions in Quick mode, the minimum-workable "
+                "Guidance mode: Guide.\n"
+                "GUIDE MODE OVERRIDE:\n"
+                "For ADVANCE/STAY decisions in Guide mode, the minimum-workable "
                 "criteria below are the authoritative completion thresholds. They "
                 "replace the current stage's ADVANCE/STAY and READINESS completion "
                 "thresholds for this turn. Any additional stage completion "
-                "requirements not included in the Quick minimum below are "
-                "non-blocking in Quick mode. The stage's PURPOSE, coaching "
+                "requirements not included in the Guide minimum below are "
+                "non-blocking in Guide mode. The stage's PURPOSE, coaching "
                 "behaviour, safety rules, prohibitions, and subject-matter "
                 "guidance remain active and unchanged. The full stage "
-                "ADVANCE/STAY and READINESS requirements remain the authoritative "
-                "baseline in Strict mode.\n"
-                "In Quick mode, prefer ADVANCE once the student has produced the "
+                "ADVANCE/STAY and READINESS requirements remain the baseline only "
+                "when neither Guide nor Free overrides apply.\n"
+                "In Guide mode, prefer ADVANCE once the student has produced the "
                 "minimum workable outcome for the current stage. Do not hold the "
                 "student in the current stage merely for additional polish, depth, "
                 "completeness, stronger evidence, or optional refinement.\n"
-                "Quick minimum workable criteria by stage:\n"
+                "Guide minimum workable criteria by stage:\n"
                 "- Problem Identification: a student-authored usable HMW or "
                 "informal HMW framing with a clear user/stakeholder, "
-                "need/problem/opportunity, and desired outcome. In Quick mode, "
+                "need/problem/opportunity, and desired outcome. In Guide mode, "
                 "informal HMW syntax, shorthand, bullets, slash-separated "
                 "phrasing, or missing formal \"How might we / for / so that\" "
                 "wording must not block ADVANCE when those three substantive "
@@ -224,20 +224,32 @@ def _runtime_instructions(context: PromptContext) -> str:
                 "reflection.\n"
                 "Prefer progress. Keep follow-up questions light. Use STAY only "
                 "when the minimum workable outcome for the current stage is "
-                "clearly missing. Quick mode lowers the progression threshold; it "
+                "clearly missing. Guide mode lowers the progression threshold; it "
                 "does not require ignoring contradictions or answers that are "
                 "unusable for the next stage. Aim for good enough to continue, "
                 "not ignore quality completely."
             )
         else:
             parts.append(
-                "Guidance mode: Strict. Recommend ADVANCE only when the "
-                "student's contribution is thorough for the current stage, with "
-                "specific claims, clear reasoning, and limited important "
-                "ambiguity. Prefer STAY when meaningful required elements remain "
-                "missing or underdeveloped. The current stage's ADVANCE/STAY "
-                "section remains the authoritative completion standard in Strict "
-                "mode."
+                "Guidance mode: Free.\n"
+                "FREE MODE OVERRIDE:\n"
+                "The student already has an idea and is checking it on the current "
+                "stage, not asking to be coached through a full structure-building "
+                "process. For ADVANCE/STAY in Free mode, recommend ADVANCE as soon "
+                "as they have shared a usable idea, draft, or check-in for this "
+                "stage. They should be able to press Next after that reply and "
+                "move on, including jumping to another Thinking Path stage they "
+                "want to work on.\n"
+                "Do not keep prompting them to improve HMW wording, formal "
+                "structure, completeness, extra evidence, or missing scaffold "
+                "steps. Do not run the usual Socratic structure ladder. Give a "
+                "brief, concrete check (what is workable, at most one optional "
+                "risk or gap) and let them proceed.\n"
+                "Use STAY only when the message is empty or off-topic, the idea is "
+                "internally contradictory in a way that makes it unusable, or a "
+                "serious safety/ethics issue would make moving on irresponsible. "
+                "Do not write the work for them. Do not claim the stage already "
+                "changed; Next / Work on this stage remains the student's move."
             )
     if context.allow_model_knowledge:
         parts.append(

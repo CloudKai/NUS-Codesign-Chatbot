@@ -454,6 +454,7 @@ class ProfessorAnalyticsService:
                 current_stage,
                 messages,
                 enabled=settings.hmw_scaffold_enabled,
+                response_detail=str(journey.get("response_detail") or ""),
             ),
         )
 
@@ -550,6 +551,7 @@ class ProfessorAnalyticsService:
                     str(journey.get("current_stage") or DEFAULT_STAGE),
                     messages,
                     enabled=settings.hmw_scaffold_enabled,
+                    response_detail=str(journey.get("response_detail") or ""),
                 ),
                 review=learning_review(
                     messages,

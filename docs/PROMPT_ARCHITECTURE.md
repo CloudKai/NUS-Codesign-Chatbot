@@ -2,7 +2,7 @@
 
 Canonical **pedagogy** for production AgentCore lives in
 `agentcore_runtime/prompts/`. FastAPI sends **application runtime rules**
-(stage id, Quick/Strict, language, allowed `[S#]`, source-grounding,
+(stage id, Guide/Free, language, allowed `[S#]`, source-grounding,
 research-coding contract). `backend/prompts/` remains the composer used by
 mock, OpenAI, and Bedrock Converse, and is the token-budget stand-in for
 AgentCore planning. Do not treat those two packages as competing curricula
@@ -96,7 +96,7 @@ runtime for compatibility and are unused on the active FastAPI path.
 | Silent vs surface ethics / AT-EAI | POC ethics blocks | shared + `deep_analysis.md` | runtime shared + `ethics_critical.md` | MERGE |
 | CLEAR / Facione / HCTSR research | not in POC runtime | shared coaching + research models | runtime shared + same structured fields | PRESERVE |
 | Source grounding / citations | POC Q&A tools | composer + RAG | untrusted evidence `[S#]`; no KB tools | KEEP APPLICATION-SIDE |
-| Quick/Strict | n/a | composer runtime instructions | `runtime_context.response_detail` | KEEP APPLICATION-SIDE |
+| Guide/Free | n/a | composer runtime instructions | `runtime_context.response_detail` (`guide`/`free`) | KEEP APPLICATION-SIDE |
 | Research independence | n/a | shared coaching | runtime shared coaching | PRESERVE |
 | Q&A specialist | POC + unrestricted KB tools | none | runtime `prompts/qa.md`, pre-retrieved evidence | IMPROVE |
 | Scoring specialist | markdown critique | application Review tab | Formative Review specialist, not a grade | MERGE / RENAME |

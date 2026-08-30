@@ -39,8 +39,8 @@ from ui.settings import apply_selected_model
 
 
 _COACHING_STYLE_LABELS = {
-    "short": "Quick",
-    "long": "Strict",
+    "short": "Guide",
+    "long": "Free",
 }
 
 
@@ -134,7 +134,7 @@ def _persist_active_thread(thread_id: str | None) -> None:
 
 
 def new_notebook(should_rerun: bool = True) -> None:
-    """Create an untitled notebook with a fresh Quick coaching journey.
+    """Create an untitled notebook with a fresh Guide coaching journey.
 
     User-initiated creates stay on Chat so course materials can load. Nav and
     mobile chrome call this from ``on_click`` with ``should_rerun=False`` so the
@@ -142,7 +142,7 @@ def new_notebook(should_rerun: bool = True) -> None:
     Those callers set ``toast_course_materials_loading`` themselves. When
     ``should_rerun`` is True (Your Notebooks dialog), set the toast and remount.
     Session init uses ``should_rerun=False`` without a toast. The profile
-    Coaching style widget is reset to Quick so a prior Strict choice cannot
+    Coaching style widget is reset to Guide so a prior Free choice cannot
     leak onto the new notebook.
 
     Args:

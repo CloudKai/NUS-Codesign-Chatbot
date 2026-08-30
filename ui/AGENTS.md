@@ -38,10 +38,10 @@ Only read that for UI tasks that touch API migration or coaching flow.
 | `theme.py` | Loads `assets/styles/` in fixed order, `inject_template_css()`, dynamic `render_theme_css()` |
 | `layout/` | Browser-side layout helpers (column resize, sources scroll, composer) |
 | `runtime.py` | Compatibility alias for `services/runtime.py` (cached store/workspace/coach, `WorkspaceFacade`, coach helpers, rerun) |
-| `session.py` | Session defaults (Quick coaching / `response_detail=short`), notebook create/select/delete, `save_journey()` |
+| `session.py` | Session defaults (Guide coaching / `response_detail=short`), notebook create/select/delete, `save_journey()` |
 | `rename.py` | Shared Enter-only rename forms, draft discard, select-all helper |
 | `topbar.py` | Brand, title, section switcher, Guidance, profile entry |
-| `profile.py` | Compact settings popover (display name, Coaching style Quick/Strict, appearance, logout) |
+| `profile.py` | Compact settings popover (display name, Coaching style Guide/Free, appearance, logout) |
 | `workspace.py` | Gemini mobile header (menu overlay / new chat / chat ⋮) and three-column nav/chat/studio layout |
 | `chat.py` | Compatibility alias for `panels/chat.py` (messages, citations, composer, `handle_prompt()`) |
 | `sources.py` | Compatibility alias for `panels/sources.py` (library, search/filter, add/viewer dialogs) |

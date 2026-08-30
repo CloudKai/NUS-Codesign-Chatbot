@@ -118,11 +118,11 @@ _STAGE_GUIDANCE: dict[str, tuple[str, str, str]] = {
 
 
 def default_journey() -> dict[str, Any]:
-    """Return a Focus-stage journey with Strict coaching as the default style.
+    """Return a Focus-stage journey with Guide coaching as the default style.
 
     Returns:
-        A normalized learning-journey dict. ``response_detail`` is ``long``
-        (student-facing Strict). Persisted Quick notebooks keep ``short``.
+        A normalized learning-journey dict. ``response_detail`` is ``short``
+        (student-facing Guide). Persisted Free notebooks keep ``long``.
     """
     return {
         "current_stage": DEFAULT_STAGE,

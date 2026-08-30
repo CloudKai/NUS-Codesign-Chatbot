@@ -55,12 +55,12 @@ def test_fast_chat_qa_runtime_rules_override_stage_pedagogy() -> None:
 
 
 def test_fast_chat_wrapper_does_not_replace_canonical_coaching() -> None:
-    assembled = fast_chat_system_prompt("problem_identification", "Guidance mode: Quick.")
+    assembled = fast_chat_system_prompt("problem_identification", "Guidance mode: Guide.")
     shared_body = _shared_coaching_body()
     assert "Socratic" in shared_body
     assert shared_body in assembled
-    assert "Guidance mode: Quick." in assembled
-    assert assembled.index(shared_body) < assembled.index("Guidance mode: Quick.")
+    assert "Guidance mode: Guide." in assembled
+    assert assembled.index(shared_body) < assembled.index("Guidance mode: Guide.")
     assert load_shared_coaching().startswith(_COACHING_IDENTITY)
 
 

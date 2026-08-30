@@ -194,7 +194,7 @@ def test_application_converts_research_quotes_to_offsets_and_persists_atomically
             thread_id=thread_id,
             student_message=message,
             current_stage="problem_identification",
-            response_detail="long",  # Persisted Quick preference is authoritative.
+            response_detail="long",  # Persisted Guide preference is authoritative.
         )
     )
 

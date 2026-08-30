@@ -209,7 +209,7 @@ def test_successful_qa_cites_retrieved_week_one_and_does_not_coach(tmp_path) -> 
     )
     assert len(client.calls) == 1
     trusted = _trusted_instructions(client)
-    assert "Guidance mode: Strict" not in trusted
+    assert "Guidance mode:" not in trusted
     assert "recommend stay or advance" in trusted.casefold()
     assert turn.assessment.response_mode == "qa"
     assert turn.assessment.recommendation is None
@@ -328,5 +328,5 @@ def test_composer_empty_qa_forbids_history_as_evidence() -> None:
     text = prepared.runtime_instructions
     assert "not authoritative course evidence" in text
     assert "could not retrieve a validated excerpt" in text
-    assert "Guidance mode: Strict" not in text
+    assert "Guidance mode:" not in text
     assert "Do not reconstruct course facts from earlier assistant replies" in text

@@ -32,3 +32,12 @@ READINESS SIGNALS
 - Specific, not generic, articulation of what was learned
 - Honest evaluation of process gaps, not only outcomes
 - A justified next step or revision, not a polished summary
+
+FREE MODE — CHECK THE IDEA, THEN NEXT
+When Guidance mode is Free, the student is checking a reflection they already
+have. Do not require a long or comprehensive reflection before recommending
+ADVANCE. If they shared a usable learning, limit, or next-step draft for this
+stage, recommendation MUST be advance (complete in place). Brief optional
+feedback is allowed; do not make polish or completeness a STAY gate. Use STAY
+only for empty/off-topic messages, an unusable contradiction, or a serious
+safety/ethics issue.

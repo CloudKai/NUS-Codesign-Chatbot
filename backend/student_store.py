@@ -819,7 +819,7 @@ class StudentStore:
     ) -> str:
         """Create a notebook and return its id (``thread_id`` compatibility).
 
-        New notebooks start on Quick coaching (``response_detail=short``).
+        New notebooks start on Guide coaching (``response_detail=short``).
         """
         from backend.student_journey import DEFAULT_STAGE
 
@@ -1721,7 +1721,23 @@ class StudentStore:
                 raise ValueError("Notebook not found")
             metadata = self._thread_dict(row).get("metadata") or {}
             journey = normalize_journey(metadata.get("learning_journey"))
-            if cleaned_stage not in selectable_stage_ids(journey):
+            allowed = set(selectable_stage_ids(journey))
+            active_revision = self._notebook_revision_value(row)
+            pending = connection.execute(
+                f"""
+                SELECT proposed_stage FROM messages
+                WHERE notebook_id=? AND decision_status='pending'
+                  AND {self._active_at_revision_sql()}
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                (thread_id, active_revision, active_revision),
+            ).fetchone()
+            if pending is not None:
+                pending_to = str(pending["proposed_stage"] or "").strip()
+                if pending_to in STAGE_BY_ID:
+                    allowed.add(pending_to)
+            if cleaned_stage not in allowed:
                 raise ValueError(f"Thinking stage is locked: {cleaned_stage}")
 
     def _selected_learning_stage_metadata(
@@ -1741,6 +1757,8 @@ class StudentStore:
         helper so their journey and pending-transition semantics cannot drift.
         Stage authorization is validated before any pending-transition update
         or metadata mutation, so an illegal request is fail-closed and atomic.
+        A pending Ready destination remains selectable even when
+        ``completed_stages`` briefly lags after revise.
         """
         from backend.student_journey import (
             STAGE_BY_ID,
@@ -1753,7 +1771,22 @@ class StudentStore:
         if cleaned_stage not in STAGE_BY_ID:
             raise ValueError(f"Unknown thinking stage: {cleaned_stage}")
         journey = normalize_journey(metadata.get("learning_journey"))
-        if cleaned_stage not in selectable_stage_ids(journey):
+        allowed = set(selectable_stage_ids(journey))
+        pending = connection.execute(
+            f"""
+            SELECT proposed_stage FROM messages
+            WHERE notebook_id=? AND decision_status='pending'
+              AND {self._active_at_revision_sql()}
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (thread_id, active_revision, active_revision),
+        ).fetchone()
+        if pending is not None:
+            pending_to = str(pending["proposed_stage"] or "").strip()
+            if pending_to in STAGE_BY_ID:
+                allowed.add(pending_to)
+        if cleaned_stage not in allowed:
             raise ValueError(f"Thinking stage is locked: {cleaned_stage}")
         selected = dict(metadata)
         selected["learning_journey"] = set_current_stage(journey, cleaned_stage)
@@ -2498,7 +2531,9 @@ class StudentStore:
         message is already durable from the revision transaction. Content is not
         rewritten destructively; metadata may be refreshed without clearing
         lineage columns. An assistant row stamped with the expected revision is
-        inserted.
+        inserted. Validated completion may still run on that path so a
+        replacement ADVANCE re-marks ``completed_stages`` after the revision
+        rolled them back.
 
         The periodic Deep Review counter is recomputed from the notebook
         ``settings_text`` row inside this transaction, not from a
@@ -2536,8 +2571,8 @@ class StudentStore:
                 raise ValueError(
                     "Validated completion cannot combine with a stage mutation"
                 )
-            if existing_user_message_id is not None:
-                raise ValueError("Validated completion is not available during revision")
+            # Revision is allowed: edit rolls completed_stages back, then the
+            # replacement ADVANCE re-records completion with the new pending.
             if completion_stage != expected_stage:
                 raise ValueError("Validated completion stage does not match the coach turn")
         user_id = str(existing_user_message_id or uuid.uuid4())

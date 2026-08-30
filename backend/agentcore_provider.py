@@ -581,7 +581,7 @@ def _runtime_context(
     context: dict[str, Any] = {
         "current_stage": request.current_stage,
         "agentcore_topic": agentcore_topic_for_stage(request.current_stage),
-        "response_detail": "quick" if request.response_detail == "short" else "strict",
+        "response_detail": "guide" if request.response_detail == "short" else "free",
         "language": request.response_language,
         "allowed_citations": labels,
         "allow_model_knowledge": bool(request.allow_model_knowledge),

@@ -477,6 +477,20 @@ def render_journey_track() -> None:
         and THINKING_STAGES[frontier_candidate].id in selectable_ids
         else None
     )
+    # Pending Ready (Chat ADVANCE) should still expose Work on this stage even
+    # when completed_stages briefly lag after an edit/revise race.
+    if selection_enabled and frontier_next is None:
+        pending = _fetch_pending_transition()
+        pending_to = str(getattr(pending, "to_stage", "") or "").strip()
+        if (
+            pending is not None
+            and pending_to in STAGE_BY_ID
+            and pending_to != current_id
+        ):
+            frontier_next = pending_to
+            if frontier_progress_id is None:
+                frontier_progress_id = pending_to
+            selectable_ids.add(pending_to)
     thread_meta = dict(
         (store.get_thread(str(st.session_state.thread_id or "")) or {}).get(
             "metadata"
@@ -898,12 +912,14 @@ def render_learning_review(journey: dict[str, Any]) -> None:
             sections=strength_sections,
             current_stage_id=current_stage_id,
             key_prefix="strengths",
+            empty_label="No work on this stage yet.",
         )
     with st.expander("Areas for improvement", expanded=False):
         _render_review_stage_expanders(
             sections=improvement_sections,
             current_stage_id=current_stage_id,
             key_prefix="improvements",
+            empty_label="No work on this stage yet.",
         )
     st.markdown(
         facione_scores_table_html(review.get("facione_scores")),

@@ -179,8 +179,8 @@ def test_hmw_completion_criterion_lives_in_problem_identification_prompts() -> N
         assert "working draft, not a polished final statement" in collapsed
         assert "opportunity is expressed as a problem or friction" in collapsed
         assert "refinement a progression gate" in collapsed
-        assert "QUICK MODE — INFORMAL HMW COMPLETION" in collapsed
-        assert "STRICT MODE — CLEARER ARTICULATION" in collapsed
+        assert "GUIDE MODE — INFORMAL HMW COMPLETION" in collapsed
+        assert "FREE MODE — CHECK THE IDEA, THEN NEXT" in collapsed
         assert "NON-BLOCKING AFTER WORKABLE HMW" in collapsed
         assert "BAN PROGRESSION-HOLDING LANGUAGE" in collapsed
         assert "recommendation MUST be advance" in collapsed
@@ -229,12 +229,12 @@ def test_hmw_completion_criterion_lives_in_problem_identification_prompts() -> N
 
 
 def test_quick_informal_hmw_contract_accepts_meaningful_shorthand() -> None:
-    """Quick PI prompt treats informal A/B/C HMW as workable completion."""
+    """Guide PI prompt treats informal A/B/C HMW as workable completion."""
     prompt = Path(
         "agentcore_runtime/prompts/stages/problem_identification.md"
     ).read_text(encoding="utf-8")
     collapsed = " ".join(prompt.split())
-    assert "QUICK MODE — INFORMAL HMW COMPLETION" in collapsed
+    assert "GUIDE MODE — INFORMAL HMW COMPLETION" in collapsed
     assert "hmw help elderly cross busy roads safely / feel less stressed" in collapsed
     assert "meaning, not syntax" in collapsed
     assert "block informal HMW/shorthand" in collapsed
@@ -245,24 +245,23 @@ def test_quick_informal_hmw_contract_accepts_meaningful_shorthand() -> None:
 
 
 def test_strict_retains_clearer_hmw_articulation_bar() -> None:
-    """Strict PI still prefers clearer HMW wording and is not reduced to Quick."""
+    """Free PI checks a student idea and does not hold on HMW structure."""
     prompt = Path(
         "agentcore_runtime/prompts/stages/problem_identification.md"
     ).read_text(encoding="utf-8")
     collapsed = " ".join(prompt.split())
-    assert "STRICT MODE — CLEARER ARTICULATION" in collapsed
-    assert "prefer a clearer working HMW using the preferred structure" in collapsed
-    assert "research-validation gate" in collapsed
-    assert (
-        "equivalent prose that states user, problem, and outcome without a "
-        "clearer working HMW articulation is not completion"
-    ) in collapsed
+    assert "FREE MODE — CHECK THE IDEA, THEN NEXT" in collapsed
+    assert "checking an idea they already have" in collapsed
+    assert "Do not coach them through HMW formula" in collapsed
+    assert "recommendation MUST be advance" in collapsed
+    assert "hmw_scaffold_ready MUST be false" in collapsed
+    assert "Use STAY only for empty/off-topic" in collapsed
     assert "solution-locked" in collapsed
     assert "Template filling" in collapsed
 
 
 def test_composer_quick_pi_allows_informal_hmw_syntax() -> None:
-    """Quick runtime PI minimum accepts informal HMW when A/B/C are clear."""
+    """Guide runtime PI minimum accepts informal HMW when A/B/C are clear."""
     from backend.prompts import PromptComposer, PromptContext
 
     guidance = PromptComposer().compose(
@@ -272,7 +271,7 @@ def test_composer_quick_pi_allows_informal_hmw_syntax() -> None:
             response_detail="short",
         )
     ).runtime_instructions
-    assert "Guidance mode: Quick" in guidance
+    assert "Guidance mode: Guide" in guidance
     assert "informal HMW" in guidance
     assert "must not block ADVANCE" in guidance
     assert "Barrier/root-cause sharpening is non-blocking" in guidance

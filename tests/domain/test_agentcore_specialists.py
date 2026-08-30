@@ -107,11 +107,11 @@ def test_specialist_system_prompt_does_not_need_application_stage_files() -> Non
         {
             "phase": "coaching",
             "topic": "concept_generation",
-            "trusted_instructions": "Guidance mode: Quick.",
+            "trusted_instructions": "Guidance mode: Guide.",
         }
     )
     assert "STAGE: CONCEPT GENERATION" in system
-    assert "Guidance mode: Quick." in system
+    assert "Guidance mode: Guide." in system
     assert "<shared_coaching>" not in system
 
 

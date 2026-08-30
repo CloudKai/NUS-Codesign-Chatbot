@@ -296,7 +296,7 @@ def test_short_street_message_survives_prompt_planning() -> None:
         {
             "phase": "coaching",
             "topic": "problem_identification",
-            "trusted_instructions": "Guidance mode: Strict.",
+            "trusted_instructions": "Guidance mode: Free.",
             "messages": [
                 {"role": "assistant", "content": [{"text": "Where does this actually happen?"}]},
                 {"role": "user", "content": [{"text": _STREET}]},
@@ -314,7 +314,7 @@ def test_short_street_message_survives_prompt_planning() -> None:
     assert user_prompt == _STREET
     assert _STREET not in system_prompt
     assert "STAGE: PROBLEM IDENTIFICATION" in system_prompt
-    assert "Guidance mode: Strict." in system_prompt
+    assert "Guidance mode: Free." in system_prompt
     assert user_prompt.strip()
 
 

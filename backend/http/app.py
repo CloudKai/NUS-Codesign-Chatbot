@@ -1489,6 +1489,7 @@ def create_app(
             str(journey.get("current_stage") or DEFAULT_STAGE),
             owner.store.get_messages(thread_id),
             enabled=settings.hmw_scaffold_enabled,
+            response_detail=str(journey.get("response_detail") or ""),
         )
         return payload
 

@@ -31,7 +31,12 @@ def test_workflow_keeps_stage_without_creating_a_pending_transition(tmp_path):
         SQLitePhaseTransitionRepository(store),
     )
 
-    turn = workflow.run(_request(thread_id))
+    turn = workflow.run(
+        _request(
+            thread_id,
+            "I want to assess whether the evidence supports this claim.",
+        )
+    )
 
     assert turn.assessment.recommendation is StageDecision.STAY
     assert turn.pending_transition is None
@@ -97,7 +102,7 @@ def test_guided_mock_changes_its_question_then_recommends_progress(tmp_path):
     assert summary["mode"] in {"langgraph", "sequential"}
 
 
-def test_guided_mock_separates_quick_and_strict_assessment_history(tmp_path):
+def test_guided_mock_separates_guide_and_free_assessment_history(tmp_path):
     store = StudentStore(tmp_path / "guided-profiles.sqlite3")
     provider = DeterministicCoachProvider()
     common = {
@@ -107,54 +112,37 @@ def test_guided_mock_separates_quick_and_strict_assessment_history(tmp_path):
         "student_message": "I specified the design problem.",
         "current_stage": "problem_identification",
     }
-    quick_assessment = {
+    guide_assessment = {
         "role": "assistant",
-        "content": "Quick feedback",
+        "content": "Guide feedback",
         "metadata": {
             "thinking_stage": "problem_identification",
             "coaching_profile": "quick",
             "assessment": {"current_stage": "problem_identification"},
         },
     }
-    strict_assessment = {
-        "role": "assistant",
-        "content": "Strict feedback",
-        "metadata": {
-            "thinking_stage": "problem_identification",
-            "coaching_profile": "strict",
-            "assessment": {"current_stage": "problem_identification"},
-        },
-    }
-    legacy_assessment = {
-        "role": "assistant",
-        "content": "Legacy feedback",
-        "metadata": {
-            "thinking_stage": "problem_identification",
-            "assessment": {"current_stage": "problem_identification"},
-        },
-    }
 
-    quick = provider.assess(
-        CoachRequest(**common, response_detail="short", history=[quick_assessment])
+    guide_without_history = provider.assess(
+        CoachRequest(**common, response_detail="short", history=[])
     )
-    strict_with_quick_history = provider.assess(
+    guide_with_one_turn = provider.assess(
+        CoachRequest(**common, response_detail="short", history=[guide_assessment])
+    )
+    free_without_history = provider.assess(
+        CoachRequest(**common, response_detail="long", history=[])
+    )
+    free_with_only_guide_history = provider.assess(
         CoachRequest(
             **common,
             response_detail="long",
-            history=[quick_assessment, quick_assessment],
-        )
-    )
-    strict_with_eligible_history = provider.assess(
-        CoachRequest(
-            **common,
-            response_detail="long",
-            history=[strict_assessment, legacy_assessment],
+            history=[guide_assessment, guide_assessment],
         )
     )
 
-    assert quick.assessment.recommendation is StageDecision.ADVANCE
-    assert strict_with_quick_history.assessment.recommendation is StageDecision.STAY
-    assert strict_with_eligible_history.assessment.recommendation is StageDecision.ADVANCE
+    assert guide_without_history.assessment.recommendation is StageDecision.STAY
+    assert guide_with_one_turn.assessment.recommendation is StageDecision.ADVANCE
+    assert free_without_history.assessment.recommendation is StageDecision.ADVANCE
+    assert free_with_only_guide_history.assessment.recommendation is StageDecision.ADVANCE
 
 
 def test_provider_failure_is_not_replayed_by_sequential_fallback(tmp_path):
@@ -184,7 +172,7 @@ def test_provider_failure_is_not_replayed_by_sequential_fallback(tmp_path):
 
 
 def test_reflection_normalizes_advance_to_stay_without_transition(tmp_path):
-    """Reflection is terminal even when a provider returns ADVANCE."""
+    """Reflection ADVANCE completes in place and must not open a next stage."""
     store = StudentStore(tmp_path / "terminal.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     workflow = CoachWorkflow(
@@ -195,6 +183,92 @@ def test_reflection_normalizes_advance_to_stay_without_transition(tmp_path):
 
     turn = workflow.run(request)
 
-    assert turn.assessment.recommendation is StageDecision.STAY
+    assert turn.assessment.recommendation is StageDecision.ADVANCE
     assert turn.pending_transition is None
     assert store.get_pending_phase_transition(thread_id) is None
+
+
+_FREE_IDEA = (
+    "Older pedestrians need adaptive traffic light timing triggered by an ID card "
+    "so they can cross safely without rushing."
+)
+
+
+def test_free_mode_pi_idea_without_hmw_recommends_advance(tmp_path):
+    """Free skips the PI HMW text guard so a usable idea unlocks Next."""
+    store = StudentStore(tmp_path / "free-pi.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    workflow = CoachWorkflow(
+        DeterministicCoachProvider(StageDecision.ADVANCE),
+        SQLitePhaseTransitionRepository(store),
+    )
+
+    turn = workflow.run(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message=_FREE_IDEA,
+            current_stage="problem_identification",
+            response_detail="long",
+        )
+    )
+
+    assert turn.assessment.recommendation is StageDecision.ADVANCE
+    assert turn.assessment.hmw_scaffold_ready is False
+    assert turn.assessment.hmw_scaffold_guarded is False
+    assert turn.pending_transition is not None
+    assert turn.pending_transition.to_stage == "concept_generation"
+
+
+def test_free_mode_coerces_stay_to_advance_on_each_stage(tmp_path):
+    """Free promotes coaching STAY to ADVANCE without artifact checklists."""
+    store = StudentStore(tmp_path / "free-stages.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    workflow = CoachWorkflow(
+        DeterministicCoachProvider(StageDecision.STAY),
+        SQLitePhaseTransitionRepository(store),
+    )
+    stages = (
+        "problem_identification",
+        "concept_generation",
+        "design_specification",
+        "deep_analysis",
+        "reflection",
+    )
+    for stage_id in stages:
+        turn = workflow.run(
+            CoachRequest(
+                thread_id=thread_id,
+                student_message=_FREE_IDEA,
+                current_stage=stage_id,
+                response_detail="long",
+            )
+        )
+        assert turn.assessment.recommendation is StageDecision.ADVANCE, stage_id
+        assert turn.assessment.hmw_scaffold_ready is False
+        assert turn.assessment.hmw_scaffold_guarded is False
+        if stage_id == "reflection":
+            assert turn.pending_transition is None
+        else:
+            assert turn.pending_transition is not None
+
+
+def test_free_mode_meta_status_does_not_open_next(tmp_path):
+    """progression_effect=none still blocks Free ADVANCE after coerce."""
+    store = StudentStore(tmp_path / "free-meta.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    workflow = CoachWorkflow(
+        DeterministicCoachProvider(StageDecision.STAY),
+        SQLitePhaseTransitionRepository(store),
+    )
+
+    turn = workflow.run(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="What stage am I on?",
+            current_stage="concept_generation",
+            response_detail="long",
+        )
+    )
+
+    assert turn.assessment.recommendation is StageDecision.STAY
+    assert turn.pending_transition is None

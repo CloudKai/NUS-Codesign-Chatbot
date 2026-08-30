@@ -67,12 +67,12 @@ def test_static_prefix_excludes_runtime_and_student_content() -> None:
     lowered = prefix.lower()
     assert "conversation_revision" not in lowered
     assert "allowed_citations" not in lowered
-    assert "guidance mode: quick." not in lowered
+    assert "guidance mode:" not in lowered
     payload = {
         "phase": "fast_chat",
         "topic": "problem_identification",
         "output_contract": "fast_chat_turn",
-        "trusted_instructions": "Guidance mode: Quick.",
+        "trusted_instructions": "Guidance mode: Guide.",
         "runtime_context": {
             "current_stage": "problem_identification",
             "allowed_citations": ["S1"],
@@ -82,7 +82,7 @@ def test_static_prefix_excludes_runtime_and_student_content() -> None:
     assembled = specialist_system_prompt(payload)
     assert prefix in assembled
     assert assembled.index(prefix) == 0
-    assert "Guidance mode: Quick." in assembled
+    assert "Guidance mode: Guide." in assembled
     assert "conversation_revision" in assembled
     assert assembled.index(prefix) + len(prefix) <= assembled.index("conversation_revision")
 

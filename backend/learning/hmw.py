@@ -307,30 +307,35 @@ def hmw_scaffold_available(
     active_messages: Sequence[Mapping[str, Any]] | None,
     *,
     enabled: bool = True,
+    response_detail: str | None = None,
 ) -> bool:
     """Return whether the How Might We scaffold may be shown.
 
     Eligibility is server-derived from the latest meaningful HMW state:
 
     1. The HMW feature is enabled.
-    2. The authoritative stage is Problem Identification.
-    3. The latest active qualifying PI Coaching assessment has
+    2. Coaching style is not Free (``response_detail=long``).
+    3. The authoritative stage is Problem Identification.
+    4. The latest active qualifying PI Coaching assessment has
        ``hmw_scaffold_ready=true`` and ``recommendation=stay``.
 
     There is no minimum Coaching-turn count. A later valid HMW with
     ``ready=false`` and ``recommendation=advance`` hides the card. Q&A and
     Deep Review never govern visibility. Leaving the stage hides it because
-    the stage check fails.
+    the stage check fails. Free mode never shows the construction card.
 
     Args:
         current_stage: Authoritative Thinking Path stage id.
         active_messages: Active-branch persisted messages.
         enabled: Feature flag; false hides the scaffold.
+        response_detail: Journey coaching style (``short`` Guide / ``long`` Free).
 
     Returns:
         True when the UI may render the scaffold.
     """
     if not enabled:
+        return False
+    if str(response_detail or "").strip().lower() == "long":
         return False
     stage = str(current_stage or DEFAULT_STAGE).strip()
     if stage != HMW_SCAFFOLD_STAGE_ID:
@@ -346,6 +351,7 @@ def hmw_scaffold_projection(
     active_messages: Sequence[Mapping[str, Any]] | None,
     *,
     enabled: bool = True,
+    response_detail: str | None = None,
 ) -> dict[str, bool]:
     """Return the read-only UI contract for HMW scaffold visibility.
 
@@ -353,6 +359,7 @@ def hmw_scaffold_projection(
         current_stage: Authoritative Thinking Path stage id.
         active_messages: Active-branch persisted messages.
         enabled: Feature flag; false hides the scaffold.
+        response_detail: Journey coaching style (``short`` Guide / ``long`` Free).
 
     Returns:
         ``{"available": bool}`` with no internal model rationale.
@@ -362,5 +369,6 @@ def hmw_scaffold_projection(
             current_stage,
             active_messages,
             enabled=enabled,
+            response_detail=response_detail,
         )
     }

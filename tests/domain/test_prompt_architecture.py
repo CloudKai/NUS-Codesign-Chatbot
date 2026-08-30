@@ -298,7 +298,7 @@ def test_composer_includes_source_context_and_bounds_history():
     assert "message-19-" in text
     assert "message-0-" not in text
     assert len(text) <= composer_module.MAX_COMPOSED_PROMPT_CHARS
-    assert "Guidance mode: Strict" in text
+    assert "Guidance mode: Free" in text
     assert (
         len(source) > composer_module.MAX_RETRIEVED_CONTEXT_CHARS
         or "older pedestrians" in text
@@ -306,7 +306,7 @@ def test_composer_includes_source_context_and_bounds_history():
 
 
 def test_composer_qa_omits_strict_guidance_and_history_is_not_evidence():
-    """Q&A runtime instructions skip Strict/advance language and history-as-facts."""
+    """Q&A runtime instructions skip Guide/Free/advance language and history-as-facts."""
     prepared = PromptComposer().compose(
         PromptContext(
             current_stage="problem_identification",
@@ -325,7 +325,7 @@ def test_composer_qa_omits_strict_guidance_and_history_is_not_evidence():
         )
     )
     text = prepared.runtime_instructions
-    assert "Guidance mode: Strict" not in text
+    assert "Guidance mode:" not in text
     assert "automatically move" not in text
     assert "CURRENT STAGE:" not in text
     assert "not authoritative course evidence" in text
@@ -333,7 +333,7 @@ def test_composer_qa_omits_strict_guidance_and_history_is_not_evidence():
 
 
 def test_composer_quick_guidance_overrides_stage_thoroughness():
-    """Quick mode names minimum-workable bars that override Strict stage wording."""
+    """Guide mode names minimum-workable bars that override full stage wording."""
     prepared = PromptComposer().compose(
         PromptContext(
             current_stage="problem_identification",
@@ -342,7 +342,7 @@ def test_composer_quick_guidance_overrides_stage_thoroughness():
         )
     )
     guidance = prepared.runtime_instructions
-    assert "Guidance mode: Quick" in guidance
+    assert "Guidance mode: Guide" in guidance
     assert "minimum workable" in guidance
     assert "authoritative completion thresholds" in guidance
     assert "replace the current stage's ADVANCE/STAY and READINESS" in guidance
@@ -360,7 +360,7 @@ def test_composer_quick_guidance_overrides_stage_thoroughness():
 
 
 def test_composer_strict_guidance_keeps_stage_advance_authoritative():
-    """Strict mode keeps the thorough bar and stage ADVANCE/STAY as authoritative."""
+    """Free mode recommends ADVANCE after a usable idea so the student can press Next."""
     prepared = PromptComposer().compose(
         PromptContext(
             current_stage="design_specification",
@@ -369,9 +369,11 @@ def test_composer_strict_guidance_keeps_stage_advance_authoritative():
         )
     )
     guidance = prepared.runtime_instructions
-    assert "Guidance mode: Strict" in guidance
-    assert "thorough" in guidance
-    assert "authoritative" in guidance
+    assert "Guidance mode: Free" in guidance
+    assert "FREE MODE OVERRIDE" in guidance
+    assert "already has an idea" in guidance
+    assert "Do not keep prompting" in guidance
+    assert "press Next" in guidance
 
 
 def test_composer_runtime_asserts_authoritative_current_stage():
@@ -491,7 +493,7 @@ def test_composer_trims_dynamic_context_before_mandatory_sections(monkeypatch):
     assert prepared.stage_instructions in text
     assert student_message in text
     assert "<runtime_instructions>" in text
-    assert "Guidance mode: Quick" in text
+    assert "Guidance mode: Guide" in text
     assert text.index("<shared_coaching>") < text.index("<student_message>")
     assert text.index("<student_message>") < text.index("<runtime_instructions>")
     # Huge retrieval is clipped; whole-PDF injection is refused by budget.

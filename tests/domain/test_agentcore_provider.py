@@ -346,6 +346,7 @@ def test_valid_structured_coaching_and_research_coding(
     assert _STAGE_MARKERS["problem_identification"] not in payload["trusted_instructions"]
     assert _STAGE_MARKERS["problem_identification"] not in _current_turn_text(payload)
     assert payload["runtime_context"]["current_stage"] == "problem_identification"
+    assert payload["runtime_context"]["response_detail"] == "guide"
     assert payload["runtime_context"]["specialist"] == "fast_chat"
     assert "expected_response_mode" not in payload["runtime_context"]
     assert payload["runtime_context"].get("specialist") != "coaching"
@@ -477,15 +478,15 @@ def test_agentcore_payload_sends_bounded_history_and_owner_student_id():
 def test_agentcore_compression_keeps_early_decision_out_of_recent_messages():
     from backend.context_planner import ContextBudget, HistoryContextPlanner
 
-    # The current Fast Chat contract is intentionally sizeable (over 5.5k
-    # tokens before history). A 6k synthetic ceiling leaves no room for the
-    # extractive memory this test is meant to exercise, so use a constrained
-    # budget that can carry both the contract and that memory.
+    # The current Fast Chat contract is intentionally sizeable (Guide runtime
+    # plus canonical stage pedagogy). A 6k–8k synthetic ceiling leaves no
+    # room for the extractive memory this test is meant to exercise, so use a
+    # constrained budget that can carry both the contract and that memory.
     client = FakeAgentCoreRuntime(payload=_output())
     planner = HistoryContextPlanner(
         ContextBudget(
-            model_context_limit_tokens=9_000,
-            max_input_tokens=8_000,
+            model_context_limit_tokens=16_000,
+            max_input_tokens=12_000,
             output_reserve_tokens=500,
             safety_margin_tokens=500,
             recent_verbatim_messages=4,

@@ -979,3 +979,65 @@ def test_revised_away_hmw_does_not_keep_completion(tmp_path: Path) -> None:
     assert hmw_scaffold_available(
         "problem_identification", store.get_messages(thread_id)
     ) is False
+
+
+def test_free_mode_hides_scaffold_even_with_stay_ready_history() -> None:
+    """Free coaching style never projects the HMW construction card."""
+    messages = [_coaching_message(ready=True, recommendation="stay")]
+    assert hmw_scaffold_available(
+        "problem_identification",
+        messages,
+        response_detail="short",
+    ) is True
+    assert hmw_scaffold_available(
+        "problem_identification",
+        messages,
+        response_detail="long",
+    ) is False
+    assert hmw_scaffold_projection(
+        "problem_identification",
+        messages,
+        response_detail="long",
+    ) == {"available": False}
+
+
+def test_free_mode_pi_idea_without_hmw_advances_and_hides_scaffold(
+    tmp_path: Path,
+) -> None:
+    """Free skips the HMW provenance guard and does not unlock the card."""
+    store = StudentStore(tmp_path / "free-no-hmw.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    store.update_thread(thread_id, metadata={"response_detail": "long"})
+    notebooks = SQLiteNotebookRepository(store)
+    transitions = SQLitePhaseTransitionRepository(store)
+    prose = (
+        "Older pedestrians near a school cannot finish crossing before the "
+        "pedestrian signal changes. I want them to cross safely without rushing."
+    )
+    turn = CoachApplicationService(
+        store,
+        notebooks,
+        CoachWorkflow(
+            DeterministicCoachProvider(StageDecision.ADVANCE),
+            transitions,
+        ),
+        LearningProgressService(store, notebooks, transitions),
+        auto_advance_stages=False,
+    ).submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message=prose,
+            current_stage="problem_identification",
+            response_detail="long",
+        )
+    )
+    assert student_hmw_candidate_present(prose) is False
+    assert turn.assessment.recommendation is StageDecision.ADVANCE
+    assert turn.assessment.hmw_scaffold_ready is False
+    assert turn.assessment.hmw_scaffold_guarded is False
+    assert turn.pending_transition is not None
+    assert hmw_scaffold_available(
+        "problem_identification",
+        store.get_messages(thread_id),
+        response_detail="long",
+    ) is False

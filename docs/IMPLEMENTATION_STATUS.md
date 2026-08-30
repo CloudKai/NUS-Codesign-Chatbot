@@ -2,6 +2,70 @@
 
 ## CURRENT STATUS
 
+### Free mode: no artifact required to proceed (2026-08-30)
+
+**Behavior.** Free (`response_detail=long`) no longer requires a How Might We,
+two concepts, a full spec, or other stage artifacts before Next. The PI HMW
+application guard is skipped; Free coaching STAY is promoted to ADVANCE for a
+non-empty idea (meta/status/Q&A/Deep Review still stay). The HMW construction
+card is never projected in Free. Stage prompts for CG/DS/Ethics/Reflection add
+matching Free “check the idea, then Next” blocks. Guide is unchanged.
+
+**Files.** `backend/workflow.py`, `backend/learning/hmw.py`, stage prompts under
+`backend/prompts/stages/` and `agentcore_runtime/prompts/stages/`, call-site
+`response_detail` wiring in chat/API/execution/professor analytics,
+`backend/coaching/__init__.py` (lazy export to break import cycle), tests, and
+prompt baseline hashes.
+
+**Validation.** Focused mock tests for workflow Free ADVANCE, HMW scaffold gate,
+prompt baseline, pedagogical fixtures, and UI HMW scaffold passed. `compileall`
+passed. No paid model call.
+
+**Compatibility.** No schema change. Existing Strict notebooks remain Free
+(`long`). Live Haiku copy still needs AgentCore publish for prompt text; the
+application coerce unlocks Next without waiting for that.
+
+**Next exact action.** Local smoke in Free: share a non-HMW idea on PI and
+confirm Next appears without the HMW card; optionally deploy + AgentCore
+publish for live prose.
+
+### Guide and Free coaching styles (2026-08-30)
+
+**Behavior.** Profile Coaching style is now **Guide** and **Free**. Guide is
+the former Quick path: lighter Thinking Path coaching and progress once thinking
+is workable. Free is not the old Strict bar. A student who already has an idea
+can check it on the current stage, get a brief reply, and press Next (or jump
+with Work on this stage). The coach does not keep prompting them to improve
+HMW/structure. Stage changes stay recommended and student-confirmed. Persistence
+is still `response_detail=short|long`; existing Strict notebooks open as Free.
+New notebooks stay Guide (`short`). Internal `coaching_profile` tokens remain
+`quick`/`strict` for research compatibility. AgentCore `runtime_context`
+sends `guide`/`free`.
+
+**Files.** `ui/profile.py`, `ui/session.py`, `backend/prompts/composer.py`,
+`backend/prompts/stages/problem_identification.md`,
+`agentcore_runtime/prompts/stages/problem_identification.md`,
+`backend/mock_provider.py`, `backend/agentcore_provider.py`,
+`backend/learning/journey.py`, tests, README, AGENTS, prompt baseline hash,
+and this handoff.
+
+**Validation.** Targeted mock tests passed: composer Guide/Free runtime,
+HMW Guide/Free contracts, workflow Guide/Free mock ADVANCE, Bedrock prompt
+parity, AgentCore `response_detail=guide`, prompt hash lock, and Streamlit
+AppTest labels (Guide/Free persist `short`/`long`, new chat resets to Guide).
+`compileall` over `backend`, `ui`, `streamlit_app.py`, `tests`, and `scripts`
+passed. No paid model call was made.
+
+**Compatibility and rollback.** No schema change. `short`/`long` storage is
+unchanged. Rollback is code-only. Live AgentCore Haiku sees the PI Free/Guide
+stage file only after a runtime publish and `AGENTCORE_SESSION_GENERATION`
+bump; FastAPI `trusted_instructions` apply on the next app deploy.
+
+**Next exact action.** Deploy the app, then publish AgentCore with the updated
+PI stage file if production should pick up Free/Guide pedagogy in Haiku.
+Student-facing check: Settings → Coaching style shows Guide/Free; Free lets
+Next after the first usable idea.
+
 ### Streamlit anti-flash and instant-response UI (2026-08-30)
 
 **Behavior.** Ordinary controls no longer fade or clear the notebook workspace

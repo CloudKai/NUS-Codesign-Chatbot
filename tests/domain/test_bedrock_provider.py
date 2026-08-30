@@ -447,7 +447,7 @@ def test_idempotent_retry_and_restart_do_not_duplicate(tmp_path):
 
 @pytest.mark.parametrize("stage_id", sorted(VALID_STAGE_IDS))
 @pytest.mark.parametrize("detail", ["short", "long"])
-def test_quick_strict_and_five_phase_prompt_parity_with_mock(stage_id: str, detail: str):
+def test_guide_free_and_five_phase_prompt_parity_with_mock(stage_id: str, detail: str):
     request = _request(current_stage=stage_id, response_detail=detail)
     mock = DeterministicCoachProvider(StageDecision.STAY)
     mock.assess(request)
@@ -457,7 +457,7 @@ def test_quick_strict_and_five_phase_prompt_parity_with_mock(stage_id: str, deta
     assert mock.last_prepared_prompt is not None
     assert prompt == mock.last_prepared_prompt.composed_text
     assert _STAGE_MARKERS[stage_id] in prompt
-    expected_mode = "Strict" if detail == "long" else "Quick"
+    expected_mode = "Free" if detail == "long" else "Guide"
     assert f"Guidance mode: {expected_mode}" in prompt
     for other_id, marker in _STAGE_MARKERS.items():
         if other_id != stage_id:

@@ -19,8 +19,8 @@ from ui.settings import persist_appearance
 
 
 COACHING_STYLE_LABELS = {
-    "short": "Quick",
-    "long": "Strict",
+    "short": "Guide",
+    "long": "Free",
 }
 COACHING_STYLE_VALUES = {
     label: detail for detail, label in COACHING_STYLE_LABELS.items()
@@ -28,11 +28,11 @@ COACHING_STYLE_VALUES = {
 COACHING_STYLE_COPY = {
     "short": {
         "tagline": "Keep me moving",
-        "explanation": "Lighter guidance; progress once your thinking is workable.",
+        "explanation": "Lighter coaching through the Thinking Path; progress once your thinking is workable.",
     },
     "long": {
-        "tagline": "Challenge my thinking",
-        "explanation": "More rigorous guidance; address important gaps before moving on.",
+        "tagline": "Check the idea I have",
+        "explanation": "Bring what you already have to this stage, get a check, then Next. The coach will not hold you to improve structure.",
     },
 }
 

@@ -182,6 +182,61 @@ def student_coach_error_message(category: str = "", *, status: Any = None) -> st
     return "Coaching is temporarily unavailable. Try again in a moment."
 
 
+# Revise can race an interrupted stream: FastAPI keeps the notebook lease on a
+# worker thread after Streamlit stops reading NDJSON. Brief retries bridge that gap.
+_REVISE_BUSY_ATTEMPTS = 6
+_REVISE_BUSY_SLEEP_SECONDS = 2.0
+
+_EDIT_WAIT_FOR_COACH_MESSAGE = (
+    "The coach is still finishing your previous message. "
+    "Wait for that reply, then edit again."
+)
+
+_EDIT_BUSY_RETRY_MESSAGE = (
+    "The coach was still finishing another reply for this notebook. "
+    "Your draft is preserved — wait a few seconds, then click Send again."
+)
+
+_EDIT_GENERIC_FAILURE_MESSAGE = (
+    "Could not finish this edit. Your draft is preserved — click Send "
+    "again to retry the same revision attempt without creating another "
+    "conversation branch. If the server already applied the revision, "
+    "retry resumes the replacement coach reply."
+)
+
+
+def _http_status_from_exception(error: BaseException) -> int | None:
+    """Return an HTTP status from an API client exception, when present."""
+    response = getattr(error, "response", None)
+    if response is None:
+        return None
+    try:
+        return int(getattr(response, "status_code", None))
+    except (TypeError, ValueError):
+        return None
+
+
+def _exception_is_coach_busy(error: BaseException) -> bool:
+    """Return True when *error* is a notebook-busy / rate-limit conflict."""
+    status = _http_status_from_exception(error)
+    if status == 429:
+        return True
+    detail = str(error or "").casefold()
+    return "too many requests" in detail or "only one active coaching" in detail
+
+
+def _coach_turn_busy() -> bool:
+    """Return True when a send/revise is streaming or awaiting server completion."""
+    return coach_turn_is_streaming() or awaiting_coach_turn_for_thread() is not None
+
+
+def _edit_failure_message(error: BaseException) -> str:
+    """Return student-safe copy for a failed bubble-edit revise call."""
+    if _exception_is_coach_busy(error):
+        return _EDIT_BUSY_RETRY_MESSAGE
+    return _EDIT_GENERIC_FAILURE_MESSAGE
+
+
 _INFLIGHT_ERROR_CAPTION = (
     "Reload once before resubmitting; the completed turn may already be present."
 )
@@ -413,10 +468,15 @@ def _begin_latest_edit_message(message_id: str) -> None:
 
     Side effects:
         Sets the in-bubble editor session state. Streamlit's widget callback
-        then reruns only the owning chat fragment.
+        then reruns only the owning chat fragment. Refuses while a coach turn
+        is still streaming or awaiting server completion so Edit cannot race
+        the notebook concurrency lease.
     """
     selected_id = str(message_id or "").strip()
     if not selected_id:
+        return
+    if _coach_turn_busy():
+        st.session_state.edit_error_message = _EDIT_WAIT_FOR_COACH_MESSAGE
         return
     st.session_state.editing_message = selected_id
     st.session_state.edit_confirm_message_id = None
@@ -489,6 +549,12 @@ def render_message(
                     ):
                         if not revised.strip():
                             st.error("Enter a message before resending.")
+                            return
+                        if _coach_turn_busy():
+                            st.session_state.edit_error_message = (
+                                _EDIT_WAIT_FOR_COACH_MESSAGE
+                            )
+                            _rerun_edit_fragment()
                             return
                         draft = revised.strip()
                         thread_id = st.session_state.thread_id
@@ -1418,6 +1484,10 @@ def _confirm_edit_earlier_message_dialog() -> None:
     ):
         message_id = st.session_state.get("edit_confirm_message_id")
         st.session_state.edit_confirm_message_id = None
+        if _coach_turn_busy():
+            st.session_state.edit_error_message = _EDIT_WAIT_FOR_COACH_MESSAGE
+            rerun_app()
+            return
         if message_id:
             st.session_state.editing_message = message_id
         rerun_app()
@@ -1528,6 +1598,15 @@ def _submit_pending_edit(
         "idempotency_key": idempotency_key,
     }
     st.session_state.pending_edit = pending
+    # A prior send may still hold the notebook lease on the API worker even
+    # after Streamlit interrupted the NDJSON reader. Do not race it.
+    if awaiting_coach_turn_for_thread() is not None:
+        st.session_state.pop("pending_edit", None)
+        st.session_state.pop("_chat_edit_prefix_snapshot", None)
+        _restore_pending_edit_draft(message_id, draft)
+        st.session_state.edit_error_message = _EDIT_WAIT_FOR_COACH_MESSAGE
+        _rerun_edit_fragment()
+        return False
     set_coach_turn_streaming(True)
     baseline_messages = store.get_messages(thread_id)
     set_awaiting_coach_turn(
@@ -1543,20 +1622,40 @@ def _submit_pending_edit(
     )
     try:
         try:
-            store.revise_message(
-                thread_id,
-                message_id,
-                draft,
-                idempotency_key=idempotency_key,
-                model_id=model_id,
-                reasoning_effort=reasoning_effort,
-                response_detail=st.session_state.get("response_detail")
-                or DEFAULT_RESPONSE_DETAIL,
-                response_language=st.session_state.get("response_language")
-                or "English",
-            )
+            last_error: BaseException | None = None
+            for attempt in range(_REVISE_BUSY_ATTEMPTS):
+                try:
+                    store.revise_message(
+                        thread_id,
+                        message_id,
+                        draft,
+                        idempotency_key=idempotency_key,
+                        model_id=model_id,
+                        reasoning_effort=reasoning_effort,
+                        response_detail=st.session_state.get("response_detail")
+                        or DEFAULT_RESPONSE_DETAIL,
+                        response_language=st.session_state.get("response_language")
+                        or "English",
+                    )
+                    last_error = None
+                    break
+                except Exception as error:
+                    last_error = error
+                    if (
+                        _exception_is_coach_busy(error)
+                        and attempt + 1 < _REVISE_BUSY_ATTEMPTS
+                    ):
+                        thinking.update(
+                            label="Waiting for the previous coach reply to finish…",
+                            state="running",
+                        )
+                        time.sleep(_REVISE_BUSY_SLEEP_SECONDS)
+                        continue
+                    raise
+            if last_error is not None:
+                raise last_error
             thinking.update(label="Coach reply ready", state="complete")
-        except Exception:
+        except Exception as error:
             clear_awaiting_coach_turn()
             thinking.update(label="Coaching failed", state="error")
             # Drop pending_edit so the next rerun does not auto-resubmit. Keep the
@@ -1565,12 +1664,7 @@ def _submit_pending_edit(
             st.session_state.pop("pending_edit", None)
             st.session_state.pop("_chat_edit_prefix_snapshot", None)
             _restore_pending_edit_draft(message_id, draft)
-            st.session_state.edit_error_message = (
-                "Could not finish this edit. Your draft is preserved — click Send "
-                "again to retry the same revision attempt without creating another "
-                "conversation branch. If the server already applied the revision, "
-                "retry resumes the replacement coach reply."
-            )
+            st.session_state.edit_error_message = _edit_failure_message(error)
             _rerun_edit_fragment()
             return False
         remove_retry_key(
@@ -1673,6 +1767,15 @@ def _render_composer_submit_fragment(
     fragment_enter_epoch_ms = int(time.time() * 1000)
     request_id = str(uuid.uuid4())
     pending = st.session_state.get("pending_edit")
+    # Interrupt during an in-flight send can open the editor while the API
+    # worker still holds the notebook lease. Close the editor until recovery.
+    if (
+        not isinstance(pending, dict)
+        and st.session_state.get("editing_message")
+        and awaiting_coach_turn_for_thread() is not None
+    ):
+        st.session_state.editing_message = None
+        st.session_state.edit_error_message = _EDIT_WAIT_FOR_COACH_MESSAGE
     # This is a bounded, one-action render snapshot. It is not used as
     # conversation authority and is cleared when the revise attempt ends.
     if not isinstance(pending, dict):
@@ -1689,6 +1792,8 @@ def _render_composer_submit_fragment(
     pending_message_id = ""
     if isinstance(pending, dict):
         pending_message_id = str(pending.get("message_id") or "")
+    awaiting_locked = awaiting_coach_turn_for_thread() is not None
+    history_allow_edit = not awaiting_locked and not pending_message_id
 
     with st.container(key="chat_transcript"):
         with st.container(key="chat_feed"):
@@ -1716,6 +1821,7 @@ def _render_composer_submit_fragment(
                         messages,
                         hmw_available=hmw_available,
                         visible_source_ids=visible_source_ids,
+                        allow_edit=history_allow_edit,
                     )
                 log_ui_timing(
                     chat_history_ms=round(
@@ -1748,7 +1854,6 @@ def _render_composer_submit_fragment(
                 if edit_error:
                     st.error(str(edit_error))
 
-        awaiting_locked = awaiting_coach_turn_for_thread() is not None
         with st.container(key="chat_composer"):
             fragment_enter_ms = _duration_ms(fragment_started)
             prompt_started = time.perf_counter()
@@ -1838,6 +1943,7 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
         str(journey.get("current_stage") or DEFAULT_STAGE),
         messages,
         enabled=settings.hmw_scaffold_enabled,
+        response_detail=str(journey.get("response_detail") or ""),
     )
     _render_composer_submit_fragment(
         messages,

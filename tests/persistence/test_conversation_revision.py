@@ -1458,3 +1458,67 @@ def test_provider_failure_retry_same_key_does_not_double_bump(tmp_path, monkeypa
     ]
     assert len(active_users) == 1
     assert active_users[0]["content"] == "Edited once"
+
+
+def test_revise_advance_rerecords_validated_completion(tmp_path, monkeypatch):
+    """Replacement Ready after edit must restore completed_stages for Journey.
+
+    Revise rolls the completion prefix back to the restored focus. Selection-mode
+    ADVANCE must re-mark validated completion so Concept Generation stays
+    unlocked for Work on this stage and Review stays consistent with Ready.
+    """
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    store = StudentStore(tmp_path / "revise-rerecord-complete.sqlite3")
+    coach = _coach(store)
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    store.update_thread(
+        thread_id,
+        metadata={
+            "learning_journey": {
+                "current_stage": "problem_identification",
+                "completed_stages": [],
+                "response_detail": "long",
+            }
+        },
+    )
+    idea = (
+        "I already have an idea: help elderly pedestrians cross busy roads "
+        "safely with adaptive crossing time."
+    )
+    first = coach.submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message=idea,
+            current_stage="problem_identification",
+            response_detail="long",
+            idempotency_key="free-advance-seed",
+        )
+    )
+    assert first.pending_transition is not None
+    assert first.pending_transition.to_stage == "concept_generation"
+    journey = (store.get_thread(thread_id) or {}).get("metadata", {}).get(
+        "learning_journey"
+    ) or {}
+    assert "problem_identification" in list(journey.get("completed_stages") or [])
+
+    user_id = next(
+        message["id"]
+        for message in store.get_messages(thread_id)
+        if message.get("role") == "user"
+    )
+    revised = coach.revise_and_resubmit(
+        thread_id,
+        user_id,
+        idea + " Focus on short crossing windows.",
+        idempotency_key="free-advance-revise",
+        response_detail="long",
+    )
+    assert revised.pending_transition is not None
+    assert revised.pending_transition.to_stage == "concept_generation"
+    journey_after = (store.get_thread(thread_id) or {}).get("metadata", {}).get(
+        "learning_journey"
+    ) or {}
+    assert journey_after.get("current_stage") == "problem_identification"
+    assert "problem_identification" in list(
+        journey_after.get("completed_stages") or []
+    )
