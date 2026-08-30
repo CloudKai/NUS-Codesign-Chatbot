@@ -41,6 +41,36 @@
     }
 
     @media (max-width:1050px) {
+        /* Pin the student shell so iOS focus/keyboard cannot scroll the layout
+           viewport. Without this, tapping the composer leaves a bottom gap and
+           shoves the mobile top-bar icons under the status bar. Course Analytics
+           opts out in 70-professor.css. */
+        html:not(:has(.st-key-professor_header)),
+        html:not(:has(.st-key-professor_header)) body,
+        html:not(:has(.st-key-professor_header)) .stApp,
+        html:not(:has(.st-key-professor_header))
+        [data-testid="stAppViewContainer"],
+        html:not(:has(.st-key-professor_header))
+        [data-testid="stAppViewContainer"] > .main {
+            position:fixed !important;
+            inset:0 !important;
+            width:100% !important;
+            max-width:100% !important;
+            height:100% !important;
+            max-height:100dvh !important;
+            min-height:0 !important;
+            overflow:hidden !important;
+            overscroll-behavior:none !important;
+            touch-action:manipulation;
+        }
+
+        html:not(:has(.st-key-professor_header)) .block-container {
+            height:100% !important;
+            max-height:100dvh !important;
+            min-height:0 !important;
+            overflow:hidden !important;
+        }
+
         /* iOS Safari auto-zooms focused fields under 16px, then leaves the page
            scrolled/"too high" after the keyboard closes. Keep editable controls
            at the 16px floor so the app scale stays stable while typing. */

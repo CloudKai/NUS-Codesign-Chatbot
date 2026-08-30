@@ -23,12 +23,14 @@ def test_style_partials_exist_in_fixed_manifest_order() -> None:
 
 
 def test_mobile_viewport_lock_prevents_ios_input_zoom() -> None:
-    """Phone typing must not zoom the shell; inputs stay at the 16px iOS floor."""
+    """Phone typing must not zoom or permanently shift the student shell."""
     from ui import theme as theme_module
 
     theme_source = Path(theme_module.__file__).read_text(encoding="utf-8")
     assert "def inject_mobile_viewport_lock" in theme_source
     assert "maximum-scale=1" in theme_source
+    assert "visualViewport" in theme_source
+    assert "pinDocumentScroll" in theme_source
     assert "inject_mobile_viewport_lock()" in theme_source.split(
         "def inject_template_css", 1
     )[1].split("def render_theme_css", 1)[0]
@@ -40,6 +42,9 @@ def test_mobile_viewport_lock_prevents_ios_input_zoom() -> None:
     assert "font-size:16px !important" in mobile
     assert '[data-testid="stChatInput"] textarea' in mobile
     assert '[data-testid="stPopoverBody"] input' in mobile
+    assert "position:fixed !important" in mobile
+    assert "overscroll-behavior:none !important" in mobile
+    assert "st-key-professor_header" in mobile
 
 
 def _css_rule_body(css: str, marker: str) -> str:

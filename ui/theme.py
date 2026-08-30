@@ -72,12 +72,16 @@ def __getattr__(name: str):
 
 
 def inject_mobile_viewport_lock() -> None:
-    """Keep phone browsers from zooming the app shell when focusing text fields.
+    """Keep phone browsers from zooming or shifting the app shell on focus.
 
-    iOS Safari zooms pages when a focused control is under 16px. Combined with
-    the mobile 16px input floor in ``90-responsive.css``, locking
-    ``maximum-scale=1`` keeps the visual viewport stable after the keyboard
-    closes (avoids the page ending up scrolled/"too high").
+    iOS Safari zooms pages when a focused control is under 16px, and it also
+    scrolls the layout viewport to bring the composer into view. That scroll
+    often sticks after the keyboard closes: a gap appears under the composer
+    and the mobile top-bar icons sit under the status bar (unclickable).
+
+    Combined with the mobile 16px input floor in ``90-responsive.css``, this
+    locks ``maximum-scale=1`` and repeatedly pins ``scroll`` / visualViewport
+    offsets back to the origin while editing.
     """
     import streamlit.components.v1 as components
 
@@ -86,6 +90,7 @@ def inject_mobile_viewport_lock() -> None:
 <script>
 (() => {
   const doc = window.parent.document;
+  const win = window.parent;
   const desired =
     "width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover";
   let meta = doc.querySelector('meta[name="viewport"]');
@@ -97,6 +102,75 @@ def inject_mobile_viewport_lock() -> None:
   if (meta.getAttribute("content") !== desired) {
     meta.setAttribute("content", desired);
   }
+
+  const isNarrow = () => {
+    try {
+      return win.matchMedia("(max-width: 1050px)").matches;
+    } catch (_) {
+      return win.innerWidth <= 1050;
+    }
+  };
+
+  const pinDocumentScroll = () => {
+    if (!isNarrow()) {
+      return;
+    }
+    try {
+      if (win.scrollX || win.scrollY) {
+        win.scrollTo(0, 0);
+      }
+      if (doc.documentElement && doc.documentElement.scrollTop) {
+        doc.documentElement.scrollTop = 0;
+      }
+      if (doc.body && doc.body.scrollTop) {
+        doc.body.scrollTop = 0;
+      }
+      const main = doc.querySelector(
+        '[data-testid="stAppViewContainer"] > .main, section.main'
+      );
+      if (main && main.scrollTop) {
+        main.scrollTop = 0;
+      }
+    } catch (_) {}
+  };
+
+  const schedulePin = () => {
+    pinDocumentScroll();
+    try {
+      win.requestAnimationFrame(pinDocumentScroll);
+    } catch (_) {}
+    win.setTimeout(pinDocumentScroll, 50);
+    win.setTimeout(pinDocumentScroll, 250);
+  };
+
+  if (!win.__cdViewportPinInstalled) {
+    win.__cdViewportPinInstalled = true;
+    win.addEventListener("scroll", pinDocumentScroll, { passive: true });
+    doc.addEventListener(
+      "focusin",
+      (event) => {
+        const target = event.target;
+        if (!target || typeof target.matches !== "function") {
+          return;
+        }
+        if (
+          !target.matches(
+            "input, textarea, [contenteditable='true'], [contenteditable='']"
+          )
+        ) {
+          return;
+        }
+        schedulePin();
+      },
+      true
+    );
+    doc.addEventListener("focusout", schedulePin, true);
+    if (win.visualViewport) {
+      win.visualViewport.addEventListener("resize", schedulePin);
+      win.visualViewport.addEventListener("scroll", schedulePin);
+    }
+  }
+  pinDocumentScroll();
 })();
 </script>
         """,
