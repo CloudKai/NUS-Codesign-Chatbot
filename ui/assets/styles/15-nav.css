@@ -737,7 +737,7 @@
         row-gap:.35rem !important;
     }
 
-    /* Chat Setting rename: plain textbox; Enter submits a hidden Apply control. */
+    /* Match mobile Chat Setting: Rename field + Apply on one full-width row. */
     [data-testid="stPopoverBody"]:has([class*="st-key-nav_rename_"])
     [class*="st-key-nav_rename_"],
     [data-testid="stPopoverBody"]:has([class*="st-key-nav_rename_"])
@@ -760,10 +760,10 @@
     [data-testid="stPopoverBody"]:has([class*="st-key-nav_rename_"])
     [class*="st-key-nav_rename_"] form
     > [data-testid="stVerticalBlock"] {
-        display:flex !important;
-        flex-direction:column !important;
-        align-items:stretch !important;
-        gap:0 !important;
+        display:grid !important;
+        grid-template-columns:minmax(0,1fr) auto !important;
+        align-items:end !important;
+        gap:.4rem !important;
         row-gap:0 !important;
         width:100% !important;
         max-width:100% !important;
@@ -806,23 +806,34 @@
         box-sizing:border-box !important;
     }
 
-    /* Hide Apply submit only — never the text-input ElementContainer. */
     [data-testid="stPopoverBody"]:has([class*="st-key-nav_rename_"])
     [class*="st-key-nav_rename_"]
-    [data-testid="stElementContainer"]:has(> [data-testid="stFormSubmitButton"]),
+    [data-testid="stElementContainer"]:has([data-testid="stFormSubmitButton"]),
     [data-testid="stPopoverBody"]:has([class*="st-key-nav_rename_"])
     [class*="st-key-nav_rename_"]
     [data-testid="stElementContainer"]:has(> div > [data-testid="stFormSubmitButton"]),
     [data-testid="stPopoverBody"]:has([class*="st-key-nav_rename_"])
     [class*="st-key-nav_rename_"] [data-testid="stFormSubmitButton"] {
-        display:none !important;
-        height:0 !important;
-        min-height:0 !important;
-        max-height:0 !important;
+        display:flex !important;
+        align-items:center !important;
+        justify-content:center !important;
+        width:auto !important;
+        min-width:0 !important;
+        height:auto !important;
         margin:0 !important;
         padding:0 !important;
-        overflow:hidden !important;
-        border:0 !important;
+        flex:0 0 auto !important;
+    }
+
+    [data-testid="stPopoverBody"]:has([class*="st-key-nav_rename_"])
+    [class*="st-key-nav_rename_"] [data-testid="stFormSubmitButton"] button {
+        width:auto !important;
+        min-width:0 !important;
+        height:2.5rem !important;
+        min-height:2.5rem !important;
+        padding:0 .85rem !important;
+        white-space:nowrap !important;
+        border-radius:.7rem !important;
     }
 
     [data-testid="stPopoverBody"]:has([class*="st-key-nav_rename_"])

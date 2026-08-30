@@ -62,21 +62,18 @@ def test_nav_rail_exposes_new_search_library_and_recents_actions() -> None:
     assert "Share conversation" not in nav
     assert "Add to notebook" not in nav
     assert '"Pin"' not in nav
-    # Recents / mobile Chat Setting: Rename textbox only (Apply hidden like sources).
+    # Recents Chat Setting matches mobile: Rename + visible Apply on one row.
     css_nav = Path("ui/assets/styles/15-nav.css").read_text(encoding="utf-8")
-    responsive = Path("ui/assets/styles/90-responsive.css").read_text(encoding="utf-8")
-    nav_rename_css = css_nav.split('st-key-nav_rename_"', 1)[1].split(
-        "Keep Download / Delete", 1
-    )[0]
+    assert "grid-template-columns:minmax(0,1fr) auto" in css_nav
+    nav_rename_css = css_nav.split('st-key-nav_rename_"', 1)[1]
     assert "stFormSubmitButton" in nav_rename_css
-    assert "display:none !important" in nav_rename_css
-    assert "grid-template-columns:minmax(0,1fr) auto" not in nav_rename_css
-    mobile_rename_css = responsive.split('st-key-mobile_rename_"', 1)[1].split(
-        "Keep Download / Delete", 1
-    )[0]
-    assert "stFormSubmitButton" in mobile_rename_css
-    assert "display:none !important" in mobile_rename_css
-    assert "grid-template-columns:minmax(0,1fr) auto" not in mobile_rename_css
+    assert "display:flex !important" in nav_rename_css
+    # Apply must stay visible (no hide rule for the submit control).
+    hide_submit = (
+        '[data-testid="stFormSubmitButton"] {\n'
+        "        display:none !important;"
+    )
+    assert hide_submit not in css_nav
     assert "set_nav_collapsed" in nav
     assert "new_notebook(should_rerun=False)" in nav
     assert "select_thread(" in nav

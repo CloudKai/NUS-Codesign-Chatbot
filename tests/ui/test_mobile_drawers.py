@@ -318,11 +318,7 @@ def test_mobile_drawer_css_contract() -> None:
     )
     assert 'st-key-mobile_rename_' in mobile
     assert "right:.5rem" in mobile
-    mobile_rename = mobile.split('st-key-mobile_rename_', 1)[1].split(
-        "Keep Download / Delete", 1
-    )[0]
-    assert "display:none !important" in mobile_rename
-    assert "grid-template-columns:minmax(0,1fr) auto" not in mobile_rename
+    assert "grid-template-columns:minmax(0,1fr) auto" in mobile
     assert "width:min(20.5rem,88vw)" in mobile
     assert any(
         marker in mobile

@@ -76,10 +76,10 @@ def render_enter_to_apply_rename(
 ) -> tuple[bool, str]:
     """Render an Enter-only rename form and return ``(applied, cleaned_value)``.
 
-    The Apply submit control remains in the form so Streamlit can commit on
-    Enter, but Chat Setting / source popovers hide it with CSS so students see
-    a plain textbox. Streamlit's ``Press Enter to submit form`` hint is hidden
-    on rename fields; no help icon is attached.
+    The Apply submit control is present for Streamlit form Enter handling.
+    Chat Setting popovers (Recents and mobile) show Apply beside the field;
+    other surfaces may hide it with CSS. Streamlit's ``Press Enter to submit
+    form`` hint is hidden on rename fields; no help icon is attached.
 
     Args:
         key_namespace: Optional disambiguator when the same item is renamed from
