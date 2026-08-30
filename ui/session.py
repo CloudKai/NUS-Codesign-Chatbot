@@ -184,6 +184,9 @@ def new_notebook(should_rerun: bool = True) -> None:
     _persist_active_thread(thread_id)
     st.session_state.mobile_nav_open = False
     st.session_state.mobile_studio_open = False
+    # Skip the Sources sync-complete full remount once; New chat already remounted.
+    st.session_state.pop("_sources_defer_stable_remount", None)
+    st.session_state["_suppress_sources_sync_rerun_for_thread"] = thread_id
     if should_rerun:
         st.session_state.pending_mobile_panel = "Chat"
         st.session_state.center_view = "chat"
@@ -473,6 +476,8 @@ def select_thread(thread_id: str, should_rerun: bool = True) -> None:
     _persist_active_thread(thread_id)
     store.backfill_legacy_sources(thread_id)
     seed_coach_welcome(store, thread_id)
+    st.session_state.pop("_suppress_sources_sync_rerun_for_thread", None)
+    st.session_state.pop("_sources_defer_stable_remount", None)
     if should_rerun:
         rerun_app()
 

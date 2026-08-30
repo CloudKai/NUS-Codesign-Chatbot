@@ -1114,6 +1114,9 @@ def _watch_stage_review_attention_fragment() -> None:
     if prev_attention is None:
         return
     if (not prev_attention and attention) or (prev_active and not active):
+        # A full remount during handle_prompt stacks a second workspace.
+        if coach_turn_is_streaming():
+            return
         rerun_app()
 
 

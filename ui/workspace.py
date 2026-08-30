@@ -29,6 +29,7 @@ from ui.menu_popovers import menu_popover_widget_key
 from ui.panels.chat import mount_awaiting_coach_turn_recovery, render_chat_panel
 from ui.panels.nav import (
     close_mobile_drawers,
+    dismiss_delete_chat_dialog,
     mount_pending_delete_chat_dialog,
     render_chat_actions_menu,
     render_nav_panel,
@@ -186,6 +187,7 @@ def _on_mobile_new_chat() -> None:
     Mirrors desktop ``_on_new_chat``: close drawers, route to Chat, toast that
     course materials are loading, then create without a nested full-app remount.
     """
+    dismiss_delete_chat_dialog()
     close_mobile_drawers()
     st.session_state.center_view = "chat"
     st.session_state.mobile_panel = "Chat"

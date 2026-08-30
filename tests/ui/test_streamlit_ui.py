@@ -1202,6 +1202,37 @@ def test_notebook_history_confirmed_delete_removes_the_selected_notebook():
     assert not app.exception
 
 
+def test_dismissed_delete_dialog_does_not_remount_and_new_chat_clears_pending():
+    """Esc/dismiss marker and New chat must not leave a sticky Delete chat dialog."""
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    thread_id = app.session_state["thread_id"]
+
+    app.session_state["pending_delete_chat_id"] = thread_id
+    app.session_state["_delete_chat_dialog_dismissed_id"] = thread_id
+    app.run()
+    assert not any(
+        (button.key or "").startswith("nav-delete-confirm")
+        or (button.key or "") == "nav-delete-cancel"
+        for button in app.button
+    )
+    assert "pending_delete_chat_id" not in app.session_state or not app.session_state[
+        "pending_delete_chat_id"
+    ]
+    assert not app.exception
+
+    app.session_state["pending_delete_chat_id"] = thread_id
+    if "_delete_chat_dialog_dismissed_id" in app.session_state:
+        del app.session_state["_delete_chat_dialog_dismissed_id"]
+    next(button for button in app.button if button.label == "New chat").click().run()
+    assert "pending_delete_chat_id" not in app.session_state or not app.session_state[
+        "pending_delete_chat_id"
+    ]
+    assert not any(
+        (button.key or "") == "nav-delete-confirm" for button in app.button
+    )
+    assert not app.exception
+
+
 def test_notebook_actions_offers_transcript_download():
     """Recent chat menus expose persisted transcript downloads."""
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()

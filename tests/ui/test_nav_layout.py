@@ -96,8 +96,20 @@ def test_nav_rail_exposes_new_search_library_and_recents_actions() -> None:
         assert "rerun_app()" not in callback_body
     assert 'if target == current:' in open_chat
     assert 'toast_course_materials_loading = True' in new_chat
+    assert "dismiss_delete_chat_dialog()" in open_search
+    assert "dismiss_delete_chat_dialog()" in toggle_library
+    assert "dismiss_delete_chat_dialog()" in open_chat
+    assert "dismiss_delete_chat_dialog()" in new_chat
     assert "pending_delete_chat_id" in open_delete
+    assert "_delete_chat_dialog_dismissed_id" in open_delete
     assert "close_menu_popover" in open_delete
+    dismiss_fn = nav.split("def dismiss_delete_chat_dialog", 1)[1].split(
+        "\n@st.dialog", 1
+    )[0]
+    assert "_delete_chat_dialog_dismissed_id" in dismiss_fn
+    mount_fn = nav.split("def mount_pending_delete_chat_dialog", 1)[1]
+    assert "_delete_chat_dialog_dismissed_id" in mount_fn
+    assert "pending == dismissed" in mount_fn
     # Rename apply and delete confirm still remount so titles / transcript stay consistent.
     assert "rerun_app()" in nav
     css = Path("ui/assets/styles/15-nav.css").read_text(encoding="utf-8")
@@ -231,4 +243,5 @@ def test_workspace_chrome_uses_on_click_without_extra_rerun() -> None:
         assert "rerun_app()" not in body
     mobile_new = workspace.split("def _on_mobile_new_chat", 1)[1].split("\ndef ", 1)[0]
     assert 'toast_course_materials_loading = True' in mobile_new
+    assert "dismiss_delete_chat_dialog()" in mobile_new
     assert "rerun_app" not in workspace

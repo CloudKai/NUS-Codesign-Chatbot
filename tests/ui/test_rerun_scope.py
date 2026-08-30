@@ -123,6 +123,10 @@ def test_sources_local_paths_use_fragment_rerun() -> None:
     assert "coach_turn_is_streaming()" in source
     assert "uploads_active = any(" in source
     assert "sync_future.done() and not uploads_active" in source
+    assert "def _consume_sources_sync_rerun_suppress(" in source
+    assert "def _sources_defer_stable_remount(" in source
+    assert "_suppress_sources_sync_rerun_for_thread" in source
+    assert "_sources_defer_stable_remount" in source
     polling = source.split("def _render_sources_panel_polling", 1)[1].split(
         "def _render_sources_panel_body", 1
     )[0]
@@ -130,6 +134,8 @@ def test_sources_local_paths_use_fragment_rerun() -> None:
     assert polling.index("if coach_turn_is_streaming():") < polling.index(
         "rerun_app()"
     )
+    assert "_consume_sources_sync_rerun_suppress(thread_id)" in polling
+    assert "_sources_defer_stable_remount(thread_id)" in polling
     stable = source.split("def _render_sources_panel_stable", 1)[1].split(
         "def _render_sources_panel_polling", 1
     )[0]
@@ -137,7 +143,26 @@ def test_sources_local_paths_use_fragment_rerun() -> None:
     assert stable.index("if coach_turn_is_streaming():") < stable.index("rerun_app()")
     assert "uploads_active = any(" in stable
     assert "uploads_active or not store.request_course_material_sync" in stable
+    assert "_consume_sources_sync_rerun_suppress(thread_id)" in stable
     assert "and not uploads_active" in polling
+    session = Path("ui/session.py").read_text(encoding="utf-8")
+    assert '_suppress_sources_sync_rerun_for_thread"] = thread_id' in session
+    chooser = source.split("def render_sources_panel", 1)[1].split(
+        "def _render_sources_panel_stable", 1
+    )[0]
+    assert "_sources_defer_stable_remount(thread_id)" in chooser
+
+
+def test_stage_review_attention_skips_app_rerun_while_streaming() -> None:
+    """Badge flips must not remount the workspace during an in-flight coach turn."""
+    source = Path(inspect.getfile(studio_module)).read_text(encoding="utf-8")
+    watch_block = source.split(
+        "def _watch_stage_review_attention_fragment", 1
+    )[1].split("def mount_stage_review_attention_watch", 1)[0]
+    assert "coach_turn_is_streaming()" in watch_block
+    assert watch_block.index("coach_turn_is_streaming()") < watch_block.index(
+        "rerun_app()"
+    )
 
 
 def test_completed_source_upload_does_not_request_fragment_rerun() -> None:
@@ -526,6 +551,7 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
     assert "_stage_review_poll_app_run" in watch_block
     assert "force_read" in watch_block
     assert "rerun_app()" in watch_block
+    assert "coach_turn_is_streaming()" in watch_block
     assert "not prev_attention and attention" in watch_block
     assert "prev_active and not active" in watch_block
     journey_block = source.split("def render_journey_track", 1)[1].split(

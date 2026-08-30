@@ -64,6 +64,7 @@ def _on_close_mobile_nav() -> None:
 
 def _on_open_search() -> None:
     """Route to Search and close drawers before ``center_view`` is read."""
+    dismiss_delete_chat_dialog()
     _finish_mobile_nav_destination()
     st.session_state.center_view = "search"
     st.session_state.pending_mobile_panel = "Chat"
@@ -71,6 +72,7 @@ def _on_open_search() -> None:
 
 def _on_toggle_library() -> None:
     """Toggle Library/Chat and close drawers before ``center_view`` is read."""
+    dismiss_delete_chat_dialog()
     _finish_mobile_nav_destination()
     library_on = st.session_state.get("center_view") == "library"
     st.session_state.center_view = "chat" if library_on else "library"
@@ -86,6 +88,7 @@ def _on_new_chat() -> None:
     ``new_notebook(should_rerun=False)`` skips that path (session init must not
     toast).
     """
+    dismiss_delete_chat_dialog()
     _finish_mobile_nav_destination()
     st.session_state.center_view = "chat"
     st.session_state.mobile_panel = "Chat"
@@ -106,6 +109,7 @@ def open_chat_destination(thread_id: str) -> None:
     Args:
         thread_id: Persisted notebook identifier to open.
     """
+    dismiss_delete_chat_dialog()
     _finish_mobile_nav_destination()
     st.session_state.center_view = "chat"
     st.session_state.mobile_panel = "Chat"
@@ -310,6 +314,7 @@ def _on_open_delete_chat(thread_id: str, menu_scope: str) -> None:
     target = str(thread_id or "").strip()
     if not target:
         return
+    st.session_state.pop("_delete_chat_dialog_dismissed_id", None)
     st.session_state.pending_delete_chat_id = target
     close_menu_popover(menu_scope, target)
 
@@ -395,8 +400,13 @@ def dismiss_delete_chat_dialog() -> None:
     """Clear pending delete when the dialog is closed via X / outside / Esc.
 
     Without this, clicking away leaves ``pending_delete_chat_id`` set and the
-    confirmation remounts on every later rerun (including New chat).
+    confirmation remounts on every later rerun (including New chat). Records the
+    dismissed id so ``mount_pending_delete_chat_dialog`` cannot re-arm the same
+    pending value if Streamlit still sees it in the same interaction cycle.
     """
+    pending = str(st.session_state.get("pending_delete_chat_id") or "").strip()
+    if pending:
+        st.session_state["_delete_chat_dialog_dismissed_id"] = pending
     st.session_state.pop("pending_delete_chat_id", None)
 
 
@@ -437,6 +447,18 @@ def confirm_delete_chat_dialog() -> None:
 
 
 def mount_pending_delete_chat_dialog() -> None:
-    """Open the delete confirmation dialog when Recents requested it."""
-    if st.session_state.get("pending_delete_chat_id"):
-        confirm_delete_chat_dialog()
+    """Open the delete confirmation dialog when Recents requested it.
+
+    Skips remount when the pending id was just dismissed (Esc/outside/Cancel)
+    so a stale ``pending_delete_chat_id`` cannot block New chat or Recents.
+    """
+    pending = str(st.session_state.get("pending_delete_chat_id") or "").strip()
+    if not pending:
+        return
+    dismissed = str(
+        st.session_state.get("_delete_chat_dialog_dismissed_id") or ""
+    ).strip()
+    if pending == dismissed:
+        st.session_state.pop("pending_delete_chat_id", None)
+        return
+    confirm_delete_chat_dialog()

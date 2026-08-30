@@ -427,6 +427,34 @@ def _render_source_sort_dropdown(thread_id: str) -> str:
     return str(st.session_state[sort_key])
 
 
+def _consume_sources_sync_rerun_suppress(thread_id: str) -> bool:
+    """Return True once when New chat asked to skip the sync remount for ``thread_id``.
+
+    Notebook create already triggered a full script remount. Course-material sync
+    finishing would otherwise call ``rerun_app()`` again (stable↔polling swap).
+    Consuming the flag here drops that second flash without blocking later
+    user-upload remounts. Arms ``_sources_defer_stable_remount`` so polling
+    ticks keep skipping until the next full-script paint chooses stable.
+    """
+    suppressed = str(
+        st.session_state.get("_suppress_sources_sync_rerun_for_thread") or ""
+    ).strip()
+    current = str(thread_id or "").strip()
+    if not suppressed or not current or suppressed != current:
+        return False
+    st.session_state.pop("_suppress_sources_sync_rerun_for_thread", None)
+    st.session_state["_sources_defer_stable_remount"] = current
+    return True
+
+
+def _sources_defer_stable_remount(thread_id: str) -> bool:
+    """True while a New-chat sync skip is waiting for the next full-script paint."""
+    deferred = str(
+        st.session_state.get("_sources_defer_stable_remount") or ""
+    ).strip()
+    return bool(deferred and deferred == str(thread_id or "").strip())
+
+
 def render_sources_panel() -> None:
     """Render the Sources library center destination.
 
@@ -442,6 +470,15 @@ def render_sources_panel() -> None:
     uploads_active = any(
         not job.future.done() for job in pending_source_uploads(thread_id)
     )
+    # Full-script paint after a suppressed sync-complete: drop the 1s timer.
+    if (
+        _sources_defer_stable_remount(thread_id)
+        and sync_future.done()
+        and not uploads_active
+    ):
+        st.session_state.pop("_sources_defer_stable_remount", None)
+        _render_sources_panel_stable()
+        return
     if coach_turn_is_streaming() or (sync_future.done() and not uploads_active):
         _render_sources_panel_stable()
     else:
@@ -459,7 +496,13 @@ def _render_sources_panel_stable() -> None:
     if uploads_active or not store.request_course_material_sync(thread_id).done():
         # The enqueue callback used a fragment rerun to show its pending card.
         # One guarded app rerun remounts the timed polling fragment without
-        # disrupting a simultaneous Coach stream.
+        # disrupting a simultaneous Coach stream. Skip once after New chat —
+        # that click already remounted; polling starts on the next natural paint.
+        if uploads_active:
+            rerun_app()
+            return
+        if _consume_sources_sync_rerun_suppress(thread_id):
+            return
         rerun_app()
 
 
@@ -473,6 +516,11 @@ def _render_sources_panel_polling() -> None:
     uploads_active = any(not job.future.done() for job in pending_source_uploads(thread_id))
     if store.request_course_material_sync(thread_id).done() and not uploads_active:
         # Remount the stable fragment so the browser drops the 1s timer.
+        # After New chat, skip remounts until the next full-script paint.
+        if _consume_sources_sync_rerun_suppress(thread_id):
+            return
+        if _sources_defer_stable_remount(thread_id):
+            return
         rerun_app()
 
 
