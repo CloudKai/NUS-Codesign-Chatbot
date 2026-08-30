@@ -36,6 +36,7 @@ from ui.panels.nav import (
     render_nav_panel,
 )
 from ui.panels.search import render_search_panel
+from ui.profile import mount_pending_logout_dialog
 from ui.runtime import get_journey_stage_reviews, log_ui_timing, store
 from ui.session import new_notebook, notebook_switch_locked
 from ui.sources import render_sources_panel
@@ -449,3 +450,4 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
         sync_workspace_column_resize()
 
     mount_pending_delete_chat_dialog()
+    mount_pending_logout_dialog()

@@ -79,6 +79,7 @@ def initialize_session() -> None:
         "pending_notebook_actions": None,
         "reopen_notebooks_dialog": False,
         "pending_delete_chat_id": None,
+        "pending_logout_confirm": False,
         "mobile_panel": "Chat",
         "mobile_nav_open": False,
         "mobile_studio_open": False,

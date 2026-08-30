@@ -166,7 +166,16 @@
     }
 
     [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .cd-profile-logout-link {
+    .st-key-profile-logout div[data-testid="stButton"],
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile-logout [data-testid="stBaseButton-secondary"] {
+        width:100% !important;
+    }
+
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile-logout button,
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile-logout [data-testid="stBaseButton-secondary"] {
         display:flex !important;
         align-items:center !important;
         justify-content:center !important;
@@ -176,22 +185,23 @@
         padding:.55rem .9rem !important;
         border-radius:.55rem !important;
         border:1px solid var(--cd-border) !important;
-        /* Use real theme tokens (--cd-surface-2 does not exist; light fallbacks
-           left dark-mode text on a pale background). */
         background:var(--cd-subtle) !important;
         color:var(--cd-text) !important;
         -webkit-text-fill-color:var(--cd-text) !important;
         font-size:.9rem !important;
         font-weight:600 !important;
         line-height:1.2 !important;
-        text-decoration:none !important;
         cursor:pointer !important;
     }
 
     [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .cd-profile-logout-link:hover,
+    .st-key-profile-logout button:hover,
     [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
-    .cd-profile-logout-link:focus-visible {
+    .st-key-profile-logout button:focus-visible,
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile-logout [data-testid="stBaseButton-secondary"]:hover,
+    [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+    .st-key-profile-logout [data-testid="stBaseButton-secondary"]:focus-visible {
         background:var(--cd-panel) !important;
         border-color:var(--cd-accent) !important;
         color:var(--cd-text) !important;
@@ -331,7 +341,7 @@
     [data-testid="stCaptionContainer"],
     .st-key-profile_coaching_style [role="radiogroup"]
     [data-testid="stCaptionContainer"] {
-        margin:.12rem 0 0 !important;
+        margin:.04rem 0 0 !important;
         padding-left:0 !important;
         max-width:100% !important;
         min-width:0 !important;
@@ -350,20 +360,9 @@
         font-size:.68rem !important;
         font-weight:450 !important;
         line-height:1.35 !important;
-        white-space:pre-line !important;
+        white-space:normal !important;
         overflow-wrap:anywhere !important;
         word-break:break-word !important;
-    }
-
-    .st-key-profile_coaching_style [data-testid="stRadio"]
-    [data-testid="stCaptionContainer"] p::first-line,
-    .st-key-profile_coaching_style [data-testid="stRadioOption"]
-    [data-testid="stCaptionContainer"] p::first-line,
-    .st-key-profile_coaching_style [role="radiogroup"]
-    [data-testid="stCaptionContainer"] p::first-line {
-        color:var(--cd-text) !important;
-        -webkit-text-fill-color:var(--cd-text) !important;
-        font-weight:650 !important;
     }
 
     .st-key-profile_coaching_style [data-testid="stRadioOption"]:hover,
@@ -399,11 +398,7 @@
     .st-key-profile_coaching_style [role="radiogroup"]
     > [role="radio"][aria-checked="true"] p,
     .st-key-profile_coaching_style [role="radiogroup"]
-    > [role="radio"][aria-pressed="true"] p,
-    .st-key-profile_coaching_style [data-testid="stRadioOption"][data-selected]
-    [data-testid="stCaptionContainer"] p::first-line,
-    .st-key-profile_coaching_style [data-testid="stRadioOption"]:has(input:checked)
-    [data-testid="stCaptionContainer"] p::first-line {
+    > [role="radio"][aria-pressed="true"] p {
         color:var(--cd-accent) !important;
         -webkit-text-fill-color:var(--cd-accent) !important;
         font-weight:700 !important;

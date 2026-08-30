@@ -10,9 +10,10 @@ import streamlit.components.v1 as components
 
 from backend.student_journey import RESPONSE_DETAILS, normalize_journey
 
-from ui.auth_gate import app_logout_url, logout_user
+from ui.auth_gate import logout_user
 from ui.components import profile_initial
 from ui.constants import APPEARANCE_MODES
+from ui.menu_popovers import close_menu_popover, menu_popover_widget_key
 from ui.runtime import store
 from ui.session import save_journey
 from ui.settings import persist_appearance
@@ -26,14 +27,14 @@ COACHING_STYLE_VALUES = {
     label: detail for detail, label in COACHING_STYLE_LABELS.items()
 }
 COACHING_STYLE_COPY = {
-    "short": {
-        "tagline": "Keep me moving",
-        "explanation": "Lighter coaching through the Thinking Path; progress once your thinking is workable.",
-    },
-    "long": {
-        "tagline": "Check the idea I have",
-        "explanation": "Bring what you already have to this stage, get a check, then Next. The coach will not hold you to improve structure.",
-    },
+    "short": (
+        "Lighter coaching through the Thinking Path; progress once your "
+        "thinking is workable."
+    ),
+    "long": (
+        "Bring what you already have to this stage, get a check, then Next. "
+        "The coach will not hold you to improve structure."
+    ),
 }
 
 
@@ -109,9 +110,8 @@ def _persist_coaching_style() -> None:
 
 
 def _coaching_style_caption(detail: str) -> str:
-    """Return the visible tagline and explanation for one persisted detail."""
-    copy = COACHING_STYLE_COPY[detail]
-    return f"{copy['tagline']}\n{copy['explanation']}"
+    """Return the short explanation shown under one coaching-style option."""
+    return COACHING_STYLE_COPY[detail]
 
 
 @st.fragment
@@ -155,39 +155,73 @@ def _render_profile_menu_body(*, display_name: str, collapsed: bool) -> None:
         )
         _render_coaching_style_fragment()
         st.divider()
-        # --- Logout (same-tab) ---
-        # Prefer a real <a target="_self"> to the local API logout callback.
-        # st.link_button opens a new tab; components.html top-navigation is
-        # sandboxed and was leaving the authenticated session stuck.
-        logout_url = app_logout_url()
         with st.container(key="profile-logout"):
-            if logout_url:
-                st.markdown(
-                    '<a class="cd-profile-logout-link" '
-                    f'href="{escape(logout_url, quote=True)}" '
-                    'target="_self" rel="noopener">Logout</a>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                if st.button(
-                    "Logout",
-                    key="profile-logout-fallback",
-                    use_container_width=True,
-                    type="secondary",
-                ):
-                    logout_user()
+            st.button(
+                "Logout",
+                key="profile-logout-button",
+                use_container_width=True,
+                type="secondary",
+                on_click=_on_open_logout_confirm,
+            )
+
+
+def _on_open_logout_confirm() -> None:
+    """Arm logout confirmation and close Settings so only the dialog remains."""
+    st.session_state.pending_logout_confirm = True
+    close_menu_popover("profile-settings")
+
+
+def dismiss_logout_dialog() -> None:
+    """Clear pending logout when the dialog is closed via X / outside / Esc."""
+    st.session_state.pop("pending_logout_confirm", None)
+
+
+@st.dialog("Log out?", on_dismiss=dismiss_logout_dialog)
+def confirm_logout_dialog() -> None:
+    """Confirm sign-out from the profile settings menu."""
+    if not st.session_state.get("pending_logout_confirm"):
+        return
+    st.write(
+        "You will be signed out of this session on this device. "
+        "You can sign in again anytime."
+    )
+    cancel_column, confirm_column = st.columns(2)
+    if cancel_column.button(
+        "Cancel",
+        use_container_width=True,
+        key="profile-logout-cancel",
+    ):
+        dismiss_logout_dialog()
+        st.rerun()
+    if confirm_column.button(
+        "Logout",
+        type="primary",
+        use_container_width=True,
+        key="profile-logout-confirm",
+    ):
+        dismiss_logout_dialog()
+        logout_user()
+
+
+def mount_pending_logout_dialog() -> None:
+    """Open the logout confirmation when Settings requested it."""
+    if not st.session_state.get("pending_logout_confirm"):
+        return
+    confirm_logout_dialog()
 
 
 def render_profile_menu(*, collapsed: bool = False) -> None:
     """Render the sidebar identity row; only the settings icon opens the menu."""
     display_name = str(st.session_state.get("display_name") or "Student")
     initials = profile_initial(display_name)
+    settings_popover_key = menu_popover_widget_key("profile-settings")
     with st.container(key="sidebar_profile"):
         if collapsed:
             with st.popover(
                 ":material/settings:",
                 type="tertiary",
                 help="Settings",
+                key=settings_popover_key,
             ):
                 _render_profile_menu_body(
                     display_name=display_name,
@@ -212,6 +246,7 @@ def render_profile_menu(*, collapsed: bool = False) -> None:
                     ":material/settings:",
                     type="tertiary",
                     help="Settings",
+                    key=settings_popover_key,
                 ):
                     _render_profile_menu_body(
                         display_name=display_name,

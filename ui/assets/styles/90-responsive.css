@@ -41,6 +41,37 @@
     }
 
     @media (max-width:1050px) {
+        /* iOS Safari auto-zooms focused fields under 16px, then leaves the page
+           scrolled/"too high" after the keyboard closes. Keep editable controls
+           at the 16px floor so the app scale stays stable while typing. */
+        input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
+            [type="file"]
+        ):not([type="hidden"]):not([type="button"]):not([type="submit"]):not(
+            [type="reset"]
+        ):not([type="image"]),
+        textarea,
+        [contenteditable="true"],
+        [data-testid="stChatInput"] textarea,
+        [data-testid="stChatInputTextArea"],
+        [data-testid="stTextInput"] input,
+        [data-testid="stTextInputRootElement"] input,
+        [data-baseweb="input"] input,
+        [data-baseweb="textarea"] textarea,
+        [data-testid="stPopoverBody"] input,
+        [data-testid="stPopoverBody"] textarea,
+        [data-testid="stPopoverBody"] [data-testid="stTextInput"] input,
+        [data-testid="stPopoverBody"] [data-testid="stTextInputRootElement"] input,
+        [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+        [data-testid="stTextInput"] input,
+        [data-testid="stPopoverBody"]:has(.st-key-profile_menu_root)
+        [data-testid="stTextInputRootElement"] input,
+        [role="dialog"] input,
+        [role="dialog"] textarea,
+        [data-testid="stDialog"] input,
+        [data-testid="stDialog"] textarea {
+            font-size:16px !important;
+        }
+
         .block-container {
             padding:0 .7rem 0;
             background:var(--cd-bg);
@@ -475,7 +506,7 @@
             row-gap:.35rem !important;
         }
 
-        /* Rename field + Apply share one full-width row matching Download/Delete. */
+        /* Chat Setting rename: plain textbox; Enter submits a hidden Apply control. */
         [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
         [class*="st-key-mobile_rename_"],
         [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
@@ -498,10 +529,10 @@
         [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
         [class*="st-key-mobile_rename_"] form
         > [data-testid="stVerticalBlock"] {
-            display:grid !important;
-            grid-template-columns:minmax(0,1fr) auto !important;
-            align-items:end !important;
-            gap:.4rem !important;
+            display:flex !important;
+            flex-direction:column !important;
+            align-items:stretch !important;
+            gap:0 !important;
             row-gap:0 !important;
             width:100% !important;
             max-width:100% !important;
@@ -544,34 +575,23 @@
             box-sizing:border-box !important;
         }
 
+        /* Hide Apply submit only — never the text-input ElementContainer. */
         [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
         [class*="st-key-mobile_rename_"]
-        [data-testid="stElementContainer"]:has([data-testid="stFormSubmitButton"]),
+        [data-testid="stElementContainer"]:has(> [data-testid="stFormSubmitButton"]),
         [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
         [class*="st-key-mobile_rename_"]
         [data-testid="stElementContainer"]:has(> div > [data-testid="stFormSubmitButton"]),
         [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
         [class*="st-key-mobile_rename_"] [data-testid="stFormSubmitButton"] {
-            display:flex !important;
-            align-items:center !important;
-            justify-content:center !important;
-            width:auto !important;
-            min-width:0 !important;
-            height:auto !important;
+            display:none !important;
+            height:0 !important;
+            min-height:0 !important;
+            max-height:0 !important;
             margin:0 !important;
             padding:0 !important;
-            flex:0 0 auto !important;
-        }
-
-        [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
-        [class*="st-key-mobile_rename_"] [data-testid="stFormSubmitButton"] button {
-            width:auto !important;
-            min-width:0 !important;
-            height:2.5rem !important;
-            min-height:2.5rem !important;
-            padding:0 .85rem !important;
-            white-space:nowrap !important;
-            border-radius:.7rem !important;
+            overflow:hidden !important;
+            border:0 !important;
         }
 
         [data-testid="stPopoverBody"]:has([class*="st-key-mobile_rename_"])
@@ -913,6 +933,7 @@
             max-height:calc(1em * 1.45 * 5) !important;
             field-sizing:content;
             padding:.2rem 0 .3rem !important;
+            font-size:16px !important;
         }
     }
 

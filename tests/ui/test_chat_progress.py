@@ -568,7 +568,7 @@ def test_deep_review_progress_caption_refreshes_after_qualifying_turn(
     button = _deep_review_button(app)
     assert button.disabled is True
     captions = _caption_text(app)
-    assert "Deep Analysis PDF unlocks when the Thinking Path including Reflection" in captions
+    assert "Deep Analysis PDF unlocks when Thinking Path is completed." in captions
 
 
 def test_ineligible_deep_review_click_does_not_start(monkeypatch) -> None:

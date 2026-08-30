@@ -519,9 +519,8 @@ def test_streamlit_notebook_workspace_smoke():
     assert "cd-profile-menu" in rendered
     assert "cd-profile-help" not in rendered
     assert "Will input myself later" not in rendered
-    assert "cd-profile-logout-link" in rendered or any(
-        button.label == "Logout" for button in app.button
-    )
+    assert any((button.key or "") == "profile-logout-button" for button in app.button)
+    assert "cd-profile-logout-link" not in rendered
     assert "stTooltipHoverTarget" in rendered
     assert not any(
         (button.key or "").startswith("composer-model-") for button in app.button
@@ -739,10 +738,10 @@ def test_coaching_style_keeps_existing_short_long_mapping():
     assert COACHING_STYLE_VALUES["Free"] == "long"
     assert "quick" not in COACHING_STYLE_VALUES.values()
     assert "strict" not in COACHING_STYLE_VALUES.values()
-    assert "Keep me moving" in _coaching_style_caption("short")
-    assert COACHING_STYLE_COPY["short"]["explanation"] in _coaching_style_caption("short")
-    assert "Check the idea I have" in _coaching_style_caption("long")
-    assert COACHING_STYLE_COPY["long"]["explanation"] in _coaching_style_caption("long")
+    assert _coaching_style_caption("short") == COACHING_STYLE_COPY["short"]
+    assert _coaching_style_caption("long") == COACHING_STYLE_COPY["long"]
+    assert "Keep me moving" not in _coaching_style_caption("short")
+    assert "Check the idea I have" not in _coaching_style_caption("long")
     persist_source = inspect.getsource(_persist_coaching_style)
     select_source = inspect.getsource(_select_coaching_style)
     assert "COACHING_STYLE_VALUES" in persist_source
@@ -791,10 +790,10 @@ def test_theme_coaching_style_and_journey_has_no_manual_progression_control():
     assert coaching_style.options == ["Guide", "Free"]
     assert coaching_style.value == "Guide"
     visible_copy = _visible_profile_copy(app)
-    assert COACHING_STYLE_COPY["short"]["tagline"] in visible_copy
-    assert COACHING_STYLE_COPY["short"]["explanation"] in visible_copy
-    assert COACHING_STYLE_COPY["long"]["tagline"] in visible_copy
-    assert COACHING_STYLE_COPY["long"]["explanation"] in visible_copy
+    assert COACHING_STYLE_COPY["short"] in visible_copy
+    assert COACHING_STYLE_COPY["long"] in visible_copy
+    assert "Keep me moving" not in visible_copy
+    assert "Check the idea I have" not in visible_copy
     coaching_style.set_value("Free").run()
     assert app.session_state["response_detail"] == "long"
     assert app.session_state["learning_journey"]["response_detail"] == "long"
@@ -1225,6 +1224,37 @@ def test_dismissed_delete_dialog_does_not_remount_and_new_chat_clears_pending():
     ]
     assert not any(
         (button.key or "") == "nav-delete-confirm" for button in app.button
+    )
+    assert not app.exception
+
+
+def test_logout_requires_confirmation_dialog():
+    """Settings Logout opens a Cancel/Logout dialog instead of signing out immediately."""
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    logout = next(
+        button
+        for button in app.button
+        if (button.key or "") == "profile-logout-button"
+    )
+    logout.click().run()
+    assert app.session_state["pending_logout_confirm"] is True
+    assert "_menu_popover_epoch_profile-settings" in app.session_state
+    assert int(app.session_state["_menu_popover_epoch_profile-settings"]) >= 1
+    assert any((button.key or "") == "profile-logout-cancel" for button in app.button)
+    assert any((button.key or "") == "profile-logout-confirm" for button in app.button)
+
+    cancel = next(
+        button
+        for button in app.button
+        if (button.key or "") == "profile-logout-cancel"
+    )
+    cancel.click().run()
+    assert (
+        "pending_logout_confirm" not in app.session_state
+        or not app.session_state["pending_logout_confirm"]
+    )
+    assert not any(
+        (button.key or "") == "profile-logout-confirm" for button in app.button
     )
     assert not app.exception
 

@@ -495,21 +495,13 @@ def test_entrypoint_consumes_auth_refresh_marker_before_auth_branch():
     )
 
 
-def test_authenticated_users_see_full_application(logged_in_user, monkeypatch):
-    from ui import profile as profile_ui
-
-    monkeypatch.setattr(
-        profile_ui,
-        "app_logout_url",
-        lambda: "http://127.0.0.1:8000/api/v1/auth/logout",
-    )
+def test_authenticated_users_see_full_application(logged_in_user):
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
     assert not app.exception
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "st-key-chat_composer" in rendered or len(app.chat_input) == 1
-    assert 'class="cd-profile-logout-link"' in rendered
-    assert 'href="http://127.0.0.1:8000/api/v1/auth/logout"' in rendered
-    assert 'target="_self"' in rendered
+    assert any((button.key or "") == "profile-logout-button" for button in app.button)
+    assert 'class="cd-profile-logout-link"' not in rendered
     assert app.session_state["display_name"] == "Alex"
     leaked = (
         "/api/v1/auth/me",

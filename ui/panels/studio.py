@@ -132,8 +132,7 @@ def deep_review_control_view(
     )
     disabled = (not eligible) or running
     locked_caption = (
-        "Deep Analysis PDF unlocks when the Thinking Path including Reflection "
-        "is complete."
+        "Deep Analysis PDF unlocks when Thinking Path is completed."
     )
     if running:
         return DeepReviewControlView(

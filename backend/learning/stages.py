@@ -35,7 +35,7 @@ THINKING_STAGES: tuple[ThinkingStage, ...] = (
         "design_specification",
         "Design specification",
         "Specification",
-        "Turn the selected concept into explicit requirements, behavior, and constraints.",
+        "Make the selected design's requirements, behavior, and constraints explicit.",
         "What must the design do, under which constraints, and how will success be judged?",
     ),
     ThinkingStage(
@@ -49,7 +49,7 @@ THINKING_STAGES: tuple[ThinkingStage, ...] = (
         "reflection",
         "Reflection",
         "Reflection",
-        "Evaluate and revise the design reasoning, including limits and next steps.",
+        "Evaluate and revise the design reasoning, limits, and next steps.",
         "How has your design reasoning changed, and what remains uncertain?",
     ),
 )

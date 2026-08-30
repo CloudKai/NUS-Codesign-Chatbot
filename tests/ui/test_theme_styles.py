@@ -22,6 +22,26 @@ def test_style_partials_exist_in_fixed_manifest_order() -> None:
         assert path.is_file(), f"missing stylesheet partial: {path}"
 
 
+def test_mobile_viewport_lock_prevents_ios_input_zoom() -> None:
+    """Phone typing must not zoom the shell; inputs stay at the 16px iOS floor."""
+    from ui import theme as theme_module
+
+    theme_source = Path(theme_module.__file__).read_text(encoding="utf-8")
+    assert "def inject_mobile_viewport_lock" in theme_source
+    assert "maximum-scale=1" in theme_source
+    assert "inject_mobile_viewport_lock()" in theme_source.split(
+        "def inject_template_css", 1
+    )[1].split("def render_theme_css", 1)[0]
+
+    responsive = Path(_STYLES_DIR / "90-responsive.css").read_text(encoding="utf-8")
+    mobile = responsive.split("@media (max-width:1050px)", 1)[1].split(
+        "/* Mid-width desktop", 1
+    )[0]
+    assert "font-size:16px !important" in mobile
+    assert '[data-testid="stChatInput"] textarea' in mobile
+    assert '[data-testid="stPopoverBody"] input' in mobile
+
+
 def _css_rule_body(css: str, marker: str) -> str:
     """Return the first declaration block that follows ``marker``."""
     start = css.index(marker)
@@ -127,6 +147,16 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     assert f"{stage_columns}:nth-child(2)" in studio_css
     assert "flex:1 1 0 !important" in studio_css
     assert "max-width:100% !important" in studio_css
+    # Outer icon/copy row also :has(short-label + toggle) via nesting; never force
+    # every direct stColumn under that match to flex:0 0 auto (clips stage blurbs).
+    assert (
+        ':has(.journey-short-label):has(\n'
+        '        [class*="st-key-journey-toggle-"]\n'
+        '    ):not(:has([class*="st-key-journey-select-"]))\n'
+        '    > [data-testid="stColumn"] {\n'
+        '        flex:0 0 auto !important;'
+        not in studio_css
+    )
     stage_row = (
         '[class*="st-key-journey_stage_"] > [data-testid="stLayoutWrapper"]\n'
         '    > [data-testid="stHorizontalBlock"] {\n'
@@ -186,9 +216,10 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     assert "[data-selected]" in profile_css
     assert ":has(input:checked)" in profile_css
     assert "clip:rect(0,0,0,0)" in profile_css
-    assert "white-space:pre-line" in profile_css
+    assert "white-space:normal !important" in profile_css
     assert "overflow-wrap:anywhere" in profile_css
-    assert "p::first-line" in profile_css
+    assert "p::first-line" not in profile_css
+    assert "white-space:pre-line" not in profile_css
     assert "background:var(--cd-accent)" in profile_css
     assert "background:var(--cd-accent-soft)" in profile_css
 

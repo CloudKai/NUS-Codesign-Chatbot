@@ -65,6 +65,10 @@
         padding:.62rem .68rem .62rem;
         border:1px solid var(--cd-border);
         background:var(--cd-surface-muted);
+        box-sizing:border-box;
+        max-width:100%;
+        min-width:0;
+        overflow-x:clip;
     }
 
     [class*="st-key-journey_stage_"]:has(.journey-state.available):not(:has(.journey-state.preview-open)) {
@@ -75,25 +79,11 @@
         opacity:.52;
     }
 
-    [class*="st-key-journey_stage_"] [data-testid="stHorizontalBlock"]:has(.journey-short-label):has(
-        [class*="st-key-journey-toggle-"]
-    ):not(:has([class*="st-key-journey-select-"])) {
-        width:100% !important;
-        max-width:100%;
-        align-items:center !important;
-        justify-content:flex-start !important;
-        gap:.08rem;
-    }
-
-    [class*="st-key-journey_stage_"] [data-testid="stHorizontalBlock"]:has(.journey-short-label):has(
-        [class*="st-key-journey-toggle-"]
-    ):not(:has([class*="st-key-journey-select-"]))
-    > [data-testid="stColumn"] {
-        flex:0 0 auto !important;
-        width:auto !important;
-        min-width:0 !important;
-        align-self:center !important;
-    }
+    /* Title+chevron sizing lives under journey_header_* only. Do not target any
+       HorizontalBlock that merely :has(.journey-short-label + toggle) — that
+       also matches the outer icon/copy row (label/toggle are nested) and then
+       flex:0 0 auto wins over the copy column's flex:1 1 0, so stage blurbs
+       overflow the studio panel. */
 
     [class*="st-key-journey_header_"] [data-testid="stHorizontalBlock"] {
         width:100% !important;
@@ -177,13 +167,18 @@
         white-space:normal;
     }
 
-    /* Expanded preview: title, detail, then CTA in document order. */
+    /* Expanded preview: title, detail, then CTA in document order.
+       Stretch the copy column so stage blurbs wrap inside the card; flex-start
+       left detail text at intrinsic width and studio_scroll overflow-x clipped it. */
     [class*="st-key-journey_stage_"]:has(.journey-state.preview-open)
     [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child
     > [data-testid="stVerticalBlock"] {
         display:flex !important;
         flex-direction:column !important;
-        align-items:flex-start !important;
+        align-items:stretch !important;
+        min-width:0 !important;
+        max-width:100% !important;
+        width:100% !important;
     }
 
     [class*="st-key-journey_stage_"]:has(.journey-state.preview-open)
@@ -194,6 +189,19 @@
         margin-top:.28rem !important;
         margin-left:0 !important;
         width:auto !important;
+    }
+
+    [class*="st-key-journey_stage_"]:has(.journey-state.preview-open)
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child
+    > [data-testid="stVerticalBlock"]
+    > [data-testid="stLayoutWrapper"]:has(.journey-stage-detail),
+    [class*="st-key-journey_stage_"]:has(.journey-state.preview-open)
+    [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child
+    > [data-testid="stVerticalBlock"]
+    > [data-testid="stElementContainer"]:has(.journey-stage-detail) {
+        min-width:0 !important;
+        max-width:100% !important;
+        width:100% !important;
     }
 
     @container journey-stage (max-width:28rem) {
@@ -370,6 +378,15 @@
     [class*="st-key-journey_stage_"] [data-testid="stMarkdownContainer"] {
         margin:0;
         text-align:left;
+        min-width:0;
+        max-width:100%;
+    }
+
+    [class*="st-key-journey_stage_"] [data-testid="stMarkdownContainer"]:has(
+        .journey-stage-detail
+    ) {
+        width:100%;
+        overflow-wrap:anywhere;
     }
 
     [class*="st-key-journey_stage_"] [data-testid="stElementContainer"] {
@@ -490,6 +507,9 @@
         box-sizing:border-box;
         margin:.32rem 0 0;
         padding-left:0;
+        min-width:0;
+        max-width:100%;
+        width:100%;
     }
 
     .journey-stage-detail strong {
@@ -499,13 +519,21 @@
         font-size:.86rem;
         font-weight:700;
         line-height:1.25;
+        overflow-wrap:anywhere;
+        word-break:normal;
+        white-space:normal;
     }
 
     .journey-stage-detail span {
         display:block;
+        min-width:0;
+        max-width:100%;
         color:var(--cd-muted);
         font-size:.74rem;
         line-height:1.48;
+        overflow-wrap:anywhere;
+        word-break:normal;
+        white-space:normal;
     }
 
     [class*="st-key-journey-suggestions-"] {

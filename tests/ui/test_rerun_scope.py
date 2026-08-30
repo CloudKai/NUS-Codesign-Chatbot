@@ -717,5 +717,7 @@ def test_select_menus_close_after_pick() -> None:
     profile = Path("ui/profile.py").read_text(encoding="utf-8")
     sources = Path(inspect.getfile(sources_module)).read_text(encoding="utf-8")
     assert 'close_menu_popover("profile-language")' not in profile
+    assert 'close_menu_popover("profile-settings")' in profile
+    assert 'menu_popover_widget_key("profile-settings")' in profile
     assert 'close_menu_popover("source-sort", thread_id)' in sources
     assert 'menu_popover_widget_key("source-sort", thread_id)' in sources

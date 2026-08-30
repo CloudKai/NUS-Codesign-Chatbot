@@ -71,9 +71,44 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+def inject_mobile_viewport_lock() -> None:
+    """Keep phone browsers from zooming the app shell when focusing text fields.
+
+    iOS Safari zooms pages when a focused control is under 16px. Combined with
+    the mobile 16px input floor in ``90-responsive.css``, locking
+    ``maximum-scale=1`` keeps the visual viewport stable after the keyboard
+    closes (avoids the page ending up scrolled/"too high").
+    """
+    import streamlit.components.v1 as components
+
+    components.html(
+        """
+<script>
+(() => {
+  const doc = window.parent.document;
+  const desired =
+    "width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover";
+  let meta = doc.querySelector('meta[name="viewport"]');
+  if (!meta) {
+    meta = doc.createElement("meta");
+    meta.setAttribute("name", "viewport");
+    (doc.head || doc.documentElement).appendChild(meta);
+  }
+  if (meta.getAttribute("content") !== desired) {
+    meta.setAttribute("content", desired);
+  }
+})();
+</script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
 def inject_template_css() -> None:
     """Inject the active template stylesheet into the Streamlit page."""
     st.markdown(_build_template_ui_css(), unsafe_allow_html=True)
+    inject_mobile_viewport_lock()
 
 
 def render_theme_css() -> None:

@@ -326,6 +326,16 @@ def test_narrow_chat_feed_owns_touch_scroll_without_changing_textarea_ownership(
     assert "max-height:calc(1em * 1.45 * 5) !important" in composer_textarea
     assert "overflow-y:auto !important" in composer_textarea
 
+    assert "font-size:16px !important" in mobile_tablet
+    assert (
+        '[data-testid="stChatInput"] textarea' in mobile_tablet
+        or ".st-key-chat_composer [data-testid=\"stChatInput\"] textarea" in mobile_tablet
+    )
+    mobile_composer = mobile_tablet.split(
+        ".st-key-chat_composer [data-testid=\"stChatInput\"] textarea,", 1
+    )[1].split("}", 1)[0]
+    assert "font-size:16px !important" in mobile_composer
+
     assert ".cd-chat-scroll-down" in chat
     assert "opacity:0" in chat.split(".cd-chat-scroll-down {", 1)[1].split("}", 1)[0]
     assert "pointer-events:none" in chat.split(".cd-chat-scroll-down {", 1)[1].split(
