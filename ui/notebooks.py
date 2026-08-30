@@ -19,6 +19,7 @@ from backend.student_journey import (
 )
 
 from ui.components import empty_state_html
+from ui.panels.nav import render_transcript_download_control
 from ui.runtime import rerun_app, store
 from ui.rename import (
     render_enter_to_apply_rename,
@@ -299,22 +300,12 @@ def _render_notebook_actions_panel(thread_id: str) -> bool:
         )
 
         with st.container(key="notebook_action_export"):
-            try:
-                transcript = store.download_transcript(str(thread_id))
-            except ValueError:
-                transcript = None
-            if transcript is not None:
-                st.download_button(
-                    "Download transcript",
-                    data=transcript.data,
-                    file_name=transcript.filename,
-                    mime="text/plain",
-                    key=f"download-transcript-{thread_id}",
-                    use_container_width=True,
-                    type="secondary",
-                    icon=":material/download:",
-                    help="Save this notebook's chat from persisted messages",
-                )
+            render_transcript_download_control(
+                str(thread_id),
+                key_prefix="notebook-actions",
+                button_type="secondary",
+                help_text="Save this notebook's chat from persisted messages",
+            )
 
         with st.container(key="notebook_action_danger"):
             st.markdown("#### Delete notebook")

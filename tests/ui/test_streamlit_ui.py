@@ -1234,17 +1234,39 @@ def test_dismissed_delete_dialog_does_not_remount_and_new_chat_clears_pending():
 
 
 def test_notebook_actions_offers_transcript_download():
-    """Recent chat menus expose persisted transcript downloads."""
+    """Chat menus expose on-click transcript prepare, not paint-time prefetch."""
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
-    download = next(
-        control
-        for control in app.download_button
-        if (control.key or "").startswith(
-            ("nav-chat-download-transcript-", "mobile-chat-download-transcript-")
+    prepare = next(
+        button
+        for button in app.button
+        if (button.key or "").startswith(
+            ("nav-chat-prepare-transcript-", "mobile-chat-prepare-transcript-")
         )
     )
-    assert "transcript" in str(download.help).lower()
+    assert "transcript" in str(prepare.help).lower()
+    assert not any(
+        (control.key or "").startswith(
+            ("nav-chat-save-transcript-", "mobile-chat-save-transcript-")
+        )
+        for control in app.download_button
+    )
     assert not app.exception
+
+
+def test_transcript_download_is_prepared_on_click_only() -> None:
+    """Recents must not call download_transcript while painting closed menus."""
+    nav = Path("ui/panels/nav.py").read_text(encoding="utf-8")
+    assert "def prepare_transcript_export(" in nav
+    assert "def render_transcript_download_control(" in nav
+    assert "on_click=prepare_transcript_export" in nav
+    menu = nav.split("def render_chat_actions_menu", 1)[1].split(
+        "def _render_recent_menu", 1
+    )[0]
+    assert "store.download_transcript(" not in menu
+    assert "render_transcript_download_control(" in menu
+    notebooks = Path("ui/notebooks.py").read_text(encoding="utf-8")
+    assert "render_transcript_download_control(" in notebooks
+    assert "store.download_transcript(" not in notebooks
 
 
 def test_legacy_chat_turn_does_not_move_the_learning_stage_without_confirmation():

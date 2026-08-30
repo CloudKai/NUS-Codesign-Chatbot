@@ -283,9 +283,14 @@ def test_mobile_more_menu_has_only_chat_actions_and_analytics_is_dedicated() -> 
     )[0]
     assert "Rename" in actions
     assert "Chat Setting" in actions
-    assert "Download transcript" in actions
+    assert "render_transcript_download_control(" in actions
+    assert "store.download_transcript(" not in actions
+    assert "Download transcript" in nav.split("def render_transcript_download_control", 1)[1].split(
+        "def render_chat_actions_menu", 1
+    )[0]
     assert "Delete" in actions
     assert "Thinking Path" not in actions
+    assert "clear_transcript_export_cache" in workspace
 
 
 def test_mobile_drawer_css_contract() -> None:

@@ -37,6 +37,18 @@ def test_nav_rail_exposes_new_search_library_and_recents_actions() -> None:
     assert "Recents" in nav
     assert "Rename" in nav
     assert "Download transcript" in nav
+    assert "Save transcript" in nav
+    assert "prepare_transcript_export" in nav
+    assert "on_click=prepare_transcript_export" in nav
+    # Must not prefetch transcript bytes while painting every Recents row.
+    actions = nav.split("def render_chat_actions_menu", 1)[1].split(
+        "def _render_recent_menu", 1
+    )[0]
+    assert "store.download_transcript(" not in actions
+    assert "render_transcript_download_control(" in actions
+    prepare = nav.split("def prepare_transcript_export", 1)[1].split("\ndef ", 1)[0]
+    assert "store.download_transcript(" in prepare
+    assert "clear_transcript_export_cache" in nav
     assert "Delete" in nav
     assert "Chat Setting" in nav
     assert "Delete chat?" in nav

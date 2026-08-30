@@ -28,6 +28,7 @@ from ui.layout.studio_scroll import sync_studio_scroll
 from ui.menu_popovers import menu_popover_widget_key
 from ui.panels.chat import mount_awaiting_coach_turn_recovery, render_chat_panel
 from ui.panels.nav import (
+    clear_transcript_export_cache,
     close_mobile_drawers,
     dismiss_delete_chat_dialog,
     mount_pending_delete_chat_dialog,
@@ -274,6 +275,12 @@ def _render_mobile_header(panel: str) -> None:
                         disabled=locked,
                         key=menu_popover_widget_key("mobile-chat", thread_id),
                     )
+                    was_open_key = f"mobile-menu-was-open-{thread_id}"
+                    was_open = bool(st.session_state.get(was_open_key))
+                    is_open = bool(menu.open)
+                    if was_open and not is_open:
+                        clear_transcript_export_cache(thread_id)
+                    st.session_state[was_open_key] = is_open
                     with menu:
                         render_chat_actions_menu(
                             thread_id,

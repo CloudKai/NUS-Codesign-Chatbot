@@ -647,7 +647,8 @@ def test_studio_panel_is_fragment_with_scoped_preview_toggles() -> None:
     assert "close_mobile_nav_overlay" in nav_py
     assert "render_chat_actions_menu" in nav_py
     assert "open-notebooks" not in Path("ui/topbar.py").read_text(encoding="utf-8")
-    assert "nav-chat-download-transcript" in nav_py or "download-transcript" in nav_py
+    assert "nav-chat-prepare-transcript" in nav_py or "prepare-transcript" in nav_py
+    assert "prepare_transcript_export" in nav_py
     title_block = source.split("def _render_journey_stage_title_row", 1)[1].split(
         "def _render_journey_stage_select_cta", 1
     )[0]

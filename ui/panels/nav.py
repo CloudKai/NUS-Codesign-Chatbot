@@ -295,6 +295,7 @@ def _render_recent_row(
             if was_open and not is_open:
                 discard_rename_draft("notebook", thread_id)
                 bump_rename_epoch("notebook", thread_id)
+                clear_transcript_export_cache(thread_id)
             st.session_state[was_open_key] = is_open
             with menu:
                 render_chat_actions_menu(
@@ -317,6 +318,75 @@ def _on_open_delete_chat(thread_id: str, menu_scope: str) -> None:
     st.session_state.pop("_delete_chat_dialog_dismissed_id", None)
     st.session_state.pending_delete_chat_id = target
     close_menu_popover(menu_scope, target)
+
+
+def _transcript_export_key(thread_id: str) -> str:
+    """Session key for an on-demand transcript export payload."""
+    return f"_transcript_export_{str(thread_id or '').strip()}"
+
+
+def clear_transcript_export_cache(thread_id: str) -> None:
+    """Drop a prepared transcript export for ``thread_id``."""
+    st.session_state.pop(_transcript_export_key(thread_id), None)
+
+
+def prepare_transcript_export(thread_id: str) -> None:
+    """Fetch transcript bytes only when Download is clicked (not on every paint).
+
+    Streamlit ``download_button`` needs bytes at render time. The Recents ⋮ menu
+    used to call ``download_transcript`` for every chat on every script run,
+    which saturated prod with ``/transcript.txt`` traffic. Arming via
+    ``on_click`` loads once; the following remount shows the real save control.
+    """
+    target = str(thread_id or "").strip()
+    if not target:
+        return
+    try:
+        export = store.download_transcript(target)
+    except ValueError:
+        clear_transcript_export_cache(target)
+        return
+    st.session_state[_transcript_export_key(target)] = {
+        "data": export.data,
+        "filename": export.filename,
+    }
+
+
+def render_transcript_download_control(
+    thread_id: str,
+    *,
+    key_prefix: str,
+    button_type: str = "tertiary",
+    help_text: str = "Save this chat transcript",
+) -> None:
+    """Render Download as prepare-then-save so transcripts are not prefetched."""
+    target = str(thread_id or "").strip()
+    if not target:
+        return
+    cached = st.session_state.get(_transcript_export_key(target))
+    if isinstance(cached, dict) and cached.get("data") is not None:
+        st.download_button(
+            "Save transcript",
+            data=cached["data"],
+            file_name=str(cached.get("filename") or "transcript.txt"),
+            mime="text/plain",
+            key=f"{key_prefix}-save-transcript-{target}",
+            type=button_type,
+            icon=":material/download:",
+            help=help_text,
+            use_container_width=True,
+        )
+        return
+    st.button(
+        "Download transcript",
+        icon=":material/download:",
+        type=button_type,
+        key=f"{key_prefix}-prepare-transcript-{target}",
+        help=help_text,
+        use_container_width=True,
+        on_click=prepare_transcript_export,
+        args=(target,),
+    )
 
 
 def render_chat_actions_menu(
@@ -362,22 +432,12 @@ def render_chat_actions_menu(
         aria_label="Rename",
     )
 
-    try:
-        transcript = store.download_transcript(thread_id)
-    except ValueError:
-        transcript = None
-    if transcript is not None:
-        st.download_button(
-            "Download transcript",
-            data=transcript.data,
-            file_name=transcript.filename,
-            mime="text/plain",
-            key=f"{menu_scope}-download-transcript-{thread_id}",
-            type="tertiary",
-            icon=":material/download:",
-            help="Save this chat transcript",
-            use_container_width=True,
-        )
+    render_transcript_download_control(
+        thread_id,
+        key_prefix=menu_scope,
+        button_type="tertiary",
+        help_text="Save this chat transcript",
+    )
 
     with st.container(key=danger_key):
         st.button(
