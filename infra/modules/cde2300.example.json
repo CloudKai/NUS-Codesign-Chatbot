@@ -1,0 +1,34 @@
+[
+  {
+    "ParameterKey": "ModuleId",
+    "ParameterValue": "cde2300"
+  },
+  {
+    "ParameterKey": "ModuleCode",
+    "ParameterValue": "CDE2300"
+  },
+  {
+    "ParameterKey": "ModuleName",
+    "ParameterValue": "Product Design and Innovation"
+  },
+  {
+    "ParameterKey": "ProductTitle",
+    "ParameterValue": "CDE2300 Design Thinking Companion"
+  },
+  {
+    "ParameterKey": "GitRepositoryUrl",
+    "ParameterValue": "git@github.com:YOUR_ORG/YOUR_REPOSITORY.git"
+  },
+  {
+    "ParameterKey": "GitCommit",
+    "ParameterValue": "REPLACE_WITH_FULL_40_CHARACTER_GIT_SHA"
+  },
+  {
+    "ParameterKey": "AgentArtifactBucket",
+    "ParameterValue": "REPLACE_WITH_FOUNDATION_ARTIFACT_BUCKET"
+  },
+  {
+    "ParameterKey": "AgentArtifactKey",
+    "ParameterValue": "agentcore/REPLACE_WITH_FULL_40_CHARACTER_GIT_SHA/runtime.zip"
+  }
+]

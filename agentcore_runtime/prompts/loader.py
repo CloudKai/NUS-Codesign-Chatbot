@@ -10,6 +10,11 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+try:
+    from ..module_profile import load_module_profile
+except ImportError:  # pragma: no cover - deployed with main.py at zip root
+    from module_profile import load_module_profile
+
 COACHING_TOPICS = frozenset(
     {
         "problem_identification",
@@ -56,6 +61,11 @@ def _read_utf8(path: Path) -> str:
         raise PromptLoadError(f"Prompt file is not valid UTF-8: {path}") from error
     if not text:
         raise PromptLoadError(f"Prompt file is empty: {path}")
+    profile = load_module_profile()
+    # Prompt files are reviewed curriculum. Only the module identifier is
+    # substituted; no deployment-supplied prompt content is interpolated.
+    text = text.replace("CDE2300", profile.module_code)
+    text = text.replace("Product Design and Innovation", profile.module_name)
     return text
 
 

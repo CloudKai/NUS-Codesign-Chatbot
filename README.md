@@ -373,14 +373,14 @@ Caddy does not manage certificates. Restrict the EC2 security group's TCP 80
 origin access to the AWS-managed CloudFront origin-facing prefix list; do not
 publish host TCP 443.
 
-On EC2, install a private `.env` and `.streamlit/secrets.toml`, set an immutable
-ECR image tag, and deploy with the production wrapper:
+On EC2, check out the reviewed Git commit, install a private `.env` and
+`.streamlit/secrets.toml`, build the Docker image locally, and start Compose:
 
 ```bash
-export APP_IMAGE="<account>.dkr.ecr.us-west-2.amazonaws.com/cde2300-chatbot:<git-sha>"
-export ECR_REGISTRY="<account>.dkr.ecr.us-west-2.amazonaws.com"
 export AWS_REGION="us-west-2"
-sh scripts/deploy_ecr.sh
+export APP_IMAGE="co-design:<git-sha>"
+docker build --build-arg "GIT_SHA=<git-sha>" -t "$APP_IMAGE" .
+docker compose -f compose.prod.yaml up -d
 docker compose -f compose.prod.yaml ps
 docker compose -f compose.prod.yaml logs --tail=100 app caddy
 ```
@@ -396,6 +396,11 @@ DSQL_ENDPOINT=<cluster-hostname>
 DSQL_USER=co_design_app
 USER_UPLOADS_BUCKET=<private-bucket-name>
 ```
+
+Do not commit `.env` or `.streamlit/secrets.toml`; examples contain placeholders
+only. Do not store AWS access keys in either file: the EC2 instance IAM role
+supplies AWS credentials. Keep generated secrets in Secrets Manager or Parameter
+Store as the deployment path matures.
 
 Set the Cognito callback to
 `https://d1sxfuoybzedj5.cloudfront.net/api/v1/auth/callback`, keep

@@ -19,6 +19,9 @@ import re
 import time
 from typing import Any, Iterable, Protocol, Sequence
 
+from backend.persistence.object_keys import is_course_object_key
+from backend.settings import settings
+
 logger = logging.getLogger(__name__)
 
 UNANALYZABLE_SOURCE_PLACEHOLDER = (
@@ -394,25 +397,28 @@ def course_material_id_from_object_key(object_key: str) -> str:
         course/readings/week1.pdf -> reading_week1
         course/readings/archive/week1.pdf -> reading_archive_week1
     """
-    key = str(object_key or "").strip().lstrip("/")
+    key = str(object_key or "").strip().lstrip("/").replace("\\", "/")
     if not key:
         return ""
-    parts = [part for part in key.replace("\\", "/").split("/") if part]
+    prefix = settings.normalized_course_materials_prefix
+    if prefix and key.startswith(prefix):
+        key = key[len(prefix) :]
+    parts = [part for part in key.split("/") if part]
     filename = parts[-1]
     stem = filename.rsplit(".", 1)[0] if "." in filename else filename
     slug = _COURSE_MATERIAL_ID_SAFE.sub("_", stem.casefold()).strip("_")
     folder = ""
-    if len(parts) >= 2:
-        folder = parts[1].replace(" ", "").replace("_", "").casefold()
+    if len(parts) >= 1:
+        folder = parts[0].replace(" ", "").replace("_", "").casefold()
     if folder == "lecturenotes":
         prefix = "lecture"
-        nested = parts[2:-1]
+        nested = parts[1:-1]
     elif folder == "readings":
         prefix = "reading"
-        nested = parts[2:-1]
+        nested = parts[1:-1]
     else:
         prefix = "course"
-        nested = parts[1:-1] if len(parts) > 1 else []
+        nested = parts[:-1] if len(parts) > 1 else []
     nested_slug = "_".join(
         _COURSE_MATERIAL_ID_SAFE.sub("_", part.casefold()).strip("_")
         for part in nested
@@ -450,13 +456,13 @@ def is_course_retrieval_source(source: RetrievalSource) -> bool:
     """Return whether *source* is a locked Lecture Notes or Readings object.
 
     Student uploads stay on the local retriever. Course objects are identified
-    by ``course_material_group`` or a ``course/`` object key.
+    by ``course_material_group`` or the configured course object prefix.
     """
     group = str(source.group or "").replace(" ", "").replace("_", "").casefold()
     if group in _COURSE_MATERIAL_GROUPS:
         return True
     key = str(source.object_key or "").strip().lstrip("/")
-    return key.startswith("course/")
+    return is_course_object_key(key, settings.normalized_course_materials_prefix)
 
 
 def is_virtual_shared_course_record(
@@ -472,7 +478,7 @@ def is_virtual_shared_course_record(
         if source.virtual_course_source or source.shared_course_object:
             return True
         key = str(source.object_key or "").strip().lstrip("/").replace("\\", "/")
-        return key.startswith("course/")
+        return is_course_object_key(key, settings.normalized_course_materials_prefix)
     metadata = source.get("metadata")
     metadata = metadata if isinstance(metadata, dict) else {}
     if metadata.get("virtual_course_source") or metadata.get("shared_course_object"):
@@ -483,7 +489,7 @@ def is_virtual_shared_course_record(
         or source.get("path")
         or ""
     ).strip().lstrip("/").replace("\\", "/")
-    return key.startswith("course/")
+    return is_course_object_key(key, settings.normalized_course_materials_prefix)
 
 
 def requires_knowledge_base_retrieval(source: RetrievalSource) -> bool:
@@ -721,9 +727,15 @@ def retrieval_sources_from_notebook(
         ).strip()
         if not material_id and object_key:
             derived = course_material_id_from_object_key(object_key)
-            if object_key.replace("\\", "/").lstrip("/").startswith("course/"):
+            if is_course_object_key(
+                object_key.replace("\\", "/").lstrip("/"),
+                settings.normalized_course_materials_prefix,
+            ):
                 material_id = derived
-        if object_key.replace("\\", "/").lstrip("/").startswith("course/"):
+        if is_course_object_key(
+            object_key.replace("\\", "/").lstrip("/"),
+            settings.normalized_course_materials_prefix,
+        ):
             virtual_course = True
             shared_course = True
         text = str(source.get("extractedText") or "").strip()

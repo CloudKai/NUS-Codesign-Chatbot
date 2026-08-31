@@ -515,7 +515,7 @@ class FastChatTurnOutput(BaseModel):
         default=False,
         description=(
             "Return true only when the student's request or supplied material is "
-            "clearly unrelated to CDE2300 course content and the active CDE2300 "
+            "clearly unrelated to configured course content and the active "
             "design project. Return false when relevance is plausible or uncertain."
         ),
     )

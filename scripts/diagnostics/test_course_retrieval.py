@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
+from module_profile import load_module_profile
+
 _PREVIEW_CHARS = 180
 
 
@@ -63,23 +65,24 @@ def refuse_reason(args: argparse.Namespace) -> str | None:
     return None
 
 
-def resolve_course_object_key(source: str) -> str:
-    """Return a canonical ``course/`` object key from a filename or key.
+def resolve_course_object_key(source: str, *, prefix: str | None = None) -> str:
+    """Return a canonical configured-course object key from a filename or key.
 
     Args:
         source: Filename, relative lectureNotes/readings path, or full object key.
 
     Returns:
-        Slash-normalized key under ``course/``.
+        Slash-normalized key under the configured course prefix.
     """
     cleaned = str(source or "").strip().replace("\\", "/").lstrip("/")
     if not cleaned:
         raise ValueError("source is required")
-    if cleaned.startswith("course/"):
+    configured_prefix = prefix or load_module_profile().course_materials_prefix
+    if cleaned.startswith(configured_prefix):
         return cleaned
     if cleaned.startswith("lectureNotes/") or cleaned.startswith("readings/"):
-        return f"course/{cleaned}"
-    return f"course/lectureNotes/{cleaned}"
+        return f"{configured_prefix}{cleaned}"
+    return f"{configured_prefix}lectureNotes/{cleaned}"
 
 
 def _preview(text: str) -> str:

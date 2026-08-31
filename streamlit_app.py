@@ -27,7 +27,7 @@ from ui.auth_gate import (
     render_signed_out_shell,
     should_attempt_session_refresh,
 )
-from ui.constants import DEFAULT_APPEARANCE
+from ui.constants import DEFAULT_APPEARANCE, product_profile
 from ui.toasts import show_corner_toasts
 from ui.notebooks import notebooks_dialog
 from ui.runtime import bind_owner_identifier, configure_ui_perf_logger
@@ -42,7 +42,7 @@ from ui.workspace import render_workspace
 from backend.auth_profiles import store_identifier_for_sub
 
 st.set_page_config(
-    page_title="Co-design · Learning Notebook",
+    page_title=f"{product_profile().module_code} · Learning Notebook",
     page_icon="◈",
     layout="wide",
     initial_sidebar_state="collapsed",

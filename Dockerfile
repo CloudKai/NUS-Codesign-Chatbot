@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
-# Architecture-neutral base. Build for EC2 t4g (ARM64) with:
-#   docker buildx build --platform linux/arm64 -t <ECR_IMAGE_URI>:<tag> --push .
+# Architecture-neutral base. Module EC2 hosts build this for t4g (ARM64) from
+# their explicitly selected Git commit; no image registry is required.
 FROM python:3.12-slim
 
 ARG GIT_SHA=unknown

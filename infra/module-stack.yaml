@@ -1,0 +1,339 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Isolated Co-design module runtime. Builds the Docker image on EC2 from a pinned Git commit; no ECR is used.
+
+Parameters:
+  ModuleId:
+    Type: String
+    AllowedPattern: '^[a-z][a-z0-9-]{1,31}$'
+  ModuleCode:
+    Type: String
+    AllowedPattern: '^[A-Za-z][A-Za-z0-9._-]{1,19}$'
+  ModuleName:
+    Type: String
+    MinLength: 2
+    MaxLength: 120
+  ProductTitle:
+    Type: String
+    MinLength: 2
+    MaxLength: 160
+  GitRepositoryUrl:
+    Type: String
+    AllowedPattern: '^git@github\.com:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\.git$'
+  GitCommit:
+    Type: String
+    AllowedPattern: '^[0-9a-f]{40}$'
+  GitDeployKeySecretArn:
+    Type: String
+    NoEcho: true
+  AgentArtifactBucket:
+    Type: String
+  AgentArtifactKey:
+    Type: String
+  CloudFrontOriginPrefixListId:
+    Type: String
+    Description: Regional AWS-managed CloudFront origin-facing prefix-list ID.
+  CourseMaterialsPrefix:
+    Type: String
+    Default: course/
+    AllowedPattern: '^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}/$'
+  InstanceType:
+    Type: String
+    Default: t4g.small
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.40.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags: [{Key: Name, Value: !Sub 'co-design-${ModuleId}-prod'}]
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: {VpcId: !Ref Vpc, InternetGatewayId: !Ref InternetGateway}
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.40.0.0/24
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs '']
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: {VpcId: !Ref Vpc}
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties: {RouteTableId: !Ref PublicRouteTable, DestinationCidrBlock: 0.0.0.0/0, GatewayId: !Ref InternetGateway}
+  PublicRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref PublicSubnet, RouteTableId: !Ref PublicRouteTable}
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: CloudFront-origin-only HTTP; no SSH ingress.
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourcePrefixListId: !Ref CloudFrontOriginPrefixListId
+
+  UserUploadsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption: {ServerSideEncryptionConfiguration: [{ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}}]}
+      VersioningConfiguration: {Status: Enabled}
+      PublicAccessBlockConfiguration: {BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true}
+  CourseContentBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption: {ServerSideEncryptionConfiguration: [{ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}}]}
+      VersioningConfiguration: {Status: Enabled}
+      PublicAccessBlockConfiguration: {BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true}
+  UserUploadsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref UserUploadsBucket
+      PolicyDocument: &tls_only
+        Version: '2012-10-17'
+        Statement: [{Effect: Deny, Principal: '*', Action: 's3:*', Resource: [!GetAtt UserUploadsBucket.Arn, !Sub '${UserUploadsBucket.Arn}/*'], Condition: {Bool: {'aws:SecureTransport': false}}}]
+  CourseContentBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CourseContentBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{Effect: Deny, Principal: '*', Action: 's3:*', Resource: [!GetAtt CourseContentBucket.Arn, !Sub '${CourseContentBucket.Arn}/*'], Condition: {Bool: {'aws:SecureTransport': false}}}]
+
+  DsqlCluster:
+    Type: AWS::DSQL::Cluster
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      DeletionProtectionEnabled: true
+      Tags: [{Key: co-design:module, Value: !Ref ModuleId}]
+
+  CognitoPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub 'co-design-${ModuleId}-prod'
+      AutoVerifiedAttributes: [email]
+      UsernameAttributes: [email]
+      AdminCreateUserConfig: {AllowAdminCreateUserOnly: false}
+      EmailVerificationMessage: 'Your verification code is {####}.'
+      EmailVerificationSubject: !Sub '${ModuleCode} verification code'
+  CognitoClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref CognitoPool
+      ClientName: !Sub 'co-design-${ModuleId}-web'
+      GenerateSecret: true
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email, profile]
+      CallbackURLs: [!Sub 'https://${Distribution.DomainName}/api/v1/auth/callback']
+      LogoutURLs: [!Sub 'https://${Distribution.DomainName}']
+      EnableTokenRevocation: true
+      RefreshTokenValidity: 30
+      PreventUserExistenceErrors: ENABLED
+  CognitoDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref CognitoPool
+      Domain: !Sub '${ModuleId}-${AWS::AccountId}'
+  CognitoSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties: {Name: !Sub 'co-design/${ModuleId}/cognito-client'}
+  CognitoSecretCaptureRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: {Version: '2012-10-17', Statement: [{Effect: Allow, Principal: {Service: lambda.amazonaws.com}, Action: 'sts:AssumeRole'}]}
+      ManagedPolicyArns: ['arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole']
+      Policies:
+        - PolicyName: write-generated-client-secret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: ['cognito-idp:DescribeUserPoolClient'], Resource: !GetAtt CognitoPool.Arn}
+              - {Effect: Allow, Action: ['secretsmanager:PutSecretValue'], Resource: !Ref CognitoSecret}
+  CognitoSecretCaptureFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.12
+      Handler: index.handler
+      Timeout: 30
+      Role: !GetAtt CognitoSecretCaptureRole.Arn
+      Code:
+        ZipFile: |
+          import boto3, json, urllib.request
+          def handler(event, context):
+              status, reason, data = "SUCCESS", "ok", {}
+              try:
+                  p = event["ResourceProperties"]
+                  client = boto3.client("cognito-idp").describe_user_pool_client(UserPoolId=p["UserPoolId"], ClientId=p["ClientId"])["UserPoolClient"]
+                  value = {"client_id": p["ClientId"], "client_secret": client["ClientSecret"], "server_metadata_url": "https://cognito-idp.%s.amazonaws.com/%s/.well-known/openid-configuration" % (p["Region"], p["UserPoolId"]), "redirect_uri": p["RedirectUri"]}
+                  boto3.client("secretsmanager").put_secret_value(SecretId=p["SecretArn"], SecretString=json.dumps(value))
+              except Exception as error:
+                  status, reason = "FAILED", str(error)
+              body = json.dumps({"Status": status, "Reason": reason, "PhysicalResourceId": event.get("PhysicalResourceId", event["LogicalResourceId"]), "StackId": event["StackId"], "RequestId": event["RequestId"], "LogicalResourceId": event["LogicalResourceId"], "Data": data}).encode()
+              request = urllib.request.Request(event["ResponseURL"], data=body, method="PUT", headers={"content-type": "", "content-length": str(len(body))})
+              urllib.request.urlopen(request).read()
+  CognitoSecretCapture:
+    Type: Custom::CognitoClientSecretCapture
+    Properties:
+      ServiceToken: !GetAtt CognitoSecretCaptureFunction.Arn
+      UserPoolId: !Ref CognitoPool
+      ClientId: !Ref CognitoClient
+      SecretArn: !Ref CognitoSecret
+      Region: !Ref AWS::Region
+      RedirectUri: !Sub 'https://${Distribution.DomainName}/api/v1/auth/callback'
+
+  Ec2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: {Version: '2012-10-17', Statement: [{Effect: Allow, Principal: {Service: ec2.amazonaws.com}, Action: 'sts:AssumeRole'}]}
+      ManagedPolicyArns: ['arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore']
+      Policies:
+        - PolicyName: module-runtime
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - {Effect: Allow, Action: ['ssm:GetParameter'], Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/co-design/${ModuleId}/*'}
+              - {Effect: Allow, Action: ['secretsmanager:GetSecretValue'], Resource: [!Ref CognitoSecret, !Ref GitDeployKeySecretArn]}
+              - {Effect: Allow, Action: ['s3:ListBucket'], Resource: [!GetAtt UserUploadsBucket.Arn, !GetAtt CourseContentBucket.Arn], Condition: {StringLike: {'s3:prefix': ['users/*', !Sub '${CourseMaterialsPrefix}*']}}}
+              - {Effect: Allow, Action: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'], Resource: !Sub '${UserUploadsBucket.Arn}/users/*'}
+              - {Effect: Allow, Action: ['s3:GetObject'], Resource: !Sub '${CourseContentBucket.Arn}/${CourseMaterialsPrefix}*'}
+              - {Effect: Allow, Action: ['dsql:DbConnect'], Resource: !GetAtt DsqlCluster.Arn}
+              - {Effect: Allow, Action: ['bedrock:Retrieve'], Resource: !GetAtt KnowledgeBase.KnowledgeBaseArn}
+              - {Effect: Allow, Action: ['bedrock-agentcore:InvokeAgentRuntime'], Resource: !GetAtt AgentRuntime.AgentRuntimeArn}
+  Ec2Profile:
+    Type: AWS::IAM::InstanceProfile
+    Properties: {Roles: [!Ref Ec2Role]}
+
+  AgentRuntimeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: {Version: '2012-10-17', Statement: [{Effect: Allow, Principal: {Service: bedrock-agentcore.amazonaws.com}, Action: 'sts:AssumeRole'}]}
+      Policies:
+        - PolicyName: model-and-guardrail
+          PolicyDocument: {Version: '2012-10-17', Statement: [{Effect: Allow, Action: ['bedrock:InvokeModel', 'bedrock:ApplyGuardrail'], Resource: '*'}]}
+  AgentRuntime:
+    Type: AWS::BedrockAgentCore::Runtime
+    Properties:
+      AgentRuntimeName: !Sub 'co-design-${ModuleId}-prod'
+      RoleArn: !GetAtt AgentRuntimeRole.Arn
+      AgentRuntimeArtifact:
+        CodeConfiguration:
+          Code: {S3: {Bucket: !Ref AgentArtifactBucket, Key: !Ref AgentArtifactKey}}
+          Runtime: PYTHON_3_12
+          EntryPoint: [main.py]
+          EnvironmentVariables:
+            MODULE_ID: !Ref ModuleId
+            MODULE_CODE: !Ref ModuleCode
+            MODULE_NAME: !Ref ModuleName
+            MODULE_PRODUCT_TITLE: !Ref ProductTitle
+            COURSE_MATERIALS_PREFIX: !Ref CourseMaterialsPrefix
+            MODULE_PROFILE_VERSION: '1'
+  AgentRuntimeEndpoint:
+    Type: AWS::BedrockAgentCore::RuntimeEndpoint
+    Properties:
+      AgentRuntimeId: !Ref AgentRuntime
+      AgentRuntimeVersion: !GetAtt AgentRuntime.AgentRuntimeVersion
+      Name: DEFAULT
+
+  KnowledgeBaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: {Version: '2012-10-17', Statement: [{Effect: Allow, Principal: {Service: bedrock.amazonaws.com}, Action: 'sts:AssumeRole'}]}
+      Policies:
+        - PolicyName: course-only-source-read
+          PolicyDocument: {Version: '2012-10-17', Statement: [{Effect: Allow, Action: ['s3:ListBucket'], Resource: !GetAtt CourseContentBucket.Arn, Condition: {StringLike: {'s3:prefix': [!Sub '${CourseMaterialsPrefix}*']}}}, {Effect: Allow, Action: ['s3:GetObject'], Resource: !Sub '${CourseContentBucket.Arn}/${CourseMaterialsPrefix}*'}]}
+  KnowledgeBase:
+    Type: AWS::Bedrock::KnowledgeBase
+    Properties:
+      Name: !Sub 'co-design-${ModuleId}-prod'
+      RoleArn: !GetAtt KnowledgeBaseRole.Arn
+      KnowledgeBaseConfiguration: {Type: MANAGED, ManagedKnowledgeBaseConfiguration: {}}
+  CourseConnector:
+    Type: AWS::Bedrock::DataSource
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      KnowledgeBaseId: !Ref KnowledgeBase
+      Name: course-content
+      DataSourceConfiguration:
+        Type: MANAGED_KNOWLEDGE_BASE_CONNECTOR
+        ManagedKnowledgeBaseConfiguration:
+          ConnectorConfiguration:
+            S3: {BucketArn: !GetAtt CourseContentBucket.Arn, InclusionPrefixes: [!Ref CourseMaterialsPrefix]}
+
+  Guardrail:
+    Type: AWS::Bedrock::Guardrail
+    Properties:
+      Name: !Sub 'co-design-${ModuleId}-prod'
+      BlockedInputMessaging: 'I cannot help with that request.'
+      BlockedOutputsMessaging: 'I cannot provide that response.'
+  GuardrailVersion:
+    Type: AWS::Bedrock::GuardrailVersion
+    Properties: {GuardrailIdentifier: !Ref Guardrail, Description: !Sub 'Reviewed module policy for ${ModuleId}'}
+
+  AppLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties: {LogGroupName: !Sub '/co-design/${ModuleId}/app', RetentionInDays: 30}
+  ModuleInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64}}'
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref Ec2Profile
+      NetworkInterfaces: [{AssociatePublicIpAddress: true, DeviceIndex: '0', GroupSet: [!Ref InstanceSecurityGroup], SubnetId: !Ref PublicSubnet}]
+      Tags: [{Key: Name, Value: !Sub 'co-design-${ModuleId}-prod'}, {Key: co-design:module, Value: !Ref ModuleId}]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -eu
+          dnf install -y docker git jq
+          systemctl enable --now docker
+          usermod -aG docker ec2-user
+          install -d -m 700 /opt/co-design/.ssh
+          aws secretsmanager get-secret-value --region ${AWS::Region} --secret-id ${GitDeployKeySecretArn} --query SecretString --output text >/opt/co-design/.ssh/id_ed25519
+          chmod 600 /opt/co-design/.ssh/id_ed25519
+          GIT_SSH_COMMAND='ssh -i /opt/co-design/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new' git clone --no-checkout ${GitRepositoryUrl} /opt/co-design/app
+          cd /opt/co-design/app
+          git checkout --detach ${GitCommit}
+          test "$(git rev-parse HEAD)" = "${GitCommit}"
+          for i in $(seq 1 60); do aws ssm get-parameter --region ${AWS::Region} --name /co-design/${ModuleId}/runtime-config >/dev/null 2>&1 && break; sleep 5; done
+          MODULE_RUNTIME_CONFIG_PARAMETER=/co-design/${ModuleId}/runtime-config AWS_REGION=${AWS::Region} ./scripts/deploy_module_host.sh
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Origins: [{Id: app, DomainName: !GetAtt ModuleInstance.PublicDnsName, CustomOriginConfig: {HTTPPort: 80, HTTPSPort: 443, OriginProtocolPolicy: http-only}}]
+        DefaultCacheBehavior: {TargetOriginId: app, ViewerProtocolPolicy: redirect-to-https, AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE], CachedMethods: [GET, HEAD], ForwardedValues: {QueryString: true, Cookies: {Forward: all}, Headers: ['Authorization', 'Origin']}, MinTTL: 0, DefaultTTL: 0, MaxTTL: 0}
+  Ec2StatusAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties: {AlarmName: !Sub 'co-design-${ModuleId}-ec2-status', Namespace: AWS/EC2, MetricName: StatusCheckFailed, Statistic: Maximum, Period: 300, EvaluationPeriods: 2, Threshold: 1, ComparisonOperator: GreaterThanOrEqualToThreshold, Dimensions: [{Name: InstanceId, Value: !Ref ModuleInstance}]}
+  RuntimeConfig:
+    Type: AWS::SSM::Parameter
+    DependsOn: CognitoSecretCapture
+    Properties:
+      Name: !Sub '/co-design/${ModuleId}/runtime-config'
+      Type: String
+      Value: !Sub
+        - '{"module_id":"${ModuleId}","module_code":"${ModuleCode}","module_name":"${ModuleName}","product_title":"${ProductTitle}","profile_version":"1","course_materials_prefix":"${CourseMaterialsPrefix}","public_origin":"https://${Distribution.DomainName}","dsql_endpoint":"${DsqlCluster.VpcEndpointServiceName}","user_uploads_bucket":"${UserUploadsBucket}","course_materials_bucket":"${CourseContentBucket}","knowledge_base_id":"${KnowledgeBase}","guardrail_id":"${Guardrail}","guardrail_version":"${GuardrailVersion.Version}","agentcore_runtime_arn":"${AgentRuntime.AgentRuntimeArn}","agentcore_qualifier":"DEFAULT","cognito_secret_arn":"${CognitoSecret}"}'
+        - {}
+
+Outputs:
+  ModuleUrl: {Value: !Sub 'https://${Distribution.DomainName}'}
+  UserUploadsBucketName: {Value: !Ref UserUploadsBucket}
+  CourseContentBucketName: {Value: !Ref CourseContentBucket}
+  DsqlClusterArn: {Value: !GetAtt DsqlCluster.Arn}
+  RuntimeConfigParameter: {Value: !Ref RuntimeConfig}

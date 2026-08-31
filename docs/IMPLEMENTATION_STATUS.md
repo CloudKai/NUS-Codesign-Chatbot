@@ -2,6 +2,72 @@
 
 ## CURRENT STATUS
 
+### Module-adaptability P0/P1 repair (2026-08-31)
+
+**Behavior.** The canonical `ModuleProfile` now ships inside
+`agentcore_runtime`, with the root module retained only as a compatibility
+export. AgentCore prompt loading therefore resolves module identity both as a
+package and from the deployed zip-root layout. Source-routing identity cues,
+professor branding, KB diagnostic object keys, Compose model region, and the
+deployment README now use deployment configuration or neutral wording. No
+pedagogy, API, schema, live AWS resource, or EC2 deployment was changed.
+
+**Files.** `agentcore_runtime/module_profile.py`, root `module_profile.py`,
+AgentCore prompt/fast-chat imports, `backend/coaching/mode_policy.py`,
+`ui/professor.py`, KB diagnostics, `compose.prod.yaml`, `README.md`, and
+`tests/test_module_profile.py`.
+
+**Validation.** Focused module/profile, metadata/source-library, production
+configuration, and diagnostic tests passed. A synthetic module proves CDE9999
+identity in packaged prompt assembly and configured `materials/` paths without
+AWS calls; a zip-root import probe passed. Compose config validated with only
+placeholder environment values. Existing full-suite failures remain in prompt
+budget, citation/retrieval, progression, snapshot/API, and UI tests; they were
+already present before this repair pass, so no unrelated behavior was changed.
+
+**Compatibility and rollback.** The current CDE2300 profile keeps its existing
+identity cues and `course/` default. Rollback is code-only. No account was
+accessed or modified.
+
+**Next exact action.** Establish a clean-baseline full-suite result, then fix
+only failures reproducibly attributable to the module refactor. Afterwards run
+target-account CloudFormation schema validation/change sets; do not deploy.
+
+### Cross-account module foundation (2026-08-31)
+
+**Behavior.** Added a validated deployment-scoped `ModuleProfile` shared by the
+FastAPI settings, Streamlit branding, prompt loading, AgentCore specialist
+identity, and course-source key handling. Production stacks set
+`MODULE_PROFILE_REQUIRED=true`; local development retains the CDE2300 default.
+Course retrieval and virtual source IDs now honor the configured course prefix.
+Added CloudFormation foundation/module templates, per-module S3/DSQL/Cognito/
+Knowledge Base/Guardrail/AgentCore/EC2/CloudFront resources, and a local
+ARM64 Docker host build from an explicit Git SHA. There is deliberately **no
+ECR repository or ECR deployment**.
+
+**Files.** `module_profile.py`, application/UI/AgentCore profile consumers,
+`compose.prod.yaml`, `infra/foundation.yaml`, `infra/module-stack.yaml`,
+`infra/modules/cde2300.example.json`, `scripts/deploy_module_host.sh`,
+`scripts/dsql/cli.py`, and `docs/deploy/MULTI_MODULE_AWS.md`.
+
+**Validation.** `compileall` passed. Focused profile, metadata/source-library,
+and production-readiness tests passed; template YAML syntax parsing and
+`git diff --check` passed. No AWS credentials, account inventory, CloudFormation
+change set, content sync, DSQL bootstrap, or paid Bedrock/AgentCore call was
+made.
+
+**Compatibility and rollback.** Existing local CDE2300 behavior and five-phase
+DSQL schema remain unchanged. The legacy `deploy_ecr.sh` name is now a
+compatibility wrapper around the local-build deploy command. The old account
+has not been read, modified, or deleted. Stack S3 and DSQL resources retain on
+deletion; release rollback is returning users to the old URL.
+
+**Risks / next exact action.** Before live use, run `cfn-lint` and target-account
+`validate-template`/change sets to verify the current regional CloudFormation
+schemas (notably managed KB connector and AgentCore Runtime fields), add the
+reviewed Guardrail policy, and implement the approved course-sync/KB-ingestion
+job. Start with `docs/deploy/MULTI_MODULE_AWS.md` and `infra/module-stack.yaml`.
+
 ### Free mode: no artifact required to proceed (2026-08-30)
 
 **Behavior.** Free (`response_detail=long`) no longer requires a How Might We,

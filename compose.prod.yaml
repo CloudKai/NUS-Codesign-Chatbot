@@ -27,14 +27,20 @@ services:
       DSQL_SSLROOTCERT: "/etc/ssl/certs/ca-certificates.crt"
       DATABASE_PROVIDER: "dsql"
       FILE_STORAGE_PROVIDER: "s3"
-      AWS_REGION: "us-west-2"
+      AWS_REGION: "${AWS_REGION:?AWS_REGION is required}"
       # Runtime DSQL role (DbConnect). Never admin — schema uses scripts/init_dsql.py.
       DSQL_USER: "co_design_app"
       # Shared Lecture Notes/Readings live under COURSE_MATERIALS_BUCKET/course/.
       # Do not copy those PDFs into USER_UPLOADS_BUCKET/users/.
       COURSE_MATERIAL_SYNC_ENABLED: "true"
-      COURSE_MATERIALS_PREFIX: "course/"
-      # Production Knowledge Base JUQNP8AZAZ is type MANAGED. Retrieve must
+      COURSE_MATERIALS_PREFIX: "${COURSE_MATERIALS_PREFIX:?COURSE_MATERIALS_PREFIX is required}"
+      MODULE_PROFILE_REQUIRED: "true"
+      MODULE_ID: "${MODULE_ID:?MODULE_ID is required}"
+      MODULE_CODE: "${MODULE_CODE:?MODULE_CODE is required}"
+      MODULE_NAME: "${MODULE_NAME:?MODULE_NAME is required}"
+      MODULE_PRODUCT_TITLE: "${MODULE_PRODUCT_TITLE:?MODULE_PRODUCT_TITLE is required}"
+      MODULE_PROFILE_VERSION: "${MODULE_PROFILE_VERSION:-1}"
+      # Production Knowledge Base is type MANAGED. Retrieve must
       # use managedSearchConfiguration, not vectorSearchConfiguration.
       KNOWLEDGE_BASE_TYPE: "MANAGED"
       MODEL_PROVIDER: "agentcore"
@@ -48,7 +54,7 @@ services:
       AGENTCORE_SESSION_GENERATION: "8"
       AGENTCORE_MODEL_PROVIDER: "bedrock"
       AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-      AGENTCORE_MODEL_REGION: "us-west-2"
+      AGENTCORE_MODEL_REGION: "${AGENTCORE_MODEL_REGION:?AGENTCORE_MODEL_REGION is required}"
       # Fast Chat remains 110s; Deep Review uses a separate 200s client.
       DEEP_REVIEW_AGENTCORE_TIMEOUT_SECONDS: "200"
       # Stale/acceptance deadline, not hard worker cancellation.
@@ -84,15 +90,15 @@ services:
       MAX_CONCURRENT_MODEL_CALLS: "120"
       SYNC_THREADPOOL_TOKENS: "120"
       # Runtime-configured; do not hard-code account IDs or bucket names in Git.
-      # APP_IMAGE: set on the host to the ECR image URI + immutable tag
+      # APP_IMAGE is built locally from the host's explicitly selected Git commit.
       # DSQL_ENDPOINT: set in host .env
       # USER_UPLOADS_BUCKET: set in host .env
-      # COURSE_MATERIALS_BUCKET: set in host .env (cde2300-course-content-s3)
+      # COURSE_MATERIALS_BUCKET: set in host .env
       # AGENTCORE_RUNTIME_ARN: set in host .env
       # AGENTCORE_QUALIFIER: DEFAULT (query liveVersion before each release).
       # AgentCore lifecycle: idle 30 minutes, max lifetime 8 hours.
       # GUARDRAIL_ID: set in host .env; also inject the same ID and version 4 on the runtime
-      # KNOWLEDGE_BASE_ID: set in host .env (JUQNP8AZAZ) when course sync is on
+      # KNOWLEDGE_BASE_ID: set in host .env when course sync is on
       # Lecture notes are not bundled into the production image.
     expose:
       - "8000"

@@ -507,7 +507,7 @@ class BedrockCoachProvider:
                         "toolSpec": {
                             "name": _TOOL_NAME,
                             "description": (
-                                "Structured coaching turn for the CDE2300 companion."
+                                "Structured coaching turn for the configured module companion."
                             ),
                             "inputSchema": {"json": _coach_tool_json_schema()},
                         }

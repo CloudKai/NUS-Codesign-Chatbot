@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -74,6 +75,48 @@ _MESSAGE_REVISION_COLUMNS: tuple[tuple[str, str], ...] = (
 # Stay well under Aurora DSQL per-transaction row-modification limits (~3k).
 REVISION_NULL_BACKFILL_BATCH_SIZE = 1000
 _REVISION_BACKFILL_TABLES = frozenset({"notebooks", "messages"})
+_IAM_ROLE_ARN = re.compile(r"^arn:[^:]+:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]{1,128}$")
+
+
+def configure_runtime_iam_role(
+    *, endpoint: str, region: str, database: str, admin_user: str, iam_role_arn: str
+) -> None:
+    """Idempotently create, map, and privilege the non-DDL application role.
+
+    Args:
+        endpoint: Aurora DSQL endpoint hostname.
+        region: AWS Region that signs the admin token.
+        database: DSQL database name.
+        admin_user: DbConnectAdmin database principal.
+        iam_role_arn: Exact module EC2 IAM role ARN to map to ``co_design_app``.
+
+    Raises:
+        ValueError: If the supplied ARN is not an IAM role ARN.
+        Exception: When DSQL rejects a role, mapping, or privilege statement.
+    """
+    cleaned_arn = str(iam_role_arn or "").strip()
+    if not _IAM_ROLE_ARN.fullmatch(cleaned_arn):
+        raise ValueError("--runtime-iam-role-arn must be an exact IAM role ARN")
+    statements = (
+        f"CREATE ROLE {RUNTIME_ROLE_NAME} WITH LOGIN",
+        f"AWS IAM GRANT {RUNTIME_ROLE_NAME} TO '{cleaned_arn}'",
+        RUNTIME_GRANT_SQL,
+    )
+    for statement in statements:
+        connection = _connect_admin(
+            endpoint=endpoint, region=region, database=database, admin_user=admin_user
+        )
+        try:
+            try:
+                connection.execute(statement)
+            except Exception as error:  # Aurora DSQL has no IF NOT EXISTS for roles.
+                if statement.startswith("CREATE ROLE") and "already exists" in str(error).lower():
+                    connection.rollback()
+                    continue
+                raise
+            connection.commit()
+        finally:
+            connection.close()
 
 
 def is_async_index_ddl(statement: str) -> bool:
@@ -844,6 +887,14 @@ def main(argv: list[str] | None = None) -> int:
         default=os.getenv("DSQL_ADMIN_USER", "admin"),
         help="Admin DB user for DDL only (default: admin). Never the runtime role.",
     )
+    parser.add_argument(
+        "--runtime-iam-role-arn",
+        default=os.getenv("DSQL_RUNTIME_IAM_ROLE_ARN", ""),
+        help=(
+            "Exact EC2 module IAM role ARN to map to co_design_app. Required by "
+            "the production deployment job; omitted only for legacy schema repair."
+        ),
+    )
     args = parser.parse_args(argv)
     if (args.admin_user or "").strip().lower() == RUNTIME_ROLE_NAME.lower():
         raise SystemExit(
@@ -861,6 +912,15 @@ def main(argv: list[str] | None = None) -> int:
         database=str(args.database or "postgres"),
         admin_user=str(args.admin_user or "admin"),
     )
+    if str(args.runtime_iam_role_arn or "").strip():
+        configure_runtime_iam_role(
+            endpoint=str(args.endpoint or ""),
+            region=str(args.region or ""),
+            database=str(args.database or "postgres"),
+            admin_user=str(args.admin_user or "admin"),
+            iam_role_arn=str(args.runtime_iam_role_arn),
+        )
+        print(f"Mapped {args.runtime_iam_role_arn} to {RUNTIME_ROLE_NAME} with runtime CRUD only.")
     print(f"Applied {len(applied)} DSQL DDL statement(s) as {args.admin_user}.")
     if workflow_status == "requires-reset":
         print(
@@ -873,13 +933,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("The existing five-phase workflow marker is ready.")
     print()
-    print("Next: grant runtime privileges to the application role (no ARNs in Git):")
-    print(RUNTIME_GRANT_SQL)
-    print()
-    print(
-        f"Then set DSQL_USER={RUNTIME_ROLE_NAME} for the EC2 app "
-        "(IAM DbConnect token; not admin)."
-    )
+    if not str(args.runtime_iam_role_arn or "").strip():
+        print("Next: rerun with --runtime-iam-role-arn <module EC2 role ARN>.")
+    print(f"Set DSQL_USER={RUNTIME_ROLE_NAME} for the EC2 app (IAM DbConnect; not admin).")
     return 0
 
 

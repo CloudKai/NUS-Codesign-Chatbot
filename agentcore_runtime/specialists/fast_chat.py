@@ -15,15 +15,21 @@ except ImportError:  # pragma: no cover - imported as agentcore_runtime.*
         load_stage_prompt,
     )
 
+try:
+    from ..module_profile import load_module_profile
+except ImportError:  # pragma: no cover - deployed with main.py at zip root
+    from module_profile import load_module_profile
+
 # Legacy Coaching still uses this identity. Fast Chat must not open as a
 # locked Coaching specialist while it is deciding Coaching versus Q&A.
-_COACHING_SPECIALIST_IDENTITY = (
-    "You are the Coaching specialist in a Socratic design-thinking coach for CDE2300."
-)
-_FAST_CHAT_IDENTITY = (
-    "This turn is Fast Chat in a Socratic design-thinking coach for CDE2300. "
-    "Decide Coaching versus Q&A internally; you are not locked to the Coaching specialist."
-)
+def _identities() -> tuple[str, str]:
+    """Return module-specific identities while keeping curriculum static."""
+    code = load_module_profile().module_code
+    return (
+        f"You are the Coaching specialist in a Socratic design-thinking coach for {code}.",
+        f"This turn is Fast Chat in a Socratic design-thinking coach for {code}. "
+        "Decide Coaching versus Q&A internally; you are not locked to the Coaching specialist.",
+    )
 
 
 def shared_coaching_for_fast_chat() -> str:
@@ -34,8 +40,9 @@ def shared_coaching_for_fast_chat() -> str:
         replaced. Stage files and the rest of the Socratic baseline are unchanged.
     """
     text = load_shared_coaching()
-    if text.startswith(_COACHING_SPECIALIST_IDENTITY):
-        return _FAST_CHAT_IDENTITY + text[len(_COACHING_SPECIALIST_IDENTITY) :]
+    coaching_identity, fast_identity = _identities()
+    if text.startswith(coaching_identity):
+        return fast_identity + text[len(coaching_identity) :]
     return text
 
 

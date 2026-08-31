@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
+from module_profile import ModuleProfile, load_module_profile, normalize_course_prefix
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -391,6 +392,9 @@ class Settings:
     course_materials_prefix: str = (
         os.getenv("COURSE_MATERIALS_PREFIX", "course/").strip() or "course/"
     )
+    # A module deployment is physically isolated. These values only replace
+    # singleton CDE2300 copy and must not introduce tenant routing into DSQL.
+    module_profile: ModuleProfile = field(default_factory=load_module_profile)
     api_base_url: str = os.getenv("CO_DESIGN_API_URL", "http://127.0.0.1:8000")
     public_api_base_url: str = os.getenv(
         "CO_DESIGN_PUBLIC_API_URL",
@@ -557,8 +561,7 @@ class Settings:
     @property
     def normalized_course_materials_prefix(self) -> str:
         """Return the shared course-object prefix with a trailing slash."""
-        cleaned = self.course_materials_prefix.strip().replace("\\", "/").strip("/")
-        return f"{cleaned}/" if cleaned else ""
+        return normalize_course_prefix(self.course_materials_prefix)
 
     @property
     def resolved_course_materials_bucket(self) -> str:
@@ -722,6 +725,14 @@ def validate_production_configuration() -> None:
         return
     if env != "production":
         raise ValueError("APP_ENV must be development or production")
+
+    # CloudFormation sets MODULE_PROFILE_REQUIRED=true. Keeping this explicit
+    # switch preserves existing operator/test compatibility until every legacy
+    # host has been moved onto the module-stack bootstrap.
+    if _boolean("MODULE_PROFILE_REQUIRED", False):
+        profile = load_module_profile(require_explicit=True)
+        if profile.course_materials_prefix != settings.normalized_course_materials_prefix:
+            raise ValueError("COURSE_MATERIALS_PREFIX does not match module profile")
 
     if settings.model_provider == "mock":
         raise ValueError("MODEL_PROVIDER=mock is not allowed in production")

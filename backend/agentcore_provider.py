@@ -92,6 +92,7 @@ from .specialists.routing import (
     bound_router_min_confidence,
     select_specialist,
 )
+from module_profile import load_module_profile
 
 logger = logging.getLogger(__name__)
 
@@ -100,16 +101,24 @@ _TRUNCATED_FAILURE = "AgentCore truncated the coaching turn"
 _MALFORMED_FAILURE = "The coach reply could not be completed"
 _BLOCKED_FAILURE = "AgentCore blocked this turn"
 _IMAGE_FAILURE = "AgentCore does not support this image type"
-_CDE2300_SCOPE_RESPONSE = (
-    "This companion is only for CDE2300 course content and materials relevant "
-    "to your CDE2300 design project. Please ask a CDE2300 question or attach "
-    "material connected to your project."
-)
-_ATTACHMENT_SCOPE_RESPONSE = (
-    "This file appears to be outside the scope of CDE2300 and your current "
-    "design project, so I won't use it for the coaching session. If you meant "
-    "to attach a design/project-related file, upload that instead."
-)
+def _module_scope_response() -> str:
+    """Return module-scoped safe copy without exposing prompt instructions."""
+    profile = load_module_profile()
+    return (
+        f"This companion is only for {profile.module_code} course content and materials "
+        f"relevant to your {profile.module_code} design project. Please ask a "
+        f"{profile.module_code} question or attach material connected to your project."
+    )
+
+
+def _attachment_scope_response() -> str:
+    """Return module-scoped attachment refusal copy."""
+    profile = load_module_profile()
+    return (
+        f"This file appears to be outside the scope of {profile.module_code} and your "
+        "current design project, so I won't use it for the coaching session. If you "
+        "meant to attach a design/project-related file, upload that instead."
+    )
 _OUTPUT_CONTRACT = "coach_turn"
 _FAST_CHAT_CONTRACT = "fast_chat_turn"
 _FAST_CHAT_PHASE = "fast_chat"
@@ -960,9 +969,9 @@ def _validated_fast_chat(
         record_field("hmw_scaffold_ready_model", False)
         return ProviderAssessmentResult(
             response_text=(
-                _ATTACHMENT_SCOPE_RESPONSE
+                _attachment_scope_response()
                 if request.attachment_source_ids
-                else _CDE2300_SCOPE_RESPONSE
+                else _module_scope_response()
             ),
             assessment=_fast_chat_assessment(
                 request,

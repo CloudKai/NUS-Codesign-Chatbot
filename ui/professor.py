@@ -20,6 +20,7 @@ from ui.components import (
     review_stage_sections_html,
 )
 from ui.runtime import local_api_client
+from ui.constants import product_profile
 
 _PAGES = ("Overview", "Students", "Learning", "Engagement", "Research")
 _PHASE_LABELS = tuple(stage.label.title() for stage in THINKING_STAGES)
@@ -229,11 +230,11 @@ def _render_sidebar() -> str:
     """Render persistent left navigation and return the selected page."""
     with st.container(key="professor_header"):
         st.markdown(
-            """
+            f"""
             <div class="professor-course-heading professor-sidebar-brand">
-              <p class="professor-eyebrow">CDE2300</p>
+              <p class="professor-eyebrow">{escape(product_profile().module_code)}</p>
               <h1>Course Analytics</h1>
-              <p>Product Design and Innovation</p>
+              <p>{escape(product_profile().module_name)}</p>
             </div>
             """,
             unsafe_allow_html=True,

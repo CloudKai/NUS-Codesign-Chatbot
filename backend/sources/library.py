@@ -1000,7 +1000,9 @@ def _sync_lecture_notes_folder(
             and current_metadata.get("course_material_group") == material_group
             and current_metadata.get("locked_source") is True
             and current_metadata.get("course_material_id")
-            == course_material_id_from_object_key(f"course/{relative_text}")
+            == course_material_id_from_object_key(
+                f"{settings.normalized_course_materials_prefix}{relative_text}"
+            )
             and current.get("title") == path.name
         ):
             unchanged += 1
@@ -1018,7 +1020,7 @@ def _sync_lecture_notes_folder(
                     "course_material_group": material_group,
                     "locked_source": True,
                     "course_material_id": course_material_id_from_object_key(
-                        f"course/{relative_text}"
+                        f"{settings.normalized_course_materials_prefix}{relative_text}"
                     ),
                 },
                 max_file_size_mb=settings.max_course_material_size_mb,

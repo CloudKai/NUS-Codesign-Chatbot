@@ -83,6 +83,7 @@ from backend.retrieval_gate import (
     RetrievalIntent,
     classify_retrieval_intent,
 )
+from module_profile import load_module_profile
 
 ExpectedResponseMode = Literal["qa", "coaching"]
 
@@ -212,8 +213,18 @@ _ATTACHMENT_DIRECTIVE = re.compile(
     r"(?:outline|extract|list|identify|review|analy[sz]e|summar(?:y|ise|ize))\b",
     re.IGNORECASE,
 )
+def _module_identity_reference_pattern() -> str:
+    """Return the configured course identity cues without changing default routing."""
+    profile = load_module_profile()
+    name_words = profile.module_name.split()[:2]
+    name_cue = r"\s+".join(re.escape(word) for word in name_words)
+    return "|".join(filter(None, (re.escape(profile.module_code), name_cue)))
+
+
 _COURSE_REFERENCE = re.compile(
-    r"\b(lecture|lectures|week|weeks|course|cde2300|product\s+design|"
+    r"\b(lecture|lectures|week|weeks|course|"
+    + _module_identity_reference_pattern()
+    + r"|"
     r"design\s+thinking|jtbd|how\s+might\s+we|reading|readings|syllabus|"
     r"class\s+materials?|(?:lecture|course|class|the)\s+notes)\b",
     re.IGNORECASE,

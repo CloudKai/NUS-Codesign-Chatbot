@@ -11,7 +11,7 @@ from typing import Any
 
 import streamlit as st
 
-from ui.constants import PRODUCT_TITLE
+from ui.constants import PRODUCT_TITLE, product_profile
 from ui.layout.column_resize import nav_collapsed, set_nav_collapsed
 from ui.profile import render_profile_menu
 from ui.menu_popovers import close_menu_popover, menu_popover_widget_key
@@ -182,7 +182,7 @@ def _render_expanded_nav() -> None:
         brand_col.markdown(
             f'<div class="cd-nav-brand">'
             f'<span class="brand-mark">C</span>'
-            f'<span class="cd-nav-brand-title">{escape(PRODUCT_TITLE.split()[0])}</span>'
+            f'<span class="cd-nav-brand-title">{escape(product_profile().module_code)}</span>'
             f"</div>",
             unsafe_allow_html=True,
         )
