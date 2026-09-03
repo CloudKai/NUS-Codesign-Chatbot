@@ -15,6 +15,7 @@ from backend.domain import (
     StageDecision,
 )
 from backend.learning_service import LearningProgressService
+from backend.providers import ProviderUnavailableError
 from backend.repositories import (
     SQLiteNotebookRepository,
     SQLitePhaseTransitionRepository,
@@ -243,6 +244,64 @@ def test_gate_false_needs_retrieval_retries_once_and_persists_second(tmp_path) -
     assert "lecture excerpt first" not in assistants[0]["content"]
     users = [item for item in store.get_messages(thread_id) if item["role"] == "user"]
     assert len(users) == 1
+
+
+def test_structured_retry_uses_last_invoke_slot_and_skips_rag_fallback(
+    tmp_path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A recovery invoke leaves no third slot for application RAG."""
+    store = StudentStore(tmp_path / "fallback-structured-retry.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    add_text_source(store, thread_id, "Lecture 3", "Accessibility notes")
+    retriever = RecordingRetriever(result=_result_for_source(store, thread_id))
+    client = FakeAgentCoreRuntime(
+        payloads=[
+            {"ok": False, "error": True, "category": "structured_output_failure"},
+            _coaching_payload(needs_source_retrieval=True),
+        ]
+    )
+    service = _service(store, client, retriever)
+
+    with caplog.at_level("INFO"):
+        turn = _submit(
+            service, thread_id, _PROJECT_MESSAGE, key="structured-retry-rag"
+        )
+
+    assert turn.response_text.startswith("What assumption")
+    assert len(client.calls) == 2
+    assert retriever.calls == []
+    assert any(
+        "rag_fallback_skipped reason=agentcore_invoke_budget_exhausted"
+        in record.getMessage()
+        for record in caplog.records
+    )
+    assistants = [item for item in store.get_messages(thread_id) if item["role"] == "assistant"]
+    assert len(assistants) == 1
+
+
+def test_rag_fallback_failure_cannot_start_a_third_structured_retry(
+    tmp_path,
+) -> None:
+    """A transient fallback failure is bounded by the same two-call budget."""
+    store = StudentStore(tmp_path / "fallback-rag-structured-failure.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    add_text_source(store, thread_id, "Lecture 3", "Accessibility notes")
+    retriever = RecordingRetriever(result=_result_for_source(store, thread_id))
+    client = FakeAgentCoreRuntime(
+        payloads=[
+            _coaching_payload(needs_source_retrieval=True),
+            {"ok": False, "error": True, "category": "structured_output_failure"},
+        ]
+    )
+    service = _service(store, client, retriever)
+
+    with pytest.raises(ProviderUnavailableError, match="could not be completed") as raised:
+        _submit(service, thread_id, _PROJECT_MESSAGE, key="rag-structured-failure")
+
+    assert raised.value.category == "structured_output_failure"
+    assert len(client.calls) == 2
+    assert len(retriever.calls) == 1
+    assert store.get_messages(thread_id) == []
 
 
 def test_attachment_fallback_snapshot_excludes_selected_course_sources(tmp_path) -> None:

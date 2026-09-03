@@ -12,6 +12,8 @@ import json
 import streamlit as st
 import streamlit.components.v1 as components
 
+from ui.html_embed import wrap_component_html
+
 # Navigation | center | Thinking Path (relative flex ratios).
 DEFAULT_WORKSPACE_WIDTHS: tuple[float, float, float] = (0.85, 2.5, 1.0)
 _MIN_RATIO = 0.2
@@ -94,7 +96,8 @@ def sync_workspace_column_resize() -> None:
     nav_is_collapsed = nav_collapsed()
     app_run = int(st.session_state.get("_app_runs") or 0)
     components.html(
-        f"""
+        wrap_component_html(
+            f"""
 <script>
 (() => {{
   const APP_RUN = {app_run};
@@ -570,6 +573,7 @@ def sync_workspace_column_resize() -> None:
   }}
 }})();
 </script>
-        """,
+            """
+        ),
         height=0,
     )

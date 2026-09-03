@@ -165,6 +165,57 @@ def test_stage_review_attention_skips_app_rerun_while_streaming() -> None:
     )
 
 
+def test_stage_review_attention_baseline_is_scoped_to_notebook(monkeypatch) -> None:
+    """Switching A→B establishes B's baseline without a second app rerun."""
+    state: dict[str, object] = {
+        "thread_id": "notebook-a",
+        "_app_runs": 7,
+    }
+    blobs: dict[str, dict[str, object]] = {
+        "notebook-a": {
+            "unread": True,
+            "jobs": {"problem_identification": {"status": "running"}},
+        },
+        "notebook-b": {"unread": False, "jobs": {}},
+    }
+    reruns: list[str] = []
+    monkeypatch.setattr(
+        studio_module,
+        "st",
+        SimpleNamespace(session_state=state),
+    )
+    monkeypatch.setattr(
+        studio_module,
+        "get_journey_stage_reviews",
+        lambda thread_id: blobs[thread_id],
+    )
+    monkeypatch.setattr(studio_module, "coach_turn_is_streaming", lambda: False)
+    monkeypatch.setattr(studio_module, "rerun_app", lambda: reruns.append("rerun"))
+
+    watch = studio_module._watch_stage_review_attention_fragment.__wrapped__
+    watch()
+    assert state["_stage_review_attention"] is True
+    assert state["_stage_review_active"] is True
+
+    state["thread_id"] = "notebook-b"
+    watch()
+
+    assert reruns == []
+    assert state["_stage_review_poll_thread_id"] == "notebook-b"
+    assert state["_stage_review_attention"] is False
+    assert state["_stage_review_active"] is False
+
+    # A same-thread full-script remount forces the existing poll path to read
+    # again, which is how a newly queued job becomes visible to the watcher.
+    state["_app_runs"] = 8
+    blobs["notebook-b"] = {
+        "unread": True,
+        "jobs": {"problem_identification": {"status": "running"}},
+    }
+    watch()
+    assert reruns == ["rerun"]
+
+
 def test_completed_source_upload_does_not_request_fragment_rerun() -> None:
     """A full-page reload may observe a finished upload without a fragment rerun."""
     source = Path(inspect.getfile(sources_module)).read_text(encoding="utf-8")

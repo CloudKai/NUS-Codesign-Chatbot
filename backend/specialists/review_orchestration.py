@@ -404,10 +404,57 @@ STAGE_REVIEW_STATUSES = frozenset(
     }
 )
 
+# These values are persisted as additive metadata on the existing
+# ``journey_stage_reviews`` settings blob.  ``completion`` is the one-shot
+# checkpoint written when a stage first completes.  ``revisit_exit`` is a
+# coalesced refresh for substantive work made while the stage was already
+# complete and then left.
+STAGE_REVIEW_REASON_COMPLETION = "completion"
+STAGE_REVIEW_REASON_REVISIT_EXIT = "revisit_exit"
+STAGE_REVIEW_SCOPE_VERSION = 1
+
+
+def stage_review_job_is_stale(
+    job: dict[str, Any] | None,
+    timeout_seconds: int,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    """Return whether a running Journey review has exceeded its lease.
+
+    Queued jobs are intentionally never considered stale: they are safe to
+    resubmit after a process restart.  Running jobs carry an explicit lease
+    expiry when created by the current implementation; older jobs fall back to
+    their ``started_at``/``updated_at`` watermark for compatibility.
+
+    Args:
+        job: Parsed Journey stage-review job mapping.
+        timeout_seconds: Maximum worker lease duration.
+        now: Optional UTC clock for deterministic tests.
+
+    Returns:
+        ``True`` only for an expired running job (or a malformed running job
+        with no usable timestamp).
+    """
+    if not isinstance(job, dict):
+        return False
+    if str(job.get("status") or "").strip().lower() != STAGE_REVIEW_RUNNING:
+        return False
+    current = now or datetime.now(timezone.utc)
+    lease_expires = _parse_job_timestamp(job.get("lease_expires_at"))
+    if lease_expires is not None:
+        return current >= lease_expires
+    started = _parse_job_timestamp(job.get("started_at")) or _parse_job_timestamp(
+        job.get("updated_at")
+    )
+    if started is None:
+        return True
+    return (current - started).total_seconds() > max(1, int(timeout_seconds))
+
 
 def empty_journey_stage_reviews() -> dict[str, Any]:
     """Return an empty durable Journey stage-review blob."""
-    return {"jobs": {}, "reviews": {}, "unread": False}
+    return {"jobs": {}, "reviews": {}, "unread": False, "revisit_dirty": {}}
 
 
 def stage_reviews_need_attention(blob: dict[str, Any] | None) -> bool:
@@ -435,23 +482,69 @@ def parse_journey_stage_reviews(value: Any) -> dict[str, Any]:
         value: Raw notebook settings value.
 
     Returns:
-        ``{jobs, reviews, unread}`` with known stage ids only.
+        ``{jobs, reviews, unread, revisit_dirty}`` with known stage ids only.
+        Job metadata includes the durable id, reason, target token, frozen
+        conversation/message scope, and optional worker lease fields.
     """
     base = empty_journey_stage_reviews()
     if not isinstance(value, dict):
         return base
     jobs_raw = value.get("jobs") if isinstance(value.get("jobs"), dict) else {}
     reviews_raw = value.get("reviews") if isinstance(value.get("reviews"), dict) else {}
+    dirty_raw = (
+        value.get("revisit_dirty")
+        if isinstance(value.get("revisit_dirty"), dict)
+        else {}
+    )
     jobs: dict[str, Any] = {}
     reviews: dict[str, Any] = {}
+    revisit_dirty: dict[str, Any] = {}
     for stage_id in STAGE_BY_ID:
         job = jobs_raw.get(stage_id)
         if isinstance(job, dict):
             status = str(job.get("status") or "").strip().lower()
             if status in STAGE_REVIEW_STATUSES:
+                raw_job_id = str(
+                    job.get("job_id") or job.get("review_id") or ""
+                ).strip()
+                try:
+                    conversation_revision = int(
+                        job.get("conversation_revision") or 0
+                    )
+                except (TypeError, ValueError):
+                    conversation_revision = 0
+                message_ids = [
+                    str(item).strip()
+                    for item in (job.get("message_ids") or [])
+                    if str(item).strip()
+                ][:256]
+                try:
+                    scope_version = int(job.get("scope_version") or 0)
+                except (TypeError, ValueError):
+                    scope_version = 0
                 jobs[stage_id] = {
                     "status": status,
+                    "job_id": raw_job_id or None,
+                    # ``review_id`` is retained as a compatibility alias for
+                    # callers that modelled Deep Review jobs similarly.
+                    "review_id": raw_job_id or None,
+                    "reason": (
+                        str(job.get("reason") or "").strip()
+                        or STAGE_REVIEW_REASON_COMPLETION
+                    ),
+                    "target_token": str(job.get("target_token") or "").strip()
+                    or None,
+                    "conversation_revision": max(0, conversation_revision),
+                    "message_ids": message_ids,
+                    "scope_frozen": job.get("scope_frozen") is True,
+                    "scope_version": max(0, scope_version),
                     "updated_at": str(job.get("updated_at") or "").strip() or None,
+                    "started_at": str(job.get("started_at") or "").strip() or None,
+                    "lease_token": str(job.get("lease_token") or "").strip() or None,
+                    "lease_expires_at": str(
+                        job.get("lease_expires_at") or ""
+                    ).strip()
+                    or None,
                     "error_code": str(job.get("error_code") or "").strip() or None,
                 }
         review = reviews_raw.get(stage_id)
@@ -459,10 +552,41 @@ def parse_journey_stage_reviews(value: Any) -> dict[str, Any]:
             cleaned = normalize_stage_checkpoint(review, stage_id=stage_id)
             if cleaned is not None:
                 reviews[stage_id] = cleaned
+        dirty = dirty_raw.get(stage_id)
+        if isinstance(dirty, str):
+            # Accept a compact token-only legacy shape and normalize it to the
+            # richer additive marker used by current writers.
+            token = dirty.strip()
+            dirty_revision = 0
+            dirty_updated_at = None
+        elif isinstance(dirty, dict):
+            token = str(dirty.get("token") or "").strip()
+            if token:
+                try:
+                    dirty_revision = int(dirty.get("conversation_revision") or 0)
+                except (TypeError, ValueError):
+                    dirty_revision = 0
+                dirty_updated_at = (
+                    str(dirty.get("updated_at") or "").strip() or None
+                )
+            else:
+                dirty_revision = 0
+                dirty_updated_at = None
+        else:
+            token = ""
+            dirty_revision = 0
+            dirty_updated_at = None
+        if token:
+            revisit_dirty[stage_id] = {
+                "token": token,
+                "conversation_revision": max(0, dirty_revision),
+                "updated_at": dirty_updated_at,
+            }
     return {
         "jobs": jobs,
         "reviews": reviews,
         "unread": bool(value.get("unread")),
+        "revisit_dirty": revisit_dirty,
     }
 
 
@@ -516,7 +640,7 @@ def normalize_stage_checkpoint(
         str(item).strip()
         for item in (value.get("important_message_ids") or [])
         if str(item).strip()
-    ][:12]
+    ][:16]
     artifacts_raw = value.get("important_artifacts")
     artifacts: dict[str, str] = {}
     if isinstance(artifacts_raw, dict):
@@ -547,6 +671,49 @@ def normalize_stage_checkpoint(
         "important_artifacts": artifacts,
         "facione_scores": facione_scores,
         "conversation_revision": conversation_revision,
+    }
+
+
+def public_journey_stage_reviews(value: Any) -> dict[str, Any]:
+    """Project durable Journey review metadata for the student-facing API.
+
+    Internal queue records carry fencing ids, dirty tokens, frozen transcript
+    ids, and worker lease timestamps.  Those implementation details must not
+    become part of the existing student API contract.  This projection keeps
+    the historical top-level shape and the prior job status timestamps/error
+    fields while retaining normalized checkpoint content.
+
+    Args:
+        value: Raw or normalized ``journey_stage_reviews`` metadata.
+
+    Returns:
+        A public ``{jobs, reviews, unread}`` mapping with no queue internals.
+    """
+    parsed = parse_journey_stage_reviews(value)
+    jobs: dict[str, dict[str, Any]] = {}
+    for stage_id, job in (parsed.get("jobs") or {}).items():
+        if not isinstance(job, dict):
+            continue
+        jobs[stage_id] = {
+            "status": job.get("status"),
+            "updated_at": job.get("updated_at"),
+            "error_code": job.get("error_code"),
+        }
+    # ``important_message_ids`` is useful to internal stage-history tooling,
+    # but it is still transcript metadata and must not cross the student API
+    # boundary.  Keep the public review shape and all pedagogical fields while
+    # omitting that internal linkage field.
+    reviews: dict[str, dict[str, Any]] = {}
+    for stage_id, review in (parsed.get("reviews") or {}).items():
+        if not isinstance(review, dict):
+            continue
+        public_review = dict(review)
+        public_review.pop("important_message_ids", None)
+        reviews[stage_id] = public_review
+    return {
+        "jobs": jobs,
+        "reviews": reviews,
+        "unread": bool(parsed.get("unread")),
     }
 
 

@@ -12,6 +12,8 @@ from typing import Literal
 import streamlit as st
 import streamlit.components.v1 as components
 
+from ui.html_embed import wrap_component_html
+
 RenameKind = Literal["notebook", "source", "topbar"]
 
 _KEY_PREFIXES: dict[RenameKind, tuple[str, ...]] = {
@@ -135,7 +137,8 @@ def sync_rename_select_all(*, root_selector: str, aria_label: str = "Rename") ->
     safe_root = root_selector.replace("\\", "\\\\").replace("'", "\\'")
     safe_label = aria_label.replace("\\", "\\\\").replace("'", "\\'")
     components.html(
-        f"""
+        wrap_component_html(
+            f"""
 <script>
 (() => {{
   const doc = window.parent.document;
@@ -175,6 +178,7 @@ def sync_rename_select_all(*, root_selector: str, aria_label: str = "Rename") ->
   boot();
 }})();
 </script>
-        """,
+            """
+        ),
         height=0,
     )

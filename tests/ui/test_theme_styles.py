@@ -47,6 +47,44 @@ def test_mobile_viewport_lock_prevents_ios_input_zoom() -> None:
     assert "st-key-professor_header" in mobile
 
 
+def test_light_theme_makes_chat_command_code_readable_without_touching_dark(
+    monkeypatch,
+) -> None:
+    """Stage-action inline code gets a light pill only in Light appearance."""
+    from ui import theme as theme_module
+
+    rendered: list[str] = []
+    monkeypatch.setattr(
+        theme_module.st,
+        "markdown",
+        lambda value, **_kwargs: rendered.append(value),
+    )
+    monkeypatch.setattr(
+        theme_module.st,
+        "session_state",
+        {"appearance": "Light"},
+    )
+    theme_module.render_theme_css()
+    light_css = rendered[-1]
+    assert "background:#E8EDF2 !important" in light_css
+    assert "color:#475467 !important" in light_css
+    assert (
+        '[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] p code'
+        in light_css
+    )
+
+    rendered.clear()
+    monkeypatch.setattr(
+        theme_module.st,
+        "session_state",
+        {"appearance": "Dark"},
+    )
+    theme_module.render_theme_css()
+    dark_css = rendered[-1]
+    assert "background:#E8EDF2 !important" not in dark_css
+    assert "color:#475467 !important" not in dark_css
+
+
 def _css_rule_body(css: str, marker: str) -> str:
     """Return the first declaration block that follows ``marker``."""
     start = css.index(marker)

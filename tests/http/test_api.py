@@ -286,6 +286,91 @@ def test_select_stage_api_requires_flag_and_valid_stage(tmp_path, monkeypatch, c
     assert stage_event["outcome"] == "selected"
 
 
+def test_notebook_apis_hide_internal_stage_review_worker_metadata(
+    tmp_path, monkeypatch
+):
+    """All broad notebook projections strip queue fencing and frozen scope."""
+    store = StudentStore(tmp_path / "stage-review-public-api.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
+    journey = dict(metadata.get("learning_journey") or {})
+    journey["completed_stages"] = ["problem_identification"]
+    metadata.update(
+        {
+            "learning_journey": journey,
+            "journey_stage_reviews": {
+                "jobs": {
+                    "problem_identification": {
+                        "status": "queued",
+                        "updated_at": "2026-09-03T00:00:00+00:00",
+                        "job_id": "job-proof",
+                        "review_id": "job-proof",
+                        "lease_token": "lease-proof",
+                        "target_token": "dirty-proof",
+                        "message_ids": ["message-proof"],
+                        "scope_frozen": True,
+                        "scope_version": 1,
+                    }
+                },
+                "reviews": {},
+                "revisit_dirty": {
+                    "problem_identification": {"token": "dirty-proof"}
+                },
+                "unread": False,
+            },
+        }
+    )
+    store.update_thread(thread_id, metadata=metadata)
+    client = TestClient(create_app(store, auto_advance_stages=False))
+
+    def _assert_public(value: dict) -> None:
+        reviews = value["journey_stage_reviews"]
+        assert set(reviews) == {"jobs", "reviews", "unread"}
+        assert reviews["jobs"]["problem_identification"] == {
+            "status": "queued",
+            "updated_at": "2026-09-03T00:00:00+00:00",
+            "error_code": None,
+        }
+        serialized = json.dumps(reviews)
+        for private_value in (
+            "job-proof",
+            "lease-proof",
+            "dirty-proof",
+            "message-proof",
+            "scope_frozen",
+            "revisit_dirty",
+        ):
+            assert private_value not in serialized
+
+    fetched = client.get(f"/api/v1/threads/{thread_id}")
+    assert fetched.status_code == 200
+    _assert_public(fetched.json()["metadata"])
+
+    listed = client.get("/api/v1/threads")
+    assert listed.status_code == 200
+    listed_thread = next(item for item in listed.json() if item["id"] == thread_id)
+    _assert_public(listed_thread["metadata"])
+
+    patched = client.patch(
+        f"/api/v1/threads/{thread_id}",
+        json={"name": "Projected notebook"},
+    )
+    assert patched.status_code == 200
+    _assert_public(patched.json()["metadata"])
+
+    state = client.get(f"/api/v1/threads/{thread_id}/learning-state")
+    assert state.status_code == 200
+    _assert_public(state.json())
+
+    monkeypatch.setattr(settings, "student_stage_selection", True)
+    selected = client.post(
+        f"/api/v1/threads/{thread_id}/learning-state/select-stage",
+        json={"stage_id": "concept_generation"},
+    )
+    assert selected.status_code == 200
+    _assert_public(selected.json())
+
+
 def test_strict_guidance_is_stricter_before_recommending_advance(tmp_path):
     store = StudentStore(tmp_path / "complex-api.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")

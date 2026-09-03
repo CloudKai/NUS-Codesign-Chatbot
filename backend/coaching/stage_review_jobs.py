@@ -1,8 +1,8 @@
-"""Process-local background executor for Journey stage-completion reviews.
+"""Process-local executor for durable Journey stage-review jobs.
 
-Same pattern as Deep Review: one Uvicorn worker, in-process pool, fail-open.
-Queued/running jobs are lost on restart and may be retried on the next
-completion attempt when status is missing or ``failed``.
+The database owns queue state and the job id is the execution fence. The
+process-local set only suppresses duplicate submissions in one worker; queued
+rows are resubmitted from the existing Journey read seam after restart.
 """
 
 from __future__ import annotations
@@ -41,19 +41,47 @@ def submit_stage_review_job(
     service: CoachApplicationService,
     thread_id: str,
     stage_id: str,
+    *,
+    job_id: str | None = None,
 ) -> None:
-    """Submit one stage-completion Haiku review when not already in-flight.
+    """Submit one durable stage-review job when not already in-flight.
 
     Args:
         service: Application service that owns ``execute_stage_review_job``.
         thread_id: Owned notebook id.
         stage_id: Completed Thinking Path stage id.
+        job_id: Optional durable job id. When omitted, resolve the current
+            stage job for compatibility with older callers.
     """
     cleaned_thread = str(thread_id or "").strip()
     cleaned_stage = str(stage_id or "").strip()
     if not cleaned_thread or not cleaned_stage:
         return
-    key = f"{cleaned_thread}:{cleaned_stage}"
+    cleaned_job_id = str(job_id or "").strip()
+    if not cleaned_job_id:
+        try:
+            thread = service._store.get_thread(cleaned_thread)  # type: ignore[attr-defined]
+            blob = (
+                (thread or {}).get("metadata", {}).get("journey_stage_reviews")
+                if isinstance((thread or {}).get("metadata"), dict)
+                else None
+            )
+            from backend.specialists.review_orchestration import (
+                parse_journey_stage_reviews,
+            )
+
+            parsed = parse_journey_stage_reviews(blob)
+            job = dict((parsed.get("jobs") or {}).get(cleaned_stage) or {})
+            cleaned_job_id = str(
+                job.get("job_id") or job.get("review_id") or ""
+            ).strip()
+        except Exception:
+            logger.exception(
+                "stage_review_job_lookup_failed thread_id=%s stage_id=%s",
+                cleaned_thread,
+                cleaned_stage,
+            )
+    key = cleaned_job_id or f"{cleaned_thread}:{cleaned_stage}"
     with _LOCK:
         if key in _SUBMITTED:
             return
@@ -61,7 +89,11 @@ def submit_stage_review_job(
 
     def _run() -> None:
         try:
-            service.execute_stage_review_job(cleaned_thread, cleaned_stage)
+            service.execute_stage_review_job(
+                cleaned_thread,
+                cleaned_stage,
+                cleaned_job_id or None,
+            )
         except Exception:
             logger.exception(
                 "stage_review_job_failed thread_id=%s stage_id=%s",
@@ -69,9 +101,27 @@ def submit_stage_review_job(
                 cleaned_stage,
             )
         finally:
+            # The durable row, rather than this process-local set, owns the
+            # lifecycle.  Release the submission key when this worker exits so
+            # a lease-reclaimed job with the same job id can be submitted
+            # again, while concurrent callers remain deduplicated during the
+            # active execution window.
             with _LOCK:
                 _SUBMITTED.discard(key)
-
+            try:
+                # A stale worker can finish after another process reclaimed
+                # its lease.  Reconcile queued durable work now that this
+                # process-local guard has been released.
+                reconcile = getattr(
+                    service, "resubmit_queued_stage_review_jobs", None
+                )
+                if callable(reconcile):
+                    reconcile(cleaned_thread)
+            except Exception:
+                logger.exception(
+                    "stage_review_job_recovery_after_exit_failed thread_id=%s",
+                    cleaned_thread,
+                )
     get_stage_review_executor().submit(_run)
 
 

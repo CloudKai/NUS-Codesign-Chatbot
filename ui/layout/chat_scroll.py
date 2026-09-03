@@ -33,6 +33,8 @@ from __future__ import annotations
 
 import streamlit.components.v1 as components
 
+from ui.html_embed import wrap_component_html
+
 NEAR_BOTTOM_PX = 120
 # Extra frames after Send / reply remount so Streamlit can finish painting
 # the new bubble height before scrollTop is applied.
@@ -77,6 +79,8 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
         ensureGeneration: 0,
         ensureStableFrames: 0,
         ensureLastScrollHeight: -1,
+        boundScrollRoot: null,
+        boundScrollHandler: null,
       };
     }
     const current = win.__cdChatScroll;
@@ -92,6 +96,12 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     }
     if (typeof current.ensureLastScrollHeight !== "number") {
       current.ensureLastScrollHeight = -1;
+    }
+    if (!("boundScrollRoot" in current)) {
+      current.boundScrollRoot = null;
+    }
+    if (!("boundScrollHandler" in current)) {
+      current.boundScrollHandler = null;
     }
     return current;
   }
@@ -184,9 +194,33 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     button.style.bottom = bottom + "px";
   }
 
+  function bindScrollRoot(root) {
+    const state = api();
+    if (state.boundScrollRoot === root) return;
+    if (state.boundScrollRoot && state.boundScrollHandler) {
+      state.boundScrollRoot.removeEventListener("scroll", state.boundScrollHandler);
+    }
+    state.boundScrollRoot = root || null;
+    state.boundScrollHandler = null;
+    if (!root) return;
+
+    // Element scroll events do not reliably reach a document-level capture
+    // listener after Streamlit replaces the feed. Bind the current scrollport
+    // directly and refresh the fixed control on every manual scroll.
+    const handler = () => {
+      schedule(() => {
+        syncFollowFromViewport();
+        updateScrollDownButton();
+      });
+    };
+    state.boundScrollHandler = handler;
+    root.addEventListener("scroll", handler, { passive: true });
+  }
+
   function updateScrollDownButton() {
     const root = scrollRoot();
     const panel = chatPanel();
+    bindScrollRoot(root);
     const button = scrollDownButton();
     if (!button) return;
     const surfaceVisible = isChatSurfaceVisible(panel);
@@ -462,4 +496,4 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
         .replace("__CD_FOLLOW_FRAMES__", str(int(FOLLOW_SNAP_FRAMES)))
         .replace("__CD_ENSURE_FRAMES__", str(int(SCROLL_DOWN_ENSURE_FRAMES)))
     )
-    components.html(script, height=0, width=0)
+    components.html(wrap_component_html(script), height=0, width=0)

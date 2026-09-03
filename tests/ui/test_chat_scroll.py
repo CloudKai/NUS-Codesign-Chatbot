@@ -47,6 +47,20 @@ def test_chat_scroll_helper_uses_near_bottom_gating() -> None:
     assert "startEnsureScrollDown" in helper
     assert "ensureGeneration" in helper
     assert "SCROLL_DOWN_ENSURE_FRAMES" in helper
+    assert "boundScrollRoot" in helper
+    assert "boundScrollHandler" in helper
+    assert 'root.addEventListener("scroll", handler, { passive: true })' in helper
+    assert 'removeEventListener("scroll", state.boundScrollHandler)' in helper
+    assert "Element scroll events do not reliably reach" in helper
+    workspace = Path("ui/assets/styles/10-workspace.css").read_text(encoding="utf-8")
+    assert (
+        "body:has(.st-key-search_panel):not(:has(.st-key-chat_panel))"
+        in workspace
+    )
+    assert (
+        "body:has(.st-key-sources_panel):not(:has(.st-key-chat_panel))"
+        in workspace
+    )
     # Parent-owned ensure survives iframe teardown; do not early-exit on
     # first visible panel (that hid the control after Review / New chat).
     assert "function ensureScrollDown(" in helper

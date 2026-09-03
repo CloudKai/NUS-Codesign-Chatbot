@@ -15,6 +15,8 @@ import logging
 import streamlit as st
 import streamlit.components.v1 as components
 
+from ui.html_embed import wrap_component_html
+
 DEFAULT_TOAST_DURATION_MS = 3000
 _FALLBACK_TOAST_DURATION_S = 3
 _CORNER_TOAST_CONTROLLER_VERSION = 2
@@ -287,7 +289,9 @@ def _corner_toast_iframe_html(messages: list[str], *, duration_ms: int) -> str:
 def _inject_corner_toasts(messages: list[str], *, duration_ms: int) -> None:
     """Inject parent-page toast DOM. Raises if the component call fails."""
     components.html(
-        _corner_toast_iframe_html(messages, duration_ms=duration_ms),
+        wrap_component_html(
+            _corner_toast_iframe_html(messages, duration_ms=duration_ms)
+        ),
         height=0,
         width=0,
     )

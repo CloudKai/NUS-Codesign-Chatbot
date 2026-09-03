@@ -2,6 +2,164 @@
 
 ## CURRENT STATUS
 
+### AgentCore transient structured-output recovery (2026-09-04)
+
+**Behavior.** Fast Chat now performs one bounded recovery invoke when AgentCore
+returns its category-only structured-output harness envelope. The recovery uses
+a fresh stateless runtime session, while normal calls keep owner/notebook
+affinity. Strict Fast Chat validation, safety blocks, authentication failures,
+empty/native-malformed payloads, and idempotency behavior are unchanged. The
+request-local outer-call budget remains two invokes: a recovery consumes the
+available slot, and application RAG fallback is skipped when that budget is
+already exhausted. A successful recovery is persisted once; a failed pair
+leaves no partial turn.
+
+**Diagnosis/evidence.** The deployed CDE2300 logs showed the screenshot's
+failure category as `structured_output_failure` returning in about 168 ms,
+with adjacent Fast Chat calls succeeding in roughly 4.2–9.7 s. The category
+and latency do not match an EC2 cold-start timeout, OOM, lease conflict, or
+safety block. This patch targets the transient AgentCore harness/warm-session
+case without weakening the response contract.
+
+**Files.** `backend/agentcore_provider.py`, `backend/coaching/execution.py`,
+`backend/turn_perf.py`, focused AgentCore/RAG tests, and this handoff.
+
+**Validation.** Focused provider, Fast Chat, session-affinity, performance,
+RAG-fallback, atomic-persistence, and lease-alignment tests passed (141 tests
+in the final focused run). Backend `compileall` and `git diff --check` passed.
+Terra High independently reviewed the revised diff and approved the retry
+classification, fresh-session behavior, two-call lease bound, telemetry
+privacy, and exactly-once persistence coverage. No paid model call or
+deployment was made.
+
+**Compatibility, migration, and rollback.** No database/schema or student-data
+migration is required. Recovery is in-process and adds at most one model
+invoke only after a marked transient harness envelope; the existing two-call
+execution/270-second lease derivation remains valid. Rollback is code-only by
+removing the recovery change; existing persisted turns remain readable.
+
+**Known risk.** This handles transient runtime structured-output envelopes,
+not a genuinely stale published AgentCore schema or a browser/proxy NDJSON
+EOF after `started`; those still require runtime publish/version verification
+or separate stream diagnostics. The live endpoint has not been retried after
+this change because deployment and paid-call approval were not requested.
+
+**Next exact action.** Deploy the reviewed app/runtime change through the
+approved release path, bump the AgentCore affinity generation if the runtime
+artifact changes, and run a cost-capped smoke for a normal prompt plus a
+controlled transient-failure check before releasing the URL.
+
+### Cross-panel remount and stacking QA (2026-09-03)
+
+**Behavior.** The stage-review attention poller now scopes its baseline to the
+active notebook. Switching notebooks, opening Search/Library, creating a new
+notebook, changing Review/Progression, moving to another Thinking Path stage,
+or collapsing/expanding either side panel cannot reinterpret the previous
+notebook's review state as a new job and request a second workspace remount.
+Same-notebook review attention transitions still refresh when required. All
+bare `components.html` helpers now receive one shared open HTML document shell,
+and the body-wide composer tooltip observer was removed; upload tips are
+cleared on bounded apply/hover paths so panel remounts do not accumulate a
+document observer.
+
+**QA.** The deployed CDE2300 URL was exercised through both side-panel
+collapse/expand controls, Search, Library, New notebook, Review, a notebook
+switch, and a stage move. Each settled state contained one workspace mount,
+one relevant center/studio panel, and one scroll control; no persistent
+duplicate shell was observed. A deliberately submitted smoke prompt was
+blocked by the live safety check and was not retried. The test created one
+additional Untitled notebook and moved the selected Elderly Road Safety
+notebook to Design specification; these are persisted test-data changes.
+
+**Files.** `ui/panels/studio.py`, `tests/ui/test_rerun_scope.py`,
+`ui/html_embed.py`, `tests/ui/test_html_embed.py`, the layout/theme/profile/
+notebook/source/toast helper modules, `tests/ui/test_streamlit_ui.py`, and
+this handoff.
+
+**Validation.** Focused UI, HTML-embed, rerun-scope, chat-scroll, navigation,
+and toast tests passed; repository `compileall` and `git diff --check` passed.
+The broader `tests/ui/test_streamlit_ui.py` run retains two unrelated branch
+baseline failures (a stale `truncate` source assertion and a post-New-chat
+Stage Progression expectation). A cache-fresh local browser smoke covered
+side-panel collapse/expand, Search, Library, New notebook, Review, and
+remounts: every settled state had exactly one workspace and one relevant
+panel. EC2 remained healthy during the live smoke: the app used about 421 MiB
+of its 1.79 GiB container limit, the host had about 896 MiB available, and both
+containers reported zero restarts/OOM kills. No deployment or paid model call
+was made.
+
+**Known risk.** The deployed build and the local Streamlit 1.60 browser still
+log three `MutationObserver.observe(...): parameter 1 is not of type 'Node'`
+errors on clean loads and some remounts. The message persists with the app
+observers guarded and the shared component shell in place, so it is attributed
+to Streamlit/React runtime lifecycle code rather than a duplicate workspace
+trigger. It is not fixed by this repository change; upgrading or patching the
+runtime needs a separate decision and validation. The local watcher/helper
+fixes are not deployed to CloudFront.
+
+**Next exact action.** Deploy the reviewed local UI changes to a controlled
+environment, repeat the same cross-panel smoke, and then decide whether to
+upgrade/patch the Streamlit component runtime for a clean browser console.
+
+### Revisited-stage checkpoint refresh on actual exit (2026-09-03)
+
+**Behavior.** A completed Thinking Path stage can now be revisited without
+running the Haiku/Facione checkpoint after every student message. Successful
+substantive turns on that completed stage only update one coalesced durable
+dirty marker. The application freezes and queues one replacement checkpoint
+when focus actually leaves the stage through direct Journey selection, an
+exact typed move, accepted confirmation, or auto-advance. Initial stage
+completion remains a one-shot checkpoint. Durable job ids, worker leases,
+frozen message scope, stale-worker fencing, retry/restart recovery, and
+append-only revision pruning prevent duplicate or stale checkpoint writes.
+A failed older checkpoint also preserves and queues newer revisit work after
+exit. Ordinary stay/revisit turns retain the two-notebook-read baseline.
+
+Internal job ids, dirty tokens, lease data, and frozen transcript ids are
+removed from every student-facing notebook, learning-state, stage-selection,
+and dedicated Journey-review response. Deep Analysis behavior is unchanged.
+
+**Files.** `backend/coaching/execution.py`,
+`backend/coaching/stage_review_jobs.py`, `backend/http/app.py`,
+`backend/learning_service.py`, `backend/persistence/dsql_student_store.py`,
+`backend/specialists/__init__.py`,
+`backend/specialists/review_orchestration.py`, `backend/student_store.py`,
+`backend/workspace_service.py`, focused domain/HTTP/persistence/architecture
+tests, and this handoff.
+
+**Validation.** The affected deterministic regression set passed (175 tests),
+including multi-message revisit coalescing, actual-exit enqueue, provider
+failure after exit, frozen history, public API minimization, ordinary-turn read
+count, SQLite atomicity, and DSQL OCC coverage. `compileall` over `backend`,
+`ui`, `streamlit_app.py`, `tests`, and `scripts` passed, as did `git diff
+--check`. The final independent Sol-high review approved the change with no
+remaining correctness, security, or data-safety findings. The repository-wide
+suite retains 13 documented branch-baseline failures in citation/retrieval and
+prompt expectations, Free/Reflection progression expectations, stale
+architecture/route and deployment contracts, and unrelated UI/CSS assertions;
+none touches the changed revisit-refresh behavior. No paid model or AWS call
+was made.
+
+**Compatibility, migration, and rollback.** No SQL schema or existing message,
+notebook, source, or learning-data migration is required. New queue state is
+additive inside the existing `journey_stage_reviews` metadata blob, and the
+parser retains legacy job compatibility. SQLite and DSQL use the same
+transactional store methods; DSQL retry coverage includes every new write.
+Rollback is code-only: existing reviews remain readable, while additive
+internal keys are ignored by the previous parser.
+
+**Known risk.** Background review execution is process-local; after an abrupt
+restart, durable queued work resumes when the existing Journey-review read seam
+is reached, and expired running leases are reclaimed. Live AgentCore/DSQL
+behavior has not been exercised because that would require explicit paid-call
+approval and a cost cap.
+
+**Next exact action.** Run a local mock UI smoke: revisit a completed stage,
+send several messages, verify the checkpoint stays unchanged while remaining
+there, then move to another stage and verify exactly one refreshed Facione
+checkpoint appears. After that, run an explicitly cost-capped live AgentCore
+smoke before deployment.
+
 ### Free mode: no artifact required to proceed (2026-08-30)
 
 **Behavior.** Free (`response_detail=long`) no longer requires a How Might We,

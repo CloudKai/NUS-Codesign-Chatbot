@@ -1569,8 +1569,8 @@
 
     /* The fixed chat scroll control survives Streamlit destination remounts.
        Keep it out of Search and Library until Chat is mounted again. */
-    body:has(.st-key-search_panel) #cd-chat-scroll-down,
-    body:has(.st-key-sources_panel) #cd-chat-scroll-down {
+    body:has(.st-key-search_panel):not(:has(.st-key-chat_panel)) #cd-chat-scroll-down,
+    body:has(.st-key-sources_panel):not(:has(.st-key-chat_panel)) #cd-chat-scroll-down {
         display:none !important;
     }
 

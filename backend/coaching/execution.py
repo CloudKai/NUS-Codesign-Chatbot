@@ -81,7 +81,10 @@ from backend.retrieval import (
     focused_excerpt,
     with_course_evidence_gap,
 )
-from backend.settings import settings as runtime_settings
+from backend.settings import (
+    FAST_CHAT_MAX_PROVIDER_INVOCATIONS_PER_TURN,
+    settings as runtime_settings,
+)
 from backend.providers import ProviderUnavailableError
 from backend.specialists.review_orchestration import (
     COUNTER_SETTINGS_KEY,
@@ -93,16 +96,21 @@ from backend.specialists.review_orchestration import (
     DEEP_REVIEW_SNAPSHOT_KEY,
     DEEP_REVIEW_TURN_MESSAGE,
     JOURNEY_STAGE_REVIEWS_KEY,
+    STAGE_REVIEW_COMPLETE,
+    STAGE_REVIEW_FAILED,
+    STAGE_REVIEW_QUEUED,
+    STAGE_REVIEW_RUNNING,
+    stage_review_job_is_stale,
     bound_deep_review_interval,
     deep_review_job_is_stale,
     deep_review_snapshot_payload,
     deep_review_stage_reviews_for_snapshot,
     explicit_deep_review_available,
-    newly_completed_stage_ids,
     normalize_stage_checkpoint,
     parse_coaching_turns_since_deep_review,
     parse_deep_review_job,
     parse_journey_stage_reviews,
+    public_journey_stage_reviews,
 )
 from backend.source_library import (
     CHAT_ATTACHMENT_ORIGIN,
@@ -164,6 +172,59 @@ _COURSE_CATALOG_RETRIEVAL_CUES = frozenset(
 )
 
 logger = logging.getLogger(__name__)
+
+_STAGE_REVIEW_HISTORY_LIMIT = 24
+_STAGE_REVIEW_IMPORTANT_EDGE = 8
+
+
+def _agentcore_turn_budget_exhausted() -> bool:
+    """Return whether Fast Chat has consumed its outer AgentCore call budget.
+
+    The provider records this count on the request-local performance context,
+    which spans the initial workflow call and the optional application RAG
+    fallback. A missing context means the helper is being used directly by a
+    compatibility/test caller, so it preserves the previous behavior there.
+    """
+    perf = current_perf()
+    if perf is None:
+        return False
+    try:
+        consumed = int(perf.fields.get("agentcore_call_count") or 0)
+    except (TypeError, ValueError):
+        return True
+    return consumed >= FAST_CHAT_MAX_PROVIDER_INVOCATIONS_PER_TURN
+
+
+def _bounded_stage_review_history(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return the exact bounded frozen slice sent to the stage reviewer.
+
+    The durable job freezes message ids at enqueue time.  This helper applies
+    the same final tail bound to both the provider history and the checkpoint
+    linkage so those two projections cannot describe different transcript
+    slices.
+    """
+    return [
+        message
+        for message in messages
+        if str(message.get("content") or "").strip()
+    ][-_STAGE_REVIEW_HISTORY_LIMIT:]
+
+
+def _stage_review_important_message_ids(
+    messages: list[dict[str, Any]],
+) -> list[str]:
+    """Return first/last edge ids from one bounded stage-review history."""
+    ids = [
+        str(message.get("id") or "").strip()
+        for message in messages
+        if str(message.get("id") or "").strip()
+    ]
+    edge = _STAGE_REVIEW_IMPORTANT_EDGE
+    if len(ids) <= edge * 2:
+        return ids
+    return ids[:edge] + ids[-edge:]
 
 
 def _wants_course_catalog_retrieval(
@@ -943,96 +1004,212 @@ class CoachApplicationService:
         *,
         completed_before: list[str] | None,
     ) -> None:
-        """Queue Haiku Journey reviews for new completions and stage revisits.
+        """Submit durable Journey jobs after a successful coach-turn commit.
 
-        Newly completed stages enqueue once. When the student keeps working on
-        an already-completed stage and the notebook revision advances, re-queue
-        that stage so the checkpoint (including Facione) can be replaced.
-        Failures never block the coach turn.
+        Completion and revisit jobs are queued in the same transaction as the
+        state change. This post-commit seam only submits durable rows and never
+        infers refresh work from ``current_stage``.
         """
         try:
-            from backend.coaching.stage_review_jobs import submit_stage_review_job
-
-            thread = self._notebooks.get_thread(thread_id)
-            if not thread:
-                return
-            journey = normalize_journey(
-                (thread.get("metadata") or {}).get("learning_journey")
-            )
-            completed_after = list(journey.get("completed_stages") or [])
-            newly = newly_completed_stage_ids(completed_before, completed_after)
-            try:
-                notebook_revision = int(thread.get("conversation_revision") or 0)
-            except (TypeError, ValueError):
-                notebook_revision = 0
-            enqueue_stages = list(newly)
-            current_stage = str(journey.get("current_stage") or "").strip()
-            if (
-                current_stage
-                and current_stage in completed_after
-                and current_stage not in newly
-            ):
-                enqueue_stages.append(current_stage)
-            for stage_id in enqueue_stages:
-                blob, created = self._store.start_or_get_stage_review_job(
-                    thread_id,
-                    stage_id=stage_id,
-                    notebook_revision=notebook_revision,
-                )
-                del blob
-                if created:
-                    submit_stage_review_job(self, thread_id, stage_id)
+            # Keep the historical argument for private callers that still
+            # calculate the pre-turn completed list; it must not drive a
+            # post-commit write or stage inference.
+            del completed_before
+            self.resubmit_queued_stage_review_jobs(thread_id)
         except Exception:
             logger.exception(
                 "stage_review_enqueue_failed thread_id=%s", thread_id
             )
 
-    def execute_stage_review_job(self, thread_id: str, stage_id: str) -> None:
+    def resubmit_queued_stage_review_jobs(self, thread_id: str) -> None:
+        """Recover and submit durable queued Journey stage-review jobs.
+
+        This is safe to call at service construction and on Journey reads. A
+        running job is reclaimed only after its bounded lease expires; queued
+        jobs are submitted by their durable job id. No new work is inferred
+        from the notebook's current stage.
+        """
+        from backend.coaching.stage_review_jobs import submit_stage_review_job
+
+        thread = self._notebooks.get_thread(thread_id)
+        if not thread:
+            return
+        metadata = dict(thread.get("metadata") or {})
+        blob = parse_journey_stage_reviews(metadata.get(JOURNEY_STAGE_REVIEWS_KEY))
+        timeout = int(runtime_settings.deep_review_job_timeout_seconds)
+        for stage_id, raw_job in list((blob.get("jobs") or {}).items()):
+            job = raw_job if isinstance(raw_job, dict) else {}
+            status = str(job.get("status") or "").strip().lower()
+            job_id = str(job.get("job_id") or job.get("review_id") or "").strip()
+            if status == STAGE_REVIEW_RUNNING and stage_review_job_is_stale(
+                job, timeout
+            ):
+                try:
+                    self._store.requeue_stage_review_job(
+                        thread_id,
+                        stage_id=stage_id,
+                        job_id=job_id or None,
+                    )
+                except Exception:
+                    logger.exception(
+                        "stage_review_stale_requeue_failed thread_id=%s stage_id=%s",
+                        thread_id,
+                        stage_id,
+                    )
+                # Re-read the durable row after a conditional requeue. A
+                # concurrent worker may have claimed it again.
+                refreshed = self._notebooks.get_thread(thread_id) or thread
+                refreshed_blob = parse_journey_stage_reviews(
+                    (refreshed.get("metadata") or {}).get(JOURNEY_STAGE_REVIEWS_KEY)
+                )
+                job = dict((refreshed_blob.get("jobs") or {}).get(stage_id) or {})
+                status = str(job.get("status") or "").strip().lower()
+                job_id = str(
+                    job.get("job_id") or job.get("review_id") or ""
+                ).strip()
+            if status != STAGE_REVIEW_QUEUED:
+                continue
+            # The submitter resolves old jobs without a job_id as a
+            # compatibility path; new jobs are always keyed by job_id.
+            # Resolve the id again inside the submitter when omitted. Keeping
+            # the three-argument call preserves injected/test callbacks while
+            # the real submitter still deduplicates by durable job id.
+            submit_stage_review_job(self, thread_id, stage_id)
+
+    def execute_stage_review_job(
+        self,
+        thread_id: str,
+        stage_id: str,
+        job_id: str | None = None,
+    ) -> None:
         """Run one background Haiku checkpoint for a completed stage.
 
         Failures are persisted on the job envelope and never roll back stage
         completion or the coach transcript. A successful run overwrites that
-        stage's Strengths / Areas / summary / Facione checkpoint.
+        stage's Strengths / Areas / summary / Facione checkpoint. The durable
+        job id and worker lease fence stale completion/failure writes.
         """
         cleaned_stage = str(stage_id or "").strip()
+        cleaned_job_id = str(job_id or "").strip()
+        lease_token = str(uuid.uuid4())
+        claimed = False
         try:
-            self._store.mark_stage_review_running(thread_id, stage_id=cleaned_stage)
+            thread = self._notebooks.get_thread(thread_id)
+            if not thread:
+                return
+            metadata = dict(thread.get("metadata") or {})
+            blob = parse_journey_stage_reviews(metadata.get(JOURNEY_STAGE_REVIEWS_KEY))
+            current_job = dict((blob.get("jobs") or {}).get(cleaned_stage) or {})
+            if not cleaned_job_id:
+                cleaned_job_id = str(
+                    current_job.get("job_id")
+                    or current_job.get("review_id")
+                    or ""
+                ).strip()
+            if not cleaned_job_id:
+                # Legacy queued rows predate durable ids. Leave the claim id
+                # empty so the store can assign one atomically; the durable id
+                # is read back before any provider work begins.
+                cleaned_job_id = ""
+            status = str(current_job.get("status") or "").strip().lower()
+            if status in {STAGE_REVIEW_COMPLETE, STAGE_REVIEW_FAILED}:
+                return
+            if status == STAGE_REVIEW_RUNNING:
+                if not stage_review_job_is_stale(
+                    current_job,
+                    int(runtime_settings.deep_review_job_timeout_seconds),
+                ):
+                    return
+                if not self._store.requeue_stage_review_job(
+                    thread_id,
+                    stage_id=cleaned_stage,
+                    job_id=cleaned_job_id,
+                ):
+                    return
+            if not self._store.mark_stage_review_running(
+                thread_id,
+                stage_id=cleaned_stage,
+                job_id=cleaned_job_id,
+                lease_token=lease_token,
+            ):
+                return
+            claimed = True
             thread = self._notebooks.get_thread(thread_id)
             if not thread:
                 raise ValueError("Notebook not found")
             metadata = dict(thread.get("metadata") or {})
+            blob = parse_journey_stage_reviews(metadata.get(JOURNEY_STAGE_REVIEWS_KEY))
+            current_job = dict((blob.get("jobs") or {}).get(cleaned_stage) or {})
+            persisted_job_id = str(
+                current_job.get("job_id") or current_job.get("review_id") or ""
+            ).strip()
+            if cleaned_job_id:
+                if persisted_job_id != cleaned_job_id:
+                    return
+            else:
+                # The store assigned a fencing id to a legacy queued row.
+                cleaned_job_id = persisted_job_id
+            if not cleaned_job_id:
+                return
+            frozen_revision = int(current_job.get("conversation_revision") or 0)
+            if frozen_revision < 0:
+                frozen_revision = 0
+            current_revision = int(thread.get("conversation_revision") or 0)
+            frozen_revision = min(frozen_revision, current_revision)
             journey = normalize_journey(metadata.get("learning_journey"))
             if cleaned_stage not in (journey.get("completed_stages") or []):
                 raise ValueError("Stage is not completed")
-            messages = self._store.get_messages(thread_id)
-            stage_history = [
-                message
-                for message in messages
-                if str(
-                    (message.get("metadata") or {}).get("thinking_stage")
-                    or ""
-                ).strip()
-                == cleaned_stage
-                or str(
-                    ((message.get("metadata") or {}).get("assessment") or {}).get(
-                        "current_stage"
-                    )
-                    or ""
-                ).strip()
-                == cleaned_stage
-            ]
-            if not stage_history:
-                stage_history = messages[-12:]
+            messages = self._store.get_messages_at_revision(
+                thread_id, frozen_revision
+            )
+            frozen_ids = {
+                str(item).strip()
+                for item in (current_job.get("message_ids") or [])
+                if str(item).strip()
+            }
+            if current_job.get("scope_frozen") is True:
+                # New jobs have an explicit frozen scope.  An empty frozen
+                # list is intentional (for example, a completion with no
+                # stage-tagged transcript rows) and must not widen to live
+                # history after a restart.
+                stage_history = [
+                    message
+                    for message in messages
+                    if str(message.get("id") or "") in frozen_ids
+                ]
+            else:
+                # Legacy queued rows predate frozen scope metadata.  Retain a
+                # bounded compatibility path for those rows only.
+                stage_history = [
+                    message
+                    for message in messages
+                    if str(
+                        (message.get("metadata") or {}).get("thinking_stage")
+                        or ""
+                    ).strip()
+                    == cleaned_stage
+                    or str(
+                        ((message.get("metadata") or {}).get("assessment") or {}).get(
+                            "current_stage"
+                        )
+                        or ""
+                    ).strip()
+                    == cleaned_stage
+                ]
+                if not stage_history:
+                    stage_history = messages[-12:]
+            stage_history = _bounded_stage_review_history(stage_history)
             note = str((journey.get("stage_notes") or {}).get(cleaned_stage) or "")
             student_message = (
                 f"Create a short Journey checkpoint for the completed "
                 f"{STAGE_BY_ID[cleaned_stage].label} stage. "
                 f"Stage note: {note or 'none'}."
             )
-            try:
-                conversation_revision = int(thread.get("conversation_revision") or 0)
-            except (TypeError, ValueError):
-                conversation_revision = 0
+            # The checkpoint watermark belongs to the frozen queue target,
+            # not to edits/turns that arrived while the provider was running.
+            # This keeps a later dirty marker eligible for a follow-up refresh
+            # and makes the persisted history scope auditable after restart.
+            conversation_revision = frozen_revision
             request = CoachRequest(
                 thread_id=thread_id,
                 student_message=student_message,
@@ -1044,8 +1221,7 @@ class CoachApplicationService:
                         "metadata": dict(message.get("metadata") or {}),
                     }
                     for message in stage_history
-                    if str(message.get("content") or "").strip()
-                ][-24:],
+                ],
                 response_detail=str(
                     journey.get("response_detail") or DEFAULT_RESPONSE_DETAIL
                 ),
@@ -1080,11 +1256,9 @@ class CoachApplicationService:
                     "strengths": list(assessment.review_strengths or []),
                     "areas_to_revisit": list(assessment.review_improvements or []),
                     "reasoning_progress": assessment.understanding_change or "",
-                    "important_message_ids": [
-                        str(message.get("id") or "")
-                        for message in stage_history
-                        if str(message.get("id") or "").strip()
-                    ][:8],
+                    "important_message_ids": _stage_review_important_message_ids(
+                        stage_history
+                    ),
                     "important_artifacts": artifacts,
                     "facione_scores": facione_payload,
                     "conversation_revision": conversation_revision,
@@ -1093,9 +1267,22 @@ class CoachApplicationService:
             )
             if checkpoint is None:
                 raise ValueError("Empty stage checkpoint")
-            self._store.complete_stage_review_job(
-                thread_id, stage_id=cleaned_stage, checkpoint=checkpoint
+            completed = self._store.complete_stage_review_job(
+                thread_id,
+                stage_id=cleaned_stage,
+                checkpoint=checkpoint,
+                job_id=cleaned_job_id,
+                lease_token=lease_token,
             )
+            if completed:
+                # If new substantive work arrived while this job was running,
+                # its newer dirty token remains and is flushed as a follow-up
+                # job without allowing the stale result to overwrite it.
+                self._store.flush_stage_review_revisit(
+                    thread_id,
+                    stage_id=cleaned_stage,
+                )
+                self.resubmit_queued_stage_review_jobs(thread_id)
         except Exception:
             logger.exception(
                 "stage_review_execute_failed thread_id=%s stage_id=%s",
@@ -1103,9 +1290,22 @@ class CoachApplicationService:
                 cleaned_stage,
             )
             try:
-                self._store.fail_stage_review_job(
-                    thread_id, stage_id=cleaned_stage, error_code="review_failed"
+                failed = self._store.fail_stage_review_job(
+                    thread_id,
+                    stage_id=cleaned_stage,
+                    error_code="review_failed",
+                    job_id=cleaned_job_id or None,
+                    lease_token=lease_token if claimed else None,
                 )
+                if failed:
+                    # A student may have left this completed stage while the
+                    # provider was running. Preserve that later revisit work
+                    # even when the older checkpoint attempt failed.
+                    self._store.flush_stage_review_revisit(
+                        thread_id,
+                        stage_id=cleaned_stage,
+                    )
+                    self.resubmit_queued_stage_review_jobs(thread_id)
             except Exception:
                 logger.exception(
                     "stage_review_fail_mark_failed thread_id=%s stage_id=%s",
@@ -1115,15 +1315,30 @@ class CoachApplicationService:
 
     def mark_journey_stage_reviews_read(self, thread_id: str) -> dict[str, Any]:
         """Clear Journey unread after the student views Journey updates."""
-        return self._store.mark_journey_stage_reviews_read(thread_id)
+        return public_journey_stage_reviews(
+            self._store.mark_journey_stage_reviews_read(thread_id)
+        )
 
     def get_journey_stage_reviews(self, thread_id: str) -> dict[str, Any]:
-        """Return the durable Journey stage-review blob for one notebook."""
+        """Return Journey reviews and recover durable worker state.
+
+        Journey is an existing read seam, so it also resubmits queued jobs and
+        reclaims running jobs whose bounded lease expired after a restart.
+        """
         thread = self._notebooks.get_thread(thread_id)
         if not thread:
             raise ValueError("Notebook not found")
+        try:
+            self.resubmit_queued_stage_review_jobs(thread_id)
+        except Exception:
+            logger.exception(
+                "stage_review_recovery_failed thread_id=%s", thread_id
+            )
+            thread = self._notebooks.get_thread(thread_id) or thread
         metadata = dict(thread.get("metadata") or {})
-        return parse_journey_stage_reviews(metadata.get(JOURNEY_STAGE_REVIEWS_KEY))
+        return public_journey_stage_reviews(
+            metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+        )
 
     def get_deep_review_job(self, thread_id: str) -> DeepReviewJob | None:
         """Return the owner-scoped Deep Review job, failing stale in-flight work.
@@ -1794,14 +2009,6 @@ class CoachApplicationService:
                 # produced this pending ADVANCE. Phase 2 records completion while
                 # keeping focus and the auditable pending choice unchanged.
                 validated_completion_stage = prepared_request.current_stage
-        completed_before = list(
-            normalize_journey(
-                (self._notebooks.get_thread(prepared_request.thread_id) or {})
-                .get("metadata", {})
-                .get("learning_journey")
-            ).get("completed_stages")
-            or []
-        )
         persist_started = time.perf_counter()
         emit_coach_progress(PROGRESS_SAVING)
         self._store.persist_coach_turn(
@@ -1923,6 +2130,9 @@ class CoachApplicationService:
             auto_advance=auto_advance,
             validated_completion_stage=validated_completion_stage,
             manual_stage_selection_to=manual_stage_target,
+            mark_stage_review_dirty=(
+                not server_owned_turn and manual_stage_target is None
+            ),
             review_counter_qualifying=bool(
                 orchestration.get("qualifying_coaching_turn")
             ),
@@ -1931,10 +2141,20 @@ class CoachApplicationService:
             ),
         )
         record_field("persist_turn_ms", elapsed_ms(persist_started))
-        self._enqueue_stage_reviews_after_completion(
-            prepared_request.thread_id,
-            completed_before=completed_before,
-        )
+        # Ordinary coaching turns—including substantive work while staying in
+        # a completed stage—only persist/coalesce the revisit marker.  A
+        # durable review job can be created here only when this transaction
+        # completed a stage or actually changed focus, so avoid an additional
+        # notebook read on every message.
+        if (
+            auto_advance is not None
+            or manual_stage_target is not None
+            or validated_completion_stage is not None
+        ):
+            self._enqueue_stage_reviews_after_completion(
+                prepared_request.thread_id,
+                completed_before=None,
+            )
         persist_stage = (
             auto_advance.to_stage
             if auto_advance is not None
@@ -2179,6 +2399,12 @@ class CoachApplicationService:
         if request.retrieved_chunks:
             return request, turn
         if not request.source_ids:
+            return request, turn
+        if _agentcore_turn_budget_exhausted():
+            record_field("rag_fallback_skipped_budget", True)
+            logger.info(
+                "rag_fallback_skipped reason=agentcore_invoke_budget_exhausted"
+            )
             return request, turn
         if not self._workflow.peek_needs_source_retrieval(request.thread_id):
             return request, turn

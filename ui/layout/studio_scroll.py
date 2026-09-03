@@ -9,15 +9,19 @@ from __future__ import annotations
 
 import streamlit.components.v1 as components
 
+from ui.html_embed import wrap_component_html
+
 
 def sync_studio_scroll() -> None:
     """Size the Thinking Path scroll region and enable vertical scrolling."""
     components.html(
-        """
+        wrap_component_html(
+            """
 <script>
 (() => {
   const doc = window.parent.document;
   const win = window.parent;
+  const isNode = (value) => Boolean(value) && typeof value.nodeType === "number";
 
   function panel() {
     return doc.querySelector(".st-key-studio_panel");
@@ -148,7 +152,7 @@ def sync_studio_scroll() -> None:
 
     const studioColumn = column(studioPanel);
     const root = scrollRoot(studioPanel);
-    if (root) {
+    if (isNode(root)) {
       const tabObserver = new win.MutationObserver(schedule);
       tabObserver.observe(root, {
         childList: true,
@@ -159,14 +163,16 @@ def sync_studio_scroll() -> None:
     }
     if (typeof win.ResizeObserver === "function") {
       const observer = new win.ResizeObserver(schedule);
-      observer.observe(studioPanel);
-      if (studioColumn) observer.observe(studioColumn);
+      if (isNode(studioPanel)) observer.observe(studioPanel);
+      if (isNode(studioColumn)) observer.observe(studioColumn);
       const workspace = studioPanel.closest(".st-key-notebook_workspace");
-      if (workspace) observer.observe(workspace);
+      if (isNode(workspace)) observer.observe(workspace);
       studioPanel.__cdStudioResizeObserver = observer;
     } else {
       const observer = new win.MutationObserver(schedule);
-      observer.observe(studioPanel, { childList: true, subtree: true });
+      if (isNode(studioPanel)) {
+        observer.observe(studioPanel, { childList: true, subtree: true });
+      }
     }
 
     schedule();
@@ -185,6 +191,7 @@ def sync_studio_scroll() -> None:
   boot();
 })();
 </script>
-        """,
+            """
+        ),
         height=0,
     )

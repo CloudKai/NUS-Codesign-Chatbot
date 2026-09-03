@@ -13,6 +13,7 @@ import os
 import streamlit.components.v1 as components
 
 from backend.settings import settings
+from ui.html_embed import wrap_component_html
 
 
 def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
@@ -39,6 +40,7 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
   const ATTACH_LABEL = __CD_ATTACH_LABEL__;
   const PROFILE_ENABLED = __CD_COMPOSER_PROFILE_ENABLED__;
   const now = () => win.performance.now();
+  const isNode = (value) => Boolean(value) && typeof value.nodeType === "number";
   const profile = PROFILE_ENABLED
     ? (win.__cdComposerProfile = win.__cdComposerProfile || {
         inputs: 0,
@@ -217,7 +219,7 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
 
   function watchModelMenu() {
     const body = doc.body;
-    if (!body || body.dataset.cdModelMenuWatch === "1") return;
+    if (!isNode(body) || body.dataset.cdModelMenuWatch === "1") return;
     body.dataset.cdModelMenuWatch = "1";
     const observer = new win.MutationObserver((records) => {
       const started = now();
@@ -399,38 +401,6 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
       layer.style.setProperty("opacity", "0", "important");
       layer.style.setProperty("pointer-events", "none", "important");
     }
-  }
-
-  function watchNativeUploadTooltips() {
-    if (doc.body.dataset.cdNativeUploadTipWatch === "1") return;
-    doc.body.dataset.cdNativeUploadTipWatch = "1";
-    const uploadTipObserver = new win.MutationObserver((records) => {
-      const started = now();
-      profileCount("tooltip_mutation_callbacks");
-      const maybeTip = records.some((record) =>
-        Array.from(record.addedNodes).some((node) => {
-          if (node.nodeType !== 1) return false;
-          if (
-            node.matches &&
-            (node.matches('[data-testid="stTooltipContent"]') ||
-              node.matches('[data-testid="stTooltipErrorContent"]') ||
-              node.matches('[data-baseweb="tooltip"]') ||
-              node.matches('[role="tooltip"]'))
-          ) {
-            return true;
-          }
-          return Boolean(
-            node.querySelector &&
-              node.querySelector(
-                '[data-testid="stTooltipContent"], [data-testid="stTooltipErrorContent"]'
-              )
-          );
-        })
-      );
-      if (maybeTip) hideNativeUploadTooltips();
-      if (profile) profileCount("tooltip_mutation_ms", now() - started);
-    });
-    uploadTipObserver.observe(doc.body, { childList: true, subtree: true });
   }
 
   function rewriteDropOverlay() {
@@ -672,7 +642,7 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
     }
     if (textarea.dataset.cdComposerWidthObserved === "1") return;
     textarea.dataset.cdComposerWidthObserved = "1";
-    textareaWidthObserver.observe(input);
+    if (isNode(input)) textareaWidthObserver.observe(input);
   }
 
   function capTextarea(textarea, refreshMetrics = false) {
@@ -872,13 +842,15 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
       if (structural || controlStateChanged) scheduleApply();
       if (profile) profileCount("mutation_ms", now() - started);
     });
-    observer.observe(input, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeOldValue: true,
-      attributeFilter: ["data-testid", "disabled"],
-    });
+    if (isNode(input)) {
+      observer.observe(input, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeOldValue: true,
+        attributeFilter: ["data-testid", "disabled"],
+      });
+    }
     let overlayFrame = 0;
     const overlayObserver = new win.MutationObserver((records) => {
       const started = now();
@@ -896,12 +868,15 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
       }
       if (profile) profileCount("overlay_mutation_ms", now() - started);
     });
-    overlayObserver.observe(input, { childList: true, subtree: true });
-    // Streamlit mounts the native attach tip as a body portal; scrub it so only
-    // .cd-attach-tooltip (with the size limit) remains.
-    watchNativeUploadTooltips();
+    if (isNode(input)) {
+      overlayObserver.observe(input, { childList: true, subtree: true });
+    }
+    // Streamlit mounts the native attach tip as a body portal. Clear it from
+    // the bounded apply/hover paths instead of observing the whole document;
+    // a body-wide observer is recreated on every Streamlit remount and adds
+    // avoidable work (and can race a document teardown).
     const slot = modelSlot(composer);
-    if (slot) observer.observe(slot, { childList: true, subtree: true });
+    if (isNode(slot)) observer.observe(slot, { childList: true, subtree: true });
     observeTextareaWidth(textarea);
     bindModelMenu();
     watchModelMenu();
@@ -925,8 +900,10 @@ def sync_composer_layout(*, max_file_size_mb: int | None = None) -> None:
 </script>
         """
     components.html(
-        script.replace("__CD_SIZE_HINT__", json.dumps(size_hint)).replace(
-            "__CD_ATTACH_LABEL__", json.dumps(attach_label)
-        ).replace("__CD_COMPOSER_PROFILE_ENABLED__", json.dumps(profile_enabled)),
+        wrap_component_html(
+            script.replace("__CD_SIZE_HINT__", json.dumps(size_hint)).replace(
+                "__CD_ATTACH_LABEL__", json.dumps(attach_label)
+            ).replace("__CD_COMPOSER_PROFILE_ENABLED__", json.dumps(profile_enabled))
+        ),
         height=0,
     )

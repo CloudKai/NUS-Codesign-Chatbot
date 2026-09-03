@@ -1378,6 +1378,10 @@ class StudentStore:
         *,
         stage_id: str,
         notebook_revision: int | None = None,
+        job_id: str | None = None,
+        reason: str = "completion",
+        target_token: str | None = None,
+        message_ids: list[str] | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Mark one stage review as queued, or return the in-flight/complete job.
 
@@ -1390,6 +1394,11 @@ class StudentStore:
             stage_id: Completed Thinking Path stage id.
             notebook_revision: Conversation revision used for revisit refresh.
                 Defaults to the notebook's current revision when omitted.
+            job_id: Optional durable fencing id. A new id is generated when
+                omitted; old callers remain compatible.
+            reason: ``completion`` or ``revisit_exit`` metadata for the job.
+            target_token: Optional revisit-dirty token represented by the job.
+            message_ids: Optional frozen active stage-message ids.
 
         Returns:
             ``(blob, created)`` where *created* is ``True`` only when this call
@@ -1400,7 +1409,9 @@ class StudentStore:
         """
         from backend.specialists.review_orchestration import (
             JOURNEY_STAGE_REVIEWS_KEY,
+            STAGE_REVIEW_REASON_COMPLETION,
             STAGE_REVIEW_QUEUED,
+            STAGE_REVIEW_SCOPE_VERSION,
             parse_journey_stage_reviews,
             stage_review_should_enqueue,
         )
@@ -1439,9 +1450,34 @@ class StudentStore:
                     notebook_revision=revision,
                 ):
                     return blob, False
+                cleaned_job_id = str(job_id or uuid.uuid4()).strip() or str(uuid.uuid4())
+                frozen_message_ids = [
+                    str(item).strip()
+                    for item in (message_ids or [])
+                    if str(item).strip()
+                ][:256]
+                if message_ids is None:
+                    frozen_message_ids = self._stage_message_ids(
+                        connection,
+                        thread_id=thread_id,
+                        stage_id=cleaned_stage,
+                        active_revision=revision,
+                    )
                 blob["jobs"][cleaned_stage] = {
                     "status": STAGE_REVIEW_QUEUED,
+                    "job_id": cleaned_job_id,
+                    "review_id": cleaned_job_id,
+                    "reason": str(reason or STAGE_REVIEW_REASON_COMPLETION).strip()
+                    or STAGE_REVIEW_REASON_COMPLETION,
+                    "target_token": str(target_token or "").strip() or None,
+                    "conversation_revision": max(0, revision),
+                    "message_ids": frozen_message_ids,
+                    "scope_frozen": True,
+                    "scope_version": STAGE_REVIEW_SCOPE_VERSION,
                     "updated_at": now,
+                    "started_at": None,
+                    "lease_token": None,
+                    "lease_expires_at": None,
                     "error_code": None,
                 }
                 metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
@@ -1453,8 +1489,191 @@ class StudentStore:
             "The notebook was updated before the stage review could be queued"
         )
 
-    def mark_stage_review_running(self, thread_id: str, *, stage_id: str) -> None:
-        """Move a queued stage review to running."""
+    def _stage_message_ids(
+        self,
+        connection: Any,
+        *,
+        thread_id: str,
+        stage_id: str,
+        active_revision: int,
+    ) -> list[str]:
+        """Return active message ids evidenced in one Thinking Path stage.
+
+        The list is captured inside the same transaction as a stage transition
+        or coach turn.  It is intentionally metadata-based so it works for
+        legacy rows and never copies private transcript content into settings.
+        """
+        rows = connection.execute(
+            f"""
+            SELECT id, metadata_text, assessment_text
+            FROM messages
+            WHERE notebook_id=?
+              AND {self._active_at_revision_sql()}
+            ORDER BY created_at ASC, id ASC
+            """,
+            (thread_id, active_revision, active_revision),
+        ).fetchall()
+        ids: list[str] = []
+        for row in rows:
+            metadata = _load(row["metadata_text"], {})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            assessment = _load(row["assessment_text"], {})
+            if not isinstance(assessment, dict):
+                assessment = {}
+            row_stage = str(metadata.get("thinking_stage") or "").strip()
+            assessed_stage = str(assessment.get("current_stage") or "").strip()
+            if row_stage != stage_id and assessed_stage != stage_id:
+                continue
+            message_id = str(row["id"] or "").strip()
+            if message_id:
+                ids.append(message_id)
+        return ids[-256:]
+
+    @staticmethod
+    def _stage_review_job_id(job: dict[str, Any] | None) -> str:
+        """Return the durable fencing id from one normalized stage job."""
+        if not isinstance(job, dict):
+            return ""
+        return str(job.get("job_id") or job.get("review_id") or "").strip()
+
+    def _queue_stage_review_in_metadata(
+        self,
+        connection: Any,
+        *,
+        thread_id: str,
+        metadata: dict[str, Any],
+        stage_id: str,
+        active_revision: int,
+        reason: str,
+        target_token: str | None = None,
+        force: bool = False,
+    ) -> tuple[dict[str, Any], bool]:
+        """Queue one fenced stage review while the caller owns a DB transaction.
+
+        This helper mutates *metadata* only. The caller must persist the
+        notebook row in the same transaction, making stage-change + review
+        queue atomic for SQLite and the DSQL OCC wrapper.
+        """
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            STAGE_REVIEW_ACTIVE,
+            STAGE_REVIEW_REASON_COMPLETION,
+            STAGE_REVIEW_REASON_REVISIT_EXIT,
+            STAGE_REVIEW_QUEUED,
+            STAGE_REVIEW_SCOPE_VERSION,
+            parse_journey_stage_reviews,
+        )
+        from backend.student_journey import STAGE_BY_ID
+
+        cleaned_stage = str(stage_id or "").strip()
+        if cleaned_stage not in STAGE_BY_ID:
+            raise ValueError(f"Unknown thinking stage: {cleaned_stage}")
+        cleaned_reason = str(reason or STAGE_REVIEW_REASON_COMPLETION).strip()
+        if cleaned_reason not in {
+            STAGE_REVIEW_REASON_COMPLETION,
+            STAGE_REVIEW_REASON_REVISIT_EXIT,
+        }:
+            cleaned_reason = STAGE_REVIEW_REASON_COMPLETION
+        blob = parse_journey_stage_reviews(metadata.get(JOURNEY_STAGE_REVIEWS_KEY))
+        existing = dict(blob["jobs"].get(cleaned_stage) or {})
+        existing_status = str(existing.get("status") or "").strip().lower()
+        cleaned_token = str(target_token or "").strip() or None
+        dirty = dict(blob.get("revisit_dirty", {}).get(cleaned_stage) or {})
+        dirty_token = str(dirty.get("token") or "").strip() or None
+        if (
+            force
+            and cleaned_reason == STAGE_REVIEW_REASON_COMPLETION
+            and dirty_token
+        ):
+            # A re-completion supersedes any older envelope, but its frozen
+            # scope must still absorb all substantive work recorded while the
+            # stage was complete.  Completion clears this exact token only
+            # after the new worker commits successfully.
+            cleaned_token = dirty_token
+        if existing_status in STAGE_REVIEW_ACTIVE and not (
+            force and cleaned_reason == STAGE_REVIEW_REASON_COMPLETION
+        ):
+            # At most one worker may run a stage job. A newer revisit token is
+            # retained in ``revisit_dirty`` and will be flushed after this job
+            # completes (or on the next safe read/restart seam).
+            return blob, False
+        if not force and cleaned_reason == STAGE_REVIEW_REASON_REVISIT_EXIT:
+            if not dirty_token:
+                return blob, False
+            if cleaned_token and cleaned_token != dirty_token:
+                return blob, False
+            cleaned_token = dirty_token
+        if not force and cleaned_reason == STAGE_REVIEW_REASON_COMPLETION:
+            # A completion retry is allowed after ``failed``; a complete
+            # checkpoint remains idempotent unless the caller explicitly asks
+            # for a revisit refresh.
+            if existing_status == "complete":
+                return blob, False
+        frozen_message_ids = self._stage_message_ids(
+            connection,
+            thread_id=thread_id,
+            stage_id=cleaned_stage,
+            active_revision=max(0, int(active_revision)),
+        )
+        now = utc_now()
+        new_job_id = str(uuid.uuid4())
+        blob["jobs"][cleaned_stage] = {
+            "status": STAGE_REVIEW_QUEUED,
+            "job_id": new_job_id,
+            "review_id": new_job_id,
+            "reason": cleaned_reason,
+            "target_token": cleaned_token,
+            "conversation_revision": max(0, int(active_revision)),
+            "message_ids": frozen_message_ids,
+            "scope_frozen": True,
+            "scope_version": STAGE_REVIEW_SCOPE_VERSION,
+            "updated_at": now,
+            "started_at": None,
+            "lease_token": None,
+            "lease_expires_at": None,
+            "error_code": None,
+        }
+        metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
+        return blob, True
+
+    def _mark_stage_review_dirty_in_metadata(
+        self,
+        metadata: dict[str, Any],
+        *,
+        stage_id: str,
+        conversation_revision: int,
+    ) -> str:
+        """Record one coalesced substantive revisit token in *metadata*."""
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            parse_journey_stage_reviews,
+        )
+
+        blob = parse_journey_stage_reviews(metadata.get(JOURNEY_STAGE_REVIEWS_KEY))
+        token = str(uuid.uuid4())
+        blob["revisit_dirty"][str(stage_id).strip()] = {
+            "token": token,
+            "conversation_revision": max(0, int(conversation_revision)),
+            "updated_at": utc_now(),
+        }
+        metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
+        return token
+
+    def mark_stage_review_running(
+        self,
+        thread_id: str,
+        *,
+        stage_id: str,
+        job_id: str | None = None,
+        lease_token: str | None = None,
+    ) -> bool:
+        """Atomically claim one queued stage review for a worker.
+
+        ``job_id`` fences stale workers after a newer exit queues a refresh.
+        ``lease_token`` prevents two processes from executing the same durable
+        queued job concurrently.  The optional arguments preserve old callers.
+        """
         from backend.specialists.review_orchestration import (
             JOURNEY_STAGE_REVIEWS_KEY,
             STAGE_REVIEW_QUEUED,
@@ -1464,6 +1683,8 @@ class StudentStore:
 
         cleaned_stage = str(stage_id or "").strip()
         now = utc_now()
+        requested_job_id = str(job_id or "").strip()
+        requested_lease = str(lease_token or "").strip()
         for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
             with self._lock, self._connect() as connection:
                 row = connection.execute(
@@ -1478,18 +1699,40 @@ class StudentStore:
                 )
                 job = dict(blob["jobs"].get(cleaned_stage) or {})
                 status = str(job.get("status") or "")
+                current_job_id = self._stage_review_job_id(job)
+                if requested_job_id and current_job_id != requested_job_id:
+                    return False
                 if status == STAGE_REVIEW_RUNNING:
-                    return
+                    # A running job is owned by the lease token that claimed
+                    # it.  A duplicate submit cannot execute concurrently.
+                    return bool(
+                        requested_lease
+                        and str(job.get("lease_token") or "").strip()
+                        == requested_lease
+                    )
                 if status != STAGE_REVIEW_QUEUED:
-                    return
+                    return False
+                if not current_job_id:
+                    current_job_id = requested_job_id or str(uuid.uuid4())
+                worker_lease = requested_lease or str(uuid.uuid4())
                 job["status"] = STAGE_REVIEW_RUNNING
+                job["job_id"] = current_job_id
+                job["review_id"] = current_job_id
                 job["updated_at"] = now
+                job["started_at"] = now
+                job["lease_token"] = worker_lease
+                job["lease_expires_at"] = (
+                    _utc_now_datetime()
+                    + timedelta(
+                        seconds=max(1, int(settings.deep_review_job_timeout_seconds))
+                    )
+                ).isoformat()
                 blob["jobs"][cleaned_stage] = job
                 metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
                 if self._update_settings_text_only(
                     connection, thread_id, row, metadata
                 ):
-                    return
+                    return True
         raise ConversationRevisionConflictError(
             "The notebook was updated before the stage review could start"
         )
@@ -1500,11 +1743,24 @@ class StudentStore:
         *,
         stage_id: str,
         checkpoint: dict[str, Any],
-    ) -> None:
-        """Persist one successful Journey stage checkpoint and set unread."""
+        job_id: str | None = None,
+        lease_token: str | None = None,
+    ) -> bool:
+        """Persist one successful Journey stage checkpoint and set unread.
+
+        Completion is fenced by ``job_id`` and, when supplied, the worker
+        ``lease_token``. A stale worker therefore cannot overwrite a newer
+        checkpoint. The optional arguments preserve the historical method
+        shape for local callers.
+
+        Returns:
+            ``True`` when this worker completed the current job; ``False`` when
+            the job was already replaced or finalized.
+        """
         from backend.specialists.review_orchestration import (
             JOURNEY_STAGE_REVIEWS_KEY,
             STAGE_REVIEW_COMPLETE,
+            STAGE_REVIEW_RUNNING,
             normalize_stage_checkpoint,
             parse_journey_stage_reviews,
         )
@@ -1513,6 +1769,8 @@ class StudentStore:
         cleaned = normalize_stage_checkpoint(checkpoint, stage_id=cleaned_stage)
         if cleaned is None:
             raise ValueError("Stage checkpoint is empty")
+        requested_job_id = str(job_id or "").strip()
+        requested_lease = str(lease_token or "").strip()
         now = utc_now()
         for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
             with self._lock, self._connect() as connection:
@@ -1526,18 +1784,55 @@ class StudentStore:
                 blob = parse_journey_stage_reviews(
                     metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
                 )
+                job = dict(blob["jobs"].get(cleaned_stage) or {})
+                current_job_id = self._stage_review_job_id(job)
+                if requested_job_id and current_job_id != requested_job_id:
+                    return False
+                if requested_lease and str(job.get("lease_token") or "").strip() != requested_lease:
+                    return False
+                status = str(job.get("status") or "").strip().lower()
+                if status in {STAGE_REVIEW_COMPLETE, "failed"}:
+                    return False
+                if requested_job_id and status != STAGE_REVIEW_RUNNING:
+                    return False
+                if requested_lease and status != STAGE_REVIEW_RUNNING:
+                    return False
                 blob["reviews"][cleaned_stage] = cleaned
-                blob["jobs"][cleaned_stage] = {
+                completed_job = {
                     "status": STAGE_REVIEW_COMPLETE,
+                    "job_id": current_job_id or requested_job_id or None,
+                    "review_id": current_job_id or requested_job_id or None,
+                    "reason": str(job.get("reason") or "completion").strip()
+                    or "completion",
+                    "target_token": str(job.get("target_token") or "").strip()
+                    or None,
+                    "conversation_revision": max(
+                        0, int(job.get("conversation_revision") or 0)
+                    ),
+                    "message_ids": list(job.get("message_ids") or [])[:256],
+                    "scope_frozen": job.get("scope_frozen") is True,
+                    "scope_version": max(
+                        0,
+                        int(job.get("scope_version") or 0),
+                    ),
                     "updated_at": now,
+                    "started_at": job.get("started_at"),
+                    "lease_token": None,
+                    "lease_expires_at": None,
                     "error_code": None,
                 }
+                blob["jobs"][cleaned_stage] = completed_job
+                dirty = dict(blob.get("revisit_dirty", {}).get(cleaned_stage) or {})
+                target_token = str(job.get("target_token") or "").strip()
+                dirty_token = str(dirty.get("token") or "").strip()
+                if target_token and dirty_token == target_token:
+                    blob["revisit_dirty"].pop(cleaned_stage, None)
                 blob["unread"] = True
                 metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
                 if self._update_settings_text_only(
                     connection, thread_id, row, metadata
                 ):
-                    return
+                    return True
         raise ConversationRevisionConflictError(
             "The notebook was updated before the stage review could be saved"
         )
@@ -1548,16 +1843,26 @@ class StudentStore:
         *,
         stage_id: str,
         error_code: str = "review_failed",
-    ) -> None:
-        """Mark one stage review failed without rolling back stage completion."""
+        job_id: str | None = None,
+        lease_token: str | None = None,
+    ) -> bool:
+        """Mark one stage review failed without rolling back completion.
+
+        The job and lease tokens fence failure writes just like successful
+        completion writes. Revisit-dirty work remains durable after failure so
+        a later safe read or stage exit can retry it.
+        """
         from backend.specialists.review_orchestration import (
             JOURNEY_STAGE_REVIEWS_KEY,
             STAGE_REVIEW_COMPLETE,
             STAGE_REVIEW_FAILED,
+            STAGE_REVIEW_RUNNING,
             parse_journey_stage_reviews,
         )
 
         cleaned_stage = str(stage_id or "").strip()
+        requested_job_id = str(job_id or "").strip()
+        requested_lease = str(lease_token or "").strip()
         now = utc_now()
         for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
             with self._lock, self._connect() as connection:
@@ -1571,14 +1876,40 @@ class StudentStore:
                 blob = parse_journey_stage_reviews(
                     metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
                 )
-                status = str(
-                    (blob["jobs"].get(cleaned_stage) or {}).get("status") or ""
-                )
-                if status == STAGE_REVIEW_COMPLETE:
-                    return
+                prior_job = dict(blob["jobs"].get(cleaned_stage) or {})
+                current_job_id = self._stage_review_job_id(prior_job)
+                if requested_job_id and current_job_id != requested_job_id:
+                    return False
+                if requested_lease and str(prior_job.get("lease_token") or "").strip() != requested_lease:
+                    return False
+                status = str(prior_job.get("status") or "").strip().lower()
+                if status in {STAGE_REVIEW_COMPLETE, STAGE_REVIEW_FAILED}:
+                    return False
+                if requested_job_id and status != STAGE_REVIEW_RUNNING:
+                    return False
+                if requested_lease and status != STAGE_REVIEW_RUNNING:
+                    return False
                 blob["jobs"][cleaned_stage] = {
                     "status": STAGE_REVIEW_FAILED,
+                    "job_id": current_job_id or requested_job_id or None,
+                    "review_id": current_job_id or requested_job_id or None,
+                    "reason": str(prior_job.get("reason") or "completion").strip()
+                    or "completion",
+                    "target_token": str(prior_job.get("target_token") or "").strip()
+                    or None,
+                    "conversation_revision": max(
+                        0, int(prior_job.get("conversation_revision") or 0)
+                    ),
+                    "message_ids": list(prior_job.get("message_ids") or [])[:256],
+                    "scope_frozen": prior_job.get("scope_frozen") is True,
+                    "scope_version": max(
+                        0,
+                        int(prior_job.get("scope_version") or 0),
+                    ),
                     "updated_at": now,
+                    "started_at": prior_job.get("started_at"),
+                    "lease_token": None,
+                    "lease_expires_at": None,
                     "error_code": str(error_code or "review_failed").strip()
                     or "review_failed",
                 }
@@ -1586,9 +1917,134 @@ class StudentStore:
                 if self._update_settings_text_only(
                     connection, thread_id, row, metadata
                 ):
-                    return
+                    return True
         raise ConversationRevisionConflictError(
             "The notebook was updated before the stage review could be marked failed"
+        )
+
+    def requeue_stage_review_job(
+        self,
+        thread_id: str,
+        *,
+        stage_id: str,
+        job_id: str | None = None,
+    ) -> bool:
+        """Requeue one stale running stage job under its existing fencing id.
+
+        Requeue is used only after the bounded worker lease has expired. It
+        preserves the frozen target token and message ids so restart recovery
+        cannot silently broaden the review scope.
+        """
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            STAGE_REVIEW_QUEUED,
+            STAGE_REVIEW_RUNNING,
+            parse_journey_stage_reviews,
+        )
+
+        cleaned_stage = str(stage_id or "").strip()
+        requested_job_id = str(job_id or "").strip()
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                metadata = dict(self._thread_dict(row).get("metadata") or {})
+                blob = parse_journey_stage_reviews(
+                    metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+                )
+                job = dict(blob["jobs"].get(cleaned_stage) or {})
+                current_job_id = self._stage_review_job_id(job)
+                if requested_job_id and current_job_id != requested_job_id:
+                    return False
+                if str(job.get("status") or "").strip().lower() != STAGE_REVIEW_RUNNING:
+                    return False
+                job["status"] = STAGE_REVIEW_QUEUED
+                job["updated_at"] = utc_now()
+                job["started_at"] = None
+                job["lease_token"] = None
+                job["lease_expires_at"] = None
+                job["error_code"] = None
+                blob["jobs"][cleaned_stage] = job
+                metadata[JOURNEY_STAGE_REVIEWS_KEY] = blob
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return True
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before the stage review could be requeued"
+        )
+
+    def flush_stage_review_revisit(
+        self,
+        thread_id: str,
+        *,
+        stage_id: str,
+    ) -> tuple[dict[str, Any], bool]:
+        """Queue one durable refresh for a previously marked stage revisit.
+
+        The method is intentionally explicit: callers invoke it only after an
+        actual stage exit or after a worker discovers newer dirty work.  A
+        missing marker is a no-op, so navigation and idempotent replay cannot
+        manufacture a Haiku request.
+
+        Returns:
+            ``(journey_stage_reviews, created)``.
+        """
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            STAGE_REVIEW_REASON_REVISIT_EXIT,
+            parse_journey_stage_reviews,
+        )
+
+        cleaned_stage = str(stage_id or "").strip()
+        for _ in range(self._SETTINGS_MERGE_ATTEMPTS):
+            with self._lock, self._connect() as connection:
+                row = connection.execute(
+                    "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                    (thread_id, self.owner_id),
+                ).fetchone()
+                if not row:
+                    raise ValueError("Notebook not found")
+                thread = self._thread_dict(row)
+                metadata = dict(thread.get("metadata") or {})
+                blob = parse_journey_stage_reviews(
+                    metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+                )
+                # This is the authoritative atomic exit guard.  A worker may
+                # finish after a student turn, but it must not manufacture a
+                # refresh while the student is still on the reviewed stage.
+                # The notebook row is read in the same write transaction that
+                # queues the successor, so a concurrent stage change cannot be
+                # decided from a stale service-side snapshot.
+                current_stage = str(row["current_stage"] or DEFAULT_STAGE).strip()
+                if current_stage == cleaned_stage:
+                    return blob, False
+                dirty = dict(blob.get("revisit_dirty", {}).get(cleaned_stage) or {})
+                token = str(dirty.get("token") or "").strip()
+                if not token:
+                    return blob, False
+                revision = self._notebook_revision_value(row)
+                queued_blob, created = self._queue_stage_review_in_metadata(
+                    connection,
+                    thread_id=thread_id,
+                    metadata=metadata,
+                    stage_id=cleaned_stage,
+                    active_revision=revision,
+                    reason=STAGE_REVIEW_REASON_REVISIT_EXIT,
+                    target_token=token,
+                )
+                if not created:
+                    return queued_blob, False
+                if self._update_settings_text_only(
+                    connection, thread_id, row, metadata
+                ):
+                    return queued_blob, True
+        raise ConversationRevisionConflictError(
+            "The notebook was updated before the stage review refresh could be queued"
         )
 
     def mark_journey_stage_reviews_read(self, thread_id: str) -> dict[str, Any]:
@@ -1659,6 +2115,12 @@ class StudentStore:
             current_meta = dict(thread.get("metadata") or {})
             now = utc_now()
             active_revision = self._notebook_revision_value(row)
+            prior_journey = dict(current_meta.get("learning_journey") or {})
+            prior_stage = str(
+                prior_journey.get("current_stage")
+                or row["current_stage"]
+                or DEFAULT_STAGE
+            ).strip()
             current_meta = self._selected_learning_stage_metadata(
                 connection,
                 thread_id=thread_id,
@@ -1667,6 +2129,18 @@ class StudentStore:
                 active_revision=active_revision,
                 decision_at=now,
             )
+            if prior_stage != cleaned_stage:
+                # The marker is written by substantive turns while a completed
+                # stage is active.  Only an actual stage change flushes it;
+                # selecting the same stage is idempotent navigation.
+                self._queue_stage_review_in_metadata(
+                    connection,
+                    thread_id=thread_id,
+                    metadata=current_meta,
+                    stage_id=prior_stage,
+                    active_revision=active_revision,
+                    reason="revisit_exit",
+                )
             current_stage, progress_text, settings_text = self._split_notebook_metadata(
                 current_meta
             )
@@ -2512,6 +2986,7 @@ class StudentStore:
         auto_advance: AtomicAutoAdvance | None = None,
         validated_completion_stage: str | None = None,
         manual_stage_selection_to: str | None = None,
+        mark_stage_review_dirty: bool | None = None,
         review_counter_qualifying: bool | None = None,
         review_counter_deep_succeeded: bool | None = None,
     ) -> tuple[str, str]:
@@ -2546,6 +3021,11 @@ class StudentStore:
         turn is written onto the pending marker in this same transaction.
         Waiters can then replay that payload instead of reconstructing a slim
         assessment from message rows before ``complete_coach_request``.
+
+        When ``mark_stage_review_dirty`` is true and the entry stage was
+        already complete, this transaction records a coalesced revisit token.
+        That token is flushed into one frozen stage-review job only when the
+        student subsequently leaves that stage.
         """
         cleaned_user = user_content.strip()
         cleaned_assistant = assistant_content.strip()
@@ -2669,6 +3149,14 @@ class StudentStore:
                 )
             thread = self._thread_dict(notebook)
             current_meta = dict(thread.get("metadata") or {})
+            entry_stage = active_stage
+            entry_journey = dict(current_meta.get("learning_journey") or {})
+            entry_completed = {
+                str(item).strip()
+                for item in (entry_journey.get("completed_stages") or [])
+                if str(item).strip()
+            }
+            entry_stage_was_complete = entry_stage in entry_completed
             summary_metadata = dict(summary_metadata)
             if (
                 review_counter_qualifying is not None
@@ -2897,6 +3385,55 @@ class StudentStore:
                 if key in summary_metadata:
                     journey_meta[key] = summary_metadata[key]
             current_meta["learning_journey"] = journey_meta
+            if (
+                bool(mark_stage_review_dirty)
+                and entry_stage_was_complete
+                and manual_target is None
+            ):
+                # This is intentionally after the user/assistant rows have
+                # been staged and before the notebook UPDATE. The marker is
+                # therefore committed only with a successful coach turn.
+                self._mark_stage_review_dirty_in_metadata(
+                    current_meta,
+                    stage_id=entry_stage,
+                    conversation_revision=active_revision,
+                )
+            target_stage = (
+                auto_advance.to_stage
+                if auto_advance is not None
+                else manual_target or expected_stage
+            )
+            if target_stage != entry_stage:
+                self._queue_stage_review_in_metadata(
+                    connection,
+                    thread_id=thread_id,
+                    metadata=current_meta,
+                    stage_id=entry_stage,
+                    active_revision=active_revision,
+                    reason="revisit_exit",
+                )
+            # Initial completion checkpoints are queued durably in this same
+            # transaction. The post-commit seam only submits already persisted
+            # jobs; it never infers a refresh from current_stage.
+            from backend.specialists.review_orchestration import (
+                STAGE_REVIEW_REASON_COMPLETION,
+                newly_completed_stage_ids,
+            )
+
+            newly_completed = newly_completed_stage_ids(
+                list(entry_completed),
+                list(journey_meta.get("completed_stages") or []),
+            )
+            for completed_stage in newly_completed:
+                self._queue_stage_review_in_metadata(
+                    connection,
+                    thread_id=thread_id,
+                    metadata=current_meta,
+                    stage_id=completed_stage,
+                    active_revision=active_revision,
+                    reason=STAGE_REVIEW_REASON_COMPLETION,
+                    force=True,
+                )
             stage, progress_text, settings_text = self._split_notebook_metadata(
                 current_meta
             )
@@ -3538,6 +4075,11 @@ class StudentStore:
         ``ConversationRevisionConflictError`` on CAS miss so SQLite rolls back.
         """
         from backend.student_journey import STAGE_BY_ID, THINKING_STAGES, normalize_journey
+        from backend.specialists.review_orchestration import (
+            JOURNEY_STAGE_REVIEWS_KEY,
+            STAGE_REVIEW_ACTIVE,
+            parse_journey_stage_reviews,
+        )
 
         cleaned = content.strip()
         if not cleaned:
@@ -3787,6 +4329,29 @@ class StudentStore:
                 journey["working_conclusion"] = ""
                 journey["critical_reflection"] = ""
                 journey.pop("learning_summary", None)
+
+            # Revision is append-only, but it also rolls the active learning
+            # frontier back to the replacement message's entry stage.  Any
+            # revisit marker or in-flight checkpoint for a stage that is no
+            # longer completed belongs to the superseded branch.  Pruning the
+            # active envelope fences its worker by job id (and dropping the
+            # marker prevents a later exit from manufacturing a duplicate).
+            review_blob = parse_journey_stage_reviews(
+                current_meta.get(JOURNEY_STAGE_REVIEWS_KEY)
+            )
+            completed_after = {
+                str(stage_id).strip()
+                for stage_id in (journey.get("completed_stages") or [])
+                if str(stage_id).strip()
+            }
+            for stage_id in list(review_blob.get("revisit_dirty") or {}):
+                if stage_id not in completed_after:
+                    review_blob["revisit_dirty"].pop(stage_id, None)
+            for stage_id, job in list((review_blob.get("jobs") or {}).items()):
+                status = str((job or {}).get("status") or "").strip().lower()
+                if stage_id not in completed_after and status in STAGE_REVIEW_ACTIVE:
+                    review_blob["jobs"].pop(stage_id, None)
+            current_meta[JOURNEY_STAGE_REVIEWS_KEY] = review_blob
 
             current_meta["learning_journey"] = journey
             current_meta["thinking_stage"] = restored_stage
@@ -4155,6 +4720,54 @@ class StudentStore:
                     journey_blob.update(preserved)
                     next_meta["learning_journey"] = journey_blob
                 next_meta.update(preserved)
+                source_stage = str(
+                    notebook["current_stage"] or DEFAULT_STAGE
+                ).strip()
+                target_stage = str(
+                    (journey_blob or {}).get("current_stage")
+                    or next_meta.get("thinking_stage")
+                    or source_stage
+                ).strip()
+                if target_stage != source_stage:
+                    # Flush only durable substantive revisit work. Rejected
+                    # decisions and same-stage confirmations never queue a
+                    # refresh, and this write remains atomic with the stage
+                    # transition itself.
+                    self._queue_stage_review_in_metadata(
+                        connection,
+                        thread_id=thread_id,
+                        metadata=next_meta,
+                        stage_id=source_stage,
+                        active_revision=revision,
+                        reason="revisit_exit",
+                    )
+                from backend.specialists.review_orchestration import (
+                    STAGE_REVIEW_REASON_COMPLETION,
+                    newly_completed_stage_ids,
+                )
+
+                prior_progress = _load(notebook["progress_text"], {})
+                if not isinstance(prior_progress, dict):
+                    prior_progress = {}
+                completed_before = list(
+                    prior_progress.get("completed_stages") or []
+                )
+                completed_after = list(
+                    (journey_blob or {}).get("completed_stages") or []
+                )
+                for completed_stage in newly_completed_stage_ids(
+                    completed_before,
+                    completed_after,
+                ):
+                    self._queue_stage_review_in_metadata(
+                        connection,
+                        thread_id=thread_id,
+                        metadata=next_meta,
+                        stage_id=completed_stage,
+                        active_revision=revision,
+                        reason=STAGE_REVIEW_REASON_COMPLETION,
+                        force=True,
+                    )
                 stage, progress_text, settings_text = self._split_notebook_metadata(
                     next_meta
                 )

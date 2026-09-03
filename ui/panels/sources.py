@@ -14,6 +14,7 @@ import streamlit.components.v1 as components
 from backend.settings import settings
 from backend.source_library import COURSE_MATERIAL_GROUPS, is_locked_course_source
 from ui.components import empty_state_html
+from ui.html_embed import wrap_component_html
 from ui.menu_popovers import close_menu_popover, menu_popover_widget_key
 from ui.rename import (
     bump_rename_epoch,
@@ -305,7 +306,8 @@ def _set_select_all_checkbox_state(*, checked: bool, indeterminate: bool) -> Non
     state = "indeterminate" if indeterminate else "checked" if checked else "unchecked"
     aria_state = "mixed" if indeterminate else "true" if checked else "false"
     components.html(
-        f"""
+        wrap_component_html(
+            f"""
 <script>
 (() => {{
   const state = {state!r};
@@ -340,7 +342,8 @@ def _set_select_all_checkbox_state(*, checked: bool, indeterminate: bool) -> Non
   window.setTimeout(applyState, 0);
 }})();
 </script>
-""",
+            """
+        ),
         height=0,
     )
 

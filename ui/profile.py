@@ -13,6 +13,7 @@ from backend.student_journey import RESPONSE_DETAILS, normalize_journey
 from ui.auth_gate import logout_user
 from ui.components import profile_initial
 from ui.constants import APPEARANCE_MODES
+from ui.html_embed import wrap_component_html
 from ui.menu_popovers import close_menu_popover, menu_popover_widget_key
 from ui.runtime import store
 from ui.session import save_journey
@@ -53,7 +54,8 @@ def _sync_profile_trigger_label(display_name: str) -> None:
     encoded_name = json.dumps(display_name)
     encoded_initials = json.dumps(profile_initial(display_name))
     components.html(
-        f"""
+        wrap_component_html(
+            f"""
 <script>
 (() => {{
   const root = window.parent.document.querySelector('.st-key-sidebar_profile');
@@ -70,7 +72,8 @@ def _sync_profile_trigger_label(display_name: str) -> None:
   }}
 }})();
 </script>
-        """,
+            """
+        ),
         height=0,
         width=0,
     )
@@ -269,11 +272,13 @@ def _sync_profile_popover_close_on_leave() -> None:
     Streamlit already closes on outside tap / Escape.
     """
     components.html(
-        """
+        wrap_component_html(
+            """
 <script>
 (() => {
   const doc = window.parent.document;
   const win = window.parent;
+  const isNode = (value) => Boolean(value) && typeof value.nodeType === "number";
   const LEAVE_MS = 420;
   const INTERACT_MS = 1800;
   const finePointer = win.matchMedia(
@@ -472,7 +477,7 @@ def _sync_profile_popover_close_on_leave() -> None:
   }
 
   const body = doc.body;
-  if (body instanceof win.Node) {
+  if (isNode(body)) {
     body.addEventListener("pointerdown", onPointerDown, true);
     observer = new win.MutationObserver(() => {
       bind();
@@ -497,7 +502,8 @@ def _sync_profile_popover_close_on_leave() -> None:
   };
 })();
 </script>
-        """,
+            """
+        ),
         height=0,
         width=0,
     )

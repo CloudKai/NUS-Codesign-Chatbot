@@ -11,6 +11,8 @@ from pathlib import Path
 
 import streamlit as st
 
+from ui.html_embed import wrap_component_html
+
 _ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 _STYLES_DIR = _ASSETS_DIR / "styles"
 # Fixed cascade order. Do not reorder without comparing the assembled CSS.
@@ -86,7 +88,8 @@ def inject_mobile_viewport_lock() -> None:
     import streamlit.components.v1 as components
 
     components.html(
-        """
+        wrap_component_html(
+            """
 <script>
 (() => {
   const doc = window.parent.document;
@@ -173,7 +176,8 @@ def inject_mobile_viewport_lock() -> None:
   pinDocumentScroll();
 })();
 </script>
-        """,
+            """
+        ),
         height=0,
         width=0,
     )
@@ -251,11 +255,30 @@ def render_theme_css() -> None:
         if mode == "System"
         else ""
     )
+    light_inline_code = """
+            [data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] p code {
+                color:#475467 !important;
+                -webkit-text-fill-color:#475467 !important;
+                background:#E8EDF2 !important;
+                border:1px solid #D5DDE5 !important;
+                border-radius:.35rem !important;
+                padding:.08rem .3rem !important;
+            }
+    """
+    system_light_inline_code = (
+        f"@media (prefers-color-scheme:light) {{ {light_inline_code} }}"
+        if mode == "System"
+        else ""
+    )
+    active_light_inline_code = (
+        light_inline_code if mode == "Light" else system_light_inline_code
+    )
     st.markdown(
         f"""
         <style>
             :root {{{tokens}}}
             {system_dark}
+            {active_light_inline_code}
             [data-testid="stAppViewContainer"],
             [data-testid="stAppViewContainer"] > .main {{
                 color:var(--cd-text);

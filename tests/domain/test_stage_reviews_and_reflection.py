@@ -29,6 +29,7 @@ from backend.specialists.review_orchestration import (
     explicit_deep_review_available,
     newly_completed_stage_ids,
     parse_journey_stage_reviews,
+    public_journey_stage_reviews,
     stage_review_should_enqueue,
 )
 from backend.student_store import StudentStore
@@ -156,6 +157,50 @@ def test_stage_reviews_need_attention_for_unread_or_active_jobs() -> None:
     )
 
 
+def test_public_stage_reviews_hide_internal_queue_metadata() -> None:
+    """Student projection preserves status/review fields without worker tokens."""
+    public = public_journey_stage_reviews(
+        {
+            "jobs": {
+                "problem_identification": {
+                    "status": "queued",
+                    "updated_at": "2026-09-03T00:00:00+00:00",
+                    "error_code": None,
+                    "job_id": "job-secret",
+                    "lease_token": "lease-secret",
+                    "message_ids": ["message-private"],
+                    "target_token": "dirty-secret",
+                    "scope_frozen": True,
+                    "scope_version": 1,
+                }
+            },
+            "reviews": {
+                "problem_identification": {
+                    "stage": "problem_identification",
+                    "summary": "A bounded checkpoint.",
+                    "strengths": ["Names a stakeholder."],
+                    "areas_to_revisit": [],
+                    "important_message_ids": ["message-private"],
+                    "facione_scores": {"analysis": 2},
+                }
+            },
+            "revisit_dirty": {
+                "problem_identification": {"token": "dirty-secret"}
+            },
+            "unread": True,
+        }
+    )
+
+    assert set(public) == {"jobs", "reviews", "unread"}
+    assert public["jobs"]["problem_identification"] == {
+        "status": "queued",
+        "updated_at": "2026-09-03T00:00:00+00:00",
+        "error_code": None,
+    }
+    assert "important_message_ids" not in public["reviews"]["problem_identification"]
+    assert "revisit_dirty" not in public
+
+
 def test_execute_stage_review_job_persists_checkpoint_and_unread(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -261,10 +306,13 @@ def test_stage_review_revisit_reenqueues_and_replaces_checkpoint(
     assert second["reviews"]["problem_identification"]["facione_scores"]["analysis"] >= 1
 
 
-def test_enqueue_after_completion_includes_completed_stage_revisit(
+def test_completed_stage_revisit_waits_for_actual_exit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Coach-turn enqueue refreshes Haiku when staying on a completed stage."""
+    """Several revisit turns coalesce into one refresh when the stage is left."""
+    from backend.settings import settings as runtime_settings
+
+    monkeypatch.setattr(runtime_settings, "student_stage_selection", True)
     store = StudentStore(tmp_path / "stage-revisit-enqueue.sqlite3")
     coach = _services(store)
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
@@ -278,42 +326,153 @@ def test_enqueue_after_completion_includes_completed_stage_revisit(
             "thinking_stage": "problem_identification",
         },
     )
-    with store._lock, store._connect() as connection:
-        connection.execute(
-            "UPDATE notebooks SET conversation_revision=? WHERE id=? AND user_id=?",
-            (2, thread_id, store.owner_id),
-        )
     store.start_or_get_stage_review_job(
-        thread_id, stage_id="problem_identification", notebook_revision=2
+        thread_id, stage_id="problem_identification"
     )
     coach.execute_stage_review_job(thread_id, "problem_identification")
     store.mark_journey_stage_reviews_read(thread_id)
 
-    with store._lock, store._connect() as connection:
-        connection.execute(
-            "UPDATE notebooks SET conversation_revision=? WHERE id=? AND user_id=?",
-            (7, thread_id, store.owner_id),
-        )
-    enqueued: list[str] = []
+    submitted: list[tuple[str, str]] = []
 
     def _capture(_coach: object, _thread: str, stage: str) -> None:
-        enqueued.append(stage)
+        submitted.append((_thread, stage))
 
     monkeypatch.setattr(
         "backend.coaching.stage_review_jobs.submit_stage_review_job",
         _capture,
     )
-    coach._enqueue_stage_reviews_after_completion(
-        thread_id,
-        completed_before=list(journey.get("completed_stages") or []),
+    coach._progress.set_stage_review_enqueue(  # noqa: SLF001 - test seam
+        lambda queued_thread, stage: submitted.append((queued_thread, stage))
     )
-    assert enqueued == ["problem_identification"]
-    blob = parse_journey_stage_reviews(
+
+    for index, message in enumerate(
+        (
+            "I now think slower walking speed is the most important constraint.",
+            "The crossing should also work for people using mobility aids.",
+            "A short pilot at two junctions would test that assumption.",
+        )
+    ):
+        coach.submit(
+            CoachRequest(
+                thread_id=thread_id,
+                student_message=message,
+                current_stage="problem_identification",
+                response_detail="short",
+                idempotency_key=f"revisit-{index}",
+            )
+        )
+        internal = parse_journey_stage_reviews(
+            (store.get_thread(thread_id) or {}).get("metadata", {}).get(
+                JOURNEY_STAGE_REVIEWS_KEY
+            )
+        )
+        assert internal["jobs"]["problem_identification"]["status"] == STAGE_REVIEW_COMPLETE
+        assert "problem_identification" in internal["revisit_dirty"]
+        assert submitted == []
+
+    coach._progress.select_stage(  # noqa: SLF001 - exercise direct Journey exit
+        thread_id, "concept_generation"
+    )
+    assert submitted == [(thread_id, "problem_identification")]
+
+    queued = parse_journey_stage_reviews(
         (store.get_thread(thread_id) or {}).get("metadata", {}).get(
             JOURNEY_STAGE_REVIEWS_KEY
         )
     )
-    assert blob["jobs"]["problem_identification"]["status"] == "queued"
+    job = queued["jobs"]["problem_identification"]
+    assert job["status"] == "queued"
+    assert job["reason"] == "revisit_exit"
+    assert job["scope_frozen"] is True
+    assert job["target_token"] == queued["revisit_dirty"]["problem_identification"][
+        "token"
+    ]
+
+    frozen_ids = set(job["message_ids"])
+    frozen_messages = [
+        row
+        for row in store.get_messages(thread_id)
+        if str(row.get("id") or "") in frozen_ids
+    ]
+    frozen_user_text = {
+        str(row.get("content") or "")
+        for row in frozen_messages
+        if row.get("role") == "user"
+    }
+    assert frozen_user_text.issuperset(
+        {
+            "I now think slower walking speed is the most important constraint.",
+            "The crossing should also work for people using mobility aids.",
+            "A short pilot at two junctions would test that assumption.",
+        }
+    )
+
+
+def test_failed_completion_worker_preserves_revisit_refresh_after_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed older checkpoint cannot strand newer work made before exit."""
+    store = StudentStore(tmp_path / "stage-revisit-failure.sqlite3")
+    coach = _services(store)
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    journey = mark_stage_completed(default_journey(), "problem_identification")
+    store.update_thread(
+        thread_id,
+        metadata={
+            "learning_journey": journey,
+            "thinking_stage": "problem_identification",
+        },
+    )
+    queued, created = store.start_or_get_stage_review_job(
+        thread_id,
+        stage_id="problem_identification",
+    )
+    assert created is True
+    old_job_id = queued["jobs"]["problem_identification"]["job_id"]
+
+    # Model a substantive revisit that arrives while the older completion job
+    # is still queued. The real coach-turn transaction writes this same marker.
+    queued["revisit_dirty"]["problem_identification"] = {
+        "token": "newer-revisit",
+        "conversation_revision": 0,
+        "updated_at": "2026-09-03T00:00:00+00:00",
+    }
+    store.update_thread(thread_id, metadata={JOURNEY_STAGE_REVIEWS_KEY: queued})
+    store.select_learning_stage(thread_id, "concept_generation")
+
+    submitted: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "backend.coaching.stage_review_jobs.submit_stage_review_job",
+        lambda _coach, queued_thread, stage: submitted.append(
+            (queued_thread, stage)
+        ),
+    )
+
+    def _fail_checkpoint(_request: CoachRequest) -> object:
+        raise RuntimeError("deterministic checkpoint failure")
+
+    monkeypatch.setattr(
+        coach._workflow.provider,  # noqa: SLF001 - deterministic failure seam
+        "assess_stage_checkpoint",
+        _fail_checkpoint,
+    )
+    coach.execute_stage_review_job(
+        thread_id,
+        "problem_identification",
+        old_job_id,
+    )
+
+    recovered = parse_journey_stage_reviews(
+        (store.get_thread(thread_id) or {}).get("metadata", {}).get(
+            JOURNEY_STAGE_REVIEWS_KEY
+        )
+    )
+    replacement = recovered["jobs"]["problem_identification"]
+    assert replacement["status"] == "queued"
+    assert replacement["job_id"] != old_job_id
+    assert replacement["reason"] == "revisit_exit"
+    assert replacement["target_token"] == "newer-revisit"
+    assert submitted == [(thread_id, "problem_identification")]
 
 
 def test_deep_review_enqueue_blocked_until_reflection_complete(

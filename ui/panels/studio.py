@@ -1097,8 +1097,23 @@ def _watch_stage_review_attention_fragment() -> None:
     if not thread_id:
         return
 
+    polled_thread_id = str(
+        st.session_state.get("_stage_review_poll_thread_id") or ""
+    ).strip()
+    thread_changed = polled_thread_id != thread_id
+    if thread_changed:
+        # Attention/active flags belong to one notebook.  Clear the previous
+        # notebook's baseline before reading this one so a switch cannot look
+        # like a background job transition and trigger a second app remount.
+        st.session_state["_stage_review_poll_thread_id"] = thread_id
+        st.session_state.pop("_stage_review_attention", None)
+        st.session_state.pop("_stage_review_active", None)
+        st.session_state.pop("_stage_review_poll_app_run", None)
+
     app_runs = st.session_state.get("_app_runs")
-    force_read = st.session_state.get("_stage_review_poll_app_run") != app_runs
+    force_read = thread_changed or (
+        st.session_state.get("_stage_review_poll_app_run") != app_runs
+    )
     if force_read:
         st.session_state["_stage_review_poll_app_run"] = app_runs
 
@@ -1126,7 +1141,7 @@ def _watch_stage_review_attention_fragment() -> None:
     )
     st.session_state["_stage_review_attention"] = attention
     st.session_state["_stage_review_active"] = active
-    if prev_attention is None:
+    if thread_changed or prev_attention is None:
         return
     if (not prev_attention and attention) or (prev_active and not active):
         # A full remount during handle_prompt stacks a second workspace.

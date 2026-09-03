@@ -10,7 +10,11 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from backend.agentcore_provider import AgentCoreCoachProvider, agentcore_topic_for_stage
+from backend.agentcore_provider import (
+    AgentCoreCoachProvider,
+    _affinity_session_id,
+    agentcore_topic_for_stage,
+)
 from backend.api import create_app
 from backend.application import CoachApplicationService
 from backend.context_planner import ConversationMemory, ModelContextPlan
@@ -949,6 +953,77 @@ def test_harness_error_envelope_maps_to_structured_output_failure():
     assert raised.value.category == "structured_output_failure"
 
 
+def test_transient_harness_failure_retries_once_with_fresh_stateless_session(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A runtime harness envelope gets one stateless recovery invoke only."""
+    monkeypatch.setattr(settings, "agentcore_session_affinity_enabled", True)
+    monkeypatch.setattr(settings, "agentcore_session_generation", "1")
+    client = FakeAgentCoreRuntime(
+        payloads=[
+            {"ok": False, "error": True, "category": "structured_output_failure"},
+            _output(),
+        ]
+    )
+    from backend.turn_perf import (
+        begin_coach_turn_perf,
+        emit_coach_turn_perf,
+        reset_coach_turn_perf,
+    )
+
+    begin_coach_turn_perf()
+    try:
+        with caplog.at_level("INFO"):
+            result = _provider(client).assess(
+                _request(student_id="owner-demo", thread_id="thread-demo")
+            )
+        recorded = emit_coach_turn_perf()
+    finally:
+        reset_coach_turn_perf()
+
+    assert result.response_text
+    assert len(client.calls) == 2
+    assert client.calls[0]["runtimeSessionId"] == _affinity_session_id(
+        "owner-demo", "thread-demo", "fast_chat", "1"
+    )
+    assert str(client.calls[1]["runtimeSessionId"]).startswith("stateless-")
+    assert client.calls[0]["runtimeSessionId"] != client.calls[1]["runtimeSessionId"]
+    assert recorded["agentcore_call_count"] == 2
+    assert recorded["agentcore_structured_output_retry_attempted"] is True
+    assert recorded["agentcore_structured_output_retry_succeeded"] is True
+    joined = " ".join(record.getMessage() for record in caplog.records)
+    assert "agentcore_structured_output_retry role=fast_chat" in joined
+    assert "owner-demo" not in joined
+
+
+def test_transient_harness_retry_translation_records_failure() -> None:
+    """A non-provider recovery error is translated without losing telemetry."""
+    client = FakeAgentCoreRuntime(
+        payloads=[
+            {"ok": False, "error": True, "category": "structured_output_failure"},
+            RuntimeError("runtime-harness-error"),
+        ]
+    )
+    from backend.turn_perf import (
+        begin_coach_turn_perf,
+        emit_coach_turn_perf,
+        reset_coach_turn_perf,
+    )
+
+    begin_coach_turn_perf()
+    try:
+        with pytest.raises(ProviderUnavailableError) as raised:
+            _provider(client).assess(_request())
+        recorded = emit_coach_turn_perf()
+    finally:
+        reset_coach_turn_perf()
+
+    assert raised.value.category == "unavailable"
+    assert len(client.calls) == 2
+    assert recorded["agentcore_structured_output_retry_attempted"] is True
+    assert recorded["agentcore_structured_output_retry_succeeded"] is False
+
+
 def test_harness_safety_envelope_stays_safety_blocked():
     client = FakeAgentCoreRuntime(
         payload={"ok": False, "error": True, "category": "safety_blocked"}
@@ -956,6 +1031,7 @@ def test_harness_safety_envelope_stays_safety_blocked():
     with pytest.raises(ProviderUnavailableError, match="blocked this turn") as raised:
         _provider(client).assess(_request())
     assert raised.value.category == "safety_blocked"
+    assert len(client.calls) == 1
 
 
 def _legacy_nested_coach_turn(*, recommendation: str = "stay") -> dict[str, Any]:
@@ -1009,6 +1085,7 @@ def test_malformed_fast_chat_payload_fails_closed(caplog):
     assert "expected=fast_chat_turn_v1" in joined
     assert "What trade-off" not in joined
     assert _STUDENT_MESSAGE not in joined
+    assert len(client.calls) == 1
 
 
 def test_out_of_scope_fast_chat_uses_fixed_non_mutating_course_boundary():
@@ -1136,6 +1213,60 @@ def test_structured_output_failure_retry_persists_exactly_one_turn(tmp_path):
     assert assistant["content"].strip()
     assert store.get_pending_phase_transition(thread_id) is None
     assert _thread_stage(store, thread_id) == "problem_identification"
+
+
+def test_transient_harness_retry_persists_one_turn_and_replays_without_invoke(
+    tmp_path,
+):
+    """Recovery happens before the atomic commit and does not duplicate a turn."""
+    store = StudentStore(tmp_path / "agentcore-harness-retry.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    client = FakeAgentCoreRuntime(
+        payloads=[
+            {"ok": False, "error": True, "category": "structured_output_failure"},
+            _output(research=None),
+        ]
+    )
+    service = _service(store, _provider(client))
+    request = _request(
+        thread_id=thread_id,
+        student_message=_STREET,
+        idempotency_key="harness-retry-once",
+    )
+
+    first = service.submit(request)
+    second = service.submit(request)
+
+    assert first.response_text == second.response_text
+    assert len(client.calls) == 2
+    messages = store.get_messages(thread_id)
+    roles = [item["role"] for item in messages]
+    assert roles.count("user") == 1
+    assert roles.count("assistant") == 1
+    assert next(item for item in messages if item["role"] == "user")["content"] == _STREET
+
+
+def test_transient_harness_retry_exhaustion_does_not_persist_a_turn(tmp_path):
+    """Two failed harness envelopes are bounded and leave no partial turn."""
+    store = StudentStore(tmp_path / "agentcore-harness-exhausted.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    failure = {"ok": False, "error": True, "category": "structured_output_failure"}
+    client = FakeAgentCoreRuntime(payloads=[failure, failure])
+    service = _service(store, _provider(client))
+    request = _request(
+        thread_id=thread_id,
+        student_message=_STREET,
+        idempotency_key="harness-retry-exhausted",
+    )
+
+    with pytest.raises(ProviderUnavailableError, match="could not be completed") as raised:
+        service.submit(request)
+
+    assert raised.value.category == "structured_output_failure"
+    assert len(client.calls) == 2
+    messages = store.get_messages(thread_id)
+    assert all(item["role"] not in {"user", "assistant"} for item in messages)
+    assert store.get_pending_phase_transition(thread_id) is None
 
 
 def test_street_stay_does_not_advance_stage(tmp_path):

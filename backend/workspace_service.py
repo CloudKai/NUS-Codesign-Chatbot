@@ -28,7 +28,11 @@ from .source_library import (
     list_visible_sources,
     read_source_bytes,
 )
-from .specialists.review_orchestration import DEEP_REVIEW_SNAPSHOT_KEY
+from .specialists.review_orchestration import (
+    DEEP_REVIEW_SNAPSHOT_KEY,
+    JOURNEY_STAGE_REVIEWS_KEY,
+    public_journey_stage_reviews,
+)
 from .student_journey import normalize_journey
 from .student_store import StudentStore
 
@@ -138,9 +142,27 @@ def professor_public_source(source: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def public_notebook_metadata(metadata: Any) -> dict[str, Any]:
+    """Return notebook metadata without internal Journey worker state.
+
+    Queue ids, dirty tokens, frozen transcript ids, and lease fields are
+    persistence/worker details. All notebook-facing API routes share this
+    projection so a broader thread or learning-state response cannot bypass
+    the dedicated Journey review projection.
+    """
+    payload = dict(metadata) if isinstance(metadata, dict) else {}
+    if JOURNEY_STAGE_REVIEWS_KEY in payload:
+        payload[JOURNEY_STAGE_REVIEWS_KEY] = public_journey_stage_reviews(
+            payload.get(JOURNEY_STAGE_REVIEWS_KEY)
+        )
+    return payload
+
+
 def public_thread(thread: dict[str, Any]) -> dict[str, Any]:
     """Return a notebook record for API/UI consumers."""
-    return dict(thread)
+    payload = dict(thread)
+    payload["metadata"] = public_notebook_metadata(payload.get("metadata"))
+    return payload
 
 
 class WorkspaceService:

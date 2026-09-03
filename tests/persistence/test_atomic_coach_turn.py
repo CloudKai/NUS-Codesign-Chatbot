@@ -35,11 +35,19 @@ class _CallbackProvider:
     def __init__(self, callback: Callable[[], None]) -> None:
         self._callback = callback
         self.calls = 0
+        self.stage_review_calls = 0
 
     def assess(self, request: CoachRequest):
         self.calls += 1
         self._callback()
         return DeterministicCoachProvider(StageDecision.ADVANCE).assess(request)
+
+    def assess_stage_checkpoint(self, request: CoachRequest):
+        """Keep background stage-review invocations separate from coach calls."""
+        self.stage_review_calls += 1
+        return DeterministicCoachProvider(StageDecision.ADVANCE).assess_stage_checkpoint(
+            request
+        )
 
 
 class _SqliteDsqlProxy:

@@ -19,6 +19,7 @@ from backend.student_journey import (
 )
 
 from ui.components import empty_state_html
+from ui.html_embed import wrap_component_html
 from ui.panels.nav import render_transcript_download_control
 from ui.runtime import rerun_app, store
 from ui.rename import (
@@ -334,7 +335,8 @@ def _render_notebook_actions_panel(thread_id: str) -> bool:
 def _sync_notebook_library_scroll() -> None:
     """Keep the notebook list scrollable and pinned to the top on open."""
     components.html(
-        """
+        wrap_component_html(
+            """
 <script>
 (() => {
   const doc = window.parent.document;
@@ -408,6 +410,7 @@ def _sync_notebook_library_scroll() -> None:
   win.addEventListener("resize", schedule);
 })();
 </script>
-        """,
+            """
+        ),
         height=0,
     )

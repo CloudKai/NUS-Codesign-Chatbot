@@ -46,6 +46,31 @@ class LearningProgressService:
         """Attach the background stage-review submitter after coach construction."""
         self._enqueue_stage_review = enqueue
 
+    def _submit_durable_stage_review_jobs(self, thread_id: str) -> None:
+        """Submit only stage-review jobs already committed by the store.
+
+        Stage-change transactions queue completion/refresh work atomically;
+        this callback is deliberately post-commit and only hands durable rows
+        to the process-local executor.
+        """
+        if self._enqueue_stage_review is None:
+            return
+        thread = self._notebooks.get_thread(thread_id)
+        if not thread:
+            return
+        blob = (thread.get("metadata") or {}).get(JOURNEY_STAGE_REVIEWS_KEY)
+        if not isinstance(blob, dict):
+            return
+        jobs = blob.get("jobs")
+        if not isinstance(jobs, dict):
+            return
+        for stage_id, job in jobs.items():
+            if not isinstance(job, dict):
+                continue
+            if str(job.get("status") or "").strip().lower() != "queued":
+                continue
+            self._enqueue_stage_review(thread_id, str(stage_id).strip())
+
     def get_pending(self, thread_id: str) -> PendingPhaseTransition | None:
         """Return the unresolved recommendation for one owned notebook."""
         if not self._notebooks.get_thread(thread_id):
@@ -133,26 +158,7 @@ class LearningProgressService:
         )
         if accepted:
             try:
-                from backend.specialists.review_orchestration import (
-                    newly_completed_stage_ids,
-                )
-
-                after = normalize_journey(
-                    (
-                        (self._notebooks.get_thread(thread_id) or {}).get("metadata")
-                        or {}
-                    ).get("learning_journey")
-                )
-                for stage_id in newly_completed_stage_ids(
-                    journey.get("completed_stages") or [],
-                    after.get("completed_stages") or [],
-                ):
-                    blob, created = self._store.start_or_get_stage_review_job(
-                        thread_id, stage_id=stage_id
-                    )
-                    del blob
-                    if created and self._enqueue_stage_review is not None:
-                        self._enqueue_stage_review(thread_id, stage_id)
+                self._submit_durable_stage_review_jobs(thread_id)
             except Exception:
                 logger.exception(
                     "stage_review_enqueue_after_confirm_failed thread_id=%s",
@@ -229,5 +235,11 @@ class LearningProgressService:
                         "response_mode": "qa",
                     },
                 },
+            )
+        try:
+            self._submit_durable_stage_review_jobs(thread_id)
+        except Exception:
+            logger.exception(
+                "stage_review_enqueue_after_select_failed thread_id=%s", thread_id
             )
         return updated

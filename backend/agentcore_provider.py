@@ -69,7 +69,7 @@ from .domain import (
 )
 from .prompts import compose_coach_prompt
 from .providers import ProviderUnavailableError
-from .settings import settings
+from .settings import FAST_CHAT_MAX_PROVIDER_INVOCATIONS_PER_TURN, settings
 from .turn_perf import (
     begin_coach_turn_perf,
     current_perf,
@@ -275,11 +275,56 @@ def _blocked_error() -> ProviderUnavailableError:
     return ProviderUnavailableError(_BLOCKED_FAILURE, category="safety_blocked")
 
 
-def _malformed_error() -> ProviderUnavailableError:
-    """Return a category-only structured-output failure."""
-    return ProviderUnavailableError(
-        _MALFORMED_FAILURE, category="structured_output_failure"
+class _TransientStructuredOutputError(ProviderUnavailableError):
+    """Mark one runtime harness envelope as eligible for one fresh retry."""
+
+
+def _malformed_error(*, transient: bool = False) -> ProviderUnavailableError:
+    """Return a category-only structured-output failure.
+
+    Args:
+        transient: Whether the failure came from a runtime harness envelope
+            that may be recovered by one fresh stateless invoke. Strict
+            contract validation keeps the default ``False`` so deterministic
+            malformed model output is never retried.
+    """
+    error_type = (
+        _TransientStructuredOutputError if transient else ProviderUnavailableError
     )
+    return error_type(
+        _MALFORMED_FAILURE,
+        category="structured_output_failure",
+    )
+
+
+def _is_transient_structured_output_failure(
+    error: ProviderUnavailableError,
+) -> bool:
+    """Return whether *error* is eligible for one Fast Chat recovery invoke.
+
+    The transient marker is assigned only while decoding AgentCore's harness
+    envelope. Contract validation and provider/authorization failures use the
+    same student-safe category but remain non-retryable.
+    """
+    return isinstance(error, _TransientStructuredOutputError)
+
+
+def _fast_chat_retry_budget_available() -> bool:
+    """Return whether this turn has one outer AgentCore invoke slot left.
+
+    ``agentcore_call_count`` is request-local and incremented by
+    :meth:`AgentCoreCoachProvider._call_runtime`. Keeping the recovery within
+    that same two-invoke budget prevents a later application RAG fallback from
+    extending one claimed idempotency execution to a third invoke.
+    """
+    perf = current_perf()
+    if perf is None:
+        return True
+    try:
+        consumed = int(perf.fields.get("agentcore_call_count") or 0)
+    except (TypeError, ValueError):
+        return False
+    return consumed < FAST_CHAT_MAX_PROVIDER_INVOCATIONS_PER_TURN
 
 
 def _mapping_indicates_runtime_block(obj: Any, *, depth: int = 0) -> bool:
@@ -352,7 +397,7 @@ def _raise_if_harness_error_envelope(payload: Mapping[str, Any]) -> None:
             "AgentCore is temporarily throttled", category="throttled"
         )
     if category in {"structured_output_failure", "malformed"}:
-        raise _malformed_error()
+        raise _malformed_error(transient=True)
     raise ProviderUnavailableError(_GENERIC_FAILURE, category="unavailable")
 
 
@@ -1739,6 +1784,7 @@ class AgentCoreCoachProvider:
         *,
         request: CoachRequest,
         role: str,
+        fresh_stateless_session: bool = False,
     ) -> dict[str, Any]:
         """Invoke AgentCore once and return the parsed JSON object.
 
@@ -1747,6 +1793,8 @@ class AgentCoreCoachProvider:
             request: Server-built coaching input used only for optional
                 session affinity. Identity values are never logged.
             role: ``fast_chat`` or ``review_deep`` for affinity isolation.
+            fresh_stateless_session: Use a new non-affinity session for a
+                narrowly scoped recovery invoke.
 
         Returns:
             Unwrapped runtime JSON. Harness error envelopes raise.
@@ -1765,10 +1813,15 @@ class AgentCoreCoachProvider:
             round(float(configured_timeout), 1),
         )
         encoded = json.dumps(payload).encode("utf-8")
+        runtime_session_id = (
+            _stateless_session_id()
+            if fresh_stateless_session
+            else _runtime_session_id(request, role)
+        )
         response = self._runtime_client(role).invoke_agent_runtime(
             agentRuntimeArn=self._runtime_arn,
             qualifier=self._qualifier,
-            runtimeSessionId=_runtime_session_id(request, role),
+            runtimeSessionId=runtime_session_id,
             payload=encoded,
             contentType="application/json",
             accept="application/json",
@@ -1992,11 +2045,42 @@ class AgentCoreCoachProvider:
             output_contract=_FAST_CHAT_CONTRACT,
         )
         started = time.monotonic()
+        recovery_attempted = False
         try:
-            parsed = self._call_runtime(
-                payload, request=request, role="fast_chat"
-            )
+            try:
+                parsed = self._call_runtime(
+                    payload, request=request, role="fast_chat"
+                )
+            except ProviderUnavailableError as error:
+                if not _is_transient_structured_output_failure(error):
+                    raise
+                if not _fast_chat_retry_budget_available():
+                    record_field(
+                        "agentcore_structured_output_retry_skipped_budget", True
+                    )
+                    logger.warning(
+                        "agentcore_structured_output_retry role=fast_chat "
+                        "outcome=skipped reason=turn_invoke_budget_exhausted"
+                    )
+                    raise
+                recovery_attempted = True
+                record_field("agentcore_structured_output_retry_attempted", True)
+                logger.warning(
+                    "agentcore_structured_output_retry role=fast_chat "
+                    "reason=transient_runtime_shape session=stateless"
+                )
+                parsed = self._call_runtime(
+                    payload,
+                    request=request,
+                    role="fast_chat",
+                    fresh_stateless_session=True,
+                )
             result = _validated_fast_chat(parsed, request)
+            if recovery_attempted:
+                record_field("agentcore_structured_output_retry_succeeded", True)
+                logger.info(
+                    "agentcore_structured_output_retry role=fast_chat outcome=success"
+                )
             self._log_role_precise(
                 role="fast_chat",
                 started=started,
@@ -2007,6 +2091,11 @@ class AgentCoreCoachProvider:
             record_success()
             return self._with_memory(request, result, plan)
         except ProviderUnavailableError as error:
+            if recovery_attempted:
+                record_field("agentcore_structured_output_retry_succeeded", False)
+                logger.warning(
+                    "agentcore_structured_output_retry role=fast_chat outcome=failed"
+                )
             self._log_role_precise(
                 role="fast_chat",
                 started=started,
@@ -2018,6 +2107,11 @@ class AgentCoreCoachProvider:
             record_failure(error.category)
             raise
         except Exception as error:
+            if recovery_attempted:
+                record_field("agentcore_structured_output_retry_succeeded", False)
+                logger.warning(
+                    "agentcore_structured_output_retry role=fast_chat outcome=failed"
+                )
             translated = _translate_agentcore_error(error)
             self._log_role_precise(
                 role="fast_chat",

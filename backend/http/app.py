@@ -70,7 +70,7 @@ from backend.student_store import (
     ConversationRevisionConflictError,
     StudentStore,
 )
-from backend.workspace_service import WorkspaceService
+from backend.workspace_service import WorkspaceService, public_notebook_metadata
 from backend.professor_analytics.models import (
     ConversationTranscriptResponse,
     CriticalThinkingResponse,
@@ -1483,7 +1483,7 @@ def create_app(
         thread = owner.store.get_thread(thread_id)
         if not thread:
             raise HTTPException(status_code=404, detail="Notebook not found")
-        payload = dict(thread.get("metadata") or {})
+        payload = public_notebook_metadata(thread.get("metadata"))
         journey = normalize_journey(payload.get("learning_journey"))
         payload["hmw_scaffold"] = hmw_scaffold_projection(
             str(journey.get("current_stage") or DEFAULT_STAGE),
@@ -1511,7 +1511,7 @@ def create_app(
             status = 404 if "not found" in message.lower() else 400
             raise HTTPException(status_code=status, detail=message) from error
         record_stage_transition(outcome="selected")
-        return dict(metadata or {})
+        return public_notebook_metadata(metadata)
 
     @app.post(
         "/api/v1/threads/{thread_id}/messages/{message_id}/revise",
