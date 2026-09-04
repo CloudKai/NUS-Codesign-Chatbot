@@ -2,6 +2,212 @@
 
 ## CURRENT STATUS
 
+### Students roster reference alignment (2026-09-05)
+
+**Behavior.** The top-level Students view now follows the supplied roster
+reference more closely: airy Student work/Students heading and module context,
+roomier search and Stage/Attention filters, a clear result count, full-width
+student cards with rounded-square initials, stronger name/stage/activity
+hierarchy, and right-aligned Open actions. The existing Course Analytics rail
+remains available, and the roster continues to use real filtered professor
+records rather than prototype data.
+
+The final scoped roster contract consolidates card geometry at the Streamlit
+wrapper boundary: filters are approximately 50 px tall, desktop cards have an
+86 px minimum with 6 px vertical breathing room, and avatar/copy/action content
+is vertically centered. At phone widths the card keeps a 70/30 copy/action
+split, wraps long names safely, and does not introduce horizontal overflow.
+
+**Files.** `ui/professor.py`, `ui/assets/styles/70-professor.css`, and this
+handoff. The visual change uses existing Streamlit/chatbot design tokens and
+assets; no React runtime or new service was introduced.
+
+**Validation.** Luna Max implemented the roster pass and Sol High reviewed it
+with an **APPROVE** verdict and no P0–P2 findings. Professor UI plus analytics/
+research API tests passed (44 tests), project `compileall` passed, and
+`git diff --check` passed. Deterministic browser checks at 1280 px and 390 px
+confirmed the enlarged cards, readable mobile arrangement, no horizontal
+overflow, and no browser-console errors.
+
+**Compatibility, migration, and rollback.** The roster still performs only the
+existing filtered `professor_students()` read; student detail, notebook tabs,
+attachments, and source bytes remain lazy. No authentication, authorization,
+HTTP contract, backend, schema, AWS resource, or persisted data changed.
+Rollback is code-only: revert the roster additions in `ui/professor.py` and
+`ui/assets/styles/70-professor.css` (and this status entry if desired).
+
+**Known risk.** Browser validation used deterministic local fixtures rather
+than the authenticated lecturer's production-shaped roster. Long names and
+large classes should be smoke-tested before release.
+
+**Next exact action.** Sign in as the promoted lecturer, open Course Analytics
+→ Students, and compare the real roster at desktop and 390 px before deploying
+the branch.
+
+### Selected-student lecturer workbench (2026-09-05)
+
+**Behavior.** The Students drill-down now has a read-only three-pane workbench
+matching the supplied reference: an All students context rail, the existing
+chatbot-style notebook transcript with breadcrumb and Chat/Sources/Progression/
+Review tabs, and a Thinking Path rail. Review is the initial visual state and
+uses the already-loaded student profile until its detailed projection is
+explicitly requested. Chat messages reuse the student surface's Material
+avatars and message bubbles; attachment/source bytes remain explicit,
+lazy-open actions. The desktop rail stays beside the transcript, while the
+inner panes stack at 390 px without horizontal overflow. Roster context,
+student switching, and current notebook tab behavior remain available.
+
+**Files.** `ui/professor.py`, `ui/assets/styles/70-professor.css`, and this
+handoff. The existing React dashboard archive remains a visual reference only;
+no React runtime, AWS/Lambda resource, backend, schema, auth, or persistence
+code was added.
+
+**Validation.** Luna Max implemented the workbench and the follow-up visual and
+mobile fixes. Sol High independently reviewed the final diff and browser
+evidence with an **APPROVE** verdict and no P0–P2 findings. The focused
+professor UI plus analytics/research API suites passed (44 tests), project
+`compileall` passed, and `git diff --check` passed. A deterministic local
+preview was checked at 1280 px and 390 px: the three-pane desktop layout uses
+the existing chatbot message chrome, the inner panes stack at mobile width,
+`scrollWidth` equals the 390 px viewport, and browser error logs were empty.
+
+**Compatibility, migration, and rollback.** This is presentation-only. Opening
+a notebook still fetches only its Chat projection; Sources, Progression,
+Review, attachments, and source bytes remain lazy and use the existing
+authorised FastAPI client. No authentication/authorization boundary, HTTP
+contract, read-only restriction, student record, notebook, message, source,
+or AWS resource changed. Rollback is code-only: revert the workbench changes
+in `ui/professor.py` and `ui/assets/styles/70-professor.css` (and this status
+entry if desired).
+
+**Known risk.** Browser validation used deterministic local fixtures rather
+than the user's authenticated production session and production-shaped roster
+data. Real student names, long transcripts, and lecturer permissions should be
+smoke-tested before release.
+
+**Next exact action.** Sign in as the promoted lecturer in the local or
+controlled deployment, open Course Analytics → Students, open a real notebook,
+and smoke Chat/Sources/Progression/Review at desktop and 390 px while checking
+the browser console and lazy endpoint behavior before deployment approval.
+
+### Professor dashboard reference alignment (2026-09-05)
+
+**Behavior.** The existing EC2-hosted Streamlit lecturer dashboard now follows
+the supplied Course Analytics reference more closely: a narrow 210 px desktop
+navigation rail, compact radio-dot navigation, restrained dark surfaces,
+reference-style roster and notebook cards, read-only workspace framing,
+compact notebook tabs, stage/review accordions, and a denser Facione card.
+The content column stays beside the rail on desktop and stacks without
+horizontal overflow at 390 px. The duplicate Streamlit navigation label is
+hidden while the visible mono rail label remains. The existing roster → student
+→ notebook drill-down and all real professor API calls remain unchanged.
+
+**Files.** `ui/professor.py`, `ui/assets/styles/70-professor.css`, and this
+handoff. The React ZIP remains a visual reference only; no prototype records,
+React runtime, Lambda, AWS resource, backend, schema, or persistence code was
+added.
+
+**Validation.** Luna Max implemented the focused alignment pass and Sol High
+reviewed the final diff with an **APPROVE** verdict and no P0–P2 findings.
+Professor UI plus professor analytics/research tests passed (44 tests), UI and
+project compile checks passed, and `git diff --check` passed. A controlled
+deterministic preview was checked at 1280 px and 390 px: the desktop rail and
+content stayed side-by-side, mobile navigation/content stacked without
+horizontal overflow, and no new browser-console errors appeared. The broader
+UI command still has the two documented branch-baseline failures in unchanged
+student chat expectations; the theme command still has its documented single
+failure in unchanged `90-responsive.css`.
+
+**Compatibility, migration, and rollback.** This is presentation-only. No
+authentication, authorization, FastAPI contract, read-only boundary, lazy
+attachment/source access, analytics/research write path, or persisted data was
+changed. No migration or AWS action is required. Rollback is code-only: revert
+the changes to `ui/professor.py` and `ui/assets/styles/70-professor.css` (and
+this status entry if desired).
+
+**Known risk.** The visual browser check used a local deterministic lecturer
+preview rather than the user's authenticated production session. The real
+lecturer account should still be smoke-tested after the next local restart or
+deployment to confirm auth gating and data-specific wrapping.
+
+**Next exact action.** Sign in as the promoted lecturer account in the local or
+controlled deployment, open Course Analytics, and smoke Overview, Students,
+one notebook's Chat/Sources/Progression/Review, Learning, Engagement, and
+Research at desktop and 390 px before releasing the dashboard URL.
+
+### Local lecturer role promotion (2026-09-04)
+
+**Behavior.** Promoted the single local SQLite user matching
+`nus.ai.education99@gmail.com` from `student` to `lecturer`. The application
+still requires a fresh authenticated `/auth/me` lookup before entering the
+lecturer dashboard; Cognito claims alone are not used to elevate roles.
+
+**Evidence.** The transaction reported exactly one changed row. The resulting
+role counts are one `lecturer` and four `student` users. The pre-change backup is
+at `/private/tmp/co-design-lecturer-backup.Nms7W5/co_design.sqlite3`.
+Notebook, message, source, notebook-source, thread, folder, step,
+phase-transition, model-turn, and research table counts match the backup
+(12 notebooks, 131 messages, and 61 sources among the populated tables).
+The local API readiness endpoint and Streamlit endpoint both returned 200 after
+the stack restart. The visible browser tab belongs to another student account,
+so it intentionally remains in the student workspace; the promoted account
+must sign out and sign in again to refresh its session role.
+
+**Compatibility, migration, and rollback.** This is a local-only application
+role update. No AWS, EC2, Cognito, deployed service, notebook, message, source,
+or other user was changed. Rollback is recoverable by restoring the backup or
+updating this one row back to `student` after stopping the local services.
+
+**Known risk.** The target account's browser session was not available to this
+browser automation session, so its authenticated `/auth/me` response and
+dashboard paint still require the user to sign out/in locally.
+
+**Next exact action.** In the local browser, sign out, sign in with
+`nus.ai.education99@gmail.com`, and confirm the Course Analytics dashboard
+appears. If it does not, capture the local API `/auth/me` status and Streamlit
+log line for that fresh sign-in.
+
+### Streamlit lecturer dashboard visual refresh (2026-09-04)
+
+**Behavior.** The supplied React dashboard was used only as a visual reference.
+The existing lecturer dashboard remains inside the EC2-hosted Streamlit app and
+continues to use the authenticated FastAPI professor APIs. Its five existing
+views now have a calmer shared page header, compact section hierarchy, clearer
+metrics, roster/notebook rows, read-only notebook framing, responsive follow-up
+tables, and contextual source/attachment actions. Student utterances are
+labelled as `Student`, and every open action has a target-specific accessible
+name. Lecturer branding uses the same shared product constants as the student
+surface.
+
+**Files.** `ui/professor.py`, `ui/assets/styles/70-professor.css`, and this
+handoff. No React application, Lambda, backend, AWS, schema, or prototype data
+was added.
+
+**Validation.** Luna Max's implementation pass and Sol High's final review both
+completed; Sol approved with no P0-P2 findings. The professor UI suite passed
+(11 tests), professor analytics/research API suites passed (33 tests), UI
+compileall and `git diff --check` passed. The broader student UI check passed 38
+tests with two existing unrelated failures. The combined theme run retains one
+existing failure in unchanged `90-responsive.css`; its worktree blob matches
+`HEAD`. A temporary local preview server started successfully, but the in-app
+browser blocked the localhost page after an earlier connection failure, so
+desktop/390 px visual wrapping was not claimed as verified.
+
+**Compatibility, migration, and rollback.** Authentication, persisted
+lecturer/admin authorization, audited reads, pagination, lazy source access,
+research review/adjudication, CSV export, and student initialization boundaries
+are unchanged. No data or infrastructure migration is required. Rollback is
+code-only: revert the two presentation files.
+
+**Known risk.** Real-browser desktop and 390 px checks remain a release gate;
+AppTest cannot prove final wrapping, focus order, or scroll behavior. The live
+EC2/CloudFront deployment has not been changed.
+
+**Next exact action.** Open a permitted local or controlled deployed lecturer
+URL and smoke Overview, Students, notebook Chat/Sources/Progression/Review,
+Learning, Engagement, and Research at desktop and 390 px in light and dark
+themes before deployment approval.
+
 ### Sources delete / polling remount guard (2026-09-04)
 
 **Behavior.** Personal-source deletion remains a fragment-local
