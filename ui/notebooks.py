@@ -21,7 +21,7 @@ from backend.student_journey import (
 from ui.components import empty_state_html
 from ui.html_embed import wrap_component_html
 from ui.panels.nav import render_transcript_download_control
-from ui.runtime import rerun_app, store
+from ui.runtime import rerun_app, rerun_fragment, store
 from ui.rename import (
     render_enter_to_apply_rename,
     sync_rename_select_all,
@@ -128,15 +128,37 @@ def notebooks_dialog() -> None:
 
 
 def _return_to_notebook_list() -> None:
-    """Leave the actions panel and remount Your Notebooks on the list view.
+    """Return the open dialog to its list view with a fragment rerun.
 
-    Streamlit already drew the actions widgets in this run, so falling through
-    to the list would stack both UIs. Remount instead via reopen + rerun.
+    Your Notebooks is a Streamlit dialog (and therefore a fragment).  Its
+    Actions and Back controls only change dialog-local state, so a fragment
+    rerun replaces the dialog body without rebuilding the workspace shell.
     """
     cancel_notebook_actions()
-    st.session_state._notebooks_suppress_dismiss = True
-    st.session_state.reopen_notebooks_dialog = True
-    rerun_app()
+    rerun_fragment()
+
+
+def _on_notebook_actions(thread_id: str) -> None:
+    """Show one notebook's actions in the current dialog fragment.
+
+    Args:
+        thread_id: Persisted notebook identifier whose actions should be shown.
+
+    Side effects:
+        Updates dialog-local session state.  Because this is a widget callback,
+        Streamlit reruns the owning dialog fragment automatically.
+    """
+    request_notebook_actions(thread_id)
+
+
+def _on_notebook_actions_back() -> None:
+    """Return from notebook Actions to the list in the dialog fragment.
+
+    The callback runs before the fragment body is painted, so clearing the
+    pending id makes the same fragment render the list without a second app
+    rerun or a stacked action/list body.
+    """
+    cancel_notebook_actions()
 
 
 def _on_dialog_new_notebook() -> None:
@@ -147,6 +169,7 @@ def _on_dialog_new_notebook() -> None:
     """
     st.session_state.pending_notebook_actions = None
     st.session_state.reopen_notebooks_dialog = False
+    st.session_state.pop("_notebooks_suppress_dismiss", None)
     st.session_state.toast_course_materials_loading = True
     new_notebook(should_rerun=False)
 
@@ -158,6 +181,7 @@ def _on_dialog_open_notebook(thread_id: str) -> None:
         return
     st.session_state.pending_notebook_actions = None
     st.session_state.reopen_notebooks_dialog = False
+    st.session_state.pop("_notebooks_suppress_dismiss", None)
     select_thread(target, should_rerun=False)
 
 
@@ -242,17 +266,15 @@ def _render_notebook_library_list() -> None:
                         args=(thread["id"],),
                     )
                     actions_disabled = locked
-                    if menu_column.button(
+                    menu_column.button(
                         "⋯",
                         type="tertiary",
                         key=f"notebook-actions-{thread['id']}",
                         disabled=actions_disabled,
                         help="Wait for the coach reply" if actions_disabled else None,
-                    ):
-                        # No help= tooltip: on touch / narrow preview the tip
-                        # intercepts the first tap and forces a double-click.
-                        request_notebook_actions(thread["id"])
-                        rerun_app()
+                        on_click=_on_notebook_actions,
+                        args=(thread["id"],),
+                    )
 
     _sync_notebook_library_scroll()
 
@@ -263,21 +285,22 @@ def _render_notebook_actions_panel(thread_id: str) -> bool:
     Returns:
         ``True`` when the actions panel owns the dialog body.
         ``False`` only when the notebook is missing so the list can render.
-        Back / rename / delete remount the list via ``rerun_app`` instead of
-        falling through (which would stack both UIs in one dialog body).
+        Back and rename return to the list with a dialog-fragment rerun so the
+        application workspace is not rebuilt. Delete keeps its app-scoped
+        rerun when the active notebook must be reconciled.
     """
     thread = store.get_thread(thread_id)
     if not thread:
         cancel_notebook_actions()
         return False
 
-    if st.button(
+    st.button(
         "Back to notebooks",
         icon=":material/arrow_back:",
         type="tertiary",
         key=f"notebook-actions-back-{thread_id}",
-    ):
-        _return_to_notebook_list()
+        on_click=_on_notebook_actions_back,
+    )
 
     current_title = str(thread.get("name") or "").strip() or "Untitled notebook"
     overview = thread_overview(thread)

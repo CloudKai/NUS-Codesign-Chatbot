@@ -64,7 +64,7 @@ from ui.runtime import (
     start_deep_review,
     store,
 )
-from ui.session import apply_manual_stage_move
+from ui.session import apply_manual_stage_move, reset_chat_history_window
 
 logger = logging.getLogger(__name__)
 
@@ -1010,6 +1010,7 @@ def _resolve_pending_transition(transition_id: str, accepted: bool) -> None:
             transition_id,
             accepted=accepted,
         )
+        reset_chat_history_window(st.session_state.thread_id)
         updated = store.get_thread(st.session_state.thread_id) or {}
         st.session_state.learning_journey = normalize_journey(
             (updated.get("metadata") or {}).get("learning_journey")

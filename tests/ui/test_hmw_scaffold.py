@@ -464,6 +464,35 @@ def test_hmw_scaffold_renders_once_when_eligible() -> None:
     )
 
 
+def test_projected_hmw_anchor_waits_for_its_loaded_page() -> None:
+    """A partial newest page must not render the scaffold at a guessed location."""
+    anchor = {
+        "id": "coach-anchor",
+        "role": "assistant",
+        "content": "A useful coaching response.",
+        "metadata": {"assessment": _pi_coaching(ready=True)},
+    }
+    newest = {
+        "id": "newest",
+        "role": "user",
+        "content": "A later response.",
+        "metadata": {},
+    }
+    partial = transcript_hmw_render_plan(
+        [newest],
+        hmw_available=True,
+        anchor_message_id="coach-anchor",
+    )
+    assert all(kind != "hmw" for kind, _ in partial)
+
+    complete = transcript_hmw_render_plan(
+        [anchor, newest],
+        hmw_available=True,
+        anchor_message_id="coach-anchor",
+    )
+    assert [kind for kind, _ in complete] == ["message", "hmw", "message"]
+
+
 def test_qa_turn_keeps_hmw_after_unlocking_coach() -> None:
     """A later Q&A exchange must not move or duplicate the HMW card."""
     app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()

@@ -1,4 +1,4 @@
-"""Bounded chat-transcript scroll policy for Send / reconcile.
+"""Bounded chat-transcript scroll policy for notebook paging and Send.
 
 Streamlit has no first-class chat-anchor API. ``sync_chat_scroll`` injects a
 zero-height helper that:
@@ -31,11 +31,17 @@ Prefer ``ui.layout.chat_scroll``.
 
 from __future__ import annotations
 
+from time import monotonic_ns
+
 import streamlit.components.v1 as components
 
 from ui.html_embed import wrap_component_html
 
 NEAR_BOTTOM_PX = 120
+# Keep the floating control independent from the wider follow threshold. A
+# student who is close to (but not at) the end should still have an explicit
+# way to jump to the latest message.
+SCROLL_CONTROL_THRESHOLD_PX = 16
 # Extra frames after Send / reply remount so Streamlit can finish painting
 # the new bubble height before scrollTop is applied.
 FOLLOW_SNAP_FRAMES = 8
@@ -49,24 +55,33 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     """Apply one event-driven chat scroll action.
 
     Args:
-        mode: ``send`` snaps to the bottom, arms reply reveal, and resumes
+        mode: ``open`` snaps a newly opened notebook to the exact bottom;
+        ``prepend`` restores the reading position after older rows are added;
+        ``send`` snaps to the bottom, arms reply reveal, and resumes
             follow. ``settle`` records near-bottom state and does not move the
             viewport. ``reply`` arms reveal and pins the latest coach reply top
             after a remount (stage move or completed coach turn). ``reconcile``
             pins only when follow or a pending reply-reveal is still armed.
     """
     cleaned = str(mode or "reconcile").strip().lower()
-    if cleaned not in {"send", "settle", "reconcile", "reply"}:
+    if cleaned not in {"open", "prepend", "send", "settle", "reconcile", "reply"}:
         cleaned = "reconcile"
+    # ``components.html`` may keep an identical srcdoc iframe across a
+    # fragment remount. A monotonic token makes each helper invocation
+    # rehydrate the parent controller without any DOM observer or global
+    # mutable counter.
+    sync_token = monotonic_ns()
     script = """
 <script>
 (() => {
   const doc = window.parent.document;
   const win = window.parent;
+  const SYNC_TOKEN = __CD_SYNC_TOKEN__;
   const MODE = __CD_MODE__;
   const NEAR_BOTTOM_PX = __CD_NEAR_BOTTOM__;
+  const SCROLL_CONTROL_THRESHOLD_PX = __CD_SCROLL_CONTROL_THRESHOLD__;
   const FOLLOW_SNAP_FRAMES = __CD_FOLLOW_FRAMES__;
-  const SCROLL_DOWN_ENSURE_FRAMES = __CD_ENSURE_FRAMES__;
+    const SCROLL_DOWN_ENSURE_FRAMES = __CD_ENSURE_FRAMES__;
 
   function api() {
     if (!win.__cdChatScroll) {
@@ -81,6 +96,10 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
         ensureLastScrollHeight: -1,
         boundScrollRoot: null,
         boundScrollHandler: null,
+        documentHandlers: null,
+        scheduledFrame: 0,
+        scheduledCallbacks: [],
+        pagingLocked: false,
       };
     }
     const current = win.__cdChatScroll;
@@ -103,11 +122,30 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     if (!("boundScrollHandler" in current)) {
       current.boundScrollHandler = null;
     }
+    if (!("documentHandlers" in current)) {
+      current.documentHandlers = null;
+    }
+    if (typeof current.scheduledFrame !== "number") {
+      current.scheduledFrame = 0;
+    }
+    if (!Array.isArray(current.scheduledCallbacks)) {
+      current.scheduledCallbacks = [];
+    }
+    if (typeof current.pagingLocked !== "boolean") {
+      current.pagingLocked = false;
+    }
     return current;
   }
 
   function schedule(fn) {
-    win.requestAnimationFrame(fn);
+    const state = api();
+    state.scheduledCallbacks.push(fn);
+    if (state.scheduledFrame) return;
+    state.scheduledFrame = win.requestAnimationFrame(() => {
+      state.scheduledFrame = 0;
+      const callbacks = state.scheduledCallbacks.splice(0);
+      callbacks.forEach((callback) => callback());
+    });
   }
 
   function scrollRoot() {
@@ -194,9 +232,11 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     button.style.bottom = bottom + "px";
   }
 
-  function bindScrollRoot(root) {
+  function bindScrollRoot(root, force = false) {
     const state = api();
-    if (state.boundScrollRoot === root) return;
+    if (!force && state.boundScrollRoot === root && state.boundScrollHandler) {
+      return;
+    }
     if (state.boundScrollRoot && state.boundScrollHandler) {
       state.boundScrollRoot.removeEventListener("scroll", state.boundScrollHandler);
     }
@@ -217,6 +257,74 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     root.addEventListener("scroll", handler, { passive: true });
   }
 
+  function removeDocumentListeners() {
+    const state = api();
+    const handlers = state.documentHandlers;
+    if (!handlers) return;
+    doc.removeEventListener("click", handlers.click, true);
+    doc.removeEventListener("wheel", handlers.wheel, true);
+    doc.removeEventListener("touchmove", handlers.touchmove, true);
+    doc.removeEventListener("scroll", handlers.scroll, true);
+    win.removeEventListener("resize", handlers.resize);
+    state.documentHandlers = null;
+  }
+
+  function bindDocumentListeners() {
+    const state = api();
+    // Streamlit can leave the body-hosted button behind while tearing down
+    // the component iframe that installed these callbacks. Rehydrate the
+    // parent listeners on every sync instead of trusting a stale boolean.
+    removeDocumentListeners();
+    const handlers = {
+      click: (event) => {
+        const live = win.__cdChatScroll;
+        if (live && typeof live.onScrollDownClick === "function") {
+          live.onScrollDownClick(event);
+        }
+      },
+      wheel: (event) => {
+        const live = win.__cdChatScroll;
+        if (live && typeof live.markUserScroll === "function") {
+          live.markUserScroll(event);
+        }
+      },
+      touchmove: (event) => {
+        const live = win.__cdChatScroll;
+        if (live && typeof live.markUserScroll === "function") {
+          live.markUserScroll(event);
+        }
+      },
+      scroll: (event) => {
+        const live = win.__cdChatScroll;
+        if (live && typeof live.onFeedScroll === "function") {
+          live.onFeedScroll(event);
+        }
+      },
+      resize: () => {
+        const live = win.__cdChatScroll;
+        if (live && typeof live.onResize === "function") {
+          live.onResize();
+        }
+      },
+    };
+    doc.addEventListener("click", handlers.click, true);
+    doc.addEventListener("wheel", handlers.wheel, {
+      capture: true,
+      passive: true,
+    });
+    doc.addEventListener("touchmove", handlers.touchmove, {
+      capture: true,
+      passive: true,
+    });
+    doc.addEventListener("scroll", handlers.scroll, {
+      capture: true,
+      passive: true,
+    });
+    win.addEventListener("resize", handlers.resize);
+    state.documentHandlers = handlers;
+    state.listenersBound = true;
+  }
+
   function updateScrollDownButton() {
     const root = scrollRoot();
     const panel = chatPanel();
@@ -229,9 +337,12 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
       surfaceVisible &&
       root &&
       root.clientHeight > 8 &&
-      !isNearBottom(root)
+      distanceFromBottom(root) > SCROLL_CONTROL_THRESHOLD_PX
     );
     button.classList.toggle("cd-chat-scroll-down-visible", show);
+    button.dataset.cdChatScrollState = show ? "away" : "bottom";
+    button.setAttribute("aria-hidden", show ? "false" : "true");
+    button.tabIndex = show ? 0 : -1;
   }
 
   function syncFollowFromViewport() {
@@ -253,28 +364,36 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     event.preventDefault();
     event.stopPropagation();
     api().follow = true;
-    api().awaitingReplyReveal = true;
-    keepRevealingCoachReply(FOLLOW_SNAP_FRAMES);
+    api().awaitingReplyReveal = false;
+    keepSnappingToBottom(FOLLOW_SNAP_FRAMES);
   }
 
   function scrollDownButton() {
-    let button = doc.getElementById("cd-chat-scroll-down");
+    const buttons = Array.from(doc.querySelectorAll("#cd-chat-scroll-down"));
+    let button =
+      buttons.find((candidate) => candidate.parentElement === doc.body) ||
+      buttons[0] ||
+      null;
+    buttons.forEach((candidate) => {
+      if (candidate !== button) candidate.remove();
+    });
     // Host on document.body with position:fixed. Appending under
     // .st-key-chat_panel loses the node whenever Streamlit remounts that
     // block after Send or Journey/Sources tab switches.
-    if (!button || button.parentElement !== doc.body) {
-      if (button) button.remove();
+    if (!button) {
       button = doc.createElement("button");
       button.id = "cd-chat-scroll-down";
       button.type = "button";
       button.className = "cd-chat-scroll-down";
-      button.setAttribute("aria-label", "Scroll to bottom");
       button.innerHTML =
         '<svg class="cd-chat-scroll-down-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
         '<path d="M12 16.5 6 10.5l1.4-1.4 4.6 4.6 4.6-4.6L18 10.5z" fill="currentColor"/>' +
         "</svg>";
-      doc.body.appendChild(button);
     }
+    if (button.parentElement !== doc.body) doc.body.appendChild(button);
+    button.className = "cd-chat-scroll-down";
+    button.type = "button";
+    button.setAttribute("aria-label", "Scroll to bottom");
     placeScrollDownButton(button);
     return button;
   }
@@ -343,10 +462,58 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     finishSnapFrames(framesLeft, revealLatestCoachReply, true);
   }
 
-  // Keep handlers on the parent window and bind document listeners once.
-  // components.html iframes are torn down; iframe-local closures on the
-  // button then stop firing even though the node stays in the DOM.
+  function restorePrependedViewport(framesLeft) {
+    const state = api();
+    const root = scrollRoot();
+    const anchor = win.__cdChatScrollPrependAnchor;
+    if (!root || !anchor || root.clientHeight <= 0) return;
+    const oldTop = Number(anchor.top || 0);
+    const oldHeight = Number(anchor.height || 0);
+    const anchorId = String(anchor.messageId || "");
+    // Without a stable marker, retain the captured reading position and use
+    // the measured height delta. The marker branch below can additionally
+    // account for a remount that preserved or reset the live scrollTop.
+    let nextTop = oldTop + Math.max(0, root.scrollHeight - oldHeight);
+    if (anchorId) {
+      const marker = Array.from(
+        root.querySelectorAll("[data-cd-message-id]")
+      ).find(
+        (candidate) =>
+          String(candidate.getAttribute("data-cd-message-id") || "") === anchorId
+      );
+      if (marker) {
+        // Prefer the stable message marker over a raw height delta. Streamlit
+        // can change markdown/attachment height across several paints; using
+        // the marker's current offset keeps the same message at the same
+        // viewport position even when the inserted page reflows.
+        const rootRect = root.getBoundingClientRect();
+        const markerRect = marker.getBoundingClientRect();
+        const oldOffset = Number(anchor.offset || 0);
+        const currentOffset = markerRect.top - rootRect.top;
+        // Use the live scrollTop because Streamlit may preserve the current
+        // value or reset it while the feed remounts. In either case, applying
+        // the marker's offset delta keeps the same message at the same
+        // viewport position. Adding the captured top here would double-count
+        // it when the browser preserved a non-zero scrollTop.
+        nextTop = root.scrollTop + currentOffset - oldOffset;
+      }
+    }
+    const maxScroll = Math.max(0, root.scrollHeight - root.clientHeight);
+    root.scrollTop = Math.max(0, Math.min(nextTop, maxScroll));
+    if (framesLeft <= 1) {
+      delete win.__cdChatScrollPrependAnchor;
+      state.follow = isNearBottom(root);
+      updateScrollDownButton();
+      return;
+    }
+    schedule(() => restorePrependedViewport(framesLeft - 1));
+  }
+
+  // Keep handlers on the parent window and rehydrate parent listeners every
+  // time this helper runs. components.html iframes are torn down; iframe-local
+  // closures on the button then stop firing even though the node stays in DOM.
   const current = api();
+  current.lastSyncToken = SYNC_TOKEN;
   current.scrollRoot = scrollRoot;
   current.snapToBottom = snapToBottom;
   current.revealLatestCoachReply = revealLatestCoachReply;
@@ -357,60 +524,25 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
   current.onResize = onResize;
   current.keepSnappingToBottom = keepSnappingToBottom;
   current.keepRevealingCoachReply = keepRevealingCoachReply;
-  if (!current.listenersBound) {
-    doc.addEventListener(
-      "click",
-      (event) => {
-        const live = win.__cdChatScroll;
-        if (live && typeof live.onScrollDownClick === "function") {
-          live.onScrollDownClick(event);
-        }
-      },
-      true
-    );
-    doc.addEventListener(
-      "wheel",
-      (event) => {
-        const live = win.__cdChatScroll;
-        if (live && typeof live.markUserScroll === "function") {
-          live.markUserScroll(event);
-        }
-      },
-      { capture: true, passive: true }
-    );
-    doc.addEventListener(
-      "touchmove",
-      (event) => {
-        const live = win.__cdChatScroll;
-        if (live && typeof live.markUserScroll === "function") {
-          live.markUserScroll(event);
-        }
-      },
-      { capture: true, passive: true }
-    );
-    doc.addEventListener(
-      "scroll",
-      (event) => {
-        const live = win.__cdChatScroll;
-        if (live && typeof live.onFeedScroll === "function") {
-          live.onFeedScroll(event);
-        }
-      },
-      { capture: true, passive: true }
-    );
-    win.addEventListener("resize", () => {
-      const live = win.__cdChatScroll;
-      if (live && typeof live.onResize === "function") {
-        live.onResize();
-      }
-    });
-    current.listenersBound = true;
-  }
+  bindDocumentListeners();
+  // Force a detach/attach for the current feed on each helper run. The
+  // ensure loop also detects a replaced Streamlit feed between remounts.
+  bindScrollRoot(scrollRoot(), true);
 
   function feedGeometryReady(root) {
     if (!root || root.clientHeight <= 8) return false;
     const height = root.scrollHeight;
     const state = api();
+    // Streamlit can paint an empty feed first and append the persisted
+    // transcript after this helper has run. Keep the parent-owned ensure loop
+    // alive until there is either meaningful overflow or the bounded budget
+    // expires; otherwise a long notebook remount would leave the control in
+    // its stale hidden state.
+    if (height <= root.clientHeight + SCROLL_CONTROL_THRESHOLD_PX) {
+      state.ensureLastScrollHeight = height;
+      state.ensureStableFrames = 0;
+      return false;
+    }
     if (height === state.ensureLastScrollHeight) {
       state.ensureStableFrames += 1;
     } else {
@@ -460,6 +592,7 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     return;
   }
   if (MODE === "send") {
+    api().pagingLocked = true;
     api().follow = true;
     api().awaitingReplyReveal = true;
     // Pending user + thinking are not yet a coach bubble in chat_log.
@@ -467,12 +600,33 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
     startEnsureScrollDown();
     return;
   }
+  if (MODE === "open") {
+    api().pagingLocked = false;
+    api().follow = true;
+    api().awaitingReplyReveal = false;
+    keepSnappingToBottom(FOLLOW_SNAP_FRAMES);
+    startEnsureScrollDown();
+    return;
+  }
+  if (MODE === "prepend") {
+    api().pagingLocked = false;
+    // Older rows are inserted above the current viewport. Restore the old
+    // reading position using the captured stable height delta; repeated
+    // frames absorb Streamlit's late layout of markdown and attachments.
+    api().snapping = true;
+    restorePrependedViewport(FOLLOW_SNAP_FRAMES);
+    api().snapping = false;
+    startEnsureScrollDown();
+    return;
+  }
   if (MODE === "settle") {
+    api().pagingLocked = false;
     syncFollowFromViewport();
     startEnsureScrollDown();
     return;
   }
   if (MODE === "reply") {
+    api().pagingLocked = false;
     // Stage-move remounts never go through Send, so follow may already be
     // false from a scrollTop=0 reset. Arm reveal the same way Send does.
     api().follow = true;
@@ -483,6 +637,7 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
   }
   // reconcile: pin latest coach top only when follow / pending reveal is
   // still armed. Do not steal the viewport after the student scrolled away.
+  api().pagingLocked = false;
   if (shouldRevealReply()) {
     keepRevealingCoachReply(FOLLOW_SNAP_FRAMES);
   }
@@ -491,8 +646,13 @@ def sync_chat_scroll(*, mode: str = "reconcile") -> None:
 </script>
 """
     script = (
-        script.replace("__CD_MODE__", repr(cleaned))
+        script.replace("__CD_SYNC_TOKEN__", str(sync_token))
+        .replace("__CD_MODE__", repr(cleaned))
         .replace("__CD_NEAR_BOTTOM__", str(int(NEAR_BOTTOM_PX)))
+        .replace(
+            "__CD_SCROLL_CONTROL_THRESHOLD__",
+            str(int(SCROLL_CONTROL_THRESHOLD_PX)),
+        )
         .replace("__CD_FOLLOW_FRAMES__", str(int(FOLLOW_SNAP_FRAMES)))
         .replace("__CD_ENSURE_FRAMES__", str(int(SCROLL_DOWN_ENSURE_FRAMES)))
     )

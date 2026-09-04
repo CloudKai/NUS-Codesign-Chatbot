@@ -48,6 +48,7 @@ _SOURCE_IMPORT_PARTIAL_ERROR = (
 )
 _SOURCE_RENAME_ERROR = "The source could not be renamed. Try again."
 _SOURCE_DOWNLOAD_ERROR = "The file could not be downloaded. Try again."
+_SOURCE_LOCAL_ACTION_DEFER_KEY = "_sources_defer_local_action_for_thread"
 
 
 def format_size(size: int) -> str:
@@ -450,6 +451,59 @@ def _consume_sources_sync_rerun_suppress(thread_id: str) -> bool:
     return True
 
 
+def _defer_sources_local_action(thread_id: str) -> None:
+    """Defer one polling completion remount after a local Sources action.
+
+    Args:
+        thread_id: Notebook whose local Sources fragment just handled an
+            action such as deleting a source.
+
+    Side effects:
+        Stores a one-shot, thread-scoped marker. The polling fragment consumes
+        it before its course-sync completion remount; stable mode clears any
+        leftover marker.
+    """
+    current = str(thread_id or "").strip()
+    if current:
+        st.session_state[_SOURCE_LOCAL_ACTION_DEFER_KEY] = current
+
+
+def _consume_sources_local_action_defer(thread_id: str) -> bool:
+    """Consume a matching local-action defer marker exactly once.
+
+    Args:
+        thread_id: Notebook currently rendered by the Sources polling fragment.
+
+    Returns:
+        True when a matching marker was removed; otherwise False.
+    """
+    deferred = str(
+        st.session_state.get(_SOURCE_LOCAL_ACTION_DEFER_KEY) or ""
+    ).strip()
+    current = str(thread_id or "").strip()
+    if not deferred or not current or deferred != current:
+        return False
+    st.session_state.pop(_SOURCE_LOCAL_ACTION_DEFER_KEY, None)
+    return True
+
+
+def _clear_sources_local_action_defer(thread_id: str) -> None:
+    """Clear a matching local-action marker when stable Sources mode renders.
+
+    Args:
+        thread_id: Notebook currently rendered by the stable Sources fragment.
+
+    Side effects:
+        Removes only a marker belonging to ``thread_id`` so a stale marker from
+        another notebook cannot alter its polling handoff.
+    """
+    deferred = str(
+        st.session_state.get(_SOURCE_LOCAL_ACTION_DEFER_KEY) or ""
+    ).strip()
+    if deferred and deferred == str(thread_id or "").strip():
+        st.session_state.pop(_SOURCE_LOCAL_ACTION_DEFER_KEY, None)
+
+
 def _sources_defer_stable_remount(thread_id: str) -> bool:
     """True while a New-chat sync skip is waiting for the next full-script paint."""
     deferred = str(
@@ -473,7 +527,7 @@ def render_sources_panel() -> None:
     uploads_active = any(
         not job.future.done() for job in pending_source_uploads(thread_id)
     )
-    # Full-script paint after a suppressed sync-complete: drop the 1s timer.
+    # Full-script paint after a deferred sync-complete: drop the 1s timer.
     if (
         _sources_defer_stable_remount(thread_id)
         and sync_future.done()
@@ -491,6 +545,7 @@ def render_sources_panel() -> None:
 @st.fragment
 def _render_sources_panel_stable() -> None:
     """Sources UI without a client auto-refresh timer."""
+    _clear_sources_local_action_defer(str(st.session_state.thread_id))
     _render_sources_panel_body()
     if coach_turn_is_streaming():
         return
@@ -499,8 +554,8 @@ def _render_sources_panel_stable() -> None:
     if uploads_active or not store.request_course_material_sync(thread_id).done():
         # The enqueue callback used a fragment rerun to show its pending card.
         # One guarded app rerun remounts the timed polling fragment without
-        # disrupting a simultaneous Coach stream. Skip once after New chat —
-        # that click already remounted; polling starts on the next natural paint.
+        # disrupting a simultaneous Coach stream. Skip after a local action or
+        # New chat — the current fragment already painted the latest state.
         if uploads_active:
             rerun_app()
             return
@@ -519,7 +574,11 @@ def _render_sources_panel_polling() -> None:
     uploads_active = any(not job.future.done() for job in pending_source_uploads(thread_id))
     if store.request_course_material_sync(thread_id).done() and not uploads_active:
         # Remount the stable fragment so the browser drops the 1s timer.
-        # After New chat, skip remounts until the next full-script paint.
+        # After a local action or New chat, skip remounts until the next
+        # full-script paint. This prevents a delete-triggered fragment rerun
+        # from handing the browser directly to a second workspace shell.
+        if _consume_sources_local_action_defer(thread_id):
+            return
         if _consume_sources_sync_rerun_suppress(thread_id):
             return
         if _sources_defer_stable_remount(thread_id):
@@ -830,6 +889,9 @@ def _render_sources_panel_body() -> None:
                             store.delete_source(
                                 st.session_state.thread_id,
                                 source["id"],
+                            )
+                            _defer_sources_local_action(
+                                str(st.session_state.thread_id)
                             )
                             rerun_fragment()
 

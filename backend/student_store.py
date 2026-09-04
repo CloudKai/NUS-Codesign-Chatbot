@@ -20,6 +20,9 @@ compatibility wrappers over ``notebooks`` so API and UI churn stays limited.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import shutil
 import sqlite3
 import threading
@@ -58,7 +61,7 @@ from .persistence.store.migrations import (
     repair_misbound_notebook_foreign_key,
 )
 from .settings import settings
-from .student_journey import DEFAULT_RESPONSE_DETAIL, DEFAULT_STAGE
+from .student_journey import DEFAULT_RESPONSE_DETAIL, DEFAULT_STAGE, normalize_journey
 from . import workflow_contract as _workflow_contract
 from .workflow_contract import workflow_contract_is_ready, workflow_contract_payload
 
@@ -68,6 +71,70 @@ if TYPE_CHECKING:
 
 RESEARCH_WORKFLOW_CONTRACT_KEY = _workflow_contract.WORKFLOW_CONTRACT_KEY
 RESEARCH_WORKFLOW_CONTRACT_VERSION = _workflow_contract.WORKFLOW_CONTRACT_VERSION
+
+_MESSAGE_PAGE_DEFAULT_LIMIT = 6
+_MESSAGE_PAGE_MAX_LIMIT = 100
+_MESSAGE_PAGE_CURSOR_VERSION = 1
+
+
+class MessagePageCursorError(ValueError):
+    """Raised when a history-page cursor is malformed or not notebook-bound."""
+
+    status_code = 400
+
+
+class MessagePageRevisionConflictError(MessagePageCursorError):
+    """Raised when a history-page cursor belongs to an older revision."""
+
+    status_code = 409
+
+
+def _encode_message_page_cursor(
+    *,
+    thread_id: str,
+    revision: int,
+    created_at: str,
+    message_id: str,
+) -> str:
+    """Encode a private keyset position bound to one notebook revision."""
+    payload = {
+        "v": _MESSAGE_PAGE_CURSOR_VERSION,
+        "thread_id": str(thread_id),
+        "revision": int(revision),
+        "created_at": str(created_at),
+        "message_id": str(message_id),
+    }
+    raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _decode_message_page_cursor(value: str) -> dict[str, Any]:
+    """Decode and minimally validate an opaque message-page cursor."""
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("Invalid message cursor")
+    try:
+        padded = text + "=" * (-len(text) % 4)
+        decoded = json.loads(base64.urlsafe_b64decode(padded.encode()).decode())
+    except (ValueError, TypeError, UnicodeDecodeError, binascii.Error) as error:
+        raise ValueError("Invalid message cursor") from error
+    if not isinstance(decoded, dict) or decoded.get("v") != _MESSAGE_PAGE_CURSOR_VERSION:
+        raise ValueError("Invalid message cursor")
+    thread_id = str(decoded.get("thread_id") or "").strip()
+    created_at = str(decoded.get("created_at") or "")
+    message_id = str(decoded.get("message_id") or "").strip()
+    try:
+        revision = int(decoded.get("revision"))
+    except (TypeError, ValueError) as error:
+        raise ValueError("Invalid message cursor") from error
+    if not thread_id or revision < 0 or not created_at or not message_id:
+        raise ValueError("Invalid message cursor")
+    return {
+        "thread_id": thread_id,
+        "revision": revision,
+        "created_at": created_at,
+        "message_id": message_id,
+    }
 
 
 def _utc_now_datetime() -> datetime:
@@ -280,6 +347,86 @@ class StudentStore:
             isinstance(meta, dict)
             and meta.get("_internal_type") == _COACH_IDEMPOTENCY_MARKER
         )
+
+    @classmethod
+    def _message_is_visible(cls, row: Any) -> bool:
+        """Return whether a persisted row belongs in the student transcript.
+
+        Coach idempotency reservations and empty assistant transition
+        skeletons are implementation details.  Keeping this predicate in the
+        store makes full and paginated history projections agree.
+        """
+        meta = _load(row["metadata_text"], {})
+        if cls._is_coach_idempotency_marker_meta(meta):
+            return False
+        role = str(row["role"] or "").strip().lower()
+        if role == "assistant":
+            try:
+                has_content = bool(str(row["content"] or "").strip())
+            except (KeyError, IndexError, TypeError):
+                has_content = bool(row["has_content"])
+            if not has_content:
+                return False
+        return True
+
+    @staticmethod
+    def _message_source_ids(row: Any, meta: dict[str, Any]) -> list[str]:
+        """Extract stable source/attachment ids from one message row."""
+        values: list[Any] = []
+        cited = _load(row["cited_source_ids_text"], None)
+        if cited is not None:
+            values.append(cited)
+        for key in ("source_ids", "attachment_source_ids", "source_refs", "attachments"):
+            if key in meta:
+                values.append(meta.get(key))
+
+        source_ids: list[str] = []
+        seen: set[str] = set()
+
+        def add(value: Any) -> None:
+            if isinstance(value, str):
+                candidate = value.strip()
+                if candidate and candidate not in seen:
+                    seen.add(candidate)
+                    source_ids.append(candidate)
+                return
+            if isinstance(value, dict):
+                for key in ("id", "source_id", "sourceId"):
+                    if value.get(key):
+                        add(value[key])
+                        break
+                return
+            if isinstance(value, (list, tuple, set)):
+                for item in value:
+                    add(item)
+
+        for value in values:
+            add(value)
+        return source_ids
+
+    @staticmethod
+    def _message_slim_projection(row: Any) -> dict[str, Any]:
+        """Build the metadata-only shape consumed by the HMW projection."""
+        meta = _load(row["metadata_text"], {})
+        if not isinstance(meta, dict):
+            meta = {}
+        assessment = _load(row["assessment_text"], None)
+        if isinstance(assessment, dict):
+            meta = dict(meta)
+            meta["assessment"] = assessment
+        cited = _load(row["cited_source_ids_text"], None)
+        if cited is not None:
+            meta = dict(meta)
+            meta["source_refs"] = cited
+        has_content = row["has_content"] if "has_content" in row.keys() else bool(
+            str(row["content"] or "").strip()
+        )
+        return {
+            "id": str(row["id"]),
+            "role": str(row["role"]),
+            "content": "visible" if bool(has_content) else "",
+            "metadata": meta,
+        }
 
     @staticmethod
     def _collect_idempotency_keys_from_meta(meta: Any) -> list[str]:
@@ -3607,7 +3754,7 @@ class StudentStore:
             )
         with self._connect() as connection:
             row = connection.execute(
-                f"""
+                """
                 SELECT o.*, n.user_id AS student_user_id,
                        u.display_name AS student_display_name,
                        u.email AS student_email
@@ -4450,6 +4597,327 @@ class StudentStore:
             )
         return prior
 
+    def get_message_metadata(self, thread_id: str) -> list[dict[str, Any]]:
+        """Return active message metadata without loading transcript bodies.
+
+        This narrow projection exists for compatibility maintenance such as
+        importing legacy upload descriptors.  It is owner- and current
+        revision-bound and deliberately omits ``content`` so large histories
+        are not rehydrated merely to inspect attachments.
+        """
+        with self._lock, self._connect() as connection:
+            # Keep ownership, revision, and the metadata projection in one
+            # read transaction.  This prevents a concurrent revision from
+            # changing the active branch between the two reads.
+            connection.execute("BEGIN")
+            thread_row = connection.execute(
+                "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not thread_row:
+                raise ValueError("Notebook not found")
+            rows = connection.execute(
+                """
+                SELECT m.id, m.role, m.metadata_text
+                FROM messages AS m
+                JOIN notebooks AS n ON n.id = m.notebook_id
+                WHERE n.id=? AND n.user_id=?
+                  AND COALESCE(m.conversation_revision, 0) <=
+                      COALESCE(n.conversation_revision, 0)
+                  AND (m.superseded_at_revision IS NULL OR
+                       m.superseded_at_revision >
+                       COALESCE(n.conversation_revision, 0))
+                  AND LOWER(COALESCE(m.metadata_text, '')) LIKE '%"uploads"%'
+                ORDER BY m.created_at ASC, m.id ASC
+                """,
+                (thread_id, self.owner_id),
+            ).fetchall()
+        metadata_rows: list[dict[str, Any]] = []
+        for row in rows:
+            metadata = _load(row["metadata_text"], {})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            if self._is_coach_idempotency_marker_meta(metadata):
+                continue
+            # The SQL filter is a cheap candidate reduction; the JSON check
+            # keeps malformed or unrelated metadata from reaching backfill.
+            if not isinstance(metadata.get("uploads"), list):
+                continue
+            metadata_rows.append(
+                {
+                    "id": str(row["id"]),
+                    "role": str(row["role"]),
+                    "metadata": metadata,
+                }
+            )
+        return metadata_rows
+
+    def has_messages(self, thread_id: str) -> bool:
+        """Return whether an owned notebook has a visible active message.
+
+        This is an existence-only projection for notebook-open welcome seeding.
+        It does not select message bodies or metadata rows, and it treats the
+        internal idempotency marker plus empty assistant skeletons as absent.
+
+        Raises:
+            ValueError: When the notebook is missing or not owned.
+        """
+        with self._lock, self._connect() as connection:
+            connection.execute("BEGIN")
+            row = connection.execute(
+                """
+                SELECT CASE WHEN EXISTS (
+                    SELECT 1
+                    FROM messages AS m
+                    WHERE m.notebook_id=n.id
+                      AND COALESCE(m.conversation_revision, 0) <=
+                          COALESCE(n.conversation_revision, 0)
+                      AND (m.superseded_at_revision IS NULL OR
+                           m.superseded_at_revision >
+                           COALESCE(n.conversation_revision, 0))
+                      AND NOT (
+                          LOWER(COALESCE(m.role, ''))='assistant'
+                          AND TRIM(COALESCE(m.content, ''))=''
+                      )
+                      AND LOWER(COALESCE(m.metadata_text, '')) NOT LIKE
+                          '%"_internal_type": "coach_idempotency"%'
+                      AND LOWER(COALESCE(m.metadata_text, '')) NOT LIKE
+                          '%"_internal_type":"coach_idempotency"%'
+                ) THEN 1 ELSE 0 END AS has_messages
+                FROM notebooks AS n
+                WHERE n.id=? AND n.user_id=?
+                """,
+                (thread_id, self.owner_id),
+            ).fetchone()
+        if not row:
+            raise ValueError("Notebook not found")
+        return bool(row["has_messages"])
+
+    def get_oldest_user_messages(
+        self, thread_id: str, *, limit: int = 2
+    ) -> list[str]:
+        """Return a bounded oldest-user prompt projection for title migration.
+
+        This intentionally selects at most two user bodies and never hydrates
+        assistant replies or the remainder of a long notebook transcript.
+        """
+        thread = self.get_thread(thread_id)
+        if not thread:
+            raise ValueError("Notebook not found")
+        bounded_limit = max(1, min(2, int(limit)))
+        revision = int(thread.get("conversation_revision") or 0)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT content
+                FROM messages
+                WHERE notebook_id=? AND role='user'
+                  AND {self._active_at_revision_sql()}
+                ORDER BY created_at ASC, id ASC
+                LIMIT ?
+                """,
+                (thread_id, revision, revision, bounded_limit),
+            ).fetchall()
+        return [str(row["content"] or "") for row in rows]
+
+    def get_message_page(
+        self,
+        thread_id: str,
+        *,
+        limit: int = _MESSAGE_PAGE_DEFAULT_LIMIT,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a newest-first keyset page projected chronologically.
+
+        The cursor carries the notebook id and current conversation revision;
+        stale, foreign, malformed, or tampered cursors fail closed.  Rows are
+        filtered before becoming public messages, while aggregate source and
+        HMW state are computed from metadata-only active rows.
+        """
+        try:
+            page_limit = int(limit)
+        except (TypeError, ValueError) as error:
+            raise ValueError("Invalid message page limit") from error
+        if page_limit < 1 or page_limit > _MESSAGE_PAGE_MAX_LIMIT:
+            raise ValueError("Invalid message page limit")
+
+        position: dict[str, Any] | None = None
+        if cursor is not None:
+            try:
+                position = _decode_message_page_cursor(cursor)
+            except ValueError as error:
+                raise MessagePageCursorError(str(error)) from error
+            # Validation and all projections below intentionally share one
+            # connection/read transaction with the notebook revision lookup.
+
+        with self._lock, self._connect() as connection:
+            connection.execute("BEGIN")
+            notebook_row = connection.execute(
+                "SELECT * FROM notebooks WHERE id=? AND user_id=?",
+                (thread_id, self.owner_id),
+            ).fetchone()
+            if not notebook_row:
+                raise ValueError("Notebook not found")
+            thread = self._thread_dict(notebook_row)
+            revision = int(notebook_row["conversation_revision"] or 0)
+            if position is not None:
+                if position["thread_id"] != str(thread_id):
+                    raise MessagePageCursorError("Invalid message cursor")
+                if position["revision"] != revision:
+                    raise MessagePageRevisionConflictError(
+                        "The notebook changed; reload the latest messages"
+                    )
+                anchor = connection.execute(
+                    f"""
+                    SELECT * FROM messages
+                    WHERE notebook_id=? AND id=? AND created_at=?
+                      AND {self._active_at_revision_sql()}
+                    """,
+                    (
+                        thread_id,
+                        position["message_id"],
+                        position["created_at"],
+                        revision,
+                        revision,
+                    ),
+                ).fetchone()
+                if anchor is None or not self._message_is_visible(anchor):
+                    raise MessagePageCursorError("Invalid message cursor")
+
+            # The SQL page is intentionally a little wider than the public
+            # page: internal rows and empty assistant skeletons must not consume
+            # slots.
+            fetch_limit = max(page_limit + 16, 32)
+            visible_rows: list[Any] = []
+            created_before = position["created_at"] if position else None
+            id_before = position["message_id"] if position else None
+            while True:
+                clauses = [
+                    "notebook_id=?",
+                    self._active_at_revision_sql(),
+                ]
+                parameters: list[Any] = [thread_id, revision, revision]
+                if created_before is not None and id_before is not None:
+                    clauses.append("(created_at < ? OR (created_at = ? AND id < ?))")
+                    parameters.extend([created_before, created_before, id_before])
+                batch = connection.execute(
+                    f"""
+                    SELECT * FROM messages
+                    WHERE {' AND '.join(clauses)}
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (*parameters, fetch_limit),
+                ).fetchall()
+                if not batch:
+                    break
+                visible_rows.extend(row for row in batch if self._message_is_visible(row))
+                last = batch[-1]
+                created_before = str(last["created_at"] or "")
+                id_before = str(last["id"])
+                if len(visible_rows) >= page_limit + 1 or len(batch) < fetch_limit:
+                    break
+
+            page_desc = visible_rows[: page_limit + 1]
+            has_more = len(page_desc) > page_limit
+            page_rows_desc = page_desc[:page_limit]
+            messages = [
+                self._public_message_dict(row)
+                for row in reversed(page_rows_desc)
+            ]
+
+            # Compute exact visible count, source ids, and HMW state from the
+            # same revision snapshot without selecting aggregate message bodies.
+            aggregate_rows = connection.execute(
+                f"""
+                SELECT id, role, metadata_text, assessment_text,
+                       cited_source_ids_text,
+                       CASE WHEN TRIM(COALESCE(content, '')) <> ''
+                            THEN 1 ELSE 0 END AS has_content
+                FROM messages
+                WHERE notebook_id=?
+                  AND {self._active_at_revision_sql()}
+                ORDER BY created_at ASC, id ASC
+                """,
+                (thread_id, revision, revision),
+            ).fetchall()
+            owned_source_rows = connection.execute(
+                "SELECT id FROM sources WHERE notebook_id=?",
+                (thread_id,),
+            ).fetchall()
+            owned_source_ids = {str(row["id"]) for row in owned_source_rows}
+            total_count = 0
+            source_ids: list[str] = []
+            seen_source_ids: set[str] = set()
+            slim_messages: list[dict[str, Any]] = []
+            for row in aggregate_rows:
+                if not self._message_is_visible(row):
+                    continue
+                total_count += 1
+                slim_messages.append(self._message_slim_projection(row))
+
+            # Only return source identifiers referenced by this page. They are
+            # validated against this owner's notebook before crossing the API
+            # boundary; older-page identifiers arrive when that page is loaded.
+            for row in page_rows_desc:
+                metadata = _load(row["metadata_text"], {})
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                for source_id in self._message_source_ids(row, metadata):
+                    if source_id in owned_source_ids and source_id not in seen_source_ids:
+                        seen_source_ids.add(source_id)
+                        source_ids.append(source_id)
+
+            from .learning.hmw import hmw_scaffold_anchor_message, hmw_scaffold_projection
+
+            journey = normalize_journey(
+                (thread.get("metadata") or {}).get("learning_journey")
+            )
+            hmw_scaffold = hmw_scaffold_projection(
+                journey.get("current_stage"),
+                slim_messages,
+                enabled=settings.hmw_scaffold_enabled,
+                response_detail=journey.get("response_detail"),
+            )
+            anchor = (
+                hmw_scaffold_anchor_message(slim_messages)
+                if hmw_scaffold.get("available")
+                else None
+            )
+            hmw_scaffold = {
+                **hmw_scaffold,
+                "anchor_message_id": (
+                    str(anchor.get("id") or "") if isinstance(anchor, dict) else ""
+                ),
+            }
+            next_cursor = None
+            if has_more and page_rows_desc:
+                oldest = page_rows_desc[-1]
+                next_cursor = _encode_message_page_cursor(
+                    thread_id=thread_id,
+                    revision=revision,
+                    created_at=str(oldest["created_at"] or ""),
+                    message_id=str(oldest["id"]),
+                )
+            return {
+                "messages": messages,
+                "next_cursor": next_cursor,
+                "total_count": total_count,
+                "conversation_revision": revision,
+                "source_ids": source_ids,
+                "hmw_scaffold": hmw_scaffold,
+            }
+
+    def get_messages_page(
+        self,
+        thread_id: str,
+        *,
+        limit: int = _MESSAGE_PAGE_DEFAULT_LIMIT,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Compatibility alias for :meth:`get_message_page`."""
+        return self.get_message_page(thread_id, limit=limit, cursor=cursor)
+
     def get_messages(self, thread_id: str) -> list[dict[str, Any]]:
         """Return messages active at the notebook's current conversation revision."""
         thread = self.get_thread(thread_id)
@@ -4495,6 +4963,9 @@ class StudentStore:
             ).fetchall()
         messages: list[dict[str, Any]] = []
         for row in rows:
+            # Preserve the legacy full-history contract: only internal
+            # idempotency reservations are hidden here. Empty assistant
+            # skeletons are filtered only by the bounded page projection.
             meta = _load(row["metadata_text"], {})
             if self._is_coach_idempotency_marker_meta(meta):
                 continue

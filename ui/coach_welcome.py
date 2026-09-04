@@ -101,18 +101,23 @@ def transcript_hmw_render_plan(
     messages: Sequence[Mapping[str, Any]] | None,
     *,
     hmw_available: bool,
+    anchor_message_id: str | None = None,
 ) -> list[tuple[Literal["message", "hmw"], Mapping[str, Any] | None]]:
     """Return chat-log steps with the HMW card after the unlocking Coach turn.
 
-    Eligibility is supplied by the caller from ``hmw_scaffold_available``.
-    This helper only decides placement and guarantees at most one ``hmw``
-    step. When eligible, the card follows the first Coaching response at
-    which the scaffold became useful. Welcome, Q&A, and Deep Review rows
-    are never anchors. The card is omitted when ``hmw_available`` is false.
+    Eligibility and (when available) the anchor id are supplied by the caller
+    from the server-owned message-page projection. This helper only decides
+    placement and guarantees at most one ``hmw`` step. When eligible, the
+    card follows the first Coaching response at which the scaffold became
+    useful. Welcome, Q&A, and Deep Review rows are never anchors. The card is
+    omitted when ``hmw_available`` is false.
 
     Args:
         messages: Active-branch messages already loaded for the panel.
         hmw_available: Server-owned visibility flag.
+        anchor_message_id: Optional server-projected anchor. Supplying this
+            keeps placement stable when the anchor is outside the six-message
+            window; the card is withheld until the anchor's page is loaded.
 
     Returns:
         Ordered ``("message", row)`` and optional ``("hmw", None)`` steps.
@@ -123,7 +128,26 @@ def transcript_hmw_render_plan(
         for item in (messages or ())
         if isinstance(item, Mapping) and not _is_skipped_transcript_message(item)
     ]
-    anchor = hmw_scaffold_anchor_message(messages) if hmw_available else None
+    projected_anchor_id = str(anchor_message_id or "").strip()
+    anchor = None
+    if hmw_available and anchor_message_id is not None:
+        # An API page projection is authoritative even when its anchor is not
+        # present yet (or is empty due to malformed legacy assessment data).
+        # Do not guess a location from the newest six rows: wait for the page
+        # containing the exact projected anchor.
+        if projected_anchor_id:
+            anchor = next(
+                (
+                    item
+                    for item in visible
+                    if str(item.get("id") or "").strip() == projected_anchor_id
+                ),
+                None,
+            )
+    elif hmw_available:
+        # Direct callers without a server projection retain the historical
+        # deterministic placement helper for compatibility.
+        anchor = hmw_scaffold_anchor_message(messages)
     steps: list[tuple[Literal["message", "hmw"], Mapping[str, Any] | None]] = []
     hmw_inserted = False
     for item in visible:
@@ -166,8 +190,8 @@ def render_hmw_scaffold_if_needed(*, available: bool) -> None:
 class _MessageStore(Protocol):
     """Minimal store surface used to seed the coach welcome message."""
 
-    def get_messages(self, thread_id: str) -> list[dict[str, Any]]:
-        """Return persisted messages for ``thread_id``."""
+    def has_messages(self, thread_id: str) -> bool:
+        """Return whether the owned notebook already has visible messages."""
 
     def add_message(
         self,
@@ -186,8 +210,8 @@ def seed_coach_welcome(store: _MessageStore, thread_id: str) -> bool:
         True when a welcome message was added; False when history already exists
         or a welcome was already present.
     """
-    messages = store.get_messages(thread_id)
-    if messages:
+    checker = getattr(store, "has_messages", None)
+    if not callable(checker) or checker(thread_id):
         return False
     store.add_message(
         thread_id,

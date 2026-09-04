@@ -583,6 +583,9 @@ class WorkspaceFacade:
         _forget_reads(
             ("get_thread", thread_id),
             ("get_messages", thread_id),
+            ("has_messages", thread_id),
+            ("get_message_page", thread_id),
+            ("get_oldest_user_messages", thread_id),
             ("list_sources", thread_id),
             ("pending_transition", thread_id),
             ("backfill_legacy_sources", thread_id),
@@ -610,6 +613,8 @@ class WorkspaceFacade:
         _forget_reads(
             ("get_thread", thread_id),
             ("get_messages", thread_id),
+            ("has_messages", thread_id),
+            ("get_message_page", thread_id),
             ("pending_transition", thread_id),
         )
 
@@ -717,6 +722,60 @@ class WorkspaceFacade:
 
         return _memo_read(("get_messages", thread_id), load)
 
+    def has_messages(self, thread_id: str) -> bool:
+        """Return the bounded owner-scoped visible-message existence flag."""
+
+        def load() -> bool:
+            if local_api_enabled():
+                return local_api_client().has_messages(thread_id)
+            return self._service().has_messages(thread_id)
+
+        return bool(_memo_read(("has_messages", thread_id), load))
+
+    def get_message_page(
+        self,
+        thread_id: str,
+        *,
+        limit: int = 6,
+        cursor: str | None = None,
+    ) -> Any:
+        """Return one bounded transcript page through the active backend."""
+
+        def load() -> Any:
+            if local_api_enabled():
+                return local_api_client().get_message_page(
+                    thread_id, limit=limit, cursor=cursor
+                )
+            return self._service().get_message_page(
+                thread_id, limit=limit, cursor=cursor
+            )
+
+        return _memo_read(("get_message_page", thread_id, limit, cursor), load)
+
+    def get_messages_page(
+        self,
+        thread_id: str,
+        *,
+        limit: int = 6,
+        cursor: str | None = None,
+    ) -> Any:
+        """Compatibility alias for :meth:`get_message_page`."""
+        return self.get_message_page(thread_id, limit=limit, cursor=cursor)
+
+    def get_oldest_user_messages(
+        self, thread_id: str, *, limit: int = 2
+    ) -> list[str]:
+        """Return a bounded oldest-user projection for title compatibility."""
+
+        def load() -> list[str]:
+            if local_api_enabled():
+                return local_api_client().get_oldest_user_messages(
+                    thread_id, limit=limit
+                )
+            return self._service().get_oldest_user_messages(thread_id, limit=limit)
+
+        return _memo_read(("get_oldest_user_messages", thread_id, limit), load)
+
     def download_transcript(self, thread_id: str) -> TranscriptExport:
         """Return a ``.txt`` transcript projected from persisted messages."""
         if local_api_enabled():
@@ -753,7 +812,12 @@ class WorkspaceFacade:
             added = self._service().add_message(
                 thread_id, role, content, metadata=metadata
             )
-        _forget_reads(("get_messages", thread_id), ("get_thread", thread_id))
+        _forget_reads(
+            ("get_messages", thread_id),
+            ("has_messages", thread_id),
+            ("get_message_page", thread_id),
+            ("get_thread", thread_id),
+        )
         return added
 
     def list_sources(

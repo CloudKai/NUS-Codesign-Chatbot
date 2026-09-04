@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import ui.runtime as runtime_module
+import ui.notebooks as notebooks_module
 import ui.sources as sources_module
 import ui.studio as studio_module
 from ui.panels.chat import _edit_render_plan
@@ -389,6 +390,83 @@ def test_awaiting_coach_turn_survives_panel_remount_and_locks_notebooks() -> Non
     assert "st.radio(" not in workspace.split("def _render_mobile_header", 1)[1].split(
         "def _render_collapsed_rail", 1
     )[0]
+
+
+def test_legacy_notebook_actions_and_back_stay_dialog_local() -> None:
+    """Actions and Back must not rebuild the full workspace shell."""
+    source = Path(inspect.getfile(notebooks_module)).read_text(encoding="utf-8")
+    list_block = source.split("def _render_notebook_library_list", 1)[1].split(
+        "def _render_notebook_actions_panel", 1
+    )[0]
+    assert "on_click=_on_notebook_actions" in list_block
+    action_button = list_block.split("menu_column.button(", 1)[1].split(
+        "_sync_notebook_library_scroll", 1
+    )[0]
+    assert "on_click=_on_notebook_actions" in action_button
+    assert "rerun_app()" not in action_button
+
+    actions_block = source.split("def _render_notebook_actions_panel", 1)[1]
+    back_button = actions_block.split("st.button(", 1)[1].split(
+        "current_title", 1
+    )[0]
+    assert "on_click=_on_notebook_actions_back" in back_button
+    assert "rerun_app()" not in back_button
+
+    action_callback = source.split("def _on_notebook_actions(", 1)[1].split(
+        "def _on_notebook_actions_back", 1
+    )[0]
+    assert "request_notebook_actions(thread_id)" in action_callback
+    assert "rerun_app()" not in action_callback
+
+    back_callback = source.split("def _on_notebook_actions_back", 1)[1].split(
+        "def _on_dialog_new_notebook", 1
+    )[0]
+    assert "rerun_fragment()" in source.split("def _return_to_notebook_list", 1)[1].split(
+        "def _on_notebook_actions", 1
+    )[0]
+    assert "rerun_app()" not in back_callback
+
+    # Deleting the active notebook still requires an app remount to reconcile
+    # the active thread; that application-wide path remains explicit.
+    assert "delete_notebook(thread_id)" in actions_block
+    assert "rerun_app()" in actions_block
+
+
+def test_notebook_dialog_action_flags_do_not_stick(monkeypatch) -> None:
+    """Fragment-local Actions/Back cannot leave legacy dismiss state armed."""
+    import ui.session as session_module
+
+    class _SessionState(dict[str, object]):
+        """Small attribute-compatible stand-in for Streamlit session state."""
+
+        def __getattr__(self, key: str) -> object:
+            return self[key]
+
+        def __setattr__(self, key: str, value: object) -> None:
+            self[key] = value
+
+    state = _SessionState(
+        {
+            "pending_notebook_actions": "old-thread",
+            "reopen_notebooks_dialog": True,
+            "_notebooks_suppress_dismiss": True,
+        }
+    )
+    monkeypatch.setattr(
+        session_module,
+        "st",
+        SimpleNamespace(session_state=state),
+    )
+
+    session_module.request_notebook_actions("new-thread")
+    assert state["pending_notebook_actions"] == "new-thread"
+    assert state["reopen_notebooks_dialog"] is False
+    assert "_notebooks_suppress_dismiss" not in state
+
+    session_module.dismiss_notebooks_dialog()
+    assert state["pending_notebook_actions"] is None
+    assert state["reopen_notebooks_dialog"] is False
+    assert "_notebooks_suppress_dismiss" not in state
 
 
 def test_chat_composer_fragment_keeps_inflight_sibling() -> None:

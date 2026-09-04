@@ -1172,6 +1172,48 @@ def test_notebook_history_card_highlights_active_notebook_without_folders():
     assert not app.exception
 
 
+def test_legacy_notebook_actions_and_back_do_not_remount_workspace(monkeypatch):
+    """Dialog callbacks switch views without incrementing the app-run count."""
+    from types import SimpleNamespace
+
+    import ui.notebooks as notebooks_module
+    import ui.session as session_module
+
+    class _SessionState(dict):
+        """Small attribute-compatible stand-in for Streamlit session state."""
+
+        def __getattr__(self, key):
+            return self[key]
+
+        def __setattr__(self, key, value):
+            self[key] = value
+
+    state = _SessionState(
+        {
+            "_app_runs": 11,
+            "pending_notebook_actions": None,
+            "reopen_notebooks_dialog": False,
+        }
+    )
+    fake_streamlit = SimpleNamespace(session_state=state)
+    monkeypatch.setattr(session_module, "st", fake_streamlit)
+    monkeypatch.setattr(notebooks_module, "st", fake_streamlit)
+    monkeypatch.setattr(
+        notebooks_module,
+        "request_notebook_actions",
+        session_module.request_notebook_actions,
+    )
+
+    notebooks_module._on_notebook_actions("thread-a")
+    assert state["_app_runs"] == 11
+    assert state["pending_notebook_actions"] == "thread-a"
+
+    notebooks_module._on_notebook_actions_back()
+    assert state["_app_runs"] == 11
+    assert state["pending_notebook_actions"] is None
+    assert state["reopen_notebooks_dialog"] is False
+
+
 def test_notebook_history_confirmed_delete_removes_the_selected_notebook():
     from backend.student_store import StudentStore
 

@@ -92,6 +92,7 @@ def initialize_session() -> None:
         "review_fingerprint": "",
         "review_seen_fingerprint": "",
         "stage_move_notice": None,
+        "_chat_history_window": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -168,6 +169,7 @@ def new_notebook(should_rerun: bool = True) -> None:
     )
     seed_coach_welcome(store, thread_id)
     st.session_state.thread_id = thread_id
+    reset_chat_history_window(thread_id)
     st.session_state.support_mode = DEFAULT_SUPPORT_MODE
     st.session_state.learning_journey = journey
     st.session_state.response_detail = journey["response_detail"]
@@ -209,6 +211,32 @@ def set_stage_move_notice(message: str) -> None:
 def clear_stage_move_notice() -> None:
     """Drop the ephemeral stage-move composer notice."""
     st.session_state.stage_move_notice = None
+
+
+def reset_chat_history_window(thread_id: str | None = None) -> None:
+    """Reset the bounded transcript window for an explicit notebook mutation.
+
+    The next Chat paint fetches the newest six visible messages. Search,
+    Library, Review, and panel-resize remounts deliberately leave this state
+    untouched so pages loaded during the current notebook visit accumulate.
+    """
+    target = str(thread_id or st.session_state.get("thread_id") or "").strip()
+    st.session_state._chat_history_window = {
+        "thread_id": target,
+        "messages": [],
+        "next_cursor": None,
+        "total_count": 0,
+        "conversation_revision": 0,
+        "source_ids": [],
+        "hmw_scaffold": {},
+        "loaded": False,
+        "prepend_pending": False,
+        "_history_stale_open_pending": False,
+        "open_pending": True,
+        "loading": False,
+        "error": None,
+        "error_at": 0.0,
+    }
 
 
 def locked_stage_move_notice(stage_id: str, journey: Any | None = None) -> str:
@@ -350,6 +378,7 @@ def apply_manual_stage_move(thread_id: str, stage_id: str) -> bool:
         or ""
     ).strip()
     metadata = store.select_stage(thread_id, cleaned)
+    reset_chat_history_window(thread_id)
     journey = normalize_journey(metadata.get("learning_journey"))
     st.session_state.learning_journey = journey
     st.session_state.response_detail = journey["response_detail"]
@@ -368,10 +397,14 @@ def delete_notebook(thread_id: str) -> None:
         return
     st.session_state.pending_notebook_actions = None
     st.session_state.reopen_notebooks_dialog = False
+    # Clear compatibility state left by pre-fragment dialog remounts.  The
+    # current Actions/Back path never arms this flag, but stale sessions must
+    # not keep the dismiss callback from cleaning up.
     st.session_state.pop("_notebooks_suppress_dismiss", None)
     store.delete_thread(thread_id)
     purge_notebook_retry_keys(st.session_state, thread_id)
     if thread_id == st.session_state.thread_id:
+        reset_chat_history_window(None)
         st.session_state.thread_id = None
         _persist_active_thread(None)
 
@@ -379,25 +412,32 @@ def delete_notebook(thread_id: str) -> None:
 def dismiss_notebooks_dialog() -> None:
     """Clear library dialog state when Your Notebooks is closed (X / outside).
 
-    Remounts for the inline actions panel set ``_notebooks_suppress_dismiss``
-    so closing-and-reopening the same dialog does not wipe pending.
+    Actions and Back are fragment-local, so dismissal is the only path that
+    should clear the dialog's pending item.  Pop the legacy suppress marker as
+    well so a session upgraded from the old full-app remount path cannot leave
+    the dialog state sticky.
     """
-    if st.session_state.pop("_notebooks_suppress_dismiss", False):
-        return
     thread_id = st.session_state.get("pending_notebook_actions")
     if thread_id:
         discard_rename_draft("notebook", str(thread_id))
         bump_rename_epoch("notebook", str(thread_id))
+    st.session_state.pop("_notebooks_suppress_dismiss", None)
     st.session_state.pending_notebook_actions = None
     st.session_state.reopen_notebooks_dialog = False
 
 
 def request_notebook_actions(thread_id: str) -> None:
     """Show rename / download / delete for ``thread_id`` inside Your Notebooks."""
-    # Keep dismiss from clearing pending when Streamlit remounts the dialog.
-    st.session_state._notebooks_suppress_dismiss = True
-    st.session_state.pending_notebook_actions = thread_id
-    st.session_state.reopen_notebooks_dialog = True
+    target = str(thread_id or "").strip()
+    if not target:
+        cancel_notebook_actions()
+        return
+    # Actions are rendered by the already-open dialog fragment.  Do not arm a
+    # full-script reopen or dismiss suppressor: both are only needed by the old
+    # app-remount flow and can make a later X/Esc dismissal sticky.
+    st.session_state.pop("_notebooks_suppress_dismiss", None)
+    st.session_state.pending_notebook_actions = target
+    st.session_state.reopen_notebooks_dialog = False
 
 
 def cancel_notebook_actions() -> None:
@@ -411,6 +451,8 @@ def cancel_notebook_actions() -> None:
         discard_rename_draft("notebook", str(thread_id))
         bump_rename_epoch("notebook", str(thread_id))
     st.session_state.pending_notebook_actions = None
+    st.session_state.reopen_notebooks_dialog = False
+    st.session_state.pop("_notebooks_suppress_dismiss", None)
 
 
 def select_thread(thread_id: str, should_rerun: bool = True) -> None:
@@ -469,6 +511,7 @@ def select_thread(thread_id: str, should_rerun: bool = True) -> None:
     if display_name:
         st.session_state.display_name = display_name
     st.session_state.thread_id = thread_id
+    reset_chat_history_window(thread_id)
     st.session_state.editing_message = None
     st.session_state.pending_edit = None
     st.session_state.edit_error_message = None
@@ -499,3 +542,4 @@ def save_journey(journey: dict[str, Any]) -> None:
             "response_language": st.session_state.get("response_language", "English"),
         },
     )
+    reset_chat_history_window(st.session_state.thread_id)

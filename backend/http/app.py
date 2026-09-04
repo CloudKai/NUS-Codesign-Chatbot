@@ -31,6 +31,7 @@ from backend.domain import (
     DeepReviewJob,
     DeepReviewRequest,
     MessageCreateRequest,
+    MessagePage,
     NotebookCreateRequest,
     NotebookUpdateRequest,
     PendingPhaseTransition,
@@ -349,7 +350,9 @@ def create_app(
 
     def _value_error(error: ValueError) -> HTTPException:
         detail = str(error)
-        status = 404 if "not found" in detail.lower() else 400
+        status = int(getattr(error, "status_code", 0) or 0)
+        if status not in {400, 404, 409}:
+            status = 404 if "not found" in detail.lower() else 400
         return HTTPException(status_code=status, detail=detail)
 
     def _with_idempotency_header(
@@ -1227,6 +1230,59 @@ def create_app(
         """Return canonical chat history for an owned notebook."""
         try:
             return owner.workspace.get_messages(thread_id)
+        except ValueError as error:
+            raise _value_error(error) from error
+
+    @app.get(
+        "/api/v1/threads/{thread_id}/messages/exists",
+        response_model=bool,
+    )
+    def has_messages(
+        thread_id: str,
+        owner: OwnerServices = Depends(current_owner),
+    ) -> bool:
+        """Return whether an owned notebook has a visible active message."""
+        try:
+            return owner.workspace.has_messages(thread_id)
+        except ValueError as error:
+            raise _value_error(error) from error
+
+    @app.get(
+        "/api/v1/threads/{thread_id}/messages/page",
+        response_model=MessagePage,
+    )
+    def list_message_page(
+        thread_id: str,
+        limit: int = Query(6, ge=1, le=100),
+        cursor: str | None = Query(default=None, max_length=2048),
+        owner: OwnerServices = Depends(current_owner),
+    ) -> MessagePage:
+        """Return a bounded newest-first page of an owned notebook transcript.
+
+        The response is chronological for straightforward rendering.  Cursor
+        validation, revision binding, visibility filtering, and source-owner
+        checks are performed by the persistence adapter.
+        """
+        try:
+            return MessagePage.model_validate(
+                owner.workspace.get_message_page(
+                    thread_id,
+                    limit=limit,
+                    cursor=cursor,
+                )
+            )
+        except ValueError as error:
+            raise _value_error(error) from error
+
+    @app.get("/api/v1/threads/{thread_id}/messages/title-context")
+    def title_context(
+        thread_id: str,
+        limit: int = Query(2, ge=1, le=2),
+        owner: OwnerServices = Depends(current_owner),
+    ) -> list[str]:
+        """Return only the bounded oldest user prompts used for title migration."""
+        try:
+            return owner.workspace.get_oldest_user_messages(thread_id, limit=limit)
         except ValueError as error:
             raise _value_error(error) from error
 

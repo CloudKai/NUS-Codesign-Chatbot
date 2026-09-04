@@ -37,6 +37,7 @@ from .student_journey import normalize_journey
 from .student_store import StudentStore
 
 _TRANSCRIPT_ROLES = {"user": "Student", "assistant": "Coach"}
+MESSAGE_PAGE_SIZE = 6
 
 
 @dataclass(frozen=True)
@@ -257,6 +258,44 @@ class WorkspaceService:
         if not self._store.get_thread(thread_id):
             raise ValueError("Notebook not found")
         return self._store.get_messages(thread_id)
+
+    def has_messages(self, thread_id: str) -> bool:
+        """Return whether an owned notebook has any visible chat rows."""
+        return self._store.has_messages(thread_id)
+
+    def get_message_page(
+        self,
+        thread_id: str,
+        *,
+        limit: int = MESSAGE_PAGE_SIZE,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Return one bounded, revision-bound page of notebook history."""
+        return self._store.get_message_page(
+            thread_id,
+            limit=limit,
+            cursor=cursor,
+        )
+
+    def get_messages_page(
+        self,
+        thread_id: str,
+        *,
+        limit: int = MESSAGE_PAGE_SIZE,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Compatibility alias for :meth:`get_message_page`."""
+        return self.get_message_page(thread_id, limit=limit, cursor=cursor)
+
+    def get_message_metadata(self, thread_id: str) -> list[dict[str, Any]]:
+        """Return active message metadata without transcript bodies."""
+        return self._store.get_message_metadata(thread_id)
+
+    def get_oldest_user_messages(
+        self, thread_id: str, *, limit: int = 2
+    ) -> list[str]:
+        """Return at most two oldest active user prompts for title migration."""
+        return self._store.get_oldest_user_messages(thread_id, limit=limit)
 
     def export_transcript(self, thread_id: str) -> TranscriptExport:
         """Return a ``.txt`` transcript projected from persisted messages.

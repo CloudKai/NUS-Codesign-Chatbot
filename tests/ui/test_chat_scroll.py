@@ -4,16 +4,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ui.layout.chat_scroll import NEAR_BOTTOM_PX
+from ui.layout.chat_scroll import NEAR_BOTTOM_PX, SCROLL_CONTROL_THRESHOLD_PX
 
 
 def test_chat_scroll_helper_uses_near_bottom_gating() -> None:
     """Send snaps bottom; reply remount pins coach top; manual scroll stops follow."""
     helper = Path("ui/layout/chat_scroll.py").read_text(encoding="utf-8")
     assert "NEAR_BOTTOM_PX = 120" in helper
+    assert "SCROLL_CONTROL_THRESHOLD_PX = 16" in helper
+    assert "sync_token = monotonic_ns()" in helper
     assert "FOLLOW_SNAP_FRAMES = 8" in helper
     assert "SCROLL_DOWN_ENSURE_FRAMES = 90" in helper
     assert NEAR_BOTTOM_PX == 120
+    assert SCROLL_CONTROL_THRESHOLD_PX == 16
     assert 'querySelector(".st-key-chat_log")' not in helper
     assert "Element.prototype" not in helper
     assert "scrollIntoView" not in helper
@@ -49,9 +52,32 @@ def test_chat_scroll_helper_uses_near_bottom_gating() -> None:
     assert "SCROLL_DOWN_ENSURE_FRAMES" in helper
     assert "boundScrollRoot" in helper
     assert "boundScrollHandler" in helper
+    assert "bindScrollRoot(root, force = false)" in helper
+    assert "bindScrollRoot(scrollRoot(), true)" in helper
     assert 'root.addEventListener("scroll", handler, { passive: true })' in helper
     assert 'removeEventListener("scroll", state.boundScrollHandler)' in helper
     assert "Element scroll events do not reliably reach" in helper
+    assert "function bindDocumentListeners()" in helper
+    assert "function removeDocumentListeners()" in helper
+    assert "documentHandlers" in helper
+    assert "removeDocumentListeners();" in helper
+    assert "state.documentHandlers = handlers" in helper
+    assert "if (!current.listenersBound)" not in helper
+    prepend = helper.split("function restorePrependedViewport(", 1)[1].split(
+        "// Keep handlers", 1
+    )[0]
+    assert "root.scrollTop + currentOffset - oldOffset" in prepend
+    assert "oldTop + Math.max(0, root.scrollHeight - oldHeight)" in prepend
+    assert "oldTop + currentOffset - oldOffset" not in prepend
+    # Regression guard for short upward gestures: the live-anchor formula
+    # preserves the pre-scroll position for every small non-zero scrollTop.
+    for pre_scroll_top in range(1, 49):
+        old_marker_content_top = 640.0
+        inserted_height = 192.0
+        old_offset = old_marker_content_top - pre_scroll_top
+        current_offset_after_reset = old_marker_content_top + inserted_height
+        restored = current_offset_after_reset - old_offset
+        assert restored == pre_scroll_top + inserted_height
     workspace = Path("ui/assets/styles/10-workspace.css").read_text(encoding="utf-8")
     assert (
         "body:has(.st-key-search_panel):not(:has(.st-key-chat_panel))"
@@ -66,6 +92,9 @@ def test_chat_scroll_helper_uses_near_bottom_gating() -> None:
     assert "function ensureScrollDown(" in helper
     assert "state.ensureGeneration !== generation" in helper
     assert "feedGeometryReady" in helper
+    assert (
+        "height <= root.clientHeight + SCROLL_CONTROL_THRESHOLD_PX" in helper
+    )
     assert "isChatSurfaceVisible(panel)) return" not in helper
     assert "win.innerHeight - 40" in helper
     send_branch = helper.split('MODE === "send"', 1)[1].split(
@@ -116,6 +145,35 @@ def test_chat_scroll_helper_uses_near_bottom_gating() -> None:
     assert "onScrollDownClick" in helper
     assert "listenersBound" in helper
     assert 'closest("#cd-chat-scroll-down")' in helper
+    click_fn = helper.split("function onScrollDownClick(", 1)[1].split(
+        "function scrollDownButton()", 1
+    )[0]
+    assert "api().awaitingReplyReveal = false" in click_fn
+    assert "keepSnappingToBottom(FOLLOW_SNAP_FRAMES)" in click_fn
+    button_fn = helper.split("function scrollDownButton()", 1)[1].split(
+        "function markUserScroll(", 1
+    )[0]
+    assert 'querySelectorAll("#cd-chat-scroll-down")' in button_fn
+    assert "candidate.remove()" in button_fn
+    assert (
+        "buttons.find((candidate) => candidate.parentElement === doc.body)"
+        in button_fn
+    )
+    assert (
+        "if (button.parentElement !== doc.body) doc.body.appendChild(button);"
+        in button_fn
+    )
+    assert "button.dataset.cdChatScrollState" in helper
+    assert 'button.setAttribute("aria-hidden", show ? "false" : "true")' in helper
+    assert "button.tabIndex = show ? 0 : -1" in helper
+    assert "distanceFromBottom(root) > SCROLL_CONTROL_THRESHOLD_PX" in helper
+    # Prepending may run after Streamlit has reset the feed to zero or while
+    # it has preserved a small (1–48 px) top offset. Rebase from the live
+    # scrollTop so the stable message marker delta is applied exactly once.
+    assert "nextTop = root.scrollTop + currentOffset - oldOffset" in helper
+    assert "nextTop = oldTop + currentOffset - oldOffset" not in helper
+    assert "const oldTop = Number(anchor.top || 0)" in helper
+    assert "const oldHeight = Number(anchor.height || 0)" in helper
     assert "button.addEventListener(\"click\"" not in helper
     assert "AbortController" not in helper
     assert "snapFollow" not in helper
@@ -127,6 +185,8 @@ def test_chat_scroll_helper_uses_near_bottom_gating() -> None:
     # One schedule() wrapper owns requestAnimationFrame.
     assert helper.count("requestAnimationFrame") == 1
     assert "function schedule(fn)" in helper
+    assert "const SYNC_TOKEN = __CD_SYNC_TOKEN__;" in helper
+    assert 'script.replace("__CD_SYNC_TOKEN__", str(sync_token))' in helper
     # Remount must not clear awaitingReplyReveal via viewport sync.
     sync_fn = helper.split("function syncFollowFromViewport()", 1)[1].split(
         "function onScrollDownClick", 1
@@ -142,6 +202,21 @@ def test_chat_scroll_helper_uses_near_bottom_gating() -> None:
     studio_panel = studio.split("def render_studio_panel(", 1)[1]
     assert 'sync_chat_scroll(mode="settle")' in studio_panel
     assert "from ui.layout.chat_scroll import sync_chat_scroll" in studio
+    chat = Path("ui/panels/chat.py").read_text(encoding="utf-8")
+    # A stale cursor is recovered inside the fragment; consuming this flag
+    # there is what restores the exact-bottom open behavior without relying
+    # on an outer workspace rerun.
+    assert "if history_state.get(\"_history_stale_open_pending\")" in chat
+    assert "if history_state.get(\"open_pending\")" not in chat
+    assert 'sync_chat_scroll(mode="open")' in chat
+    open_branch = chat.split('if history_state.get("_history_stale_open_pending")', 1)[1].split(
+        "elif history_state.get(\"prepend_pending\")", 1
+    )[0]
+    assert 'history_state["_history_stale_open_pending"] = False' in open_branch
+    stale_branch = chat.split('if _history_page_is_stale(error):', 1)[1].split(
+        'state["error"]', 1
+    )[0]
+    assert 'state["_history_stale_open_pending"] = True' in stale_branch
 
 
 def test_inflight_wrapper_has_no_card_chrome() -> None:
@@ -192,8 +267,17 @@ def test_fragment_submit_path_still_owns_inflight() -> None:
     assert "handle_prompt(" in composer_block
     assert 'st.container(key="chat_inflight")' in composer_block
     assert 'sync_chat_scroll(mode="reconcile")' not in composer_block
+    assert 'if history_state.get("_history_stale_open_pending")' in composer_block
+    assert 'if history_state.get("open_pending")' not in composer_block
+    assert 'sync_chat_scroll(mode="open")' in composer_block
+    assert composer_block.index('sync_chat_scroll(mode="open")') < composer_block.index(
+        'sync_chat_scroll(mode="prepend")'
+    )
     workspace = Path("ui/workspace.py").read_text(encoding="utf-8")
     assert 'sync_chat_scroll(mode="reconcile")' in workspace
+    assert workspace.count('sync_chat_scroll(mode="settle")') >= 2
+    assert "Search remounts can be fragment-local" in workspace
+    assert "Library uses the same center column" in workspace
     assert "chat_follow_bottom" in workspace
     assert "chat_reveal_coach_reply" in workspace
     assert 'sync_chat_scroll(mode="reply")' in workspace
@@ -363,6 +447,14 @@ def test_narrow_chat_feed_owns_touch_scroll_without_changing_textarea_ownership(
     assert "opacity:1" in chat.split(
         ".cd-chat-scroll-down.cd-chat-scroll-down-visible {", 1
     )[1].split("}", 1)[0]
+    control_rule = chat.split(".cd-chat-scroll-down {", 1)[1].split("}", 1)[0]
+    visible_rule = chat.split(
+        ".cd-chat-scroll-down.cd-chat-scroll-down-visible {", 1
+    )[1].split("}", 1)[0]
+    assert "z-index:210" in control_rule
+    assert "visibility:hidden" in control_rule
+    assert "margin-bottom:env(safe-area-inset-bottom, 0px)" in control_rule
+    assert "visibility:visible" in visible_rule
     workspace = Path("ui/assets/styles/10-workspace.css").read_text(encoding="utf-8")
     transcript_rule = workspace.split(
         ".st-key-chat_transcript,\n    [data-testid=\"stElementContainer\"].st-key-chat_transcript",

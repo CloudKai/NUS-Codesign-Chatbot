@@ -2,6 +2,182 @@
 
 ## CURRENT STATUS
 
+### Sources delete / polling remount guard (2026-09-04)
+
+**Behavior.** Personal-source deletion remains a fragment-local
+`store.delete_source` followed by `rerun_fragment()`. A thread-scoped one-shot
+marker now defers only the immediate course-sync polling→stable full-app
+handoff when deletion races with sync completion; the next polling tick keeps
+the original stable-fragment transition. Stable mode clears any leftover
+marker, and coach-stream, upload, and New-chat sync guards are unchanged.
+
+**Files.** `ui/panels/sources.py`, `tests/ui/test_sources_ui.py`, and this
+handoff.
+
+**Validation.** Sources-delete, polling-race, stable-cleanup, rerun-scope, and
+navigation tests passed (37 tests in the combined focused command). Full
+compileall and `git diff --check` passed. A non-destructive local browser check
+settled Library course content and observed exactly one workspace and one
+Sources panel; no source was deleted and no AWS or paid-model call was made.
+The broader UI suite retains the two unrelated branch-baseline assertions
+already documented above.
+
+**Compatibility, migration, and rollback.** No backend, API, schema, AWS, or
+student-data migration is involved. Source deletion and cache invalidation
+remain unchanged. Rollback is code-only: revert the marker/helper and its
+tests.
+
+**Known risk.** The exact destructive browser click was not exercised against
+real data; the race is covered with isolated deterministic seams. Existing
+unrelated `MutationObserver` console errors remain outside this change.
+
+**Next exact action.** Deploy/restart the controlled environment, then run a
+non-production source-delete smoke with a temporary personal source while
+watching for duplicate workspace shells during course-material sync.
+
+### Notebook-action remount stabilization (2026-09-04)
+
+**Behavior.** New chat and the Recents/mobile ⋯ menus remain single-render
+workspace interactions. The legacy Your Notebooks dialog now changes its
+Actions/Back view through dialog-local callbacks instead of escalating to a
+full application rerun; stale dismiss/reopen flags are cleared consistently.
+Active-notebook deletion still uses an application rerun because the active
+workspace must be reconciled. The client-only Recents popover was deliberately
+left without a rerun callback.
+
+**Files.** `ui/notebooks.py`, `ui/session.py`,
+`tests/ui/test_rerun_scope.py`, `tests/ui/test_streamlit_ui.py`, and this
+handoff.
+
+**Validation.** Focused notebook-action, rerun-scope, navigation, and related
+Streamlit tests passed. Mock-browser checks at 1280 px and 390 px reproduced
+New chat → notebook actions with exactly one workspace, one chat feed, one
+mobile shell, and one actions dialog. No prompt, notebook deletion, AWS call,
+or paid-model call was made. The broader UI run retains two unrelated existing
+branch-baseline failures: the stale `truncate` assertion and a Stage
+Progression expectation after New chat.
+
+**Compatibility, migration, and rollback.** No backend, API, schema, AWS,
+identity, or persisted student-data changes are involved. Existing notebook
+actions, rename, download, and delete behavior remain available. Rollback is
+code-only: revert the notebook/session callback changes and their tests.
+
+**Known risk.** The browser still reports pre-existing
+`MutationObserver.observe(...): parameter 1 is not of type 'Node'` errors from
+other layout helpers; the notebook-action path does not add these observers.
+The deployed CloudFront instance has not been changed.
+
+**Next exact action.** Deploy or restart the controlled environment with this
+branch, then repeat New chat → Recents ⋯ and legacy Your Notebooks Actions/Back
+at desktop and mobile widths while checking the browser console.
+
+### Scroll-to-bottom control restoration (2026-09-04)
+
+**Behavior.** The body-hosted `Scroll to bottom` control now rehydrates its
+parent-window listeners on every helper invocation, force-rebinds the current
+`.st-key-chat_feed`, and coalesces scroll work through one animation frame.
+Replaced feeds are detected by identity, duplicate controls are removed, and
+the surviving button is kept on `document.body`. Visibility uses a 16 px
+control threshold instead of the 120 px follow threshold, with synchronized
+`aria-hidden`, `tabIndex`, and state attributes. The control remains fixed
+above the composer, includes mobile safe-area spacing, and is layered above
+chat content. Clicking it snaps to the true feed bottom and hides the control.
+Search and Library remounts explicitly settle the control as hidden while no
+chat surface is mounted. A monotonic helper token forces Streamlit to re-run
+the parent controller when an otherwise identical component iframe would be
+reused.
+
+**Files.** `ui/layout/chat_scroll.py`, `ui/assets/styles/30-chat.css`,
+`ui/workspace.py`, `tests/ui/test_chat_scroll.py`, and this handoff.
+
+**Validation.** The focused chat-scroll, rerun-scope, and HTML-embed set
+passed (43 tests); UI compile checks and `git diff --check` passed. Browser
+checks passed at an explicit 1024 px desktop view and an explicit 390 px
+mobile view:
+wheel scroll revealed the control, it stayed 8 px above the composer, click
+snapped the feed to the bottom, and the control hid with `aria-hidden=true`
+and `tabIndex=-1`. Search, Library, notebook switching, Review/Progression,
+and mobile Thinking Path open/close remounts retained exactly one control and
+the expected hidden/visible state. No prompt was sent, no notebook was
+created, and no AWS or paid-model call was made. The broader `tests/ui` run
+retains four unrelated branch-baseline failures in deep-review copy, stale
+`truncate`/Stage Progression AppTest expectations, and a responsive CSS
+assertion.
+
+**Compatibility, migration, and rollback.** No backend, API, schema,
+student-data, AWS, or persistence changes are required. Existing transcripts
+and the five-phase workflow are untouched. Rollback is code-only: revert the
+four implementation/test files; no data cleanup or migration is needed.
+
+**Known risk.** The local browser still reports the pre-existing
+`MutationObserver.observe(...): parameter 1 is not of type 'Node'` errors from
+other layout helpers (the scroll helper adds no observer or matching error).
+The live CloudFront deployment has not been changed; release still requires
+the normal controlled deployment and browser smoke.
+
+**Next exact action.** Deploy the reviewed UI change to the controlled
+environment, then repeat the desktop/mobile scroll and remount smoke against
+the deployed URL before release.
+
+### Latest-first six-message notebook history (2026-09-04)
+
+**Behavior.** Notebook opening now loads only the newest six visible persisted
+messages and schedules an exact bottom snap. A deliberate upward wheel, touch,
+pointer, keyboard, or accessible fallback action requests one opaque keyset
+page at a time; loaded rows accumulate and are deduplicated by message id.
+Prepending restores the live scroll position from a stable message marker (with
+the captured-top height-delta fallback), including remounts that reset the feed
+scrollTop. Explicit notebook switches reset to the newest page, while Search,
+Library, Review/Progression, and panel remounts preserve the active window.
+Paging is locked during Send, awaiting-reply recovery, and revision. Stale
+revision cursors refresh the newest page and consume a distinct
+fragment-local stale-open flag so the student returns to the exact bottom;
+ordinary notebook-open state remains available to the outer workspace sync.
+Source ids,
+attachments, citations, and HMW visibility are projected alongside each page;
+the full-history endpoint remains unchanged for coaching, Review, export, and
+model context.
+
+**Files.** `backend/domain.py`, `backend/student_store.py`,
+`backend/workspace_service.py`, `backend/api_client.py`,
+`backend/http/app.py`, `backend/repositories.py`,
+`backend/sources/library.py`, `ui/services/runtime.py`, `ui/session.py`,
+`ui/panels/chat.py`, `ui/panels/studio.py`, `ui/topbar.py`,
+`ui/coach_welcome.py`, `ui/workspace.py`, `ui/layout/chat_scroll.py`,
+`ui/assets/styles/30-chat.css`, the pagination/HMW/chat-scroll tests, and
+this handoff.
+
+**Validation.** The final pagination persistence/API, HMW projection,
+facade-read instrumentation, chat-scroll, navigation/remount, Streamlit API,
+and architecture-contract set passed (84 tests). Repository `compileall` and
+`git diff --check` passed. The complete
+deterministic run reached 100% with 12 unrelated branch-baseline failures in
+citation resolution, reflection/stage behavior, prompt/retrieval expectations,
+research persistence, deployment-config expectations, deep-review/UI copy,
+and responsive CSS assertions; none are in the pagination acceptance set.
+Sol High's final review approved the live-anchor/fallback math, stale-cursor
+open handling, pagination boundaries, and updated contract inventories.
+The requested local browser smoke could not be completed because the in-app
+browser rejected the localhost reload under its URL policy; no workaround or
+paid call was used.
+
+**Compatibility, migration, and rollback.** No schema migration, AWS,
+AgentCore, DSQL, S3, identity, or student-data change is required. The legacy
+full-history route and server-side complete-history consumers remain intact.
+Rollback is code-only: revert the pagination/UI files and retain all persisted
+messages because no stored data format changed.
+
+**Known risks.** Real browser coverage of 6 → 12 → 18 paging, exact-bottom
+opening, touch/keyboard intent, and console cleanliness remains pending due to
+the localhost browser policy. The Streamlit 1.60 bidirectional component is
+wrapped with a visible fallback, but should be exercised in the controlled
+environment before release.
+
+**Next exact action.** Run the desktop and 390 px browser smoke against a
+permitted local/deployed URL, including notebook switching, Send/revision,
+Search, Library, Review, panel resize, and three upward page loads; then record
+the screenshots/console result before deployment.
+
 ### AgentCore transient structured-output recovery (2026-09-04)
 
 **Behavior.** Fast Chat now performs one bounded recovery invoke when AgentCore

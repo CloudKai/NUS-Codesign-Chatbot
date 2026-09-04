@@ -734,5 +734,4 @@ def logout_user() -> None:
 """,
         unsafe_allow_javascript=True,
     )
-    st.link_button("Continue sign-out", url, type="primary")
     st.stop()

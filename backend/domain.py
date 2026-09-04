@@ -758,6 +758,26 @@ class MessageCreateRequest(BaseModel):
     metadata: WelcomeMessageMetadata = Field(default_factory=WelcomeMessageMetadata)
 
 
+class MessagePage(BaseModel):
+    """One owner- and conversation-revision-bound page of visible messages.
+
+    ``messages`` is returned in chronological order even though the backing
+    keyset query reads newest-first.  ``next_cursor`` is opaque to clients and
+    is only valid for the same notebook revision.  The aggregate projections
+    let a notebook open render its shell without loading the complete
+    transcript.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    messages: list[dict[str, Any]] = Field(default_factory=list)
+    next_cursor: str | None = None
+    total_count: int = Field(default=0, ge=0)
+    conversation_revision: int = Field(default=0, ge=0)
+    source_ids: list[str] = Field(default_factory=list)
+    hmw_scaffold: dict[str, Any] = Field(default_factory=dict)
+
+
 class SourceUpdateRequest(BaseModel):
     """Rename and/or change selection for one notebook source."""
 

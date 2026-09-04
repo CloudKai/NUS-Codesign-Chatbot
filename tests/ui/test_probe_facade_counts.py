@@ -17,7 +17,7 @@ After (inner ``WorkspaceService`` / learning / sync reads, measured
 2026-08-17, in-process AppTest):
 
 - initial page load: 16
-  (get_preferences 4, get_thread 3, get_messages 2, update_preferences 2,
+  (get_preferences 4, get_thread 3, has_messages 1, get_message_page 1, update_preferences 2,
   list_sources 1, backfill 1, get_pending 1, request 1, list_threads 1)
 - Send / waiting / answer-complete: 13 in the same script run under AppTest
   (full-script Send still rebuilds Chat then Journey then Sources; persist
@@ -50,6 +50,8 @@ INNER_METHODS = (
     (WorkspaceService, "list_threads"),
     (WorkspaceService, "get_thread"),
     (WorkspaceService, "get_messages"),
+    (WorkspaceService, "has_messages"),
+    (WorkspaceService, "get_message_page"),
     (WorkspaceService, "list_sources"),
     (WorkspaceService, "get_source"),
     (WorkspaceService, "backfill_legacy_sources"),
@@ -122,6 +124,8 @@ def test_run_scoped_memo_cuts_duplicate_workspace_reads() -> None:
         rerun_total = sum(after_rerun.values())
 
         assert after_load.get("get_messages", 0) <= 2
+        assert after_load.get("has_messages", 0) <= 1
+        assert after_load.get("get_message_page", 0) <= 2
         assert after_load.get("list_sources", 0) <= 1
         assert after_load.get("backfill_legacy_sources", 0) <= 1
         assert after_load.get("get_preferences", 0) <= 4
@@ -135,6 +139,8 @@ def test_run_scoped_memo_cuts_duplicate_workspace_reads() -> None:
         assert after_send.get("get_source", 0) == 0
         assert rerun_total == 7
         assert after_rerun.get("get_messages", 0) <= 2
+        assert after_rerun.get("has_messages", 0) <= 1
+        assert after_rerun.get("get_message_page", 0) <= 2
         assert after_rerun.get("list_sources", 0) <= 1
         assert after_rerun.get("backfill_legacy_sources", 0) <= 1
         assert after_rerun.get("get_preferences", 0) <= 4

@@ -13,6 +13,7 @@ from .domain import (
     CoachTurn,
     DeepReviewJob,
     MessageCreateRequest,
+    MessagePage,
     NotebookCreateRequest,
     NotebookUpdateRequest,
     PendingPhaseTransition,
@@ -493,6 +494,67 @@ class LocalApiClient:
         )
         response.raise_for_status()
         return response.json()
+
+    def has_messages(self, thread_id: str) -> bool:
+        """Return the owner-scoped visible-message existence projection."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/threads/{thread_id}/messages/exists",
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if isinstance(payload, bool):
+            return payload
+        if isinstance(payload, dict):
+            return bool(payload.get("has_messages"))
+        return False
+
+    def get_message_page(
+        self,
+        thread_id: str,
+        *,
+        limit: int = 6,
+        cursor: str | None = None,
+    ) -> MessagePage:
+        """Return one bounded, newest-first keyset page of chat history.
+
+        The cursor is opaque and is only sent back to the API that issued it.
+        The full-history ``get_messages`` method remains available for explicit
+        transcript, review, and model-context operations.
+        """
+        params: dict[str, Any] = {"limit": int(limit)}
+        if cursor:
+            params["cursor"] = cursor
+        response = self._http.get(
+            f"{self._base_url}/api/v1/threads/{thread_id}/messages/page",
+            params=params,
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        return MessagePage.model_validate(response.json())
+
+    def get_messages_page(
+        self,
+        thread_id: str,
+        *,
+        limit: int = 6,
+        cursor: str | None = None,
+    ) -> MessagePage:
+        """Compatibility alias for :meth:`get_message_page`."""
+        return self.get_message_page(thread_id, limit=limit, cursor=cursor)
+
+    def get_oldest_user_messages(
+        self, thread_id: str, *, limit: int = 2
+    ) -> list[str]:
+        """Return a bounded title-migration projection, not the transcript."""
+        response = self._http.get(
+            f"{self._base_url}/api/v1/threads/{thread_id}/messages/title-context",
+            params={"limit": int(limit)},
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return [str(value) for value in payload] if isinstance(payload, list) else []
 
     def download_transcript(self, thread_id: str) -> TranscriptExport:
         """Download the persisted notebook transcript as UTF-8 ``.txt``."""

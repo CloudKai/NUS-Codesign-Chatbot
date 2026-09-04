@@ -17,6 +17,7 @@ from typing import Any
 
 import streamlit as st
 import streamlit.components.v1 as components
+import streamlit.components.v2 as components_v2
 from streamlit.errors import StreamlitAPIException
 
 from backend.domain import CoachRequest, CoachTurn
@@ -42,7 +43,6 @@ from ui.coach_welcome import (
     COACH_WELCOME_KIND,
     COACH_WELCOME_MARKDOWN,
     render_hmw_scaffold_if_needed,
-    seed_coach_welcome,
     transcript_hmw_render_plan,
 )
 from ui.constants import DEFAULT_APPEARANCE
@@ -71,8 +71,149 @@ from ui.session import (
     locked_stage_move_notice,
     set_awaiting_coach_turn,
     set_stage_move_notice,
+    reset_chat_history_window,
 )
 from ui.sources import source_viewer_dialog
+
+
+_HISTORY_PAGE_SIZE = 6
+_HISTORY_TOP_THRESHOLD_PX = 48
+_HISTORY_ERROR_TTL_SECONDS = 8.0
+_HISTORY_PAGER_HTML = '<span class="cd-history-pager" aria-hidden="true"></span>'
+_HISTORY_PAGER_CSS = ".cd-history-pager{display:block;width:1px;height:0;overflow:hidden}"
+_HISTORY_PAGER_JS = r"""
+export default function(component) {
+  const { data, setTriggerValue } = component;
+  const doc = window.parent?.document || document;
+  const win = window.parent || window;
+  const registryKey = '__cdHistoryPagerController';
+  const prior = win[registryKey];
+  if (prior && typeof prior.cleanup === 'function') prior.cleanup();
+  const feed = doc.querySelector('.st-key-chat_feed');
+  const hasMore = !!(data && data.has_more && data.cursor);
+  const topThreshold = 48;
+  let armed = true;
+  let touchY = null;
+  let pointerY = null;
+  let disposed = false;
+
+  const isBusy = () => !!(data && data.busy) ||
+    !!(win.__cdChatScroll && win.__cdChatScroll.pagingLocked);
+  const canRequest = () => !disposed && hasMore && !isBusy() && feed &&
+    feed.clientHeight > 0 && feed.scrollTop <= topThreshold && armed;
+  const captureAnchor = (reason) => {
+    if (!feed) return;
+    const feedRect = feed.getBoundingClientRect();
+    const markers = Array.from(feed.querySelectorAll('[data-cd-message-id]'));
+    const marker = markers.find((node) => node.getBoundingClientRect().bottom >= feedRect.top);
+    win.__cdChatScrollPrependAnchor = {
+      top: Number(feed.scrollTop || 0),
+      height: Number(feed.scrollHeight || 0),
+      messageId: marker ? String(marker.getAttribute('data-cd-message-id') || '') : '',
+      offset: marker ? Number(marker.getBoundingClientRect().top - feedRect.top) : 0,
+      reason: String(reason || 'intent')
+    };
+  };
+  const request = (reason) => {
+    if (!canRequest()) return;
+    armed = false;
+    captureAnchor(reason);
+    setTriggerValue('older', {
+      thread_id: String(data.thread_id || ''),
+      cursor: String(data.cursor || ''),
+      reason: String(reason || 'intent')
+    });
+  };
+  const onScroll = () => {
+    if (!feed) return;
+    if (feed.scrollTop > topThreshold + 8) armed = true;
+  };
+  const onWheel = (event) => {
+    if (event && Number(event.deltaY) < 0) request('wheel');
+  };
+  const onTouchStart = (event) => {
+    touchY = event.touches && event.touches.length ? event.touches[0].clientY : null;
+  };
+  const onTouchMove = (event) => {
+    if (touchY == null) return;
+    const y = event.touches && event.touches.length ? event.touches[0].clientY : null;
+    if (y != null && y - touchY > 10) request('touch');
+  };
+  const onPointerDown = (event) => {
+    if (event && event.isPrimary === false) return;
+    if (event && event.button != null && Number(event.button) !== 0) return;
+    pointerY = Number.isFinite(event.clientY) ? event.clientY : null;
+  };
+  const onPointerMove = (event) => {
+    if (pointerY == null) return;
+    // A mouse pointer must still be held down. Touch/pen pointer events carry
+    // a non-zero buttons value while the contact is active as well.
+    if (event && event.buttons != null && Number(event.buttons) === 0) return;
+    if (event.clientY - pointerY > 10) request('pointer');
+  };
+  const onTouchEnd = () => { touchY = null; };
+  const onPointerUp = () => { pointerY = null; };
+  const onKeyDown = (event) => {
+    const target = event && event.target;
+    if (target && (target.closest('textarea,input,[contenteditable="true"]') ||
+      target.closest('.st-key-chat_composer'))) return;
+    if (event.key === 'ArrowUp' || event.key === 'PageUp' || event.key === 'Home') {
+      request('keyboard');
+    }
+  };
+  const onFallbackClick = (event) => {
+    const target = event && event.target;
+    const button = target && target.closest ? target.closest('button') : null;
+    if (button && /^Load 6 earlier messages/.test(String(button.textContent || ''))) {
+      captureAnchor('fallback');
+    }
+  };
+  const cleanup = () => {
+    disposed = true;
+    if (feed) {
+      feed.removeEventListener('scroll', onScroll);
+      feed.removeEventListener('wheel', onWheel);
+      feed.removeEventListener('touchstart', onTouchStart);
+      feed.removeEventListener('touchmove', onTouchMove);
+      feed.removeEventListener('touchend', onTouchEnd);
+      feed.removeEventListener('touchcancel', onTouchEnd);
+      feed.removeEventListener('pointerdown', onPointerDown);
+      feed.removeEventListener('pointermove', onPointerMove);
+      feed.removeEventListener('pointerup', onPointerUp);
+      feed.removeEventListener('pointercancel', onPointerUp);
+    }
+    doc.removeEventListener('keydown', onKeyDown, true);
+    doc.removeEventListener('click', onFallbackClick, true);
+    if (win[registryKey] && win[registryKey].cleanup === cleanup) delete win[registryKey];
+  };
+  win[registryKey] = { cleanup };
+  if (feed) {
+    feed.addEventListener('scroll', onScroll, { passive: true });
+    feed.addEventListener('wheel', onWheel, { passive: true });
+    feed.addEventListener('touchstart', onTouchStart, { passive: true });
+    feed.addEventListener('touchmove', onTouchMove, { passive: true });
+    feed.addEventListener('touchend', onTouchEnd, { passive: true });
+    feed.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    feed.addEventListener('pointerdown', onPointerDown, { passive: true });
+    feed.addEventListener('pointermove', onPointerMove, { passive: true });
+    feed.addEventListener('pointerup', onPointerUp, { passive: true });
+    feed.addEventListener('pointercancel', onPointerUp, { passive: true });
+  }
+  doc.addEventListener('keydown', onKeyDown, true);
+  doc.addEventListener('click', onFallbackClick, true);
+}
+"""
+
+try:
+    _history_pager_component = components_v2.component(
+        "cd_history_pager",
+        html=_HISTORY_PAGER_HTML,
+        css=_HISTORY_PAGER_CSS,
+        js=_HISTORY_PAGER_JS,
+        isolate_styles=False,
+    )
+except Exception:  # pragma: no cover - old Streamlit/test import fallback
+    _history_pager_component = None
 
 
 def _duration_ms(started: float) -> float:
@@ -494,6 +635,13 @@ def render_message(
         role,
         avatar=(":material/auto_awesome:" if role == "assistant" else ":material/person:"),
     ):
+        st.markdown(
+            f'<span data-cd-message-id="{html.escape(str(message.get("id") or ""), quote=True)}" '
+            'aria-hidden="true" '
+            'style="display:block;width:0;height:0;position:relative;overflow:visible;'
+            'pointer-events:none"></span>',
+            unsafe_allow_html=True,
+        )
         metadata = message.get("metadata") or {}
         if role == "user" and st.session_state.editing_message == message["id"]:
             safe_id = message["id"].replace("-", "_")
@@ -830,6 +978,7 @@ def apply_completed_turn_to_session(
         for tests and session journey updates.
     """
     store.forget_turn_reads(thread_id)
+    reset_chat_history_window(thread_id)
     updated_thread = store.get_thread(thread_id) or {}
     updated_meta = dict(updated_thread.get("metadata") or {})
     updated_journey = normalize_journey(updated_meta.get("learning_journey"))
@@ -856,10 +1005,16 @@ def _awaiting_turn_has_assistant_reply(
     messages: list[dict[str, Any]],
     *,
     baseline_message_count: int,
+    total_count: int | None = None,
 ) -> bool:
     """Return True when persisted history advanced with a new assistant row."""
+    if total_count is not None and int(total_count) <= int(baseline_message_count or 0):
+        return False
     rows = [message for message in messages if isinstance(message, dict)]
-    for message in rows[max(0, int(baseline_message_count or 0)) :]:
+    # A bounded newest page is sufficient during recovery: any newly persisted
+    # coach reply is necessarily among the newest rows.
+    start = 0 if total_count is not None else max(0, int(baseline_message_count or 0))
+    for message in rows[start:]:
         if str(message.get("role") or "").strip().lower() != "assistant":
             continue
         if str(message.get("content") or "").strip():
@@ -909,13 +1064,20 @@ def _try_complete_awaiting_coach_turn() -> bool:
         )
         return True
     store.forget_turn_reads(thread_id)
-    messages = store.get_messages(thread_id)
+    page = store.get_message_page(thread_id, limit=6)
+    messages = page.messages if hasattr(page, "messages") else (page or {}).get("messages", [])
+    total_count = (
+        int(page.total_count)
+        if hasattr(page, "total_count")
+        else int((page or {}).get("total_count", len(messages)))
+    )
     baseline = int(pending.get("baseline_message_count") or 0)
     if not _awaiting_turn_has_assistant_reply(
-        messages, baseline_message_count=baseline
+        messages, baseline_message_count=baseline, total_count=total_count
     ):
         return False
     _sync_session_journey_from_thread(thread_id)
+    reset_chat_history_window(thread_id)
     clear_awaiting_coach_turn()
     st.session_state.composer_nonce = int(
         st.session_state.get("composer_nonce") or 0
@@ -1319,8 +1481,28 @@ def handle_prompt(
                 attachment_source_ids=attachment_source_ids,
             )
             spans["request_build_ms"] = _duration_ms(build_started)
-            baseline_messages = store.get_messages(st.session_state.thread_id)
-            baseline_message_count = len(baseline_messages)
+            history_window = st.session_state.get("_chat_history_window")
+            if (
+                isinstance(history_window, dict)
+                and str(history_window.get("thread_id") or "")
+                == str(st.session_state.thread_id or "")
+                and history_window.get("loaded")
+            ):
+                # The composer fragment already loaded this authoritative
+                # page before accepting the prompt. Reuse its visible count
+                # instead of issuing a duplicate one-row page read.
+                baseline_message_count = int(
+                    history_window.get("total_count") or 0
+                )
+            else:
+                baseline_page = store.get_message_page(
+                    st.session_state.thread_id, limit=1
+                )
+                baseline_message_count = (
+                    int(baseline_page.total_count)
+                    if hasattr(baseline_page, "total_count")
+                    else int((baseline_page or {}).get("total_count", 0))
+                )
             thinking_started = time.perf_counter()
             if thinking is None:
                 thinking = st.status(
@@ -1608,12 +1790,22 @@ def _submit_pending_edit(
         _rerun_edit_fragment()
         return False
     set_coach_turn_streaming(True)
-    baseline_messages = store.get_messages(thread_id)
+    baseline_page = store.get_message_page(thread_id, limit=1)
+    baseline_messages = (
+        baseline_page.messages
+        if hasattr(baseline_page, "messages")
+        else (baseline_page or {}).get("messages", [])
+    )
+    baseline_total = (
+        int(baseline_page.total_count)
+        if hasattr(baseline_page, "total_count")
+        else int((baseline_page or {}).get("total_count", len(baseline_messages)))
+    )
     set_awaiting_coach_turn(
         thread_id=str(thread_id or ""),
         idempotency_key=str(idempotency_key or ""),
         prompt=draft,
-        baseline_message_count=len(baseline_messages),
+        baseline_message_count=baseline_total,
     )
     thinking = st.status(
         "Coach is thinking…",
@@ -1681,6 +1873,7 @@ def _submit_pending_edit(
         updated_journey = normalize_journey(updated_metadata.get("learning_journey"))
         st.session_state.learning_journey = updated_journey
         st.session_state.response_detail = updated_journey["response_detail"]
+        reset_chat_history_window(thread_id)
         clear_awaiting_coach_turn()
         st.session_state.composer_nonce += 1
         st.session_state.chat_reveal_coach_reply = True
@@ -1690,10 +1883,330 @@ def _submit_pending_edit(
         set_coach_turn_streaming(False)
 
 
+def _page_payload(page: Any) -> dict[str, Any]:
+    """Normalize a local/API page model into a serializable mapping."""
+    if hasattr(page, "model_dump"):
+        value = page.model_dump(mode="json")
+    elif isinstance(page, dict):
+        value = dict(page)
+    else:
+        value = {}
+    messages = value.get("messages")
+    value["messages"] = [item for item in messages or () if isinstance(item, dict)]
+    value["next_cursor"] = value.get("next_cursor") or None
+    value["total_count"] = max(0, int(value.get("total_count") or 0))
+    value["conversation_revision"] = max(
+        0, int(value.get("conversation_revision") or 0)
+    )
+    value["source_ids"] = [str(item) for item in value.get("source_ids") or () if str(item).strip()]
+    value["hmw_scaffold"] = (
+        value.get("hmw_scaffold") if isinstance(value.get("hmw_scaffold"), dict) else {}
+    )
+    return value
+
+
+def _history_projection(state: dict[str, Any]) -> dict[str, Any]:
+    """Return the normalized server projection carried by a history window."""
+    projection = state.get("hmw_scaffold")
+    return projection if isinstance(projection, dict) else {}
+
+
+def _history_anchor_message_id(state: dict[str, Any]) -> str | None:
+    """Return the server anchor, or ``None`` for legacy local projections.
+
+    A present ``available`` flag means the page came from the authoritative
+    history projection. In that mode an empty anchor is meaningful: the HMW
+    card must stay hidden until a valid exact anchor can be loaded.
+    """
+    projection = _history_projection(state)
+    if "available" not in projection:
+        return None
+    return str(projection.get("anchor_message_id") or "")
+
+
+def _history_hmw_available(
+    state: dict[str, Any],
+    journey: dict[str, Any] | None = None,
+) -> bool:
+    """Return the conservative HMW gate for the loaded notebook window.
+
+    The server projection is authoritative for readiness. The session journey
+    is an additional display guard so a just-selected non-PI stage cannot
+    leave a stale card visible during the short remount before its projection
+    refreshes.
+    """
+    projection = _history_projection(state)
+    current = journey or normalize_journey(st.session_state.get("learning_journey"))
+    if str(current.get("current_stage") or DEFAULT_STAGE) != DEFAULT_STAGE:
+        return False
+    if "available" not in projection:
+        # Compatibility with an older in-process adapter that predates the
+        # page projection; the normal API/local service path always supplies
+        # ``available`` above.
+        return hmw_scaffold_available(
+            str(current.get("current_stage") or DEFAULT_STAGE),
+            state.get("messages") or [],
+            enabled=settings.hmw_scaffold_enabled,
+            response_detail=str(current.get("response_detail") or ""),
+        )
+    return bool(projection.get("available"))
+
+
+def _refresh_loaded_history_window(thread_id: str) -> None:
+    """Detect out-of-band transcript writes without dropping loaded pages.
+
+    Normal chat mutations explicitly reset the window. This bounded probe is
+    for app remounts that can follow an external worker or another browser
+    tab: when the total/revision/projection changes, the next render starts at
+    the newest six; otherwise already-prepended pages remain in session.
+    """
+    state = st.session_state.get("_chat_history_window")
+    if not isinstance(state, dict) or not state.get("loaded"):
+        return
+    try:
+        probe = _page_payload(
+            store.get_message_page(thread_id, limit=_HISTORY_PAGE_SIZE)
+        )
+    except Exception:
+        return
+    if (
+        probe["total_count"] != int(state.get("total_count") or 0)
+        or probe["conversation_revision"]
+        != int(state.get("conversation_revision") or 0)
+        or probe["hmw_scaffold"] != _history_projection(state)
+        or probe["messages"]
+        != list(state.get("messages") or [])[-len(probe["messages"]) :]
+    ):
+        reset_chat_history_window(thread_id)
+
+
+def _message_source_ids_for_render(message: Any) -> set[str]:
+    """Collect source and private-attachment ids from a loaded message.
+
+    The page API returns an aggregate source projection, while individual
+    message metadata still carries private attachment descriptors. Keeping
+    both sets merged as pages are prepended lets citation and attachment
+    buttons resolve without reopening the full transcript.
+    """
+    if not isinstance(message, dict):
+        return set()
+    metadata = message.get("metadata")
+    if not isinstance(metadata, dict):
+        return set()
+    values: list[Any] = [
+        metadata.get("source_ids"),
+        metadata.get("attachment_source_ids"),
+        metadata.get("source_refs"),
+        metadata.get("attachments"),
+    ]
+    source_ids: set[str] = set()
+
+    def add(value: Any) -> None:
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if cleaned:
+                source_ids.add(cleaned)
+        elif isinstance(value, dict):
+            for key in ("id", "source_id", "sourceId"):
+                if value.get(key):
+                    add(value[key])
+                    break
+        elif isinstance(value, (list, tuple, set)):
+            for item in value:
+                add(item)
+
+    for value in values:
+        add(value)
+    return source_ids
+
+
+def _history_window(thread_id: str) -> dict[str, Any]:
+    """Return the serializable bounded history window for the active notebook."""
+    existing = st.session_state.get("_chat_history_window")
+    if not isinstance(existing, dict) or str(existing.get("thread_id") or "") != str(thread_id):
+        reset_chat_history_window(thread_id)
+        existing = st.session_state._chat_history_window
+    return existing
+
+
+def _history_page_is_stale(error: BaseException) -> bool:
+    """Return whether a page failure means its revision-bound cursor is stale."""
+    status = getattr(error, "status_code", None)
+    response = getattr(error, "response", None)
+    if status is None and response is not None:
+        status = getattr(response, "status_code", None)
+    try:
+        if int(status or 0) == 409:
+            return True
+    except (TypeError, ValueError):
+        pass
+    text = str(error).lower()
+    return "revision" in text or "stale cursor" in text or "notebook changed" in text
+
+
+def _load_initial_history_window(thread_id: str) -> dict[str, Any]:
+    """Fetch newest six visible messages after an explicit notebook reset."""
+    state = _history_window(thread_id)
+    if state.get("loaded"):
+        return state
+    try:
+        payload = _page_payload(
+            store.get_message_page(thread_id, limit=_HISTORY_PAGE_SIZE)
+        )
+    except Exception:
+        # Keep the empty/unloaded state so a later app rerun can retry. The
+        # error is intentionally short-lived and rendered by the pager rather
+        # than exposing transport or storage details to the student.
+        state["error"] = "Chat history is temporarily unavailable. Try again."
+        state["error_at"] = time.time()
+        return state
+    state.update(
+        {
+            "messages": payload["messages"],
+            "next_cursor": payload["next_cursor"],
+            "total_count": payload["total_count"],
+            "conversation_revision": payload["conversation_revision"],
+            "source_ids": payload["source_ids"],
+            "hmw_scaffold": payload["hmw_scaffold"],
+            "loaded": True,
+            "prepend_pending": False,
+            "loading": False,
+            "error": None,
+            "error_at": 0.0,
+        }
+    )
+    return state
+
+
+def _prepend_history_page(thread_id: str) -> bool:
+    """Prepend one older page, deduplicating by persisted message id."""
+    if (
+        coach_turn_is_streaming()
+        or awaiting_coach_turn_for_thread() is not None
+        or isinstance(st.session_state.get("pending_edit"), dict)
+        or bool(st.session_state.get("editing_message"))
+    ):
+        return False
+    state = _history_window(thread_id)
+    if state.get("loading"):
+        return False
+    cursor = str(state.get("next_cursor") or "").strip()
+    if not cursor:
+        return False
+    state["loading"] = True
+    try:
+        payload = _page_payload(
+            store.get_message_page(thread_id, limit=_HISTORY_PAGE_SIZE, cursor=cursor)
+        )
+    except Exception as error:
+        # Keep already loaded rows and cursor intact so a transient network
+        # failure can be retried. A revision conflict cannot be merged safely;
+        # reset to a fresh newest page while retaining a student-safe notice.
+        if _history_page_is_stale(error):
+            reset_chat_history_window(thread_id)
+            fresh = _load_initial_history_window(thread_id)
+            # Keep the object already held by this render in sync with the
+            # replacement session value; otherwise the current run could paint
+            # a detached stale transcript after the reset.
+            state.clear()
+            state.update(fresh)
+            # Keep the ordinary open flag for the outer workspace rerun. This
+            # separate marker is consumed only by a component-triggered
+            # fragment rerun, where the outer mode="open" call cannot run.
+            state["_history_stale_open_pending"] = True
+            return False
+        state["error"] = "Earlier messages could not be loaded. Try again."
+        state["error_at"] = time.time()
+        state["prepend_pending"] = False
+        state["loading"] = False
+        return False
+    by_id: dict[str, dict[str, Any]] = {}
+    for item in [*payload["messages"], *state.get("messages", [])]:
+        message_id = str(item.get("id") or "").strip()
+        if message_id:
+            by_id[message_id] = item
+    ordered = sorted(
+        by_id.values(),
+        key=lambda item: (str(item.get("created_at") or ""), str(item.get("id") or "")),
+    )
+    source_ids = list(dict.fromkeys([*state.get("source_ids", []), *payload["source_ids"]]))
+    state.update(
+        {
+            "messages": ordered,
+            "next_cursor": payload["next_cursor"],
+            "total_count": payload["total_count"],
+            "conversation_revision": payload["conversation_revision"],
+            "source_ids": source_ids,
+            "hmw_scaffold": payload["hmw_scaffold"],
+            "loaded": True,
+            "prepend_pending": True,
+            "open_pending": False,
+            "loading": False,
+            "error": None,
+            "error_at": 0.0,
+        }
+    )
+    return True
+
+
+def _render_history_pager(thread_id: str, state: dict[str, Any]) -> None:
+    """Mount the bidirectional upward trigger and accessible fallback button."""
+    error_text = str(state.get("error") or "").strip()
+    error_at = float(state.get("error_at") or 0.0)
+    if error_text and (not error_at or time.time() - error_at <= _HISTORY_ERROR_TTL_SECONDS):
+        st.caption(error_text)
+    elif error_text:
+        state["error"] = None
+        state["error_at"] = 0.0
+    cursor = str(state.get("next_cursor") or "").strip()
+    has_more = bool(cursor)
+    busy = bool(
+        coach_turn_is_streaming()
+        or awaiting_coach_turn_for_thread() is not None
+        or isinstance(st.session_state.get("pending_edit"), dict)
+        or bool(st.session_state.get("editing_message"))
+        or bool(state.get("loading"))
+    )
+    component_data = {
+        "thread_id": str(thread_id),
+        "cursor": cursor,
+        "has_more": has_more,
+        "busy": busy,
+    }
+    if _history_pager_component is not None:
+        try:
+            result = _history_pager_component(
+                key=f"history-pager-{thread_id}",
+                data=component_data,
+                width=1,
+                height=0,
+                on_older_change=lambda: None,
+            )
+            trigger = getattr(result, "older", None)
+            if isinstance(trigger, dict) and str(trigger.get("cursor") or "") == cursor:
+                if _prepend_history_page(thread_id):
+                    st.session_state._chat_history_window["_component_prepend"] = True
+        except Exception:
+            # The visible fallback remains available when a browser/component
+            # runtime does not support the Streamlit 1.60 bidi API.
+            pass
+    if has_more:
+        st.button(
+            f"Load {_HISTORY_PAGE_SIZE} earlier messages",
+            key=f"load-earlier-{thread_id}-{cursor[:24]}",
+            disabled=busy,
+            on_click=_prepend_history_page,
+            args=(thread_id,),
+            help="Load the previous six messages",
+            type="tertiary",
+        )
+
+
 def _render_chat_history(
     messages: list[dict[str, Any]],
     *,
     hmw_available: bool,
+    hmw_anchor_message_id: str | None = None,
     visible_source_ids: set[str],
     stop_before_message_id: str | None = None,
     allow_edit: bool = True,
@@ -1703,6 +2216,8 @@ def _render_chat_history(
     Args:
         messages: Rows to paint (full branch, or truncated pending-edit view).
         hmw_available: Whether the HMW scaffold may appear in this branch.
+        hmw_anchor_message_id: Server-projected persisted anchor id. This may
+            be outside the currently loaded window.
         visible_source_ids: Source ids currently shown in this notebook.
         stop_before_message_id: Optional id to stop before (editor-open paths).
         allow_edit: When False, hide Edit on user bubbles (pending-edit inflight).
@@ -1722,6 +2237,7 @@ def _render_chat_history(
     for kind, message in transcript_hmw_render_plan(
         messages,
         hmw_available=hmw_available,
+        anchor_message_id=hmw_anchor_message_id,
     ):
         if kind == "hmw":
             render_hmw_scaffold_if_needed(available=True)
@@ -1766,6 +2282,25 @@ def _render_composer_submit_fragment(
     fragment_started = time.perf_counter()
     fragment_enter_epoch_ms = int(time.time() * 1000)
     request_id = str(uuid.uuid4())
+    thread_id = str(st.session_state.get("thread_id") or "").strip()
+    history_state: dict[str, Any] = {}
+    if thread_id:
+        history_state = _load_initial_history_window(thread_id)
+        messages = list(history_state.get("messages") or [])
+        # The parent may only know sources from the first page. Merge every
+        # loaded page's aggregate and per-message references before rendering
+        # citation/attachment controls.
+        visible_source_ids = set(visible_source_ids)
+        visible_source_ids.update(
+            str(source_id)
+            for source_id in history_state.get("source_ids") or []
+            if str(source_id).strip()
+        )
+        for loaded_message in messages:
+            visible_source_ids.update(
+                _message_source_ids_for_render(loaded_message)
+            )
+        hmw_available = _history_hmw_available(history_state)
     pending = st.session_state.get("pending_edit")
     # Interrupt during an in-flight send can open the editor while the API
     # worker still holds the notebook lease. Close the editor until recovery.
@@ -1797,6 +2332,21 @@ def _render_composer_submit_fragment(
 
     with st.container(key="chat_transcript"):
         with st.container(key="chat_feed"):
+            _render_history_pager(thread_id, history_state)
+            # A component trigger can update the session window before this
+            # fragment paints its transcript. Read it again so the prepended
+            # page appears in the same rerun.
+            messages = list(history_state.get("messages") or [])
+            visible_source_ids.update(
+                str(source_id)
+                for source_id in history_state.get("source_ids") or []
+                if str(source_id).strip()
+            )
+            for loaded_message in messages:
+                visible_source_ids.update(
+                    _message_source_ids_for_render(loaded_message)
+                )
+            hmw_available = _history_hmw_available(history_state)
             chat_log = st.container(key="chat_log")
             with chat_log:
                 history_started = time.perf_counter()
@@ -1813,6 +2363,9 @@ def _render_composer_submit_fragment(
                         _render_chat_history(
                             render_messages,
                             hmw_available=hmw_available,
+                            hmw_anchor_message_id=_history_anchor_message_id(
+                                history_state
+                            ),
                             visible_source_ids=visible_source_ids,
                             allow_edit=False,
                         )
@@ -1820,6 +2373,9 @@ def _render_composer_submit_fragment(
                     _render_chat_history(
                         messages,
                         hmw_available=hmw_available,
+                        hmw_anchor_message_id=_history_anchor_message_id(
+                            history_state
+                        ),
                         visible_source_ids=visible_source_ids,
                         allow_edit=history_allow_edit,
                     )
@@ -1882,6 +2438,17 @@ def _render_composer_submit_fragment(
             layout_started = time.perf_counter()
             sync_composer_layout(max_file_size_mb=settings.max_file_size_mb)
             composer_layout_ms = _duration_ms(layout_started)
+    # A stale cursor means the accumulated window was replaced with the
+    # newest page. Component-triggered fragment reruns do not execute the
+    # outer workspace block, so consume only the stale-recovery flag here;
+    # ordinary notebook opens leave open_pending for workspace.py.
+    if history_state.get("_history_stale_open_pending"):
+        history_state["_history_stale_open_pending"] = False
+        history_state["prepend_pending"] = False
+        sync_chat_scroll(mode="open")
+    elif history_state.get("prepend_pending"):
+        history_state["prepend_pending"] = False
+        sync_chat_scroll(mode="prepend")
     prompt, uploads = normalize_composer_value(composer_value)
     if prompt and not pending_message_id and not awaiting_locked:
         handle_prompt(
@@ -1914,7 +2481,6 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
     selected_sources = [source for source in sources if source.get("selected")]
     allow_model_knowledge = not selected_sources
     st.session_state.allow_model_knowledge = allow_model_knowledge
-    seed_coach_welcome(store, st.session_state.thread_id)
     # Recovery poller mounts from workspace outside this panel so its
     # run_every ticks do not strip the JS scroll-down control. Still clear a
     # stuck streaming flag and try to complete on every chat paint.
@@ -1924,27 +2490,26 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
         and not coach_turn_is_streaming()
     ):
         _try_complete_awaiting_coach_turn()
-    messages = store.get_messages(st.session_state.thread_id)
-    visible_source_ids = {str(source.get("id") or "") for source in sources}
+    _refresh_loaded_history_window(st.session_state.thread_id)
+    history_state = _load_initial_history_window(st.session_state.thread_id)
+    messages = list(history_state.get("messages") or [])
+    visible_source_ids = {
+        str(source.get("id") or "") for source in sources
+    }
+    visible_source_ids.update(
+        str(source_id)
+        for source_id in history_state.get("source_ids") or []
+        if str(source_id).strip()
+    )
     # Private attachments are absent from Sources but remain safe to open from
     # their authoritative message history (including a Coach citation to one).
     for message in messages:
-        metadata = message.get("metadata") or {}
-        visible_source_ids.update(
-            str(source_id)
-            for source_id in metadata.get("attachment_source_ids") or []
-            if str(source_id).strip()
-        )
+        visible_source_ids.update(_message_source_ids_for_render(message))
     if st.session_state.get("edit_confirm_message_id"):
         _confirm_edit_earlier_message_dialog()
 
     journey = normalize_journey(st.session_state.get("learning_journey"))
-    hmw_available = hmw_scaffold_available(
-        str(journey.get("current_stage") or DEFAULT_STAGE),
-        messages,
-        enabled=settings.hmw_scaffold_enabled,
-        response_detail=str(journey.get("response_detail") or ""),
-    )
+    hmw_available = _history_hmw_available(history_state, journey)
     _render_composer_submit_fragment(
         messages,
         hmw_available,

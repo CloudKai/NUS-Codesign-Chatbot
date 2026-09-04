@@ -373,6 +373,10 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                         1,
                     )
                 )
+                # Search remounts can be fragment-local, so explicitly
+                # rehydrate the body-hosted chat control and mark it hidden
+                # while no chat surface is mounted.
+                sync_chat_scroll(mode="settle")
             elif center_view == "library":
                 with st.container(key="sources_panel"):
                     sources_started = time.perf_counter()
@@ -387,6 +391,9 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                         )
                     )
                     sync_sources_scroll()
+                # Library uses the same center column but has no chat feed;
+                # keep the control's ARIA state in sync with that remount.
+                sync_chat_scroll(mode="settle")
             else:
                 with st.container(key="chat_panel"):
                     chat_started = time.perf_counter()
@@ -397,7 +404,12 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                             1,
                         )
                     )
-                if panel == "Chat" and st.session_state.pop(
+                history_window = st.session_state.get("_chat_history_window")
+                if panel == "Chat" and isinstance(history_window, dict) and history_window.pop(
+                    "open_pending", False
+                ):
+                    sync_chat_scroll(mode="open")
+                elif panel == "Chat" and st.session_state.pop(
                     "chat_follow_bottom", False
                 ):
                     sync_chat_scroll(mode="send")

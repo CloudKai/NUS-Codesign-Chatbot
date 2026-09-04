@@ -689,10 +689,8 @@ def test_missing_given_name_falls_back_safely(tmp_path):
 
 def test_logout_user_navigates_to_fastapi_logout(monkeypatch):
     html = MagicMock(name="streamlit_html")
-    link_button = MagicMock(name="link_button")
     stop = MagicMock(name="stop", side_effect=RuntimeError("stop"))
     monkeypatch.setattr(st, "html", html)
-    monkeypatch.setattr(st, "link_button", link_button)
     monkeypatch.setattr(st, "stop", stop)
     monkeypatch.setattr(
         auth_gate,
@@ -710,7 +708,6 @@ def test_logout_user_navigates_to_fastapi_logout(monkeypatch):
     assert "http://127.0.0.1:8000/api/v1/auth/logout" in markup
     assert "window.location.replace" in markup
     assert html.call_args.kwargs == {"unsafe_allow_javascript": True}
-    link_button.assert_called_once()
     stop.assert_called_once_with()
 
 

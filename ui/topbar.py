@@ -23,11 +23,7 @@ def prepare_workspace_context() -> tuple[str, str | None]:
     thread = store.get_thread(st.session_state.thread_id) or {}
     legacy_title_replacement = NotebookTitleService.replacement_for_legacy_title(
         str(thread.get("name") or ""),
-        [
-            str(message.get("content") or "")
-            for message in store.get_messages(st.session_state.thread_id)
-            if message.get("role") == "user"
-        ],
+        store.get_oldest_user_messages(st.session_state.thread_id, limit=2),
     )
     if legacy_title_replacement:
         store.update_thread(

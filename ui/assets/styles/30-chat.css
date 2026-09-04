@@ -598,7 +598,7 @@
         position:fixed;
         left:50%;
         bottom:3.5rem;
-        z-index:60;
+        z-index:210;
         display:flex;
         align-items:center;
         justify-content:center;
@@ -613,6 +613,8 @@
         box-shadow:0 2px 10px color-mix(in srgb,var(--cd-shadow) 24%,transparent);
         cursor:pointer;
         transform:translateX(-50%);
+        margin-bottom:env(safe-area-inset-bottom, 0px);
+        visibility:hidden;
         opacity:0;
         pointer-events:none;
         transition:opacity .15s ease;
@@ -633,6 +635,7 @@
     }
 
     .cd-chat-scroll-down.cd-chat-scroll-down-visible {
+        visibility:visible;
         opacity:1;
         pointer-events:auto;
     }

@@ -1106,7 +1106,10 @@ def add_url_source(
 def backfill_legacy_sources(store: StudentStore, thread_id: str) -> int:
     created = 0
     files_root = settings.files_dir.resolve()
-    for message in store.get_messages(thread_id):
+    # Notebook opening must not hydrate the entire transcript just to discover
+    # legacy upload descriptors.  StudentStore returns an owner/revision-bound
+    # metadata projection with message bodies deliberately omitted.
+    for message in store.get_message_metadata(thread_id):
         for upload in (message.get("metadata") or {}).get("uploads") or []:
             path_value = str(upload.get("path") or "")
             if not path_value:
