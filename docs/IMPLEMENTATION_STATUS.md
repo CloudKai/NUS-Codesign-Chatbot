@@ -2,6 +2,160 @@
 
 ## CURRENT STATUS
 
+### Professional lecturer dashboard redesign (2026-09-05)
+
+**Behavior.** The lecturer shell now presents one persistent desktop navigation
+rail with the display labels Overview, Students, Critical thinking,
+Participation, and Research review while retaining the existing internal page
+tokens and API/cache keys. Overview leads with three class-health metrics,
+stage distribution, an actionable follow-up queue, and a localized empty
+activity state. Students is a compact, searchable roster with truthful
+`Has activity` filtering, readable long identities, and short `Open` actions. A
+selected notebook has one desktop roster + Chat/Sources center +
+Progression/Review evidence rail; at 800px and below, a compact header and one
+View selector show exactly one surface at a time. Panel fetches have local
+loading/error/retry states, and trend charts clean invalid rows, use a UTC
+temporal scale with an explicit padded domain, and constrain ticks to readable
+day labels without Vega extent warnings. Appearance persistence failures stay
+visible as recoverable session-local notices.
+
+**Files.** `ui/professor.py`, `ui/assets/styles/70-professor.css`,
+`streamlit_app.py`, `tests/ui/test_professor_ui.py`, and this handoff. No
+backend, auth, persistence, schema, or student-data contracts changed.
+
+**Validation.** The focused professor UI plus professor analytics/research HTTP
+suites pass (54 tests). Project `compileall` and `git diff --check` pass. The
+full suite was run and reports 13 failures in domain/UI/deployment coverage
+outside this redesign; the focused affected suites remain green. Sol xHigh's
+independent final review is **APPROVE** with no remaining P0–P2 findings.
+Browser evidence from the deterministic lecturer preview covers 1440px,
+1024px, 800px, and 390px layouts, Light/Dark/System controls, keyboard-visible
+navigation, lazy notebook surfaces, readable follow-up labels, and a clean
+fresh-tab console. At 1440px the trend axis shows one readable label per day
+(01–08 Aug); at 390px the workbench has one outer scroll flow and no horizontal
+overflow.
+
+**Compatibility, migration, and rollback.** Existing page/cache/widget keys
+remain stable where feasible, including the center workspace key and refresh
+key. The staff-authentication-before-student-initialization boundary, read-only
+FastAPI behavior, and lazy Chat-only notebook opening are unchanged. The
+desktop workbench uses a flex column shell with a flex-none context header and
+flex workbench; mobile overrides remove nested roster/transcript/path
+scrollports. Rollback is code only by reverting the listed UI/test/status files;
+no migration is needed.
+
+**Known risks/blockers.** Browser validation uses deterministic local fixtures,
+so the authenticated production-shaped roster should receive a final smoke
+pass before release. The full-suite failures listed above are unrelated to the
+lecturer redesign and should be triaged separately. Streamlit emits an
+existing server-side `st.components.v1.html` deprecation notice; it is not a
+browser console warning from this UI.
+
+**Next exact action.** Run the authenticated lecturer smoke test from
+`streamlit_app.py` at 1440px and 390px, switch each rail section and appearance
+mode, open a real notebook, and confirm the same lazy/read-only behavior before
+release.
+
+### Lecturer dashboard global top-bar outline (2026-09-05)
+
+**Behavior.** The same review-style top bar now appears on Overview, Students,
+Learning, Engagement, and Research, not only after a notebook is opened. Its
+Section dropdown routes through the existing dashboard page state, Appearance
+uses the persisted System/Light/Dark preference, and the lecturer sign-out
+action remains available after the vertical rail is hidden. The selected
+notebook bar now includes Section and Sign out as well as its existing Screen,
+Appearance, refresh, and Notebooks controls.
+
+**Files.** `ui/professor.py`, `ui/assets/styles/70-professor.css`,
+`tests/ui/test_professor_ui.py`, and this handoff. No backend, API, schema,
+AWS, authentication, or persisted student-data changes were made.
+
+**Validation.** Fifteen focused professor UI tests and the professor
+analytics/research HTTP tests passed (48 tests total); project `compileall`
+and `git diff --check` passed. AppTest verified the
+Overview Section dropdown routes to Students and the Appearance dropdown
+persists Light while the existing radio state stays synchronized.
+
+**Compatibility, migration, and rollback.** The existing sidebar radio,
+segmented appearance control, and widget keys remain rendered as hidden
+state/keyboard compatibility seams. The change is code-only and can be
+rolled back by reverting the listed UI/test/status files; no data migration is
+needed.
+
+**Known risk.** A live authenticated visual smoke test is still required to
+confirm the CSS rail collapse and top-bar wrapping in the deployed Streamlit
+session, especially at 390 px.
+
+**Next exact action.** Run the local authenticated lecturer smoke test at
+desktop and 390 px widths, use Section to visit each dashboard page, switch
+Appearance, and verify the selected-notebook bar still exposes Screen, Review,
+refresh, back, and sign-out.
+
+### Lecturer review-workbench top-bar outline (2026-09-05)
+
+**Behavior.** The selected lecturer notebook now uses a compact review-style
+top bar for notebook context, Screen selection (Chat, Sources, Progression, or
+Review), appearance selection (System, Light, or Dark), refresh, and return to
+Notebooks. The lower workbench retains the existing roster, read-only
+transcript, source actions, Review/Progression projections, and independent
+desktop scroll regions. Mobile controls stack into one outer scroll flow.
+
+**Files.** `ui/professor.py`, `ui/assets/styles/70-professor.css`,
+`tests/ui/test_professor_ui.py`, and this handoff. No backend, API, schema,
+AWS, authentication, or persisted student-data changes were made.
+
+**Validation.** Fourteen focused professor UI tests passed, including top-bar
+Screen and appearance behavior; desktop and 390 px deterministic browser
+previews were checked; project `compileall` and `git diff --check` passed.
+
+**Compatibility, migration, and rollback.** Existing workspace radio and
+sidebar widgets remain rendered as compatibility/state seams while the new
+top bar is the visible control surface for an open notebook. Reverting the
+listed UI/test/status changes restores the previous outline.
+
+**Known risk.** Browser checks use deterministic local fixtures; the real
+authenticated lecturer flow should still be smoke-tested in both appearance
+modes before release.
+
+**Next exact action.** Run the controlled authenticated lecturer smoke test at
+desktop and 390 px widths, verify Screen/Appearance changes and Review loading,
+then release if no console or remount errors appear.
+
+### Lecturer workbench cache, viewport, and appearance follow-up (2026-09-05)
+
+**Behavior.** The selected-notebook workbench now keeps independent
+notebook-scoped selections for the center workspace and Thinking Path rail. The
+rail can fetch and render Review or Progression while the center remains on
+Chat; the two surfaces share only their per-notebook Review/Progression payload
+caches, so a projection is not requested twice. Opening a notebook stays
+Chat-only. The lecturer branch restores the authenticated appearance preference
+and syncs the appearance widget before injecting theme CSS, without running
+student session initialization. Desktop workbench panes keep independent
+scrollports inside a box-sized single viewport; mobile returns to one normal
+outer scroll flow.
+
+**Files.** `ui/professor.py`, `streamlit_app.py`,
+`ui/assets/styles/70-professor.css`, `tests/ui/test_professor_ui.py`, and this
+handoff. No backend, API, schema, AWS, or persisted data changes were made.
+
+**Validation.** Professor UI plus analytics/research HTTP tests passed (46
+tests), project `compileall` passed, and `git diff --check` passed. The new
+AppTests cover preference restoration/persistence, lazy Chat-only notebook
+opening, and shared center/rail Review/Progression cache state.
+
+**Compatibility, migration, and rollback.** Existing widget keys, read-only
+professor API calls, student notebook data, and lazy endpoint boundaries remain
+unchanged. Rollback is code-only: revert the listed UI/test/status changes.
+
+**Known risk.** Browser checks use deterministic local fixtures; the real
+lecturer session should still be smoke-tested at desktop and 390 px widths in
+both appearance modes before deployment.
+
+**Next exact action.** Sol High's final review is complete and approved. Run
+the controlled authenticated lecturer smoke test at desktop and 390 px widths
+in both appearance modes, then release only after the Review rail, independent
+scrolling, and appearance persistence pass.
+
 ### Students roster reference alignment (2026-09-05)
 
 **Behavior.** The top-level Students view now follows the supplied roster

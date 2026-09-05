@@ -1,4 +1,4 @@
-"""Professor-facing learning analytics rendered solely from the FastAPI client."""
+"""Lecturer-facing learning analytics rendered solely from the FastAPI client."""
 
 from __future__ import annotations
 
@@ -19,18 +19,31 @@ from ui.components import (
     review_card_html,
     review_stage_sections_html,
 )
-from ui.constants import PRODUCT_SUBTITLE, PRODUCT_TITLE
+from ui.constants import APPEARANCE_MODES, DEFAULT_APPEARANCE, PRODUCT_SUBTITLE, PRODUCT_TITLE
 from ui.runtime import local_api_client
+from ui.settings import persist_appearance, sync_appearance_from_widget
+from ui.theme import render_theme_css
 
 _PAGES = ("Overview", "Students", "Learning", "Engagement", "Research")
+_PAGE_LABELS = {
+    "Overview": "Overview",
+    "Students": "Students",
+    "Learning": "Critical thinking",
+    "Engagement": "Participation",
+    "Research": "Research review",
+}
 _PHASE_LABELS = tuple(stage.label.title() for stage in THINKING_STAGES)
 _WORKSPACE_TABS = ("Chat", "Sources", "Progression", "Review")
+_CENTER_TABS = ("Chat", "Sources")
+_PATH_TABS = ("Progression", "Review")
+_MOBILE_VIEWS = ("Roster", "Chat", "Sources", "Thinking Path")
 _ROSTER_CACHE_KEY = "professor_roster_cache"
 _DETAIL_CACHE_KEY = "professor_student_detail_cache"
 _CHAT_CACHE_KEY = "professor_chat_cache"
 _SOURCES_CACHE_KEY = "professor_sources_cache"
 _JOURNEY_CACHE_KEY = "professor_journey_cache"
 _REVIEW_CACHE_KEY = "professor_review_cache"
+_PROFESSOR_APPEARANCE_OWNER_KEY = "professor_appearance_owner"
 
 
 _PAGE_META: dict[str, dict[str, str]] = {
@@ -45,18 +58,18 @@ _PAGE_META: dict[str, dict[str, str]] = {
         "description": "Open a student record to inspect notebooks and read-only learning evidence.",
     },
     "Learning": {
-        "eyebrow": "Learning signals",
-        "title": "Learning",
+        "eyebrow": "Critical-thinking signals",
+        "title": "Critical thinking",
         "description": "Descriptive critical-thinking patterns across the latest assessed responses.",
     },
     "Engagement": {
-        "eyebrow": "Activity",
-        "title": "Engagement",
+        "eyebrow": "Participation signals",
+        "title": "Participation",
         "description": "Usage patterns that help staff understand where support may be useful.",
     },
     "Research": {
         "eyebrow": "Research workbench",
-        "title": "Research Review",
+        "title": "Research review",
         "description": "Review immutable automated observations against student utterances, then record independent human validation.",
     },
 }
@@ -153,6 +166,22 @@ def _clear_notebook_tab_caches(student_id: str, notebook_id: str | None = None) 
                     cache.pop(key, None)
         else:
             cache.pop((student_id, notebook_id), None)
+    if notebook_id is None:
+        rail_prefix = f"professor_thinking_rail_tab_{student_id}_"
+        for key in list(st.session_state):
+            if str(key).startswith(rail_prefix):
+                st.session_state.pop(key, None)
+        mobile_prefix = f"professor_mobile_view_{student_id}_"
+        for key in list(st.session_state):
+            if str(key).startswith(mobile_prefix):
+                st.session_state.pop(key, None)
+    else:
+        st.session_state.pop(
+            f"professor_thinking_rail_tab_{student_id}_{notebook_id}", None
+        )
+        st.session_state.pop(
+            f"professor_mobile_view_{student_id}_{notebook_id}", None
+        )
 
 
 def _invalidate_student_detail_cache(student_id: str) -> None:
@@ -184,6 +213,235 @@ def _invalidate_review_cache(student_id: str, notebook_id: str) -> None:
     """Drop one notebook review cache entry."""
     cache = st.session_state.get(_REVIEW_CACHE_KEY) or {}
     cache.pop((student_id, notebook_id), None)
+
+
+def _restore_professor_appearance(client: Any) -> None:
+    """Restore staff appearance through the authenticated preferences API.
+
+    Lecturer rendering intentionally skips ``initialize_session`` because that
+    helper creates/selects student notebooks. This small owner-scoped restore
+    reads only the persisted preference and seeds the shared appearance widget
+    before the professor theme is injected.
+    """
+    owner = str(st.session_state.get("_auth_bound_sub") or "professor")
+    if st.session_state.get(_PROFESSOR_APPEARANCE_OWNER_KEY) != owner:
+        preferences: dict[str, Any] = {}
+        get_preferences = getattr(client, "get_preferences", None)
+        if callable(get_preferences):
+            try:
+                payload = get_preferences()
+                if isinstance(payload, dict):
+                    preferences = payload
+            except Exception:  # noqa: BLE001 - theme fallback must not block analytics
+                preferences = {}
+        stored = str(preferences.get("appearance") or "").strip()
+        chosen = stored if stored in APPEARANCE_MODES else DEFAULT_APPEARANCE
+        st.session_state.appearance = chosen
+        st.session_state.setting_appearance = chosen
+        st.session_state[_PROFESSOR_APPEARANCE_OWNER_KEY] = owner
+        return
+
+    current = str(st.session_state.get("appearance") or DEFAULT_APPEARANCE)
+    if current not in APPEARANCE_MODES:
+        current = DEFAULT_APPEARANCE
+    st.session_state.appearance = current
+    st.session_state.setdefault("setting_appearance", current)
+
+
+def _set_professor_thinking_tab(tab_key: str, tab: str) -> None:
+    """Set the independent Thinking Path projection selected by the rail."""
+    if tab in _PATH_TABS:
+        st.session_state[tab_key] = tab
+
+
+def _page_display_label(page: str) -> str:
+    """Return the lecturer-facing label for an internal dashboard page token."""
+    return _PAGE_LABELS.get(page, page)
+
+
+def _set_professor_page_from_mobile(page_key: str) -> None:
+    """Route the compact mobile section selector through the durable page state."""
+    page = str(st.session_state.get(page_key) or "")
+    if page in _PAGES:
+        st.session_state["professor_page"] = page
+
+
+def _set_professor_appearance(appearance_key: str) -> None:
+    """Persist a lecturer appearance selection through the shared preference."""
+    appearance = str(
+        st.session_state.get(appearance_key) or DEFAULT_APPEARANCE
+    )
+    if appearance not in APPEARANCE_MODES:
+        appearance = DEFAULT_APPEARANCE
+    st.session_state.appearance = appearance
+    st.session_state.setting_appearance = appearance
+    _persist_professor_appearance_safely()
+
+
+def _persist_professor_appearance_safely() -> None:
+    """Persist appearance without allowing a preference outage to replace the dashboard.
+
+    The local API is intentionally optional for the lecturer preview and can be
+    unavailable while analytics remains readable. The selected theme is already
+    applied to the current session, so a persistence failure is non-blocking and
+    is surfaced as a small inline notice instead of a traceback.
+    """
+    try:
+        persist_appearance()
+    except Exception:  # noqa: BLE001 - preference persistence must not break analytics
+        st.session_state["_professor_appearance_persist_error"] = True
+
+
+def _render_professor_appearance_notice() -> None:
+    """Render and consume one localized appearance persistence warning."""
+    if st.session_state.pop("_professor_appearance_persist_error", False):
+        st.caption(
+            "Appearance updated for this session; saving is unavailable right now."
+        )
+
+
+def _set_professor_mobile_view(
+    view_key: str, workspace_key: str, rail_key: str
+) -> None:
+    """Route the mobile one-surface selector to the existing pane state keys."""
+    view = str(st.session_state.get(view_key) or "")
+    if view in _CENTER_TABS:
+        st.session_state[workspace_key] = view
+    elif view == "Thinking Path":
+        if str(st.session_state.get(rail_key) or "") not in _PATH_TABS:
+            st.session_state[rail_key] = "Progression"
+
+
+def _render_professor_signout_control(key: str) -> None:
+    """Render the staff sign-out action in a compact lecturer control row."""
+    logout_url = app_logout_url()
+    if logout_url:
+        st.markdown(
+            '<div class="professor-mobile-account">'
+            f'<a href="{escape(logout_url, quote=True)}" target="_self" '
+            'rel="noopener">Sign out</a></div>',
+            unsafe_allow_html=True,
+        )
+    elif st.button("Sign out", key=key, use_container_width=True, type="tertiary"):
+        logout_user()
+
+
+def _render_professor_mobile_header(
+    page: str,
+    *,
+    student_id: str | None = None,
+    student: dict[str, Any] | None = None,
+    notebook: dict[str, Any] | None = None,
+) -> None:
+    """Render compact section controls that are visible only on narrow screens.
+
+    Desktop keeps the persistent navigation rail as the only section control.
+    Mobile uses this compact header and, for an opened notebook, a single
+    ``View`` selector so roster, transcript, sources, and Thinking Path never
+    compete for vertical space.
+    """
+    current_page = page if page in _PAGES else "Overview"
+    page_key = "professor_mobile_page"
+    page_kwargs: dict[str, Any] = {
+        "key": page_key,
+        "format_func": _page_display_label,
+        "on_change": _set_professor_page_from_mobile,
+        "args": (page_key,),
+    }
+    if page_key not in st.session_state:
+        page_kwargs["index"] = _PAGES.index(current_page)
+    elif st.session_state.get(page_key) != current_page:
+        st.session_state[page_key] = current_page
+
+    current_appearance = str(
+        st.session_state.get("appearance") or DEFAULT_APPEARANCE
+    )
+    if current_appearance not in APPEARANCE_MODES:
+        current_appearance = DEFAULT_APPEARANCE
+    appearance_key = "professor_mobile_appearance"
+    appearance_kwargs: dict[str, Any] = {
+        "key": appearance_key,
+        "on_change": _set_professor_appearance,
+        "args": (appearance_key,),
+    }
+    if appearance_key not in st.session_state:
+        appearance_kwargs["index"] = APPEARANCE_MODES.index(current_appearance)
+    elif st.session_state.get(appearance_key) != current_appearance:
+        st.session_state[appearance_key] = current_appearance
+
+    notebook_id = str((notebook or {}).get("id") or "")
+    workspace_key = f"professor_workspace_tab_{student_id}_{notebook_id}"
+    rail_key = f"professor_thinking_rail_tab_{student_id}_{notebook_id}"
+    view_key = f"professor_mobile_view_{student_id}_{notebook_id}"
+    view_kwargs: dict[str, Any] = {
+        "key": view_key,
+        "on_change": _set_professor_mobile_view,
+        "args": (view_key, workspace_key, rail_key),
+    }
+    current_view = "Chat"
+    if notebook_id:
+        center = str(st.session_state.get(workspace_key) or "Chat")
+        path = str(st.session_state.get(rail_key) or "Progression")
+        current_view = center if center in _CENTER_TABS else "Thinking Path"
+        if path in _PATH_TABS and center not in _CENTER_TABS:
+            current_view = "Thinking Path"
+        if view_key not in st.session_state:
+            view_kwargs["index"] = _MOBILE_VIEWS.index(current_view)
+        elif st.session_state.get(view_key) not in _MOBILE_VIEWS:
+            st.session_state[view_key] = current_view
+
+    with st.container(key="professor_mobile_header"):
+        with st.container(key="professor_mobile_header_row"):
+            brand, section, appearance, account = st.columns(
+                [1.45, .95, .9, .6], gap="small"
+            )
+            with brand:
+                context = (
+                    f'{escape(str((student or {}).get("name") or "Student"))} / '
+                    f'{escape(_notebook_card_label(notebook or {}))}'
+                    if notebook_id
+                    else "Lecturer dashboard"
+                )
+                st.markdown(
+                    '<div class="professor-mobile-brand">'
+                    '<span class="professor-mobile-eyebrow">CDE2300 · Course Analytics</span>'
+                    f'<strong>{context}</strong>'
+                    '<span>Lecturer workspace</span></div>',
+                    unsafe_allow_html=True,
+                )
+            with section:
+                st.selectbox("Section", _PAGES, **page_kwargs)
+            with appearance:
+                st.selectbox("Appearance", APPEARANCE_MODES, **appearance_kwargs)
+            with account:
+                _render_professor_signout_control("professor_mobile_sign_out")
+
+        if notebook_id and student_id:
+            actions = st.columns([.5, .5], gap="small")
+            with actions[0]:
+                if st.button(
+                    "Back",
+                    key=f"professor_mobile_back_notebooks_{student_id}",
+                    use_container_width=True,
+                    help="Return to the student's notebooks",
+                ):
+                    st.session_state.pop(f"professor_open_notebook_{student_id}", None)
+                    _clear_notebook_tab_caches(student_id, notebook_id)
+                    st.rerun()
+            with actions[1]:
+                if st.button(
+                    "Refresh",
+                    key=f"professor_mobile_workbench_refresh_{student_id}_{notebook_id}",
+                    use_container_width=True,
+                    help="Refresh this view",
+                ):
+                    _invalidate_chat_cache(student_id, notebook_id)
+                    _invalidate_sources_cache(student_id, notebook_id)
+                    _invalidate_journey_cache(student_id, notebook_id)
+                    _invalidate_review_cache(student_id, notebook_id)
+                    st.rerun()
+            with st.container(key=f"professor_mobile_view_switcher_{student_id}_{notebook_id}"):
+                st.selectbox("View", _MOBILE_VIEWS, **view_kwargs)
 
 
 def _format_file_size(size: int | float | None) -> str:
@@ -256,7 +514,7 @@ def _student_row_caption(row: dict[str, Any]) -> str:
 
 
 def _render_page_header(page: str) -> None:
-    """Render a compact page heading with the shared module context."""
+    """Render the single page heading; product identity stays in the rail."""
     meta = _PAGE_META.get(page, _PAGE_META["Overview"])
     st.markdown(
         '<header class="professor-page-header">'
@@ -264,10 +522,6 @@ def _render_page_header(page: str) -> None:
         f'<p class="professor-page-eyebrow">{escape(meta["eyebrow"])}</p>'
         f'<h2>{escape(meta["title"])}</h2>'
         f'<p>{escape(meta["description"])}</p>'
-        '</div>'
-        '<div class="professor-page-context">'
-        f'<span class="professor-page-context-code">{escape(PRODUCT_TITLE)}</span>'
-        f'<span>{escape(PRODUCT_SUBTITLE)}</span>'
         '</div>'
         '</header>',
         unsafe_allow_html=True,
@@ -301,21 +555,28 @@ def _render_sidebar() -> str:
             unsafe_allow_html=True,
         )
         st.markdown(
-            '<p class="professor-sidebar-nav-label">Professor dashboard navigation</p>',
+            '<p class="professor-sidebar-nav-label">Lecturer dashboard</p>',
             unsafe_allow_html=True,
         )
         page = st.radio(
-            "Professor dashboard navigation",
+            "Lecturer dashboard navigation",
             _PAGES,
+            format_func=_page_display_label,
             label_visibility="collapsed",
             key="professor_page",
         )
-        professor_name = escape(str(st.session_state.get("display_name") or "Teaching staff"))
+        st.segmented_control(
+            "Appearance",
+            APPEARANCE_MODES,
+            key="setting_appearance",
+            on_change=_persist_professor_appearance_safely,
+        )
+        professor_name = escape(str(st.session_state.get("display_name") or "Lecturer"))
         logout_url = app_logout_url()
         if logout_url:
             st.markdown(
                 '<div class="professor-account professor-sidebar-account">'
-                f"<span>{professor_name}</span>"
+                f'<span><small>Lecturer</small>{professor_name}</span>'
                 f'<a href="{escape(logout_url, quote=True)}" target="_self" '
                 'rel="noopener">Sign out</a></div>',
                 unsafe_allow_html=True,
@@ -379,13 +640,38 @@ def _bar_rows(
         )
 
 
-def _attention_table(rows: list[dict[str, Any]]) -> None:
-    """Render deterministic attention reasons in a responsive roster table."""
-    if not rows:
-        st.caption("No current follow-up signals under the configured academic thresholds.")
+def _open_professor_student(student_id: str) -> None:
+    """Open a student from a follow-up row without changing backend state."""
+    if not student_id:
         return
-    table_rows: list[str] = []
+    # The sidebar radio is rendered before Overview's follow-up table. Keep a
+    # one-run handoff so Streamlit can seed that already-rendered widget before
+    # the next script pass instead of restoring its previous page value.
+    st.session_state["_professor_pending_page"] = "Students"
+    st.session_state["professor_selected_student_id"] = student_id
+    st.session_state.pop(f"professor_open_notebook_{student_id}", None)
+    _clear_notebook_tab_caches(student_id)
+    st.rerun()
+
+
+def _attention_table(
+    rows: list[dict[str, Any]], *, action_key_prefix: str = "professor_followup"
+) -> None:
+    """Render deterministic follow-up rows with a direct student action."""
+    if not rows:
+        st.caption("No students need follow-up under the configured academic thresholds.")
+        return
+    headers = ("Student", "Reason", "Stage", "Score", "Last active", "Action")
+    headers = "".join(f"<span>{escape(label)}</span>" for label in headers)
+    st.markdown(
+        '<div class="professor-followup-table">'
+        f'<div class="professor-followup-header">{headers}</div></div>',
+        unsafe_allow_html=True,
+    )
     for row in rows:
+        student_id = str(row.get("id") or "")
+        if not student_id:
+            continue
         reasons = "; ".join(
             str(signal.get("reason") or "")
             for signal in row.get("needs_attention", [])
@@ -398,25 +684,25 @@ def _attention_table(rows: list[dict[str, Any]]) -> None:
             ("Score", _score(row.get("facione_overall"))),
             ("Last active", _when(row.get("last_active"))),
         )
-        table_rows.append(
-            '<div class="professor-followup-row" role="row">'
-            + "".join(
-                f'<span data-label="{escape(label)}" role="cell">{escape(str(value))}</span>'
-                for label, value in cells
-            )
-            + "</div>"
-        )
-    headers = "".join(
-        f'<span role="columnheader">{escape(label)}</span>'
-        for label in ("Student", "Reason", "Stage", "Score", "Last active")
-    )
-    st.markdown(
-        '<div class="professor-followup-table" role="table">'
-        f'<div class="professor-followup-header" role="row">{headers}</div>'
-        + "".join(table_rows)
-        + "</div>",
-        unsafe_allow_html=True,
-    )
+        with st.container(key=f"{action_key_prefix}_row_{student_id}"):
+            row_columns = st.columns([1.05, 1.7, 1.1, .75, 1, .7], gap="small")
+            for column, (label, value) in zip(row_columns[:5], cells):
+                with column:
+                    st.markdown(
+                        f'<span class="professor-followup-cell" '
+                        f'data-label="{escape(label)}" '
+                        f'aria-label="{escape(label)}: {escape(str(value))}">'
+                        f"{escape(str(value))}</span>",
+                        unsafe_allow_html=True,
+                    )
+            with row_columns[5]:
+                if st.button(
+                    "Open",
+                    key=f"{action_key_prefix}_{student_id}",
+                    use_container_width=True,
+                    help=f"Open {str(row.get('name') or 'student')}",
+                ):
+                    _open_professor_student(student_id)
 
 
 def _line_chart(
@@ -429,21 +715,71 @@ def _line_chart(
     y_domain: tuple[float, float] | None = None,
 ) -> None:
     """Render a restrained time-series chart from row-oriented API data."""
+    if not rows:
+        st.caption(f"No {y_label.lower()} data is available yet.")
+        return
     frame = pd.DataFrame.from_records(rows, columns=[x, y])
-    frame[x] = pd.to_datetime(frame[x], errors="coerce")
+    # Vega's temporal extent calculation can briefly see an empty data store
+    # while Streamlit mounts a chart, producing a noisy ``Infinity`` warning.
+    # Clean the date field first, then provide an explicit domain so the chart
+    # remains a truthful temporal scale even while it is mounting. Invalid rows
+    # are excluded before any chart is emitted.
+    frame["_professor_chart_date"] = pd.to_datetime(
+        frame[x], errors="coerce", utc=True
+    )
     frame[y] = pd.to_numeric(frame[y], errors="coerce")
+    frame = frame.dropna(subset=["_professor_chart_date", y])
+    if frame.empty:
+        st.caption(f"No {y_label.lower()} data is available yet.")
+        return
+    frame = frame.sort_values("_professor_chart_date")
+    start = frame["_professor_chart_date"].min()
+    end = frame["_professor_chart_date"].max()
+    if start == end:
+        # A one-point trend still deserves a visible mark without a zero-width
+        # domain. Keep the expansion small and date-based for readability.
+        start = start - pd.Timedelta(days=1)
+        end = end + pd.Timedelta(days=1)
+    # Add a half-day breathing room around the endpoints. This keeps the
+    # first/last day labels inside the plot when Vega applies overlap
+    # handling, while the line itself still uses the exact assessment times.
+    temporal_domain = [
+        (start - pd.Timedelta(hours=12)).isoformat(),
+        (end + pd.Timedelta(hours=12)).isoformat(),
+    ]
     chart = (
         alt.Chart(frame)
         .mark_line(color="#147D74", strokeWidth=2)
         .encode(
-            x=alt.X(f"{x}:T", title=x_label, axis=alt.Axis(format="%d %b")),
+            x=alt.X(
+                "_professor_chart_date:T",
+                title=x_label,
+                # Use a UTC time scale so date ticks line up with the
+                # normalised API timestamps regardless of the lecturer's
+                # browser timezone.
+                scale=alt.Scale(type="utc", domain=temporal_domain),
+                # Keep labels at day-level granularity. Without an explicit
+                # temporal interval Vega may choose sub-day ticks and the
+                # formatted labels repeat the same date several times across
+                # the chart.
+                axis=alt.Axis(
+                    format="%d %b",
+                    tickCount={"interval": "day", "step": 1},
+                    labelOverlap=True,
+                    labelFlush=True,
+                ),
+            ),
             y=alt.Y(
                 f"{y}:Q",
                 title=y_label,
                 scale=alt.Scale(domain=list(y_domain)) if y_domain else alt.Scale(zero=True),
             ),
             tooltip=[
-                alt.Tooltip(f"{x}:T", title=x_label, format="%d %b %Y"),
+                alt.Tooltip(
+                    "_professor_chart_date:T",
+                    title=x_label,
+                    format="%d %b %Y",
+                ),
                 alt.Tooltip(f"{y}:Q", title=y_label),
             ],
         )
@@ -453,29 +789,44 @@ def _line_chart(
     st.altair_chart(chart, width="stretch")
 
 
+def _render_panel_error(message: str, retry_key: str) -> None:
+    """Render a safe panel-level error with an explicit retry action."""
+    st.error(message)
+    if st.button("Retry", key=retry_key, type="secondary"):
+        st.rerun()
+
+
 def _render_overview(client) -> None:
     """Render the ten-second class overview from one authorised API response."""
-    data = client.professor_overview()
+    try:
+        with st.spinner("Loading class snapshot…"):
+            data = client.professor_overview()
+    except Exception:  # noqa: BLE001 - do not expose analytics or SQL details
+        _render_panel_error(
+            "The class snapshot is unavailable right now.",
+            "professor_overview_retry",
+        )
+        return
     updated = _when(data.get("generated_at"))
     with st.container(key="professor_overview_metrics"):
         st.markdown(
-            f'<div class="professor-updated"><span>Class snapshot</span>'
+            f'<div class="professor-updated"><span>Last refresh</span>'
             f'<time datetime="{escape(str(data.get("generated_at") or ""), quote=True)}">'
             f"Last updated {escape(updated)}</time></div>",
             unsafe_allow_html=True,
         )
         metrics = st.columns(3, gap="small")
         with metrics[0]:
-            _metric("Students", str(data["students"]), "enrolled records")
+            _metric("Students", str(data["students"]), "enrolled")
         with metrics[1]:
             _metric(
-                "Active this week",
+                "Students active (7 days)",
                 f"{data['active_students_week']} / {data['students']}",
                 "with current discussion",
             )
         with metrics[2]:
             _metric(
-                "Need follow-up",
+                "Students needing follow-up",
                 str(data.get("attention_students_count", len(data.get("attention_students", [])))),
                 "deterministic signals",
             )
@@ -488,7 +839,7 @@ def _render_overview(client) -> None:
         left, right = st.columns([1.08, 1], gap="large")
         with left:
             _section_heading(
-                "Current thinking stage",
+                "How students are progressing",
                 "Students are counted at the most recently active notebook stage.",
             )
             stages = [
@@ -498,10 +849,13 @@ def _render_overview(client) -> None:
             _bar_rows(stages, value_key="count", display_key="display")
         with right:
             _section_heading(
-                "Follow-up queue",
+                "Follow-up",
                 "Deterministic follow-up signals, not judgements of ability.",
             )
-            _attention_table(data.get("attention_students", []))
+            _attention_table(
+                data.get("attention_students", []),
+                action_key_prefix="professor_followup",
+            )
     with st.container(key="professor_overview_activity"):
         _section_heading("Activity over time")
         activity = data.get("weekly_activity", [])
@@ -531,13 +885,17 @@ def _render_students(client) -> None:
 
     if opened_notebook and selected_id:
         try:
-            detail = _cached_professor_student_detail(client, selected_id)
+            with st.spinner("Loading student workspace…"):
+                detail = _cached_professor_student_detail(client, selected_id)
         except Exception:  # noqa: BLE001 - keep notebook back control on fetch failure
             if st.button("← Notebooks", key=f"professor_back_notebooks_{selected_id}"):
                 st.session_state.pop(f"professor_open_notebook_{selected_id}", None)
                 _clear_notebook_tab_caches(selected_id, opened_notebook)
                 st.rerun()
-            st.error("This notebook is unavailable right now. Please try again shortly.")
+            _render_panel_error(
+                "This student workspace is unavailable right now.",
+                f"professor_student_workspace_retry_{selected_id}",
+            )
             return
         student = detail.get("student") or {}
         notebook_summary = next(
@@ -548,40 +906,58 @@ def _render_students(client) -> None:
             ),
             {"id": opened_notebook, "title": "Notebook"},
         )
+        _render_professor_workbench_context(
+            student_id=selected_id,
+            student=student,
+            notebook=notebook_summary,
+        )
+        _render_professor_mobile_header(
+            "Students",
+            student_id=selected_id,
+            student=student,
+            notebook=notebook_summary,
+        )
         with st.container(key=f"professor_selected_workbench_{selected_id}_{opened_notebook}"):
-            roster_col, workspace_col, path_col = st.columns(
-                [0.22, 0.49, 0.29], gap="small"
-            )
-            with roster_col:
-                _render_workbench_roster(
-                    client,
-                    selected_id=selected_id,
-                    notebook_id=str(opened_notebook),
-                    selected_student=student,
-                    selected_notebook=notebook_summary,
+            with st.container(
+                key=f"professor_desktop_workbench_{selected_id}_{opened_notebook}"
+            ):
+                roster_col, workspace_col, path_col = st.columns(
+                    [0.26, 0.45, 0.29], gap="small"
                 )
-            with workspace_col:
-                if st.button(
-                    "← Notebooks",
-                    key=f"professor_back_notebooks_{selected_id}",
-                ):
-                    st.session_state.pop(f"professor_open_notebook_{selected_id}", None)
-                    _clear_notebook_tab_caches(selected_id, opened_notebook)
-                    st.rerun()
-                _render_professor_workspace(
-                    client,
-                    selected_id,
-                    notebook_summary,
-                    student_name=str(student.get("name") or "Student"),
-                    compact=True,
-                )
-            with path_col:
-                _render_professor_thinking_rail(
+                with roster_col:
+                    _render_workbench_roster(
+                        client,
+                        selected_id=selected_id,
+                        notebook_id=str(opened_notebook),
+                        selected_student=student,
+                        selected_notebook=notebook_summary,
+                    )
+                with workspace_col:
+                    _render_professor_workspace(
+                        client,
+                        selected_id,
+                        notebook_summary,
+                        student_name=str(student.get("name") or "Student"),
+                        compact=True,
+                    )
+                with path_col:
+                    _render_professor_thinking_rail(
+                        client,
+                        selected_id,
+                        str(opened_notebook),
+                        selected_student=student,
+                        student_detail=detail,
+                    )
+            with st.container(
+                key=f"professor_mobile_workbench_{selected_id}_{opened_notebook}"
+            ):
+                _render_professor_mobile_workbench(
                     client,
                     selected_id,
                     str(opened_notebook),
                     selected_student=student,
                     student_detail=detail,
+                    selected_notebook=notebook_summary,
                 )
         return
 
@@ -592,9 +968,13 @@ def _render_students(client) -> None:
             _clear_notebook_tab_caches(selected_id)
             st.rerun()
         try:
-            detail = _cached_professor_student_detail(client, selected_id)
+            with st.spinner("Loading student record…"):
+                detail = _cached_professor_student_detail(client, selected_id)
         except Exception:  # noqa: BLE001 - keep the back control when one record fails
-            st.error("This student record is unavailable right now. Please try again shortly.")
+            _render_panel_error(
+                "This student record is unavailable right now.",
+                f"professor_student_detail_retry_{selected_id}",
+            )
             return
         _render_student_detail(client, detail)
         return
@@ -615,12 +995,20 @@ def _render_students(client) -> None:
             )
         stage_filter = None if stage == "All" else stage
         attention_only = attention == "Needs attention"
-        data = _cached_professor_students(
-            client,
-            search=search,
-            stage=stage_filter,
-            attention_only=attention_only,
-        )
+        try:
+            with st.spinner("Loading students…"):
+                data = _cached_professor_students(
+                    client,
+                    search=search,
+                    stage=stage_filter,
+                    attention_only=attention_only,
+                )
+        except Exception:  # noqa: BLE001 - roster errors stay student-safe
+            _render_panel_error(
+                "The student list is unavailable right now.",
+                "professor_students_retry",
+            )
+            return
         rows = data.get("students", [])
         if not rows:
             st.info("No students match these filters.")
@@ -654,9 +1042,10 @@ def _render_students(client) -> None:
                         )
                     with row_columns[1]:
                         if st.button(
-                            f"Open {student_name}",
+                            "Open",
                             key=f"professor_open_student_{student_id}",
                             use_container_width=True,
+                            help=f"Open {student_name}",
                         ):
                             st.session_state["professor_selected_student_id"] = student_id
                             st.session_state.pop(f"professor_open_notebook_{student_id}", None)
@@ -707,15 +1096,16 @@ def _render_student_detail(
                     )
                 with row_columns[1]:
                     if st.button(
-                        f"Open {_notebook_card_label(item)}",
+                        "Open",
                         key=f"professor_open_notebook_btn_{student['id']}_{notebook_id}",
                         use_container_width=True,
+                        help=f"Open {_notebook_card_label(item)}",
                     ):
                         st.session_state[f"professor_open_notebook_{student['id']}"] = notebook_id
                         _clear_notebook_tab_caches(student["id"], notebook_id)
                         st.rerun()
 
-    st.markdown("#### Learning snapshot")
+    st.markdown("#### Thinking path snapshot")
     completed_labels = set(data.get("completed_stages", []))
     current_stage = student.get("current_stage")
     steps = []
@@ -753,7 +1143,7 @@ def _render_student_detail(
         else:
             st.caption("No critical-thinking assessment is available yet.")
     with overview_right:
-        st.markdown("#### Engagement")
+        st.markdown("#### Participation")
         engagement = data.get("engagement", {})
         engagement_metrics = st.columns(2, gap="small")
         with engagement_metrics[0]:
@@ -777,12 +1167,141 @@ def _render_student_detail(
         st.caption("Assessment trend is descriptive only; it does not establish causal change.")
 
 
+def _refresh_professor_workbench(student_id: str, notebook_id: str) -> None:
+    """Invalidate every visible notebook projection before a workbench rerun."""
+    _invalidate_chat_cache(student_id, notebook_id)
+    _invalidate_sources_cache(student_id, notebook_id)
+    _invalidate_journey_cache(student_id, notebook_id)
+    _invalidate_review_cache(student_id, notebook_id)
+    st.rerun()
+
+
+def _render_professor_workbench_context(
+    *,
+    student_id: str,
+    student: dict[str, Any],
+    notebook: dict[str, Any],
+) -> None:
+    """Render one desktop context header for the selected read-only notebook."""
+    notebook_id = str(notebook.get("id") or "")
+    student_name = str(student.get("name") or "Student")
+    title = _notebook_card_label(notebook)
+    stage = str(
+        notebook.get("stage")
+        or notebook.get("current_stage")
+        or student.get("current_stage")
+        or "Not started"
+    )
+    with st.container(key=f"professor_workbench_context_{student_id}_{notebook_id}"):
+        left, actions = st.columns([1, .28], gap="small")
+        with left:
+            st.markdown(
+                '<div class="professor-workbench-context-copy">'
+                '<p class="professor-workbench-eyebrow">Selected student work</p>'
+                f'<h2>{escape(student_name)} <span aria-hidden="true">/</span> '
+                f'{escape(title)}</h2>'
+                f'<p>{escape(stage)} <span aria-hidden="true">·</span> '
+                f'Last active {escape(_when(notebook.get("last_active") or student.get("last_active")))}</p>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+        with actions:
+            action_row = st.columns(2, gap="small")
+            with action_row[0]:
+                if st.button(
+                    "Back",
+                    key=f"professor_back_notebooks_{student_id}",
+                    use_container_width=True,
+                    help="Return to the student's notebooks",
+                    type="tertiary",
+                ):
+                    st.session_state.pop(f"professor_open_notebook_{student_id}", None)
+                    _clear_notebook_tab_caches(student_id, notebook_id)
+                    st.rerun()
+            with action_row[1]:
+                if st.button(
+                    "Refresh",
+                    key=f"professor_workbench_refresh_{student_id}_{notebook_id}",
+                    use_container_width=True,
+                    help="Refresh this notebook",
+                    type="tertiary",
+                ):
+                    _refresh_professor_workbench(student_id, notebook_id)
+        st.markdown(
+            '<span class="professor-readonly-badge">Read only · lecturer view</span>',
+            unsafe_allow_html=True,
+        )
+
+
+def _render_professor_mobile_workbench(
+    client: Any,
+    student_id: str,
+    notebook_id: str,
+    *,
+    selected_student: dict[str, Any],
+    student_detail: dict[str, Any],
+    selected_notebook: dict[str, Any],
+) -> None:
+    """Render exactly one notebook surface for the narrow-screen experience."""
+    view_key = f"professor_mobile_view_{student_id}_{notebook_id}"
+    view = str(st.session_state.get(view_key) or "Chat")
+    if view not in _MOBILE_VIEWS:
+        view = "Chat"
+    with st.container(key=f"professor_mobile_surface_{student_id}_{notebook_id}"):
+        if view == "Roster":
+            _render_workbench_roster(
+                client,
+                selected_id=student_id,
+                notebook_id=notebook_id,
+                selected_student=selected_student,
+                selected_notebook=selected_notebook,
+                compact=True,
+            )
+            return
+        if view == "Chat":
+            try:
+                with st.spinner("Loading conversation…"):
+                    payload = _cached_professor_chat(client, student_id, notebook_id)
+            except Exception:  # noqa: BLE001 - localise notebook panel failures
+                _render_panel_error(
+                    "This conversation is unavailable right now.",
+                    f"professor_mobile_chat_retry_{student_id}_{notebook_id}",
+                )
+                return
+            _render_professor_chat_tab(
+                client, student_id, notebook_id, payload, compact=True
+            )
+            return
+        if view == "Sources":
+            try:
+                with st.spinner("Loading sources…"):
+                    payload = _cached_professor_sources(client, student_id, notebook_id)
+            except Exception:  # noqa: BLE001 - localise notebook panel failures
+                _render_panel_error(
+                    "Sources are unavailable right now.",
+                    f"professor_mobile_sources_retry_{student_id}_{notebook_id}",
+                )
+                return
+            _render_professor_sources_tab(
+                client, student_id, notebook_id, payload, compact=True
+            )
+            return
+        _render_professor_thinking_rail(
+            client,
+            student_id,
+            notebook_id,
+            selected_student=selected_student,
+            student_detail=student_detail,
+            compact=True,
+        )
+
+
 def _workbench_filter_rows(
     rows: list[dict[str, Any]],
     filter_name: str,
 ) -> list[dict[str, Any]]:
     """Apply the visual workbench roster filter without another API contract."""
-    if filter_name == "Active":
+    if filter_name == "Has activity":
         return [
             row
             for row in rows
@@ -804,9 +1323,13 @@ def _render_workbench_roster(
     notebook_id: str,
     selected_student: dict[str, Any],
     selected_notebook: dict[str, Any],
+    compact: bool = False,
 ) -> None:
     """Render the selected-notebook roster context using the existing API."""
-    with st.container(key=f"professor_workbench_roster_{selected_id}_{notebook_id}"):
+    key_suffix = "_mobile" if compact else ""
+    with st.container(
+        key=f"professor_workbench_roster_{selected_id}_{notebook_id}{key_suffix}"
+    ):
         st.markdown(
             '<div class="professor-workbench-panel-heading">'
             '<p class="professor-workbench-eyebrow">Student work</p>'
@@ -816,22 +1339,30 @@ def _render_workbench_roster(
         search = st.text_input(
             "Search students",
             placeholder="Name or email",
-            key=f"professor_workbench_search_{selected_id}_{notebook_id}",
+            key=f"professor_workbench_search_{selected_id}_{notebook_id}{key_suffix}",
             label_visibility="collapsed",
         )
         filter_name = st.radio(
             "Roster filter",
-            ("All", "Active", "Done"),
+            ("All", "Has activity", "Done"),
             horizontal=True,
-            key=f"professor_workbench_filter_{selected_id}_{notebook_id}",
+            key=f"professor_workbench_filter_{selected_id}_{notebook_id}{key_suffix}",
             label_visibility="collapsed",
         )
-        roster = _cached_professor_students(
-            client,
-            search=search,
-            stage=None,
-            attention_only=False,
-        )
+        try:
+            with st.spinner("Loading roster…"):
+                roster = _cached_professor_students(
+                    client,
+                    search=search,
+                    stage=None,
+                    attention_only=False,
+                )
+        except Exception:  # noqa: BLE001 - keep the selected notebook usable
+            _render_panel_error(
+                "The workbench roster is unavailable right now.",
+                f"professor_workbench_roster_retry_{selected_id}_{notebook_id}{key_suffix}",
+            )
+            return
         rows = _workbench_filter_rows(list(roster.get("students") or []), filter_name)
         selected_row = {
             "id": selected_id,
@@ -848,7 +1379,9 @@ def _render_workbench_roster(
             f'{"s" if len(rows) != 1 else ""}</p>',
             unsafe_allow_html=True,
         )
-        with st.container(key=f"professor_workbench_roster_scroll_{selected_id}_{notebook_id}"):
+        with st.container(
+            key=f"professor_workbench_roster_scroll_{selected_id}_{notebook_id}{key_suffix}"
+        ):
             for row in rows:
                 row_id = str(row.get("id") or "")
                 if not row_id:
@@ -857,9 +1390,9 @@ def _render_workbench_roster(
                 initials = "".join(piece[0] for piece in name.split() if piece).upper()[:2] or "ST"
                 is_selected = row_id == selected_id
                 card_key = (
-                    f"professor_workbench_student_card_{row_id}_selected"
+                    f"professor_workbench_student_card_{row_id}_selected{key_suffix}"
                     if is_selected
-                    else f"professor_workbench_student_card_{row_id}"
+                    else f"professor_workbench_student_card_{row_id}{key_suffix}"
                 )
                 with st.container(key=card_key):
                     st.markdown(
@@ -868,16 +1401,17 @@ def _render_workbench_roster(
                         '<span class="professor-student-copy">'
                         f'<strong>{escape(name)}</strong>'
                         f'<span>{escape(str(selected_notebook.get("title") if is_selected else row.get("current_stage") or "Not started"))}</span>'
-                        f'<small>{escape("Active" if is_selected else _when(row.get("last_active")))}</small>'
+                        f'<small>{escape("Selected" if is_selected else _when(row.get("last_active")))}</small>'
                         '</span>'
                         f'<span class="professor-workbench-student-status" aria-label="{escape("Selected" if is_selected else "Student")}">'
                         f'{"●" if is_selected else ""}</span></div>',
                         unsafe_allow_html=True,
                     )
                     if not is_selected and st.button(
-                        f"Open {name}",
-                        key=f"professor_workbench_select_student_{row_id}_{notebook_id}",
+                        "Open",
+                        key=f"professor_workbench_select_student_{row_id}_{notebook_id}{key_suffix}",
                         use_container_width=True,
+                        help=f"Open {name}",
                     ):
                         st.session_state["professor_selected_student_id"] = row_id
                         st.session_state.pop(f"professor_open_notebook_{row_id}", None)
@@ -892,63 +1426,105 @@ def _render_professor_thinking_rail(
     *,
     selected_student: dict[str, Any],
     student_detail: dict[str, Any],
+    compact: bool = False,
 ) -> None:
     """Render a lazy Thinking Path rail beside the read-only transcript."""
-    rail_key = f"professor_thinking_rail_{student_id}_{notebook_id}"
-    loaded_key = f"{rail_key}_loaded"
-    # Review is the visual default in the supplied workbench. The initial
-    # state uses the already-fetched student profile as a quiet placeholder;
-    # the full review projection is fetched only after an explicit click.
-    active = st.session_state.get(rail_key) or "Review"
-    loaded = bool(st.session_state.get(loaded_key))
-    with st.container(key=f"professor_path_rail_{student_id}_{notebook_id}"):
+    rail_tab_key = f"professor_thinking_rail_tab_{student_id}_{notebook_id}"
+    requested_tab = str(st.session_state.get(rail_tab_key) or "")
+    rail_requested = requested_tab in _PATH_TABS
+    review_key = (student_id, notebook_id)
+    review_loaded = review_key in (st.session_state.get(_REVIEW_CACHE_KEY) or {})
+    journey_loaded = review_key in (st.session_state.get(_JOURNEY_CACHE_KEY) or {})
+    # Chat and Sources have no Thinking Path projection. Keep the rail focused
+    # on the persisted journey by default, while retaining a separate Review
+    # projection for an explicit lecturer request.
+    active = requested_tab if requested_tab in _PATH_TABS else "Progression"
+    control_suffix = "_mobile" if compact else ""
+    rail_key = (
+        f"professor_path_rail_compact_{student_id}_{notebook_id}"
+        if compact
+        else f"professor_path_rail_{student_id}_{notebook_id}"
+    )
+    with st.container(key=rail_key):
         st.markdown(
             '<div class="professor-path-heading"><h3>Thinking Path</h3></div>',
             unsafe_allow_html=True,
         )
         controls = st.columns(2, gap="small")
         with controls[0]:
-            if st.button(
+            st.button(
                 "Progression",
-                key=f"professor_path_progression_{student_id}_{notebook_id}",
+                key=f"professor_path_progression_{student_id}_{notebook_id}{control_suffix}",
                 use_container_width=True,
-                type="secondary" if active != "Progression" else "primary",
-            ):
-                st.session_state[rail_key] = "Progression"
-                st.session_state[loaded_key] = True
-                st.rerun()
+                type=(
+                    "primary"
+                    if active == "Progression"
+                    else "secondary"
+                ),
+                on_click=_set_professor_thinking_tab,
+                args=(rail_tab_key, "Progression"),
+            )
         with controls[1]:
-            if st.button(
+            st.button(
                 "Review",
-                key=f"professor_path_review_{student_id}_{notebook_id}",
+                key=f"professor_path_review_{student_id}_{notebook_id}{control_suffix}",
                 use_container_width=True,
-                type="secondary" if active != "Review" else "primary",
-            ):
-                st.session_state[rail_key] = "Review"
-                st.session_state[loaded_key] = True
-                st.rerun()
-        if active == "Progression":
-            if loaded:
-                journey_payload = _cached_professor_journey(client, student_id, notebook_id)
-                _render_professor_journey_tab(journey_payload)
-            else:
-                _render_professor_path_fallback(
-                    selected_student=selected_student,
-                    student_detail=student_detail,
-                    notebook_id=notebook_id,
-                    mode="Progression",
-                )
-        elif active == "Review":
-            if loaded:
-                review_payload = _cached_professor_review(client, student_id, notebook_id)
-                _render_professor_review_tab(review_payload)
-            else:
-                _render_professor_path_fallback(
-                    selected_student=selected_student,
-                    student_detail=student_detail,
-                    notebook_id=notebook_id,
-                    mode="Review",
-                )
+                type=(
+                    "primary"
+                    if active == "Review"
+                    else "secondary"
+                ),
+                on_click=_set_professor_thinking_tab,
+                args=(rail_tab_key, "Review"),
+            )
+        with st.container(
+            key=(
+                f"professor_path_content_{student_id}_{notebook_id}"
+                f"{'_mobile' if compact else ''}"
+            )
+        ):
+            if active == "Progression":
+                if journey_loaded or rail_requested:
+                    try:
+                        with st.spinner("Loading progression…"):
+                            journey_payload = _cached_professor_journey(
+                                client, student_id, notebook_id
+                            )
+                    except Exception:  # noqa: BLE001 - localise one rail failure
+                        _render_panel_error(
+                            "Progression is unavailable right now.",
+                            f"professor_progression_retry_{student_id}_{notebook_id}{control_suffix}",
+                        )
+                        return
+                    _render_professor_journey_tab(journey_payload)
+                else:
+                    _render_professor_path_fallback(
+                        selected_student=selected_student,
+                        student_detail=student_detail,
+                        notebook_id=notebook_id,
+                        mode="Progression",
+                    )
+            elif active == "Review":
+                if review_loaded or rail_requested:
+                    try:
+                        with st.spinner("Loading review…"):
+                            review_payload = _cached_professor_review(
+                                client, student_id, notebook_id
+                            )
+                    except Exception:  # noqa: BLE001 - localise one rail failure
+                        _render_panel_error(
+                            "Review is unavailable right now.",
+                            f"professor_review_retry_{student_id}_{notebook_id}{control_suffix}",
+                        )
+                        return
+                    _render_professor_review_tab(review_payload)
+                else:
+                    _render_professor_path_fallback(
+                        selected_student=selected_student,
+                        student_detail=student_detail,
+                        notebook_id=notebook_id,
+                        mode="Review",
+                    )
 
 
 def _render_professor_path_fallback(
@@ -1008,68 +1584,68 @@ def _render_professor_workspace(
     student_name: str | None = None,
     compact: bool = False,
 ) -> None:
-    """Render the read-only Chat, Sources, Journey, and Review tabs."""
+    """Render the center Chat/Sources surface for the selected notebook."""
     notebook_id = str(notebook.get("id") or "")
-    with st.container(key=f"professor_workspace_header_{student_id}_{notebook_id}"):
-        breadcrumb = (
-            '<p class="professor-workspace-breadcrumb">'
-            f"Students / {escape(student_name or 'Student')} / "
-            f"{escape(_notebook_card_label(notebook))}</p>"
-            if student_name
-            else ""
+    with st.container(key=f"professor_workspace_pane_{student_id}_{notebook_id}"):
+        if not compact:
+            with st.container(key=f"professor_workspace_header_{student_id}_{notebook_id}"):
+                breadcrumb = (
+                    '<p class="professor-workspace-breadcrumb">'
+                    f"Students / {escape(student_name or 'Student')} / "
+                    f"{escape(_notebook_card_label(notebook))}</p>"
+                    if student_name
+                    else ""
+                )
+                header_html = (
+                    '<div class="professor-workspace-heading">'
+                    + '<div class="professor-workspace-heading-copy">'
+                    + breadcrumb
+                    + f'<p class="professor-workspace-eyebrow">Read-only notebook</p>'
+                    + f'<h3>{escape(_notebook_card_label(notebook))}</h3>'
+                    + f'<p>{escape(str(notebook.get("stage") or notebook.get("current_stage") or "Not started"))}'
+                    + f' <span aria-hidden="true">·</span> Last active {escape(_when(notebook.get("last_active")))}</p></div>'
+                    + '<span class="professor-readonly-badge">View only</span></div>'
+                )
+                st.markdown(header_html, unsafe_allow_html=True)
+
+        tab = st.radio(
+            "Notebook content",
+            _CENTER_TABS,
+            horizontal=True,
+            key=f"professor_workspace_tab_{student_id}_{notebook_id}",
+            label_visibility="collapsed",
         )
-        header_html = (
-            '<div class="professor-workspace-heading">'
-            + '<div class="professor-workspace-heading-copy">'
-            + breadcrumb
-            + f'<p class="professor-workspace-eyebrow">Read-only notebook</p>'
-            + f'<h3>{escape(_notebook_card_label(notebook))}</h3>'
-            + f'<p>{escape(str(notebook.get("stage") or notebook.get("current_stage") or "Not started"))}'
-            + f' <span aria-hidden="true">·</span> Active {escape(_when(notebook.get("last_active")))}</p></div>'
-            + '<span class="professor-readonly-badge">View only</span></div>'
-        )
-        st.markdown(
-            header_html,
-            unsafe_allow_html=True,
-        )
-    tab = st.radio(
-        "Notebook workspace",
-        _WORKSPACE_TABS,
-        horizontal=True,
-        key=f"professor_workspace_tab_{student_id}_{notebook_id}",
-        label_visibility="collapsed",
-    )
-    refresh_key = f"professor_refresh_{tab.lower()}_{student_id}_{notebook_id}"
-    refresh_columns = st.columns([0.82, 0.18], gap="small")
-    with refresh_columns[1]:
-        refresh_requested = st.button("Refresh", key=refresh_key, use_container_width=True)
-    if refresh_requested:
         if tab == "Chat":
-            _invalidate_chat_cache(student_id, notebook_id)
-        elif tab == "Sources":
-            _invalidate_sources_cache(student_id, notebook_id)
-        elif tab == "Progression":
-            _invalidate_journey_cache(student_id, notebook_id)
+            try:
+                with st.spinner("Loading conversation…"):
+                    chat_payload = _cached_professor_chat(
+                        client, student_id, notebook_id
+                    )
+            except Exception:  # noqa: BLE001 - localise the center panel failure
+                _render_panel_error(
+                    "This conversation is unavailable right now.",
+                    f"professor_chat_retry_{student_id}_{notebook_id}",
+                )
+                return
+            _render_professor_chat_tab(
+                client,
+                student_id,
+                notebook_id,
+                chat_payload,
+            )
         else:
-            _invalidate_review_cache(student_id, notebook_id)
-        st.rerun()
-    if tab == "Chat":
-        chat_payload = _cached_professor_chat(client, student_id, notebook_id)
-        _render_professor_chat_tab(
-            client,
-            student_id,
-            notebook_id,
-            chat_payload,
-        )
-    elif tab == "Sources":
-        sources_payload = _cached_professor_sources(client, student_id, notebook_id)
-        _render_professor_sources_tab(client, student_id, notebook_id, sources_payload)
-    elif tab == "Progression":
-        journey_payload = _cached_professor_journey(client, student_id, notebook_id)
-        _render_professor_journey_tab(journey_payload)
-    else:
-        review_payload = _cached_professor_review(client, student_id, notebook_id)
-        _render_professor_review_tab(review_payload)
+            try:
+                with st.spinner("Loading sources…"):
+                    sources_payload = _cached_professor_sources(
+                        client, student_id, notebook_id
+                    )
+            except Exception:  # noqa: BLE001 - localise the center panel failure
+                _render_panel_error(
+                    "Sources are unavailable right now.",
+                    f"professor_sources_retry_{student_id}_{notebook_id}",
+                )
+                return
+            _render_professor_sources_tab(client, student_id, notebook_id, sources_payload)
 
 
 def _render_professor_chat_tab(
@@ -1077,13 +1653,19 @@ def _render_professor_chat_tab(
     student_id: str,
     notebook_id: str,
     chat_payload: dict[str, Any],
+    *,
+    compact: bool = False,
 ) -> None:
     """Render the active-branch transcript inside a scroll region."""
+    key_suffix = "_mobile" if compact else ""
     messages = list(chat_payload.get("messages") or [])
     cache = st.session_state.setdefault(_CHAT_CACHE_KEY, {})
     cache_entry = cache.setdefault((student_id, notebook_id), chat_payload)
     next_cursor = cache_entry.get("next_cursor")
-    if next_cursor and st.button("Load earlier messages", key=f"professor_load_earlier_{notebook_id}"):
+    if next_cursor and st.button(
+        "Load earlier messages",
+        key=f"professor_load_earlier_{notebook_id}{key_suffix}",
+    ):
         older = client.professor_notebook_messages(
             student_id, notebook_id, cursor=next_cursor
         )
@@ -1094,10 +1676,12 @@ def _render_professor_chat_tab(
     if not messages:
         st.caption("No conversation has been recorded in this notebook.")
         return
-    with st.container(key="professor_transcript_scroll"):
+    with st.container(key=f"professor_transcript_scroll{key_suffix}"):
         for index, message in enumerate(messages):
             message_key = str(message.get("id") or index)
-            with st.container(key=f"professor_message_{notebook_id}_{message_key}"):
+            with st.container(
+                key=f"professor_message_{notebook_id}_{message_key}{key_suffix}"
+            ):
                 role = str(message.get("role") or "")
                 speaker = "Student" if role == "user" else "Coach"
                 role_class = "student" if role == "user" else "coach"
@@ -1119,7 +1703,10 @@ def _render_professor_chat_tab(
                     content = str(message.get("content") or "")
                     if content:
                         with st.container(
-                            key=f"professor_message_body_{notebook_id}_{message_key}"
+                            key=(
+                                f"professor_message_body_{notebook_id}_{message_key}"
+                                f"{key_suffix}"
+                            )
                         ):
                             st.markdown(content)
                     for attachment in message.get("attachments") or []:
@@ -1129,6 +1716,7 @@ def _render_professor_chat_tab(
                             notebook_id,
                             message,
                             attachment,
+                            compact=compact,
                         )
                     citations = message.get("citations") or []
                     if citations:
@@ -1139,6 +1727,7 @@ def _render_professor_chat_tab(
                                 student_id,
                                 notebook_id,
                                 citation,
+                                compact=compact,
                             )
 
 
@@ -1148,8 +1737,11 @@ def _render_professor_attachment_row(
     notebook_id: str,
     message: dict[str, Any],
     attachment: dict[str, Any],
+    *,
+    compact: bool = False,
 ) -> None:
     """Render one compact attachment row with lazy open."""
+    key_suffix = "_mobile" if compact else ""
     attachment_id = str(attachment.get("id") or "")
     title = str(attachment.get("title") or "Attachment")
     mime = str(attachment.get("mime") or "application/octet-stream")
@@ -1167,9 +1759,13 @@ def _render_professor_attachment_row(
     with row[1]:
         if attachment_id and hasattr(client, "professor_conversation_attachment"):
             if st.button(
-                f"Open attachment {title}",
-                key=f"professor_attachment_{message.get('id')}_{attachment_id}",
+                "Open",
+                key=(
+                    f"professor_attachment_{message.get('id')}_{attachment_id}"
+                    f"{key_suffix}"
+                ),
                 use_container_width=True,
+                help=f"Open attachment {title}",
             ):
                 _professor_attachment_dialog(
                     client,
@@ -1185,8 +1781,11 @@ def _render_professor_citation_row(
     student_id: str,
     notebook_id: str,
     citation: dict[str, Any],
+    *,
+    compact: bool = False,
 ) -> None:
     """Render one citation row; open bytes only on explicit click."""
+    key_suffix = "_mobile" if compact else ""
     citation_id = str(citation.get("id") or "").strip()
     label = str(citation.get("label") or citation_id or "source").strip()
     title = str(citation.get("title") or label or "Source").strip()
@@ -1197,9 +1796,13 @@ def _render_professor_citation_row(
     with row[1]:
         if citation_id and hasattr(client, "professor_notebook_source"):
             if st.button(
-                f"Open source {title}",
-                key=f"professor_citation_{notebook_id}_{citation_id}_{label}",
+                "Open",
+                key=(
+                    f"professor_citation_{notebook_id}_{citation_id}_{label}"
+                    f"{key_suffix}"
+                ),
                 use_container_width=True,
+                help=f"Open source {title}",
             ):
                 _professor_source_dialog(
                     client,
@@ -1215,6 +1818,8 @@ def _render_professor_sources_tab(
     student_id: str,
     notebook_id: str,
     sources_payload: dict[str, Any],
+    *,
+    compact: bool = False,
 ) -> None:
     """Render grouped library sources as visible sections."""
     sources = list(sources_payload.get("sources") or [])
@@ -1226,7 +1831,9 @@ def _render_professor_sources_tab(
     st.markdown("#### My Sources")
     if grouped["My Sources"]:
         for source in grouped["My Sources"]:
-            _render_professor_source_row(client, student_id, notebook_id, source)
+            _render_professor_source_row(
+                client, student_id, notebook_id, source, compact=compact
+            )
     else:
         st.caption("No personal sources in this notebook.")
     for group in COURSE_MATERIAL_GROUPS:
@@ -1234,7 +1841,9 @@ def _render_professor_sources_tab(
         st.markdown(f"#### {group}")
         if group_sources:
             for source in group_sources:
-                _render_professor_source_row(client, student_id, notebook_id, source)
+                _render_professor_source_row(
+                    client, student_id, notebook_id, source, compact=compact
+                )
         else:
             st.caption(f"No {group.lower()} in this notebook.")
 
@@ -1244,8 +1853,11 @@ def _render_professor_source_row(
     student_id: str,
     notebook_id: str,
     source: dict[str, Any],
+    *,
+    compact: bool = False,
 ) -> None:
     """Render one read-only source row with lazy open."""
+    key_suffix = "_mobile" if compact else ""
     source_id = str(source.get("id") or "")
     title = str(source.get("title") or "Source")
     mime = str(source.get("mime") or "application/octet-stream")
@@ -1269,9 +1881,10 @@ def _render_professor_source_row(
     with row[1]:
         if source_id and source.get("has_file") and hasattr(client, "professor_notebook_source"):
             if st.button(
-                f"Open source {title}",
-                key=f"professor_source_{notebook_id}_{source_id}",
+                "Open",
+                key=f"professor_source_{notebook_id}_{source_id}{key_suffix}",
                 use_container_width=True,
+                help=f"Open source {title}",
             ):
                 _professor_source_dialog(client, student_id, notebook_id, source_id, title)
 
@@ -1448,7 +2061,15 @@ def _professor_attachment_dialog(
 
 def _render_critical_thinking(client) -> None:
     """Render teaching-relevant Facione distributions and non-causal comparisons."""
-    data = client.professor_critical_thinking()
+    try:
+        with st.spinner("Loading critical-thinking signals…"):
+            data = client.professor_critical_thinking()
+    except Exception:  # noqa: BLE001 - keep other dashboard pages available
+        _render_panel_error(
+            "Critical-thinking signals are unavailable right now.",
+            "professor_learning_retry",
+        )
+        return
     with st.container(key="professor_learning_stage"):
         _section_heading(
             "Stage distribution",
@@ -1520,7 +2141,15 @@ def _render_critical_thinking(client) -> None:
 
 def _render_engagement(client) -> None:
     """Render meaningful usage patterns without rewarding high message volume."""
-    data = client.professor_engagement()
+    try:
+        with st.spinner("Loading participation signals…"):
+            data = client.professor_engagement()
+    except Exception:  # noqa: BLE001 - keep other dashboard pages available
+        _render_panel_error(
+            "Participation signals are unavailable right now.",
+            "professor_engagement_retry",
+        )
+        return
     with st.container(key="professor_engagement_trends"):
         left, right = st.columns(2, gap="large")
         with left:
@@ -1577,7 +2206,10 @@ def _render_engagement(client) -> None:
             st.caption("Source grounding will appear after assessed coach responses are recorded.")
     with st.container(key="professor_engagement_inactive"):
         _section_heading("Recently inactive students")
-        _attention_table(data.get("inactive_students", []))
+        _attention_table(
+            data.get("inactive_students", []),
+            action_key_prefix="professor_inactive",
+        )
 
 
 def _research_codes(values: Any) -> str:
@@ -1777,11 +2409,15 @@ def _render_research_validation(client: Any, observation: dict[str, Any]) -> Non
 
 def _render_research(client: Any) -> None:
     """Render an audited queue-to-transcript-to-validation research workflow."""
-    summary = client.professor_research_summary()
-    st.caption(
-        "Review immutable automated observations against student utterances, then "
-        "record independent human validation."
-    )
+    try:
+        with st.spinner("Loading research summary…"):
+            summary = client.professor_research_summary()
+    except Exception:  # noqa: BLE001 - keep failures local to the research page
+        _render_panel_error(
+            "The research summary is unavailable right now.",
+            "professor_research_summary_retry",
+        )
+        return
     with st.container(key="research_summary"):
         metrics = st.columns(4, gap="small")
         status_counts = summary.get("coding_status") or {}
@@ -1838,10 +2474,17 @@ def _render_research(client: Any) -> None:
             )
         with filters[3]:
             if st.button("Prepare CSV", key="research_prepare_export"):
-                st.session_state["research_export_csv"] = client.professor_research_export(
-                    coding_status=None if status == "All" else status,
-                    phase=None if phase == "All" else phase,
-                )
+                try:
+                    with st.spinner("Preparing export…"):
+                        st.session_state["research_export_csv"] = client.professor_research_export(
+                            coding_status=None if status == "All" else status,
+                            phase=None if phase == "All" else phase,
+                        )
+                except Exception:  # noqa: BLE001 - export errors stay in the action
+                    _render_panel_error(
+                        "The research export could not be prepared.",
+                        "professor_research_export_retry",
+                    )
             export_data = st.session_state.get("research_export_csv")
             if export_data:
                 st.download_button(
@@ -1852,13 +2495,21 @@ def _render_research(client: Any) -> None:
                     key="research_download_export",
                 )
 
-    queue = client.professor_research_queue(
-        search=search,
-        coding_status=None if status == "All" else status,
-        phase=None if phase == "All" else phase,
-        limit=100,
-        offset=0,
-    )
+    try:
+        with st.spinner("Loading validation queue…"):
+            queue = client.professor_research_queue(
+                search=search,
+                coding_status=None if status == "All" else status,
+                phase=None if phase == "All" else phase,
+                limit=100,
+                offset=0,
+            )
+    except Exception:  # noqa: BLE001 - keep summary and filters usable
+        _render_panel_error(
+            "The validation queue is unavailable right now.",
+            "professor_research_queue_retry",
+        )
+        return
     items = list(queue.get("items") or [])
     with st.container(key="research_workspace"):
         queue_pane, detail_pane = st.columns([0.72, 2.05], gap="large")
@@ -1888,7 +2539,16 @@ def _render_research(client: Any) -> None:
                 f"{str(selected.get('coding_status') or '').title()}"
             )
 
-        detail = client.professor_research_notebook(selected["notebook_id"])
+        try:
+            with st.spinner("Loading transcript and coding…"):
+                detail = client.professor_research_notebook(selected["notebook_id"])
+        except Exception:  # noqa: BLE001 - localise one observation's detail panel
+            with detail_pane:
+                _render_panel_error(
+                    "This observation detail is unavailable right now.",
+                    f"professor_research_detail_retry_{selected_id}",
+                )
+            return
         observations = list(detail.get("observations") or [])
         observation = next(
             (item for item in observations if str(item.get("id")) == selected_id),
@@ -1915,13 +2575,31 @@ def _render_research(client: Any) -> None:
                 st.info("No active automated observation is available.")
 
 
-def render_professor_dashboard() -> None:
+def prepare_professor_appearance(client: Any | None = None) -> Any:
+    """Restore staff appearance and inject theme CSS before lecturer widgets."""
+    resolved_client = client if client is not None else local_api_client()
+    _restore_professor_appearance(resolved_client)
+    try:
+        sync_appearance_from_widget()
+    except Exception:  # noqa: BLE001 - a preference outage must not blank analytics
+        st.session_state["_professor_appearance_persist_error"] = True
+    render_theme_css()
+    return resolved_client
+
+
+def render_professor_dashboard(client: Any | None = None) -> None:
     """Render the authorised professor dashboard through FastAPI only.
 
     The Streamlit view has no direct database, model-provider, or filesystem
     access.  A backend 403/401 remains authoritative if a role changes after
     the navigation has rendered.
     """
+    resolved_client = (
+        client if client is not None else prepare_professor_appearance()
+    )
+    pending_page = st.session_state.pop("_professor_pending_page", None)
+    if pending_page in _PAGES:
+        st.session_state["professor_page"] = pending_page
     with st.container(key="professor_shell"):
         # Keep the rail close to the 210px reference geometry while allowing
         # the content pane to use the remaining width. The stylesheet stacks
@@ -1930,28 +2608,33 @@ def render_professor_dashboard() -> None:
         with nav_col:
             page = _render_sidebar()
         with content_col:
+            # Render the preference warning in the visible content pane. The
+            # desktop rail is CSS-hidden on mobile, so consuming it there
+            # would strand the recovery message on narrow screens.
+            _render_professor_appearance_notice()
             try:
-                client = local_api_client()
                 selected_student_id = st.session_state.get("professor_selected_student_id")
                 selected_notebook_id = (
                     st.session_state.get(f"professor_open_notebook_{selected_student_id}")
                     if selected_student_id
                     else None
                 )
-                # The selected-notebook workbench supplies its own breadcrumb
-                # and header; retain the page header for the roster and all
-                # other dashboard pages.
-                if not (page == "Students" and selected_notebook_id):
-                    _render_page_header(page)
+                selected_workbench = page == "Students" and selected_notebook_id
+                # The selected-notebook workbench supplies its own context;
+                # regular screens keep the compact header for narrow screens.
+                if not selected_workbench:
+                    _render_professor_mobile_header(page)
+                    if not selected_student_id:
+                        _render_page_header(page)
                 if page == "Overview":
-                    _render_overview(client)
+                    _render_overview(resolved_client)
                 elif page == "Students":
-                    _render_students(client)
+                    _render_students(resolved_client)
                 elif page == "Learning":
-                    _render_critical_thinking(client)
+                    _render_critical_thinking(resolved_client)
                 elif page == "Engagement":
-                    _render_engagement(client)
+                    _render_engagement(resolved_client)
                 else:
-                    _render_research(client)
+                    _render_research(resolved_client)
             except Exception:  # noqa: BLE001 - do not expose backend/student data in UI errors
-                st.error("Professor analytics is unavailable right now. Please try again shortly.")
+                st.error("Lecturer analytics is unavailable right now. Please try again shortly.")

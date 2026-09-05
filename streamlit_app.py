@@ -36,7 +36,7 @@ from ui.settings import sync_appearance_from_widget
 from ui.theme import inject_template_css, render_theme_css
 from ui.profile import inject_profile_leave_helper
 from ui.topbar import prepare_workspace_context
-from ui.professor import render_professor_dashboard
+from ui.professor import prepare_professor_appearance, render_professor_dashboard
 from ui.workspace import render_workspace
 
 from backend.auth_profiles import store_identifier_for_sub
@@ -107,9 +107,11 @@ if "display_name" not in st.session_state:
 # before student notebook/session initialisation so staff never create or alter
 # a student workspace while reviewing analytics.
 if str(user.get("role") or "").strip().lower() in {"lecturer", "admin"}:
-    st.session_state["appearance"] = st.session_state.get("appearance", DEFAULT_APPEARANCE)
-    render_theme_css()
-    render_professor_dashboard()
+    # Staff bypasses student session initialization, but still restores the
+    # persisted appearance and synchronizes the settings widget before theme
+    # CSS is injected. This branch must not create or select a notebook.
+    professor_client = prepare_professor_appearance()
+    render_professor_dashboard(professor_client)
     st.stop()
 
 # Debug counter for full-script runs (fragment-only interactions skip this path).

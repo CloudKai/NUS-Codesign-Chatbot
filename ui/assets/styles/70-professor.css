@@ -1,1296 +1,1376 @@
-/* Professor analytics: dense, academic, and deliberately free of dashboard gloss. */
 /*
- * Course Analytics is a document, not the student studio viewport.
- * 00-foundations.css locks html/body/.stApp/.block-container to 100vh +
- * overflow:hidden so Journey/Chat fill the window. That clips Students,
- * Research, and long Overview pages unless every ancestor can scroll.
+ * Lecturer dashboard
+ *
+ * The lecturer view is a calm analytics workspace rather than a second
+ * student-studio viewport. All selectors are scoped to professor markup so
+ * the student experience and its persisted layout are unaffected.
  */
-html:has(.st-key-professor_header),
-html:has(.st-key-professor_header) body,
-.stApp:has(.st-key-professor_header),
-[data-testid="stAppViewContainer"]:has(.st-key-professor_header),
-[data-testid="stAppViewContainer"]:has(.st-key-professor_header) > .main,
-[data-testid="stAppViewContainer"]:has(.st-key-professor_header) [data-testid="stMain"],
-[data-testid="stAppViewContainer"]:has(.st-key-professor_header) .stMain {
-    height:auto !important;
-    min-height:100vh !important;
-    max-height:none !important;
-    overflow-x:hidden !important;
-    overflow-y:auto !important;
-    position:relative !important;
-    inset:auto !important;
-}
 
-/* Students roster contract. These rules are scoped to the top-level roster so
-   notebook workbench cards retain their denser treatment. */
-.st-key-professor_shell .st-key-professor_students_roster {
-    margin-top:.1rem;
-}
-.st-key-professor_shell .st-key-professor_students_roster
-[data-testid="stWidgetLabel"] p {
-    color:var(--cd-text);
-    font-size:.8rem;
-    font-weight:600;
-}
-.st-key-professor_shell .st-key-professor_students_roster
-[data-testid="stTextInput"] input,
-.st-key-professor_shell .st-key-professor_students_roster
-[data-baseweb="select"] > div {
-    box-sizing:border-box !important;
-    min-height:3.15rem !important;
-    border-radius:.65rem !important;
-    background:var(--cd-surface-muted) !important;
-}
-.st-key-professor_shell .st-key-professor_students_roster
-[data-testid="stTextInput"] input {
-    padding-left:.85rem !important;
-    color:var(--cd-text) !important;
-}
-.st-key-professor_shell .st-key-professor_students_roster
-[data-testid="stTextInput"] input::placeholder {
-    color:var(--cd-muted) !important;
-}
-.st-key-professor_shell .st-key-professor_students_roster
-[data-testid="stElementContainer"]:has([class*="st-key-professor_student_card_"]) {
-    min-height:5.4rem !important;
-    margin:.375rem 0 !important;
-}
-.st-key-professor_shell .st-key-professor_students_roster
-[class*="st-key-professor_student_card_"] {
-    box-sizing:border-box !important;
-    min-height:5.4rem !important;
-    margin:0 !important;
-    padding:.62rem .7rem !important;
-    border:1px solid var(--cd-border) !important;
-    border-radius:.8rem !important;
-    background:var(--cd-surface) !important;
-}
-.st-key-professor_shell .st-key-professor_students_roster
-[class*="st-key-professor_student_card_"] [data-testid="stHorizontalBlock"] {
-    min-height:4.05rem !important;
-    align-items:center !important;
-}
-.st-key-professor_shell .st-key-professor_students_roster
-.professor-student-row {
-    min-width:0;
-    min-height:3.8rem;
-    align-items:center;
-    gap:.65rem;
-    padding:.15rem .1rem;
-}
-.st-key-professor_shell .st-key-professor_students_roster
-.professor-student-avatar {
-    width:2.45rem;
-    height:2.45rem;
-    flex:0 0 2.45rem;
-    border-radius:.65rem;
-    font-size:.74rem;
-}
-.st-key-professor_shell .st-key-professor_students_roster
-.professor-student-copy {
-    min-width:0;
-    gap:.1rem;
-}
-.st-key-professor_shell .st-key-professor_students_roster
-.professor-student-copy strong {
-    overflow-wrap:anywhere;
-    white-space:normal;
-    color:var(--cd-text);
-    font-size:1rem !important;
-    line-height:1.2;
-}
-.st-key-professor_shell .st-key-professor_students_roster
-.professor-student-copy span {
-    overflow-wrap:anywhere;
-    color:var(--cd-text);
-    font-size:.82rem !important;
-    line-height:1.3;
-}
-.st-key-professor_shell .st-key-professor_students_roster
-.professor-student-copy small {
-    overflow-wrap:anywhere;
-    color:var(--cd-muted);
-    font-size:.76rem !important;
-    line-height:1.3;
-}
-.st-key-professor_shell .st-key-professor_students_roster
-[class*="st-key-professor_open_student_"] button {
-    min-height:3.7rem !important;
-    padding:.35rem .45rem !important;
-    border:0 !important;
-    border-radius:.5rem !important;
-    color:var(--cd-text) !important;
-    background:transparent !important;
-    font-size:.84rem !important;
-    font-weight:650 !important;
-    justify-content:flex-end !important;
-    text-align:right !important;
-    white-space:normal !important;
-    line-height:1.2 !important;
-}
-.st-key-professor_shell .st-key-professor_students_roster
-[class*="st-key-professor_open_student_"] button p {
-    white-space:normal !important;
-    overflow-wrap:anywhere !important;
-}
-.st-key-professor_shell .st-key-professor_students_roster
-[class*="st-key-professor_open_student_"] button:hover,
-.st-key-professor_shell .st-key-professor_students_roster
-[class*="st-key-professor_open_student_"] button:focus-visible {
-    color:var(--cd-accent) !important;
-    background:var(--cd-surface-muted) !important;
-}
-
-@media (max-width:800px) {
-  .st-key-professor_shell .st-key-professor_students_roster
-  [data-testid="stElementContainer"]:has([class*="st-key-professor_student_card_"]) {
-      min-height:5.4rem !important;
-      margin:.375rem 0 !important;
-  }
-  .st-key-professor_shell .st-key-professor_students_roster
-  [class*="st-key-professor_student_card_"] {
-      min-height:5.4rem !important;
-      padding:.5rem .55rem !important;
-  }
-  .st-key-professor_shell .st-key-professor_students_roster
-  [class*="st-key-professor_student_card_"] [data-testid="stHorizontalBlock"] {
-      display:flex !important;
-      flex-wrap:nowrap !important;
-      align-items:center !important;
-  }
-  .st-key-professor_shell .st-key-professor_students_roster
-  [class*="st-key-professor_student_card_"] [data-testid="stHorizontalBlock"]
-  > [data-testid="stColumn"]:first-child {
-      flex:0 0 70% !important;
-      width:70% !important;
-      max-width:70% !important;
-      min-width:0 !important;
-  }
-  .st-key-professor_shell .st-key-professor_students_roster
-  [class*="st-key-professor_student_card_"] [data-testid="stHorizontalBlock"]
-  > [data-testid="stColumn"]:last-child {
-      flex:1 1 30% !important;
-      width:30% !important;
-      max-width:30% !important;
-      min-width:0 !important;
-  }
-  .st-key-professor_shell .st-key-professor_students_roster
-  [class*="st-key-professor_open_student_"] button {
-      min-height:3.7rem !important;
-      padding-left:.1rem !important;
-      padding-right:.1rem !important;
-      font-size:.74rem !important;
-      white-space:normal !important;
-      line-height:1.2 !important;
-  }
-  .st-key-professor_shell .st-key-professor_students_roster
-  [class*="st-key-professor_open_student_"] button p {
-      white-space:normal !important;
-      overflow-wrap:anywhere;
-  }
-}
-.block-container:has(.st-key-professor_header),
-.block-container:has(.st-key-professor_header).stMainBlockContainer {
-    height:auto !important;
+/* Streamlit's student shell is intentionally viewport-locked. Lecturer pages
+   include long rosters, research queues, and charts, so this route owns the
+   document scroll instead. */
+html:has(.st-key-professor_shell),
+html:has(.st-key-professor_shell) body,
+.stApp:has(.st-key-professor_shell),
+[data-testid="stAppViewContainer"]:has(.st-key-professor_shell),
+[data-testid="stAppViewContainer"]:has(.st-key-professor_shell) > .main,
+[data-testid="stAppViewContainer"]:has(.st-key-professor_shell) [data-testid="stMain"],
+[data-testid="stAppViewContainer"]:has(.st-key-professor_shell) .stMain,
+[data-testid="stAppViewContainer"]:has(.st-key-professor_shell) > .main {
     min-height:100vh !important;
+    height:auto !important;
     max-height:none !important;
-    display:block !important;
     overflow-x:hidden !important;
     overflow-y:visible !important;
-    padding-bottom:2.5rem;
 }
-.block-container:has(.st-key-professor_header) > [data-testid="stVerticalBlockBorderWrapper"],
-.block-container:has(.st-key-professor_header) > [data-testid="stVerticalBlock"],
-.block-container:has(.st-key-professor_header) > [data-testid="stVerticalBlockBorderWrapper"]
-> [data-testid="stVerticalBlock"] {
-    height:auto !important;
-    min-height:0 !important;
-    max-height:none !important;
-    overflow:visible !important;
-}
-.st-key-professor_header {
-    position:sticky; top:0; padding:.85rem .85rem 1rem 0;
-    border-bottom:none; border-right:1px solid var(--cd-border); background:transparent;
-}
-.st-key-professor_header [data-testid="stRadio"] { justify-content:flex-start; margin-top:.7rem; }
-.st-key-professor_header [data-testid="stRadio"] > div,
-.st-key-professor_shell .st-key-professor_header [data-testid="stRadio"] > div {
-    flex-direction:column; flex-wrap:nowrap; align-items:stretch; gap:.08rem;
-    padding:0; border:none; border-radius:0; background:transparent;
-}
-.st-key-professor_header label {
-    display:block; margin:0 !important; padding:.42rem .55rem; border-radius:.45rem;
-    color:var(--cd-muted); font-size:.82rem; white-space:normal;
-}
-.st-key-professor_header label p { white-space:normal; }
-.st-key-professor_header label:has(input:checked) {
-    color:var(--cd-text); background:var(--cd-accent-soft); box-shadow:none;
-}
-.professor-sidebar-brand h1 { font-size:1.05rem; }
-.professor-sidebar-account { justify-content:flex-start; margin-top:1rem; padding-top:.75rem; border-top:1px solid var(--cd-border); }
-.professor-chat-divider { margin:.55rem 0 .7rem; border-bottom:1px solid var(--cd-border); }
-.professor-timeline-step.professor-step {
-    display:flex; flex-direction:column; align-items:flex-start; gap:.08rem;
-    margin:.2rem 0 .55rem; padding:.1rem 0 .55rem .7rem;
-    border:none; border-left:1px solid var(--cd-border); border-radius:0; background:transparent;
-}
-.professor-timeline-step span { color:var(--cd-muted); font-size:.75rem; font-weight:500; }
-.professor-step-not_completed { color:var(--cd-muted); opacity:.85; }
-.professor-course-heading h1 { margin:.12rem 0 .22rem; color:var(--cd-text); font-size:1.35rem; letter-spacing:-.02em; }
-.professor-course-heading p { margin:0; color:var(--cd-muted); font-size:.86rem; }
-.professor-course-heading .professor-eyebrow { font-size:.72rem; font-weight:700; color:var(--cd-accent); }
-[class*="st-key-professor_open_notebook_btn_"] button {
-    width:100%; min-height:3.15rem; padding:.48rem .15rem; border:none;
-    border-bottom:1px solid var(--cd-border); border-radius:0; background:transparent;
-    color:var(--cd-text); text-align:left; justify-content:flex-start;
-    white-space:pre-line; font-weight:600; line-height:1.35;
-}
-[class*="st-key-professor_open_notebook_btn_"] button:hover { background:var(--cd-surface-muted); }
-.professor-metric { min-height:auto; padding:.55rem 0 .7rem; border:none; border-radius:0; background:transparent; }
-.professor-metric p,.professor-metric span { display:block; margin:0; color:var(--cd-muted); font-size:.72rem; line-height:1.25; }
-.professor-metric strong { display:block; margin:.26rem 0; color:var(--cd-text); font-size:1.12rem; letter-spacing:-.02em; }
-.professor-summary { margin:1rem 0; padding:.72rem .86rem; border-left:3px solid var(--cd-accent); color:var(--cd-text); background:var(--cd-accent-soft); font-size:.9rem; line-height:1.5; }
-.professor-bar-row { display:grid; grid-template-columns:minmax(7.5rem,1fr) minmax(5rem,2.25fr) 5.8rem; gap:.55rem; align-items:center; min-height:2rem; color:var(--cd-muted); font-size:.82rem; }
-.professor-bar { height:.4rem; overflow:hidden; border-radius:999px; background:var(--cd-subtle); }
-.professor-bar i { display:block; height:100%; border-radius:inherit; background:var(--cd-accent); }
-.professor-bar-row b { color:var(--cd-text); text-align:right; font-size:.78rem; font-weight:600; }
-.professor-progress { color:var(--cd-text); line-height:1.8; font-size:.85rem; }
-.professor-account { display:flex; justify-content:flex-end; gap:.65rem; margin-top:.45rem; color:var(--cd-muted); font-size:.75rem; }
-.professor-account a { color:var(--cd-accent); font-weight:600; text-decoration:none; }
-.professor-account a:hover { text-decoration:underline; }
-.professor-progress { display:flex; flex-wrap:wrap; gap:.45rem .7rem; padding:.65rem .8rem; border:1px solid var(--cd-border); border-radius:.65rem; background:var(--cd-surface); }
-.professor-step { display:inline-flex; align-items:center; gap:.28rem; padding:.22rem .42rem; border-radius:.4rem; color:var(--cd-muted); font-size:.82rem; }
-.professor-step-completed { color:var(--cd-text); background:var(--cd-accent-soft); }
-.professor-step-current { color:var(--cd-text); background:var(--cd-accent); font-weight:700; }
-.professor-step-future { color:var(--cd-muted); opacity:.72; }
-.st-key-professor_selected_student [data-testid="stRadio"], [class*="st-key-professor_notebook_card_"] { max-height:34rem; overflow-y:auto; }
-.st-key-professor_selected_student label, [class*="st-key-professor_notebook_card_"] { display:block; padding:.55rem .65rem; margin:.2rem 0; border:1px solid var(--cd-border); border-radius:.5rem; background:var(--cd-surface); }
-[class*="st-key-professor_notebook_card_"] { margin:.35rem 0; padding:.55rem .65rem; border:1px solid var(--cd-border); border-radius:.65rem; background:var(--cd-surface); }
-.st-key-professor_students_workspace { padding:.5rem; border:1px solid var(--cd-border); border-radius:.75rem; }
-.professor-student-card,.professor-notebook-card { margin:.35rem 0; padding:.55rem .65rem; border:1px solid var(--cd-border); border-radius:.65rem; background:var(--cd-surface); }
-.professor-student-card-selected { border-color:var(--cd-accent); background:var(--cd-accent-soft); }
-.professor-student-card-name { display:flex; justify-content:space-between; gap:.5rem; color:var(--cd-text); font-weight:700; font-size:.92rem; }
-.professor-student-card-chevron { color:var(--cd-muted); font-size:1.1rem; line-height:1; }
-.professor-student-card-meta,.professor-notebook-card-meta { margin-top:.2rem; color:var(--cd-muted); font-size:.78rem; line-height:1.35; }
-.professor-notebook-card-title { color:var(--cd-text); font-weight:700; font-size:.9rem; }
-.professor-notebook-card-stage { margin-top:.12rem; color:var(--cd-text); font-size:.82rem; }
-[class*="st-key-professor_message_"] { padding:.55rem .7rem; margin:.35rem 0; border:1px solid var(--cd-border); border-radius:.65rem; background:var(--cd-surface); overflow:visible; }
-[class*="st-key-professor_message_"]:has(.professor-chat-student) { border-left:3px solid var(--cd-accent); }
-[class*="st-key-professor_message_"]:has(.professor-chat-coach) { border-left:3px solid var(--cd-muted); }
-.professor-chat-card { margin:0 0 .35rem; }
-.professor-chat-student { border-left:none; }
-.professor-chat-coach { border-left:none; }
-.professor-chat-meta { display:flex; justify-content:space-between; gap:.75rem; margin-bottom:.1rem; color:var(--cd-muted); font-size:.78rem; }
-.professor-chat-meta strong { color:var(--cd-text); font-size:.82rem; }
-.professor-file-row { padding:.45rem 0; }
-.professor-file-row-title { color:var(--cd-text); font-size:.86rem; font-weight:600; line-height:1.35; }
-.professor-file-row-meta { margin-top:.12rem; color:var(--cd-muted); font-size:.76rem; }
-.st-key-professor_students_workspace [data-testid="stHorizontalBlock"] {
-    align-items:stretch;
-}
-.st-key-professor_students_workspace [data-testid="stColumn"] {
-    min-width:0;
-    min-height:0;
-    overflow:visible;
-}
-.st-key-professor_student_list_scroll,
-[data-testid="stElementContainer"].st-key-professor_student_list_scroll,
-.st-key-professor_transcript_scroll,
-[data-testid="stElementContainer"].st-key-professor_transcript_scroll,
-.st-key-research_transcript_scroll,
-[data-testid="stElementContainer"].st-key-research_transcript_scroll {
-    display:flex !important;
-    flex-direction:column !important;
-    min-height:0 !important;
-    overflow-x:hidden !important;
-    overflow-y:auto !important;
-    padding-right:.4rem;
-}
-.st-key-professor_student_list_scroll,
-[data-testid="stElementContainer"].st-key-professor_student_list_scroll {
-    max-height:min(34rem, calc(100vh - 16rem));
-}
-.st-key-professor_transcript_scroll,
-[data-testid="stElementContainer"].st-key-professor_transcript_scroll {
-    max-height:min(60vh, calc(100vh - 14rem));
-}
-.st-key-research_transcript_scroll,
-[data-testid="stElementContainer"].st-key-research_transcript_scroll {
-    max-height:58vh;
-}
-.st-key-professor_student_list_scroll [data-testid="stVerticalBlockBorderWrapper"],
-.st-key-professor_transcript_scroll [data-testid="stVerticalBlockBorderWrapper"],
-.st-key-research_transcript_scroll [data-testid="stVerticalBlockBorderWrapper"] {
-    flex:1 1 auto !important;
-    min-height:0 !important;
-    max-height:inherit;
-    overflow-x:hidden !important;
-    overflow-y:auto !important;
-    overscroll-behavior:contain;
-    -webkit-overflow-scrolling:touch;
-}
-.st-key-professor_transcript_scroll > [data-testid="stVerticalBlock"],
-.st-key-professor_transcript_scroll > [data-testid="stLayoutWrapper"],
-.st-key-professor_student_list_scroll > [data-testid="stVerticalBlock"],
-.st-key-professor_student_list_scroll > [data-testid="stLayoutWrapper"],
-.st-key-research_transcript_scroll > [data-testid="stVerticalBlock"],
-.st-key-research_transcript_scroll > [data-testid="stLayoutWrapper"] {
+
+.block-container:has(.st-key-professor_shell),
+.block-container:has(.st-key-professor_shell).stMainBlockContainer {
+    width:100% !important;
+    max-width:1440px !important;
+    min-height:100vh !important;
     height:auto !important;
     max-height:none !important;
+    margin:0 auto !important;
+    padding:1.1rem 1.25rem 2.5rem !important;
     overflow:visible !important;
 }
-.st-key-professor_transcript_scroll [class*="st-key-professor_message_"] { margin-bottom:.45rem; overflow:visible; }
-@media (max-width:800px) {
-  .st-key-professor_header {
-    position:static; padding:.75rem 0 .65rem; border-right:none;
-    border-bottom:1px solid var(--cd-border);
-  }
-  /* Streamlit's generated radio-group rule has a more specific selector than
-     the compact mobile rule below. Repeat the shell scope so the dashboard
-     navigation actually becomes a small horizontal control strip. */
-  .st-key-professor_shell .st-key-professor_header [data-testid="stRadio"] > div {
-    flex-direction:row !important;
-    flex-wrap:wrap !important;
-    overflow-x:auto !important;
-    overflow-y:hidden !important;
-    gap:.12rem !important;
-    border:1px solid var(--cd-border) !important;
-    border-radius:.65rem !important;
-    background:var(--cd-surface-muted) !important;
-    padding:.22rem !important;
-  }
-  .st-key-professor_shell .st-key-professor_header [data-testid="stRadio"] label {
-    width:auto !important;
+
+.block-container:has(.st-key-professor_shell) > [data-testid="stVerticalBlock"] {
+    height:auto !important;
+    min-height:100vh !important;
     flex:0 0 auto !important;
-  }
-  .st-key-professor_shell [data-testid="stHorizontalBlock"] { display:block; }
-  .st-key-professor_shell [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
-    width:100% !important; max-width:none !important; min-width:0 !important;
-  }
-  .st-key-professor_header [data-testid="stRadio"] > div {
-    flex-direction:row; flex-wrap:wrap; overflow-x:auto; gap:.12rem;
-    border:1px solid var(--cd-border); border-radius:.65rem;
-    background:var(--cd-surface-muted); padding:.22rem;
-  }
-  .st-key-professor_header label { white-space:nowrap; }
-  .st-key-professor_shell .professor-page-context {
-      flex:0 0 auto;
-      min-height:0;
-  }
-  .professor-account { justify-content:flex-start; }
-  .professor-bar-row { grid-template-columns:minmax(6.4rem,1fr) minmax(4rem,1.4fr) minmax(6.8rem,auto); }
-}
-@media (max-width:700px) {
-  .st-key-professor_transcript_scroll { max-height:52vh; }
+    overflow:visible !important;
 }
 
-/* Research review is intentionally workbench-like: queue, transcript, validation. */
-.st-key-research_workspace {
-    margin-top:.8rem;
-    padding:.75rem;
-    border:1px solid var(--cd-border);
-    border-radius:.8rem;
-    background:var(--cd-surface-muted);
-}
-.st-key-research_workspace > [data-testid="stLayoutWrapper"]
-> [data-testid="stHorizontalBlock"] { align-items:stretch; }
-.st-key-research_workspace > [data-testid="stLayoutWrapper"]
-> [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+.st-key-professor_shell {
+    width:100%;
     min-width:0;
-    padding:.75rem;
-    border:1px solid var(--cd-border);
-    border-radius:.65rem;
-    background:var(--cd-surface);
-}
-.research-coding-card {
-    margin:.35rem 0 .75rem;
-    padding:.72rem;
-    border-left:3px solid var(--cd-accent);
-    background:var(--cd-accent-soft);
-}
-.research-coding-card h4,
-.research-coding-card p { margin:.18rem 0 .55rem; color:var(--cd-text); }
-.research-coding-card .research-coding-meta {
-    color:var(--cd-muted);
-    font-size:.72rem;
-    font-weight:700;
-    letter-spacing:.035em;
-    text-transform:none;
-}
-.st-key-research_transcript_scroll [data-testid="stMarkdownContainer"] {
-    margin:0 0 .55rem;
-    padding:.65rem .7rem;
-    border:1px solid var(--cd-border);
-    border-radius:.6rem;
-    background:var(--cd-surface-muted);
+    color:var(--cd-text);
 }
 
-/* Small additions for the Streamlit dashboard markup. Keep these selectors
-   inside the professor shell so they cannot change the student workspace. */
-.st-key-professor_shell .professor-page-header {
-    display:flex;
-    align-items:flex-start;
-    justify-content:space-between;
-    gap:1rem;
-    margin:0 0 1.1rem;
-    padding:.15rem 0 .85rem;
-    border-bottom:1px solid var(--cd-border);
+.st-key-professor_shell [data-testid="stHorizontalBlock"] {
+    min-width:0;
 }
-.st-key-professor_shell .professor-page-heading { min-width:0; }
-.st-key-professor_shell .professor-page-heading h2 {
-    margin:.12rem 0 .25rem;
+
+.st-key-professor_shell [data-testid="stColumn"] {
+    min-width:0;
+}
+
+/* Persistent desktop rail. The outer row remains a two-column shell; only
+   its first column becomes the navigation rail. */
+@media (min-width:801px) {
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has(.st-key-professor_header) {
+        align-items:stretch !important;
+        gap:1.35rem !important;
+        flex-wrap:nowrap !important;
+    }
+
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has(.st-key-professor_header)
+    > [data-testid="stColumn"]:first-child {
+        flex:0 0 13.5rem !important;
+        width:13.5rem !important;
+        max-width:13.5rem !important;
+    }
+
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has(.st-key-professor_header)
+    > [data-testid="stColumn"]:last-child {
+        flex:1 1 0 !important;
+        width:0 !important;
+        max-width:none !important;
+    }
+
+    .st-key-professor_header {
+        position:sticky;
+        top:1rem;
+        display:flex;
+        flex-direction:column;
+        min-height:calc(100vh - 2rem);
+        box-sizing:border-box;
+        padding:.35rem .9rem .9rem 0;
+        border-right:1px solid var(--cd-border);
+    }
+
+    .st-key-professor_header [data-testid="stRadio"] {
+        margin-top:1.35rem;
+    }
+
+    .st-key-professor_header [data-testid="stRadio"] > div {
+        display:flex;
+        flex-direction:column;
+        align-items:stretch;
+        gap:.18rem;
+        padding:0;
+        border:0;
+        background:transparent;
+    }
+
+    .st-key-professor_header [data-testid="stRadio"] label {
+        display:block;
+        box-sizing:border-box;
+        width:100%;
+        margin:0 !important;
+        padding:.62rem .72rem;
+        border-radius:.55rem;
+        color:var(--cd-muted);
+        font-size:.84rem;
+        font-weight:600;
+        line-height:1.2;
+        white-space:normal;
+    }
+
+    .st-key-professor_header [data-testid="stRadio"] label:hover,
+    .st-key-professor_header [data-testid="stRadio"] label:has(input:focus-visible) {
+        background:var(--cd-surface-muted);
+        color:var(--cd-text);
+    }
+
+    .st-key-professor_header [data-testid="stRadio"] label:has(input:checked) {
+        background:var(--cd-accent-soft);
+        color:var(--cd-text);
+    }
+
+    .st-key-professor_mobile_header {
+        display:none !important;
+    }
+
+    /* The mobile surface is rendered alongside the desktop workbench so the
+       same session state can switch views without another rerun. Keep it out
+       of the desktop layout; the narrow-screen rule below enables it. */
+    [class*="st-key-professor_mobile_workbench_"] {
+        display:none !important;
+    }
+}
+
+.professor-sidebar-brand h1 {
+    margin:.12rem 0 .24rem;
     color:var(--cd-text);
-    font-size:1.55rem;
-    line-height:1.2;
+    font-family:"Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size:1.35rem;
     letter-spacing:-.025em;
 }
-.st-key-professor_shell .professor-page-heading > p:last-child {
-    max-width:58ch;
+
+.professor-sidebar-brand p {
     margin:0;
     color:var(--cd-muted);
-    font-size:.86rem;
-    line-height:1.45;
-}
-.st-key-professor_shell .professor-page-eyebrow,
-.st-key-professor_shell .professor-workspace-eyebrow {
-    margin:0;
-    color:var(--cd-accent);
-    font-size:.7rem;
-    font-weight:700;
-    letter-spacing:.04em;
-}
-.st-key-professor_shell .professor-page-context {
-    display:flex;
-    flex:0 1 15rem;
-    flex-direction:column;
-    align-items:flex-end;
-    gap:.12rem;
-    padding:.45rem .6rem;
-    border:1px solid var(--cd-border);
-    border-radius:.5rem;
-    color:var(--cd-muted);
-    font-size:.74rem;
-    line-height:1.3;
-    text-align:right;
-}
-.st-key-professor_shell .professor-page-context-code {
-    color:var(--cd-text);
-    font-weight:700;
-}
-.st-key-professor_shell .professor-sidebar-nav-label {
-    margin:.75rem 0 .15rem;
-    color:var(--cd-muted);
-    font-size:.68rem;
-    font-weight:700;
-    letter-spacing:.035em;
-}
-.st-key-professor_shell .professor-section-heading {
-    margin:.25rem 0 .65rem;
-}
-.st-key-professor_shell .professor-section-heading h3 {
-    margin:0;
-    color:var(--cd-text);
-    font-size:1rem;
-    line-height:1.3;
-}
-.st-key-professor_shell .professor-section-description {
-    margin:.22rem 0 0;
-    color:var(--cd-muted);
-    font-size:.78rem;
+    font-size:.8rem;
     line-height:1.4;
 }
-.st-key-professor_shell .professor-updated {
+
+.professor-sidebar-brand .professor-eyebrow {
+    color:var(--cd-accent);
+    font-size:.68rem;
+    font-weight:750;
+    letter-spacing:.06em;
+    text-transform:uppercase;
+}
+
+.professor-sidebar-nav-label {
+    margin:1.25rem 0 .25rem;
+    color:var(--cd-muted);
+    font-size:.68rem;
+    font-weight:750;
+    letter-spacing:.05em;
+    text-transform:uppercase;
+}
+
+.professor-sidebar-account {
     display:flex;
+    align-items:center;
     justify-content:space-between;
-    gap:.75rem;
-    margin:0 0 .35rem;
+    gap:.55rem;
+    margin-top:auto;
+    padding-top:.85rem;
+    border-top:1px solid var(--cd-border);
     color:var(--cd-muted);
-    font-size:.72rem;
-}
-.st-key-professor_shell .professor-updated span { color:var(--cd-text); font-weight:700; }
-.st-key-professor_shell .professor-result-count {
-    margin:.35rem 0 .45rem;
-    color:var(--cd-muted);
-    font-size:.76rem;
-}
-.st-key-professor_shell .professor-metric-label,
-.st-key-professor_shell .professor-metric-detail {
-    display:block;
-    margin:0;
-    color:var(--cd-muted);
-    font-size:.72rem;
+    font-size:.75rem;
     line-height:1.3;
 }
-.st-key-professor_shell .professor-metric-value {
-    display:block;
-    margin:.22rem 0;
-    color:var(--cd-text);
-    font-size:1.2rem;
-    line-height:1.2;
-}
-.st-key-professor_shell .professor-followup-table {
-    overflow:hidden;
-    border:1px solid var(--cd-border);
-    border-radius:.55rem;
-}
-.st-key-professor_shell .professor-followup-header,
-.st-key-professor_shell .professor-followup-row {
-    display:grid;
-    grid-template-columns:1.05fr 1.7fr 1.1fr .75fr 1fr;
-    gap:.5rem;
-    align-items:start;
-    padding:.48rem .6rem;
-    color:var(--cd-muted);
-    font-size:.74rem;
-    line-height:1.35;
-}
-.st-key-professor_shell .professor-followup-header {
-    color:var(--cd-text);
-    font-weight:700;
-    background:var(--cd-surface-muted);
-}
-.st-key-professor_shell .professor-followup-row { border-top:1px solid var(--cd-border); }
-.st-key-professor_shell .professor-followup-row span { min-width:0; overflow-wrap:anywhere; }
-.st-key-professor_shell .professor-student-row,
-.st-key-professor_shell .professor-notebook-row {
+
+.professor-sidebar-account span {
     display:flex;
     min-width:0;
-    gap:.12rem;
-    padding:.3rem 0;
+    flex-direction:column;
 }
-.st-key-professor_shell .professor-student-row {
-    flex-direction:row;
-    align-items:center;
-}
-.st-key-professor_shell .professor-notebook-row { flex-direction:column; }
-.st-key-professor_shell .professor-student-avatar {
-    display:inline-flex;
-    width:1.8rem;
-    height:1.8rem;
-    align-items:center;
-    justify-content:center;
-    flex:0 0 1.8rem;
-    border-radius:50%;
-    color:var(--cd-accent);
-    background:var(--cd-accent-soft);
+
+.professor-sidebar-account small {
+    color:var(--cd-muted);
     font-size:.68rem;
-    font-weight:700;
 }
-.st-key-professor_shell .professor-student-copy {
+
+.professor-sidebar-account a,
+.professor-mobile-account a {
+    color:var(--cd-accent);
+    font-weight:700;
+    text-decoration:none;
+    white-space:nowrap;
+}
+
+.professor-sidebar-account a:hover,
+.professor-mobile-account a:hover {
+    text-decoration:underline;
+}
+
+/* Compact mobile-only controls. Desktop section navigation stays in the rail. */
+.st-key-professor_mobile_header {
+    margin:0 0 .9rem;
+    padding:.7rem 0 .75rem;
+    border-bottom:1px solid var(--cd-border);
+}
+
+.professor-mobile-brand {
     display:flex;
     min-width:0;
     flex-direction:column;
     gap:.08rem;
 }
-.st-key-professor_shell .professor-student-copy strong,
-.st-key-professor_shell .professor-notebook-row strong {
+
+.professor-mobile-brand strong {
+    overflow:hidden;
+    color:var(--cd-text);
+    font-size:.9rem;
+    line-height:1.25;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+
+.professor-mobile-brand > span:last-child {
+    color:var(--cd-muted);
+    font-size:.7rem;
+}
+
+.professor-mobile-eyebrow {
+    overflow:hidden;
+    color:var(--cd-accent) !important;
+    font-size:.62rem !important;
+    font-weight:750;
+    letter-spacing:.04em;
+    text-overflow:ellipsis;
+    text-transform:uppercase;
+    white-space:nowrap;
+}
+
+.professor-mobile-account {
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    min-height:2.5rem;
+    font-size:.72rem;
+}
+
+.st-key-professor_mobile_header [data-testid="stHorizontalBlock"] {
+    align-items:center;
+    gap:.4rem;
+}
+
+.st-key-professor_mobile_header [data-testid="stHorizontalBlock"]
+> [data-testid="stColumn"] {
+    min-width:0 !important;
+}
+
+.st-key-professor_mobile_header [data-baseweb="select"] > div {
+    min-height:2.45rem !important;
+    box-sizing:border-box !important;
+    border-radius:.55rem !important;
+    background:var(--cd-surface-muted) !important;
+}
+
+.st-key-professor_mobile_header [data-baseweb="select"] * {
+    font-size:.72rem !important;
+}
+
+.st-key-professor_mobile_header .st-key-professor_mobile_back_notebooks,
+.st-key-professor_mobile_header [class*="st-key-professor_mobile_back_notebooks_"] {
+    margin-top:.55rem;
+}
+
+.st-key-professor_mobile_header [class*="st-key-professor_mobile_back_notebooks_"] button,
+.st-key-professor_mobile_header [class*="st-key-professor_mobile_workbench_refresh_"] button {
+    min-height:2.4rem !important;
+    padding:.4rem .55rem !important;
+    font-size:.76rem !important;
+}
+
+.st-key-professor_mobile_header [class*="st-key-professor_mobile_view_switcher_"] {
+    margin-top:.5rem;
+}
+
+/* Page hierarchy */
+.professor-page-header {
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:1rem;
+    margin:0 0 1.25rem;
+    padding:.15rem 0 .95rem;
+    border-bottom:1px solid var(--cd-border);
+}
+
+.professor-page-heading {
+    min-width:0;
+}
+
+.professor-page-eyebrow,
+.professor-workspace-eyebrow,
+.professor-workbench-eyebrow {
+    margin:0;
+    color:var(--cd-accent);
+    font-size:.68rem;
+    font-weight:750;
+    letter-spacing:.055em;
+    text-transform:uppercase;
+}
+
+.professor-page-heading h2 {
+    margin:.13rem 0 .28rem;
+    color:var(--cd-text);
+    font-family:"Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size:1.65rem;
+    line-height:1.15;
+    letter-spacing:-.03em;
+}
+
+.professor-page-heading > p:last-child {
+    max-width:62ch;
+    margin:0;
+    color:var(--cd-muted);
+    font-size:.83rem;
+    line-height:1.45;
+}
+
+.professor-section-heading {
+    margin:.15rem 0 .65rem;
+}
+
+.professor-section-heading h3 {
+    margin:0;
+    color:var(--cd-text);
+    font-size:1rem;
+    line-height:1.25;
+}
+
+.professor-section-description {
+    margin:.2rem 0 0;
+    color:var(--cd-muted);
+    font-size:.76rem;
+    line-height:1.4;
+}
+
+.professor-updated {
+    display:flex;
+    justify-content:space-between;
+    gap:.8rem;
+    margin:0 0 .4rem;
+    color:var(--cd-muted);
+    font-size:.7rem;
+}
+
+.professor-updated span {
+    color:var(--cd-text);
+    font-weight:750;
+}
+
+.professor-summary {
+    margin:.65rem 0 1.1rem;
+    padding:.8rem .9rem;
+    border-left:3px solid var(--cd-accent);
+    border-radius:0 .55rem .55rem 0;
+    background:var(--cd-accent-soft);
     color:var(--cd-text);
     font-size:.86rem;
-    overflow-wrap:anywhere;
+    line-height:1.5;
 }
-.st-key-professor_shell .professor-student-copy span,
-.st-key-professor_shell .professor-student-copy small,
-.st-key-professor_shell .professor-notebook-row span,
-.st-key-professor_shell .professor-notebook-row small {
+
+/* Overview metrics and chart primitives */
+.professor-metric {
+    min-height:5.5rem;
+    padding:.72rem .8rem;
+    border:1px solid var(--cd-border);
+    border-radius:.7rem;
+    background:var(--cd-surface);
+    box-shadow:0 2px 8px rgba(21,32,43,.035);
+}
+
+.professor-metric-label,
+.professor-metric-detail {
+    display:block;
+    margin:0;
+    color:var(--cd-muted);
+    font-size:.7rem;
+    line-height:1.3;
+}
+
+.professor-metric-value {
+    display:block;
+    margin:.3rem 0 .15rem;
+    color:var(--cd-text);
+    font-size:1.28rem;
+    font-weight:750;
+    letter-spacing:-.025em;
+}
+
+.professor-bar-row {
+    display:grid;
+    grid-template-columns:minmax(7.5rem,1fr) minmax(5rem,2.2fr) 5.8rem;
+    align-items:center;
+    gap:.6rem;
+    min-height:2.05rem;
+    color:var(--cd-muted);
+    font-size:.78rem;
+}
+
+.professor-bar {
+    height:.4rem;
+    overflow:hidden;
+    border-radius:999px;
+    background:var(--cd-subtle);
+}
+
+.professor-bar i {
+    display:block;
+    height:100%;
+    border-radius:inherit;
+    background:var(--cd-accent);
+}
+
+.professor-bar-row b {
+    color:var(--cd-text);
+    font-size:.75rem;
+    font-weight:700;
+    text-align:right;
+}
+
+/* Follow-up rows are an operational queue, not a decorative table. */
+.professor-followup-table {
+    width:100%;
+    overflow:hidden;
+    border:1px solid var(--cd-border);
+    border-radius:.7rem;
+    background:var(--cd-surface);
+}
+
+.professor-followup-header {
+    display:grid;
+    grid-template-columns:1.05fr 1.7fr 1.1fr .75fr 1fr .7fr;
+    gap:.55rem;
+    padding:.58rem .7rem;
+    border-bottom:1px solid var(--cd-border);
+    background:var(--cd-surface-muted);
+    color:var(--cd-muted);
+    font-size:.65rem;
+    font-weight:750;
+    letter-spacing:.04em;
+    text-transform:uppercase;
+}
+
+[class*="st-key-professor_followup_row_"],
+[class*="st-key-professor_inactive_row_"] {
+    padding:.2rem .7rem;
+    border-bottom:1px solid var(--cd-border);
+}
+
+[class*="st-key-professor_followup_row_"]:last-child,
+[class*="st-key-professor_inactive_row_"]:last-child {
+    border-bottom:0;
+}
+
+[class*="st-key-professor_followup_row_"] [data-testid="stHorizontalBlock"],
+[class*="st-key-professor_inactive_row_"] [data-testid="stHorizontalBlock"] {
+    align-items:center;
+}
+
+.professor-followup-cell {
+    display:block;
+    overflow:hidden;
+    color:var(--cd-text);
+    font-size:.76rem;
+    line-height:1.35;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+
+.professor-followup-label {
+    display:none;
+}
+
+.professor-followup-cell[data-label="Reason"],
+.professor-followup-cell[data-label="Last active"] {
+    color:var(--cd-muted);
+}
+
+[class*="st-key-professor_followup_"] button,
+[class*="st-key-professor_inactive_"] button {
+    min-height:2.25rem !important;
+    padding:.35rem .55rem !important;
+    font-size:.74rem !important;
+    font-weight:750 !important;
+    white-space:nowrap !important;
+}
+
+/* Student roster and notebook list */
+.professor-result-count,
+.professor-workbench-count {
+    margin:.35rem 0 .5rem;
+    color:var(--cd-muted);
+    font-size:.74rem;
+}
+
+.st-key-professor_students_roster [data-testid="stTextInput"] input,
+.st-key-professor_students_roster [data-baseweb="select"] > div,
+[class*="st-key-professor_workbench_roster_"] [data-testid="stTextInput"] input,
+[class*="st-key-professor_workbench_roster_"] [data-baseweb="select"] > div {
+    min-height:2.7rem !important;
+    box-sizing:border-box !important;
+    border-radius:.6rem !important;
+    background:var(--cd-surface-muted) !important;
+}
+
+.professor-student-row,
+.professor-workbench-student-row {
+    display:flex;
+    min-width:0;
+    align-items:center;
+    gap:.65rem;
+}
+
+.professor-student-avatar {
+    display:inline-flex;
+    width:2.35rem;
+    height:2.35rem;
+    flex:0 0 2.35rem;
+    align-items:center;
+    justify-content:center;
+    border-radius:.65rem;
+    background:var(--cd-accent-soft);
+    color:var(--cd-accent-hover);
+    font-size:.72rem;
+    font-weight:800;
+}
+
+.professor-student-copy {
+    display:flex;
+    min-width:0;
+    flex:1 1 auto;
+    flex-direction:column;
+    gap:.08rem;
+}
+
+.professor-student-copy strong {
+    overflow:hidden;
+    color:var(--cd-text);
+    font-size:.9rem;
+    line-height:1.25;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+
+.professor-student-copy span,
+.professor-student-copy small {
+    overflow:hidden;
+    color:var(--cd-muted);
+    font-size:.73rem;
+    line-height:1.35;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+
+.st-key-professor_students_roster [class*="st-key-professor_student_card_"] {
+    margin:.35rem 0 !important;
+    padding:.62rem .7rem !important;
+    border:1px solid var(--cd-border) !important;
+    border-radius:.7rem !important;
+    background:var(--cd-surface) !important;
+}
+
+.st-key-professor_students_roster [class*="st-key-professor_open_student_"] button,
+[class*="st-key-professor_workbench_select_student_"] button {
+    min-height:2.4rem !important;
+    padding:.3rem .45rem !important;
+    color:var(--cd-accent-hover) !important;
+    font-size:.74rem !important;
+    font-weight:750 !important;
+    white-space:nowrap !important;
+}
+
+.professor-notebook-row {
+    display:flex;
+    flex-direction:column;
+    gap:.12rem;
+    min-width:0;
+    padding:.25rem 0;
+}
+
+.professor-notebook-row strong {
+    overflow:hidden;
+    color:var(--cd-text);
+    font-size:.88rem;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+}
+
+.professor-notebook-row span,
+.professor-notebook-row small {
     color:var(--cd-muted);
     font-size:.74rem;
     line-height:1.35;
 }
-.st-key-professor_shell .professor-workspace-heading {
-    display:flex;
-    align-items:flex-start;
-    justify-content:space-between;
-    gap:.75rem;
-    margin:0 0 .35rem;
+
+[class*="st-key-professor_open_notebook_btn_"] button {
+    min-height:2.5rem !important;
+    padding:.35rem .45rem !important;
+    color:var(--cd-accent-hover) !important;
+    font-size:.74rem !important;
+    font-weight:750 !important;
+    white-space:nowrap !important;
 }
-.st-key-professor_shell .professor-workspace-heading h3 {
-    margin:.1rem 0 .2rem;
+
+.st-key-professor_student_list_scroll {
+    min-width:0;
+    overflow:visible;
+}
+
+/* Selected notebook workbench. The content column is the only viewport-locked
+   ancestor; its context header is flex:none and the workbench is flex:1. Do
+   not set 100dvh on the workbench itself: that is what previously clipped the
+   header and bottom controls. */
+.st-key-professor_shell [data-testid="stColumn"]:has([class*="st-key-professor_selected_workbench_"]) {
+    display:flex !important;
+    min-height:100dvh !important;
+    height:100dvh !important;
+    flex-direction:column !important;
+    overflow:hidden !important;
+}
+
+[class*="st-key-professor_workbench_context_"] {
+    flex:0 0 auto !important;
+    min-height:0 !important;
+    padding:.15rem 0 .65rem;
+}
+
+.professor-workbench-context-copy h2 {
+    margin:.12rem 0 .18rem;
     color:var(--cd-text);
-    font-size:1.15rem;
-    line-height:1.25;
-    overflow-wrap:anywhere;
+    font-family:"Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size:1.32rem;
+    line-height:1.2;
+    letter-spacing:-.025em;
 }
-.st-key-professor_shell .professor-workspace-heading p:last-child {
+
+.professor-workbench-context-copy p:last-child {
     margin:0;
     color:var(--cd-muted);
-    font-size:.76rem;
+    font-size:.74rem;
 }
-.st-key-professor_shell .professor-readonly-badge {
-    flex:0 0 auto;
+
+.professor-readonly-badge {
+    display:inline-flex;
+    width:max-content;
+    margin-top:.35rem;
     padding:.22rem .45rem;
-    border:1px solid var(--cd-border);
     border-radius:999px;
+    background:var(--cd-surface-muted);
     color:var(--cd-muted);
-    font-size:.68rem;
-    white-space:nowrap;
-}
-.st-key-professor_shell .professor-subsection-label {
-    margin:.2rem 0 .45rem;
-    color:var(--cd-text);
-    font-size:.82rem;
+    font-size:.65rem;
     font-weight:700;
 }
 
-@media (max-width:800px) {
-  .st-key-professor_shell .professor-page-header { flex-direction:column; gap:.55rem; }
-  .st-key-professor_shell .professor-page-context {
-      width:100%;
-      align-items:flex-start;
-      text-align:left;
-  }
-  .st-key-professor_shell .professor-followup-table { overflow-x:auto; }
-  .st-key-professor_shell .professor-followup-header,
-  .st-key-professor_shell .professor-followup-row {
-      min-width:35rem;
-  }
+[class*="st-key-professor_selected_workbench_"] {
+    display:flex !important;
+    min-height:0 !important;
+    height:auto !important;
+    flex:1 1 auto !important;
+    flex-direction:column !important;
+    overflow:hidden !important;
 }
 
-/* The reference dashboard uses a narrow navigation rail and a generous
-   reading gutter. Keep the keyed Streamlit shell scoped so student pages are
-   unaffected by the lecturer-only geometry. */
-@media (min-width:801px) {
-  .st-key-professor_shell > [data-testid="stLayoutWrapper"]
-  > [data-testid="stHorizontalBlock"] {
-      display:flex !important;
-      flex-wrap:nowrap !important;
-      width:100% !important;
-      max-width:100% !important;
-      gap:16px !important;
-  }
-  .st-key-professor_shell > [data-testid="stLayoutWrapper"]
-  > [data-testid="stHorizontalBlock"]
-  > [data-testid="stColumn"]:has(.st-key-professor_header) {
-      flex:0 0 210px !important;
-      width:210px !important;
-      max-width:210px !important;
-  }
-  .st-key-professor_shell > [data-testid="stLayoutWrapper"]
-  > [data-testid="stHorizontalBlock"]
-  > [data-testid="stColumn"]:not(:has(.st-key-professor_header)) {
-      flex:1 1 0 !important;
-      /* A zero flex-basis is important here: Streamlit otherwise retains the
-         original percentage width and wraps the content below the rail. */
-      width:0 !important;
-      max-width:none !important;
-      min-width:0 !important;
-      padding-left:1.5rem !important;
-      padding-right:2.5rem !important;
-  }
+[class*="st-key-professor_desktop_workbench_"] {
+    display:flex !important;
+    min-height:0 !important;
+    height:100% !important;
+    flex:1 1 auto !important;
+    flex-direction:column !important;
+    overflow:hidden !important;
 }
 
-@media (max-width:800px) {
-  .st-key-professor_shell > [data-testid="stLayoutWrapper"]
-  > [data-testid="stHorizontalBlock"]
-  > [data-testid="stColumn"] {
-      padding-left:0 !important;
-      padding-right:0 !important;
-  }
-  /* This reset must follow the desktop declaration because the latter is
-     intentionally scoped to the shell and otherwise leaves a 15rem flex
-     basis behind on narrow screens. */
-  .st-key-professor_shell .professor-page-context {
-      flex:0 0 auto !important;
-      min-height:0 !important;
-  }
+[class*="st-key-professor_desktop_workbench_"] [data-testid="stHorizontalBlock"] {
+    min-height:0 !important;
+    height:100% !important;
+    align-items:stretch !important;
 }
 
-/* Compact rail details and the restrained card treatment used by the
-   supplied Course Analytics reference. */
-.st-key-professor_shell .st-key-professor_header {
-    min-height:100vh;
-    padding:1.15rem 1rem 1rem;
-    background:var(--cd-bg);
-}
-.st-key-professor_shell .professor-sidebar-brand {
-    padding:0 .25rem;
-}
-.st-key-professor_shell .professor-sidebar-brand .professor-eyebrow {
-    margin:0 0 .55rem;
-    color:var(--cd-muted);
-    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-    font-size:.62rem;
-    font-weight:600;
-    letter-spacing:.14em;
-    text-transform:uppercase;
-}
-.st-key-professor_shell .professor-sidebar-brand h1 {
-    margin:.05rem 0 .35rem;
-    font-size:1.05rem;
-    letter-spacing:-.02em;
-}
-.st-key-professor_shell .professor-sidebar-brand p:last-child {
-    max-width:18ch;
-    font-size:.75rem;
-    line-height:1.35;
-}
-.st-key-professor_shell .professor-student-avatar {
-    border-radius:.55rem;
-}
-.st-key-professor_shell .professor-sidebar-nav-label {
-    margin:.9rem .25rem .25rem;
-    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-    font-size:.62rem;
-    letter-spacing:.11em;
-    line-height:1.45;
-    text-transform:uppercase;
-}
-.st-key-professor_shell .st-key-professor_header label {
-    min-height:2.2rem;
-    padding:.47rem .55rem;
-    border:1px solid transparent;
-    border-radius:.55rem;
-    font-size:.8rem;
-}
-.st-key-professor_shell .st-key-professor_header [data-testid="stWidgetLabel"] {
-    /* The visible mono eyebrow above the rail already names this control. */
-    display:none !important;
-}
-.st-key-professor_shell .st-key-professor_header label:has(input:checked) {
-    border-color:color-mix(in srgb, var(--cd-accent) 26%, transparent);
+[class*="st-key-professor_desktop_workbench_"] [data-testid="stColumn"] {
+    min-width:0 !important;
+    min-height:0 !important;
+    overflow:hidden !important;
 }
 
-.st-key-professor_shell [class*="st-key-professor_notebook_card_"] {
-    margin:.2rem 0;
-    padding:.2rem .35rem;
-    border:1px solid var(--cd-border);
-    border-radius:.65rem;
-    background:var(--cd-surface);
-    transition:border-color var(--cd-transition),background var(--cd-transition);
-}
-.st-key-professor_shell [class*="st-key-professor_notebook_card_"]:has(button:hover),
-.st-key-professor_shell [class*="st-key-professor_notebook_card_"]:has(button:focus-visible) {
-    border-color:var(--cd-accent);
-    background:var(--cd-accent-soft);
-}
-.st-key-professor_shell [class*="st-key-professor_open_notebook_btn_"] button {
-    min-height:0;
-    padding:.36rem .2rem;
-    border:0;
-    border-radius:.45rem;
-    background:transparent;
-}
-.st-key-professor_shell [class*="st-key-professor_open_notebook_btn_"] button:hover {
-    background:transparent;
-}
-
-.st-key-professor_shell [class*="st-key-professor_workspace_header_"] {
-    margin:.05rem 0 .65rem;
-    padding:.65rem .8rem;
+[class*="st-key-professor_workbench_roster_"] {
+    display:flex !important;
+    min-height:0 !important;
+    height:100% !important;
+    flex-direction:column !important;
+    padding:.65rem .65rem .35rem;
     border:1px solid var(--cd-border);
     border-radius:.7rem;
     background:var(--cd-surface-muted);
 }
-.st-key-professor_shell [class*="st-key-professor_workspace_tab_"] [data-testid="stRadioGroup"] {
-    display:flex;
-    flex-wrap:nowrap;
-    gap:.15rem;
-    padding:.2rem;
+
+[class*="st-key-professor_workbench_roster_scroll_"] {
+    min-height:0 !important;
+    flex:1 1 auto !important;
+    overflow-x:hidden !important;
+    overflow-y:auto !important;
+    overscroll-behavior:contain;
+    padding-right:.25rem;
+}
+
+[class*="st-key-professor_workbench_student_card_"] {
+    margin:.28rem 0 !important;
+    padding:.5rem .52rem !important;
+    border:1px solid var(--cd-border) !important;
+    border-radius:.6rem !important;
+    background:var(--cd-surface) !important;
+}
+
+.professor-workbench-student-row .professor-student-copy span {
+    font-size:.7rem;
+}
+
+.professor-workbench-student-row .professor-student-copy small {
+    color:var(--cd-muted);
+    font-size:.68rem;
+}
+
+.professor-workbench-student-status {
+    flex:0 0 1rem;
+    color:var(--cd-accent);
+    font-size:.7rem;
+    text-align:center;
+}
+
+[class*="st-key-professor_workspace_pane_"] {
+    display:flex !important;
+    min-height:0 !important;
+    height:100% !important;
+    flex-direction:column !important;
+    padding:.7rem .85rem .4rem;
     border:1px solid var(--cd-border);
-    border-radius:.65rem;
+    border-radius:.7rem;
+    background:var(--cd-surface);
+}
+
+[class*="st-key-professor_workspace_pane_"] [data-testid="stRadio"] > div,
+[class*="st-key-professor_path_rail_"] [data-testid="stHorizontalBlock"] {
+    gap:.35rem;
+}
+
+[class*="st-key-professor_workspace_pane_"] [data-testid="stRadio"] label {
+    min-height:2.3rem;
+    padding:.38rem .65rem;
+    border-radius:.5rem;
+    color:var(--cd-muted);
+    font-size:.77rem;
+    font-weight:700;
+}
+
+[class*="st-key-professor_workspace_pane_"] [data-testid="stRadio"] label:has(input:checked) {
+    background:var(--cd-accent-soft);
+    color:var(--cd-text);
+}
+
+[class*="st-key-professor_workspace_pane_"] [data-testid="stRadio"] label:hover {
     background:var(--cd-surface-muted);
 }
-.st-key-professor_shell [class*="st-key-professor_workspace_tab_"] [data-testid="stRadioOption"] {
-    flex:1 1 0;
+
+/* Center-only transcript/sources, with the path projection kept in the rail. */
+[class*="st-key-professor_transcript_scroll"] {
+    min-height:0 !important;
+    flex:1 1 auto !important;
+    overflow-x:hidden !important;
+    overflow-y:auto !important;
+    overscroll-behavior:contain;
+    padding-right:.35rem;
+}
+
+.professor-chat-meta {
+    display:flex;
+    justify-content:space-between;
+    gap:.65rem;
+    margin-bottom:.15rem;
+    color:var(--cd-muted);
+    font-size:.72rem;
+}
+
+.professor-chat-meta strong {
+    color:var(--cd-text);
+    font-size:.78rem;
+}
+
+[class*="st-key-professor_message_"] {
+    margin:.35rem 0 !important;
+    padding:.55rem .65rem !important;
+    border:1px solid var(--cd-border) !important;
+    border-radius:.6rem !important;
+    background:var(--cd-surface-muted) !important;
+}
+
+[class*="st-key-professor_message_"]:has(.professor-chat-student) {
+    border-left:3px solid var(--cd-accent) !important;
+}
+
+.professor-file-row {
     min-width:0;
-    border:1px solid transparent;
-    border-radius:.45rem;
+    padding:.42rem 0;
 }
-.st-key-professor_shell [class*="st-key-professor_workspace_tab_"] [data-testid="stRadioOption"][data-selected="true"] {
-    border-color:color-mix(in srgb, var(--cd-accent) 26%, transparent);
-    background:var(--cd-accent-soft);
-}
-.st-key-professor_shell [class*="st-key-professor_workspace_tab_"] [data-testid="stRadioOption"] p {
-    font-size:.75rem;
+
+.professor-file-row-title {
+    overflow:hidden;
+    color:var(--cd-text);
+    font-size:.8rem;
+    font-weight:700;
+    line-height:1.35;
+    text-overflow:ellipsis;
     white-space:nowrap;
 }
 
-.st-key-professor_shell .professor-timeline-step.professor-step {
-    display:flex;
-    flex-direction:row;
-    align-items:center;
-    gap:.5rem;
-    margin:.25rem 0;
-    padding:.5rem .6rem;
-    border:1px solid var(--cd-border);
-    border-left:2px solid var(--cd-border);
-    border-radius:.6rem;
-    background:var(--cd-surface);
-}
-.st-key-professor_shell .professor-timeline-step.professor-step.professor-step-current {
-    border-color:color-mix(in srgb, var(--cd-accent) 42%, var(--cd-border));
-    border-left-color:var(--cd-accent);
-    background:var(--cd-accent-soft);
-}
-.st-key-professor_shell .professor-timeline-step.professor-step.professor-step-completed {
-    border-left-color:var(--cd-accent);
-}
-.st-key-professor_shell .professor-timeline-node {
-    display:inline-flex;
-    width:1.35rem;
-    height:1.35rem;
-    align-items:center;
-    justify-content:center;
-    flex:0 0 1.35rem;
-    border:1px solid var(--cd-border);
-    border-radius:50%;
+.professor-file-row-meta {
+    margin-top:.12rem;
     color:var(--cd-muted);
-    background:var(--cd-surface-muted);
-    font-size:.68rem;
+    font-size:.7rem;
 }
-.st-key-professor_shell .professor-step-current .professor-timeline-node,
-.st-key-professor_shell .professor-step-completed .professor-timeline-node {
-    border-color:var(--cd-accent);
+
+[class*="st-key-professor_attachment_"] button,
+[class*="st-key-professor_citation_"] button,
+[class*="st-key-professor_source_"] button {
+    min-height:2.25rem !important;
+    padding:.3rem .45rem !important;
+    font-size:.72rem !important;
+    font-weight:750 !important;
+    white-space:nowrap !important;
+}
+
+/* Thinking Path owns the right-rail projections on desktop and the fourth
+   mobile surface when explicitly selected. */
+[class*="st-key-professor_path_rail_"] {
+    display:flex !important;
+    min-height:0 !important;
+    height:100% !important;
+    flex-direction:column !important;
+    padding:.7rem .7rem .4rem;
+    border:1px solid var(--cd-border);
+    border-radius:.7rem;
+    background:var(--cd-surface-muted);
+}
+
+.professor-path-heading h3 {
+    margin:0 0 .55rem;
+    color:var(--cd-text);
+    font-size:1rem;
+}
+
+[class*="st-key-professor_path_rail_"] [data-testid="stButton"] button {
+    min-height:2.3rem !important;
+    padding:.35rem .45rem !important;
+    font-size:.72rem !important;
+    font-weight:750 !important;
+}
+
+[class*="st-key-professor_path_content_"] {
+    min-height:0 !important;
+    flex:1 1 auto !important;
+    overflow-y:auto !important;
+    overflow-x:hidden !important;
+    padding-right:.2rem;
+}
+
+.professor-timeline-step {
+    display:flex;
+    align-items:flex-start;
+    gap:.55rem;
+    margin:.2rem 0;
+    padding:.55rem .5rem;
+    border-left:2px solid var(--cd-border);
+}
+
+.professor-timeline-node {
+    flex:0 0 1.1rem;
+    color:var(--cd-muted);
+    font-size:.82rem;
+    text-align:center;
+}
+
+.professor-step-completed .professor-timeline-node,
+.professor-step-current .professor-timeline-node {
     color:var(--cd-accent);
 }
-.st-key-professor_shell .professor-timeline-copy {
+
+.professor-timeline-copy {
     display:flex;
     min-width:0;
     flex-direction:column;
-    gap:.05rem;
+    gap:.08rem;
 }
-.st-key-professor_shell .professor-timeline-copy strong { color:var(--cd-text); font-size:.8rem; }
-.st-key-professor_shell .professor-timeline-copy small { color:var(--cd-muted); font-size:.7rem; }
 
-.st-key-professor_shell [data-testid="stExpander"] {
+.professor-timeline-copy strong {
+    color:var(--cd-text);
+    font-size:.78rem;
+}
+
+.professor-timeline-copy small {
+    color:var(--cd-muted);
+    font-size:.68rem;
+}
+
+.professor-path-fallback-card {
+    display:flex;
+    flex-direction:column;
+    gap:.12rem;
     margin:.35rem 0;
-    border:1px solid var(--cd-border) !important;
-    border-radius:.65rem !important;
-    background:var(--cd-surface) !important;
+    padding:.58rem .62rem;
+    border:1px solid var(--cd-border);
+    border-radius:.55rem;
+    background:var(--cd-surface);
 }
-.st-key-professor_shell [data-testid="stExpander"] details > summary {
+
+.professor-path-fallback-card strong {
+    color:var(--cd-text);
+    font-size:.76rem;
+}
+
+.professor-path-fallback-card span {
+    color:var(--cd-muted);
+    font-size:.7rem;
+    line-height:1.35;
+}
+
+/* Student detail and research review */
+.professor-progress {
+    display:flex;
+    flex-wrap:wrap;
+    gap:.4rem .6rem;
     padding:.65rem .75rem;
-}
-.st-key-professor_shell .facione-card,
-.st-key-professor_shell .cd-card {
-    border-color:var(--cd-border);
+    border:1px solid var(--cd-border);
     border-radius:.65rem;
     background:var(--cd-surface);
 }
 
-@media (max-width:800px) {
-  .st-key-professor_shell .st-key-professor_header {
-      min-height:0;
-      padding:.75rem 0 .65rem;
-  }
-  .st-key-professor_shell .professor-sidebar-brand p:last-child { max-width:none; }
-  .st-key-professor_shell [class*="st-key-professor_workspace_tab_"] [data-testid="stRadioGroup"] {
-      overflow-x:auto;
-  }
-  .st-key-professor_shell [class*="st-key-professor_workspace_tab_"] [data-testid="stRadioOption"] {
-      flex:0 0 auto;
-      min-width:5.5rem;
-  }
+.professor-step {
+    display:inline-flex;
+    align-items:center;
+    gap:.25rem;
+    padding:.2rem .4rem;
+    border-radius:.4rem;
+    color:var(--cd-muted);
+    font-size:.76rem;
 }
 
-/* Selected notebook workbench: keep the lecturer's roster, transcript, and
-   Thinking Path visible as three quiet surfaces on wide screens. The class
-   names are intentionally keyed to the Streamlit containers so these rules
-   cannot affect the student-facing workspace. */
-[class*="st-key-professor_selected_workbench_"] {
-    margin-top:-.35rem;
-    padding:.2rem 0 1.2rem;
-}
-[class*="st-key-professor_selected_workbench_"] > [data-testid="stLayoutWrapper"]
-> [data-testid="stHorizontalBlock"] {
-    display:flex !important;
-    flex-wrap:nowrap !important;
-    align-items:stretch !important;
-    gap:0 !important;
-    width:100% !important;
-}
-[class*="st-key-professor_selected_workbench_"] > [data-testid="stVerticalBlock"]
-> [data-testid="stHorizontalBlock"] {
-    display:flex !important;
-    flex-wrap:nowrap !important;
-    align-items:stretch !important;
-    gap:0 !important;
-    width:100% !important;
-}
-[class*="st-key-professor_selected_workbench_"] > [data-testid="stLayoutWrapper"]
-> [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
-[class*="st-key-professor_selected_workbench_"] > [data-testid="stVerticalBlock"]
-> [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
-    min-width:0 !important;
-    padding:0 1rem !important;
-}
-[class*="st-key-professor_selected_workbench_"] > [data-testid="stLayoutWrapper"]
-> [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child,
-[class*="st-key-professor_selected_workbench_"] > [data-testid="stVerticalBlock"]
-> [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {
-    flex:0 0 23% !important;
-    width:23% !important;
-    padding-left:0 !important;
-    border-right:1px solid var(--cd-border);
-}
-[class*="st-key-professor_selected_workbench_"] > [data-testid="stLayoutWrapper"]
-> [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2),
-[class*="st-key-professor_selected_workbench_"] > [data-testid="stVerticalBlock"]
-> [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) {
-    flex:1 1 0 !important;
-    width:0 !important;
-}
-[class*="st-key-professor_selected_workbench_"] > [data-testid="stLayoutWrapper"]
-> [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child {
-    flex:0 0 29% !important;
-    width:29% !important;
-    padding-right:0 !important;
-    border-left:1px solid var(--cd-border);
-}
-[class*="st-key-professor_selected_workbench_"] > [data-testid="stVerticalBlock"]
-> [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child {
-    flex:0 0 29% !important;
-    width:29% !important;
-    padding-right:0 !important;
-    border-left:1px solid var(--cd-border);
-}
-[class*="st-key-professor_selected_workbench_"] [class*="st-key-professor_workbench_roster_"] {
-    min-width:0;
-}
-.st-key-professor_shell .professor-workbench-panel-heading {
-    margin:0 0 .65rem;
-}
-.st-key-professor_shell .professor-workbench-panel-heading h3,
-.st-key-professor_shell .professor-path-heading h3 {
-    margin:.1rem 0 .25rem;
+.professor-step-completed {
+    background:var(--cd-accent-soft);
     color:var(--cd-text);
-    font-size:1rem;
-    line-height:1.25;
 }
-.st-key-professor_shell .professor-workbench-eyebrow {
-    margin:0;
-    color:var(--cd-muted);
-    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-    font-size:.65rem;
-    font-weight:700;
-    letter-spacing:.08em;
+
+.professor-step-current {
+    background:var(--cd-accent);
+    color:#fff;
+    font-weight:750;
+}
+
+.st-key-research_workspace {
+    margin-top:.8rem;
+    padding:.75rem;
+    border:1px solid var(--cd-border);
+    border-radius:.75rem;
+    background:var(--cd-surface-muted);
+}
+
+.st-key-research_workspace [data-testid="stColumn"] {
+    min-width:0;
+    padding:.65rem;
+    border:1px solid var(--cd-border);
+    border-radius:.6rem;
+    background:var(--cd-surface);
+}
+
+.research-coding-card {
+    margin:.35rem 0 .75rem;
+    padding:.7rem;
+    border-left:3px solid var(--cd-accent);
+    background:var(--cd-accent-soft);
+}
+
+.research-coding-card h4,
+.research-coding-card p {
+    margin:.18rem 0 .5rem;
+    color:var(--cd-text);
+}
+
+.research-coding-meta {
+    color:var(--cd-muted) !important;
+    font-size:.68rem;
+    font-weight:750;
+    letter-spacing:.04em;
     text-transform:uppercase;
 }
-.st-key-professor_shell .professor-workbench-count {
-    margin:.5rem 0 .45rem;
-    color:var(--cd-muted);
-    font-size:.72rem;
+
+.st-key-research_transcript_scroll {
+    max-height:58vh;
+    overflow-x:hidden !important;
+    overflow-y:auto !important;
+    padding-right:.3rem;
 }
-.st-key-professor_shell [class*="st-key-professor_workbench_search_"] input {
-    min-height:2.15rem;
+
+.st-key-research_transcript_scroll [data-testid="stMarkdownContainer"] {
+    margin:0 0 .5rem;
+    padding:.58rem .65rem;
+    border:1px solid var(--cd-border);
     border-radius:.55rem;
     background:var(--cd-surface-muted);
 }
-.st-key-professor_shell [class*="st-key-professor_workbench_filter_"] [data-testid="stRadioGroup"] {
-    display:flex;
-    flex-wrap:nowrap;
-    gap:.1rem;
-    margin:.2rem 0 .4rem;
-}
-.st-key-professor_shell [class*="st-key-professor_workbench_filter_"] [data-testid="stRadioOption"] {
-    min-width:0;
-    padding:.18rem .22rem;
-    border:1px solid transparent;
-    border-radius:.4rem;
-}
-.st-key-professor_shell [class*="st-key-professor_workbench_filter_"] [data-testid="stRadioOption"] p {
-    color:var(--cd-muted);
-    font-size:.7rem;
-}
-.st-key-professor_shell [class*="st-key-professor_workbench_filter_"] [data-testid="stRadioOption"][data-selected="true"] {
-    border-color:color-mix(in srgb, var(--cd-accent) 28%, transparent);
-    background:var(--cd-accent-soft);
-}
-.st-key-professor_shell [class*="st-key-professor_workbench_roster_scroll_"] {
-    max-height:calc(100vh - 15rem);
-    overflow-y:auto;
-    padding-right:.35rem;
-    overscroll-behavior:contain;
-}
-.st-key-professor_shell [class*="st-key-professor_workbench_student_card_"] {
-    margin:.25rem 0;
-    padding:.48rem .45rem;
-    border:1px solid transparent;
-    border-radius:.65rem;
-    background:transparent;
-}
-.st-key-professor_shell [class*="st-key-professor_workbench_student_card_"]:has(button:hover),
-.st-key-professor_shell [class*="st-key-professor_workbench_student_card_"]:has(button:focus-visible) {
-    border-color:var(--cd-border);
-    background:var(--cd-surface-muted);
-}
-.st-key-professor_shell [class*="st-key-professor_workbench_student_card_"][class*="_selected"] {
-    border-color:color-mix(in srgb, var(--cd-accent) 48%, var(--cd-border));
-    background:var(--cd-accent-soft);
-}
-.st-key-professor_shell .professor-workbench-student-row {
-    display:flex;
-    min-width:0;
-    align-items:center;
-    gap:.45rem;
-}
-.st-key-professor_shell .professor-workbench-student-row .professor-student-avatar {
-    width:1.95rem;
-    height:1.95rem;
-    flex-basis:1.95rem;
-}
-.st-key-professor_shell .professor-workbench-student-status {
-    margin-left:auto;
-    color:var(--cd-accent);
-    font-size:.7rem;
-}
-.st-key-professor_shell [class*="st-key-professor_workbench_select_student_"] button {
-    min-height:1.7rem;
-    margin-top:.25rem;
-    padding:.18rem .3rem;
-    border:0;
-    color:var(--cd-accent);
-    background:transparent;
-    font-size:.7rem;
-    justify-content:flex-start;
-}
-.st-key-professor_shell [class*="st-key-professor_workbench_select_student_"] button:hover {
-    background:var(--cd-surface-muted);
-}
-.st-key-professor_shell [class*="st-key-professor_workspace_header_"] {
-    margin:0 0 .6rem;
-    padding:0 0 .65rem;
-    border:0;
-    border-bottom:1px solid var(--cd-border);
-    border-radius:0;
-    background:transparent;
-}
-.st-key-professor_shell .professor-workspace-heading-copy {
-    min-width:0;
-}
-.st-key-professor_shell .professor-workspace-breadcrumb {
-    margin:0 0 .55rem;
-    color:var(--cd-muted);
-    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-    font-size:.68rem;
-    line-height:1.35;
-    overflow-wrap:anywhere;
-}
-.st-key-professor_shell .professor-workspace-heading-copy h3 {
-    margin:.14rem 0 .2rem;
-    font-size:1.28rem;
-}
-.st-key-professor_shell .st-key-professor_transcript_scroll {
-    max-height:calc(100vh - 16rem);
-}
-.st-key-professor_shell [class*="st-key-professor_path_rail_"] {
-    min-width:0;
-    height:100%;
-    padding-left:1rem;
-}
-.st-key-professor_shell .professor-path-heading {
-    margin:0 0 .65rem;
-    padding-bottom:.6rem;
-    border-bottom:1px solid var(--cd-border);
-}
-.st-key-professor_shell [class*="st-key-professor_path_progression_"] button,
-.st-key-professor_shell [class*="st-key-professor_path_review_"] button {
-    min-height:2rem;
-    padding:.25rem .35rem;
-    border-radius:.45rem;
-    font-size:.72rem;
-}
-.st-key-professor_shell .professor-path-empty {
-    display:flex;
-    flex-direction:column;
-    gap:.35rem;
-    margin-top:.7rem;
-    padding:.8rem;
-    border:1px solid var(--cd-border);
-    border-radius:.6rem;
-    color:var(--cd-muted);
-    background:var(--cd-surface-muted);
-    font-size:.74rem;
-    line-height:1.4;
-}
-.st-key-professor_shell .professor-path-empty strong { color:var(--cd-text); }
-.st-key-professor_shell [class*="st-key-professor_path_rail_"] .cd-card {
-    margin:.55rem 0;
-    padding:.55rem;
-}
-.st-key-professor_shell [class*="st-key-professor_path_rail_"] .facione-table {
-    font-size:.7rem;
-}
-.st-key-professor_shell [class*="st-key-professor_path_rail_"] .facione-score-content {
-    gap:.2rem;
+
+/* Consistent target sizes and focus treatment. */
+.st-key-professor_shell button,
+.st-key-professor_shell [role="button"] {
+    transition:background var(--cd-transition), border-color var(--cd-transition), color var(--cd-transition);
 }
 
-/* The initial Review rail uses the already-fetched student profile while the
-   detailed projection remains lazy. Keep that fallback in the same quiet
-   accordion/card language as the loaded Review projection. */
-.st-key-professor_shell .professor-path-fallback-card {
-    display:flex;
-    flex-direction:column;
-    gap:.24rem;
-    margin:.35rem 0;
-    padding:.65rem .7rem;
-    border:1px solid var(--cd-border);
-    border-radius:.6rem;
-    background:var(--cd-surface);
-    color:var(--cd-muted);
-    font-size:.72rem;
-    line-height:1.4;
-}
-.st-key-professor_shell .professor-path-fallback-card strong {
-    color:var(--cd-text);
-    font-size:.8rem;
+.st-key-professor_shell button:focus-visible,
+.st-key-professor_shell input:focus-visible,
+.st-key-professor_shell textarea:focus-visible,
+.st-key-professor_shell [role="radio"]:focus-visible {
+    outline:2px solid var(--cd-accent) !important;
+    outline-offset:2px;
 }
 
-/* Read-only transcript messages reuse the student's existing ChatMessage
-   chrome: Material Symbols avatars, markdown bodies, and right-aligned user
-   bubbles. The outer keyed row remains for stable Streamlit identity. */
-.st-key-professor_shell .st-key-professor_transcript_scroll
-[class*="st-key-professor_message_"] {
-    margin:0 0 .65rem;
-    padding:0;
-    border:0;
-    border-radius:0;
-    background:transparent;
-}
-.st-key-professor_shell .st-key-professor_transcript_scroll
-[data-testid="stChatMessage"] {
-    margin:0;
-    padding:.15rem 0 .35rem;
-    border:0;
-    border-radius:0;
-    background:transparent;
-}
-.st-key-professor_shell .st-key-professor_transcript_scroll
-[data-testid="stChatMessageAvatarCustom"] {
-    display:flex;
-    width:1.85rem;
-    height:1.85rem;
-    min-width:1.85rem;
-    align-items:center;
-    justify-content:center;
-    border-radius:50%;
-    color:#fff;
-    background:var(--cd-accent);
-}
-.st-key-professor_shell .st-key-professor_transcript_scroll
-[data-testid="stChatMessageAvatarCustom"] [data-testid="stIconMaterial"] {
-    font-size:1rem;
-}
-.st-key-professor_shell .st-key-professor_transcript_scroll
-[data-testid="stChatMessageContent"] {
-    min-width:0;
-    width:100%;
-    max-width:100%;
-}
-.st-key-professor_shell .st-key-professor_transcript_scroll
-[data-testid="stChatMessage"]:has([aria-label="Chat message from user"])
-[data-testid="stChatMessageAvatarCustom"] {
-    display:none;
-}
-.st-key-professor_shell .st-key-professor_transcript_scroll
-[class*="st-key-professor_message_body_"] {
-    min-width:0;
-    margin:.2rem 0 0;
-    padding:.72rem .8rem;
-    border:1px solid var(--cd-border);
-    border-radius:.85rem;
-    background:var(--cd-surface-muted);
-    overflow-wrap:anywhere;
-}
-.st-key-professor_shell .st-key-professor_transcript_scroll
-[data-testid="stChatMessage"]:has([aria-label="Chat message from user"])
-[class*="st-key-professor_message_body_"] {
-    width:fit-content;
-    max-width:84%;
-    margin-left:auto;
-    border-color:color-mix(in srgb, var(--cd-accent) 18%, var(--cd-border));
-    background:var(--cd-accent-soft);
-}
-.st-key-professor_shell .st-key-professor_transcript_scroll
-[class*="st-key-professor_message_body_"]
-[data-testid="stMarkdownContainer"],
-.st-key-professor_shell .st-key-professor_transcript_scroll
-[class*="st-key-professor_message_body_"]
-[data-testid="stMarkdownContainer"] p {
-    margin:0 !important;
-    padding:0 !important;
-    color:var(--cd-text) !important;
-}
-.st-key-professor_shell .st-key-professor_transcript_scroll
-.professor-chat-meta {
-    margin:.05rem 0 .25rem;
-    font-size:.7rem;
-}
-.st-key-professor_shell .st-key-professor_transcript_scroll
-.professor-chat-meta time {
-    color:var(--cd-muted);
+/* At compact desktop widths the overview's follow-up queue is still a
+   two-column teaching-priority panel. Give each row a readable evidence stack
+   instead of squeezing six labels into a few hundred pixels. */
+@media (max-width:1199px) and (min-width:801px) {
+    /* Keep the selected student's identity recoverable when the three-pane
+       workbench gets compact. Names may wrap; they must never collapse to an
+       ellipsis that hides which record is open. */
+    [class*="st-key-professor_desktop_workbench_"] .professor-student-copy strong,
+    [class*="st-key-professor_desktop_workbench_"] .professor-student-copy span,
+    [class*="st-key-professor_desktop_workbench_"] .professor-student-copy small {
+        overflow:visible !important;
+        overflow-wrap:break-word;
+        word-break:normal;
+        text-overflow:clip !important;
+        white-space:normal !important;
+    }
+
+    [class*="st-key-professor_desktop_workbench_"] .professor-student-avatar {
+        width:2rem;
+        height:2rem;
+        flex-basis:2rem;
+        font-size:.65rem;
+    }
+
+    [class*="st-key-professor_desktop_workbench_"] .professor-student-copy strong {
+        font-size:.8rem;
+    }
+
+    [class*="st-key-professor_followup_row_"] [data-testid="stHorizontalBlock"] {
+        display:grid !important;
+        grid-template-columns:minmax(0,1fr) minmax(5.2rem,auto) !important;
+        gap:.22rem .55rem !important;
+    }
+
+    [class*="st-key-professor_followup_row_"] [data-testid="stColumn"] {
+        width:auto !important;
+        max-width:none !important;
+        min-width:0 !important;
+    }
+
+    [class*="st-key-professor_followup_row_"] [data-testid="stColumn"]:nth-child(n+3) {
+        grid-column:1 / -1;
+    }
+
+    .professor-followup-header {
+        display:none;
+    }
+
+    .professor-followup-cell {
+        white-space:normal;
+        overflow-wrap:anywhere;
+    }
+
+    .professor-followup-cell::before {
+        content:attr(data-label) ": ";
+        color:var(--cd-muted);
+        font-size:.65rem;
+        font-weight:750;
+        letter-spacing:.02em;
+    }
 }
 
+/* On narrow screens, the app has one document scroll. Never create a second
+   roster/transcript/path viewport inside it. */
 @media (max-width:800px) {
-  [class*="st-key-professor_selected_workbench_"] {
-      padding:.1rem 0 1rem;
-  }
-  [class*="st-key-professor_selected_workbench_"] > [data-testid="stLayoutWrapper"]
-  > [data-testid="stHorizontalBlock"],
-  [class*="st-key-professor_selected_workbench_"] > [data-testid="stVerticalBlock"]
-  > [data-testid="stHorizontalBlock"] {
-      display:block !important;
-  }
-  [class*="st-key-professor_selected_workbench_"] > [data-testid="stLayoutWrapper"]
-  > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
-  [class*="st-key-professor_selected_workbench_"] > [data-testid="stVerticalBlock"]
-  > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
-      display:block !important;
-      width:100% !important;
-      max-width:none !important;
-      padding:.75rem 0 !important;
-      border:0 !important;
-      border-bottom:1px solid var(--cd-border) !important;
-  }
-  [class*="st-key-professor_selected_workbench_"] > [data-testid="stLayoutWrapper"]
-  > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child,
-  [class*="st-key-professor_selected_workbench_"] > [data-testid="stVerticalBlock"]
-  > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child {
-      padding-bottom:0 !important;
-      border-bottom:0 !important;
-  }
-  .st-key-professor_shell [class*="st-key-professor_workbench_roster_scroll_"] {
-      max-height:18rem;
-  }
-  .st-key-professor_shell [class*="st-key-professor_path_rail_"] {
-      height:auto;
-      padding-left:0;
-  }
-  .st-key-professor_shell .st-key-professor_transcript_scroll {
-      max-height:56vh;
-  }
+    html:has(.st-key-professor_shell),
+    html:has(.st-key-professor_shell) body,
+    .stApp:has(.st-key-professor_shell),
+    [data-testid="stAppViewContainer"]:has(.st-key-professor_shell),
+    [data-testid="stAppViewContainer"]:has(.st-key-professor_shell) > .main,
+    [data-testid="stAppViewContainer"]:has(.st-key-professor_shell) [data-testid="stMain"] {
+        height:auto !important;
+        min-height:100vh !important;
+        max-height:none !important;
+        overflow-x:hidden !important;
+        overflow-y:auto !important;
+    }
 
-  /* Streamlit may insert a layout wrapper between the keyed workbench and
-     its first horizontal block. Identify that outer row by the roster panel
-     it owns, then reset only its three main columns. Nested columns used by
-     tabs, refresh controls, and the Thinking Path remain independent. */
-  [class*="st-key-professor_selected_workbench_"]
-  [data-testid="stHorizontalBlock"]:has([class*="st-key-professor_workbench_roster_"]) {
-      display:block !important;
-      width:100% !important;
-      max-width:100% !important;
-      min-width:0 !important;
-      flex:none !important;
-  }
-  [class*="st-key-professor_selected_workbench_"]
-  [data-testid="stHorizontalBlock"]:has([class*="st-key-professor_workbench_roster_"]) > [data-testid="stColumn"]:first-child,
-  [class*="st-key-professor_selected_workbench_"]
-  [data-testid="stHorizontalBlock"]:has([class*="st-key-professor_workbench_roster_"]) > [data-testid="stColumn"]:nth-child(2),
-  [class*="st-key-professor_selected_workbench_"]
-  [data-testid="stHorizontalBlock"]:has([class*="st-key-professor_workbench_roster_"]) > [data-testid="stColumn"]:last-child {
-      display:block !important;
-      flex:0 0 100% !important;
-      flex-basis:100% !important;
-      width:100% !important;
-      max-width:100% !important;
-      min-width:0 !important;
-      padding:.75rem 0 !important;
-      border:0 !important;
-      border-bottom:1px solid var(--cd-border) !important;
-      box-sizing:border-box !important;
-  }
-  [class*="st-key-professor_selected_workbench_"]
-  [data-testid="stHorizontalBlock"]:has([class*="st-key-professor_workbench_roster_"]) > [data-testid="stColumn"]:last-child {
-      padding-bottom:0 !important;
-      border-bottom:0 !important;
-  }
+    .block-container:has(.st-key-professor_shell) {
+        padding:.7rem .8rem 2rem !important;
+    }
+
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has(.st-key-professor_header) {
+        display:block !important;
+    }
+
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has(.st-key-professor_header)
+    > [data-testid="stColumn"] {
+        width:100% !important;
+        max-width:none !important;
+    }
+
+    .st-key-professor_shell [data-testid="stColumn"]:has([class*="st-key-professor_selected_workbench_"]) {
+        display:block !important;
+        height:auto !important;
+        min-height:0 !important;
+        overflow:visible !important;
+    }
+
+    .st-key-professor_header {
+        display:none !important;
+    }
+
+    .st-key-professor_mobile_header {
+        display:block !important;
+    }
+
+    .st-key-professor_mobile_header [data-testid="stHorizontalBlock"] {
+        display:flex !important;
+        flex-wrap:wrap !important;
+        align-items:center !important;
+    }
+
+    .st-key-professor_mobile_header [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"] {
+        width:auto !important;
+        max-width:none !important;
+    }
+
+    .st-key-professor_mobile_header [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]:first-child {
+        flex:1 1 9rem !important;
+    }
+
+    .st-key-professor_mobile_header [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"]:not(:first-child) {
+        flex:0 1 5.5rem !important;
+    }
+
+    .st-key-professor_mobile_header .professor-mobile-account {
+        min-width:3.8rem;
+    }
+
+    .professor-page-header {
+        display:block;
+        margin-bottom:1rem;
+    }
+
+    .professor-page-heading h2 {
+        font-size:1.42rem;
+    }
+
+    /* Overview is a reading flow on a phone. Streamlit columns otherwise keep
+       the two teaching-priority panels side by side, leaving the follow-up
+       evidence only a few characters wide. Stack those panels and let each
+       follow-up row apply its own compact grid below. */
+    .st-key-professor_overview_breakdown [data-testid="stHorizontalBlock"] {
+        display:block !important;
+    }
+
+    .st-key-professor_overview_breakdown [data-testid="stHorizontalBlock"]
+    > [data-testid="stColumn"] {
+        width:100% !important;
+        max-width:none !important;
+        margin:0 0 1.1rem;
+    }
+
+    /* Student detail headers and notebook rows keep their action columns
+       usable at phone widths. A fixed action track prevents labels such as
+       Refresh/Open from wrapping into unreadable single letters. */
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has([class*="st-key-professor_refresh_student_"]) {
+        display:grid !important;
+        grid-template-columns:minmax(0,1fr) 6.2rem !important;
+        gap:.65rem !important;
+    }
+
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has([class*="st-key-professor_refresh_student_"])
+    > [data-testid="stColumn"] {
+        width:100% !important;
+        max-width:none !important;
+        min-width:0 !important;
+    }
+
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has([class*="st-key-professor_open_notebook_btn_"]) {
+        display:grid !important;
+        grid-template-columns:minmax(0,1fr) 5.6rem !important;
+        gap:.55rem !important;
+    }
+
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has([class*="st-key-professor_open_notebook_btn_"])
+    > [data-testid="stColumn"] {
+        width:100% !important;
+        max-width:none !important;
+        min-width:0 !important;
+    }
+
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has(.professor-metric) {
+        display:block !important;
+    }
+
+    .st-key-professor_shell [data-testid="stHorizontalBlock"]:has(.professor-metric)
+    > [data-testid="stColumn"] {
+        width:100% !important;
+        max-width:none !important;
+        margin:0 0 .55rem;
+    }
+
+    .professor-updated {
+        align-items:flex-start;
+        flex-direction:column;
+        gap:.12rem;
+    }
+
+    .professor-bar-row {
+        grid-template-columns:minmax(6.2rem,1fr) minmax(4rem,1.3fr) minmax(5.5rem,auto);
+        gap:.42rem;
+        font-size:.73rem;
+    }
+
+    [class*="st-key-professor_selected_workbench_"] {
+        display:block !important;
+        height:auto !important;
+        min-height:0 !important;
+        overflow:visible !important;
+    }
+
+    [class*="st-key-professor_workbench_context_"] {
+        display:none !important;
+    }
+
+    [class*="st-key-professor_desktop_workbench_"] {
+        display:none !important;
+    }
+
+    [class*="st-key-professor_mobile_workbench_"] {
+        display:block !important;
+        height:auto !important;
+        min-height:0 !important;
+        overflow:visible !important;
+    }
+
+    [class*="st-key-professor_mobile_surface_"] {
+        height:auto !important;
+        min-height:0 !important;
+        overflow:visible !important;
+    }
+
+    [class*="st-key-professor_workbench_roster_"] {
+        display:block !important;
+        height:auto !important;
+        min-height:0 !important;
+        padding:.7rem 0 .2rem;
+        border:0;
+        background:transparent;
+    }
+
+    [class*="st-key-professor_workbench_roster_scroll_"] {
+        max-height:none !important;
+        overflow:visible !important;
+        padding:0;
+    }
+
+    [class*="st-key-professor_workspace_pane_"] {
+        display:block !important;
+        height:auto !important;
+        min-height:0 !important;
+        padding:.2rem 0;
+        border:0;
+        background:transparent;
+    }
+
+    [class*="st-key-professor_path_rail_"] {
+        display:block !important;
+        height:auto !important;
+        min-height:0 !important;
+        padding:.2rem 0;
+        border:0;
+        background:transparent;
+    }
+
+    [class*="st-key-professor_path_content_"] {
+        max-height:none !important;
+        overflow:visible !important;
+        padding:0;
+    }
+
+    [class*="st-key-professor_transcript_scroll"] {
+        max-height:none !important;
+        overflow:visible !important;
+        padding:0;
+    }
+
+    .st-key-research_transcript_scroll {
+        max-height:none !important;
+        overflow:visible !important;
+        padding:0;
+    }
+
+    [class*="st-key-professor_followup_row_"] [data-testid="stHorizontalBlock"],
+    [class*="st-key-professor_inactive_row_"] [data-testid="stHorizontalBlock"] {
+        display:grid !important;
+        grid-template-columns:minmax(0,1fr) minmax(4.2rem,auto) !important;
+        gap:.2rem .5rem !important;
+    }
+
+    [class*="st-key-professor_followup_row_"] [data-testid="stColumn"],
+    [class*="st-key-professor_inactive_row_"] [data-testid="stColumn"] {
+        width:auto !important;
+        max-width:none !important;
+    }
+
+    .professor-followup-header {
+        display:none;
+    }
+
+    .professor-followup-cell {
+        white-space:normal;
+    }
+
+    .professor-followup-cell::before {
+        content:attr(data-label) ": ";
+        color:var(--cd-muted);
+        font-size:.65rem;
+        font-weight:750;
+        letter-spacing:.02em;
+    }
+
+    [class*="st-key-professor_followup_row_"] [data-testid="stColumn"]:nth-child(n+3),
+    [class*="st-key-professor_inactive_row_"] [data-testid="stColumn"]:nth-child(n+3) {
+        grid-column:1 / -1;
+    }
+
+    .st-key-research_workspace {
+        padding:.25rem 0;
+        border:0;
+        background:transparent;
+    }
+
+    .st-key-research_workspace [data-testid="stColumn"] {
+        margin:.35rem 0;
+        padding:.5rem;
+    }
 }
