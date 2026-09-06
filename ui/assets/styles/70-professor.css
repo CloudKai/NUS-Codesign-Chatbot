@@ -615,6 +615,25 @@ html:has(.st-key-professor_shell) body,
     line-height:1.35;
 }
 
+/* Each notebook is a separate record. Keep the outline quiet in the resting
+   state, then use the teal accent only when the row is being explored so the
+   list stays scannable without turning back into a wall of heavy cards. */
+[class*="st-key-professor_notebook_card_"] {
+    min-width:0 !important;
+    margin:.45rem 0 !important;
+    padding:.45rem .65rem !important;
+    border:1px solid var(--cd-border) !important;
+    border-radius:.7rem !important;
+    background:var(--cd-surface-muted) !important;
+    box-shadow:none !important;
+    transition:border-color var(--cd-transition), background var(--cd-transition);
+}
+
+[class*="st-key-professor_notebook_card_"]:hover,
+[class*="st-key-professor_notebook_card_"]:focus-within {
+    border-color:var(--cd-accent) !important;
+}
+
 [class*="st-key-professor_open_notebook_btn_"] button {
     min-height:2.5rem !important;
     padding:.35rem .45rem !important;
@@ -629,31 +648,36 @@ html:has(.st-key-professor_shell) body,
     overflow:visible;
 }
 
-/* Selected notebook workbench. The content column is the only viewport-locked
-   ancestor; its context header is flex:none and the workbench is flex:1. Do
-   not set 100dvh on the workbench itself: that is what previously clipped the
-   header and bottom controls. */
+/* Selected notebook workbench. Keep the document as the escape hatch for
+   zoomed/short viewports. The panes get a bounded height of their own so a
+   wheel or trackpad gesture over a pane still scrolls that pane, while a
+   gesture over the surrounding page can always reach the header and footer. */
 .st-key-professor_shell [data-testid="stColumn"]:has([class*="st-key-professor_selected_workbench_"]) {
     display:flex !important;
-    min-height:100dvh !important;
-    height:100dvh !important;
+    min-height:0 !important;
+    height:auto !important;
     flex-direction:column !important;
-    overflow:hidden !important;
+    overflow:visible !important;
 }
 
 [class*="st-key-professor_workbench_context_"] {
     flex:0 0 auto !important;
     min-height:0 !important;
+    margin-bottom:.4rem;
     padding:.15rem 0 .65rem;
+    border-bottom:1px solid var(--cd-border);
 }
 
 .professor-workbench-context-copy h2 {
+    max-width:100%;
     margin:.12rem 0 .18rem;
     color:var(--cd-text);
     font-family:"Source Serif 4", Georgia, "Times New Roman", serif;
     font-size:1.32rem;
     line-height:1.2;
     letter-spacing:-.025em;
+    overflow-wrap:anywhere;
+    word-break:normal;
 }
 
 .professor-workbench-context-copy p:last-child {
@@ -678,18 +702,30 @@ html:has(.st-key-professor_shell) body,
     display:flex !important;
     min-height:0 !important;
     height:auto !important;
-    flex:1 1 auto !important;
+    flex:0 0 auto !important;
     flex-direction:column !important;
-    overflow:hidden !important;
+    overflow:visible !important;
 }
 
 [class*="st-key-professor_desktop_workbench_"] {
     display:flex !important;
     min-height:0 !important;
+    height:clamp(30rem, calc(100dvh - 10rem), 52rem) !important;
+    max-height:calc(100dvh - 7rem) !important;
+    flex:0 0 auto !important;
+    flex-direction:column !important;
+    overflow:visible !important;
+}
+
+/* Streamlit inserts a neutral wrapper between a keyed vertical block and its
+   horizontal row. Give that wrapper the same flex contract; otherwise the row
+   collapses to its intrinsic content height and the lower half of the
+   workbench becomes an unreachable blank gap. */
+[class*="st-key-professor_desktop_workbench_"] > div:has(> [data-testid="stHorizontalBlock"]) {
+    display:flex !important;
+    min-height:0 !important;
     height:100% !important;
     flex:1 1 auto !important;
-    flex-direction:column !important;
-    overflow:hidden !important;
 }
 
 [class*="st-key-professor_desktop_workbench_"] [data-testid="stHorizontalBlock"] {
@@ -701,7 +737,33 @@ html:has(.st-key-professor_shell) body,
 [class*="st-key-professor_desktop_workbench_"] [data-testid="stColumn"] {
     min-width:0 !important;
     min-height:0 !important;
-    overflow:hidden !important;
+    height:100% !important;
+    overflow:visible !important;
+}
+
+/* Streamlit nests each column's content in a vertical block and a layout
+   wrapper. Stretch both wrappers so every keyed pane receives the full
+   workbench height and its own transcript/path scrollport can do the rest. */
+[class*="st-key-professor_desktop_workbench_"] [data-testid="stColumn"]
+> [data-testid="stVerticalBlock"],
+[class*="st-key-professor_desktop_workbench_"] [data-testid="stColumn"]
+> [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"] {
+    display:flex !important;
+    min-height:0 !important;
+    height:100% !important;
+    flex:1 1 auto !important;
+}
+
+/* The final layout wrapper in each pane contains its scrollport. Stretch only
+   those wrappers; headings and filters above them should keep their natural
+   height. */
+[class*="st-key-professor_workbench_roster_"] > [data-testid="stLayoutWrapper"]:has([class*="st-key-professor_workbench_roster_scroll_"]),
+[class*="st-key-professor_workspace_pane_"] > [data-testid="stLayoutWrapper"]:has([class*="st-key-professor_transcript_scroll"]),
+[class*="st-key-professor_path_rail_"] > [data-testid="stLayoutWrapper"]:has([class*="st-key-professor_path_content_"]) {
+    display:flex !important;
+    min-height:0 !important;
+    height:100% !important;
+    flex:1 1 auto !important;
 }
 
 [class*="st-key-professor_workbench_roster_"] {
@@ -710,9 +772,12 @@ html:has(.st-key-professor_shell) body,
     height:100% !important;
     flex-direction:column !important;
     padding:.65rem .65rem .35rem;
-    border:1px solid var(--cd-border);
-    border-radius:.7rem;
-    background:var(--cd-surface-muted);
+    border-top:0;
+    border-right:1px solid var(--cd-border);
+    border-bottom:0;
+    border-left:0;
+    border-radius:0;
+    background:transparent;
 }
 
 [class*="st-key-professor_workbench_roster_scroll_"] {
@@ -721,6 +786,8 @@ html:has(.st-key-professor_shell) body,
     overflow-x:hidden !important;
     overflow-y:auto !important;
     overscroll-behavior:contain;
+    scrollbar-gutter:stable;
+    scrollbar-width:thin;
     padding-right:.25rem;
 }
 
@@ -754,9 +821,9 @@ html:has(.st-key-professor_shell) body,
     height:100% !important;
     flex-direction:column !important;
     padding:.7rem .85rem .4rem;
-    border:1px solid var(--cd-border);
-    border-radius:.7rem;
-    background:var(--cd-surface);
+    border:0;
+    border-radius:0;
+    background:transparent;
 }
 
 [class*="st-key-professor_workspace_pane_"] [data-testid="stRadio"] > div,
@@ -789,6 +856,8 @@ html:has(.st-key-professor_shell) body,
     overflow-x:hidden !important;
     overflow-y:auto !important;
     overscroll-behavior:contain;
+    scrollbar-gutter:stable;
+    scrollbar-width:thin;
     padding-right:.35rem;
 }
 
@@ -816,6 +885,25 @@ html:has(.st-key-professor_shell) body,
 
 [class*="st-key-professor_message_"]:has(.professor-chat-student) {
     border-left:3px solid var(--cd-accent) !important;
+}
+
+/* Transcript messages are evidence, not separate dashboard cards. A flat
+   divider preserves grouping while avoiding the repeated dark-on-dark boxes
+   that make long conversations feel visually noisy. */
+[class*="st-key-professor_desktop_workbench_"] [class*="st-key-professor_message_"] {
+    margin:.15rem 0 !important;
+    padding:.72rem .15rem !important;
+    border-top:0 !important;
+    border-right:0 !important;
+    border-bottom:1px solid var(--cd-border) !important;
+    border-left:0 !important;
+    border-radius:0 !important;
+    background:transparent !important;
+}
+
+[class*="st-key-professor_desktop_workbench_"] [class*="st-key-professor_message_"]:has(.professor-chat-student) {
+    border-left:3px solid var(--cd-accent) !important;
+    padding-left:.65rem !important;
 }
 
 .professor-file-row {
@@ -857,9 +945,12 @@ html:has(.st-key-professor_shell) body,
     height:100% !important;
     flex-direction:column !important;
     padding:.7rem .7rem .4rem;
-    border:1px solid var(--cd-border);
-    border-radius:.7rem;
-    background:var(--cd-surface-muted);
+    border-top:0;
+    border-right:0;
+    border-bottom:0;
+    border-left:1px solid var(--cd-border);
+    border-radius:0;
+    background:transparent;
 }
 
 .professor-path-heading h3 {
@@ -873,6 +964,7 @@ html:has(.st-key-professor_shell) body,
     padding:.35rem .45rem !important;
     font-size:.72rem !important;
     font-weight:750 !important;
+    white-space:nowrap !important;
 }
 
 [class*="st-key-professor_path_content_"] {
@@ -880,7 +972,30 @@ html:has(.st-key-professor_shell) body,
     flex:1 1 auto !important;
     overflow-y:auto !important;
     overflow-x:hidden !important;
+    scrollbar-gutter:stable;
+    scrollbar-width:thin;
     padding-right:.2rem;
+}
+
+[class*="st-key-professor_workbench_roster_scroll_"]::-webkit-scrollbar,
+[class*="st-key-professor_transcript_scroll"]::-webkit-scrollbar,
+[class*="st-key-professor_path_content_"]::-webkit-scrollbar {
+    width:.62rem;
+}
+
+[class*="st-key-professor_workbench_roster_scroll_"]::-webkit-scrollbar-track,
+[class*="st-key-professor_transcript_scroll"]::-webkit-scrollbar-track,
+[class*="st-key-professor_path_content_"]::-webkit-scrollbar-track {
+    background:transparent;
+}
+
+[class*="st-key-professor_workbench_roster_scroll_"]::-webkit-scrollbar-thumb,
+[class*="st-key-professor_transcript_scroll"]::-webkit-scrollbar-thumb,
+[class*="st-key-professor_path_content_"]::-webkit-scrollbar-thumb {
+    border:.16rem solid transparent;
+    border-radius:999px;
+    background:var(--cd-border);
+    background-clip:padding-box;
 }
 
 .professor-timeline-step {
@@ -1045,6 +1160,26 @@ html:has(.st-key-professor_shell) body,
    two-column teaching-priority panel. Give each row a readable evidence stack
    instead of squeezing six labels into a few hundred pixels. */
 @media (max-width:1199px) and (min-width:801px) {
+    /* At tablet-sized desktop widths, give the roster and evidence rail a
+       readable minimum instead of allowing Streamlit's percentage columns to
+       squeeze names into one-letter wraps. The center remains the largest
+       track and continues to own its transcript scroll. */
+    [class*="st-key-professor_desktop_workbench_"] [data-testid="stHorizontalBlock"]:has(
+        [class*="st-key-professor_workbench_roster_"]
+    ) {
+        display:grid !important;
+        grid-template-columns:minmax(13rem,31fr) minmax(0,42fr) minmax(12rem,27fr) !important;
+        gap:.75rem !important;
+    }
+
+    [class*="st-key-professor_desktop_workbench_"] [data-testid="stHorizontalBlock"]:has(
+        [class*="st-key-professor_workbench_roster_"]
+    ) > [data-testid="stColumn"] {
+        width:auto !important;
+        max-width:none !important;
+        flex:none !important;
+    }
+
     /* Keep the selected student's identity recoverable when the three-pane
        workbench gets compact. Names may wrap; they must never collapse to an
        ellipsis that hides which record is open. */
@@ -1067,6 +1202,11 @@ html:has(.st-key-professor_shell) body,
 
     [class*="st-key-professor_desktop_workbench_"] .professor-student-copy strong {
         font-size:.8rem;
+    }
+
+    [class*="st-key-professor_path_rail_"] [data-testid="stButton"] button {
+        padding:.3rem .32rem !important;
+        font-size:.68rem !important;
     }
 
     [class*="st-key-professor_followup_row_"] [data-testid="stHorizontalBlock"] {
@@ -1321,6 +1461,19 @@ html:has(.st-key-professor_shell) body,
         max-height:none !important;
         overflow:visible !important;
         padding:0;
+    }
+
+    /* The desktop pane contract targets the same keyed blocks inside the
+       mobile workbench. Return their neutral layout wrappers to normal flow so
+       mobile keeps one document scroll rather than inheriting a 100% flex
+       viewport from the desktop rule. */
+    [class*="st-key-professor_mobile_workbench_"] [class*="st-key-professor_workbench_roster_"] > [data-testid="stLayoutWrapper"],
+    [class*="st-key-professor_mobile_workbench_"] [class*="st-key-professor_workspace_pane_"] > [data-testid="stLayoutWrapper"],
+    [class*="st-key-professor_mobile_workbench_"] [class*="st-key-professor_path_rail_"] > [data-testid="stLayoutWrapper"] {
+        display:block !important;
+        height:auto !important;
+        min-height:0 !important;
+        flex:none !important;
     }
 
     .st-key-research_transcript_scroll {

@@ -17,7 +17,7 @@ from ui.coach_welcome import render_hmw_scaffold
 from ui.components import (
     facione_scores_table_html,
     review_card_html,
-    review_stage_sections_html,
+    review_feedback_items_html,
 )
 from ui.constants import APPEARANCE_MODES, DEFAULT_APPEARANCE, PRODUCT_SUBTITLE, PRODUCT_TITLE
 from ui.runtime import local_api_client
@@ -1939,30 +1939,100 @@ def _render_professor_journey_tab(journey_payload: dict[str, Any]) -> None:
         render_hmw_scaffold()
 
 
+def _render_professor_review_stage_groups(review: dict[str, Any]) -> None:
+    """Render Review evidence in one scannable group per Thinking Path stage."""
+    strength_sections = {
+        str(section.get("stage_id") or ""): list(section.get("items") or [])
+        for section in (review.get("strength_sections") or [])
+        if isinstance(section, dict)
+    }
+    improvement_sections = {
+        str(section.get("stage_id") or ""): list(section.get("items") or [])
+        for section in (review.get("improvement_sections") or [])
+        if isinstance(section, dict)
+    }
+    raw_checkpoints = review.get("stage_reviews") or {}
+    checkpoints = raw_checkpoints if isinstance(raw_checkpoints, dict) else {}
+    for stage in THINKING_STAGES:
+        checkpoint = checkpoints.get(stage.id) or {}
+        if not isinstance(checkpoint, dict):
+            checkpoint = {}
+        summary = str(checkpoint.get("summary") or "").strip()
+        reasoning = str(checkpoint.get("reasoning_progress") or "").strip()
+        stage_strengths = strength_sections.get(stage.id)
+        stage_improvements = improvement_sections.get(stage.id)
+        strengths = [
+            " ".join(str(item).split()).strip()
+            for item in (
+                stage_strengths
+                if stage.id in strength_sections
+                else checkpoint.get("strengths") or []
+            )
+            if str(item).strip()
+        ]
+        improvements = [
+            " ".join(str(item).split()).strip()
+            for item in (
+                stage_improvements
+                if stage.id in improvement_sections
+                else checkpoint.get("areas_to_revisit") or []
+            )
+            if str(item).strip()
+        ]
+        if not any((summary, reasoning, strengths, improvements)):
+            continue
+        with st.expander(stage.label, expanded=False):
+            if summary:
+                st.markdown(
+                    review_card_html(label="Working conclusion", body=summary),
+                    unsafe_allow_html=True,
+                )
+            if reasoning:
+                st.markdown("**Reasoning progress**")
+                st.markdown(
+                    f'<div class="review-conclusion-body">{escape(reasoning)}</div>',
+                    unsafe_allow_html=True,
+                )
+            if strengths:
+                st.markdown("**Strengths**")
+                st.markdown(
+                    review_feedback_items_html(strengths),
+                    unsafe_allow_html=True,
+                )
+            if improvements:
+                st.markdown("**Areas for improvement**")
+                st.markdown(
+                    review_feedback_items_html(improvements),
+                    unsafe_allow_html=True,
+                )
+
+
 def _render_professor_review_tab(review_payload: dict[str, Any]) -> None:
     """Render the Review projection without Deep Review controls."""
     review = dict(review_payload)
-    st.markdown(
-        review_card_html(
-            label="Summary",
-            body=str(review.get("summary") or ""),
-        ),
-        unsafe_allow_html=True,
-    )
+    checkpoints = review.get("stage_reviews") or {}
+    has_assessment = bool(review.get("has_personalized_assessment") or checkpoints)
+    if has_assessment:
+        st.markdown(
+            review_card_html(
+                label="Summary",
+                body=str(review.get("summary") or ""),
+            ),
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            review_card_html(
+                label="Review status",
+                body="No persisted review evidence is available for this notebook yet.",
+            ),
+            unsafe_allow_html=True,
+        )
     st.markdown(
         facione_scores_table_html(review.get("facione_scores")),
         unsafe_allow_html=True,
     )
-    with st.expander("Strengths", expanded=False):
-        st.markdown(
-            review_stage_sections_html(sections=review.get("strength_sections")),
-            unsafe_allow_html=True,
-        )
-    with st.expander("Areas for improvement", expanded=False):
-        st.markdown(
-            review_stage_sections_html(sections=review.get("improvement_sections")),
-            unsafe_allow_html=True,
-        )
+    _render_professor_review_stage_groups(review)
     conclusion = str(review.get("conclusion") or "").strip()
     with st.expander("Working conclusion", expanded=False):
         if conclusion:

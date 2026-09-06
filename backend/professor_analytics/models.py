@@ -173,8 +173,26 @@ class ProfessorJourneyProjection(BaseModel):
     hmw_scaffold: dict[str, Any] = Field(default_factory=dict)
 
 
+class ProfessorReviewStage(BaseModel):
+    """One safe, normalized Thinking Path checkpoint for lecturer Review."""
+
+    stage_id: str
+    stage: str
+    summary: str = ""
+    strengths: list[str] = Field(default_factory=list)
+    areas_to_revisit: list[str] = Field(default_factory=list)
+    reasoning_progress: str = ""
+    facione_scores: dict[str, int] = Field(default_factory=dict)
+
+
 class ProfessorReviewProjection(BaseModel):
-    """Persisted Deep Review / learning review fields for lecturer display."""
+    """Safe read-only Review projection for one lecturer-visible notebook.
+
+    ``stage_reviews`` is keyed by the persisted Thinking Path stage id and
+    contains only normalized checkpoint copy, not worker leases or message
+    linkage.  The established summary, score, section, and conclusion fields
+    remain present for older lecturer clients.
+    """
 
     notebook: ProfessorNotebookSummary
     summary: str = ""
@@ -182,6 +200,8 @@ class ProfessorReviewProjection(BaseModel):
     strength_sections: list[dict[str, Any]] = Field(default_factory=list)
     improvement_sections: list[dict[str, Any]] = Field(default_factory=list)
     conclusion: str = ""
+    stage_reviews: dict[str, ProfessorReviewStage] = Field(default_factory=dict)
+    has_personalized_assessment: bool = False
 
 
 class ProfessorWorkspaceTranscript(BaseModel):

@@ -23,6 +23,7 @@ from .models import (
     ProfessorMessagePage,
     ProfessorNotebookSummary,
     ProfessorReviewProjection,
+    ProfessorReviewStage,
     ProfessorSourcesResponse,
     ProfessorSourceSummary,
     ProfessorTranscriptMessage,
@@ -471,34 +472,200 @@ class ProfessorAnalyticsService:
         thread = store.get_thread(notebook_id)
         if thread is None:
             return None
+        metadata = dict(thread.get("metadata") or {})
+        projection, _legacy_review = self._project_notebook_review(
+            header_row=header_row,
+            metadata=metadata,
+            messages=store.get_messages(notebook_id),
+        )
+        return projection
+
+    @staticmethod
+    def _completed_journey_stage_reviews(value: Any) -> dict[str, Any]:
+        """Keep only checkpoints backed by a matching completed job.
+
+        A persisted review row can outlive a queued, failed, or replaced job.
+        Treating that row as current would show stale evidence in the lecturer
+        dashboard, so the job status is an explicit part of this read-time
+        projection contract. Missing jobs are intentionally excluded too.
+        """
+        from backend.specialists.review_orchestration import (
+            STAGE_REVIEW_COMPLETE,
+            parse_journey_stage_reviews,
+        )
+
+        parsed = parse_journey_stage_reviews(value)
+        jobs = parsed.get("jobs") or {}
+        reviews = parsed.get("reviews") or {}
+        completed_reviews = {
+            stage_id: review
+            for stage_id, review in reviews.items()
+            if isinstance(jobs.get(stage_id), dict)
+            and str(jobs[stage_id].get("status") or "") == STAGE_REVIEW_COMPLETE
+        }
+        return {**parsed, "reviews": completed_reviews}
+
+    @staticmethod
+    def _project_journey_stage_reviews(
+        value: Any,
+    ) -> dict[str, ProfessorReviewStage]:
+        """Return safe checkpoint copy from the notebook settings blob.
+
+        Journey checkpoint jobs retain worker leases, queue ids, and frozen
+        message ids in ``notebooks.settings_text``.  Those fields are useful
+        to the student workflow but are not lecturer Review data.  Normalize
+        once at this boundary and keep only pedagogical checkpoint fields.
+        """
+        from backend.specialists.review_orchestration import parse_journey_stage_reviews
+
+        parsed = parse_journey_stage_reviews(value)
+        projected: dict[str, ProfessorReviewStage] = {}
+        for stage_id, checkpoint in (parsed.get("reviews") or {}).items():
+            if not isinstance(checkpoint, dict):
+                continue
+            cleaned_stage_id = str(stage_id or checkpoint.get("stage") or "").strip()
+            if not cleaned_stage_id:
+                continue
+            projected[cleaned_stage_id] = ProfessorReviewStage(
+                stage_id=cleaned_stage_id,
+                stage=_label(cleaned_stage_id) or cleaned_stage_id,
+                summary=str(checkpoint.get("summary") or ""),
+                strengths=[
+                    str(item) for item in (checkpoint.get("strengths") or [])
+                ],
+                areas_to_revisit=[
+                    str(item)
+                    for item in (checkpoint.get("areas_to_revisit") or [])
+                ],
+                reasoning_progress=str(
+                    checkpoint.get("reasoning_progress") or ""
+                ),
+                facione_scores=dict(checkpoint.get("facione_scores") or {}),
+            )
+        return projected
+
+    @staticmethod
+    def _merge_checkpoint_feedback(
+        sections: Any,
+        checkpoints: dict[str, ProfessorReviewStage],
+        checkpoint_key: str,
+    ) -> list[dict[str, Any]]:
+        """Prepend checkpoint feedback to stage sections with safe dedupe."""
+        merged: list[dict[str, Any]] = []
+        for raw_section in sections or []:
+            if not isinstance(raw_section, dict):
+                continue
+            section = dict(raw_section)
+            stage_id = str(section.get("stage_id") or "").strip()
+            checkpoint = checkpoints.get(stage_id)
+            checkpoint_items = getattr(checkpoint, checkpoint_key, [])
+            values: list[str] = []
+            for value in [
+                *checkpoint_items,
+                *(section.get("items") or []),
+            ]:
+                cleaned = " ".join(str(value).split()).strip()
+                if cleaned and cleaned.casefold() not in {
+                    item.casefold() for item in values
+                }:
+                    values.append(cleaned)
+            section["items"] = values
+            merged.append(section)
+        return merged
+
+    def _project_notebook_review(
+        self,
+        *,
+        header_row: dict[str, Any],
+        metadata: dict[str, Any],
+        messages: list[dict[str, Any]],
+    ) -> tuple[ProfessorReviewProjection, dict[str, Any]]:
+        """Build the shared dedicated/legacy lecturer Review projection.
+
+        ``journey_stage_reviews`` is read from the already-owned notebook's
+        settings projection.  This method has no provider or persistence
+        writes and is intentionally shared so ``/review`` and the historical
+        ``/workspace`` response cannot drift apart. It returns the compact
+        dedicated projection plus the full legacy ``learning_review`` mapping
+        augmented with safe stage checkpoints.
+        """
         from backend.learning.journey import learning_review
-        from backend.specialists.review_orchestration import DEEP_REVIEW_SNAPSHOT_KEY
+        from backend.specialists.review_orchestration import (
+            DEEP_REVIEW_SNAPSHOT_KEY,
+            JOURNEY_STAGE_REVIEWS_KEY,
+        )
         from backend.student_journey import normalize_journey
 
-        metadata = dict(thread.get("metadata") or {})
         journey = normalize_journey(metadata.get("learning_journey"))
+        checkpoint_blob = self._completed_journey_stage_reviews(
+            metadata.get(JOURNEY_STAGE_REVIEWS_KEY)
+        )
+        checkpoints = self._project_journey_stage_reviews(checkpoint_blob)
         snapshot = metadata.get(DEEP_REVIEW_SNAPSHOT_KEY)
-        messages = store.get_messages(notebook_id)
         review = learning_review(
             messages,
             journey,
             detail=journey.get("response_detail"),
             deep_review_snapshot=snapshot if isinstance(snapshot, dict) else None,
+            journey_stage_reviews=checkpoint_blob,
         )
-        return ProfessorReviewProjection(
+        # ``learning_review`` keeps checkpoint scoring provider-neutral.  The
+        # lecturer projection also needs the checkpoint's stage-level copy so
+        # staff can understand the evidence behind that score when no Deep
+        # Review snapshot exists.
+        strength_sections = self._merge_checkpoint_feedback(
+            review.get("strength_sections"), checkpoints, "strengths"
+        )
+        improvement_sections = self._merge_checkpoint_feedback(
+            review.get("improvement_sections"), checkpoints, "areas_to_revisit"
+        )
+        summary = str(review.get("summary") or "").strip()
+        meaningful_summary = bool(
+            summary
+            and summary != "Your discussion will be summarized here after you start chatting."
+        )
+        if checkpoints and not meaningful_summary:
+            raw_checkpoints = checkpoint_blob.get("reviews") or {}
+            latest_checkpoint = max(
+                (
+                    item
+                    for item in raw_checkpoints.values()
+                    if isinstance(item, dict)
+                ),
+                key=lambda item: int(item.get("conversation_revision") or 0),
+                default={},
+            )
+            summary = str(latest_checkpoint.get("summary") or "").strip() or summary
+        has_personalized_assessment = bool(
+            review.get("has_personalized_assessment") or checkpoints
+        )
+        legacy_review = dict(review)
+        legacy_review["summary"] = summary
+        legacy_review["strength_sections"] = strength_sections
+        legacy_review["improvement_sections"] = improvement_sections
+        legacy_review["has_personalized_assessment"] = has_personalized_assessment
+        legacy_review["stage_reviews"] = {
+            stage_id: checkpoint.model_dump(mode="json")
+            for stage_id, checkpoint in checkpoints.items()
+        }
+        projection = ProfessorReviewProjection(
             notebook=self._notebook_summary_from_row(header_row),
-            summary=str(review.get("summary") or ""),
+            summary=summary,
             facione_scores=dict(review.get("facione_scores") or {}),
-            strength_sections=list(review.get("strength_sections") or []),
-            improvement_sections=list(review.get("improvement_sections") or []),
+            strength_sections=strength_sections,
+            improvement_sections=improvement_sections,
             conclusion=str(review.get("conclusion") or ""),
+            stage_reviews=checkpoints,
+            has_personalized_assessment=has_personalized_assessment,
         )
+        return projection, legacy_review
 
     def notebook_workspace(
         self, student_id: str, notebook_id: str
     ) -> NotebookWorkspaceResponse | None:
         """Return one authorised read-only notebook workspace for lecturers."""
-        if not self._repository.notebook_owned(student_id, notebook_id):
+        header_row = self._repository.load_notebook_header(student_id, notebook_id)
+        if header_row is None:
             return None
         store = self._repository.student_store(student_id)
         if store is None:
@@ -508,10 +675,8 @@ class ProfessorAnalyticsService:
             return None
 
         from backend.learning.hmw import hmw_scaffold_projection
-        from backend.learning.journey import learning_review
         from backend.settings import settings
         from backend.sources.library import list_visible_sources
-        from backend.specialists.review_orchestration import DEEP_REVIEW_SNAPSHOT_KEY
         from backend.student_journey import DEFAULT_STAGE, normalize_journey
 
         messages = store.get_messages(notebook_id)
@@ -520,7 +685,11 @@ class ProfessorAnalyticsService:
         )
         metadata = dict(thread.get("metadata") or {})
         journey = normalize_journey(metadata.get("learning_journey"))
-        snapshot = metadata.get(DEEP_REVIEW_SNAPSHOT_KEY)
+        _review_projection, legacy_review = self._project_notebook_review(
+            header_row=header_row,
+            metadata=metadata,
+            messages=messages,
+        )
         last_active = None
         for message in reversed(messages):
             if str(message.get("role") or "") == "user" and not message.get("is_error"):
@@ -553,14 +722,7 @@ class ProfessorAnalyticsService:
                     enabled=settings.hmw_scaffold_enabled,
                     response_detail=str(journey.get("response_detail") or ""),
                 ),
-                review=learning_review(
-                    messages,
-                    journey,
-                    detail=journey.get("response_detail"),
-                    deep_review_snapshot=snapshot
-                    if isinstance(snapshot, dict)
-                    else None,
-                ),
+                review=legacy_review,
             ),
         )
 

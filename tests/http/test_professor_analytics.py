@@ -6,6 +6,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.api import create_app
@@ -18,6 +19,7 @@ from backend.settings import settings
 from backend.student_store import StudentStore
 from backend.workspace_service import WorkspaceService
 from backend.source_library import add_text_source
+from backend.specialists.review_orchestration import JOURNEY_STAGE_REVIEWS_KEY
 
 
 class FakeOIDC(CognitoOIDCClient):
@@ -550,6 +552,207 @@ def test_professor_workspace_returns_read_only_payload(tmp_path, monkeypatch):
             "SELECT action FROM research_access_events ORDER BY created_at DESC, id DESC LIMIT 1"
         ).fetchone()
     assert audit["action"] == "professor.workspace"
+
+
+def test_professor_review_projects_settings_checkpoints_on_both_routes(
+    tmp_path, monkeypatch
+):
+    """Dedicated Review and legacy workspace expose the same safe checkpoint evidence."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    student_store.update_thread(
+        notebook_id,
+        metadata={
+            JOURNEY_STAGE_REVIEWS_KEY: {
+                "jobs": {
+                    "problem_identification": {
+                        "status": "complete",
+                        "job_id": "worker-secret",
+                        "lease_token": "lease-secret",
+                    }
+                },
+                "reviews": {
+                    "problem_identification": {
+                        "stage": "problem_identification",
+                        "summary": "Checkpoint summary.",
+                        "strengths": ["Names the affected people."],
+                        "areas_to_revisit": ["Clarify the success outcome."],
+                        "reasoning_progress": "The focus is becoming testable.",
+                        "important_message_ids": ["message-secret"],
+                        "facione_scores": {"analysis": 4},
+                        "conversation_revision": 9,
+                    }
+                },
+                "unread": True,
+                "revisit_dirty": {"problem_identification": {"token": "dirty-secret"}},
+            }
+        },
+    )
+    service = ProfessorAnalyticsService(ProfessorAnalyticsRepository(bootstrap))
+    direct = service.notebook_review(student_id, notebook_id)
+    assert direct is not None
+    assert direct.summary == "Checkpoint summary."
+    assert direct.facione_scores["analysis"] == 4
+    assert direct.has_personalized_assessment is True
+    assert direct.stage_reviews["problem_identification"].strengths == [
+        "Names the affected people."
+    ]
+    assert not hasattr(
+        direct.stage_reviews["problem_identification"], "conversation_revision"
+    )
+    problem_strengths = next(
+        section["items"]
+        for section in direct.strength_sections
+        if section["stage_id"] == "problem_identification"
+    )
+    assert problem_strengths == ["Names the affected people."]
+
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    base = f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}"
+    review_response = client.get(f"{base}/review", cookies=cookies)
+    workspace_response = client.get(f"{base}/workspace", cookies=cookies)
+    assert review_response.status_code == 200
+    assert workspace_response.status_code == 200
+    dedicated = review_response.json()
+    legacy = workspace_response.json()["learning"]["review"]
+    assert dedicated["summary"] == legacy["summary"] == "Checkpoint summary."
+    assert dedicated["strength_sections"] == legacy["strength_sections"]
+    assert dedicated["improvement_sections"] == legacy["improvement_sections"]
+    assert dedicated["stage_reviews"] == legacy["stage_reviews"]
+    assert {
+        "detail",
+        "current_stage",
+        "progress",
+        "understanding_level",
+        "understanding_description",
+        "completed_stages",
+        "contributions",
+        "summary",
+        "facione_scores",
+        "facione_behavior_counts",
+        "facione_holistic_candidate",
+        "stage_notes",
+        "conclusion",
+        "critical_reflection",
+        "strength_sections",
+        "improvement_sections",
+        "strengths",
+        "improvement_areas",
+        "next_question",
+        "turn_count",
+        "has_personalized_assessment",
+        "stage_reviews",
+    } <= set(legacy)
+    assert "notebook" not in legacy
+    checkpoint = dedicated["stage_reviews"]["problem_identification"]
+    assert "conversation_revision" not in checkpoint
+    assert "important_message_ids" not in checkpoint
+    assert "jobs" not in dedicated["stage_reviews"]
+
+
+@pytest.mark.parametrize("job_status", ["queued", "running", "failed", "missing"])
+def test_professor_review_ignores_unfinished_or_unmatched_checkpoints(
+    tmp_path, monkeypatch, job_status
+):
+    """Only a matching completed stage-review job can feed lecturer Review."""
+    bootstrap, _professor, student_id, oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    jobs = {} if job_status == "missing" else {
+        "problem_identification": {"status": job_status}
+    }
+    student_store.update_thread(
+        notebook_id,
+        metadata={
+            JOURNEY_STAGE_REVIEWS_KEY: {
+                "jobs": jobs,
+                "reviews": {
+                    "problem_identification": {
+                        "stage": "problem_identification",
+                        "summary": "Stale checkpoint summary.",
+                        "strengths": ["Stale checkpoint strength."],
+                        "areas_to_revisit": ["Stale checkpoint improvement."],
+                        "facione_scores": {"analysis": 4},
+                        "conversation_revision": 9,
+                    }
+                },
+            }
+        },
+    )
+    service = ProfessorAnalyticsService(ProfessorAnalyticsRepository(bootstrap))
+    direct = service.notebook_review(student_id, notebook_id)
+    assert direct is not None
+    assert direct.stage_reviews == {}
+    assert direct.has_personalized_assessment is False
+    assert direct.facione_scores["analysis"] == 0
+    assert direct.summary != "Stale checkpoint summary."
+    assert all(not section["items"] for section in direct.strength_sections)
+    assert all(not section["items"] for section in direct.improvement_sections)
+
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(bootstrap, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: oidc.add("prof")}
+    base = f"/api/v1/professor/students/{student_id}/conversations/{notebook_id}"
+    dedicated = client.get(f"{base}/review", cookies=cookies)
+    legacy = client.get(f"{base}/workspace", cookies=cookies)
+    assert dedicated.status_code == 200
+    assert legacy.status_code == 200
+    assert dedicated.json()["stage_reviews"] == {}
+    assert legacy.json()["learning"]["review"]["stage_reviews"] == {}
+
+
+def test_professor_review_summary_prefers_latest_coaching_summary(
+    tmp_path,
+):
+    """A meaningful persisted coaching summary wins over checkpoint fallback copy."""
+    bootstrap, _professor, student_id, _oidc = _setup(tmp_path)
+    student_store = StudentStore(Path(bootstrap.path), identifier="cognito:student-a")
+    notebook_id = student_store.list_threads()[0]["id"]
+    assessment = _assessment(analysis=2)
+    assessment.update(
+        {
+            "recommendation": "stay",
+            "learning_summary": "Latest coaching summary.",
+            "review_strengths": ["Incremental coaching strength."],
+        }
+    )
+    student_store.add_message(
+        notebook_id,
+        "assistant",
+        "Keep refining the focus.",
+        metadata={"assessment": assessment},
+    )
+    student_store.update_thread(
+        notebook_id,
+        metadata={
+            JOURNEY_STAGE_REVIEWS_KEY: {
+                "jobs": {"problem_identification": {"status": "complete"}},
+                "reviews": {
+                    "problem_identification": {
+                        "stage": "problem_identification",
+                        "summary": "Newer checkpoint summary.",
+                        "strengths": ["Completed checkpoint strength."],
+                        "areas_to_revisit": [],
+                        "conversation_revision": 11,
+                    }
+                },
+            }
+        },
+    )
+    review = ProfessorAnalyticsService(
+        ProfessorAnalyticsRepository(bootstrap)
+    ).notebook_review(student_id, notebook_id)
+    assert review is not None
+    assert review.summary == "Latest coaching summary."
+    assert review.strength_sections[0]["items"] == [
+        "Completed checkpoint strength."
+    ]
+    assert review.strength_sections[1]["items"] == [
+        "Incremental coaching strength."
+    ]
 
 
 def test_professor_workspace_enforces_ownership_and_role(tmp_path, monkeypatch):

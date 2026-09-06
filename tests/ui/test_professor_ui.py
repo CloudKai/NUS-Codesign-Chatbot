@@ -119,9 +119,37 @@ class _AnalyticsClient:
             "notebook": {"id": "notebook-1", "title": "Notebook"},
             "summary": "The student is exploring evidence.",
             "facione_scores": {"analysis": 3},
-            "strength_sections": [],
-            "improvement_sections": [],
+            "strength_sections": [{
+                "stage_id": "problem_identification",
+                "stage": "Problem Identification",
+                "items": [
+                    "Names the affected people.",
+                    "Deep review evidence.",
+                    "Incremental coaching evidence.",
+                ],
+            }],
+            "improvement_sections": [{
+                "stage_id": "problem_identification",
+                "stage": "Problem Identification",
+                "items": [
+                    "Clarify the success outcome.",
+                    "Deep review improvement.",
+                    "Incremental coaching improvement.",
+                ],
+            }],
             "conclusion": "",
+            "stage_reviews": {
+                "problem_identification": {
+                    "stage_id": "problem_identification",
+                    "stage": "Problem Identification",
+                    "summary": "Checkpoint summary.",
+                    "strengths": ["Raw-only checkpoint strength."],
+                    "areas_to_revisit": ["Raw-only checkpoint improvement."],
+                    "reasoning_progress": "Evidence is becoming testable.",
+                    "facione_scores": {"analysis": 3},
+                }
+            },
+            "has_personalized_assessment": True,
         }
 
     def professor_conversation_transcript(self, _student_id, _notebook_id):
@@ -572,6 +600,17 @@ def test_professor_thinking_path_keeps_independent_tab_state(monkeypatch):
     assert _AnalyticsClient.review_calls == 1
     assert _AnalyticsClient.journey_calls == 1
     assert next(radio for radio in app.radio if radio.label == "Notebook content").value == "Chat"
+    review_rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    assert "Checkpoint summary." in review_rendered
+    assert "Names the affected people." in review_rendered
+    assert "Deep review evidence." in review_rendered
+    assert "Incremental coaching evidence." in review_rendered
+    assert "Deep review improvement." in review_rendered
+    assert "Incremental coaching improvement." in review_rendered
+    assert "Raw-only checkpoint strength." not in review_rendered
+    assert "Raw-only checkpoint improvement." not in review_rendered
+    assert "Reasoning progress" in review_rendered
+    assert "Areas for improvement" in review_rendered
 
     workspace_tabs = next(radio for radio in app.radio if radio.label == "Notebook content")
     workspace_tabs.set_value("Sources").run()
@@ -726,7 +765,13 @@ def test_professor_research_css_has_desktop_tablet_and_mobile_contracts() -> Non
     assert "professor_mobile_header" in component
     assert "professor-workbench-context" in component
     assert "professor_mobile_workbench" in component
-    assert "height:100dvh" in component
+    assert '[class*="st-key-professor_notebook_card_"]' in component
+    assert "border:1px solid var(--cd-border) !important" in component
+    assert "height:clamp(30rem, calc(100dvh - 10rem), 52rem)" in component
+    assert "overflow:visible !important" in component
+    assert "scrollbar-gutter:stable" in component
+    assert '[data-testid="stLayoutWrapper"]' in component
+    assert "height:100dvh !important" not in component
     assert "max-height:18rem" not in component
     assert "max-height:56vh" not in component
     assert "professor_dashboard_topbar" not in component

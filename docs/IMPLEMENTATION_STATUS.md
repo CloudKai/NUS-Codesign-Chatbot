@@ -2,6 +2,127 @@
 
 ## CURRENT STATUS
 
+### Lecturer Review checkpoint projection (2026-09-06)
+
+**Behavior.** Lecturer Review now reads the existing
+``notebooks.settings_text.journey_stage_reviews`` checkpoint source through a
+single read-only projection shared by the dedicated ``/review`` endpoint and
+the legacy ``/workspace`` response. Checkpoint Facione scores, summaries,
+stage strengths, and areas to revisit are merged with the existing learning
+review while a meaningful persisted coaching summary remains authoritative
+over checkpoint fallback copy. The API exposes typed per-stage evidence only;
+worker leases, queue identifiers, frozen message ids, and conversation
+revision metadata stay private. The lecturer rail renders that evidence in
+one group per Thinking Path stage and keeps the existing summary, score,
+section, and conclusion fields for compatibility.
+
+**Files.** ``backend/professor_analytics/models.py``,
+``backend/professor_analytics/service.py``, ``ui/professor.py``,
+``tests/http/test_professor_analytics.py``, ``tests/ui/test_professor_ui.py``,
+and this handoff. No provider, auth, persistence-write, schema, migration, or
+student-data changes were made.
+
+**Validation.** The focused professor analytics (36), research HTTP (3),
+Review-domain (25), and lecturer Streamlit AppTest (21) suites pass (85 tests
+total). The run includes negative queued/running/failed/missing-job cases,
+summary-precedence coverage, legacy workspace-key compatibility, and merged
+section rendering. Project ``compileall`` and ``git diff --check`` pass.
+
+**Compatibility, migration, and rollback.** Existing ``/workspace`` and
+dedicated ``/review`` routes, notebook ownership/audit checks, lazy tab fetches,
+and read-only boundaries remain in place. This is code-only with no data
+migration or rewrite; rollback is by reverting the listed backend/UI/test
+changes and this status entry.
+
+**Browser evidence.** Sol xHigh reviewed the shared diff and the deterministic
+lecturer flow at 1440×1000, 1024×768, and 390×844. The Review rail showed
+checkpoint Working conclusion, Reasoning progress, checkpoint/Deep/incremental
+feedback, and Facione values without horizontal overflow; mobile retained one
+scroll owner. The browser console had zero application errors (only the nine
+existing Streamlit/browser capability warnings).
+
+**Known risks/blockers.** No P0–P2 findings remain. A production-authenticated
+smoke pass with a large roster and long checkpoint copy remains a sensible
+release check, but it is not required for this code-only projection change.
+
+**Next exact action.** Hand off the working tree for the normal release review;
+no database migration, data rewrite, or additional implementation step is
+required.
+
+### Lecturer notebook list outlines (2026-09-06)
+
+**Behavior.** Each notebook in a student's detail view now has its own quiet
+outlined surface, making adjacent notebooks distinguishable without restoring
+the dense card-wall treatment. The outline uses the existing theme border in
+Light/Dark/System modes and switches to the teal accent on hover or keyboard
+focus so the currently explored row is easy to locate.
+
+**Files.** `ui/assets/styles/70-professor.css`,
+`tests/ui/test_professor_ui.py`, and this handoff. No backend, auth,
+persistence, schema, provider, or student-data contracts changed.
+
+**Validation.** The focused professor UI plus professor analytics/research HTTP
+suites pass (54 tests); project `compileall` and `git diff --check` pass. A
+deterministic browser preview was checked at desktop and 390px widths in the
+existing theme modes; notebook outlines remain visible and do not introduce
+horizontal overflow or new scroll traps.
+
+**Compatibility, migration, and rollback.** This is a CSS/test-only change with
+no migration. Existing notebook keys, actions, lazy loading, and read-only
+behavior are unchanged. Rollback is code-only by reverting the listed files
+and this status entry.
+
+**Known risks/blockers.** The preview fixture has a small notebook list; a
+production-shaped roster should receive the same visual check before release.
+
+**Next exact action.** Sign in as a lecturer, open a student's detail view,
+and confirm each notebook outline remains legible in Light, Dark, and System
+themes at 200% zoom.
+
+### Lecturer workbench zoom/scroll and visual hierarchy follow-up (2026-09-06)
+
+**Behavior.** The selected-notebook workbench no longer locks its content
+column to `100dvh` with `overflow:hidden`. The outer lecturer document remains
+scrollable when the context header plus workbench exceed a short or zoomed
+viewport, while the roster, transcript, and Thinking Path panes retain bounded
+independent scroll regions. Streamlit's intermediate layout wrappers now
+stretch with the three-pane row, so pane bottoms are reachable instead of
+collapsing to intrinsic content height. Desktop workbench surfaces use thin
+dividers and flat evidence rows rather than nested dark card walls; long
+notebook titles wrap safely, compact desktop columns preserve readable roster
+and path labels, and path actions remain single-line.
+
+**Files.** `ui/assets/styles/70-professor.css`,
+`tests/ui/test_professor_ui.py`, and this handoff. No backend, auth,
+persistence, schema, provider, or student-data contracts changed.
+
+**Validation.** The focused professor UI plus professor analytics/research HTTP
+suites pass (54 tests); project `compileall` and `git diff --check` pass.
+Playwright preview reported zero application errors in the browser console at
+1440×900 and 1024×768 (only existing Streamlit/browser framework warnings):
+the three pane scrollports fill the workbench, the app container scrolls the
+context/workbench as one document when needed, and the compact 1024 layout
+keeps `Progression` on one line. At 390×844 and 800×900 the
+desktop pane is hidden, exactly one mobile surface is rendered, and the page
+has no horizontal overflow; the 720×450 proxy (representative of a zoomed,
+short viewport) keeps the same mobile flow. The existing theme stylesheet
+test remains a baseline failure unrelated to this CSS change, as do the
+previously recorded full-suite failures.
+
+**Compatibility, migration, and rollback.** Existing widget/cache keys,
+read-only API calls, staff-authentication boundary, and lazy notebook loading
+remain unchanged. This is a CSS/test-only change with no migration; rollback is
+code-only by reverting the two listed files and this status entry.
+
+**Known risks/blockers.** The browser fixture still has one student and a short
+transcript, so a final authenticated smoke pass should exercise a full roster,
+long transcript, and real long notebook titles at 200% zoom before release.
+
+**Next exact action.** Sign in as the promoted lecturer, open a real notebook,
+then verify 1440/1024/800/390 widths in Light, Dark, and System modes while
+scrolling each pane and the page at 200% zoom; capture any production-shaped
+overflow before release.
+
 ### Professional lecturer dashboard redesign (2026-09-05)
 
 **Behavior.** The lecturer shell now presents one persistent desktop navigation
