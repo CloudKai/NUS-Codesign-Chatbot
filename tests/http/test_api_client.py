@@ -136,7 +136,8 @@ def test_api_client_raises_for_missing_notebook(tmp_path):
     store = StudentStore(tmp_path / "client-missing.sqlite3")
     client = _client_for_store(store, auto_advance=False)
     try:
-        with pytest.raises(httpx.HTTPStatusError):
+        # Starlette may use httpx2 while LocalApiClient also supports httpx.
+        with pytest.raises(Exception) as raised:
             client.coach_turn(
                 CoachRequest(
                     thread_id="missing-thread",
@@ -145,6 +146,8 @@ def test_api_client_raises_for_missing_notebook(tmp_path):
                     response_detail="short",
                 )
             )
+        assert type(raised.value).__name__ == "HTTPStatusError"
+        assert raised.value.response.status_code == 404
     finally:
         client.close()
 

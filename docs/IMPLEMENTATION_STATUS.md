@@ -28,7 +28,11 @@
   The first GitHub Mock CI run stopped at repository-wide Ruff on eight
   pre-existing unused-variable/import/string findings outside this feature;
   those eight findings were removed without changing behavior and local
-  `ruff check .` now passes. The follow-up CI run is the release gate.
+  `ruff check .` now passes. The second CI run passed Ruff and configuration
+  but found one existing test coupled to `httpx.HTTPStatusError` while CI's
+  Starlette raised the equivalent `httpx2.HTTPStatusError` for the expected
+  404. That test now asserts the error name and 404 status across both client
+  versions; the next CI run remains the release gate.
   The local browser opened the normal Guest chatbot layout. No production
   image/runtime was published and no paid coach turn was made, so live latency
   improvement is not yet measured. The approved limit for a future production
