@@ -1600,7 +1600,7 @@ def _render_professor_workspace(
                     '<div class="professor-workspace-heading">'
                     + '<div class="professor-workspace-heading-copy">'
                     + breadcrumb
-                    + f'<p class="professor-workspace-eyebrow">Read-only notebook</p>'
+                    + '<p class="professor-workspace-eyebrow">Read-only notebook</p>'
                     + f'<h3>{escape(_notebook_card_label(notebook))}</h3>'
                     + f'<p>{escape(str(notebook.get("stage") or notebook.get("current_stage") or "Not started"))}'
                     + f' <span aria-hidden="true">·</span> Last active {escape(_when(notebook.get("last_active")))}</p></div>'

@@ -5,7 +5,6 @@ from __future__ import annotations
 import threading
 
 from fastapi.testclient import TestClient
-from streamlit.testing.v1 import AppTest
 from saved_ui_workspace import saved_app
 
 from backend.api import create_app

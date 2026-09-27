@@ -1198,7 +1198,6 @@ def test_current_notebook_title_is_editable_from_recent_chat_menu():
     _save_draft_with_message(app)
     current = StudentStore().get_thread(app.session_state["thread_id"])
     assert current
-    thread_id = str(app.session_state["thread_id"])
     title = next(
         text_input
         for text_input in app.text_input

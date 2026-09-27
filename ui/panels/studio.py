@@ -21,7 +21,6 @@ import streamlit as st
 
 from backend.settings import settings
 from backend.specialists.review_orchestration import (
-    COUNTER_SETTINGS_KEY,
     DEEP_REVIEW_JOB_COMPLETED,
     DEEP_REVIEW_JOB_FAILED,
     DEEP_REVIEW_JOB_KEY,

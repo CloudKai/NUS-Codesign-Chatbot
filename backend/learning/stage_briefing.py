@@ -67,7 +67,8 @@ def compose_stage_move_briefing(
     if already_selected:
         return None
     cleaned = str(target_stage or "").strip()
-    stage = STAGE_BY_ID[cleaned]
+    if cleaned not in STAGE_BY_ID:
+        raise KeyError(cleaned)
     normalized = normalize_journey(journey)
     completed = {
         str(item or "").strip()

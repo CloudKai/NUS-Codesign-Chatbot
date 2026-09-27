@@ -25,6 +25,10 @@
 - **Validation:** Focused progress/API/UI/telemetry tests passed. Full local
   mock pytest passed after the implementation; an added failed-save preview
   test passed separately. Ruff, compileall, and `git diff --check` passed.
+  The first GitHub Mock CI run stopped at repository-wide Ruff on eight
+  pre-existing unused-variable/import/string findings outside this feature;
+  those eight findings were removed without changing behavior and local
+  `ruff check .` now passes. The follow-up CI run is the release gate.
   The local browser opened the normal Guest chatbot layout. No production
   image/runtime was published and no paid coach turn was made, so live latency
   improvement is not yet measured. The approved limit for a future production
