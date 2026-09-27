@@ -170,7 +170,7 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert 'MODEL_PROVIDER: "agentcore"' in app
     assert 'MOCK_OPENAI: "false"' in app
     assert 'AGENTCORE_QUALIFIER: "DEFAULT"' in app
-    assert 'AGENTCORE_SESSION_GENERATION: "8"' in app
+    assert 'AGENTCORE_SESSION_GENERATION: "10"' in app
     assert 'AGENTCORE_MODEL_PROVIDER: "bedrock"' in app
     assert 'AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
     assert 'DEEP_REVIEW_AGENTCORE_TIMEOUT_SECONDS: "200"' in app
@@ -188,7 +188,7 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert 'FAST_CHAT_HISTORY_MESSAGE_MAX_TOKENS: "1500"' in app
     assert 'FAST_CHAT_SOFT_INPUT_TOKENS: "12000"' in app
     assert 'FAST_CHAT_MAX_INPUT_TOKENS: "16000"' in app
-    assert 'FAST_CHAT_PROMPT_CACHE_ENABLED: "false"' in app
+    assert 'FAST_CHAT_PROMPT_CACHE_ENABLED: "true"' in app
     assert 'AGENTCORE_SESSION_AFFINITY_ENABLED: "true"' in app
     assert 'GUARDRAIL_VERSION: "4"' in app
     assert 'MAX_ACTIVE_COACH_REQUESTS_PER_NOTEBOOK: "1"' in app
@@ -227,7 +227,7 @@ def test_production_compose_keeps_host_env_knowledge_base_contract():
     assert 'MODEL_PROVIDER: "agentcore"' in app
     assert 'MOCK_OPENAI: "false"' in app
     assert 'AGENTCORE_QUALIFIER: "DEFAULT"' in app
-    assert 'AGENTCORE_SESSION_GENERATION: "8"' in app
+    assert 'AGENTCORE_SESSION_GENERATION: "10"' in app
     assert 'AGENTCORE_MODEL_PROVIDER: "bedrock"' in app
     assert 'AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
     assert 'ROUTER_MODEL_PROVIDER: "bedrock"' in app
@@ -243,7 +243,7 @@ def test_production_compose_keeps_host_env_knowledge_base_contract():
     assert 'FAST_CHAT_HISTORY_MESSAGE_MAX_TOKENS: "1500"' in app
     assert 'FAST_CHAT_SOFT_INPUT_TOKENS: "12000"' in app
     assert 'FAST_CHAT_MAX_INPUT_TOKENS: "16000"' in app
-    assert 'FAST_CHAT_PROMPT_CACHE_ENABLED: "false"' in app
+    assert 'FAST_CHAT_PROMPT_CACHE_ENABLED: "true"' in app
     assert 'AGENTCORE_SESSION_AFFINITY_ENABLED: "true"' in app
     assert 'GUARDRAIL_VERSION: "4"' in app
     assert "${KNOWLEDGE_BASE_ID" not in compose
@@ -288,6 +288,7 @@ def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     assert "handle /api/v1/auth/me" in caddyfile
     assert "handle /api/v1/auth/refresh" in caddyfile
     assert "handle /api/v1/auth/logout" in caddyfile
+    assert "handle /api/v1/auth/guest/start" in caddyfile
     assert "handle /api/v1/auth/guest/renew" in caddyfile
     assert "handle /api/v1/auth/guest/claim/preview" in caddyfile
     assert "handle /api/v1/auth/guest/claim/confirm" in caddyfile
@@ -309,6 +310,7 @@ def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     me_index = caddyfile.index("handle /api/v1/auth/me")
     refresh_index = caddyfile.index("handle /api/v1/auth/refresh")
     logout_index = caddyfile.index("handle /api/v1/auth/logout")
+    guest_start_index = caddyfile.index("handle /api/v1/auth/guest/start")
     guest_renew_index = caddyfile.index("handle /api/v1/auth/guest/renew")
     guest_claim_preview_index = caddyfile.index("handle /api/v1/auth/guest/claim/preview")
     guest_claim_confirm_index = caddyfile.index("handle /api/v1/auth/guest/claim/confirm")
@@ -321,6 +323,7 @@ def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     assert me_index < block_index
     assert refresh_index < block_index
     assert logout_index < block_index
+    assert guest_start_index < block_index
     assert guest_renew_index < block_index
     assert guest_claim_preview_index < block_index
     assert guest_claim_confirm_index < block_index
@@ -343,12 +346,12 @@ def test_compose_keeps_internal_fastapi_url_for_container_local_calls():
     assert "ports:" not in app
 
 
-def test_production_compose_keeps_guest_access_disabled():
-    """The production deployment explicitly opts out of guest access."""
+def test_production_compose_enables_guest_access():
+    """The production deployment opens the student guest path."""
     compose = (ROOT / "compose.prod.yaml").read_text(encoding="utf-8")
     app = _service_block(compose, "app")
 
-    assert 'GUEST_ACCESS_ENABLED: "false"' in app
+    assert 'GUEST_ACCESS_ENABLED: "true"' in app
 
 
 def test_compose_sets_production_cognito_redirect_uri():

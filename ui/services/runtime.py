@@ -491,7 +491,7 @@ def stream_coach_turn_events(
     *,
     request_id: str | None = None,
 ) -> Iterator[dict[str, Any]]:
-    """Yield progress and done events for one coaching turn.
+    """Yield progress, validated reply preview, and done events for a turn.
 
     Uses the NDJSON streaming API when ``USE_LOCAL_API`` is enabled; otherwise
     runs the in-process coach service and emits the same progress phases.
@@ -504,6 +504,7 @@ def stream_coach_turn_events(
     api_to_first_event_ms: float | None = None
     api_to_started_ms: float | None = None
     api_to_first_status_ms: float | None = None
+    api_to_reply_ready_ms: float | None = None
 
     def _iter_events() -> Iterator[dict[str, Any]]:
         if local_api_enabled():
@@ -528,9 +529,12 @@ def stream_coach_turn_events(
                 }
             )
 
+        def _reply_ready(response_text: str) -> None:
+            bus.put({"event": "reply_ready", "text": response_text})
+
         def _worker() -> None:
             try:
-                completed = coach.submit(request, progress=_progress)
+                completed = coach.submit(request, progress=_progress, reply=_reply_ready)
                 bus.put({"event": "done", "turn": completed.model_dump(mode="json")})
             except BaseException as error:
                 bus.put(error)
@@ -560,6 +564,8 @@ def stream_coach_turn_events(
                 api_to_started_ms = elapsed
             elif kind == "status" and api_to_first_status_ms is None:
                 api_to_first_status_ms = elapsed
+            elif kind == "reply_ready" and api_to_reply_ready_ms is None:
+                api_to_reply_ready_ms = elapsed
             yield event
     finally:
         log_ui_timing(
@@ -568,6 +574,7 @@ def stream_coach_turn_events(
             api_to_first_event_ms=api_to_first_event_ms,
             api_to_started_ms=api_to_started_ms,
             api_to_first_status_ms=api_to_first_status_ms,
+            api_to_reply_ready_ms=api_to_reply_ready_ms,
             api_dispatch_ms=api_to_first_event_ms,
         )
 

@@ -46,8 +46,10 @@ from backend.coaching.progress import (
     PROGRESS_SAVING,
     PROGRESS_THINKING,
     CoachProgressCallback,
+    CoachReplyCallback,
     coach_progress,
     emit_coach_progress,
+    emit_coach_reply_ready,
 )
 from backend.coaching.progress_fields import meaningful_progress_fields
 from backend.coaching.turn_snapshot import TurnSnapshot
@@ -744,6 +746,7 @@ class CoachApplicationService:
         execution_lease_held: bool = False,
         server_owned_specialist: str | None = None,
         progress: CoachProgressCallback | None = None,
+        reply: CoachReplyCallback | None = None,
     ) -> CoachTurn:
         """Run and persist one turn, optionally applying its recommendation.
 
@@ -761,8 +764,10 @@ class CoachApplicationService:
         ``review``.
         *progress* receives execution-boundary phase names for NDJSON status
         events. It must not receive student text.
+        *reply* receives the validated, final response text before persistence;
+        callers must discard that preview if the turn fails to save.
         """
-        with coach_progress(progress):
+        with coach_progress(progress, reply):
             return self._submit_body(
                 request,
                 execution_lease_held=execution_lease_held,
@@ -2010,6 +2015,7 @@ class CoachApplicationService:
                 # keeping focus and the auditable pending choice unchanged.
                 validated_completion_stage = prepared_request.current_stage
         persist_started = time.perf_counter()
+        emit_coach_reply_ready(turn.response_text)
         emit_coach_progress(PROGRESS_SAVING)
         self._store.persist_coach_turn(
             prepared_request.thread_id,

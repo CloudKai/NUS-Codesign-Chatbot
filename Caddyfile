@@ -10,6 +10,11 @@
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 	}
 
+	# Browser-facing guest bootstrap and renewal; other student APIs stay private.
+	handle /api/v1/auth/guest/start {
+		reverse_proxy app:8000
+	}
+
 	# FastAPI-owned Cognito login, session probe, and logout.
 	handle /api/v1/auth/guest/renew {
 		reverse_proxy app:8000

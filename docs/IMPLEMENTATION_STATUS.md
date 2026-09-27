@@ -2,6 +2,139 @@
 
 ## CURRENT STATUS
 
+### Validated reply preview and first-text timing (2026-09-27)
+
+- **Expected / actual:** The coach reply now appears as one validated preview
+  after the coaching workflow finishes and before the database save completes.
+  The saved turn replaces the preview on success; a failed save clears it. This
+  shortens the visible wait by the persistence interval but does not stream
+  individual model tokens. Raw Strands structured-output fragments remain
+  hidden because schema, citation, and output-guardrail checks are incomplete
+  while those fragments arrive.
+- **Files:** `backend/coaching/progress.py`, `backend/coaching/execution.py`,
+  `backend/http/app.py`, `ui/services/runtime.py`, `ui/panels/chat.py`,
+  `agentcore_runtime/main.py`, `backend/agentcore_provider.py`, and
+  `backend/turn_perf.py`; focused domain, API, and UI tests.
+- **Timing:** Fast Chat now records privacy-safe `model_first_content_ms` and
+  `model_first_reply_text_ms` from real Strands callback events. The latter
+  waits for a character inside the structured `response_text` field, rather
+  than counting the opening JSON key or a failed prose recovery cycle. The
+  runtime returns these numbers with its final payload; the adapter copies
+  them into per-turn performance telemetry. The pinned Strands 1.52.0 fake
+  model produced both metrics without AWS or student content.
+- **Validation:** Focused progress/API/UI/telemetry tests passed. Full local
+  mock pytest passed after the implementation; an added failed-save preview
+  test passed separately. Ruff, compileall, and `git diff --check` passed.
+  The local browser opened the normal Guest chatbot layout. No production
+  image/runtime was published and no paid coach turn was made, so live latency
+  improvement is not yet measured. The approved limit for a future production
+  check is up to four short turns and US$0.10 total.
+- **Compatibility / rollback:** No database migration or persisted-format
+  change. Existing `started`/`status`/`done`/`error` NDJSON events remain;
+  `reply_ready` is additive. Older runtimes simply omit the new timing fields.
+  Reverting the preview callback restores the old wait behavior while leaving
+  saved turns intact. Production Compose is prepared with session generation
+  10 (up from live generation 9). A new AgentCore runtime version and app image
+  are needed to see both timing metrics and the preview in production.
+- **Next exact action:** Release the tested tree under the ordered production
+  checklist (commit/push, READY AgentCore publish, fresh session generation,
+  matching app image), then use the approved bounded smoke to compare first
+  content, first reply character, preview arrival, and final saved-turn time.
+  Real token-by-token text would require a separately reviewed stream-time
+  output-safety and schema policy; do not forward raw structured JSON.
+
+### Fast Chat prompt caching rollout (2026-09-27)
+
+- **Expected behavior:** Repeated Fast Chat requests in an eligible stage reuse
+  the static coach instruction prefix through a Bedrock system `cachePoint`.
+  The current conservative 4,096-token estimate qualifies Problem
+  Identification; shorter stage prefixes remain uncached. Student text,
+  runtime context, and retrieved evidence remain after the cache point.
+- **Actual so far:** The existing production AgentCore v33 package's
+  `prompt_cache.py`, `structured_coach.py`, and `main.py` match the local source
+  byte for byte. Published v34 using the same code artifact and all existing
+  runtime configuration, adding only `FAST_CHAT_PROMPT_CACHE_ENABLED=true`.
+  AWS automatically moved DEFAULT to v34 once it became READY. The EC2 host
+  Compose was then updated to cache true and session generation 9, with a
+  pre-cache copy saved, and only the app container was recreated. DEFAULT is
+  READY on v34; app health and internal readiness are 200, and public
+  CloudFront health is 200.
+- **Files:** `compose.prod.yaml` prepares cache true and session generation 9;
+  `tests/domain/test_prompt_cache.py` verifies the real Fast Chat prompt's
+  cache boundary and byte-identical text; `tests/test_deployment_config.py`
+  tracks production configuration; `docs/PRODUCTION_RELEASE_CHECKLIST.md`
+  records the runtime flag and telemetry gate.
+- **Validation:** Focused cache/deployment tests passed (29 tests). Full mock
+  pytest passed. `compileall` and `git diff --check` passed. The first host
+  readiness probe ran immediately after container recreation and got a
+  connection-refused startup response; the follow-up probe passed with a
+  healthy container. The user approved two short paid turns with a US$0.05
+  total cap. Two synthetic Problem Identification AgentCore turns succeeded
+  without creating a student notebook. Turn 1: one model cycle, cache enabled,
+  6,331 cache-write tokens, zero cache-read tokens, 20,827 ms invoke. Turn 2:
+  one cycle, 6,331 cache-read tokens, zero cache-write tokens, 18,924 ms
+  invoke. The first probe's reporting code exited after the successful model
+  turn because it requested a nonexistent response field; the corrected
+  second probe exited cleanly. Different messages and two samples do not
+  establish a stable latency improvement. Exact AWS billed cost was not
+  available in per-request telemetry; no further paid requests were made.
+- **Compatibility and rollback:** No database or student-data migration and
+  no model/pedagogy code change. Rollback requires pointing DEFAULT at READY
+  v33, assigning a fresh session generation, restoring the saved pre-cache
+  Compose flag, and recreating only the app container. Cache write cost and
+  miss behavior still need bounded live measurement.
+- **Next exact action:** Profile time to first model text and output-token
+  generation on real Fast Chat turns, then implement genuine text streaming
+  through AgentCore, FastAPI, and Streamlit if the structured-output contract
+  can be preserved. Measure perceived first-text latency and total duration
+  separately. For click latency, profile Streamlit rerun/API calls on New Chat
+  and saved-chat open; cache or eliminate only verified redundant reads.
+
+### Production guest rollout (2026-09-27)
+
+- **Expected / actual:** Open the CloudFront chatbot directly as Guest, keep
+  notebook history across reloads, allow source-grounded coaching, and retain
+  optional Cognito sign-in. The live browser now does all of these except the
+  final guest-to-account transfer, which needs a real account sign-in. The first
+  live attempt failed because production Caddy omitted the browser-facing
+  `/api/v1/auth/guest/start` allowlist route; adding that exact route resolved
+  the 404. The prior sign-in gate was caused by production Compose explicitly
+  setting `GUEST_ACCESS_ENABLED=false`, not by CloudFront caching.
+- **Files:** `compose.prod.yaml`, `Caddyfile`,
+  `tests/test_deployment_config.py`, `docs/GUEST_ACCESS_PHASE_HANDOFF.md`, and
+  this entry. The EC2 host copies of Compose and Caddy were updated to match
+  the reviewed local files; only the app container was recreated and Caddy was
+  validated/reloaded.
+- **Migration:** AWS Backup completed a full DSQL recovery point before the
+  additive `--guest-sessions-only` migration. The migration created
+  `guest_sessions`, awaited its two async indexes, and granted the runtime role
+  SELECT/INSERT/UPDATE/DELETE. Existing notebook/user data was not rewritten.
+  The post-migration dry run no longer proposes table/column creation; it
+  always lists the idempotent index/grant statements by design. The backup has
+  30-day retention and restores to a new cluster if needed.
+- **Validation:** The focused guest/auth/persistence/DSQL/deployment block and
+  full local mock suite passed after the final Caddy test assertion; compileall
+  and `git diff --check` passed. Caddy validated. The production app reported
+  healthy and internal readiness 200. CloudFront health returned 200 while
+  public notebook and readiness API paths remained 404. In a live Guest browser,
+  a coach turn completed, the notebook and both messages survived reload, and
+  a synthetic text upload produced a grounded reply with an `[S1]` citation.
+  The optional sign-in button reached Cognito Managed Login. Narrow-layout
+  navigation showed the Guest identity and sign-in button.
+- **Rollback / risks:** The EC2 host retains pre-guest copies of Compose and
+  Caddy. Restoring those files, recreating only the app, and reloading Caddy
+  disables new guest entry; retain the additive DSQL table and existing guest
+  rows. A real Cognito guest-to-account transfer and signed-in source-object
+  copy were not executed. The in-app browser emitted the previously observed
+  Streamlit iframe `MutationObserver` errors on reload without interrupting
+  the flow. The live test notebook and synthetic source remain in the browser's
+  guest workspace; no student data was deleted.
+- **Next exact action:** Have the user sign in from the live Guest workspace
+  with their account and verify its active notebook and source history append
+  after redirect/reload. If that fails, inspect the OAuth callback and guest
+  claim logs before changing data; the immediate safety switch is the saved
+  production Compose guest flag.
+
 ### Guest sign-in opens the transferred active notebook (2026-09-27)
 
 - **Behavior:** Successful guest-to-account transfer now sets only the account's

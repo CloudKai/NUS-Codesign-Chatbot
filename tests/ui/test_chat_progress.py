@@ -345,6 +345,7 @@ def test_auto_advance_reconciles_thinking_path_after_reply_is_visible(
 
     def fake_stream(request: Any, **_kwargs: Any) -> Iterator[dict[str, Any]]:
         yield {"event": "status", "phase": "thinking", "label": "Coach is thinking…"}
+        yield {"event": "reply_ready", "text": reply}
         local_store = StudentStore()
         local_store.add_message(request.thread_id, "user", request.student_message)
         local_store.add_message(request.thread_id, "assistant", reply)
@@ -390,6 +391,24 @@ def test_auto_advance_reconciles_thinking_path_after_reply_is_visible(
     assert _reply_message_count(app, reply) == 1
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Generate and compare plausible concepts that respond to the problem." in rendered
+
+
+def test_failed_save_removes_ephemeral_reply_preview(monkeypatch) -> None:
+    """A preview is never left looking like a saved coach message on failure."""
+    from ui import chat
+
+    preview = "This reply was validated but could not be saved."
+
+    def fake_stream(request: Any, **_kwargs: Any) -> Iterator[dict[str, Any]]:
+        del request
+        yield {"event": "reply_ready", "text": preview}
+        yield {"event": "error", "detail": "Save failed", "category": "unavailable"}
+
+    monkeypatch.setattr(chat, "stream_coach_turn_events", fake_stream)
+    app = saved_app()
+    app.chat_input[0].set_value("A new design question").run()
+    assert not app.exception
+    assert not _reply_visible(app, preview)
 
 
 def test_citation_buttons_render_from_done_payload_without_get_source(

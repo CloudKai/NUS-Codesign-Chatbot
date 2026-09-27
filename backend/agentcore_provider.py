@@ -921,6 +921,8 @@ def _record_runtime_cache_metrics(payload: dict[str, Any]) -> None:
         ("model_output_tokens", "model_output_tokens"),
         ("model_call_count", "model_call_count"),
         ("time_to_first_token_ms", "agentcore_ttft_ms"),
+        ("model_first_content_ms", "model_first_content_ms"),
+        ("model_first_reply_text_ms", "model_first_reply_text_ms"),
         ("server_request_duration_ms", "agentcore_model_duration_ms"),
     ):
         raw = payload.get(source)

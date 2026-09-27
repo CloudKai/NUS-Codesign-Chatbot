@@ -14,6 +14,19 @@ opens Ready; students move with Journey **Work on this stage** or typed
 `Move to`. Do not flip those flags back to Month-1 auto-advance during release
 unless product explicitly reverts.
 
+**2026-09-27 guest rollout:** The production DSQL guest-session migration and
+backup, Compose guest flag, and Caddy guest-start allowlist are recorded under
+`docs/IMPLEMENTATION_STATUS.md` → **Production guest rollout**. The older
+release-specific DSQL statement below predates this rollout. Preserve the
+additive guest table and rows when rolling back the guest flag.
+
+**Next release:** Publish the Fast Chat first-text timing runtime, then deploy
+the app's validated `reply_ready` preview with Compose session generation 10.
+Generation 9 is the currently documented live prompt-cache release. The
+preview is a complete validated reply sent before persistence, not model-token
+streaming; a save failure must clear it. Use the user-approved limit of four
+short coach turns and US$0.10 total for the post-release production check.
+
 ---
 
 ## Ordered cutover (this release)
@@ -32,8 +45,12 @@ READY does **not** mean the EC2 image is new. Keep these gates separate.
    Do **not** create a new runtime ARN.
 4. Wait until that new runtime version is **READY**.
 5. Move the **DEFAULT** qualifier only after READY.
-6. Increase `AGENTCORE_SESSION_GENERATION` in host `.env` so warm microVMs
+6. Increase `AGENTCORE_SESSION_GENERATION` in host `compose.prod.yaml` so warm microVMs
    cannot keep the previous assets.
+
+`update-agent-runtime` may move DEFAULT automatically when the new version
+becomes READY. Query the endpoint immediately after publishing and apply the
+new session generation before sending a coach turn.
 
 ### EC2 IMAGE DEPLOYED
 
@@ -44,7 +61,10 @@ READY does **not** mean the EC2 image is new. Keep these gates separate.
 10. Run a small controlled live validation.
 
 Intended order is 1 → 10. Do not skip the READY wait. Do not move DEFAULT
-onto a non-READY version. Prompt cache stays **off**. Session affinity is
+onto a non-READY version. For the planned Fast Chat prompt-cache rollout, set
+`FAST_CHAT_PROMPT_CACHE_ENABLED=true` in the published AgentCore runtime
+environment as well as Compose. Confirm cache-read tokens on repeated turns
+before claiming a latency benefit. Session affinity is
 enabled by `compose.prod.yaml` and is safe only while production owner ids
 remain unique Cognito subjects.
 
@@ -85,7 +105,7 @@ generation.
 | | |
 |---|---|
 | **When** | Every authorised AgentCore republish. Not required for an app-image-only deploy that does not publish a new runtime version. |
-| **How** | **Always** set a new non-secret generation value in host `.env` for a republish (and redeploy the app container so FastAPI picks it up). This is required even when only runtime environment or prompt/schema assets changed. |
+| **How** | **Always** set a new non-secret generation value in host `compose.prod.yaml` for a republish (and recreate the app container so FastAPI picks it up). This is required even when only runtime environment or prompt/schema assets changed. |
 | **Pass** | Host env generation differs from the pre-publish value; app container recreated after the change; DEFAULT liveVersion is the new published version. |
 
 Rolling back an AgentCore version has the same rule: change generation again
@@ -187,6 +207,5 @@ Container logs (json-file → CloudWatch or the host sink). No student text.
   selection-mode Compose defaults without an explicit product decision.
 - Republish AgentCore without changing `AGENTCORE_SESSION_GENERATION` and recreating FastAPI.
 - Create a **new** AgentCore runtime ARN (publish a new version on the existing ARN).
-- Enable `FAST_CHAT_PROMPT_CACHE_ENABLED` on this baseline. Session affinity is
-  already enabled in `compose.prod.yaml`; do not enable it with shared owner
-  identifiers.
+- Enable session affinity with shared owner identifiers. Production affinity
+  requires unique owner IDs.

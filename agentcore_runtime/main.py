@@ -17,6 +17,7 @@ loaded per role from explicit environment configuration.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Mapping
 from typing import Any, Callable
@@ -162,6 +163,47 @@ except ImportError:  # pragma: no cover - companion tests never import this modu
 app = BedrockAgentCoreApp() if BedrockAgentCoreApp is not None else None
 
 _ROLE_CONFIGS_READY = False
+_REPLY_TEXT_START = re.compile(r'"response_text"\s*:\s*"(?:[^"\\]|\\.)')
+
+
+def _first_text_timing_callback(started: float) -> tuple[Callable[..., None], dict[str, int]]:
+    """Measure first model content and first reply character without logging text.
+
+    Strands emits structured output as tool-input JSON, so its first content
+    event is not necessarily the first character of the student-facing reply.
+    The bounded buffer is used only to locate the ``response_text`` property.
+    """
+    timings: dict[str, int] = {}
+    tool_prefix = ""
+    tool_id = ""
+
+    def capture(**event: Any) -> None:
+        nonlocal tool_prefix, tool_id
+        delta = event.get("delta")
+        tool = delta.get("toolUse") if isinstance(delta, Mapping) else None
+        fragment = tool.get("input") if isinstance(tool, Mapping) else None
+        prose = event.get("data")
+        if not isinstance(fragment, str) or not fragment:
+            fragment = prose if isinstance(prose, str) else ""
+        if not fragment:
+            return
+        elapsed = max(0, int((time.monotonic() - started) * 1000))
+        timings.setdefault("model_first_content_ms", elapsed)
+        if isinstance(tool, Mapping) and "model_first_reply_text_ms" not in timings:
+            current_tool = event.get("current_tool_use")
+            current_id = (
+                str(current_tool.get("toolUseId") or "")
+                if isinstance(current_tool, Mapping)
+                else ""
+            )
+            if current_id and current_id != tool_id:
+                tool_prefix = ""
+                tool_id = current_id
+            tool_prefix = (tool_prefix + fragment)[:4096]
+            if _REPLY_TEXT_START.search(tool_prefix):
+                timings["model_first_reply_text_ms"] = elapsed
+
+    return capture, timings
 
 
 def _with_cache_telemetry(
@@ -173,6 +215,7 @@ def _with_cache_telemetry(
     first_cycle_tool_choice_installed: bool | None = None,
     first_cycle_tool_choice_applied: bool | None = None,
     first_cycle_tool_choice_decision: str | None = None,
+    first_text_timings: Mapping[str, int] | None = None,
 ) -> dict[str, Any]:
     """Attach numeric cache, cycle, and safe model provenance without student text.
 
@@ -200,6 +243,8 @@ def _with_cache_telemetry(
         first_cycle_tool_choice_decision=first_cycle_tool_choice_decision,
     )
     payload.update(runtime_model_provenance_fields(model_config))
+    if first_text_timings:
+        payload.update(first_text_timings)
     if enabled:
         logger.info(
             "prompt_cache_enabled=true cache_read_input_tokens=%s "
@@ -551,11 +596,13 @@ async def _structured_role_invoke(
         )
         logger.exception("runtime_model_load_failed")
         return harness_error_payload("unavailable")
+    fast_chat = str(role).strip().lower() == MODEL_ROLE_FAST_CHAT
+    first_text_callback, first_text_timings = _first_text_timing_callback(started)
     agent_kwargs: dict[str, Any] = {
         "model": model,
         "system_prompt": system_prompt,
         "tools": [],
-        "callback_handler": None,
+        "callback_handler": first_text_callback if fast_chat else None,
         "retry_strategy": _retry_strategy_for_role(role),
     }
     if include_history:
@@ -563,7 +610,6 @@ async def _structured_role_invoke(
             agent_kwargs["messages"] = prior_messages
     agent = Agent(**agent_kwargs)
     first_cycle_stop: list[str] = []
-    fast_chat = str(role).strip().lower() == MODEL_ROLE_FAST_CHAT
     cycle_state: dict[str, Any] = {}
     first_cycle_installed = _install_first_cycle_structured_output(
         agent, role=role, cycle_state=cycle_state if fast_chat else None
@@ -610,6 +656,7 @@ async def _structured_role_invoke(
             first_cycle_tool_choice_decision=(
                 cycle_state.get("decision") if fast_chat else None
             ),
+            first_text_timings=first_text_timings if fast_chat else None,
         )
     except CoachTurnExtractionError as error:
         first_stop = first_cycle_stop[0] if first_cycle_stop else ""

@@ -2216,10 +2216,11 @@ def create_app(
         http_request: Request,
         owner: OwnerServices = Depends(current_owner),
     ) -> StreamingResponse:
-        """Stream one coaching turn as NDJSON progress events, then the final turn.
+        """Stream progress, a validated reply preview, and the saved turn.
 
-        Progress phases correspond to execution boundaries. This endpoint does
-        not emit fake token slices of a completed reply.
+        Progress phases correspond to execution boundaries. ``reply_ready``
+        contains the final validated text before persistence and is ephemeral.
+        This endpoint does not emit fake token slices of a completed reply.
         """
 
         request = _with_idempotency_header(request, http_request)
@@ -2281,6 +2282,9 @@ def create_app(
                     }
                 )
 
+            def _reply_ready(response_text: str) -> None:
+                bus.put({"event": "reply_ready", "text": response_text})
+
             def _worker() -> None:
                 try:
                     begin_coach_turn_perf()
@@ -2288,7 +2292,9 @@ def create_app(
                     auth_ms = getattr(http_request.state, "auth_context_ms", None)
                     if auth_ms is not None:
                         record_field("auth_context_ms", auth_ms)
-                    completed = owner.coach.submit(request, progress=_progress)
+                    completed = owner.coach.submit(
+                        request, progress=_progress, reply=_reply_ready
+                    )
                     bus.put({"event": "_complete", "turn": completed})
                 except BaseException as error:
                     bus.put(error)

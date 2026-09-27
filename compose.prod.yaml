@@ -24,7 +24,7 @@ services:
       CO_DESIGN_UI_URL: "${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}"
       COGNITO_REDIRECT_URI: "${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}/api/v1/auth/callback"
       AUTH_COOKIE_SECURE: "true"
-      GUEST_ACCESS_ENABLED: "false"
+      GUEST_ACCESS_ENABLED: "true"
       DSQL_SSLROOTCERT: "/etc/ssl/certs/ca-certificates.crt"
       DATABASE_PROVIDER: "dsql"
       FILE_STORAGE_PROVIDER: "s3"
@@ -46,7 +46,7 @@ services:
       AGENTCORE_SESSION_AFFINITY_ENABLED: "true"
       # Bump when publishing a new AgentCore version or changing lifecycle
       # settings so new requests cannot reuse older warm microVM sessions.
-      AGENTCORE_SESSION_GENERATION: "8"
+      AGENTCORE_SESSION_GENERATION: "10"
       AGENTCORE_MODEL_PROVIDER: "bedrock"
       AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       AGENTCORE_MODEL_REGION: "us-west-2"
@@ -71,7 +71,8 @@ services:
       FAST_CHAT_HISTORY_MESSAGE_MAX_TOKENS: "1500"
       FAST_CHAT_SOFT_INPUT_TOKENS: "12000"
       FAST_CHAT_MAX_INPUT_TOKENS: "16000"
-      FAST_CHAT_PROMPT_CACHE_ENABLED: "false"
+      # Mirrors the AgentCore runtime flag; the cache point is added there.
+      FAST_CHAT_PROMPT_CACHE_ENABLED: "true"
       GUARDRAIL_VERSION: "4"
       # Process-local coach workflow capacity for ~100 concurrent students.
       # MAX_CONCURRENT_MODEL_CALLS is the historical name for active workflows,

@@ -518,6 +518,8 @@ def test_structured_output_recovery_flags_are_recorded(caplog) -> None:
     payload["first_cycle_tool_choice_installed"] = True
     payload["first_cycle_tool_choice_applied"] = True
     payload["first_cycle_tool_choice_decision"] = "applied"
+    payload["model_first_content_ms"] = 321
+    payload["model_first_reply_text_ms"] = 415
     client = FakeAgentCoreRuntime(payload=payload)
     provider = AgentCoreCoachProvider(
         _RUNTIME_ARN,
@@ -544,6 +546,8 @@ def test_structured_output_recovery_flags_are_recorded(caplog) -> None:
     assert recorded["first_cycle_tool_choice_installed"] is True
     assert recorded["first_cycle_tool_choice_applied"] is True
     assert recorded["first_cycle_tool_choice_decision"] == "applied"
+    assert recorded["model_first_content_ms"] == 321
+    assert recorded["model_first_reply_text_ms"] == 415
     assert recorded["agentcore_call_count"] == 1
     assert "I think option B" not in json.dumps(recorded)
 

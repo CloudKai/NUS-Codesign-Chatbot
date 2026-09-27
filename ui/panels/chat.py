@@ -1521,6 +1521,7 @@ def handle_prompt(
                     type="compact",
                 )
             spans["thinking_render_ms"] = _duration_ms(thinking_started)
+            reply_preview = st.empty()
             try:
                 turn: CoachTurn | None = None
                 thinking_closed = False
@@ -1590,6 +1591,15 @@ def handle_prompt(
                         continue
                     if kind == "token":
                         continue
+                    if kind == "reply_ready":
+                        preview_text = str(event.get("text") or "").strip()
+                        if preview_text:
+                            with reply_preview.container():
+                                with st.chat_message(
+                                    "assistant", avatar=":material/auto_awesome:"
+                                ):
+                                    st.markdown(preview_text)
+                        continue
                     elif kind == "done":
                         turn = CoachTurn.model_validate(event["turn"])
                     elif kind == "error":
@@ -1632,9 +1642,11 @@ def handle_prompt(
                 # Prefer reply-top pin on remount when the student did not
                 # scroll away (JS awaitingReplyReveal survives feed reset).
                 st.session_state.chat_reveal_coach_reply = True
+                reply_preview.empty()
                 rerun_app()
                 return
             except CoachTurnStreamError as error:
+                reply_preview.empty()
                 clear_awaiting_coach_turn()
                 try:
                     thinking.update(label="Coaching failed", state="error")
@@ -1646,6 +1658,7 @@ def handle_prompt(
                 sync_chat_scroll(mode="settle")
                 return
             except Exception:
+                reply_preview.empty()
                 clear_awaiting_coach_turn()
                 try:
                     thinking.update(label="Coaching failed", state="error")

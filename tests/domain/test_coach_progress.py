@@ -95,6 +95,41 @@ def test_non_rag_turn_emits_thinking_then_saving(tmp_path) -> None:
     assert len(client.calls) == 1
 
 
+def test_reply_preview_is_validated_and_emitted_before_persistence(tmp_path) -> None:
+    """The preview contains the final reply while the transcript remains authoritative."""
+    store = StudentStore(tmp_path / "progress-reply.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    service = _service(
+        store,
+        FakeAgentCoreRuntime(payload=_coaching_payload()),
+        RecordingRetriever(),
+    )
+    events: list[tuple[str, str]] = []
+
+    def reply_ready(text: str) -> None:
+        assert not any(
+            message.get("role") == "assistant" for message in store.get_messages(thread_id)
+        )
+        events.append(("reply", text))
+
+    turn = service.submit(
+        CoachRequest(
+            thread_id=thread_id,
+            student_message="I compared two constraints.",
+            current_stage="problem_identification",
+            response_detail="short",
+            idempotency_key="progress-reply",
+        ),
+        progress=lambda phase: events.append(("status", phase)),
+        reply=reply_ready,
+    )
+    assert events == [
+        ("status", "thinking"),
+        ("reply", turn.response_text),
+        ("status", "saving"),
+    ]
+
+
 def test_rag_turn_emits_retrieving_before_thinking(tmp_path) -> None:
     store = StudentStore(tmp_path / "progress-rag.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")

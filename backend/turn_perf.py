@@ -151,6 +151,8 @@ SAFE_PERF_FIELDS = frozenset(
         "model_output_tokens",
         "model_call_count",
         "agentcore_ttft_ms",
+        "model_first_content_ms",
+        "model_first_reply_text_ms",
         "agentcore_model_duration_ms",
         "notebook_load_count",
         "source_catalog_load_count",

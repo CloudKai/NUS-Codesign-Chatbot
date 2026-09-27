@@ -942,6 +942,7 @@ def test_local_api_maps_safety_blocked_to_structured_503(tmp_path, monkeypatch, 
     assert error["status"] == 503
     assert error["category"] == "safety_blocked"
     assert error["detail"] == "AgentCore blocked this turn"
+    assert not any(event.get("event") == "reply_ready" for event in events)
     coach = next(
         json.loads(record.getMessage())
         for record in caplog.records
@@ -1072,9 +1073,11 @@ def test_local_api_ready_request_id_stream_and_graph(tmp_path):
     assert kinds[1] == "status"
     assert events[1].get("phase") == "thinking"
     assert "token" not in kinds
+    assert kinds.index("reply_ready") < kinds.index("done")
     assert "saving" in [event.get("phase") for event in events if event.get("event") == "status"]
     assert kinds[-1] == "done"
     assert events[-1]["turn"]["response_text"]
+    assert next(event["text"] for event in events if event["event"] == "reply_ready") == events[-1]["turn"]["response_text"]
 
     graph = client.get(f"/api/v1/threads/{thread_id}/graph")
     assert graph.status_code == 200

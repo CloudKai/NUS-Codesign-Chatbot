@@ -1,5 +1,20 @@
 # Hybrid guest access phase handoff
 
+## Production enablement (2026-09-27)
+
+The user authorised the environment-specific migration and acceptance checks.
+After a completed 30-day AWS Backup recovery point, the documented admin-only
+DSQL guest-session migration added the table, two indexes, and runtime grant.
+Production Compose now enables guest access. Production Caddy additionally
+allows the exact browser-facing `/api/v1/auth/guest/start` route; other student
+API paths remain blocked at the edge. The live Guest browser completed a coach
+turn, reloaded the same notebook/history, uploaded a synthetic text source,
+received an `[S1]` grounded answer, and reached Cognito Managed Login from the
+sign-in button. A real account sign-in/automatic append is still to be
+observed. Rollback: restore the host's pre-guest Compose and Caddy files,
+recreate the app, reload Caddy, and retain the additive DSQL schema and guest
+rows. See the current entry in `docs/IMPLEMENTATION_STATUS.md` for evidence.
+
 ## Current account append behavior (2026-09-26)
 
 The user requested automatic guest-to-account append after sign-in or sign-up.

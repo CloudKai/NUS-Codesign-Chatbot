@@ -98,6 +98,24 @@ def test_agent_system_prompt_defaults_to_identical_string(monkeypatch) -> None:
     assert prompt_cache_enabled_from_environ({}) is False
 
 
+def test_enabled_fast_chat_caches_only_the_static_eligible_prefix(monkeypatch) -> None:
+    monkeypatch.setenv("FAST_CHAT_PROMPT_CACHE_ENABLED", "true")
+    payload = {
+        "phase": "fast_chat",
+        "topic": "problem_identification",
+        "output_contract": "fast_chat_turn",
+        "trusted_instructions": "Guidance mode: Guide.",
+        "runtime_context": {"conversation_revision": 9},
+    }
+    result = agent_system_prompt(payload)
+    assert isinstance(result, list)
+    assert result[0] == {"text": fast_chat_static_prefix("problem_identification")}
+    assert result[1] == {"cachePoint": {"type": "default"}}
+    assert "Guidance mode: Guide." in result[2]["text"]
+    assert "conversation_revision" in result[2]["text"]
+    assert "".join(block.get("text", "") for block in result) == specialist_system_prompt(payload)
+
+
 def test_cache_usage_is_not_fabricated() -> None:
     assert cache_usage_from_agent_result(None) == {}
     empty = SimpleNamespace(metrics=SimpleNamespace(accumulated_usage={}))
