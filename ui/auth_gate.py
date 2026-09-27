@@ -502,11 +502,7 @@ def _render_signin_button(*, disabled: bool) -> bool:
 
 
 def _start_guest_in_browser() -> None:
-    """Ask FastAPI to issue a guest cookie directly to the current browser."""
-    st.markdown(
-        '<div role="status" aria-live="polite">Starting a private guest workspace…</div>',
-        unsafe_allow_html=True,
-    )
+    """Issue the browser's guest cookie without showing an interim entry page."""
     st.html(
         """
 <script>

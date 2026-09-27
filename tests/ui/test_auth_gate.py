@@ -576,7 +576,7 @@ def test_new_visitor_starts_guest_without_welcome_gate(logged_out_user, monkeypa
     assert "fetch('/api/v1/auth/guest/start'" in source
     assert "credentials: 'same-origin'" in source
     assert "__coDesignGuestStartPending" in source
-    assert "Starting a private guest workspace" in rendered
+    assert "Starting a private guest workspace" not in rendered
     assert not any(button.label == "Continue as guest" for button in app.button)
     assert not any(button.label == "Sign in or create an account" for button in app.button)
     assert len(app.chat_input) == 0
