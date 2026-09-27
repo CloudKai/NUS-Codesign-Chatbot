@@ -20,12 +20,12 @@ backup, Compose guest flag, and Caddy guest-start allowlist are recorded under
 release-specific DSQL statement below predates this rollout. Preserve the
 additive guest table and rows when rolling back the guest flag.
 
-**Next release:** Publish the Fast Chat first-text timing runtime, then deploy
-the app's validated `reply_ready` preview with Compose session generation 10.
-Generation 9 is the currently documented live prompt-cache release. The
-preview is a complete validated reply sent before persistence, not model-token
-streaming; a save failure must clear it. Use the user-approved limit of four
-short coach turns and US$0.10 total for the post-release production check.
+**2026-09-27 cutover:** Fast Chat first-text timing is live on AgentCore
+DEFAULT v35. The app's validated `reply_ready` preview is live with Compose
+session generation 11. The preview is a complete validated reply sent before
+persistence, not model-token streaming; a save failure must clear it. The
+approved production check remains capped at four short coach turns and
+US$0.10 total; two turns have been used across the pre/post-cutover checks.
 
 ---
 

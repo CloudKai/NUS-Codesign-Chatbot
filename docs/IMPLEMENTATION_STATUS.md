@@ -2,6 +2,46 @@
 
 ## CURRENT STATUS
 
+### Production AgentCore v35 and generation 11 (2026-09-27)
+
+- **Expected / actual:** Publish the committed Fast Chat first-text callback
+  runtime on the existing ARN, move DEFAULT only after READY, bump the app's
+  session generation, and verify a Guest turn. DEFAULT is READY on v35 and
+  serves the reviewed source artifact from commit `0e43fe6bebb9f7464a98b0b893aa26efef3017a0`.
+  The host app was recreated with generation 11; internal readiness returned
+  200 and Docker reported healthy. One short Guest coaching turn succeeded,
+  and its user message and reply survived a public-page reload.
+- **Files:** `compose.prod.yaml` and its two deployment-config assertions now
+  track generation 11; the release checklist and this status entry record the
+  cutover. The AgentCore artifact contains the committed `main.py` plus six
+  changed coaching prompt files overlaid onto v34's vendored package. All 33
+  runtime source files in the running app container matched the local release
+  tree before packaging; the new ZIP passed CRC and byte-for-byte source
+  verification.
+- **Validation:** GitHub release CI for `0e43fe6` passed `mock-suite` and
+  `agentcore-runtime-compatibility`. DEFAULT v35 READY, runtime cache enabled,
+  Guardrail v4, Deep Review read timeout 180s. The live turn recorded
+  `model_first_content_ms=6149`, `model_first_reply_text_ms=6150`,
+  `api_to_reply_ready_ms=15147`, and UI stream completion at 15281ms. This is
+  one sample, not a latency-improvement estimate. Two of the approved four
+  short production turns have been used across the earlier pre-cutover and
+  this post-cutover check; exact billed cost was unavailable.
+- **Compatibility / rollback:** No schema or student-data migration. v34's
+  artifact remains available. Rollback requires repointing DEFAULT to a
+  previously READY runtime and using another fresh session generation with an
+  app-container recreation. The host has a copy of the pre-v35 Compose file.
+  The current app image tag is `cde2300-chatbot:0e43fe6`, but its revision
+  label and `APP_GIT_SHA` both say `unknown`; the build-provenance gate remains
+  open even though its source markers and runtime digest were checked. Only
+  Problem Identification was exercised live after v35; the other four stage
+  prompt paths rely on the passing deterministic tests.
+- **Next exact action:** Rebuild the next app image with
+  `--build-arg GIT_SHA=<full commit SHA>` and verify the image label and
+  `APP_GIT_SHA` at deploy. Any further live turns must stay within the
+  remaining approved four-turn/US$0.10 cap or have a fresh cap. First model
+  text still precedes the validated preview by several seconds because raw
+  structured fragments are intentionally not shown.
+
 ### Validated reply preview and first-text timing (2026-09-27)
 
 - **Expected / actual:** The coach reply now appears as one validated preview

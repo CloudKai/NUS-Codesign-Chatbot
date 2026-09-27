@@ -170,7 +170,7 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert 'MODEL_PROVIDER: "agentcore"' in app
     assert 'MOCK_OPENAI: "false"' in app
     assert 'AGENTCORE_QUALIFIER: "DEFAULT"' in app
-    assert 'AGENTCORE_SESSION_GENERATION: "10"' in app
+    assert 'AGENTCORE_SESSION_GENERATION: "11"' in app
     assert 'AGENTCORE_MODEL_PROVIDER: "bedrock"' in app
     assert 'AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
     assert 'DEEP_REVIEW_AGENTCORE_TIMEOUT_SECONDS: "200"' in app
@@ -227,7 +227,7 @@ def test_production_compose_keeps_host_env_knowledge_base_contract():
     assert 'MODEL_PROVIDER: "agentcore"' in app
     assert 'MOCK_OPENAI: "false"' in app
     assert 'AGENTCORE_QUALIFIER: "DEFAULT"' in app
-    assert 'AGENTCORE_SESSION_GENERATION: "10"' in app
+    assert 'AGENTCORE_SESSION_GENERATION: "11"' in app
     assert 'AGENTCORE_MODEL_PROVIDER: "bedrock"' in app
     assert 'AGENTCORE_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"' in app
     assert 'ROUTER_MODEL_PROVIDER: "bedrock"' in app
