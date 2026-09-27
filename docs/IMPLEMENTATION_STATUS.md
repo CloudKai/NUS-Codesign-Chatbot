@@ -2,6 +2,37 @@
 
 ## CURRENT STATUS
 
+### Hidden Guest startup interstitial (2026-09-27)
+
+- **Expected / actual:** On first visit or after sign-out, the browser still
+  obtains a Guest cookie before private notebook data loads. The intermediate
+  "Starting a private guest workspace" status line is no longer rendered; the
+  browser proceeds automatically to the normal chat after the cookie is set.
+  If an existing Guest cookie cannot be verified or startup fails, the
+  existing retry/recovery choices remain visible to protect prior history.
+- **Files:** `ui/auth_gate.py`, `tests/ui/test_auth_gate.py`. Production app
+  image `cde2300-chatbot:bdba9d8` was built for linux/arm64 from commit
+  `bdba9d8753dbe2b48cd8869e78c406286a0d61ec` with matching image label
+  and `APP_GIT_SHA`, then deployed by recreating only the app container.
+- **Validation:** 58 focused auth UI tests passed, full local mock pytest
+  passed, compileall and `git diff --check` passed, and GitHub Mock CI passed
+  both jobs. Production app readiness and public home/health returned 200;
+  Docker reported healthy, session generation remained 11, and the running
+  `ui/auth_gate.py` has no setup-status text. The fresh-visitor AppTest asserts
+  that guest startup remains automatic and the interim text is absent. A
+  separate clean production browser check was unavailable because automatic
+  computer-use approval rejected opening Chrome; the existing in-app browser
+  has a Guest cookie, so it cannot represent a first visit without altering
+  that workspace.
+- **Compatibility / rollback:** No schema or saved-data change, no paid model
+  turn, and no AgentCore republish. Previous host image
+  `cde2300-chatbot:0e43fe6` and a copy of its `.env` remain available for
+  rollback. First visit still needs one cookie request and redirect; a brief
+  blank transition may occur on a slow connection.
+- **Next exact action:** On a new browser profile, open the production URL and
+  confirm it reaches Chat as Guest without visible setup copy, then sign out
+  and confirm the same. Preserve any existing Guest cookie during this check.
+
 ### Production AgentCore v35 and generation 11 (2026-09-27)
 
 - **Expected / actual:** Publish the committed Fast Chat first-text callback
