@@ -371,18 +371,18 @@ def test_notebook_apis_hide_internal_stage_review_worker_metadata(
     _assert_public(selected.json())
 
 
-def test_strict_guidance_is_stricter_before_recommending_advance(tmp_path):
+def test_guide_requires_student_hmw_before_recommending_advance(tmp_path):
     store = StudentStore(tmp_path / "complex-api.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     store.update_thread(
         thread_id,
         metadata={
-            "response_detail": "long",
+            "response_detail": "short",
             "learning_journey": {
                 "current_stage": "problem_identification",
                 "completed_stages": [],
                 "stage_notes": {},
-                "response_detail": "long",
+                "response_detail": "short",
             },
         },
     )
@@ -390,7 +390,7 @@ def test_strict_guidance_is_stricter_before_recommending_advance(tmp_path):
     request = {
         "thread_id": thread_id,
         "current_stage": "problem_identification",
-        "response_detail": "long",
+        "response_detail": "short",
     }
 
     client.post(
@@ -419,6 +419,35 @@ def test_strict_guidance_is_stricter_before_recommending_advance(tmp_path):
     )
     assert third.status_code == 200
     assert third.json()["pending_transition"]["to_stage"] == "concept_generation"
+
+
+def test_free_guidance_unlocks_next_after_usable_idea_without_moving_stage(tmp_path):
+    """Free mode offers Next early while confirmation still owns the stage change."""
+    store = StudentStore(tmp_path / "free-api.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    store.update_thread(
+        thread_id,
+        metadata={
+            "response_detail": "long",
+            "learning_journey": {"response_detail": "long"},
+        },
+    )
+    client = TestClient(create_app(store, auto_advance_stages=False))
+    response = client.post(
+        "/api/v1/coach/turn",
+        json={
+            "thread_id": thread_id,
+            "current_stage": "problem_identification",
+            "response_detail": "long",
+            "student_message": "I want to evaluate a crossing design for older pedestrians.",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["pending_transition"]["to_stage"] == "concept_generation"
+    assert (
+        store.get_thread(thread_id)["metadata"]["thinking_stage"]
+        == "problem_identification"
+    )
 
 
 def test_first_coaching_turn_generates_a_concise_model_assisted_title(tmp_path):

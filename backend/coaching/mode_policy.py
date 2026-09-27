@@ -558,7 +558,7 @@ def should_author_qa_evidence_gap(request: object) -> bool:
     if getattr(request, "retrieved_chunks", None):
         return False
     source_ids = getattr(request, "source_ids", None) or []
-    retrieved_context = str(getattr(request, "retrieved_course_context", "") or "")
+    retrieved_context = str(getattr(request, "source_context", "") or "")
     gap_note = (
         COURSE_RETRIEVAL_UNAVAILABLE_CONTEXT in retrieved_context
         or COURSE_RETRIEVAL_EMPTY_CONTEXT in retrieved_context

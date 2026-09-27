@@ -28,6 +28,10 @@ from .workspace_service import (
 )
 
 
+class GuestClaimConflictError(RuntimeError):
+    """Safe server message for a guest claim that needs a new action."""
+
+
 class _HttpSession(Protocol):
     """Minimal sync HTTP surface used by ``LocalApiClient``."""
 
@@ -140,9 +144,11 @@ class LocalApiClient:
         self,
         id_token: str | None = None,
     ) -> dict[str, Any] | None:
-        """Return the authenticated user for Cognito auth cookies, or ``None``.
+        """Return the Cognito user, or ``None`` only for an HTTP 401.
 
-        Uses the internal FastAPI base URL. A 401 means unauthenticated.
+        Malformed success responses and transport/server failures raise so the
+        UI can retry without treating an unknown session as signed out. Uses
+        the internal FastAPI base URL. A 401 means unauthenticated.
         Only the short-lived ID-token cookie is forwarded. The refresh token is
         scoped to the browser-facing auth path and never reaches Streamlit.
         """
@@ -160,10 +166,72 @@ class LocalApiClient:
             return None
         response.raise_for_status()
         payload = response.json()
-        if not isinstance(payload, dict) or not payload.get("authenticated"):
-            return None
+        if not isinstance(payload, dict) or payload.get("authenticated") is not True:
+            raise ValueError("Invalid /auth/me success response")
         user = payload.get("user")
-        return user if isinstance(user, dict) else None
+        if not isinstance(user, dict):
+            raise ValueError("Invalid /auth/me user profile")
+        return user
+
+    def guest_session_probe(self) -> dict[str, Any] | None:
+        """Verify the current browser guest cookie without creating a session."""
+        from backend.settings import settings
+
+        response = self._http.post(
+            f"{self._base_url}/api/v1/auth/guest/probe",
+            headers={"Origin": str(settings.public_api_base_url)},
+            **self._request_kwargs(),
+        )
+        if response.status_code in {401, 404}:
+            return None
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else None
+
+    def guest_claim_preview(self) -> dict[str, Any]:
+        """Preview claimable guest data while forwarding current browser cookies."""
+        from backend.settings import settings
+
+        response = self._http.post(
+            f"{self._base_url}/api/v1/auth/guest/claim/preview",
+            headers={"Origin": str(settings.public_api_base_url)},
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
+
+    def confirm_guest_claim(self, operation_id: str) -> dict[str, Any]:
+        """Confirm transfer of the current guest workspace into Cognito owner."""
+        from backend.settings import settings
+
+        response = self._http.post(
+            f"{self._base_url}/api/v1/auth/guest/claim/confirm",
+            json={"confirmed": True, "operation_id": operation_id},
+            headers={"Origin": str(settings.public_api_base_url)},
+            **self._request_kwargs(),
+        )
+        if response.status_code == 409:
+            payload = response.json()
+            detail = payload.get("detail") if isinstance(payload, dict) else None
+            raise GuestClaimConflictError(str(detail or "Guest claim needs attention."))
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
+
+    def cancel_guest_claim(self, operation_id: str) -> dict[str, Any]:
+        """Release this account's pending claim fence after explicit cancellation."""
+        from backend.settings import settings
+
+        response = self._http.post(
+            f"{self._base_url}/api/v1/auth/guest/claim/cancel",
+            json={"operation_id": operation_id},
+            headers={"Origin": str(settings.public_api_base_url)},
+            **self._request_kwargs(),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
 
     def graph_state(self, thread_id: str) -> dict[str, Any]:
         """Return the latest inspectable coach-graph summary."""

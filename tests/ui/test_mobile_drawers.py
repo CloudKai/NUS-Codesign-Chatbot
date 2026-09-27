@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 from streamlit.testing.v1 import AppTest
+from saved_ui_workspace import saved_app
 
 import ui.workspace as workspace_module
 
@@ -55,7 +56,7 @@ def _button(app: AppTest, key: str):
 
 def test_mobile_studio_open_defaults_false_in_session() -> None:
     """The right drawer has an explicit closed default, independent of center view."""
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     assert not app.exception
     assert app.session_state["mobile_studio_open"] is False
     assert app.session_state["mobile_nav_open"] is False
@@ -65,7 +66,7 @@ def test_mobile_header_renders_current_title_and_five_controls() -> None:
     """The compact row exposes menu, title, Analytics, New chat, and ⋮."""
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     thread_id = str(app.session_state["thread_id"])
     long_title = "A very long current chat title that must ellipsize on a 390px phone"
     StudentStore().update_thread(thread_id, name=long_title)
@@ -87,7 +88,7 @@ def test_mobile_header_renders_current_title_and_five_controls() -> None:
 
 def test_header_drawer_controls_are_mutually_exclusive() -> None:
     """Analytics opens the right drawer; hamburger opens the left drawer."""
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     app.session_state["center_view"] = "library"
     app.session_state["mobile_nav_open"] = False
     app.session_state["mobile_studio_open"] = False
@@ -170,7 +171,7 @@ def test_drawer_close_controls_restore_underlying_chat(
     close_key: str,
 ) -> None:
     """Each drawer's close control leaves the center Chat view mounted."""
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     app.session_state["center_view"] = "chat"
     app.session_state["mobile_nav_open"] = False
     app.session_state["mobile_studio_open"] = False
@@ -187,7 +188,7 @@ def test_drawer_close_controls_restore_underlying_chat(
 
 def test_shared_backdrop_closes_active_drawer() -> None:
     """A click on the shared dimmer dismisses whichever side is active."""
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     app.session_state["mobile_nav_open"] = True
     app.session_state["mobile_studio_open"] = False
     app.run()
@@ -210,7 +211,7 @@ def test_navigation_destinations_close_both_drawers(
     expected_view: str,
 ) -> None:
     """Search and Library retain their routes while dismissing both overlays."""
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     app.session_state["mobile_nav_open"] = True
     app.session_state["mobile_studio_open"] = True
     app.run()
@@ -227,7 +228,7 @@ def test_recent_selection_and_new_chat_close_both_drawers() -> None:
     from backend.student_store import StudentStore
     from backend.student_support import DEFAULT_SUPPORT_MODE
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     store = StudentStore()
     selected_id = store.create_thread(
         name="Recent selection target",

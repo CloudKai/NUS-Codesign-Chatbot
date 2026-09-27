@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
+from saved_ui_workspace import saved_app
 
 from backend.learning.stages import THINKING_STAGES
 from ui.panels.studio import deep_review_control_view
@@ -25,7 +26,8 @@ def test_locked_view_before_reflection_complete() -> None:
     assert view.disabled is True
     assert view.button_type == "secondary"
     assert view.caption is not None
-    assert "Reflection" in view.caption
+    assert "Deep Analysis PDF" in view.caption
+    assert "Thinking Path" in view.caption
     assert view.detail_caption is None
     assert view.status_label is None
 
@@ -63,7 +65,7 @@ def test_review_tab_renders_projected_deep_review_feedback() -> None:
     )
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     assert not app.exception
     thread_id = str(app.session_state["thread_id"])
     store = StudentStore()
@@ -137,7 +139,7 @@ def test_queued_stage_review_shows_journey_stop_badge_before_unread() -> None:
     )
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     assert not app.exception
     thread_id = str(app.session_state["thread_id"])
     store = StudentStore()
@@ -174,7 +176,7 @@ def test_stage_review_checkpoint_renders_on_review_tab_with_stop_badge() -> None
     )
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     assert not app.exception
     thread_id = str(app.session_state["thread_id"])
     store = StudentStore()
@@ -280,4 +282,3 @@ def test_running_status_hides_expander_chevron() -> None:
     assert "::-webkit-details-marker" in status_css
     assert "stIconMaterial" in status_css
     assert "display:none !important" in status_css.split("stIconMaterial", 1)[1]
-

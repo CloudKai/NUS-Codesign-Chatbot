@@ -30,6 +30,12 @@ from backend.cognito_cookies import (
     refresh_cookie_settings,
     session_hint_cookie_settings,
 )
+from backend.auth_profiles import sync_authenticated_user
+from backend.persistence.memory_files import MemoryFileStorage
+from backend.persistence.object_keys import (
+    build_extracted_text_object_key,
+    build_upload_object_key,
+)
 from backend.settings import settings
 from backend.student_store import StudentStore
 
@@ -677,6 +683,413 @@ def test_callback_sets_auth_cookies_without_persisting_tokens(tmp_path, monkeypa
             ).fetchall()
         }
     assert "app_sessions" not in names
+
+
+def _callback_oidc(store: StudentStore, *, sub: str = "sub-auto-claim"):
+    """Build a deterministic successful callback client for guest-claim tests."""
+    identity = CognitoIdentity(
+        sub=sub,
+        email=f"{sub}@example.edu",
+        claims={"sub": sub, "email": f"{sub}@example.edu", "given_name": "Student"},
+    )
+
+    class _FakeOIDC(CognitoOIDCClient):
+        def complete_login(self, *, code: str, state: str):
+            assert (code, state) == ("good", "bound-state")
+            return CognitoAuthSession(
+                identity=identity,
+                refresh_token="refresh-auto-claim",
+                id_token=_mint_id_token(sub=sub, email=identity.email),
+            )
+
+    return _FakeOIDC(_config(), store=store, clock=lambda: FIXED_NOW)
+
+
+def test_callback_automatically_appends_guest_notebooks_and_clears_cookie(
+    tmp_path, monkeypatch
+):
+    """Verified sign-in adds guest work to existing account data exactly once."""
+    monkeypatch.setattr(settings, "guest_access_enabled", True)
+    monkeypatch.setattr(settings, "ui_base_url", "http://127.0.0.1:8501")
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    store = StudentStore(tmp_path / "automatic-guest-claim.sqlite3")
+    guest_owner_id, guest_secret = store.create_guest_session()
+    guest_profile = store.get_user_by_id(guest_owner_id)
+    assert guest_profile is not None
+    guest = StudentStore(store.path, identifier=str(guest_profile["identifier"]))
+    guest_notebook = guest.create_thread(model_id="mock", support_mode="guided")
+    guest.add_message(guest_notebook, "user", "Keep my guest message")
+    other_guest_notebook = guest.create_thread(model_id="mock", support_mode="guided")
+    guest.add_message(other_guest_notebook, "user", "Keep another guest message")
+    # The open guest notebook need not be the newest by activity.
+    guest.update_user_preferences({"active_thread_id": guest_notebook})
+
+    identity = CognitoIdentity(
+        sub="sub-auto-claim",
+        email="sub-auto-claim@example.edu",
+        claims={
+            "sub": "sub-auto-claim",
+            "email": "sub-auto-claim@example.edu",
+            "given_name": "Student",
+        },
+    )
+    account_profile = sync_authenticated_user(identity.claims, store=store)
+    account = StudentStore(store.path, identifier=account_profile.store_identifier)
+    existing_notebook = account.create_thread(model_id="mock", support_mode="guided")
+    account.add_message(existing_notebook, "user", "Keep my account message")
+    account.update_user_preferences({
+        "active_thread_id": existing_notebook,
+        "appearance": "Dark",
+    })
+    storage = MemoryFileStorage()
+    guest_user_id = guest.owner_id
+    upload_key = build_upload_object_key(
+        user_id=guest_user_id,
+        notebook_id=guest_notebook,
+        source_id="guest-upload",
+        filename="notes.pdf",
+    )
+    storage.put_bytes(key=upload_key, data=b"guest upload bytes")
+    monkeypatch.setattr("backend.persistence.factory.get_file_storage", lambda: storage)
+
+    client = TestClient(create_app(store, oidc_client=_callback_oidc(store)))
+    response = client.get(
+        "/api/v1/auth/callback",
+        params={"code": "good", "state": "bound-state"},
+        cookies={
+            _oauth_cookie_name(): "bound-state",
+            settings.guest_session_cookie_name: guest_secret,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "http://127.0.0.1:8501/"
+    guest_cookie = next(
+        header for header in response.headers.get_list("set-cookie")
+        if header.lower().startswith(f"{settings.guest_session_cookie_name.lower()}=")
+    )
+    assert "max-age=0" in guest_cookie.lower()
+    assert store.validate_guest_session(guest_secret) is None
+    assert {item["id"] for item in account.list_threads()} == {
+        existing_notebook,
+        guest_notebook,
+        other_guest_notebook,
+    }
+    assert account.get_user_preferences()["active_thread_id"] == guest_notebook
+    assert account.get_user_preferences()["appearance"] == "Dark"
+    assert [item["content"] for item in account.get_messages(existing_notebook)] == [
+        "Keep my account message"
+    ]
+    assert [item["content"] for item in account.get_messages(guest_notebook)] == [
+        "Keep my guest message"
+    ]
+    assert [item["content"] for item in account.get_messages(other_guest_notebook)] == [
+        "Keep another guest message"
+    ]
+    assert storage.get_bytes(
+        build_upload_object_key(
+            user_id=account.owner_id,
+            notebook_id=guest_notebook,
+            source_id="guest-upload",
+            filename="notes.pdf",
+        )
+    ) == b"guest upload bytes"
+
+
+@pytest.mark.parametrize("guest_cookie", [None, "invalid-secret"])
+def test_callback_without_valid_guest_cookie_does_not_transfer(
+    tmp_path, monkeypatch, guest_cookie
+):
+    """Missing or unrelated guest cookies leave the guest workspace untouched."""
+    monkeypatch.setattr(settings, "guest_access_enabled", True)
+    monkeypatch.setattr(settings, "ui_base_url", "http://127.0.0.1:8501")
+    store = StudentStore(tmp_path / f"no-guest-claim-{guest_cookie}.sqlite3")
+    guest_owner_id, valid_secret = store.create_guest_session()
+    guest_profile = store.get_user_by_id(guest_owner_id)
+    assert guest_profile is not None
+    guest = StudentStore(store.path, identifier=str(guest_profile["identifier"]))
+    notebook_id = guest.create_thread(model_id="mock", support_mode="guided")
+    identity = CognitoIdentity(
+        sub="sub-no-guest-claim",
+        email="no-guest@example.edu",
+        claims={"sub": "sub-no-guest-claim", "email": "no-guest@example.edu"},
+    )
+    oidc = _callback_oidc(store, sub=identity.sub)
+    client = TestClient(create_app(store, oidc_client=oidc))
+    cookies = {_oauth_cookie_name(): "bound-state"}
+    if guest_cookie is not None:
+        cookies[settings.guest_session_cookie_name] = guest_cookie
+
+    response = client.get(
+        "/api/v1/auth/callback",
+        params={"code": "good", "state": "bound-state"},
+        cookies=cookies,
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "http://127.0.0.1:8501/"
+    assert not any(
+        header.lower().startswith(f"{settings.guest_session_cookie_name.lower()}=")
+        for header in response.headers.get_list("set-cookie")
+    )
+    account_profile = store.get_user_by_cognito_sub(identity.sub)
+    assert account_profile is not None
+    account = StudentStore(store.path, identifier=str(account_profile["identifier"]))
+    assert account.list_threads() == []
+    assert [item["id"] for item in guest.list_threads()] == [notebook_id]
+    assert store.validate_guest_session(valid_secret) == guest_owner_id
+
+
+def test_callback_state_mismatch_does_not_transfer_guest_workspace(tmp_path, monkeypatch):
+    """OAuth state validation runs before a guest credential can be claimed."""
+    monkeypatch.setattr(settings, "guest_access_enabled", True)
+    monkeypatch.setattr(settings, "ui_base_url", "http://127.0.0.1:8501")
+    store = StudentStore(tmp_path / "state-mismatch-no-claim.sqlite3")
+    guest_owner_id, guest_secret = store.create_guest_session()
+    guest_profile = store.get_user_by_id(guest_owner_id)
+    assert guest_profile is not None
+    guest = StudentStore(store.path, identifier=str(guest_profile["identifier"]))
+    notebook_id = guest.create_thread(model_id="mock", support_mode="guided")
+    client = TestClient(create_app(store, oidc_client=_callback_oidc(store)))
+
+    response = client.get(
+        "/api/v1/auth/callback",
+        params={"code": "good", "state": "bound-state"},
+        cookies={
+            _oauth_cookie_name(): "wrong-state",
+            settings.guest_session_cookie_name: guest_secret,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert "auth_error=1" in response.headers["location"]
+    assert store.get_user_by_cognito_sub("sub-auto-claim") is None
+    assert [item["id"] for item in guest.list_threads()] == [notebook_id]
+    assert store.validate_guest_session(guest_secret) == guest_owner_id
+
+
+def test_callback_copy_failure_keeps_guest_recoverable_and_signs_in_with_error(
+    tmp_path, monkeypatch
+):
+    """A failed object copy keeps guest access while completing Cognito sign-in."""
+    monkeypatch.setattr(settings, "guest_access_enabled", True)
+    monkeypatch.setattr(settings, "ui_base_url", "http://127.0.0.1:8501")
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    store = StudentStore(tmp_path / "auto-claim-copy-failure.sqlite3")
+    guest_owner_id, guest_secret = store.create_guest_session()
+    guest_profile = store.get_user_by_id(guest_owner_id)
+    assert guest_profile is not None
+    guest = StudentStore(store.path, identifier=str(guest_profile["identifier"]))
+    notebook_id = guest.create_thread(model_id="mock", support_mode="guided")
+    guest.add_message(notebook_id, "user", "Recoverable guest message")
+
+    class FailsCopy(MemoryFileStorage):
+        def put_bytes(self, *, key: str, data: bytes, content_type: str = "application/octet-stream"):
+            if key.startswith("users/") and not key.startswith(f"users/{guest_owner_id}/"):
+                raise OSError("temporary object copy failure")
+            return super().put_bytes(key=key, data=data, content_type=content_type)
+
+    storage = FailsCopy()
+    upload_key = build_upload_object_key(
+        user_id=guest_owner_id,
+        notebook_id=notebook_id,
+        source_id="guest-upload",
+        filename="notes.pdf",
+    )
+    storage.put_bytes(key=upload_key, data=b"guest upload bytes")
+    monkeypatch.setattr("backend.persistence.factory.get_file_storage", lambda: storage)
+    client = TestClient(create_app(store, oidc_client=_callback_oidc(store)))
+
+    response = client.get(
+        "/api/v1/auth/callback",
+        params={"code": "good", "state": "bound-state"},
+        cookies={
+            _oauth_cookie_name(): "bound-state",
+            settings.guest_session_cookie_name: guest_secret,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "http://127.0.0.1:8501/?guest_transfer_error=1"
+    assert any(
+        header.lower().startswith(f"{_id_cookie_name().lower()}=")
+        for header in response.headers.get_list("set-cookie")
+    )
+    assert not any(
+        header.lower().startswith(f"{settings.guest_session_cookie_name.lower()}=")
+        for header in response.headers.get_list("set-cookie")
+    )
+    assert store.validate_guest_session(guest_secret) == guest_owner_id
+    assert [item["id"] for item in guest.list_threads()] == [notebook_id]
+    assert [item["content"] for item in guest.get_messages(notebook_id)] == [
+        "Recoverable guest message"
+    ]
+    account_profile = store.get_user_by_cognito_sub("sub-auto-claim")
+    assert account_profile is not None
+    account = StudentStore(store.path, identifier=str(account_profile["identifier"]))
+    assert account.list_threads() == []
+
+
+def test_callback_automatically_appends_guest_notebook_to_lecturer_account(
+    tmp_path, monkeypatch
+):
+    """Automatic claim preserves the lecturer role and both account workspaces."""
+    monkeypatch.setattr(settings, "guest_access_enabled", True)
+    monkeypatch.setattr(settings, "ui_base_url", "http://127.0.0.1:8501")
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    store = StudentStore(tmp_path / "automatic-lecturer-claim.sqlite3")
+    guest_owner_id, guest_secret = store.create_guest_session()
+    guest_profile = store.get_user_by_id(guest_owner_id)
+    assert guest_profile is not None
+    guest = StudentStore(store.path, identifier=str(guest_profile["identifier"]))
+    guest_notebook = guest.create_thread(model_id="mock", support_mode="guided")
+    guest.add_message(guest_notebook, "user", "Keep lecturer-bound guest work")
+    guest.update_user_preferences({"active_thread_id": "stale-guest-notebook"})
+
+    identity_claims = {
+        "sub": "sub-lecturer-auto-claim",
+        "email": "lecturer-auto-claim@example.edu",
+        "given_name": "Lecturer",
+    }
+    existing_account = store.upsert_cognito_user(
+        cognito_sub=identity_claims["sub"],
+        identifier=f"cognito:{identity_claims['sub']}",
+        email=identity_claims["email"],
+        display_name="Lecturer",
+    )
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE users SET role='lecturer' WHERE id=?", (existing_account["id"],)
+        )
+    account_profile = store.get_user_by_cognito_sub(identity_claims["sub"])
+    assert account_profile is not None
+    account = StudentStore(store.path, identifier=str(account_profile["identifier"]))
+    existing_notebook = account.create_thread(model_id="mock", support_mode="guided")
+    account.add_message(existing_notebook, "user", "Keep lecturer's prior notebook")
+    account.update_user_preferences({"active_thread_id": existing_notebook})
+    monkeypatch.setattr("backend.persistence.factory.get_file_storage", lambda: MemoryFileStorage())
+
+    client = TestClient(
+        create_app(store, oidc_client=_callback_oidc(store, sub=identity_claims["sub"]))
+    )
+    response = client.get(
+        "/api/v1/auth/callback",
+        params={"code": "good", "state": "bound-state"},
+        cookies={
+            _oauth_cookie_name(): "bound-state",
+            settings.guest_session_cookie_name: guest_secret,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "http://127.0.0.1:8501/"
+    assert any(
+        header.lower().startswith(f"{settings.guest_session_cookie_name.lower()}=")
+        and "max-age=0" in header.lower()
+        for header in response.headers.get_list("set-cookie")
+    )
+    account_profile = store.get_user_by_cognito_sub(identity_claims["sub"])
+    assert account_profile is not None
+    assert account_profile["role"] == "lecturer"
+    account = StudentStore(store.path, identifier=str(account_profile["identifier"]))
+    assert {item["id"] for item in account.list_threads()} == {
+        existing_notebook,
+        guest_notebook,
+    }
+    assert account.get_user_preferences()["active_thread_id"] == existing_notebook
+    assert [item["content"] for item in account.get_messages(existing_notebook)] == [
+        "Keep lecturer's prior notebook"
+    ]
+    assert [item["content"] for item in account.get_messages(guest_notebook)] == [
+        "Keep lecturer-bound guest work"
+    ]
+    assert store.validate_guest_session(guest_secret) is None
+
+
+def test_callback_claim_remaps_real_source_object_keys(tmp_path, monkeypatch):
+    """The callback remaps object keys on persisted guest source rows."""
+    monkeypatch.setattr(settings, "guest_access_enabled", True)
+    monkeypatch.setattr(settings, "ui_base_url", "http://127.0.0.1:8501")
+    store = StudentStore(tmp_path / "automatic-source-key-remap.sqlite3")
+    guest_owner_id, guest_secret = store.create_guest_session()
+    guest_profile = store.get_user_by_id(guest_owner_id)
+    assert guest_profile is not None
+    guest = StudentStore(store.path, identifier=str(guest_profile["identifier"]))
+    notebook_id = guest.create_thread(model_id="mock", support_mode="guided")
+    source_id = "callback-source"
+    raw_key = build_upload_object_key(
+        user_id=guest_owner_id,
+        notebook_id=notebook_id,
+        source_id=source_id,
+        filename="evidence.pdf",
+    )
+    extracted_key = build_extracted_text_object_key(
+        user_id=guest_owner_id,
+        notebook_id=notebook_id,
+        source_id=source_id,
+    )
+    storage = MemoryFileStorage()
+    storage.put_bytes(key=raw_key, data=b"original upload bytes")
+    storage.put_bytes(key=extracted_key, data=b"extracted source text")
+    with guest._connect() as connection:
+        connection.execute(
+            "INSERT INTO sources (id, notebook_id, kind, title, content_type, byte_size, "
+            "object_key, extracted_text_key, metadata_text, created_at, updated_at) "
+            "VALUES (?, ?, 'file', 'evidence.pdf', 'application/pdf', ?, ?, ?, ?, 'now', 'now')",
+            (
+                source_id,
+                notebook_id,
+                len(b"original upload bytes"),
+                raw_key,
+                extracted_key,
+                '{"storage_provider":"memory","object_key":"' + raw_key + '",'
+                '"local_path":"threads/' + notebook_id + '/uploads/evidence.pdf"}',
+            ),
+        )
+    account_profile = sync_authenticated_user(
+        {
+            "sub": "sub-source-auto-claim",
+            "email": "source-auto-claim@example.edu",
+        },
+        store=store,
+    )
+    account = StudentStore(store.path, identifier=account_profile.store_identifier)
+    monkeypatch.setattr("backend.persistence.factory.get_file_storage", lambda: storage)
+    client = TestClient(
+        create_app(store, oidc_client=_callback_oidc(store, sub="sub-source-auto-claim"))
+    )
+
+    response = client.get(
+        "/api/v1/auth/callback",
+        params={"code": "good", "state": "bound-state"},
+        cookies={
+            _oauth_cookie_name(): "bound-state",
+            settings.guest_session_cookie_name: guest_secret,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "http://127.0.0.1:8501/"
+    account_source = account.get_source(notebook_id, source_id, include_extracted_text=False)
+    assert account_source is not None
+    expected_raw_key = raw_key.replace(guest_owner_id, account.owner_id)
+    expected_extracted_key = extracted_key.replace(guest_owner_id, account.owner_id)
+    assert account_source["object_key"] == expected_raw_key
+    assert account_source["extracted_text_key"] == expected_extracted_key
+    assert account_source["metadata"]["object_key"] == expected_raw_key
+    assert account_source["metadata"]["local_path"] == (
+        f"threads/{notebook_id}/uploads/evidence.pdf"
+    )
+    assert storage.get_bytes(expected_raw_key) == b"original upload bytes"
+    assert storage.get_bytes(expected_extracted_key) == b"extracted source text"
+    assert not storage.exists(raw_key)
+    assert not storage.exists(extracted_key)
 
 
 def test_login_sets_oauth_state_cookie(tmp_path, monkeypatch):

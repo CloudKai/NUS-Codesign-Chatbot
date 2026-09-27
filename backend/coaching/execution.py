@@ -3174,6 +3174,13 @@ class CoachApplicationService:
         for index, source_id in enumerate(citation_ids, start=1):
             retrieved = retrieved_by_source.get(source_id)
             source = sources_by_id.get(source_id)
+            # Course-catalog rows are request-local; retrieved chunks retain
+            # their labels from the full authoritative selected list.
+            label = (
+                retrieved.label
+                if retrieved is not None and source_id not in request.source_ids
+                else f"S{index}"
+            )
             direct_image = (
                 source_id in resolved_image_ids
                 and source is not None
@@ -3184,12 +3191,12 @@ class CoachApplicationService:
             )
             if retrieved is None and not direct_image:
                 continue
-            resolved += 1
-            if not source:
+            if source is None:
                 continue
-            catalog[f"S{index}"] = CitationReference(
+            resolved += 1
+            catalog[label] = CitationReference(
                 source_id=source_id,
-                label=f"S{index}",
+                label=label,
                 title=str(source.get("title") or "Untitled source"),
                 excerpt=focused_excerpt(
                     retrieved.excerpt if retrieved is not None else "",

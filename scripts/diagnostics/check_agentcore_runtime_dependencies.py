@@ -12,6 +12,7 @@ import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, NoReturn
+from unittest.mock import patch
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -298,8 +299,45 @@ def _check_runtime_contracts() -> None:
         _fail("model.py must not set structured_output_prompt on BedrockModel")
     if "retry_strategy" in loader_text:
         _fail("model.py must not set retry_strategy on BedrockModel")
-    if 'retries={"total_max_attempts": 1, "mode": "standard"}' not in loader_text:
-        _fail("model.py does not pin botocore Converse retries to one total attempt")
+    from strands import models as strands_models
+
+    constructed: list[dict[str, Any]] = []
+
+    class ProbeBedrockModel:
+        """Record constructor arguments without opening a Bedrock client."""
+
+        def __init__(self, **kwargs: Any) -> None:
+            """Keep the constructed model configuration for local assertions."""
+            constructed.append(kwargs)
+
+    with patch.object(strands_models, "BedrockModel", ProbeBedrockModel):
+        for role, model_id, read_timeout in (
+            ("fast_chat", runtime_model.HAIKU_4_5_MODEL_ID, None),
+            ("review_deep", runtime_model.SONNET_4_6_MODEL_ID, 180),
+        ):
+            runtime_model.load_runtime_model(
+                runtime_model.RuntimeModelConfig(
+                    provider="bedrock",
+                    model_id=model_id,
+                    region="us-west-2",
+                    guardrail_id="test-guardrail",
+                    guardrail_version="1",
+                    role=role,
+                    bedrock_read_timeout_seconds=read_timeout,
+                )
+            )
+    for kwargs in constructed:
+        client_config = kwargs.get("boto_client_config")
+        if getattr(client_config, "retries", None) != {
+            "total_max_attempts": 1,
+            "mode": "standard",
+        }:
+            _fail("model.py does not pin botocore Converse retries to one total attempt")
+    if (
+        len(constructed) != 2
+        or constructed[1]["boto_client_config"].read_timeout != 180
+    ):
+        _fail("model.py does not preserve the Deep Review read timeout")
 
 
 def main() -> int:

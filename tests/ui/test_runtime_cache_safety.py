@@ -60,7 +60,7 @@ def test_shared_local_api_client_does_not_persist_set_cookie() -> None:
     assert list(http.cookies.jar) == []
 
 
-def test_cookie_provider_still_forwards_id_cookie_per_request(
+def test_cookie_provider_forwards_current_cognito_and_guest_cookies_per_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Auth still attaches the current browser ID cookie on each request."""
@@ -69,10 +69,16 @@ def test_cookie_provider_still_forwards_id_cookie_per_request(
     monkeypatch.setattr(
         client,
         "_cookie_provider",
-        lambda: {"co_design_id": "current-student-token"},
+        lambda: {
+            "co_design_id": "current-student-token",
+            "co_design_guest": "current-guest-secret",
+        },
     )
     forwarded = client._auth_cookies()
-    assert forwarded == {"co_design_id": "current-student-token"}
+    assert forwarded == {
+        "co_design_id": "current-student-token",
+        "co_design_guest": "current-guest-secret",
+    }
     # The shared jar stays empty; per-request cookies are not stored there.
     assert list(client._http.cookies.jar) == []
 

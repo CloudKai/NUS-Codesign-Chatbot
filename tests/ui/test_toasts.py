@@ -87,22 +87,21 @@ def test_show_corner_toasts_falls_back_to_st_toast(monkeypatch) -> None:
     assert shown == [("Course materials are loading.", 3)]
 
 
-def test_new_notebook_still_triggers_course_materials_toast() -> None:
-    """User-initiated notebooks still pop the one-shot loading toast flag."""
+def test_new_chat_draft_does_not_claim_course_materials_are_loading() -> None:
+    """A draft does not start notebook source syncing before the first Send."""
     session = Path("ui/session.py").read_text(encoding="utf-8")
     nav = Path("ui/panels/nav.py").read_text(encoding="utf-8")
     workspace = Path("ui/workspace.py").read_text(encoding="utf-8")
     notebooks = Path("ui/notebooks.py").read_text(encoding="utf-8")
     app = Path("streamlit_app.py").read_text(encoding="utf-8")
-    # should_rerun=True path and on_click New chat / Your Notebooks create arm toast.
-    assert 'st.session_state.toast_course_materials_loading = True' in session
+    assert 'st.session_state.toast_course_materials_loading = True' not in session
     new_chat = nav.split("def _on_new_chat", 1)[1].split("\ndef ", 1)[0]
     mobile_new = workspace.split("def _on_mobile_new_chat", 1)[1].split("\ndef ", 1)[0]
     dialog_new = notebooks.split("def _on_dialog_new_notebook", 1)[1].split(
         "\ndef ", 1
     )[0]
-    assert "toast_course_materials_loading = True" in new_chat
-    assert "toast_course_materials_loading = True" in mobile_new
-    assert "toast_course_materials_loading = True" in dialog_new
+    assert "toast_course_materials_loading = True" not in new_chat
+    assert "toast_course_materials_loading = True" not in mobile_new
+    assert "toast_course_materials_loading = True" not in dialog_new
     assert 'st.session_state.pop("toast_course_materials_loading", False)' in app
     assert 'show_corner_toasts("Course materials are loading.")' in app

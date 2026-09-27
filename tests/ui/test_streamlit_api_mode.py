@@ -6,6 +6,7 @@ import threading
 
 from fastapi.testclient import TestClient
 from streamlit.testing.v1 import AppTest
+from saved_ui_workspace import saved_app
 
 from backend.api import create_app
 from backend.api_client import LocalApiClient
@@ -37,7 +38,7 @@ def _install_inprocess_api(
 def test_inprocess_streamlit_chat_path_still_smoke_tests():
     """Retain one AppTest on the in-process coach path (USE_LOCAL_API=false)."""
     assert settings.use_local_api is False
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     assert not app.exception
     assert len(app.chat_input) == 1
     app.chat_input[0].set_value(
@@ -50,7 +51,7 @@ def test_inprocess_streamlit_chat_path_still_smoke_tests():
 def test_authenticated_inprocess_path_confirms_pending_transition():
     """Cognito-scoped sessions retain full Thinking Path confirmation behavior."""
     assert settings.use_local_api is False
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
 
     app.chat_input[0].set_value(
         "I want to evaluate a crossing design for older pedestrians."
@@ -80,7 +81,7 @@ def test_authenticated_inprocess_path_confirms_pending_transition():
 def test_streamlit_api_mode_confirmation_creates_pending_transition(monkeypatch):
     client = _install_inprocess_api(monkeypatch, auto_advance=False)
     try:
-        app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+        app = saved_app()
         assert not app.exception
         thread_id = app.session_state["thread_id"]
 
@@ -116,7 +117,7 @@ def test_streamlit_api_mode_confirmation_creates_pending_transition(monkeypatch)
 def test_streamlit_api_mode_auto_advance_moves_thinking_path(monkeypatch):
     client = _install_inprocess_api(monkeypatch, auto_advance=True)
     try:
-        app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+        app = saved_app()
         assert not app.exception
         thread_id = app.session_state["thread_id"]
 
@@ -152,7 +153,7 @@ def test_streamlit_stage_selection_refreshes_authoritative_stage_and_status(monk
         stage_selection=True,
     )
     try:
-        app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+        app = saved_app()
         assert not app.exception
         thread_id = app.session_state["thread_id"]
         store = StudentStore()
@@ -231,7 +232,7 @@ def test_streamlit_manual_stage_chat_command_refreshes_authoritative_journey(
         stage_selection=True,
     )
     try:
-        app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+        app = saved_app()
         assert not app.exception
         thread_id = app.session_state["thread_id"]
         store = StudentStore()

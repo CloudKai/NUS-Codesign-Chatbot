@@ -3,6 +3,8 @@ from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
 
+from saved_ui_workspace import saved_app
+
 import ui.chat as chat_module
 import ui.sources as sources_module
 import ui.studio as studio_module
@@ -32,6 +34,47 @@ def _visible_profile_copy(app: AppTest) -> str:
 def _implementation_source(module: object) -> str:
     """Read the module that owns behavior behind a compatibility alias."""
     return Path(inspect.getfile(module)).read_text(encoding="utf-8")
+
+
+def _saved_app() -> AppTest:
+    """Start legacy interaction checks with a saved notebook already present."""
+    return saved_app()
+
+
+def _save_draft_with_message(app: AppTest) -> AppTest:
+    """Submit the first turn so notebook-only controls become available."""
+    app.chat_input[0].set_value("I want to explore road safety").run()
+    assert not app.exception
+    assert app.session_state["thread_id"]
+    return app
+
+
+def test_new_chat_is_saved_only_after_first_message() -> None:
+    """Opening and abandoning a draft leaves no notebook in persistent Recents."""
+    from backend.student_store import StudentStore
+
+    store = StudentStore()
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    assert not app.exception
+    assert app.session_state["thread_id"] is None
+    assert store.list_threads() == []
+    assert len(app.chat_message) == 1  # Unsaved Coach welcome.
+
+    next(button for button in app.button if button.label == "New chat").click().run()
+    assert not app.exception
+    assert app.session_state["thread_id"] is None
+    assert store.list_threads() == []
+
+    app.chat_input[0].set_value("I want to explore road safety").run()
+    assert not app.exception
+    thread_id = app.session_state["thread_id"]
+    assert thread_id
+    assert len(store.list_threads()) == 1
+    assert any(
+        message["role"] == "user"
+        and message["content"] == "I want to explore road safety"
+        for message in store.get_messages(thread_id)
+    )
 
 
 def _open_library(app: AppTest) -> AppTest:
@@ -220,7 +263,7 @@ def test_chat_composer_attachment_error_is_recoverable(monkeypatch):
     )
     monkeypatch.setattr(chat.store, "upload_attachments", reject_upload)
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
 
     assert not app.exception
     rendered_errors = "\n".join(error.value or "" for error in app.error)
@@ -238,7 +281,7 @@ def test_empty_assistant_rows_are_not_rendered():
     """Failed or skeleton assistant rows with no text stay off the chat log."""
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     assert not app.exception
     starting = len(app.chat_message)
     store = StudentStore()
@@ -249,7 +292,7 @@ def test_empty_assistant_rows_are_not_rendered():
 
 
 def test_streamlit_notebook_workspace_smoke():
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     assert not app.exception
     assert "AttributeError" not in "\n".join(
         str(exception.value) for exception in app.exception
@@ -441,7 +484,8 @@ def test_streamlit_notebook_workspace_smoke():
     assert "creates a new conversation revision" in chat_py
     assert "remain in revision history" in chat_py
     assert "will replace the conversation after this point" not in chat_py
-    assert "truncate" not in chat_py.lower()
+    assert "store.truncate" not in chat_py
+    assert "store.delete_messages" not in chat_py
     assert "Save & resend" not in chat_py
     assert "Editing message" not in chat_py
     assert "composer_edit" not in chat_py
@@ -537,7 +581,7 @@ def test_composer_has_no_model_picker_and_keeps_default_model():
     """Students cannot choose a model; the locked default stays in session."""
     from backend.models import DEFAULT_CHAT_MODEL_ID, DEFAULT_REASONING_EFFORT
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     assert app.session_state["selected_model"] == DEFAULT_CHAT_MODEL_ID
     assert app.session_state["reasoning_effort"] == DEFAULT_REASONING_EFFORT
     assert not any(
@@ -558,7 +602,7 @@ def test_add_pasted_source_then_chat_with_citation():
     from backend.source_library import add_text_source
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     _open_library(app)
     assert any((uploader.label or "") == "Add" for uploader in app.file_uploader)
 
@@ -580,7 +624,7 @@ def test_add_pasted_source_then_chat_with_citation():
 
     # Start a clean AppTest tree when leaving Library; Streamlit's test harness
     # otherwise retains removed source rename-form widget ids.
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     app.chat_input[0].set_value("What evidence does my source provide?").run()
     assert not app.exception
     thread_id = app.session_state["thread_id"]
@@ -619,7 +663,7 @@ def test_select_all_sources_renders_indeterminate_marker_for_partial_selection()
     from backend.source_library import add_text_source
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     local_store = StudentStore()
     thread_id = app.session_state["thread_id"]
     add_text_source(local_store, thread_id, "First source", "First source text.")
@@ -646,7 +690,7 @@ def test_multiple_selected_sources_do_not_force_sources_used_footer():
     from backend.source_library import add_text_source
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     local_store = StudentStore()
     thread_id = app.session_state["thread_id"]
     add_text_source(local_store, thread_id, "Lecture evidence", "First source.")
@@ -671,7 +715,7 @@ def test_pdf_source_opens_in_installed_viewer():
     from backend.student_store import StudentStore
     from pypdf import PdfWriter
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     pdf_buffer = BytesIO()
     writer = PdfWriter()
     writer.add_blank_page(width=612, height=792)
@@ -692,7 +736,7 @@ def test_pdf_source_opens_in_installed_viewer():
 
 
 def test_learning_studio_and_notebook_history_controls():
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Thinking Path" in rendered
     app.session_state["studio_tab"] = "Review"
@@ -713,6 +757,13 @@ def test_learning_studio_and_notebook_history_controls():
     assert "Recents" in rendered
     assert "cd-nav-section-label" in rendered
     assert 'class="notebook-card-meta"' not in rendered
+    assert app.session_state["thread_id"] is None
+    _save_draft_with_message(app)
+    app.session_state["studio_tab"] = "Review"
+    app.session_state["studio_tab"] = "Progression"
+    app.run()
+    assert not app.exception
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "Stage Progression" in rendered
 
 
@@ -745,9 +796,7 @@ def test_coaching_style_keeps_existing_short_long_mapping():
     select_source = inspect.getsource(_select_coaching_style)
     assert "COACHING_STYLE_VALUES" in persist_source
     assert "save_journey(journey)" in select_source
-    coaching_block = Path("ui/profile.py").read_text(encoding="utf-8").split(
-        "def _select_coaching_style", 1
-    )[1].split("def render_profile_menu", 1)[0]
+    coaching_block = "\n".join((select_source, persist_source))
     assert "local_api_client" not in coaching_block
     assert "store.update_thread" not in coaching_block
 
@@ -756,12 +805,12 @@ def test_persisted_long_coaching_style_renders_strict_selected():
     """Reloading a notebook stored as long must select Free, not the Guide default."""
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     thread_id = app.session_state["thread_id"]
     assert _coaching_style_radio(app).value == "Guide"
     StudentStore().update_thread(thread_id, metadata={"response_detail": "long"})
 
-    restored = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    restored = _saved_app()
     assert restored.session_state["thread_id"] == thread_id
     assert restored.session_state["response_detail"] == "long"
     assert restored.session_state["learning_journey"]["response_detail"] == "long"
@@ -775,7 +824,7 @@ def test_persisted_long_coaching_style_renders_strict_selected():
 def test_theme_coaching_style_and_journey_has_no_manual_progression_control():
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     # Preferences live in the profile settings popover (content exposed to AppTest).
 
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
@@ -815,6 +864,7 @@ def test_theme_coaching_style_and_journey_has_no_manual_progression_control():
     assert app.session_state["response_detail"] == "short"
     assert app.session_state["learning_journey"]["response_detail"] == "short"
     assert app.session_state["setting_coaching_style"] == "Guide"
+    _save_draft_with_message(app)
     created = StudentStore().get_thread(app.session_state["thread_id"])
     assert created is not None
     assert created["metadata"]["response_detail"] == "short"
@@ -832,7 +882,7 @@ def test_theme_coaching_style_and_journey_has_no_manual_progression_control():
     assert not app.exception
 
     # Fresh session reload restores the stored appearance.
-    restored = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    restored = _saved_app()
     assert restored.session_state["appearance"] == "Dark"
     assert restored.session_state["setting_appearance"] == "Dark"
     assert StudentStore().get_user_preferences().get("appearance") == "Dark"
@@ -848,7 +898,7 @@ def test_journey_fresh_problem_stage_keeps_next_stage_locked(monkeypatch):
     monkeypatch.setattr(settings, "student_stage_selection", True)
     monkeypatch.setattr(settings, "auto_advance_stages", False)
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     assert not any(button.label == "Work on this stage" for button in app.button)
     compact_buttons = [button for button in app.button if button.label == "Work on.."]
     assert compact_buttons == []
@@ -863,7 +913,7 @@ def test_journey_linear_accordion_and_ctas_follow_unlocked_frontier(monkeypatch)
 
     monkeypatch.setattr(settings, "student_stage_selection", True)
     monkeypatch.setattr(settings, "auto_advance_stages", False)
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
 
     assert app.session_state["learning_journey"]["current_stage"] == (
         "problem_identification"
@@ -948,7 +998,7 @@ def test_journey_ready_next_stage_is_not_focus_highlighted(monkeypatch):
 
     monkeypatch.setattr(settings, "student_stage_selection", True)
     monkeypatch.setattr(settings, "auto_advance_stages", False)
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     store = StudentStore()
     thread = store.get_thread(app.session_state["thread_id"]) or {}
     metadata = dict(thread.get("metadata") or {})
@@ -1009,7 +1059,7 @@ def test_stale_appearance_widget_does_not_overwrite_stored_dark():
 def test_suggested_questions_are_view_only_and_do_not_change_the_composer():
     from backend.student_journey import stage_guidance_questions
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     starting_stage = app.session_state["learning_journey"]["current_stage"]
     questions = stage_guidance_questions(starting_stage)
     starting_messages = len(app.chat_message)
@@ -1027,7 +1077,7 @@ def test_collapsed_sources_expander_survives_refresh():
     from backend.student_store import StudentStore
     from ui.sources import _sources_expander_widget_key
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     _open_library(app)
     key = _sources_expander_widget_key("Lecture Notes")
     app.session_state[key] = False
@@ -1042,12 +1092,13 @@ def test_collapsed_sources_expander_survives_refresh():
     assert not app.exception
 
 
-def test_refresh_restores_last_open_notebook():
+def test_refresh_restores_last_open_notebook(monkeypatch):
     from backend.models import LOCKED_CHAT_MODEL_ID
     from backend.student_store import StudentStore
     from backend.student_support import DEFAULT_SUPPORT_MODE
+    from backend.workspace_service import WorkspaceService
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     local_store = StudentStore()
     first_id = app.session_state["thread_id"]
     assert local_store.get_user_preferences().get("active_thread_id") == first_id
@@ -1061,18 +1112,90 @@ def test_refresh_restores_last_open_notebook():
 
     # Browser refresh clears Streamlit session; preferences should reopen the
     # notebook that was active before the reload.
+    calls = {"list_threads": 0, "update_preferences": 0}
+    original_list = WorkspaceService.list_threads
+    original_update = WorkspaceService.update_preferences
+
+    def counted_list(self, *args, **kwargs):
+        calls["list_threads"] += 1
+        return original_list(self, *args, **kwargs)
+
+    def counted_update(self, *args, **kwargs):
+        calls["update_preferences"] += 1
+        return original_update(self, *args, **kwargs)
+
+    monkeypatch.setattr(WorkspaceService, "list_threads", counted_list)
+    monkeypatch.setattr(WorkspaceService, "update_preferences", counted_update)
     app.session_state["thread_id"] = None
     app.run()
     assert app.session_state["thread_id"] == other_id
     assert local_store.get_user_preferences().get("active_thread_id") == other_id
+    # The navigation rail still lists Recents once; session restore adds no
+    # second list call and no redundant active-notebook preference write.
+    assert calls == {"list_threads": 1, "update_preferences": 0}
     assert not app.exception
+
+
+def test_stale_preferred_notebook_uses_valid_fallback_and_persists_it():
+    """A removed saved ID still finds an owned notebook on reload."""
+    from backend.student_store import StudentStore
+
+    app = _saved_app()
+    local_store = StudentStore()
+    current_id = app.session_state["thread_id"]
+    local_store.update_user_preferences({"active_thread_id": "deleted-notebook"})
+    app.session_state["thread_id"] = None
+    app.run()
+
+    assert not app.exception
+    assert app.session_state["thread_id"] == current_id
+    assert local_store.get_user_preferences()["active_thread_id"] == current_id
+
+
+def test_short_title_skips_legacy_lookup_but_long_legacy_title_upgrades(monkeypatch):
+    """Only legacy-shaped titles need the oldest-message compatibility read."""
+    from backend.student_store import StudentStore
+    from backend.title_service import NotebookTitleService
+    from backend.workspace_service import WorkspaceService
+
+    app = _saved_app()
+    local_store = StudentStore()
+    thread_id = app.session_state["thread_id"]
+    calls = []
+    original = WorkspaceService.get_oldest_user_messages
+
+    def counted(self, *args, **kwargs):
+        calls.append(args)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(WorkspaceService, "get_oldest_user_messages", counted)
+    app.run()
+    assert not app.exception
+    assert calls == []
+
+    prompt = "Understand their pain and struggle and finding ways for them to walk safely"
+    local_store.add_message(thread_id, "user", prompt)
+    local_store.update_thread(thread_id, name=prompt[:70])
+    app.run()
+    assert not app.exception
+    assert len(calls) == 1
+    expected = NotebookTitleService.generate(prompt)
+    assert local_store.get_thread(thread_id)["name"] == expected
+
+    local_store.update_thread(thread_id, name="A deliberately detailed custom research notebook title")
+    app.run()
+    assert not app.exception
+    assert local_store.get_thread(thread_id)["name"] == (
+        "A deliberately detailed custom research notebook title"
+    )
 
 
 def test_current_notebook_title_is_editable_from_recent_chat_menu():
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     next(button for button in app.button if button.label == "New chat").click().run()
+    _save_draft_with_message(app)
     current = StudentStore().get_thread(app.session_state["thread_id"])
     assert current
     thread_id = str(app.session_state["thread_id"])
@@ -1159,8 +1282,9 @@ def test_rename_and_icon_controls_expose_accessible_instructions():
 def test_notebook_history_card_highlights_active_notebook_without_folders():
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     next(button for button in app.button if button.label == "New chat").click().run()
+    _save_draft_with_message(app)
     local_store = StudentStore()
     thread_id = app.session_state["thread_id"]
     local_store.update_thread(thread_id, name="Active research notebook")
@@ -1217,8 +1341,9 @@ def test_legacy_notebook_actions_and_back_do_not_remount_workspace(monkeypatch):
 def test_notebook_history_confirmed_delete_removes_the_selected_notebook():
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     next(button for button in app.button if button.label == "New chat").click().run()
+    _save_draft_with_message(app)
     deleted_thread_id = app.session_state["thread_id"]
 
     app.session_state["pending_delete_chat_id"] = deleted_thread_id
@@ -1240,7 +1365,7 @@ def test_notebook_history_confirmed_delete_removes_the_selected_notebook():
 
 def test_dismissed_delete_dialog_does_not_remount_and_new_chat_clears_pending():
     """Esc/dismiss marker and New chat must not leave a sticky Delete chat dialog."""
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     thread_id = app.session_state["thread_id"]
 
     app.session_state["pending_delete_chat_id"] = thread_id
@@ -1271,7 +1396,7 @@ def test_dismissed_delete_dialog_does_not_remount_and_new_chat_clears_pending():
 
 def test_logout_requires_confirmation_dialog():
     """Settings Logout opens a Cancel/Logout dialog instead of signing out immediately."""
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     logout = next(
         button
         for button in app.button
@@ -1302,7 +1427,7 @@ def test_logout_requires_confirmation_dialog():
 
 def test_notebook_actions_offers_transcript_download():
     """Chat menus expose on-click transcript prepare, not paint-time prefetch."""
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     prepare = next(
         button
         for button in app.button
@@ -1337,7 +1462,7 @@ def test_transcript_download_is_prepared_on_click_only() -> None:
 
 
 def test_legacy_chat_turn_does_not_move_the_learning_stage_without_confirmation():
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     next(button for button in app.button if button.label == "New chat").click().run()
     app.chat_input[0].set_value(
         "My focus is to evaluate whether the study evidence supports the main claim."
@@ -1352,7 +1477,7 @@ def test_latest_message_edit_stays_in_the_chat_fragment():
     """Editing the active user turn avoids an app-wide remount."""
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     app.chat_input[0].set_value(
         "I want to study safer street crossings for older pedestrians."
     ).run()
@@ -1391,7 +1516,7 @@ def test_earlier_message_edit_keeps_the_app_scoped_confirmation_dialog():
     """Editing an earlier turn still opens the existing confirmation dialog."""
     from backend.student_store import StudentStore
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     app.chat_input[0].set_value("First framing question.").run()
     app.chat_input[0].set_value("Second framing question.").run()
     assert not app.exception
@@ -1445,7 +1570,7 @@ def test_pending_edit_failure_keeps_chat_visible(monkeypatch):
 
     monkeypatch.setattr(chat.store, "revise_message", reject_revise)
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     assert not app.exception
     app.chat_input[0].set_value(
         "I want to study safer street crossings for older pedestrians."
@@ -1549,7 +1674,7 @@ def test_pending_edit_retries_when_coach_is_temporarily_busy(monkeypatch):
     # Do not patch stdlib time.sleep — ui.panels.chat.time is the stdlib module.
     monkeypatch.setattr(chat, "_REVISE_BUSY_SLEEP_SECONDS", 0)
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = _saved_app()
     assert not app.exception
     app.chat_input[0].set_value(
         "I want to study safer street crossings for older pedestrians."

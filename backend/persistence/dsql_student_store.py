@@ -34,6 +34,13 @@ logger = logging.getLogger(__name__)
 # only after a successful DB commit (never inside the OCC retry callback).
 _OCC_WRITE_METHODS = (
     "upsert_cognito_user",
+    "create_guest_session",
+    "renew_guest_session",
+    "revoke_guest_session",
+    "create_guest_claim_preview",
+    "begin_guest_claim",
+    "release_guest_claim",
+    "guest_claim_transfer",
     "save_oauth_login_state",
     "consume_oauth_login_state",
     "update_user_preferences",

@@ -53,11 +53,12 @@ def initialize_session() -> None:
           ``setting_appearance`` to that value.
         - Restores the last-open notebook from preferences when the Streamlit
           session has no valid ``thread_id`` (e.g. browser refresh).
-        - Creates or selects a notebook when none is active.
+        - Opens an unsaved draft when no notebook exists.
         - Backfills legacy message attachments into the source library.
     """
     defaults: dict[str, Any] = {
         "thread_id": None,
+        "new_chat_draft": False,
         "selected_model": DEFAULT_CHAT_MODEL_ID,
         "support_mode": DEFAULT_SUPPORT_MODE,
         "reasoning_effort": DEFAULT_REASONING_EFFORT,
@@ -118,16 +119,20 @@ def initialize_session() -> None:
     # Always realign the widget key from persisted appearance so a stale
     # popover value cannot rewrite the database on the next sync.
     st.session_state.setting_appearance = st.session_state.appearance
-    if not st.session_state.thread_id or not store.get_thread(st.session_state.thread_id):
+    if not st.session_state.new_chat_draft and (
+        not st.session_state.thread_id or not store.get_thread(st.session_state.thread_id)
+    ):
         preferred_id = str(preferences.get("active_thread_id") or "").strip()
-        threads = store.list_threads()
         if preferred_id and store.get_thread(preferred_id):
-            select_thread(preferred_id, should_rerun=False)
-        elif threads:
-            select_thread(threads[0]["id"], should_rerun=False)
+            select_thread(preferred_id, should_rerun=False, persist_active=False)
         else:
-            new_notebook(should_rerun=False)
-    store.backfill_legacy_sources(st.session_state.thread_id)
+            threads = store.list_threads()
+            if threads:
+                select_thread(threads[0]["id"], should_rerun=False)
+            else:
+                new_notebook(should_rerun=False)
+    if st.session_state.thread_id:
+        store.backfill_legacy_sources(st.session_state.thread_id)
 
 
 def _persist_active_thread(thread_id: str | None) -> None:
@@ -136,16 +141,11 @@ def _persist_active_thread(thread_id: str | None) -> None:
 
 
 def new_notebook(should_rerun: bool = True) -> None:
-    """Create an untitled notebook with a fresh Guide coaching journey.
+    """Open an unsaved chat draft with a fresh Guide coaching journey.
 
-    User-initiated creates stay on Chat so course materials can load. Nav and
-    mobile chrome call this from ``on_click`` with ``should_rerun=False`` so the
-    click's single remount paints the new thread (no nested full-app remount).
-    Those callers set ``toast_course_materials_loading`` themselves. When
-    ``should_rerun`` is True (Your Notebooks dialog), set the toast and remount.
-    Session init uses ``should_rerun=False`` without a toast. The profile
-    Coaching style widget is reset to Guide so a prior Free choice cannot
-    leak onto the new notebook.
+    New chat stays in the current Streamlit session until the first Send.
+    The profile Coaching style widget resets to Guide so a prior Free choice
+    cannot leak into the new notebook.
 
     Args:
         should_rerun: When True, trigger a Streamlit rerun after session updates.
@@ -153,23 +153,9 @@ def new_notebook(should_rerun: bool = True) -> None:
     if notebook_switch_locked():
         return
     journey = default_journey()
-    thread_id = store.create_thread(
-        name="Untitled notebook",
-        model_id=st.session_state.get("selected_model") or DEFAULT_CHAT_MODEL_ID,
-        support_mode=DEFAULT_SUPPORT_MODE,
-        assignment={"title": "", "course": "", "brief": "", "rubric": ""},
-    )
-    store.update_thread(
-        thread_id,
-        metadata={
-            "response_detail": journey["response_detail"],
-            "response_language": "English",
-            "allow_model_knowledge": False,
-        },
-    )
-    seed_coach_welcome(store, thread_id)
-    st.session_state.thread_id = thread_id
-    reset_chat_history_window(thread_id)
+    st.session_state.thread_id = None
+    st.session_state.new_chat_draft = True
+    reset_chat_history_window(None)
     st.session_state.support_mode = DEFAULT_SUPPORT_MODE
     st.session_state.learning_journey = journey
     st.session_state.response_detail = journey["response_detail"]
@@ -184,18 +170,52 @@ def new_notebook(should_rerun: bool = True) -> None:
     st.session_state.edit_error_message = None
     st.session_state.edit_confirm_message_id = None
     clear_stage_move_notice()
-    _persist_active_thread(thread_id)
     st.session_state.mobile_nav_open = False
     st.session_state.mobile_studio_open = False
-    # Skip the Sources sync-complete full remount once; New chat already remounted.
     st.session_state.pop("_sources_defer_stable_remount", None)
-    st.session_state["_suppress_sources_sync_rerun_for_thread"] = thread_id
+    st.session_state.pop("_suppress_sources_sync_rerun_for_thread", None)
     if should_rerun:
         st.session_state.pending_mobile_panel = "Chat"
         st.session_state.center_view = "chat"
         st.session_state.nav_section = "Chat"
-        st.session_state.toast_course_materials_loading = True
         rerun_app()
+
+
+def save_new_notebook() -> str:
+    """Persist the active draft on its first submitted message and return its id."""
+    existing = str(st.session_state.get("thread_id") or "").strip()
+    if existing:
+        return existing
+    journey = normalize_journey(st.session_state.get("learning_journey"))
+    thread_id = store.create_thread(
+        name="Untitled notebook",
+        model_id=st.session_state.get("selected_model") or DEFAULT_CHAT_MODEL_ID,
+        support_mode=DEFAULT_SUPPORT_MODE,
+        assignment=st.session_state.get("assignment") or {},
+    )
+    store.update_thread(
+        thread_id,
+        metadata={
+            "response_detail": journey["response_detail"],
+            "response_language": st.session_state.get("response_language") or "English",
+            "allow_model_knowledge": False,
+            "selected_model": st.session_state.get("selected_model") or DEFAULT_CHAT_MODEL_ID,
+            "reasoning_effort": st.session_state.get("reasoning_effort"),
+            **(
+                {"display_name": st.session_state.display_name}
+                if st.session_state.get("_auth_bound_kind") != "guest"
+                and str(st.session_state.get("display_name") or "").strip()
+                else {}
+            ),
+        },
+    )
+    seed_coach_welcome(store, thread_id)
+    st.session_state.thread_id = thread_id
+    st.session_state.new_chat_draft = False
+    reset_chat_history_window(thread_id)
+    _persist_active_thread(thread_id)
+    st.session_state["_suppress_sources_sync_rerun_for_thread"] = thread_id
+    return thread_id
 
 
 def set_stage_move_notice(message: str) -> None:
@@ -455,12 +475,15 @@ def cancel_notebook_actions() -> None:
     st.session_state.pop("_notebooks_suppress_dismiss", None)
 
 
-def select_thread(thread_id: str, should_rerun: bool = True) -> None:
+def select_thread(
+    thread_id: str, should_rerun: bool = True, *, persist_active: bool = True
+) -> None:
     """Load a notebook into session state (journey, language, assignment).
 
     Args:
         thread_id: Persisted notebook identifier.
         should_rerun: When True, trigger a Streamlit rerun after loading.
+        persist_active: Skip the preference write when restoring its saved id.
     """
     cleaned = str(thread_id or "").strip()
     if (
@@ -511,13 +534,15 @@ def select_thread(thread_id: str, should_rerun: bool = True) -> None:
     if display_name:
         st.session_state.display_name = display_name
     st.session_state.thread_id = thread_id
+    st.session_state.new_chat_draft = False
     reset_chat_history_window(thread_id)
     st.session_state.editing_message = None
     st.session_state.pending_edit = None
     st.session_state.edit_error_message = None
     st.session_state.edit_confirm_message_id = None
     clear_stage_move_notice()
-    _persist_active_thread(thread_id)
+    if persist_active:
+        _persist_active_thread(thread_id)
     store.backfill_legacy_sources(thread_id)
     seed_coach_welcome(store, thread_id)
     st.session_state.pop("_suppress_sources_sync_rerun_for_thread", None)
@@ -535,11 +560,12 @@ def save_journey(journey: dict[str, Any]) -> None:
     normalized = normalize_journey(journey)
     st.session_state.learning_journey = normalized
     st.session_state.response_detail = normalized["response_detail"]
-    store.update_thread(
-        st.session_state.thread_id,
-        metadata={
-            "response_detail": normalized["response_detail"],
-            "response_language": st.session_state.get("response_language", "English"),
-        },
-    )
+    if st.session_state.get("thread_id"):
+        store.update_thread(
+            st.session_state.thread_id,
+            metadata={
+                "response_detail": normalized["response_detail"],
+                "response_language": st.session_state.get("response_language", "English"),
+            },
+        )
     reset_chat_history_window(st.session_state.thread_id)

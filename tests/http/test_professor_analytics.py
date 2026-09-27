@@ -14,10 +14,12 @@ from backend.auth_oidc import CognitoIdentity, CognitoOIDCClient, CognitoOIDCErr
 from backend.cognito_config import CognitoAuthConfig
 from backend.persistence.factory import reset_file_storage_cache
 from backend.professor_analytics.repository import ProfessorAnalyticsRepository
+from backend.professor_analytics.guest_identity import guest_public_id
 from backend.professor_analytics.service import ProfessorAnalyticsService
 from backend.settings import settings
 from backend.student_store import StudentStore
 from backend.workspace_service import WorkspaceService
+from backend.research.models import ResearchEvidenceSpan, ResearchObservationCreate
 from backend.source_library import add_text_source
 from backend.specialists.review_orchestration import JOURNEY_STAGE_REVIEWS_KEY
 
@@ -120,6 +122,212 @@ def test_professor_routes_enforce_authentication_and_persisted_role(tmp_path, mo
     response = client.get("/api/v1/professor/overview", cookies={settings.cognito_id_token_cookie_name: professor_token})
     assert response.status_code == 200
     assert response.json()["students"] == 1
+
+
+def test_guest_students_use_stable_public_ids_and_resolve_drilldown(tmp_path, monkeypatch):
+    """Lecturer projections hide owner IDs while preserving scoped drill-down."""
+    store = StudentStore(tmp_path / "guest-analytics.sqlite3", identifier="local-student")
+    lecturer = _seed_user(store, "guest-analytics-prof", "lecturer")
+    owner_ids: list[str] = []
+    owner_identifiers: list[str] = []
+    guest_secrets: list[str] = []
+    notebook_ids: list[str] = []
+    source_ids: list[str] = []
+    for ordinal in range(2):
+        owner_id, secret = store.create_guest_session()
+        owner_ids.append(owner_id)
+        guest_secrets.append(secret)
+        profile = store.get_user_by_id(owner_id) or {}
+        owner_identifiers.append(str(profile["identifier"]))
+        guest_store = StudentStore(
+            Path(store.path), identifier=str(profile["identifier"])
+        )
+        notebook_id = guest_store.create_thread(
+            name=f"Guest notebook {ordinal}",
+            model_id="mock",
+            support_mode="critical-thinking",
+        )
+        guest_store.add_message(notebook_id, "user", "A private guest idea")
+        guest_store.add_message(notebook_id, "assistant", "A private coach response")
+        notebook_ids.append(notebook_id)
+        source_ids.append(
+            WorkspaceService(guest_store).upload_sources(
+                notebook_id,
+                [(f"guest-{ordinal}.txt", b"Private source body", "text/plain")],
+            )[0]["id"]
+        )
+
+    oidc = FakeOIDC(store)
+    lecturer_cookie = oidc.add("guest-analytics-prof")
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(store, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: lecturer_cookie}
+    roster_response = client.get("/api/v1/professor/students", cookies=cookies)
+    assert roster_response.status_code == 200
+    roster = roster_response.json()["students"]
+    public_ids = {row["id"] for row in roster if row["name"].startswith("Guest ")}
+    expected_ids = {guest_public_id(owner_id) for owner_id in owner_ids}
+    assert public_ids == expected_ids
+    assert len(public_ids) == 2
+    serialized = roster_response.text
+    overview_response = client.get("/api/v1/professor/overview", cookies=cookies)
+    assert overview_response.status_code == 200
+    for owner_id, identifier, secret in zip(owner_ids, owner_identifiers, guest_secrets):
+        assert owner_id not in serialized
+        assert identifier not in serialized
+        assert secret not in serialized
+        assert owner_id not in overview_response.text
+        assert identifier not in overview_response.text
+        assert secret not in overview_response.text
+    assert "@" not in " ".join(row["email"] or "" for row in roster if row["id"] in public_ids)
+
+    public_id = guest_public_id(owner_ids[0])
+    detail_response = client.get(
+        f"/api/v1/professor/students/{public_id}", cookies=cookies
+    )
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["student"]["id"] == public_id
+    assert detail["student"]["name"].startswith("Guest ")
+    assert detail["student"]["email"] is None
+    assert owner_ids[0] not in detail_response.text
+    assert owner_identifiers[0] not in detail_response.text
+    assert guest_secrets[0] not in detail_response.text
+
+    transcript = client.get(
+        f"/api/v1/professor/students/{public_id}/conversations/{notebook_ids[0]}",
+        cookies=cookies,
+    )
+    assert transcript.status_code == 200
+    assert "A private guest idea" in transcript.text
+    assert owner_ids[0] not in transcript.text
+    assert owner_identifiers[0] not in transcript.text
+    assert guest_secrets[0] not in transcript.text
+    journey = client.get(
+        f"/api/v1/professor/students/{public_id}/conversations/{notebook_ids[0]}/journey",
+        cookies=cookies,
+    )
+    assert journey.status_code == 200
+    source_response = client.get(
+        f"/api/v1/professor/students/{public_id}/conversations/{notebook_ids[0]}/sources/{source_ids[0]}",
+        cookies=cookies,
+    )
+    assert source_response.status_code == 200
+    cross_guest_source = client.get(
+        f"/api/v1/professor/students/{public_id}/conversations/{notebook_ids[1]}/sources/{source_ids[0]}",
+        cookies=cookies,
+    )
+    assert cross_guest_source.status_code == 404
+    cross_guest = client.get(
+        f"/api/v1/professor/students/{public_id}/conversations/{notebook_ids[1]}",
+        cookies=cookies,
+    )
+    assert cross_guest.status_code == 404
+    raw_owner_route = client.get(
+        f"/api/v1/professor/students/{owner_ids[0]}", cookies=cookies
+    )
+    assert raw_owner_route.status_code == 404
+    guest_cookie = {settings.guest_session_cookie_name: guest_secrets[0]}
+    assert client.get("/api/v1/professor/overview", cookies=guest_cookie).status_code == 401
+
+    signed_in_id = _seed_student_activity(
+        store, sub="guest-analytics-account", now=datetime.now(timezone.utc), messages=2
+    )
+    signed_roster = client.get("/api/v1/professor/students", cookies=cookies).json()["students"]
+    signed_item = next(row for row in signed_roster if row["id"] == signed_in_id)
+    assert signed_item["name"] == "Guest-Analytics-Account"
+    assert signed_item["email"] == "guest-analytics-account@example.edu"
+
+    recreated_store = StudentStore(Path(store.path), identifier="local-student")
+    assert owner_ids[0] == ProfessorAnalyticsRepository(
+        recreated_store
+    ).resolve_public_student_id(public_id)
+    assert lecturer["id"] not in roster_response.text
+
+
+def test_guest_research_queue_detail_and_csv_are_pseudonymous(tmp_path, monkeypatch):
+    """Research projections redact guest owner IDs and retain evidence records."""
+    from backend.persistence.guest_sessions import guest_secret_digest
+
+    store = StudentStore(tmp_path / "guest-research.sqlite3", identifier="local-student")
+    _seed_user(store, "guest-research-prof", "lecturer")
+    owner_id, secret = store.create_guest_session()
+    guest_profile = store.get_user_by_id(owner_id) or {}
+    guest_store = StudentStore(Path(store.path), identifier=str(guest_profile["identifier"]))
+    notebook_id = guest_store.create_thread(
+        name="Guest research notebook", model_id="mock", support_mode="critical-thinking"
+    )
+    thread = guest_store.get_thread(notebook_id) or {}
+    stage = str((thread.get("metadata") or {}).get("thinking_stage"))
+    evidence = ResearchObservationCreate(
+        coding_status="coded",
+        coding_version="research-v1",
+        prompt_version="prompt-v1",
+        provider="mock",
+        model_id="mock",
+        coaching_profile="quick",
+        phase_id=stage,
+        dominant_clear="explicit",
+        evidence=[ResearchEvidenceSpan(start_offset=0, end_offset=6, rationale="Claim evidence", confidence=0.8)],
+    )
+    guest_store.persist_coach_turn(
+        notebook_id,
+        expected_stage=stage,
+        expected_conversation_revision=0,
+        user_content="A claim with evidence.",
+        user_metadata={"thinking_stage": stage},
+        assistant_content="A coaching response.",
+        assistant_metadata={},
+        summary_metadata={},
+        research_observation=evidence,
+    )
+
+    oidc = FakeOIDC(store)
+    staff_cookie = oidc.add("guest-research-prof")
+    monkeypatch.setattr(settings, "auth_cookie_secure", False)
+    client = TestClient(create_app(store, oidc_client=oidc))
+    cookies = {settings.cognito_id_token_cookie_name: staff_cookie}
+    public_id = guest_public_id(owner_id)
+    queue_response = client.get("/api/v1/professor/research/queue", cookies=cookies)
+    assert queue_response.status_code == 200
+    queue_item = queue_response.json()["items"][0]
+    assert queue_item["student_id"] == public_id
+    assert queue_item["student_name"].startswith("Guest ")
+    assert queue_item["student_email"] is None
+    assert owner_id not in queue_response.text
+    assert secret not in queue_response.text
+    assert guest_secret_digest(secret) not in queue_response.text
+
+    detail_response = client.get(
+        f"/api/v1/professor/research/notebooks/{notebook_id}", cookies=cookies
+    )
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["student"]["id"] == public_id
+    assert detail["student"]["email"] is None
+    assert "student_user_id" not in detail_response.text
+    assert owner_id not in detail_response.text
+    assert secret not in detail_response.text
+    assert detail["observations"][0]["id"]
+
+    csv_response = client.get(
+        "/api/v1/professor/research/export.csv", cookies=cookies
+    )
+    assert csv_response.status_code == 200
+    assert public_id in csv_response.text
+    assert owner_id not in csv_response.text
+    assert secret not in csv_response.text
+    assert guest_secret_digest(secret) not in csv_response.text
+    assert guest_profile["identifier"] not in queue_response.text
+    assert guest_profile["identifier"] not in detail_response.text
+    assert guest_profile["identifier"] not in csv_response.text
+    with store._connect() as connection:
+        audit_target = connection.execute(
+            "SELECT target_user_id FROM research_access_events "
+            "WHERE notebook_id=? AND action='research.detail' ORDER BY created_at DESC LIMIT 1",
+            (notebook_id,),
+        ).fetchone()
+    assert audit_target is not None and audit_target["target_user_id"] == owner_id
 
 
 def test_analytics_uses_active_branch_assessments_and_session_boundaries(tmp_path):

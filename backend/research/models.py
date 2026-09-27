@@ -153,6 +153,7 @@ class ResearchObservation(ResearchObservationCreate):
     student_user_id: str
     student_display_name: str | None = None
     student_email: str | None = None
+    is_guest: bool | None = Field(default=None, exclude=True)
     user_message_id: str
     assistant_message_id: str
     conversation_revision: int = Field(ge=0)

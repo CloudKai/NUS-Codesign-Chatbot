@@ -72,6 +72,7 @@ from ui.session import (
     set_awaiting_coach_turn,
     set_stage_move_notice,
     reset_chat_history_window,
+    save_new_notebook,
 )
 from ui.sources import source_viewer_dialog
 
@@ -1331,6 +1332,15 @@ def handle_prompt(
     keyed history container reuses the last assistant ``st.chat_message``.
     """
     cleaned_prompt = str(prompt or "").strip()
+    if not cleaned_prompt and existing_user_message_id is None:
+        return
+    # A fresh chat is only a browser-session draft until the first Send.
+    if existing_user_message_id is None and not st.session_state.get("thread_id"):
+        try:
+            save_new_notebook()
+        except Exception:
+            st.error("The new chat could not be saved. Please try sending again.")
+            return
     # Feature-gated exact stage command: journey + assistant briefing only.
     if (
         existing_user_message_id is None
@@ -2301,6 +2311,19 @@ def _render_composer_submit_fragment(
                 _message_source_ids_for_render(loaded_message)
             )
         hmw_available = _history_hmw_available(history_state)
+    else:
+        history_state = {
+            "messages": [
+                {
+                    "id": "draft-welcome",
+                    "role": "assistant",
+                    "content": COACH_WELCOME_MARKDOWN,
+                    "metadata": {"kind": COACH_WELCOME_KIND},
+                }
+            ],
+            "source_ids": [],
+        }
+        messages = list(history_state["messages"])
     pending = st.session_state.get("pending_edit")
     # Interrupt during an in-flight send can open the editor while the API
     # worker still holds the notebook lease. Close the editor until recovery.
@@ -2332,7 +2355,8 @@ def _render_composer_submit_fragment(
 
     with st.container(key="chat_transcript"):
         with st.container(key="chat_feed"):
-            _render_history_pager(thread_id, history_state)
+            if thread_id:
+                _render_history_pager(thread_id, history_state)
             # A component trigger can update the session window before this
             # fragment paints its transcript. Read it again so the prepended
             # page appears in the same rerun.
@@ -2458,7 +2482,7 @@ def _render_composer_submit_fragment(
             reasoning_effort,
             chat_inflight,
             existing_user_message_id=None,
-            visible_source_ids=visible_source_ids,
+            visible_source_ids=visible_source_ids if thread_id else None,
             request_id=request_id,
             fragment_started=fragment_started,
             fragment_spans={
@@ -2477,6 +2501,9 @@ def render_chat_panel(model_id: str, reasoning_effort: str | None) -> None:
         model_id: Selected coaching model id for the next turn.
         reasoning_effort: Compatible reasoning effort for that model, or None.
     """
+    if not st.session_state.get("thread_id"):
+        _render_composer_submit_fragment([], False, model_id, reasoning_effort, set())
+        return
     sources = store.list_sources(st.session_state.thread_id)
     selected_sources = [source for source in sources if source.get("selected")]
     allow_model_knowledge = not selected_sources

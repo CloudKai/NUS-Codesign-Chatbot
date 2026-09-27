@@ -162,11 +162,11 @@ override: the coach ADVANCE recommendation is applied immediately without the
 Next/confirm UI, but a transition row is still persisted for auditability. Do
 not treat auto-advance as the repository default.
 
-Month-1 production on `compose.prod.yaml` intentionally runs that same
-auto-advance override (`AUTO_ADVANCE_STAGES=true`,
-`STUDENT_STAGE_SELECTION=false`): coach ADVANCE applies without student Next,
-and Journey has no stage picker. That is a pilot operations choice, not a
-change to this document’s safe default. Operator release steps:
+Production on `compose.prod.yaml` uses the stage-selection policy recorded on
+2026-08-28 (`AUTO_ADVANCE_STAGES=false`, `STUDENT_STAGE_SELECTION=true`).
+Students can explicitly select a Thinking Path stage; a coach ADVANCE
+recommendation does not automatically move them. This supersedes the earlier
+Month-1 auto-advance pilot override. Operator release steps:
 [`PRODUCTION_RELEASE_CHECKLIST.md`](PRODUCTION_RELEASE_CHECKLIST.md).
 
 ## Providers and retrieval

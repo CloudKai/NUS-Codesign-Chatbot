@@ -77,7 +77,8 @@ def test_complete_thinking_path_two_turns_per_stage(tmp_path) -> None:
             )
             assert turn.assessment.current_stage == stage.id
             if stage.id == "reflection":
-                assert turn.assessment.recommendation.value == "stay"
+                if turn_index == 1:
+                    assert turn.assessment.recommendation.value == "advance"
                 assert turn.pending_transition is None
             elif turn_index == 1:
                 assert turn.pending_transition is not None
@@ -85,6 +86,9 @@ def test_complete_thinking_path_two_turns_per_stage(tmp_path) -> None:
         seen_stages.append(stage.id)
     assert seen_stages == [stage.id for stage in THINKING_STAGES]
     assert _stage_id(store, thread_id) == "reflection"
+    assert "reflection" in normalize_journey(
+        (store.get_thread(thread_id) or {}).get("metadata", {}).get("learning_journey")
+    )["completed_stages"]
     messages = store.get_messages(thread_id)
     blob = " ".join(str(item.get("content") or "") for item in messages)
     assert "Holland Road" in blob

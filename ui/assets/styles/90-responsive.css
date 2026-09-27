@@ -1135,6 +1135,21 @@
             padding:1rem .85rem .75rem !important;
         }
 
+        /* Streamlit wraps the Recents container in a flex item. Let that
+           wrapper shrink so only the chat list scrolls above Settings. */
+        .st-key-nav_panel > [data-testid="stLayoutWrapper"]:has(> .st-key-nav_recents_scroll) {
+            flex:1 1 auto !important;
+            min-height:0 !important;
+            overflow:hidden !important;
+        }
+
+        .st-key-nav_recents_scroll {
+            height:100% !important;
+            max-height:100% !important;
+            overscroll-behavior-y:contain;
+            -webkit-overflow-scrolling:touch;
+        }
+
         /* Keep the overlay close (X); hide desktop dock collapse on mobile. */
         .st-key-nav_header [class*="st-key-nav-collapse"] {
             display:none !important;

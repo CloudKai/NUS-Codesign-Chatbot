@@ -6,6 +6,13 @@ This guide tells contributors where implemented responsibilities live. It is a
 placement guide, not a second architecture specification; architectural rules
 remain in [`LOCAL_DEMO_IMPLEMENTATION.md`](LOCAL_DEMO_IMPLEMENTATION.md).
 
+For a detailed teaching walkthrough of the services, request flow, retrieval,
+database/idempotency, AgentCore, LangGraph alternatives, and interview topics,
+start with the [project learning handbook](learning/README.md). Its
+[code-derived reference](learning/REFERENCE.md) inventories API registrations,
+input models, exact schema declarations, and Python modules. This is a learning
+companion, not a replacement architecture or release specification.
+
 ```text
 streamlit_app.py              thin Streamlit entrypoint
 ui/                           presentation, dialogs, session/view state, CSS

@@ -162,15 +162,10 @@ def _on_notebook_actions_back() -> None:
 
 
 def _on_dialog_new_notebook() -> None:
-    """Create a notebook before the workspace paints; leave Your Notebooks closed.
-
-    Runs as ``on_click`` so Chat/Recents see the new ``thread_id`` on the click's
-    single remount. Arms the course-materials toast; session init must not.
-    """
+    """Open an unsaved draft and leave Your Notebooks closed."""
     st.session_state.pending_notebook_actions = None
     st.session_state.reopen_notebooks_dialog = False
     st.session_state.pop("_notebooks_suppress_dismiss", None)
-    st.session_state.toast_course_materials_loading = True
     new_notebook(should_rerun=False)
 
 

@@ -1339,8 +1339,10 @@ def test_embedded_navigation_skips_retrieval_and_keeps_immediate_confirm_flow(tm
     assert "Type exact `confirm` to advance." in turn.response_text
 
 
-def test_reflection_completion_request_skips_retrieval_and_suppresses_advance(tmp_path) -> None:
-    """Deferred terminal completion remains a non-mutating Reflection coaching turn."""
+def test_reflection_completion_request_skips_retrieval_and_completes_in_place(
+    tmp_path,
+) -> None:
+    """Terminal Reflection completion needs no retrieval or sixth-stage transition."""
     store = StudentStore(tmp_path / "reflection-completion-deferred.sqlite3")
     thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
     metadata = dict((store.get_thread(thread_id) or {}).get("metadata") or {})
@@ -1371,7 +1373,7 @@ def test_reflection_completion_request_skips_retrieval_and_suppresses_advance(tm
 
     assert len(client.calls) == 1
     assert turn.assessment.response_mode == "coaching"
-    assert turn.assessment.recommendation is StageDecision.STAY
+    assert turn.assessment.recommendation is StageDecision.ADVANCE
     assert turn.pending_transition is None
     current = (store.get_thread(thread_id) or {}).get("metadata") or {}
     journey = current["learning_journey"]
@@ -1381,6 +1383,7 @@ def test_reflection_completion_request_skips_retrieval_and_suppresses_advance(tm
         "concept_generation",
         "design_specification",
         "deep_analysis",
+        "reflection",
     ]
 
 

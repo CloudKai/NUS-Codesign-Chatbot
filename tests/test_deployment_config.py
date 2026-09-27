@@ -138,9 +138,8 @@ def test_production_compose_is_stateless_and_uses_prebuilt_image():
     assert "source: ./data" not in app
     assert "target: /app/data" not in app
     assert 'APP_ENV: "production"' in app
-    assert 'AUTO_ADVANCE_STAGES: "true"' in app
-    assert 'STUDENT_STAGE_SELECTION: "false"' in app
-    assert "Month-2+" in compose
+    assert 'AUTO_ADVANCE_STAGES: "false"' in app
+    assert 'STUDENT_STAGE_SELECTION: "true"' in app
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
     assert "STUDENT_STAGE_SELECTION=false" in env_example
     assert 'DATABASE_PROVIDER: "dsql"' in app
@@ -289,6 +288,9 @@ def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     assert "handle /api/v1/auth/me" in caddyfile
     assert "handle /api/v1/auth/refresh" in caddyfile
     assert "handle /api/v1/auth/logout" in caddyfile
+    assert "handle /api/v1/auth/guest/renew" in caddyfile
+    assert "handle /api/v1/auth/guest/claim/preview" in caddyfile
+    assert "handle /api/v1/auth/guest/claim/confirm" in caddyfile
     assert "handle /api/v1/health" in caddyfile
     assert "handle /api/*" in caddyfile
     assert 'respond "Not Found" 404' in caddyfile
@@ -307,6 +309,10 @@ def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     me_index = caddyfile.index("handle /api/v1/auth/me")
     refresh_index = caddyfile.index("handle /api/v1/auth/refresh")
     logout_index = caddyfile.index("handle /api/v1/auth/logout")
+    guest_renew_index = caddyfile.index("handle /api/v1/auth/guest/renew")
+    guest_claim_preview_index = caddyfile.index("handle /api/v1/auth/guest/claim/preview")
+    guest_claim_confirm_index = caddyfile.index("handle /api/v1/auth/guest/claim/confirm")
+    guest_claim_cancel_index = caddyfile.index("handle /api/v1/auth/guest/claim/cancel")
     health_index = caddyfile.index("handle /api/v1/health")
     block_index = caddyfile.index("handle /api/*")
     streamlit_index = caddyfile.index("handle {\n\t\treverse_proxy app:8501")
@@ -315,6 +321,10 @@ def test_caddy_exposes_only_auth_browser_routes_and_health_to_fastapi():
     assert me_index < block_index
     assert refresh_index < block_index
     assert logout_index < block_index
+    assert guest_renew_index < block_index
+    assert guest_claim_preview_index < block_index
+    assert guest_claim_confirm_index < block_index
+    assert guest_claim_cancel_index < block_index
     assert health_index < block_index < streamlit_index
 
     api_block = caddyfile[block_index:streamlit_index]
@@ -331,6 +341,14 @@ def test_compose_keeps_internal_fastapi_url_for_container_local_calls():
     assert 'CO_DESIGN_PUBLIC_API_URL: "https://d1sxfuoybzedj5.cloudfront.net"' in app
     assert 'CO_DESIGN_UI_URL: "https://d1sxfuoybzedj5.cloudfront.net"' in app
     assert "ports:" not in app
+
+
+def test_production_compose_keeps_guest_access_disabled():
+    """The production deployment explicitly opts out of guest access."""
+    compose = (ROOT / "compose.prod.yaml").read_text(encoding="utf-8")
+    app = _service_block(compose, "app")
+
+    assert 'GUEST_ACCESS_ENABLED: "false"' in app
 
 
 def test_compose_sets_production_cognito_redirect_uri():

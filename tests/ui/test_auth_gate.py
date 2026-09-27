@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -272,8 +273,8 @@ def test_auth_gate_uses_server_authoritative_cooldown_and_same_document_redirect
     assert "button.disabled = false" not in source
     assert "streamlit.components.v1" not in source
     assert "components.html" not in source
-    assert source.count("st.html(") == 4
-    assert source.count("unsafe_allow_javascript=True") == 4
+    assert source.count("st.html(") == 6
+    assert source.count("unsafe_allow_javascript=True") == 6
     login_source = source.split("def _click_login_link", 1)[1].split(
         "@st.dialog", 1
     )[0]
@@ -501,8 +502,10 @@ def test_authenticated_users_see_full_application(logged_in_user):
     rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
     assert "st-key-chat_composer" in rendered or len(app.chat_input) == 1
     assert any((button.key or "") == "profile-logout-button" for button in app.button)
+    assert not any((button.key or "") == "profile-guest-sign-in" for button in app.button)
     assert 'class="cd-profile-logout-link"' not in rendered
     assert app.session_state["display_name"] == "Alex"
+    assert '<span class="cd-sidebar-profile-name">Alex</span>' in rendered
     leaked = (
         "/api/v1/auth/me",
         "/api/v1/auth/refresh",
@@ -559,6 +562,167 @@ def test_authenticated_subject_change_resets_identity_label(logged_in_user, monk
     assert app.session_state["_auth_bound_sub"] == "cognito-sub-test-2"
     assert app.session_state["display_name"] == "Second"
     assert app.session_state["profile_display_name"] == "Second"
+
+
+def test_new_visitor_starts_guest_without_welcome_gate(logged_out_user, monkeypatch):
+    monkeypatch.setattr(settings, "guest_access_enabled", True)
+    monkeypatch.setattr(settings, "use_local_api", True)
+    monkeypatch.setattr(auth_gate, "authenticated_guest", lambda: None)
+    monkeypatch.setattr(auth_gate, "_cookie_value", lambda _name: None)
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    assert not app.exception
+    rendered = "\n".join(markdown.value or "" for markdown in app.markdown)
+    source = Path("ui/auth_gate.py").read_text(encoding="utf-8")
+    assert "fetch('/api/v1/auth/guest/start'" in source
+    assert "credentials: 'same-origin'" in source
+    assert "__coDesignGuestStartPending" in source
+    assert "Starting a private guest workspace" in rendered
+    assert not any(button.label == "Continue as guest" for button in app.button)
+    assert not any(button.label == "Sign in or create an account" for button in app.button)
+    assert len(app.chat_input) == 0
+    assert "guest_secret" not in rendered
+
+
+def test_failed_guest_probe_keeps_existing_cookie_until_explicit_new_start(
+    logged_out_user, monkeypatch
+):
+    monkeypatch.setattr(settings, "guest_access_enabled", True)
+    monkeypatch.setattr(settings, "use_local_api", True)
+    monkeypatch.setattr(auth_gate, "authenticated_guest", lambda: None)
+    monkeypatch.setattr(
+        auth_gate,
+        "_cookie_value",
+        lambda name: "private-cookie" if name == settings.guest_session_cookie_name else None,
+    )
+    start = MagicMock()
+    monkeypatch.setattr(auth_gate, "_start_guest_in_browser", start)
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+
+    assert not app.exception
+    start.assert_not_called()
+    assert any(button.key == "guest-entry-retry" for button in app.button)
+    next(button for button in app.button if button.key == "guest-entry-new").click().run()
+    start.assert_called_once_with()
+
+
+def test_guest_start_error_waits_for_retry(logged_out_user, monkeypatch):
+    monkeypatch.setattr(settings, "guest_access_enabled", True)
+    monkeypatch.setattr(settings, "use_local_api", True)
+    monkeypatch.setattr(auth_gate, "authenticated_guest", lambda: None)
+    monkeypatch.setattr(auth_gate, "_cookie_value", lambda _name: None)
+    monkeypatch.setattr(
+        auth_gate.st, "query_params", {"guest_start_error": "1"}, raising=False
+    )
+    start = MagicMock()
+    monkeypatch.setattr(auth_gate, "_start_guest_in_browser", start)
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+
+    assert not app.exception
+    start.assert_not_called()
+    assert any(button.key == "guest-entry-retry" for button in app.button)
+
+
+def test_guest_workspace_binds_owner_and_cognito_switch_clears_guest_state(
+    logged_out_user, monkeypatch
+):
+    monkeypatch.setattr(settings, "use_local_api", False)
+    monkeypatch.setattr(settings, "guest_access_enabled", True)
+    monkeypatch.setattr(auth_gate, "authenticated_guest", lambda: {"guest_id": "guest:test"})
+    guest_app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    assert not guest_app.exception
+    assert guest_app.session_state["_auth_bound_kind"] == "guest"
+    assert guest_app.session_state["_auth_store_identifier"] == "guest:test"
+    assert guest_app.session_state["display_name"] == "Guest"
+    assert any(
+        button.key == "profile-guest-sign-in" and button.label == "Sign in or sign up"
+        for button in guest_app.button
+    )
+    guest_rendered = "\n".join(markdown.value or "" for markdown in guest_app.markdown)
+    assert '<span class="cd-sidebar-profile-name">Guest</span>' in guest_rendered
+    assert not any(input_widget.label == "Display name" for input_widget in guest_app.text_input)
+    profile_source = Path("ui/profile.py").read_text(encoding="utf-8")
+    assert "to your account automatically" in profile_source
+    assert "Review guest workspace" not in profile_source
+    assert "Transfer guest workspace" not in profile_source
+    guest_app.chat_input[0].set_value("I want to explore a design problem").run()
+    assert not guest_app.exception
+    guest_thread_id = guest_app.session_state["thread_id"]
+    assert guest_thread_id in guest_app.session_state["_legacy_backfill_done"]
+    guest_app.session_state["guest_private_draft"] = "discard on switch"
+
+    monkeypatch.setattr(auth_gate, "authenticated_user", lambda: {
+        "id": "user-cognito", "cognito_sub": "switched-sub",
+        "display_name": "Cognito Student", "role": "student",
+    })
+    monkeypatch.setattr(auth_gate, "authenticated_guest", lambda: None)
+    monkeypatch.setattr(auth_gate, "current_user_claims", lambda _user=None: {
+        "sub": "switched-sub", "name": "Cognito Student",
+    })
+    guest_app.run()
+    assert not guest_app.exception
+    assert guest_app.session_state["_auth_bound_kind"] == "cognito"
+    assert guest_app.session_state["_auth_store_identifier"] == "cognito:switched-sub"
+    assert "guest_private_draft" not in guest_app.session_state
+    assert (
+        "_legacy_backfill_done" not in guest_app.session_state
+        or guest_thread_id not in guest_app.session_state["_legacy_backfill_done"]
+    )
+    assert guest_app.session_state["display_name"] == "Cognito Student"
+    signed_in_rendered = "\n".join(markdown.value or "" for markdown in guest_app.markdown)
+    assert '<span class="cd-sidebar-profile-name">Cognito Student</span>' in signed_in_rendered
+    assert not any(button.key == "profile-guest-sign-in" for button in guest_app.button)
+
+
+def test_guest_renewal_runs_after_workspace_render_without_polling():
+    source = Path("streamlit_app.py").read_text(encoding="utf-8")
+    render_at = source.index("render_workspace(model_id, reasoning_effort)")
+    renew_at = source.index("fetch('/api/v1/auth/guest/renew'")
+    assert render_at < renew_at
+    assert "credentials: 'same-origin'" in source[renew_at : renew_at + 180]
+    assert "setInterval" not in source[renew_at : renew_at + 400]
+
+
+def test_cognito_refresh_bridge_precedes_guest_probe(logged_out_user, monkeypatch):
+    """An expired Cognito ID plus refresh hint wins before a guest cookie is probed."""
+    guest_probe = MagicMock(side_effect=AssertionError("guest probe ran before refresh"))
+    monkeypatch.setattr(auth_gate, "authenticated_user", lambda: None)
+    monkeypatch.setattr(auth_gate, "should_attempt_session_refresh", lambda: True)
+    refresh_redirect = MagicMock(return_value=True)
+    monkeypatch.setattr(auth_gate, "redirect_to_session_refresh", refresh_redirect)
+    monkeypatch.setattr(auth_gate, "authenticated_guest", guest_probe)
+    browser_cookies = {
+        settings.cognito_id_token_cookie_name: "expired-id-token",
+        settings.cognito_session_hint_cookie_name: "1",
+        settings.guest_session_cookie_name: "valid-guest-cookie",
+    }
+    monkeypatch.setattr(
+        auth_gate, "_cookie_value", lambda name: browser_cookies.get(name)
+    )
+
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+
+    assert not app.exception
+    refresh_redirect.assert_called_once_with()
+    guest_probe.assert_not_called()
+    assert len(app.chat_input) == 0
+
+
+def test_expired_cognito_id_with_session_hint_qualifies_for_refresh(monkeypatch):
+    """The browser hint keeps an expired Cognito session ahead of guest auth."""
+    monkeypatch.setattr(
+        auth_gate,
+        "st",
+        SimpleNamespace(session_state={}, query_params={}),
+    )
+    cookies = {
+        settings.cognito_id_token_cookie_name: "expired-id-token",
+        settings.cognito_session_hint_cookie_name: "1",
+        settings.guest_session_cookie_name: "valid-guest-cookie",
+    }
+    monkeypatch.setattr(auth_gate, "_cookie_value", lambda name: cookies.get(name))
+    assert auth_gate.should_attempt_session_refresh() is True
 
 
 def test_logged_in_identity_without_sub_is_cleared(monkeypatch):
@@ -692,6 +856,7 @@ def test_logout_user_navigates_to_fastapi_logout(monkeypatch):
     stop = MagicMock(name="stop", side_effect=RuntimeError("stop"))
     monkeypatch.setattr(st, "html", html)
     monkeypatch.setattr(st, "stop", stop)
+    st.session_state.clear()
     monkeypatch.setattr(
         auth_gate,
         "app_logout_url",
@@ -718,6 +883,51 @@ def test_logout_user_never_calls_st_logout(monkeypatch):
     auth_gate.logout_user()
     logout.assert_not_called()
     assert "application API" in str(st.session_state.get("_auth_config_error") or "")
+
+
+def test_guest_logout_uses_same_origin_post_without_embedding_cookie(monkeypatch):
+    html = MagicMock(name="streamlit_html")
+    st.session_state.clear()
+    st.session_state["_auth_bound_kind"] = "guest"
+    monkeypatch.setattr(
+        auth_gate,
+        "_cookie_value",
+        lambda name: "private-secret" if name == settings.guest_session_cookie_name else None,
+    )
+    monkeypatch.setattr(auth_gate.st, "html", html)
+    monkeypatch.setattr(auth_gate.st, "stop", MagicMock())
+    auth_gate.logout_user()
+    rendered = html.call_args.args[0]
+    assert "fetch('/api/v1/auth/logout'" in rendered
+    assert "method: 'POST'" in rendered
+    assert "credentials: 'same-origin'" in rendered
+    assert "private-secret" not in rendered
+
+
+def test_cognito_logout_preserves_guest_cookie_by_using_redirect(monkeypatch):
+    html = MagicMock(name="streamlit_html")
+    st.session_state.clear()
+    st.session_state["_auth_bound_kind"] = "cognito"
+    monkeypatch.setattr(
+        auth_gate,
+        "_cookie_value",
+        lambda name: "private-secret" if name in {
+            settings.guest_session_cookie_name,
+            settings.cognito_id_token_cookie_name,
+        } else None,
+    )
+    monkeypatch.setattr(
+        auth_gate, "app_logout_url", lambda: "http://127.0.0.1:8000/api/v1/auth/logout"
+    )
+    monkeypatch.setattr(auth_gate.st, "html", html)
+    monkeypatch.setattr(auth_gate.st, "stop", MagicMock())
+
+    auth_gate.logout_user()
+
+    rendered = html.call_args.args[0]
+    assert "window.location.replace" in rendered
+    assert "fetch('/api/v1/auth/logout'" not in rendered
+    assert "private-secret" not in rendered
 
 
 def test_app_logout_url_uses_public_origin_and_rejects_unsafe_base(monkeypatch):
@@ -821,6 +1031,67 @@ def test_authenticated_user_revalidates_without_caching_raw_token(monkeypatch):
     assert calls == ["raw-id-token", "raw-id-token"]
     assert "_auth_me_token" not in session_obj
     assert "raw-id-token" not in session_obj
+
+
+@pytest.mark.parametrize("failure", [TimeoutError("timeout"), RuntimeError("503")])
+def test_auth_probe_failure_waits_without_refresh_or_guest_fallback(
+    monkeypatch, failure
+):
+    """A failed /auth/me probe cannot turn a signed-in owner into a guest."""
+    monkeypatch.setattr(auth_gate, "authenticated_user", _REAL_AUTHENTICATED_USER)
+    monkeypatch.setattr(auth_gate, "_cookie_value", lambda _name: "opaque-id")
+    monkeypatch.setattr(
+        "ui.runtime.local_api_client",
+        lambda: MagicMock(auth_me=MagicMock(side_effect=failure)),
+    )
+    refresh = MagicMock(return_value=True)
+    guest = MagicMock()
+    monkeypatch.setattr(auth_gate, "redirect_to_session_refresh", refresh)
+    monkeypatch.setattr(auth_gate, "authenticated_guest", guest)
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+
+    assert not app.exception
+    assert any("couldn't check your session" in error.value for error in app.error)
+    assert any(button.label == "Retry" for button in app.button)
+    assert len(app.chat_input) == 0
+    assert "thread_id" not in app.session_state
+    refresh.assert_not_called()
+    guest.assert_not_called()
+
+
+def test_auth_probe_retry_recovers_same_owner_without_refresh(monkeypatch):
+    """A later successful probe opens the workspace without clearing identity."""
+    monkeypatch.setattr(auth_gate, "authenticated_user", _REAL_AUTHENTICATED_USER)
+    monkeypatch.setattr(auth_gate, "_cookie_value", lambda _name: "opaque-id")
+    response = [TimeoutError("timeout")]
+
+    def auth_me(_id_token):
+        if response:
+            raise response.pop()
+        return {"cognito_sub": "recovered-sub", "display_name": "Alex", "role": "student"}
+
+    monkeypatch.setattr("ui.runtime.local_api_client", lambda: MagicMock(auth_me=auth_me))
+    refresh = MagicMock(return_value=True)
+    monkeypatch.setattr(auth_gate, "redirect_to_session_refresh", refresh)
+    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    assert not app.exception
+    assert len(app.chat_input) == 0
+    next(button for button in app.button if button.label == "Retry").click().run()
+    assert not app.exception
+    assert app.session_state["_auth_bound_sub"] == "recovered-sub"
+    assert len(app.chat_input) == 1
+    refresh.assert_not_called()
+
+
+def test_malformed_auth_profile_is_unavailable_not_signed_out(monkeypatch):
+    """A malformed success payload must never enter the guest/login path."""
+    monkeypatch.setattr(auth_gate, "authenticated_user", _REAL_AUTHENTICATED_USER)
+    monkeypatch.setattr(auth_gate, "_cookie_value", lambda _name: "opaque-id")
+    monkeypatch.setattr(
+        "ui.runtime.local_api_client", lambda: MagicMock(auth_me=lambda _token: {})
+    )
+    with pytest.raises(auth_gate.AuthServiceUnavailable):
+        auth_gate.authenticated_user()
 
 
 def test_owner_binding_remains_cognito_sub(logged_in_user):

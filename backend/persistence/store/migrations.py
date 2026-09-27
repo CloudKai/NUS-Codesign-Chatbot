@@ -10,6 +10,17 @@ from __future__ import annotations
 import sqlite3
 
 
+def migrate_guest_claim_columns(connection: sqlite3.Connection) -> None:
+    """Add the small retry tombstone fields to existing guest sessions."""
+    columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(guest_sessions)")}
+    for name in (
+        "claim_user_id", "claim_operation_id", "claim_result_text", "claim_expires_at",
+        "preview_user_id", "preview_operation_id", "preview_fingerprint", "preview_expires_at",
+    ):
+        if name not in columns:
+            connection.execute(f"ALTER TABLE guest_sessions ADD COLUMN {name} TEXT")
+
+
 def migrate_oauth_login_states(connection: sqlite3.Connection) -> None:
     """Rebuild legacy camelCase OAuth state columns to snake_case."""
     rows = connection.execute(

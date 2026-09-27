@@ -398,6 +398,12 @@ class Settings:
     )
     ui_base_url: str = os.getenv("CO_DESIGN_UI_URL", "http://127.0.0.1:8501")
     use_local_api: bool = _boolean("USE_LOCAL_API", True)
+    # Guest ownership is an explicit opt-in. Keep production disabled until
+    # the guest persistence migration and later release phases are approved.
+    guest_access_enabled: bool = _boolean("GUEST_ACCESS_ENABLED", False)
+    guest_session_cookie_name: str = os.getenv(
+        "GUEST_SESSION_COOKIE_NAME", "co_design_guest"
+    ).strip() or "co_design_guest"
     # Cognito owns the browser session via HttpOnly refresh + ID-token cookies.
     # Cookie Max-Age for refresh defaults to 30d; Cognito app-client refresh
     # token validity is authoritative (~30d when configured that way).

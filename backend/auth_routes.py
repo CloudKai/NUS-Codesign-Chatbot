@@ -109,6 +109,28 @@ def _read_cookie(request: Request, name: str) -> str | None:
     return cleaned or None
 
 
+def _is_configured_same_origin(request: Request) -> bool:
+    """Return whether a browser request matches the configured public origin."""
+    origin = str(request.headers.get("origin") or "").strip()
+    expected = urlparse(settings.public_api_base_url)
+    supplied = urlparse(origin)
+    host = str(request.headers.get("host") or "").strip()
+    return bool(
+        origin
+        and supplied.scheme in {"http", "https"}
+        and supplied.netloc
+        and not supplied.username
+        and not supplied.password
+        and supplied.path in {"", "/"}
+        and not supplied.params
+        and not supplied.query
+        and not supplied.fragment
+        and supplied.scheme == expected.scheme
+        and supplied.netloc.lower() == expected.netloc.lower()
+        and supplied.netloc.lower() == host.lower()
+    )
+
+
 def _set_auth_cookies(response: Response, session: CognitoAuthSession) -> None:
     """Attach HttpOnly refresh, ID-token, and session-hint cookies."""
     refresh_params = refresh_cookie_settings()
@@ -242,7 +264,7 @@ def register_auth_routes(
 
         try:
             session = oidc_client.complete_login(code=code or "", state=query_state)
-            sync_authenticated_user(session.identity.claims, store=store)
+            profile = sync_authenticated_user(session.identity.claims, store=store)
         except CognitoOIDCError as exc:
             logger.info("Cognito callback rejected: %s", exc)
             return _auth_error_redirect()
@@ -250,8 +272,41 @@ def register_auth_routes(
             logger.exception("Cognito callback failed unexpectedly")
             return _auth_error_redirect()
 
-        response = RedirectResponse(_safe_ui_redirect("/"), status_code=302)
+        guest_secret = _read_cookie(request, settings.guest_session_cookie_name)
+        claimed_guest = False
+        claim_failed = False
+        if settings.guest_access_enabled and guest_secret:
+            from backend.guest_claims import claim_guest_workspace_automatically
+
+            try:
+                claimed_guest = claim_guest_workspace_automatically(
+                    store=store, secret=guest_secret,
+                    target_user_id=profile.user_id,
+                ) is not None
+            except Exception as claim_error:
+                # Login succeeds; the transfer worker releases its write fence
+                # and leaves the browser guest cookie available for retry.
+                logger.warning(
+                    "Guest transfer after sign-in failed request_id=%s error=%s",
+                    str(getattr(request.state, "request_id", "unknown")),
+                    type(claim_error).__name__,
+                )
+                claim_failed = True
+
+        redirect_path = "/?guest_transfer_error=1" if claim_failed else "/"
+        response = RedirectResponse(_safe_ui_redirect(redirect_path), status_code=302)
         _set_auth_cookies(response, session)
+        if claimed_guest:
+            guest_cookie_secure = settings.auth_cookie_secure or str(
+                request.url.hostname or ""
+            ).lower() not in {"localhost", "127.0.0.1", "::1"}
+            response.delete_cookie(
+                key=settings.guest_session_cookie_name,
+                path="/",
+                secure=guest_cookie_secure,
+                httponly=True,
+                samesite="lax",
+            )
         _clear_oauth_state_cookie(response)
         response.headers["Cache-Control"] = "no-store"
         return response
@@ -368,7 +423,7 @@ def register_auth_routes(
     @app.get("/api/v1/auth/logout")
     @app.post("/api/v1/auth/logout")
     def auth_logout(request: Request) -> RedirectResponse:
-        """Best-effort revoke refresh token, always clear cookies, return to UI."""
+        """Revoke presented sessions, clear their cookies, and return to UI."""
         refresh_token = _read_cookie(request, settings.cognito_refresh_cookie_name)
         if refresh_token:
             oidc_client.revoke(refresh_token)
@@ -376,5 +431,29 @@ def register_auth_routes(
             _safe_ui_redirect("/?signed_out=1"), status_code=302
         )
         _clear_auth_cookies(response)
+        # A top-level cross-site GET can carry SameSite=Lax cookies. Do not let
+        # that request revoke a guest owner's only recovery credential.
+        has_cognito_session_cookie = bool(
+            _read_cookie(request, settings.cognito_id_token_cookie_name)
+            or _read_cookie(request, settings.cognito_refresh_cookie_name)
+        )
+        if (
+            request.method == "POST"
+            and _is_configured_same_origin(request)
+            and not has_cognito_session_cookie
+        ):
+            guest_secret = _read_cookie(request, settings.guest_session_cookie_name)
+            if settings.guest_access_enabled and guest_secret:
+                store.revoke_guest_session(guest_secret)
+            guest_cookie_secure = settings.auth_cookie_secure or str(
+                request.url.hostname or ""
+            ).lower() not in {"localhost", "127.0.0.1", "::1"}
+            response.delete_cookie(
+                key=settings.guest_session_cookie_name,
+                path="/",
+                secure=guest_cookie_secure,
+                httponly=True,
+                samesite="lax",
+            )
         response.headers["Cache-Control"] = "no-store"
         return response

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from streamlit.testing.v1 import AppTest
+from saved_ui_workspace import saved_app
 
 from backend.domain import CoachTurn, EducationalAssessment
 from backend.student_journey import DEFAULT_STAGE
@@ -83,7 +84,7 @@ def test_done_payload_reconciles_from_persisted_history(monkeypatch) -> None:
 
     monkeypatch.setattr(chat, "stream_coach_turn_events", counting_stream)
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     assert not app.exception
     prompt = "What is a design problem I could explore?"
     app.chat_input[0].set_value(prompt).run()
@@ -109,7 +110,7 @@ def test_successful_send_does_not_duplicate_submit_on_next_run(monkeypatch) -> N
 
     monkeypatch.setattr(chat, "stream_coach_turn_events", counting_stream)
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     prompt = "What is a design problem I could explore?"
     app.chat_input[0].set_value(prompt).run()
     assert submissions == [prompt]
@@ -175,7 +176,7 @@ def test_submitted_prompt_does_not_share_widget_with_previous_assistant(
 
     monkeypatch.setattr(chat, "stream_coach_turn_events", counting_stream)
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     app.chat_input[0].set_value(first_prompt).run()
     assert not app.exception
     assert submissions == [first_prompt]
@@ -236,7 +237,7 @@ def test_consecutive_qa_turns_keep_persisted_history(monkeypatch) -> None:
 
     monkeypatch.setattr(chat, "stream_coach_turn_events", counting_stream)
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     thread_id = str(app.session_state["thread_id"])
     for prompt in prompts:
         app.chat_input[0].set_value(prompt).run()
@@ -296,7 +297,7 @@ def test_coaching_qa_coaching_keeps_history_and_skips_qa_counter(
     coaching_two = "I assume older pedestrians always need more crossing time."
     prompts = (coaching_one, qa_prompt, coaching_two)
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     thread_id = str(app.session_state["thread_id"])
     counters: list[int] = []
     for prompt in prompts:
@@ -371,7 +372,7 @@ def test_auto_advance_reconciles_thinking_path_after_reply_is_visible(
 
     monkeypatch.setattr(chat, "stream_coach_turn_events", fake_stream)
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     thread_id = app.session_state["thread_id"]
     app.chat_input[0].set_value("Older pedestrians need more crossing time.").run()
     assert not app.exception
@@ -418,7 +419,7 @@ def test_citation_buttons_render_from_done_payload_without_get_source(
 
     monkeypatch.setattr(chat, "rerun_app", spy_rerun)
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     local_store = StudentStore()
     added = add_text_source(
         local_store,
@@ -535,7 +536,7 @@ def test_deep_review_button_appears_after_qualifying_turn(monkeypatch) -> None:
 
     monkeypatch.setattr(chat, "rerun_app", spy_rerun)
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     button = _deep_review_button(app)
     assert button.disabled is True
     app.chat_input[0].set_value(
@@ -564,7 +565,7 @@ def test_deep_review_progress_caption_refreshes_after_qualifying_turn(
 ) -> None:
     """Locked caption names Reflection until the full Thinking Path is complete."""
     del monkeypatch
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     button = _deep_review_button(app)
     assert button.disabled is True
     captions = _caption_text(app)
@@ -582,7 +583,7 @@ def test_ineligible_deep_review_click_does_not_start(monkeypatch) -> None:
 
     monkeypatch.setattr(studio_panel, "start_deep_review", spy_start)
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     button = _deep_review_button(app)
     assert button.disabled is True
     button.click().run()
@@ -601,7 +602,7 @@ def test_deep_review_failure_keeps_counter_and_safe_error(monkeypatch) -> None:
 
     monkeypatch.setattr(studio_panel, "start_deep_review", boom)
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     store = StudentStore()
     thread_id = app.session_state["thread_id"]
     thread = store.get_thread(thread_id) or {}
@@ -634,7 +635,7 @@ def test_chat_stays_enabled_while_persisted_deep_review_job_is_running() -> None
     from backend.student_store import StudentStore
     from backend.persistence.store.contracts import utc_now
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     assert not app.exception
     thread_id = str(app.session_state["thread_id"])
     started = utc_now()

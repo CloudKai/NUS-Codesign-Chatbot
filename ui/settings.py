@@ -19,10 +19,11 @@ def persist_response_language() -> None:
     """Persist the response language immediately when its setting changes."""
     chosen_language = str(st.session_state.setting_response_language)
     st.session_state.response_language = chosen_language
-    store.update_thread(
-        st.session_state.thread_id,
-        metadata={"response_language": chosen_language},
-    )
+    if st.session_state.get("thread_id"):
+        store.update_thread(
+            st.session_state.thread_id,
+            metadata={"response_language": chosen_language},
+        )
 
 
 def apply_selected_model(model_id: str, *, effort: str | None = None) -> None:
@@ -45,13 +46,14 @@ def apply_selected_model(model_id: str, *, effort: str | None = None) -> None:
 
 def persist_composer_model_choice() -> None:
     """Persist the active composer model and reasoning effort on the notebook."""
-    store.update_thread(
-        st.session_state.thread_id,
-        metadata={
-            "selected_model": st.session_state.selected_model,
-            "reasoning_effort": st.session_state.get("reasoning_effort"),
-        },
-    )
+    if st.session_state.get("thread_id"):
+        store.update_thread(
+            st.session_state.thread_id,
+            metadata={
+                "selected_model": st.session_state.selected_model,
+                "reasoning_effort": st.session_state.get("reasoning_effort"),
+            },
+        )
 
 
 def persist_appearance() -> None:

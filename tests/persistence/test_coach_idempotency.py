@@ -7,6 +7,8 @@ import json
 import sqlite3
 import threading
 import time
+from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -149,6 +151,35 @@ def test_completed_key_replays_full_assessment_fields(tmp_path):
         replay.assessment.contribution_summary
         == first.assessment.contribution_summary
     )
+    assert provider.calls == 1
+
+
+def test_waiter_lookup_preserves_exact_turn_between_persist_and_complete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A waiter sees the atomic marker payload before completion is marked."""
+    store = StudentStore(tmp_path / "idempotent-persist-window.sqlite3")
+    thread_id = store.create_thread(model_id="mock", support_mode="critical-thinking")
+    provider = CountingProvider()
+    request = _request(thread_id, key="persist-window-key")
+    complete = store.complete_coach_request
+    observed: list[dict[str, Any] | None] = []
+
+    def inspect_before_complete(*args: Any, **kwargs: Any) -> None:
+        """Emulate a waiter lookup after persist and before lease completion."""
+        observed.append(
+            store.lookup_completed_coach_request(
+                thread_id, idempotency_key="persist-window-key"
+            )
+        )
+        return complete(*args, **kwargs)
+
+    monkeypatch.setattr(store, "complete_coach_request", inspect_before_complete)
+    first = _service(store, provider).submit(request)
+    replay = _service(store, provider).submit(request)
+
+    assert observed == [first.model_dump(mode="json")]
+    assert replay == first
     assert provider.calls == 1
 
 

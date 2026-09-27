@@ -2,6 +2,963 @@
 
 ## CURRENT STATUS
 
+### Guest sign-in opens the transferred active notebook (2026-09-27)
+
+- **Behavior:** Successful guest-to-account transfer now sets only the account's
+  `active_thread_id` to the guest notebook that was open before sign-in, if it
+  belongs to that transfer. Streamlit's existing owner switch then restores
+  that notebook. Other account notebooks and preferences remain intact; a
+  missing or stale guest selection leaves the prior account selection intact.
+- **Files:** `backend/student_store.py`, `tests/http/test_app_sessions.py`,
+  `docs/GUEST_ACCESS_PHASE_HANDOFF.md`, and this entry.
+- **Validation:** Targeted callback, stale-selection, and persistence/retry
+  tests passed. The full deterministic mock suite, compileall, and
+  `git diff --check` passed. No live Cognito sign-in was used for testing.
+- **Compatibility/rollback:** No schema or data migration and no live model
+  calls. Rolling back the preference update restores the previous account
+  selection behavior; notebook transfer and existing data remain untouched.
+- **Next exact action:** On the local guest-enabled app, open a saved guest
+  notebook, sign into an account that already has a different active notebook,
+  and verify the guest notebook opens after redirect and again after reload.
+- **Local follow-up:** The first manual attempt still used the API process that
+  predated this change, so transfer succeeded but the old account selection
+  reopened. The user's already-transferred `Try` notebook was selected in the
+  browser and remained active after reload. The local stack was restarted at
+  `127.0.0.1:8080` with guest access and the mock provider; the browser loaded
+  `Try` from the restarted app. A fresh guest-to-Cognito browser sign-in has not
+  been performed; the isolated callback regression covers that transition.
+
+### Unsaved New chat drafts (2026-09-27)
+
+- **Behavior:** Opening New chat shows the normal Coach welcome and composer
+  without creating an `Untitled notebook` or adding a Recent. The first
+  nonempty submitted message saves the notebook, seeds the welcome, and follows
+  the existing coach path. Library and Thinking Path explain that a message is
+  needed while the draft is unsaved. Existing notebooks and their history are
+  untouched.
+- **Files:** `ui/session.py`, `ui/panels/chat.py`, `ui/workspace.py`,
+  `ui/panels/nav.py`, `ui/notebooks.py`, `ui/topbar.py`, `ui/settings.py`,
+  `ui/profile.py`; related UI tests and `tests/saved_ui_workspace.py`.
+- **Validation:** Focused Streamlit tests and the full deterministic mock suite
+  passed; compileall and `git diff --check` passed. In the local browser,
+  desktop New chat kept the Recent count unchanged and showed the welcome;
+  390 px mobile showed the same draft with an enabled composer. The browser
+  still reports the previously documented iframe MutationObserver errors.
+- **Compatibility/rollback:** No schema or data migration, no deletion of old
+  empty notebooks, and no paid model call. Reverting these UI changes restores
+  eager creation without changing existing persisted data.
+- **Next exact action:** In the local guest and signed-in app, open New chat,
+  send one test message, then reload and confirm the new chat appears once in
+  Recents with its full transcript. The isolated AppTest covers that persistence
+  path without writing to the user's live database.
+
+### Baseline failure repair — Sol High implementation / Astra High review (2026-09-27)
+
+**Expected vs actual.** Repair the 11 known failures with small, evidence-based
+changes and execute the dependency-gated Strands tests. Two application bugs
+were fixed: course-catalog citations retain their validated labels from the full
+retrieval source list (including sparse `S5`/`S17`), and the unavailable-course
+evidence check reads `CoachRequest.source_context` so it can return the existing
+grounding-gap response without calling the model. Source ownership and label
+validation still precede citation resolution. The other failures were stale
+expectations for Reflection completion in place, Guide/Free readiness, mandatory
+prompt size, production stage selection, current UI copy/tab state, and effective
+responsive CSS. Tests now exercise those current contracts. No pedagogical
+policy was changed to satisfy a test.
+
+**Files changed.** `backend/coaching/execution.py`,
+`backend/coaching/mode_policy.py`, `tests/domain/test_citation_resolution.py`,
+`tests/domain/test_mode_classification.py`,
+`tests/domain/test_prompt_architecture.py`,
+`tests/domain/test_thinking_path_journey.py`, `tests/http/test_api.py`,
+`tests/test_deployment_config.py`, `tests/ui/test_deep_review_control.py`,
+`tests/ui/test_streamlit_ui.py`, `tests/ui/test_theme_styles.py`,
+`tests/domain/test_strands_first_cycle_middleware.py`,
+`scripts/diagnostics/check_agentcore_runtime_dependencies.py`,
+`backend/student_store.py`, `tests/persistence/test_coach_idempotency.py`,
+`docs/LOCAL_DEMO_IMPLEMENTATION.md`, and this entry. The architecture document
+now describes the existing production stage-selection settings, superseding its
+stale Month-1 auto-advance paragraph. Existing guest/reload work was preserved.
+
+**Validation.** Sol's focused domain/API block passed **311 tests**, its UI and
+deployment block passed **74**, and Astra independently passed **53** grounding,
+citation, source-security, and prompt tests with no blocking review findings.
+The full build after the application fixes passed compilation and recorded
+**2,214 passed, zero failures, one dependency-gated module skipped** in
+`/private/tmp/codesign-baseline-build.xml`. This includes streaming/graph,
+confirmed transitions, restart recovery, guest ownership, and persistence
+coverage. An isolated mock API/Streamlit/Caddy startup using temporary data
+returned API health `ok`, readiness `ready`, and Streamlit health `ok`; that
+temporary stack was stopped after verification.
+
+**Runtime follow-up.** The one skip represents 14 Strands middleware
+cases. The existing dedicated CI job installs `agentcore_runtime/requirements.txt`
+and executes them separately. A temporary environment at
+`/private/tmp/codesign-baseline-runtime-venv` uses those same pins, leaving the
+companion app and EC2 requirements unchanged. Executing the module exposed a
+schema fixture missing two required boolean fields; the compatibility diagnostic
+also matched an obsolete literal code format despite the correct runtime retry
+setting. Fixtures now include both required booleans and retain null-rejection
+checks. The diagnostic captures constructed Botocore configuration through a
+mocked BedrockModel and checks one total attempt plus the Deep Review timeout.
+All **35 runtime tests passed**, including all 14 previously skipped cases; the
+network-free dependency diagnostic passed. Sol and Astra independently verified
+these results and found no blocking issue. Production schema/retry behavior and
+dependency files are unchanged. The companion build retains its intentional
+module skip; the separate runtime suite has **zero skips**.
+
+**Compatibility and rollback.** No schema or data migration, production
+dependency change, deployment, or live model call. Previous notebook and guest
+data remain untouched. Phase-only before copies are under
+`/private/tmp/codesign-baseline-before`; rollback must preserve the earlier
+uncommitted work. The separate iframe MutationObserver issue and real EC2
+performance measurements remain outside this repair phase.
+
+**Final rerun follow-up.** After runtime validation edits, a second
+full build exposed an intermittent concurrent same-key replay failure in
+`test_api_same_key_waiters_converge_under_active_limit`: the replayed assessment
+lost fields although both requests returned 200. Investigation found that the
+lookup path ignored an exact turn already persisted on a still-pending marker
+and replaced it with a slim reconstruction. The lookup now returns that exact
+persisted turn while leaving status promotion to the existing claim/complete
+path, so it adds no DSQL write contention. A deterministic regression exercises
+the persist-before-complete window and checks full response equality plus one
+provider invocation. Sol and Astra independently passed the idempotency and
+rate-limit block (**42 tests**) and approved the read-only fix.
+
+The final full build passed compilation and recorded **2,215 passed, zero
+failures, one dependency-gated module skipped** (2,216 collected) in
+`/private/tmp/codesign-baseline-build-replay.xml`. The separate pinned runtime
+suite passed **35 tests with zero skips**, so every previously skipped Strands
+case was executed successfully. `git diff --check` passed.
+
+**Next exact action.** User acceptance of this repair phase. For future
+verification, run
+`sh scripts/build.sh` in the companion environment and the existing
+`agentcore-runtime-compatibility` CI job (or its diagnostic/test commands in an
+environment with `agentcore_runtime/requirements.txt`) for the separate runtime.
+
+### Reload performance — Sol High implementation / Astra High review (2026-09-26)
+
+**Expected vs actual.** Reduce unnecessary reload work while preserving
+authentication, notebook history, guest transfer, sources, streaming, and
+Thinking Path. A failed session probe (transport/5xx/malformed success) now
+stops at a Retry screen before any refresh redirect, guest fallback, or
+protected workspace read. A genuine 401 or absent ID cookie retains the
+existing refresh-hint flow; authentication decisions and tokens are not cached.
+Restoring the saved notebook checks it before listing alternatives and skips
+rewriting the same active-notebook preference. Titles of 40 characters or less
+skip the legacy message lookup. A successful legacy attachment scan runs once
+per notebook per Streamlit session; relevant local upload/source/revision
+mutations invalidate it, failed scans retry, and a new browser session scans
+again. Chat already precedes secondary panels and Library mounts Sources only
+when selected, so no additional panel deferral was added.
+
+**Measured work reduction.** The same signed-in notebook reload through the
+local API made **12 requests before and 10 after**: the preference PATCH and
+short-title history GET are gone. A fresh valid-cookie reload went directly
+to the notebook. The existing expired-cookie path still refreshed Cognito and
+returned to the chat. Deterministic in-process facade counts were **13 → 11**
+after Send and **7 → 6** for an explicit rerun; cold creation remained 13.
+These are request-count results, not an EC2 latency benchmark.
+
+**Files changed.** `backend/api_client.py`, `ui/auth_gate.py`,
+`streamlit_app.py`, `ui/session.py`, `ui/topbar.py`,
+`ui/services/runtime.py`, `tests/http/test_api_client.py`,
+`tests/ui/test_auth_gate.py`, `tests/ui/test_probe_facade_counts.py`,
+`tests/ui/test_streamlit_ui.py`, and this entry. Existing guest-access changes
+were preserved. Sol High implemented and tested; Astra High reviewed the
+phase-only delta against before-edit copies and reported no blocking issues.
+
+**Validation.** Sol's focused block passed **78 tests**. Root ran
+`sh scripts/build.sh` with a JUnit report: compilation passed; pytest recorded
+**2,202 passed, 1 skipped, 11 failed** (2,214 total). Build therefore exits 1,
+with the same 11 documented unrelated failures listed in earlier entries.
+Passing cases include selected-source retrieval/citations, source upload and
+content, streaming/graph inspection, rejected/stale transitions, restart
+recovery, and automatic guest append. `git diff --check` passed. The isolated
+mock API/Streamlit/Caddy stack used temporary SQLite/files at
+`/private/tmp/codesign-reload-smoke-data`. Browser checks confirmed automatic
+Guest entry, mock chat response, transcript retention after reload, desktop
+rendering, and Guest/sign-in controls at 390 px. The usual signed-in browser
+restored Kai Ming's prior notebook/messages after reload. The temporary test
+tab and stack were stopped; the usual app remains available at port 8080.
+
+**Remaining limits.** Browser console recorded MutationObserver target errors
+during iframe mount/reload; the source is unconfirmed and the tested flows
+worked. This phase did not change layout JavaScript or installed dependencies.
+Historical legacy attachment metadata inserted from another tab/external tool
+requires a reload to rescan; modern attachment handling is unchanged. Real
+EC2/DSQL/S3 performance is unmeasured, and genuine expired-session refresh still
+incurs Cognito latency. No paid model calls or production deployment occurred.
+
+**Compatibility and rollback.** No schema, dependency, infrastructure, or data
+migration. Rollback is limited to the changes above (before-edit copies are
+under `/private/tmp/codesign-reload-before`), preserving all earlier guest work.
+Production guest settings remain unchanged. No developer notebook content was
+used for mock chat writes.
+
+**Next exact action.** User acceptance of this local performance phase, then
+measure the same notebook reload on the existing EC2 deployment before any
+instance-size or architecture change. Enter at `ui/session.py`,
+`ui/auth_gate.py`, and the existing `http_request`/`UI TIMING` logs; investigate
+the separate iframe console error only with a source stack or reproduction.
+
+### Automatic browser guest append on sign-in (2026-09-26)
+
+**Expected vs actual.** A verified Cognito sign-in should append notebooks from
+the same browser's valid guest cookie to the signed-in account without a human
+preview or confirmation. The callback now uses the existing fenced, idempotent
+copy/verify/atomic ownership transfer for any verified Cognito account. Existing
+account notebooks remain intact. It clears the guest cookie only after commit;
+copy or commit errors leave the guest cookie and ownership available and allow
+sign-in to complete with a neutral warning. Missing, invalid, expired, or
+unrelated guest cookies do not move data. The settings UI no longer offers
+manual review/confirmation, and its guest copy describes automatic append.
+
+**Files changed for this phase.** `backend/guest_claims.py`,
+`backend/auth_routes.py`, `backend/http/app.py`, `ui/profile.py`,
+`streamlit_app.py`, `tests/http/test_app_sessions.py`,
+`tests/http/test_guest_access.py`, `tests/ui/test_auth_gate.py`, this status
+entry, and `docs/GUEST_ACCESS_PHASE_HANDOFF.md`. The prior Phase 1–7 working
+tree was preserved.
+
+**Validation.** The focused auth, guest, guest persistence, and lecturer block
+passed after the final callback change. Tests include append into an existing
+student and lecturer account, preserved messages, referenced raw/extracted
+source-object remapping, guest-cookie revocation after commit, absent/invalid
+guest cookie, OAuth state mismatch, and copy failure recovery. Compileall and
+`git diff --check` passed. The full deterministic mock suite before the final
+two test additions and lecturer guard removal had **2,184 passed, 11 failed**;
+all 11 failures match the documented unrelated Phase 1 baseline. The two new
+cases and changed callback passed in the focused rerun; the full suite was not
+rerun after those narrowly scoped changes. The local mock stack was restarted
+against the usual database, API and Caddy readiness passed, and the browser
+showed Kai Ming's existing chat and signed-in settings with no manual transfer
+control. No real Cognito callback, paid provider, or production service ran.
+
+**Compatibility, rollback, and risks.** This phase adds no schema migration and
+does not rewrite the usual live database during tests. The legacy preview and
+confirm API routes remain compatible. Production guest access remains off;
+turning it off also disables automatic append. Large object copies run during
+the OAuth callback and may delay its redirect. If the browser times out,
+guest work is either still guest-owned and retryable or already committed to
+the account; signing in again with the same browser cookie replays the
+idempotent claim where available. A guest workspace in the separate temporary
+trial database cannot be found or appended from the usual database by this
+flow. That data remains separate and needs a reviewed migration if requested.
+
+**Next exact action.** With a valid guest cookie and Cognito account in the
+same database, perform a user-observed real sign-in acceptance check on a
+backed-up local copy before considering production enablement. Enter at
+`backend/auth_routes.py` and `tests/http/test_app_sessions.py` if that check
+finds a callback issue. Keep `GUEST_ACCESS_ENABLED=false` in production until
+the environment-specific handoff in `docs/GUEST_ACCESS_PHASE_HANDOFF.md` is
+accepted.
+
+### Local runtime restored to usual history (2026-09-26)
+
+The guest trial had been launched against isolated temporary SQLite storage,
+so signing into the same Kai Ming Cognito account showed only its one notebook
+there. The usual `data/co_design.sqlite3` still contained eight Kai Ming
+notebooks and 125 messages. Both databases passed SQLite `quick_check`; online
+backups were saved under `data/backups/` with the
+`before-reset-20260925T175700Z` suffix. The temporary guest-trial directory
+was retained. The local mock stack was restarted against the usual database
+with guest access enabled. API and Caddy readiness passed, and the browser
+showed all eight notebooks and loaded messages from an older conversation.
+No account data was merged or deleted. The guest-trial work remains separate;
+the production feature flag remains off. Next action, if desired: review an
+explicit transfer of guest-trial notebooks into the usual database, with a
+backup and rollback plan before writing either data set.
+
+### Hybrid guest access — post-Phase-7 local validation (2026-09-26)
+
+**Expected vs actual.** The guest chatbot should open without a welcome gate;
+Guest and a sign-in button should appear in the sidebar; chat history should
+survive reload and API restart. These paths worked in an isolated Playwright
+browser against the running mock stack at `http://127.0.0.1:8080/`: a first
+visit opened chat, a sent message received a mock coach reply, the
+conversation survived reload, and New chat plus recent-chat selection recovered
+it. The sign-in button reached Cognito Managed Login. At 390 px the menu showed
+Guest and the sign-in button. Fresh browser checks showed zero console errors;
+18 Chromium/Streamlit feature and iframe warnings remained. Real Cognito sign-in
+and the signed-in given-name switch were covered by AppTest, not a live login.
+
+An isolated mock API on port 8765 used a new SQLite database under
+`/private/tmp`. It created a guest and notebook, stopped and restarted the API,
+then confirmed the same cookie resolved the same owner and notebook, reused
+the guest, and renewed the HttpOnly cookie. The running local Caddy returned
+200 for health, 401 for guest renewal without a cookie, and 404 for the
+browser-blocked general notebook API path. Both Caddyfiles validated.
+
+**Validation.** Independent Sol High review ran the full deterministic suite:
+**2,183 passed, 12 failed** out of 2,195 collected. Eleven failures match the
+remaining Phase 1 baseline listed below; the former research-persistence
+failure and corrected coaching-style assertion now pass. The only additional
+failure was `tests/http/test_rate_limit.py::test_api_same_key_waiters_converge_under_active_limit`,
+whose two successful responses differed under full-suite concurrency; it passed
+alone. The focused guest/auth/claim/professor/persistence/deployment block passed
+**231/231** with the known unrelated Compose assertion deselected. Compileall,
+`sh -n scripts/start.sh`, `git diff --check`, and both Caddy validations passed.
+Production guest access remains false in `.env.example` and `compose.prod.yaml`.
+
+**Impact and next action.** No live database, AWS service, or paid provider was
+used; the existing local app remains running and the restart check used only
+temporary data. Local mock guest acceptance now includes browser and process
+restart evidence. Real Cognito login/claim, DSQL/S3 permissions, and production
+deployment remain unverified. Before enabling guests in production, enter at
+`docs/GUEST_ACCESS_PHASE_HANDOFF.md` and complete those environment-specific
+checks; retain the handoff file until the user accepts the phases.
+
+### Hybrid guest access — Phase 7 integration and release handoff (2026-09-26)
+
+**Expected.** Close the mock guest acceptance gaps, verify the additive SQLite
+upgrade from a pre-Phase-5 `guest_sessions` table with an online backup and
+restore, exercise flag-off/on retention, and record local startup and rollback
+evidence. Keep production guests disabled and stop before deployment or live
+infrastructure.
+
+**Actual.** Added focused regressions for Guest A denial when fetching Guest B's
+notebook, source, and a real message attachment; a copy failure and an
+ownership-commit failure each leave the guest credential, owner, and source
+references usable and permit retry; a post-commit old-prefix cleanup failure
+keeps account access and is retried by same-account recovery; explicit guest
+start after cookie loss creates a distinct owner; and a pre-Phase-5 guest
+session database survives SQLite online backup, additive claim-column startup
+migration, restore to a second path, and a second migration. The flag on → off
+→ on case confirms disabled guest routes return 404 without guest-owner lookup,
+then the unexpired original workspace resolves again after re-enable. Existing
+claim tests continue to cover account ownership and guest revocation.
+
+**Files changed for Phase 7.** `tests/http/test_guest_access.py`,
+`tests/persistence/test_guest_sessions.py`,
+`tests/ui/test_streamlit_ui.py` (one brittle source assertion narrowed to the
+two functions it covers), this status section, and the Phase 7 section in
+`docs/GUEST_ACCESS_PHASE_HANDOFF.md`. All Phase 1–6 and other working-tree
+changes were preserved.
+
+**Validation.** The requested pre-addition acceptance block passed with exit 0:
+
+```sh
+.venv/bin/python -m pytest -q tests/http/test_guest_access.py tests/persistence/test_guest_sessions.py tests/http/test_professor_analytics.py tests/http/test_professor_research.py tests/persistence/test_research_persistence.py tests/http/test_app_sessions.py tests/ui/test_auth_gate.py tests/ui/test_runtime_cache_safety.py tests/persistence/test_storage_providers.py tests/scripts/test_init_dsql.py tests/scripts/test_guest_local_proxy.py tests/test_architecture_contracts.py tests/test_deployment_config.py -k 'not test_production_compose_is_stateless_and_uses_prebuilt_image'
+```
+
+The post-addition guest route/persistence rerun passed **28 tests**. Eleven
+selected compatibility tests passed for source retrieval/citations, streaming,
+health/readiness, graph inspection, confirmation mode, and stage behavior; the
+exact command is in the Phase 7 handoff below. Sol reran the final guest
+acceptance block after Luna's additions and it passed. Sol then ran the full
+mock suite once: 12 tests failed, consisting of 11 Phase 1 baseline failures
+and one source-text assertion that swept unrelated guest-claim profile UI into
+the coaching-style check. The baseline research-persistence failure now passes.
+The new test issue was corrected by limiting the assertion to
+`_select_coaching_style` and `_persist_coaching_style`; its isolated rerun passed
+1 test. The full suite was not rerun after this test-only correction. Sol's
+compileall, `sh -n scripts/start.sh`, and `git diff --check` passed; a final
+`git diff --check` also passed. No paid provider, live DSQL/AWS/Cognito/S3, or
+deployment was used.
+
+The mock FastAPI and Streamlit processes started with SQLite, files, workspaces,
+and lecture notes redirected under `/private/tmp/phase7-guest-smoke`; FastAPI
+`/api/v1/health` and `/api/v1/ready` both returned 200, with readiness reporting
+development/mock/SQLite/local. The UI process reported its loopback URL and was
+stopped. The loopback guest create/restart persistence check was interrupted
+before producing a result, so restart through a running server remains
+unverified. Initial sandbox binds failed with `PermissionError: [Errno 1]
+operation not permitted`; escalation allowed the health/readiness startup.
+`command -v caddy` returned no path, so the local Caddy browser flow and
+desktop/390 px guest browser checks were not performed. The flag remains
+`false` in `.env.example` and `compose.prod.yaml`.
+
+**Migration, compatibility, and rollback.** The migration test used only
+temporary databases: it backed up a legacy five-column guest table online,
+verified current `StudentStore` added claim columns without changing the valid
+guest session, user, notebook, or message, restored the pre-migration backup to
+a second temporary path, and verified startup upgraded and resolved the same
+unexpired workspace there. No developer database or DSQL schema was changed.
+Flag-off keeps guest rows and workspaces; re-enabling resolves the same valid
+cookie. Rollback is to keep `GUEST_ACCESS_ENABLED=false` or revert Phase 7 test
+and documentation changes. Retain additive guest columns and rows; do not drop
+them. Production flag remains false.
+
+**Known risks/blockers.** Loopback restart persistence, Caddy route behavior,
+real Cognito, DSQL/S3 permissions, and desktop/mobile guest browser behavior
+remain unverified. Sol's single full-suite run found 11 Phase 1 baseline
+failures plus one brittle UI source assertion; the latter was narrowed and its
+focused test passed, but the full suite was not rerun after that test-only fix.
+
+**Next exact action.** Review the Phase 7 evidence and accept the documented
+gaps or arrange Caddy plus a completed loopback restart check. Keep the
+production flag off and the guest handoff file until all phases are accepted.
+
+### Hybrid guest access — Phase 6 lecturer identity projection (2026-09-25)
+
+**Expected behavior.** Lecturer roster, overview/attention, student detail,
+transcript/workspace tabs, and Research queue/detail/CSV use a stable public
+guest pseudonym and never expose internal guest owner IDs, `guest:` identifiers,
+guest credentials/digests, or hidden claims. Signed-in names/emails and existing
+analytics remain unchanged. Claimed notebooks/evidence appear once under the
+Cognito owner. Research observations, reviews, adjudications, and historical
+audit IDs stay unchanged; new identifiable reads audit the real internal owner.
+Lecturer routes remain staff-authenticated, and no migration or
+`guest_sessions` runtime dependency is introduced.
+
+**Actual behavior.** Added a provider-neutral identity projection using
+domain-separated SHA-256 over the persisted random guest owner ID. Public IDs
+use a 20-hex digest, and names use the last 10 hex characters. Guest status is
+derived from the persisted `guest:` identifier plus the absence of a Cognito
+sub; guest email is null. Signed-in fields pass through unchanged. Class
+populations omit only guest users with no currently owned notebooks, removing
+the source guest row after claim while preserving guests who still own a
+notebook. A single repository resolver maps public IDs to current internal
+owners before existing detail/ownership checks and audit targets; raw guest
+IDs are rejected as public aliases. It uses only `users` and `notebooks`, with
+no global cache or schema change. Typed research observations carry an
+internal, serialization-excluded guest classification; queue, detail, and CSV
+project the same pseudonym and remove internal owner fields. Nested review and
+adjudication actor IDs are pseudonymized when they belong to a persisted guest;
+signed-in actor IDs remain unchanged. After claim, research joins the
+notebook's current Cognito owner. Historical review, adjudication, and
+access-audit rows are not rewritten.
+
+**Files changed for Phase 6.** `backend/professor_analytics/guest_identity.py`,
+`backend/professor_analytics/repository.py`,
+`backend/professor_analytics/service.py`,
+`backend/professor_analytics/research.py`, `backend/research/models.py`,
+`backend/http/app.py`, `backend/student_store.py`,
+`tests/http/test_professor_analytics.py`, and
+`tests/http/test_guest_access.py`. Phase 1–5 work, `docs/CODEBASE_STRUCTURE.md`,
+and `docs/learning/` were preserved.
+
+**Validation.** `.venv/bin/python -m pytest -q tests/http/test_guest_access.py
+tests/http/test_professor_analytics.py tests/http/test_professor_research.py
+tests/persistence/test_research_persistence.py` → **61 passed**. Coverage
+includes two distinct guests; stable identity after store recreation; raw
+owner/identifier, bearer, and digest absence in lecturer outputs; signed-in
+name/email; detail, transcript, journey, source drill-down and cross-guest
+denial; raw-ID alias rejection; guest credential denial with the feature flag
+off; research queue/detail/CSV; staff authentication; and a real Phase 5 claim
+commit. The claim regression verifies roster/overview contain one Cognito
+account, Research follows the current owner, nested guest actor IDs are
+pseudonymized, and evidence remains visible. Persisted observation, review,
+adjudication, and historical audit rows remain byte-for-byte unchanged. The
+research-detail audit targets the real internal owner. Existing professor and
+research auth/audit failure tests also pass. Full suite was not run per the
+phase instruction and because the recorded suite has unrelated baseline
+failures. Sol High's independent review found the nested historical actor-ID
+leak; the projection fix passed re-review with no remaining blocker. Sol's
+four-suite rerun passed 61 tests, and the strengthened claim regression passed
+again independently. Backend compileall and `git diff --check` passed. No
+DSQL/AWS access, paid call, or deployment was used.
+
+**Migration, compatibility, and rollback.** No schema, migration, persisted
+data, or UI layout changes. The query is independent of `guest_sessions`, so
+flag-off production and clusters without that table remain compatible. Rollback
+is a code revert; existing guest rows, claimed notebook ownership, and research
+records remain intact.
+
+**Known risks/blockers.** The full integration/release matrix remains
+outstanding. This phase did not run live DSQL, real Cognito, S3, restart, or
+desktop/mobile browser checks. Pseudonyms are stable but intentionally
+pseudonymous rather than anonymous; the internal owner remains in storage and
+is available only to the authenticated server-side resolver/audit path.
+
+**Next exact action.** Phase 7 starts from
+[`GUEST_ACCESS_PHASE_HANDOFF.md`](GUEST_ACCESS_PHASE_HANDOFF.md): run the
+remaining end-to-end compatibility/security and restart acceptance matrix,
+record actual results and rollback handoff, and keep the production guest flag
+off. Start with the mocked claim/renewal and lecturer acceptance tests, then
+plan live infrastructure checks only under their existing approvals.
+
+### Hybrid guest access — Phase 5 explicit account claim (2026-09-25)
+
+**Expected behavior.** Keep account claim explicit and default-off. A signed-in
+Cognito student with the valid guest cookie must first see an account-bound,
+time-limited preview of notebook titles and uploaded file names/counts, then
+confirm. Bind confirmation to a server-issued operation ID and inventory
+fingerprint; reject stale previews before fencing. Copy and byte-verify
+owner-prefixed raw/derived private objects before atomically moving notebook
+ownership and source references. Preserve IDs, transcript/revisions/citations,
+learning state, stable local upload paths, and the existing Cognito profile,
+role, and preferences. Fence new guest requests during the copy, keep guest
+access usable on failure, revoke only at the ownership commit, and support
+same-account retries and restart recovery. Keep production guest access off;
+do not call live DSQL/AWS.
+
+**Actual behavior.** Added preview/confirm routes guarded by the default-off
+feature flag, strict configured-origin/request-host checks, verified Cognito
+identity, and the original guest cookie. Same-origin validation requires the
+Origin to equal the configured public origin; the request Host may match that
+public origin or the exact configured internal API host used by Streamlit's
+server-side `LocalApiClient`. The preview operation is stored with
+its Cognito owner, ten-minute expiry, and SHA-256 inventory fingerprint. A
+changed or expired preview is rejected before claim fencing; the UI asks the
+student to refresh it. Confirmation sets a persisted guest-session fence so
+new guest owner resolution fails while storage copies run. Storage objects
+under the guest notebook prefixes are copied to account prefixes and read back
+byte-for-byte; existing destination bytes must match and are never overwritten.
+The commit rechecks notebook/source inventory, updates source object/extracted
+keys and notebook owners in one database transaction, and sets the revoked
+credential plus same-owner retry tombstone in that transaction. Local legacy
+paths at `files_dir/threads/<notebook>/uploads` and `metadata.local_path` are
+preserved because they are stable by notebook ID rather than guest owner.
+Old object prefixes are deleted after commit; an idempotent same-account
+recovery retries cleanup. A restarted same-account session can resume an
+in-progress fenced operation, or retrieve the completed tombstone after a lost
+response. The profile shows account and guest inventory in plain text and
+requires a separate Confirm transfer button. Cancel calls an account-, guest-,
+and operation-bound endpoint to release an interrupted pending fence. An
+ambiguous confirm error asks the student to retry or review status and does not
+claim that guest data is still available. Login alone does not transfer.
+
+**Files changed for Phase 5.** `backend/http/app.py`, `backend/api_client.py`,
+`backend/guest_claims.py`, `backend/student_store.py`,
+`backend/persistence/store/sqlite_schema.py`,
+`backend/persistence/store/migrations.py`,
+`backend/persistence/dsql_schema.py`,
+`backend/persistence/dsql_student_store.py`, `scripts/dsql/cli.py`,
+`Caddyfile`, `Caddyfile.local`, `ui/profile.py`,
+`tests/http/test_guest_access.py`, `tests/persistence/test_guest_sessions.py`,
+`tests/scripts/test_init_dsql.py`, `tests/scripts/test_guest_local_proxy.py`,
+`tests/test_architecture_contracts.py`, `tests/test_deployment_config.py`,
+and `tests/ui/test_auth_gate.py`. Pre-existing Phase 1–4 edits,
+`docs/CODEBASE_STRUCTURE.md`, and untracked `docs/learning/` were preserved.
+
+**Validation.** The focused deterministic command covering guest API and
+persistence, DSQL admin migration planning, auth/profile state, cookie cache
+safety, storage providers, local Caddy routes, architecture contracts, and
+deployment route contracts passed (known production Compose
+baseline test was excluded). It exercises preview-without-transfer, explicit
+confirmation, stale-preview rejection, local-path preservation, verified raw
+and extracted-object copying, ownership/key changes, profile/preferences
+preservation, guest fence/revocation, same-account operation replay and
+recovery after store recreation, and refusal by a different account. The
+correction pass also verifies distinct public/internal hosts, owner-bound
+cancellation after store restart, fresh DSQL schema fields, and neutral UI
+error copy.
+Compileall over `backend ui streamlit_app.py tests scripts`, `sh -n
+scripts/start.sh`, and `git diff --check` passed. Sol independently reran the
+focused command and confirmed 157 tests passed. No full suite, live DSQL/AWS,
+or paid model call was run. A prior broad target attempt surfaced one known
+unrelated baseline failure in `test_production_compose_is_stateless_and_uses_prebuilt_image`;
+it was excluded from the final targeted pass and not changed.
+
+**Migration, compatibility, and rollback.** SQLite startup adds the eight
+nullable preview/tombstone columns to `guest_sessions` without rewriting
+existing rows. Fresh DSQL schema includes them. Existing DSQL clusters need the
+additive admin migration before any guest claim route is enabled; the existing
+`--guest-sessions-only --dry-run` / `--guest-sessions-only` flow now plans the
+missing columns as well as indexes/grants. No live DSQL migration was run.
+Before a future SQLite rollout, use an online backup. Rollback is keeping
+`GUEST_ACCESS_ENABLED=false` or reverting application code while retaining the
+additive columns and rows. A claim that already committed is a data ownership
+change and is not reversed by app rollback; transferred notebooks remain
+account-owned and guest credentials remain revoked.
+
+**Known risks/blockers.** Real S3 copy permissions and Caddy routing were not
+exercised against deployment infrastructure. Partial copies can leave
+unreferenced account-prefix objects after failure; retry reuses them only if
+bytes match. Failed old-prefix deletion leaves inaccessible guest-prefix
+orphans; the same-account claim recovery route retries cleanup while the
+tombstone is retained until the session expiry captured at claim. Existing
+guest claims require the explicit DSQL additive migration before DSQL runtime
+use. Expired account-bound tombstone fields remain physically stored after
+replay expiry, although replay is denied; cleanup is deferred. The production
+flag remains off. If Cancel races with a committed confirmation, it may return
+`released: false`; reopening the preview recovers the completed result.
+
+**Next exact action.** Completed by the Phase 6 lecturer identity projection
+recorded above. Production guest access stays disabled.
+
+### Hybrid guest access — Phase 4 guest workspace UI (2026-09-25)
+
+**Expected behavior.** Add explicit browser-driven guest start/reuse and safe
+probe endpoints, both default-off and protected by origin/host validation;
+keep Cognito authoritative. Show Continue as guest beside optional Cognito
+sign-in, verify a guest in FastAPI before workspace initialization, and forward
+the current HttpOnly guest cookie through the per-request Streamlit API client
+without persisting response cookies in the shared jar. Renew by browser fetch
+after a successful workspace render, clear identity-dependent state on owner
+switch, and preserve the lecturer gate. Add an exact-route optional local
+same-origin Caddy proxy while preserving regular local startup if Caddy is
+missing. Keep production disabled and account claim out of scope.
+
+**Actual behavior.** Added explicit `POST /api/v1/auth/guest/start` to create
+or reuse a persisted guest and set the 400-day secret only as an HttpOnly
+cookie, plus `POST /api/v1/auth/guest/probe` to return only the safe opaque
+guest owner identifier. Both are 404 when disabled; same-origin/host checks
+guard start, probe, and existing renewal. A valid Cognito session blocks guest
+start; invalid Cognito credentials do not fall through. The signed-out gate
+offers a browser-driven Continue as guest action; its same-origin fetch never
+relays the cookie into Streamlit. Streamlit probes before workspace setup and
+uses the owner-scoped identifier. Its per-request cookie provider forwards
+both Cognito ID and guest cookies while the shared httpx jar remains
+nonpersistent. After workspace render, the browser posts to the relative
+renewal route with `credentials: 'same-origin'`; no timer is used. Guest logout
+uses same-origin POST only when guest is the active identity and Cognito
+cookies are absent. Cognito logout uses the existing redirect/GET path; the API
+also preserves guest credentials on a same-origin POST whenever Cognito ID or
+refresh cookies are present. Guest profile offers “Sign in to account” without
+modifying its guest cookie, so a student can return to the unclaimed guest
+workspace after Cognito sign-out. An expired Cognito ID session with a refresh
+hint enters the browser refresh bridge before guest probing. Short cookie-loss
+and Phase 5 account-linking notices appear at guest entry and in the guest
+profile. Identity changes clear session state before binding the new owner.
+The local launcher uses
+`Caddyfile.local` only when guest access is enabled and Caddy is installed;
+otherwise it preserves ports 8000/8501 and disables guest access for that run
+with a clear notice. Production config remains false.
+
+**Files changed for Phase 4.** `backend/http/app.py`, `backend/auth_routes.py`,
+`backend/api_client.py`, `ui/auth_gate.py`, `ui/profile.py`,
+`ui/services/runtime.py`, `streamlit_app.py`, `Caddyfile.local`,
+`scripts/start.sh`, `tests/http/test_guest_access.py`,
+`tests/ui/test_auth_gate.py`, `tests/ui/test_runtime_cache_safety.py`, and
+`tests/scripts/test_guest_local_proxy.py`. Updated this entry and the Phase 4
+handoff below. Existing Phase 1–3 changes, `docs/CODEBASE_STRUCTURE.md`, and
+`docs/learning/` were preserved.
+
+**Validation.** Sol independently ran
+`.venv/bin/python -m pytest -q tests/http/test_guest_access.py tests/http/test_app_sessions.py tests/ui/test_auth_gate.py tests/ui/test_runtime_cache_safety.py tests/scripts/test_guest_local_proxy.py`;
+all 87 tests passed. Regressions cover combined Cognito/guest cookies, Cognito
+refresh priority, guest-to-Cognito entry, cookie preservation, and the short
+retention copy. Shell syntax (`sh -n scripts/start.sh`), compileall over
+`backend ui streamlit_app.py tests scripts`, and `git diff --check` passed.
+The known Phase 1 baseline of 12 full-suite failures is unchanged and was not
+re-run for Phase 4. An independent headed Playwright check inspected the guest
+entry at 1280 px and 390 px with no app console errors; only standard Streamlit
+warnings appeared. Caddy is not installed here, so local proxy behavior remains
+unverified. No live DSQL/AWS or paid calls were made.
+
+**Compatibility, migration, and rollback.** No schema, workspace, or ownership
+data migration was made. `GUEST_ACCESS_ENABLED` remains false by default and
+in production. Setting it false hides the entry and makes the guest routes
+404; existing additive guest rows remain intact. When local Caddy is missing,
+the launcher explicitly disables guest mode only for that run and starts the
+existing direct local UI/API ports. Rollback is setting the flag false or
+reverting Phase 4 UI/API/proxy/launcher changes; retain Phase 2 guest rows.
+
+**Known risks/blockers.** The real port 8080 Caddy route, browser cookie
+issuance, and end-to-end same-origin login/logout flow need a check once Caddy is
+available. The signed-out guest entry received a desktop/390 px browser check.
+Any DSQL guest use still requires the Phase 2 admin migration. Guest claim
+transfer remains out of scope.
+
+**Next exact action.** Phase 5 starts at `backend/student_store.py` and
+`backend/http/app.py`: design and implement an explicit guest-to-Cognito claim
+preview and confirmation contract, including transaction-safe notebook/file
+ownership transfer and retry/rollback semantics. Keep production access off.
+
+### Hybrid guest access — Phase 3 API ownership (2026-09-25)
+
+**Expected behavior.** Add a default-off guest-access flag, resolve each valid
+guest cookie to its isolated persisted owner on every API request, keep verified
+Cognito `sub` authoritative, and fail closed on invalid Cognito or guest
+credentials, including missing guest credentials after guest mode is enabled.
+Add a same-origin browser renewal POST that validates the guest cookie, slides
+server expiry, and returns a 400-day HttpOnly cookie. Guest logout revokes and
+expires the credential only through a same-origin POST. Allow only
+that exact renewal route through Caddy before the general API deny rule. Keep
+professor endpoints Cognito-only and production access disabled. No guest UI,
+creation route, account claim, lecturer pseudonym, live DSQL work, or deploy.
+
+**Actual behavior.** Added `GUEST_ACCESS_ENABLED=false` and
+`GUEST_SESSION_COOKIE_NAME=co_design_guest`; FastAPI now resolves the guest
+cookie only when the flag is enabled. Missing, invalid, expired, or revoked
+guest credentials get 401 when guest mode is enabled. A present Cognito token
+is always verified first, and verification failure
+gets 401 even if a valid guest cookie is also present. Guest owner services are
+cached under the opaque persisted guest identifier, with data access scoped to
+the persisted owner UUID. The renewal route checks the configured same origin,
+validates and renews the credential, and sets the original secret only in an
+HttpOnly, SameSite=Lax cookie with `Max-Age=34560000`; Secure is set in
+production and on non-loopback hosts. Professor handlers still require a
+Cognito cookie and persisted protected role. Guest logout revokes and expires
+the cookie only for a same-origin POST. GET and cross-origin POST preserve the
+guest cookie, so a cross-site top-level navigation cannot discard the guest's
+only recovery credential. When the flag is off, same-origin POST expires the
+browser cookie without querying guest storage. Caddy has an exact allowlist
+entry before `/api/*`, and both production Compose and `.env.example`
+explicitly keep guest access off. No guest creation or claim route was added.
+
+**Files changed for Phase 3.** `backend/settings.py`,
+`backend/owner_context.py`, `backend/http/app.py`, `backend/auth_routes.py`, `Caddyfile`,
+`compose.prod.yaml`, `.env.example`, `tests/http/test_guest_access.py`,
+`tests/test_deployment_config.py`, and `tests/test_architecture_contracts.py`.
+Updated this status entry and the Phase 3 handoff section in
+`docs/GUEST_ACCESS_PHASE_HANDOFF.md`. Pre-existing Phase 2 persistence edits,
+`docs/CODEBASE_STRUCTURE.md`, and untracked `docs/learning/` were preserved.
+
+**Validation.** Sol High independently ran the focused guest/auth/Caddy/route
+contract suite and passed 56 tests (excluding the known production Compose
+baseline failure). After fixing Sol's guest-logout finding, the final focused
+`tests/http/test_guest_access.py tests/http/test_app_sessions.py` run passed 24
+tests; the phase suite was then checked again with the full suite below.
+Compileall and `git diff --check` passed. The final
+`.venv/bin/python -m pytest -q --tb=line` run completed with exactly the same
+12 baseline failures recorded in Phase 1 and no Phase 3 failures. Their node
+IDs are:
+
+- `tests/domain/test_citation_resolution.py::test_citation_resolution_is_bounded_and_keeps_selected_list_labels`
+- `tests/domain/test_mode_classification.py::test_reflection_completion_request_skips_retrieval_and_suppresses_advance`
+- `tests/domain/test_prompt_architecture.py::test_composer_trims_dynamic_context_before_mandatory_sections`
+- `tests/domain/test_retrieval.py::test_application_virtual_course_gap_is_not_placeholder_evidence`
+- `tests/domain/test_thinking_path_journey.py::test_complete_thinking_path_two_turns_per_stage`
+- `tests/http/test_api.py::test_strict_guidance_is_stricter_before_recommending_advance`
+- `tests/persistence/test_research_persistence.py::test_atomic_observation_is_attributed_offset_only_and_revision_aware`
+- `tests/test_deployment_config.py::test_production_compose_is_stateless_and_uses_prebuilt_image`
+- `tests/ui/test_deep_review_control.py::test_locked_view_before_reflection_complete`
+- `tests/ui/test_streamlit_ui.py::test_streamlit_notebook_workspace_smoke`
+- `tests/ui/test_streamlit_ui.py::test_learning_studio_and_notebook_history_controls`
+- `tests/ui/test_theme_styles.py::test_assembled_stylesheet_wraps_all_component_markers`
+
+The two Streamlit failures report that a source assertion finds `truncate` in
+a docstring/comment, and that rendered output no longer contains `Stage
+Progression`, respectively. No cause is recorded for the other failures. Sol
+identified that a cross-site GET could revoke a guest credential; guest logout
+now requires same-origin POST, with regression coverage for cross-site GET,
+cross-origin POST, and valid same-origin POST. No live DSQL/AWS or paid model
+calls were made.
+
+**Compatibility, migration, and rollback.** The feature flag is false by
+default and explicitly false in production Compose. With the flag off, owner
+resolution does not query `guest_sessions`, preserving compatibility with
+existing DSQL clusters before the Phase 2 admin migration. Existing additive
+guest rows remain dormant. No schema or data migration was run. Rollback is to
+set `GUEST_ACCESS_ENABLED=false` (already the production value) or revert the
+Phase 3 application/config/Caddy changes; retain the additive guest table and
+rows.
+
+**Known risks/blockers.** No live DSQL migration or production request was
+performed. Enabling guest resolution against DSQL requires the approved
+Phase 2 admin migration first. With guest mode disabled, same-origin POST
+logout expires the cookie but skips table access; the server credential remains
+stored and dormant. The renewal route is ready, but no browser UI calls it yet;
+this phase does not create guest credentials. The local launcher uses separate
+Streamlit (8501) and FastAPI (8000) origins, so Phase 4 must add a single-origin
+browser route/proxy for renewal. Full-suite baseline failures remain as listed.
+
+**Next exact action.** Phase 4 begins at `ui/auth_gate.py` and the auth cookie
+bridge: add the signed-out guest entry and guest state handling, then call
+`POST /api/v1/auth/guest/renew` from the browser with same-origin credentials
+after successful guest activity. Keep account claim and production enablement
+out of scope.
+
+### Hybrid guest access — Phase 2 persistence (2026-09-24)
+
+**Behavior.** Added persistent guest credential lifecycle for future phases.
+The server generates a 256-bit URL-safe secret and an opaque `guest:<uuid>`
+owner identifier, stores only the SHA-256 token digest, and returns the raw
+secret only at creation. SQLite and DSQL stores support create, validate,
+renew, and revoke; validation rejects invalid, expired, and revoked secrets,
+and renewal slides active expiry by 400 days. Each guest receives a distinct
+student user row, leaving existing Cognito/local owners and notebooks intact.
+This phase adds no auth/API/UI route, guest feature flag, claim transfer, or
+production access.
+
+**Files.** Added `backend/persistence/guest_sessions.py` and
+`tests/persistence/test_guest_sessions.py`. Updated
+`backend/student_store.py`, `backend/persistence/store/sqlite_schema.py`,
+`backend/persistence/dsql_schema.py`,
+`backend/persistence/dsql_student_store.py`, `scripts/dsql/cli.py`,
+`tests/persistence/test_storage_providers.py`,
+`tests/scripts/test_init_dsql.py`, and
+`tests/test_architecture_contracts.py`. Updated this status entry and the
+Phase 2 section of `docs/GUEST_ACCESS_PHASE_HANDOFF.md`. Pre-existing changes
+to `docs/CODEBASE_STRUCTURE.md` and untracked `docs/learning/` were preserved.
+
+**Validation.** Luna's combined focused guest-session, storage-provider,
+DSQL-admin, and persistence-contract command passed: 56 tests. Sol independently
+ran a broader focused command and passed 64 tests: 6 guest-session, 31 storage
+provider, 18 DSQL-init, and 9 architecture-contract tests. Both runs cover two
+isolated guests, digest-only storage,
+invalid/expired/revoked credentials, 400-day monotonic renewal including
+out-of-order requests, persistence after store restart, pre-Phase-2 SQLite
+user/notebook preservation, and DSQL lifecycle through an isolated
+SQLite-backed DSQL adapter. Fake-admin tests verify catalog inspection,
+no-write dry run, table/index/grant apply ordering with async waits, safe rerun,
+and CLI dispatch without AWS calls. Compileall and `git diff --check` passed.
+The earlier phase-boundary `.venv/bin/python -m pytest -q` run completed
+with the same 12 failures as the Phase 1 Luna baseline:
+`test_citation_resolution_is_bounded_and_keeps_selected_list_labels`,
+`test_reflection_completion_request_skips_retrieval_and_suppresses_advance`,
+`test_composer_trims_dynamic_context_before_mandatory_sections`,
+`test_application_virtual_course_gap_is_not_placeholder_evidence`,
+`test_complete_thinking_path_two_turns_per_stage`,
+`test_strict_guidance_is_stricter_before_recommending_advance`,
+`test_atomic_observation_is_attributed_offset_only_and_revision_aware`,
+`test_production_compose_is_stateless_and_uses_prebuilt_image`,
+`test_locked_view_before_reflection_complete`, both existing tests in
+`tests/ui/test_streamlit_ui.py`, and
+`test_assembled_stylesheet_wraps_all_component_markers`. The initial run had
+one additional architecture inventory failure caused by the four intentional
+public persistence methods; the contract inventory was updated and the final
+full run returned to the 12-test baseline. The full suite was not rerun after
+the focused review fixes. Sol's recorded Phase 1 run had 13 failures because it
+additionally hit a suite-sensitive idempotency test that passed alone. No live
+DSQL/AWS or paid model calls were made.
+
+**Compatibility, migration, and rollback.** SQLite startup adds only the
+guest table and indexes with `IF NOT EXISTS`; pre-existing user/notebook rows
+are retained. Take a SQLite online backup before opening an existing database
+with this version. DSQL runtime performs no DDL and readiness does not probe
+the new table, so existing clusters remain compatible while guest access is
+dormant. Before a live DSQL guest route or production guest enablement, take an
+approved snapshot/export, inspect with
+`scripts/init_dsql.py --guest-sessions-only --dry-run`, then apply with
+`scripts/init_dsql.py --guest-sessions-only` as an admin. The migration adds
+the table/indexes and grants runtime access one statement per transaction;
+async indexes are awaited. Rollback is an application revert with the
+additive schema/grant retained. Do not drop a table containing guest rows.
+
+**Known risks/blockers.** No live DSQL migration was applied. Existing DSQL
+guest methods will only work after the explicit migration. Cookie issuance,
+owner resolution, API fail-closed behavior, UI renewal, account claim, lecturer
+pseudonyms, and end-to-end guest release checks remain unimplemented by design
+and belong to later phases. `GUEST_ACCESS_ENABLED` remains absent/off.
+
+**Next exact action.** Phase 3 starts at `backend/owner_context.py` and
+`backend/http/app.py`: implement flag-off guest owner resolution and the
+browser-facing renewal route, with local/mock tests. Keep production guest
+access disabled; do not touch live DSQL until the later deployment prerequisite
+is reviewed and approved.
+
+### Hybrid guest access — Phase 1 contracts and baseline (2026-09-24)
+
+**Behavior.** Documentation-only phase. Defined optional Cognito for students
+and required Cognito for staff, guest pseudonyms in lecturer views/analytics,
+the 400-day rolling browser `Set-Cookie` plus server-expiry contract through a
+same-origin, Caddy-allowlisted browser renewal route (Streamlit `httpx` cannot
+relay cookies), and browser-retention caveat; explicit claim preview and
+confirmation including uploaded files, ownership transfer, rollback flag,
+seven-phase plan, and acceptance matrix in
+[`GUEST_ACCESS_PHASE_HANDOFF.md`](GUEST_ACCESS_PHASE_HANDOFF.md). Phase 6 now
+covers lecturer compatibility/analytics; Phase 7 is the full integration and
+release handoff, with production flag off and no deployment. Expected and
+actual result: no runtime, schema, or data behavior changed, and none was
+changed.
+
+**Files.** Added `docs/GUEST_ACCESS_PHASE_HANDOFF.md` and this status entry.
+The pre-existing modified `docs/CODEBASE_STRUCTURE.md`, existing status
+content, and untracked `docs/learning/` content were preserved. No runtime code
+was edited.
+
+**Validation.** Luna's pre-edit baseline: `.venv/bin/python -m pytest -q`
+completed with 12 failures; `.venv/bin/python -m compileall -q backend ui
+streamlit_app.py tests scripts` passed. Those failures are in
+`test_citation_resolution_is_bounded_and_keeps_selected_list_labels`,
+`test_reflection_completion_request_skips_retrieval_and_suppresses_advance`,
+`test_composer_trims_dynamic_context_before_mandatory_sections`,
+`test_application_virtual_course_gap_is_not_placeholder_evidence`,
+`test_complete_thinking_path_two_turns_per_stage`,
+`test_strict_guidance_is_stricter_before_recommending_advance`,
+`test_atomic_observation_is_attributed_offset_only_and_revision_aware`,
+`test_production_compose_is_stateless_and_uses_prebuilt_image`,
+`test_locked_view_before_reflection_complete`, two tests in
+`tests/ui/test_streamlit_ui.py`, and
+`test_assembled_stylesheet_wraps_all_component_markers`. They span coaching,
+retrieval, persistence, deployment, and UI. Sol's independent run reported 13
+failures, including the additional
+`tests/persistence/test_coach_idempotency.py::test_independent_dsql_stores_converge_on_one_provider_turn`;
+that test passed when run alone, so the additional result is suite-sensitive.
+Only Luna's 12 are recorded as the pre-edit baseline. This phase's diff is
+documentation-only, so no runtime edit caused the additional failure; its
+suite-level origin remains unresolved. No paid calls or live service were used.
+
+**Compatibility, migration, and rollback.** No migration or data changes.
+Rollback is removal of the new handoff and this Phase 1 entry; the existing
+user-authored documentation changes remain untouched. The feature flag is
+specified as `GUEST_ACCESS_ENABLED=false` and remains unimplemented/off.
+
+**Known risks/blockers.** Baseline suite is not green, and no guest contract has
+yet been exercised at runtime. Guest cookie loss/browser retention and claim
+atomicity are requirements for later phases, not validated behavior today.
+
+**Next exact action.** Start Phase 2 with the additive guest credential design
+at `backend/persistence/store/sqlite_schema.py`,
+`backend/persistence/dsql_schema.py`, and `backend/student_store.py`; define and
+review migration backup/rollback and repository methods before runtime edits.
+
+### Learning handbook PDF export (2026-09-07)
+
+**Behavior.** Exported the eight learning chapters and
+`CODEBASE_STRUCTURE.md` as one 45-page A4 handbook with a cover, running
+header/footer, readable headings, tables, lists, and code examples. Mermaid
+content is retained as labelled diagram source so the PDF remains fully local
+and does not depend on a diagram-rendering service.
+
+**Files.** `docs/learning/build_handbook_pdf.py` and the generated
+`output/pdf/co-design-chatbot-learning-handbook.pdf`. Source Markdown and
+application code are unchanged by the export.
+
+**Validation.** ReportLab generated the PDF successfully (140,907 source-text
+characters; 145,867-byte output). `pdfinfo` confirms an A4, 45-page document.
+Poppler rendered and visually checked representative cover, narrative,
+table-heavy, scaling, and final-appendix pages (1, 10, 22, 31, 45); text,
+tables, page breaks, and headers/footers are legible without clipping.
+
+**Compatibility, migration, and rollback.** No runtime, schema, provider,
+configuration, or student-data change. Rollback removes the generated PDF and
+its local export script only; temporary rendered inspection images are not
+part of the deliverable.
+
+**Known risks/blockers.** The renderer intentionally covers the Markdown
+constructs used in this handbook rather than being a general-purpose Markdown
+engine. If the chapters gain complex HTML, nested lists, or rendered diagrams,
+extend the export script and re-run visual QA.
+
+**Next exact action.** Open the generated PDF and use the numbered chapters
+for the guided walkthrough; rerun
+`python docs/learning/build_handbook_pdf.py` after material handbook changes.
+
+### Project learning handbook and static reference (2026-09-07)
+
+**Behavior.** Added a teaching companion at
+[`learning/README.md`](learning/README.md) with eight detailed chapters covering
+services, frontend/API execution, RAG/context, all ten database tables,
+idempotency/revisions, AgentCore/Strands, educational and review workflows,
+non-AWS/LangGraph options, scaling, operations, and interview preparation.
+The handbook distinguishes implemented, historical, inferred, and proposed
+behavior. It explicitly documents older-description drift: course-catalog
+versus personal selection, ten versus five tables, in-memory graph checkpoints,
+slim Fast Chat fields, distinct review-job recovery/idempotency semantics, and
+the explicit Compose generation value overriding the host variable.
+
+**Files.** `docs/learning/README.md`, eight numbered Markdown chapters,
+`docs/learning/REFERENCE.md`, its static-source generator
+`docs/learning/build_reference.py`, the navigation link in
+`docs/CODEBASE_STRUCTURE.md`, and this handoff. Existing architecture documents
+remain the specification; the handbook is a learning companion.
+
+**Validation.** Generated the reference without importing application modules
+or settings: 64 literal HTTP route registrations, input-model annotations,
+both ten-table SQL schema constants, 165 Python module entries, and dependency
+manifests. Checked all 349 local links inside the handbook/reference, balanced
+code fences, heading separation, JSON/NDJSON example syntax, generator AST
+syntax, and byte-identical reference regeneration. The Markdown bundle contains
+approximately 25,400 words. No application test suite or live service smoke was
+run for this documentation-only phase; historical application results are
+labeled as such rather than presented as new validation.
+
+**Compatibility, migration, and rollback.** No application/runtime, schema,
+identity, student data, configuration, or deployment changes. No paid model
+calls. Rollback removes the new learning companion/generator and navigation
+and handoff entries; application data is unaffected.
+
+**Risks.** The source baseline is `85f79cc` on `Bedrock-v3`, not a live AWS
+inventory. Generated module descriptions inherit source docstrings, which can
+be stale; the narrative calls out important discrepancies. External LangGraph
+documentation is conceptual guidance, not proof that newer examples work with
+the pinned runtime. Proposed adapters, scaling changes, and migrations are not
+implemented by this phase.
+
+**Next exact action.** Start reading at `docs/learning/README.md`; use the
+numbered chapters for the walkthrough and `REFERENCE.md` for source lookup.
+After relevant code changes, regenerate with
+`.venv/bin/python docs/learning/build_reference.py` and review affected narrative
+chapters before treating the handbook as current.
+
 ### Lecturer Review checkpoint projection (2026-09-06)
 
 **Behavior.** Lecturer Review now reads the existing

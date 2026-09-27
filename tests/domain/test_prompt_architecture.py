@@ -467,9 +467,18 @@ def test_composer_course_evidence_gap_does_not_claim_unreadable_pdf():
 
 def test_composer_trims_dynamic_context_before_mandatory_sections(monkeypatch):
     """Final budget must never hard-cut shared/stage/student/runtime text."""
-    monkeypatch.setattr(composer_module, "MAX_COMPOSED_PROMPT_CHARS", 18_000)
-    monkeypatch.setattr(composer_module, "MAX_RETRIEVED_CONTEXT_CHARS", 40_000)
     student_message = "MANDATORY_STUDENT_MESSAGE_" + ("q" * 400)
+    minimal = PromptComposer().compose(
+        PromptContext(
+            current_stage="deep_analysis",
+            student_message=student_message,
+            response_detail="short",
+            allow_model_knowledge=False,
+        )
+    )
+    budget = len(minimal.composed_text) + 512
+    monkeypatch.setattr(composer_module, "MAX_COMPOSED_PROMPT_CHARS", budget)
+    monkeypatch.setattr(composer_module, "MAX_RETRIEVED_CONTEXT_CHARS", 40_000)
     huge_source = "RETRIEVED_SOURCE_BLOCK_" + ("s" * 50_000)
     long_history = [
         {"role": "user", "content": f"old-{index}-{'h' * 700}"}
@@ -488,7 +497,9 @@ def test_composer_trims_dynamic_context_before_mandatory_sections(monkeypatch):
         )
     )
     text = prepared.composed_text
-    assert len(text) <= 18_000
+    assert len(text) <= budget
+    assert prepared.shared_instructions == minimal.shared_instructions
+    assert prepared.stage_instructions == minimal.stage_instructions
     assert prepared.shared_instructions in text
     assert prepared.stage_instructions in text
     assert student_message in text

@@ -256,6 +256,24 @@ def test_api_client_auth_me_returns_user_or_none(tmp_path, monkeypatch):
         client.close()
 
 
+@pytest.mark.parametrize(
+    "body", [{"authenticated": False}, {"authenticated": True}, {"authenticated": True, "user": []}]
+)
+def test_api_client_auth_me_rejects_malformed_success(body):
+    """Only a real 401 represents sign-out; invalid 200s require retry."""
+    session = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(200, json=body)
+        )
+    )
+    client = LocalApiClient("http://testserver", session=session)
+    try:
+        with pytest.raises(ValueError, match="Invalid /auth/me"):
+            client.auth_me("opaque-id")
+    finally:
+        client.close()
+
+
 def test_course_sync_uses_explicit_cookie_snapshot_without_worker_provider_call():
     """A background sync can reuse main-thread auth without rereading context."""
     provider_calls = 0

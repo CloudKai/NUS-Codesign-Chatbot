@@ -22,7 +22,7 @@ from fastapi.responses import (
 )
 from pydantic import BaseModel, Field
 
-from backend.auth_oidc import CognitoOIDCClient
+from backend.auth_oidc import CognitoOIDCClient, CognitoOIDCError
 from backend.auth_profiles import PROTECTED_ROLES
 from backend.auth_routes import register_auth_routes
 from backend.domain import (
@@ -40,6 +40,7 @@ from backend.domain import (
     SourceUpdateRequest,
 )
 from backend.owner_context import OwnerResolver, OwnerServices
+from backend.persistence.guest_sessions import GUEST_SESSION_TTL
 from backend.coaching.progress import PROGRESS_LABELS
 from backend.operational_metrics import (
     configure_operational_loggers,
@@ -152,6 +153,19 @@ class MessageReviseRequest(BaseModel):
     reasoning_effort: str | None = None
     response_detail: str | None = Field(default=None, pattern="^(short|long)$")
     response_language: str | None = Field(default=None, min_length=1, max_length=50)
+
+
+class GuestClaimConfirmRequest(BaseModel):
+    """Explicit confirmation and retry key for guest workspace claim."""
+
+    confirmed: bool = False
+    operation_id: str = Field(min_length=16, max_length=80)
+
+
+class GuestClaimCancelRequest(BaseModel):
+    """Identify the caller's pending guest-claim operation to release."""
+
+    operation_id: str = Field(min_length=16, max_length=80)
 
 
 def _expire_streamlit_auth_cookie(response: RedirectResponse, cookie_name: str) -> None:
@@ -480,16 +494,316 @@ def create_app(
         mode = "production" if env == "production" else "local"
         return {"status": "ok", "mode": mode}
 
+    @app.post("/api/v1/auth/guest/renew")
+    def renew_guest_session(request: Request, response: Response) -> dict[str, bool]:
+        """Renew a valid guest cookie through a same-origin browser request.
+
+        Streamlit's server-side API client cannot update the browser cookie, so
+        the browser calls this route directly. The bearer value is never
+        returned in the response body.
+        """
+        if not settings.guest_access_enabled:
+            raise HTTPException(status_code=404, detail="Not found")
+
+        origin = str(request.headers.get("origin") or "").strip()
+        expected = urlparse(settings.public_api_base_url)
+        supplied = urlparse(origin)
+        request_host = str(request.headers.get("host") or "").strip()
+        if (
+            not origin
+            or supplied.scheme not in {"http", "https"}
+            or supplied.netloc.lower() != expected.netloc.lower()
+            or supplied.netloc.lower() != request_host.lower()
+            or supplied.scheme != expected.scheme
+        ):
+            raise HTTPException(status_code=403, detail="Same-origin request required")
+
+        secret = str(
+            request.cookies.get(settings.guest_session_cookie_name) or ""
+        ).strip()
+        if not secret or active_store.validate_guest_session(secret) is None:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        if not active_store.renew_guest_session(secret):
+            raise HTTPException(status_code=401, detail="Not authenticated")
+
+        response.set_cookie(
+            key=settings.guest_session_cookie_name,
+            value=secret,
+            max_age=int(GUEST_SESSION_TTL.total_seconds()),
+            path="/",
+            secure=settings.auth_cookie_secure
+            or str(request.url.hostname or "").lower()
+            not in {"localhost", "127.0.0.1", "::1"},
+            httponly=True,
+            samesite="lax",
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return {"renewed": True}
+
+    def _require_guest_browser_origin(request: Request) -> None:
+        """Validate the public Origin from browsers and the configured API Host for server calls."""
+        origin = str(request.headers.get("origin") or "").strip()
+        expected = urlparse(settings.public_api_base_url)
+        supplied = urlparse(origin)
+        request_host = str(request.headers.get("host") or "").strip()
+        internal_api = urlparse(settings.api_base_url)
+        request_scheme = str(request.url.scheme or "").lower()
+        trusted_host = request_host.lower() == supplied.netloc.lower() or (
+            request_host.lower() == internal_api.netloc.lower()
+            and request_scheme == internal_api.scheme.lower()
+        )
+        if (
+            not origin
+            or supplied.scheme not in {"http", "https"}
+            or supplied.username
+            or supplied.password
+            or supplied.path not in {"", "/"}
+            or supplied.query
+            or supplied.fragment
+            or supplied.netloc.lower() != expected.netloc.lower()
+            or not trusted_host
+            or supplied.scheme != expected.scheme
+        ):
+            raise HTTPException(status_code=403, detail="Same-origin request required")
+
+    def _reject_cognito_precedence(request: Request) -> None:
+        """Prevent an explicit guest start from downgrading a Cognito session."""
+        id_token = str(
+            request.cookies.get(settings.cognito_id_token_cookie_name) or ""
+        ).strip()
+        refresh_token = str(
+            request.cookies.get(settings.cognito_refresh_cookie_name) or ""
+        ).strip()
+        if id_token:
+            try:
+                oidc.verify_id_token(id_token)
+            except CognitoOIDCError as error:
+                raise HTTPException(
+                    status_code=401, detail="Not authenticated"
+                ) from error
+            raise HTTPException(status_code=409, detail="Cognito session already active")
+        if refresh_token:
+            try:
+                oidc.refresh(refresh_token)
+            except CognitoOIDCError as error:
+                raise HTTPException(
+                    status_code=401, detail="Not authenticated"
+                ) from error
+            raise HTTPException(status_code=409, detail="Cognito session already active")
+
+    @app.post("/api/v1/auth/guest/start")
+    def start_guest_session(request: Request, response: Response) -> dict[str, Any]:
+        """Explicitly create a guest owner or reuse the presented valid session."""
+        if not settings.guest_access_enabled:
+            raise HTTPException(status_code=404, detail="Not found")
+        _require_guest_browser_origin(request)
+        _reject_cognito_precedence(request)
+        existing_secret = str(
+            request.cookies.get(settings.guest_session_cookie_name) or ""
+        ).strip()
+        owner_user_id = (
+            active_store.validate_guest_session(existing_secret)
+            if existing_secret
+            else None
+        )
+        if owner_user_id is None:
+            owner_user_id, existing_secret = active_store.create_guest_session()
+        user = active_store.get_user_by_id(owner_user_id)
+        if user is None:
+            raise HTTPException(status_code=503, detail="Guest session unavailable")
+        response.set_cookie(
+            key=settings.guest_session_cookie_name,
+            value=existing_secret,
+            max_age=int(GUEST_SESSION_TTL.total_seconds()),
+            path="/",
+            secure=settings.auth_cookie_secure
+            or str(request.url.hostname or "").lower()
+            not in {"localhost", "127.0.0.1", "::1"},
+            httponly=True,
+            samesite="lax",
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return {"started": True, "guest_id": str(user.get("identifier") or "")}
+
+    @app.post("/api/v1/auth/guest/probe")
+    def probe_guest_session(request: Request) -> JSONResponse:
+        """Verify the browser's guest cookie without creating or renewing it."""
+        if not settings.guest_access_enabled:
+            raise HTTPException(status_code=404, detail="Not found")
+        origin = str(request.headers.get("origin") or "").strip()
+        expected_origin = urlparse(settings.public_api_base_url)
+        api_origin = urlparse(settings.api_base_url)
+        request_host = str(request.headers.get("host") or "").strip()
+        supplied_origin = urlparse(origin)
+        if (
+            not origin
+            or supplied_origin.scheme != expected_origin.scheme
+            or supplied_origin.netloc.lower() != expected_origin.netloc.lower()
+            or request_host.lower() != api_origin.netloc.lower()
+        ):
+            raise HTTPException(status_code=403, detail="Same-origin request required")
+        _reject_cognito_precedence(request)
+        secret = str(request.cookies.get(settings.guest_session_cookie_name) or "").strip()
+        owner_user_id = active_store.validate_guest_session(secret) if secret else None
+        if owner_user_id is None:
+            return JSONResponse({"authenticated": False}, headers={"Cache-Control": "no-store"})
+        user = active_store.get_user_by_id(owner_user_id)
+        if user is None:
+            return JSONResponse({"authenticated": False}, headers={"Cache-Control": "no-store"})
+        return JSONResponse(
+            {"authenticated": True, "guest_id": str(user.get("identifier") or "")},
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.post("/api/v1/auth/guest/claim/preview")
+    def preview_guest_claim(request: Request) -> dict[str, Any]:
+        """Preview guest data for a verified Cognito account, without mutation."""
+        if not settings.guest_access_enabled:
+            raise HTTPException(status_code=404, detail="Not found")
+        _require_guest_browser_origin(request)
+        owner = current_owner(request)
+        profile = owner.store.get_user_by_id(owner.user_id)
+        if not profile or not str(profile.get("identifier") or "").startswith("cognito:"):
+            raise HTTPException(status_code=401, detail="Cognito account required")
+        secret = str(request.cookies.get(settings.guest_session_cookie_name) or "").strip()
+        preview = active_store.create_guest_claim_preview(
+            secret=secret, target_user_id=owner.user_id
+        )
+        if preview is None:
+            raise HTTPException(status_code=401, detail="Guest session unavailable")
+        if preview.get("already_claimed"):
+            from backend.guest_claims import cleanup_guest_objects
+            from backend.persistence.factory import get_file_storage
+            cleanup = active_store.guest_claim_cleanup_info(
+                secret=secret, target_user_id=owner.user_id,
+                operation_id=str(preview.get("operation_id") or ""),
+            )
+            if cleanup:
+                cleanup_guest_objects(
+                    storage=get_file_storage(), guest_user_id=cleanup[0],
+                    notebook_ids=cleanup[1],
+                )
+        return {
+            "account": {
+                "display_name": str(profile.get("display_name") or "Student")[:80],
+                "email": str(profile.get("email") or "")[:254],
+            },
+            **preview,
+        }
+
+    @app.post("/api/v1/auth/guest/claim/confirm")
+    def confirm_guest_claim(
+        payload: GuestClaimConfirmRequest,
+        request: Request,
+    ) -> dict[str, Any]:
+        """Copy and atomically claim a guest workspace after explicit consent."""
+        if not settings.guest_access_enabled:
+            raise HTTPException(status_code=404, detail="Not found")
+        _require_guest_browser_origin(request)
+        owner = current_owner(request)
+        profile = owner.store.get_user_by_id(owner.user_id)
+        if not profile or not str(profile.get("identifier") or "").startswith("cognito:"):
+            raise HTTPException(status_code=401, detail="Cognito account required")
+        if not payload.confirmed:
+            raise HTTPException(status_code=400, detail="Explicit confirmation required")
+        try:
+            from uuid import UUID
+            operation_id = str(UUID(payload.operation_id.strip()))
+        except (ValueError, AttributeError):
+            raise HTTPException(status_code=422, detail="Invalid claim operation") from None
+        secret = str(request.cookies.get(settings.guest_session_cookie_name) or "").strip()
+        if not secret:
+            raise HTTPException(status_code=401, detail="Guest session unavailable")
+        from backend.guest_claims import complete_guest_claim
+        from backend.persistence.factory import get_file_storage
+        try:
+            result = complete_guest_claim(
+                store=active_store, storage=get_file_storage(), secret=secret,
+                target_user_id=owner.user_id, operation_id=operation_id,
+            )
+        except ValueError as error:
+            if "Guest workspace changed" in str(error):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Guest workspace changed. Refresh the preview before confirming.",
+                ) from None
+            logger.warning(
+                "Guest claim failed before ownership commit (%s)", type(error).__name__
+            )
+            raise HTTPException(
+                status_code=409, detail="Guest claim failed; retry the confirmation"
+            ) from None
+        except Exception as error:
+            logger.warning(
+                "Guest claim failed before ownership commit (%s)", type(error).__name__
+            )
+            raise HTTPException(
+                status_code=409, detail="Guest claim failed; retry the confirmation"
+            ) from None
+        if result is None:
+            raise HTTPException(status_code=409, detail="Guest claim unavailable")
+        return {"claimed": True, **result}
+
+    @app.post("/api/v1/auth/guest/claim/cancel")
+    def cancel_guest_claim(
+        payload: GuestClaimCancelRequest,
+        request: Request,
+    ) -> dict[str, bool]:
+        """Release a pending claim fence for this Cognito owner and guest cookie."""
+        if not settings.guest_access_enabled:
+            raise HTTPException(status_code=404, detail="Not found")
+        _require_guest_browser_origin(request)
+        owner = current_owner(request)
+        profile = owner.store.get_user_by_id(owner.user_id)
+        if not profile or not str(profile.get("identifier") or "").startswith("cognito:"):
+            raise HTTPException(status_code=401, detail="Cognito account required")
+        try:
+            from uuid import UUID
+            operation_id = str(UUID(payload.operation_id.strip()))
+        except (ValueError, AttributeError):
+            raise HTTPException(status_code=422, detail="Invalid claim operation") from None
+        secret = str(request.cookies.get(settings.guest_session_cookie_name) or "").strip()
+        if not secret:
+            raise HTTPException(status_code=401, detail="Guest session unavailable")
+        released = active_store.release_guest_claim(
+            secret=secret, target_user_id=owner.user_id, operation_id=operation_id
+        )
+        return {"released": released}
+
     def _professor_service(owner: OwnerServices) -> ProfessorAnalyticsService:
         """Build a read-only analytics service for one authorised request."""
         return ProfessorAnalyticsService(ProfessorAnalyticsRepository(owner.store))
 
+    def _resolve_professor_student_id(owner: OwnerServices, public_id: str) -> str | None:
+        """Resolve a roster ID to its internal owner before auditing or reads."""
+        return ProfessorAnalyticsRepository(owner.store).resolve_public_student_id(
+            public_id
+        )
+
     def _research_service(owner: OwnerServices) -> ProfessorResearchService:
         """Build the research application service over its narrow repository."""
         from backend import api as api_facade
+        from backend.professor_analytics.guest_identity import (
+            guest_public_id,
+            is_guest_identity,
+        )
 
         repository_cls = api_facade.StudentStoreResearchRepository
-        return ProfessorResearchService(repository_cls(owner.store))
+
+        def project_actor_id(actor_user_id: str) -> str | None:
+            """Preserve signed-in actor IDs and pseudonymize persisted guests."""
+            profile = owner.store.get_user_by_id(actor_user_id)
+            if profile is None:
+                return None
+            if is_guest_identity(
+                profile.get("identifier"), profile.get("cognito_sub")
+            ):
+                return guest_public_id(actor_user_id)
+            return actor_user_id
+
+        return ProfessorResearchService(
+            repository_cls(owner.store), actor_id_projector=project_actor_id
+        )
 
     def _professor_role(owner: OwnerServices) -> str:
         """Reload the already-authorised persisted staff role for audit context."""
@@ -609,14 +923,17 @@ def create_app(
         owner: OwnerServices = Depends(current_professor),
     ) -> StudentDetailResponse:
         """Return one student's active learning journey and authorised transcript."""
+        resolved_student_id = _resolve_professor_student_id(owner, student_id)
+        if resolved_student_id is None:
+            raise HTTPException(status_code=404, detail="Student not found")
         _audit_professor_read(
             request,
             owner,
             action="professor.student_detail",
             scope="identifiable_student",
-            target_user_id=student_id,
+            target_user_id=resolved_student_id,
         )
-        detail = _professor_service(owner).student_detail(student_id)
+        detail = _professor_service(owner).student_detail(resolved_student_id)
         if detail is None:
             raise HTTPException(status_code=404, detail="Student not found")
         return detail
@@ -632,16 +949,19 @@ def create_app(
         owner: OwnerServices = Depends(current_professor),
     ) -> ConversationTranscriptResponse:
         """Return one selected student's active notebook transcript only."""
+        resolved_student_id = _resolve_professor_student_id(owner, student_id)
+        if resolved_student_id is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
         _audit_professor_read(
             request,
             owner,
             action="professor.transcript",
             scope="identifiable_transcript",
-            target_user_id=student_id,
+            target_user_id=resolved_student_id,
             notebook_id=notebook_id,
         )
         transcript = _professor_service(owner).conversation_transcript(
-            student_id, notebook_id
+            resolved_student_id, notebook_id
         )
         if transcript is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
@@ -658,16 +978,19 @@ def create_app(
         owner: OwnerServices = Depends(current_professor),
     ) -> NotebookWorkspaceResponse:
         """Return one authorised read-only notebook workspace for lecturers."""
+        resolved_student_id = _resolve_professor_student_id(owner, student_id)
+        if resolved_student_id is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
         _audit_professor_read(
             request,
             owner,
             action="professor.workspace",
             scope="identifiable_workspace",
-            target_user_id=student_id,
+            target_user_id=resolved_student_id,
             notebook_id=notebook_id,
         )
         workspace = _professor_service(owner).notebook_workspace(
-            student_id, notebook_id
+            resolved_student_id, notebook_id
         )
         if workspace is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
@@ -686,18 +1009,21 @@ def create_app(
         owner: OwnerServices = Depends(current_professor),
     ) -> ProfessorMessagePage:
         """Return one paginated active-branch transcript page for lecturers."""
+        resolved_student_id = _resolve_professor_student_id(owner, student_id)
+        if resolved_student_id is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
         _audit_professor_read(
             request,
             owner,
             action="professor.transcript",
             scope="identifiable_transcript",
-            target_user_id=student_id,
+            target_user_id=resolved_student_id,
             notebook_id=notebook_id,
             metadata={"paginated": True, "limit": limit, "cursor": bool(cursor)},
         )
         try:
             page = _professor_service(owner).notebook_messages(
-                student_id,
+                resolved_student_id,
                 notebook_id,
                 limit=limit,
                 cursor=cursor,
@@ -719,15 +1045,18 @@ def create_app(
         owner: OwnerServices = Depends(current_professor),
     ) -> ProfessorSourcesResponse:
         """Return allow-listed library sources for one owned notebook."""
+        resolved_student_id = _resolve_professor_student_id(owner, student_id)
+        if resolved_student_id is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
         _audit_professor_read(
             request,
             owner,
             action="professor.sources",
             scope="identifiable_sources",
-            target_user_id=student_id,
+            target_user_id=resolved_student_id,
             notebook_id=notebook_id,
         )
-        payload = _professor_service(owner).notebook_sources(student_id, notebook_id)
+        payload = _professor_service(owner).notebook_sources(resolved_student_id, notebook_id)
         if payload is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         return payload
@@ -743,15 +1072,18 @@ def create_app(
         owner: OwnerServices = Depends(current_professor),
     ) -> ProfessorJourneyProjection:
         """Return persisted journey state without transcript bodies."""
+        resolved_student_id = _resolve_professor_student_id(owner, student_id)
+        if resolved_student_id is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
         _audit_professor_read(
             request,
             owner,
             action="professor.journey",
             scope="identifiable_journey",
-            target_user_id=student_id,
+            target_user_id=resolved_student_id,
             notebook_id=notebook_id,
         )
-        payload = _professor_service(owner).notebook_journey(student_id, notebook_id)
+        payload = _professor_service(owner).notebook_journey(resolved_student_id, notebook_id)
         if payload is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         return payload
@@ -767,15 +1099,18 @@ def create_app(
         owner: OwnerServices = Depends(current_professor),
     ) -> ProfessorReviewProjection:
         """Return persisted review projection without regeneration."""
+        resolved_student_id = _resolve_professor_student_id(owner, student_id)
+        if resolved_student_id is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
         _audit_professor_read(
             request,
             owner,
             action="professor.review",
             scope="identifiable_review",
-            target_user_id=student_id,
+            target_user_id=resolved_student_id,
             notebook_id=notebook_id,
         )
-        payload = _professor_service(owner).notebook_review(student_id, notebook_id)
+        payload = _professor_service(owner).notebook_review(resolved_student_id, notebook_id)
         if payload is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         return payload
@@ -791,17 +1126,20 @@ def create_app(
         owner: OwnerServices = Depends(current_professor),
     ) -> Response:
         """Stream one library source after lecturer ownership checks."""
+        resolved_student_id = _resolve_professor_student_id(owner, student_id)
+        if resolved_student_id is None:
+            raise HTTPException(status_code=404, detail="Source not found")
         _audit_professor_read(
             request,
             owner,
             action="professor.source",
             scope="identifiable_source",
-            target_user_id=student_id,
+            target_user_id=resolved_student_id,
             notebook_id=notebook_id,
             metadata={"source_id": str(source_id)[:160]},
         )
         repository = ProfessorAnalyticsRepository(owner.store)
-        source = repository.read_library_source(student_id, notebook_id, source_id)
+        source = repository.read_library_source(resolved_student_id, notebook_id, source_id)
         if source is None:
             raise HTTPException(status_code=404, detail="Source not found")
         payload = read_source_bytes(source)
@@ -825,17 +1163,20 @@ def create_app(
         owner: OwnerServices = Depends(current_professor),
     ) -> Response:
         """Stream one message-associated attachment after lecturer checks."""
+        resolved_student_id = _resolve_professor_student_id(owner, student_id)
+        if resolved_student_id is None:
+            raise HTTPException(status_code=404, detail="Attachment not found")
         _audit_professor_read(
             request,
             owner,
             action="professor.attachment",
             scope="identifiable_attachment",
-            target_user_id=student_id,
+            target_user_id=resolved_student_id,
             notebook_id=notebook_id,
             metadata={"attachment_id": str(attachment_id)[:160]},
         )
         repository = ProfessorAnalyticsRepository(owner.store)
-        source = repository.read_attachment(student_id, notebook_id, attachment_id)
+        source = repository.read_attachment(resolved_student_id, notebook_id, attachment_id)
         if source is None:
             raise HTTPException(status_code=404, detail="Attachment not found")
         payload = read_source_bytes(source)
@@ -932,15 +1273,23 @@ def create_app(
     ) -> ResearchNotebookDetailResponse:
         """Return one audited transcript with automated and human coding."""
         try:
+            resolved_student_id = ProfessorAnalyticsRepository(
+                owner.store
+            ).resolve_notebook_owner(notebook_id)
+            if resolved_student_id is None:
+                raise HTTPException(status_code=404, detail="Research notebook not found")
             detail = _research_service(owner).notebook_detail(
                 notebook_id,
                 actor_user_id=owner.user_id,
                 actor_role=_professor_role(owner),
                 request_id=str(getattr(request.state, "request_id", "unknown")),
+                target_user_id=resolved_student_id,
                 transcript_loader=_professor_service(owner).conversation_transcript,
                 observation_limit=observation_limit,
                 observation_offset=observation_offset,
             )
+        except HTTPException:
+            raise
         except Exception as error:
             raise _research_unavailable(request) from error
         if detail is None:

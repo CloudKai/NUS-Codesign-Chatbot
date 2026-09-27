@@ -80,13 +80,10 @@ def _on_toggle_library() -> None:
 
 
 def _on_new_chat() -> None:
-    """Create a notebook before Chat paints so one remount owns the new thread.
+    """Open an unsaved chat draft before Chat paints.
 
-    Runs as ``on_click`` (before the script body) so Recents, Chat, and Thinking
-    Path all see the new ``thread_id`` without a nested full-app remount. Sets
-    the course-materials toast flag here because
-    ``new_notebook(should_rerun=False)`` skips that path (session init must not
-    toast).
+    Runs as ``on_click`` (before the script body) so Chat paints the draft
+    without a nested full-app remount.
     """
     dismiss_delete_chat_dialog()
     _finish_mobile_nav_destination()
@@ -94,7 +91,6 @@ def _on_new_chat() -> None:
     st.session_state.mobile_panel = "Chat"
     st.session_state.pending_mobile_panel = "Chat"
     st.session_state.nav_section = "Chat"
-    st.session_state.toast_course_materials_loading = True
     new_notebook(should_rerun=False)
 
 

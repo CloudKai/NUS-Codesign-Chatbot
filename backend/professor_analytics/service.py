@@ -35,6 +35,7 @@ from .models import (
     StudentsResponse,
 )
 from .repository import ProfessorAnalyticsRepository
+from .guest_identity import project_student_identity
 
 STAGES = (
     "problem_identification",
@@ -1035,6 +1036,13 @@ class ProfessorAnalyticsService:
         students: dict[str, dict[str, Any]] = {}
         for row in rows:
             user_id = str(row["user_id"])
+            identity = project_student_identity(
+                owner_id=user_id,
+                identifier=row.get("identifier"),
+                cognito_sub=row.get("cognito_sub"),
+                display_name=row.get("display_name"),
+                email=row.get("email"),
+            )
             progress = self._json(row.get("progress_text"))
             completed = progress.get("completed_stages") if isinstance(progress, dict) else []
             if not isinstance(completed, list):
@@ -1053,9 +1061,10 @@ class ProfessorAnalyticsService:
             last_activity = row.get("last_activity")
             active_days_count = int(row.get("active_days") or 0)
             students[user_id] = {
-                "id": user_id,
-                "name": str(row.get("display_name") or "Student"),
-                "email": row.get("email"),
+                "id": identity.id,
+                "name": identity.name,
+                "email": identity.email,
+                "is_guest": identity.is_guest,
                 "created_at": row.get("user_created_at"),
                 "stage": stage,
                 "completed_stages": [
@@ -1208,12 +1217,20 @@ class ProfessorAnalyticsService:
         students: dict[str, dict[str, Any]] = {}
         for row in rows:
             user_id = str(row["user_id"])
+            identity = project_student_identity(
+                owner_id=user_id,
+                identifier=row.get("identifier"),
+                cognito_sub=row.get("cognito_sub"),
+                display_name=row.get("display_name"),
+                email=row.get("email"),
+            )
             value = students.setdefault(
                 user_id,
                 {
-                    "id": user_id,
-                    "name": str(row.get("display_name") or "Student"),
-                    "email": row.get("email"),
+                    "id": identity.id,
+                    "name": identity.name,
+                    "email": identity.email,
+                    "is_guest": identity.is_guest,
                     "created_at": row.get("user_created_at"),
                     "notebooks": {},
                     "assessments": [],

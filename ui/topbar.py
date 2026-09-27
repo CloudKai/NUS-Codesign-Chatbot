@@ -20,11 +20,15 @@ def prepare_workspace_context() -> tuple[str, str | None]:
     Returns:
         The selected model id and optional reasoning effort.
     """
-    thread = store.get_thread(st.session_state.thread_id) or {}
-    legacy_title_replacement = NotebookTitleService.replacement_for_legacy_title(
-        str(thread.get("name") or ""),
-        store.get_oldest_user_messages(st.session_state.thread_id, limit=2),
-    )
+    thread_id = st.session_state.get("thread_id")
+    thread = (store.get_thread(thread_id) or {}) if thread_id else {}
+    title = str(thread.get("name") or "")
+    legacy_title_replacement = None
+    if len(title) > 40:
+        legacy_title_replacement = NotebookTitleService.replacement_for_legacy_title(
+            title,
+            store.get_oldest_user_messages(st.session_state.thread_id, limit=2),
+        )
     if legacy_title_replacement:
         store.update_thread(
             st.session_state.thread_id,

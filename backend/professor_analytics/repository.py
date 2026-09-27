@@ -37,10 +37,15 @@ _STUDENT_ROLE_FILTER = """
 """
 _STUDENT_ROSTER_SQL = f"""
             WITH eligible_users AS (
-                SELECT id, display_name, email, created_at
+                SELECT id, display_name, email, created_at, identifier, cognito_sub
                 FROM users
                 WHERE COALESCE(role, 'student') NOT IN ('lecturer', 'admin')
                   AND (identifier <> 'local-student' OR cognito_sub IS NOT NULL)
+                  AND (
+                      identifier NOT LIKE 'guest:%'
+                      OR cognito_sub IS NOT NULL
+                      OR EXISTS (SELECT 1 FROM notebooks owned WHERE owned.user_id = users.id)
+                  )
             ),
             active_messages AS (
                 SELECT
@@ -146,6 +151,8 @@ _STUDENT_ROSTER_SQL = f"""
                 u.id AS user_id,
                 u.display_name,
                 u.email,
+                u.identifier,
+                u.cognito_sub,
                 u.created_at AS user_created_at,
                 cn.notebook_id AS current_notebook_id,
                 cn.current_stage,
@@ -250,6 +257,7 @@ class ProfessorAnalyticsRepository:
         query = f"""
             SELECT
                 u.id AS user_id, u.display_name, u.email, u.role,
+                u.identifier, u.cognito_sub,
                 u.created_at AS user_created_at,
                 n.id AS notebook_id, n.title, n.current_stage, n.progress_text,
                 n.created_at AS notebook_created_at, n.updated_at AS notebook_updated_at,
@@ -269,6 +277,11 @@ class ProfessorAnalyticsRepository:
                     '%"_internal_type": "coach_idempotency"%'
             WHERE COALESCE(u.role, 'student') NOT IN ('lecturer', 'admin')
               AND (u.identifier <> 'local-student' OR u.cognito_sub IS NOT NULL)
+              AND (
+                  u.identifier NOT LIKE 'guest:%'
+                  OR u.cognito_sub IS NOT NULL
+                  OR EXISTS (SELECT 1 FROM notebooks owned WHERE owned.user_id = u.id)
+              )
               {student_clause}
               {notebook_clause}
             ORDER BY u.display_name, u.id, n.updated_at DESC, m.created_at ASC, m.id ASC
@@ -311,6 +324,58 @@ class ProfessorAnalyticsRepository:
                 "Professor analytics data is temporarily unavailable"
             ) from error
         return self._row_dict(row) if row else None
+
+    def resolve_public_student_id(self, public_id: str) -> str | None:
+        """Resolve a public guest pseudonym to its internal owner ID.
+
+        Signed-in IDs remain their existing internal API IDs. Guest lookup is
+        compact, uncached, and does not depend on the optional guest_sessions
+        table.
+        """
+        from .guest_identity import guest_public_id
+
+        if not str(public_id or "").startswith("guest_"):
+            query = """
+                SELECT id FROM users
+                WHERE id = ? AND COALESCE(role, 'student') NOT IN ('lecturer', 'admin')
+                  AND (identifier <> 'local-student' OR cognito_sub IS NOT NULL)
+                  AND (identifier NOT LIKE 'guest:%' OR cognito_sub IS NOT NULL)
+            """
+            params: tuple[Any, ...] = (public_id,)
+        else:
+            query = """
+                SELECT id FROM users
+                WHERE identifier LIKE 'guest:%' AND COALESCE(cognito_sub, '') = ''
+                  AND EXISTS (SELECT 1 FROM notebooks owned WHERE owned.user_id = users.id)
+            """
+            params = ()
+        try:
+            with self._store._connect() as connection:  # noqa: SLF001
+                rows = connection.execute(query, params).fetchall()
+        except Exception as error:
+            raise ProfessorAnalyticsUnavailable(
+                "Professor analytics data is temporarily unavailable"
+            ) from error
+        for row in rows:
+            owner_id = str(row["id"])
+            if not public_id.startswith("guest_") or guest_public_id(owner_id) == public_id:
+                return owner_id
+        return None
+
+    def resolve_notebook_owner(self, notebook_id: str) -> str | None:
+        """Return the current internal owner of one notebook ID, if present."""
+        query = """
+            SELECT u.id FROM notebooks n JOIN users u ON u.id = n.user_id
+            WHERE n.id = ? AND COALESCE(u.role, 'student') NOT IN ('lecturer', 'admin')
+        """
+        try:
+            with self._store._connect() as connection:  # noqa: SLF001
+                row = connection.execute(query, (notebook_id,)).fetchone()
+        except Exception as error:
+            raise ProfessorAnalyticsUnavailable(
+                "Professor analytics data is temporarily unavailable"
+            ) from error
+        return str(row["id"]) if row else None
 
     def load_student_notebook_summaries(self, student_id: str) -> list[dict[str, Any]]:
         """Return per-notebook aggregates for one student without message bodies."""
@@ -475,6 +540,7 @@ class ProfessorAnalyticsRepository:
         query = """
             SELECT
                 u.id AS user_id, u.display_name, u.email,
+                u.identifier, u.cognito_sub,
                 m.id AS message_id, m.role AS message_role,
                 m.is_error AS message_is_error, m.assessment_text,
                 m.created_at AS message_created_at
@@ -488,6 +554,11 @@ class ProfessorAnalyticsRepository:
                     '%"_internal_type": "coach_idempotency"%'
             WHERE COALESCE(u.role, 'student') NOT IN ('lecturer', 'admin')
               AND (u.identifier <> 'local-student' OR u.cognito_sub IS NOT NULL)
+              AND (
+                  u.identifier NOT LIKE 'guest:%'
+                  OR u.cognito_sub IS NOT NULL
+                  OR EXISTS (SELECT 1 FROM notebooks owned WHERE owned.user_id = u.id)
+              )
             ORDER BY u.id, m.created_at ASC, m.id ASC
         """
         try:

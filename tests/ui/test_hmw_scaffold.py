@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
+from saved_ui_workspace import saved_app
 
 from backend.learning.hmw import HMW_SCAFFOLD_STAGE_ID, hmw_scaffold_available
 from backend.student_journey import DEFAULT_STAGE, next_stage_id
@@ -373,7 +374,7 @@ def test_valid_hmw_advance_never_shows_scaffold() -> None:
 
 def test_empty_notebook_hides_hmw_scaffold() -> None:
     """A new Problem Identification notebook keeps the welcome and hides HMW."""
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     assert not app.exception
     assert app.session_state["learning_journey"]["current_stage"] == DEFAULT_STAGE
     visible = _visible_text(app)
@@ -386,7 +387,7 @@ def test_empty_notebook_hides_hmw_scaffold() -> None:
 
 def test_one_ready_coaching_turn_shows_hmw_scaffold() -> None:
     """A first useful Coaching assessment shows the card after that Coach reply."""
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     assert not app.exception
     thread_id = str(app.session_state["thread_id"])
     store = StudentStore()
@@ -411,7 +412,7 @@ def test_one_ready_coaching_turn_shows_hmw_scaffold() -> None:
 
 def test_hmw_scaffold_renders_once_when_eligible() -> None:
     """Server-owned readiness on the first useful Coach turn shows one card."""
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     assert not app.exception
     thread_id = str(app.session_state["thread_id"])
     store = StudentStore()
@@ -495,7 +496,7 @@ def test_projected_hmw_anchor_waits_for_its_loaded_page() -> None:
 
 def test_qa_turn_keeps_hmw_after_unlocking_coach() -> None:
     """A later Q&A exchange must not move or duplicate the HMW card."""
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     assert not app.exception
     thread_id = str(app.session_state["thread_id"])
     store = StudentStore()
@@ -537,7 +538,7 @@ def test_legacy_notebook_without_welcome_places_hmw_after_unlocking_coach() -> N
     from backend.models import LOCKED_CHAT_MODEL_ID
     from backend.student_support import DEFAULT_SUPPORT_MODE
 
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     assert not app.exception
     store = StudentStore()
     legacy_id = store.create_thread(
@@ -571,7 +572,7 @@ def test_legacy_notebook_without_welcome_places_hmw_after_unlocking_coach() -> N
 
 def test_hmw_scaffold_hides_after_concept_generation() -> None:
     """Concept Generation uses the persisted stage and must not keep the PI scaffold."""
-    app = AppTest.from_file("streamlit_app.py", default_timeout=30).run()
+    app = saved_app()
     assert not app.exception
     thread_id = str(app.session_state["thread_id"])
     store = StudentStore()

@@ -11,6 +11,7 @@ Tables:
                └── research_adjudications
 
     oauth_login_states  (pre-auth, transient)
+    guest_sessions      (guest bearer-token digests and owner mapping)
     research_access_events  (append-only attributable audit)
     system_metadata  (workflow-contract readiness)
 
@@ -66,6 +67,28 @@ CREATE TABLE IF NOT EXISTS oauth_login_states (
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS guest_sessions (
+    token_digest TEXT PRIMARY KEY,
+    owner_user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT,
+    claim_user_id TEXT,
+    claim_operation_id TEXT,
+    claim_result_text TEXT,
+    claim_expires_at TEXT,
+    preview_user_id TEXT,
+    preview_operation_id TEXT,
+    preview_fingerprint TEXT,
+    preview_expires_at TEXT
+);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_guest_sessions_owner_expires
+ON guest_sessions(owner_user_id, expires_at);
+
+CREATE INDEX ASYNC IF NOT EXISTS idx_guest_sessions_expires
+ON guest_sessions(expires_at);
 
 CREATE TABLE IF NOT EXISTS notebooks (
     id TEXT PRIMARY KEY,

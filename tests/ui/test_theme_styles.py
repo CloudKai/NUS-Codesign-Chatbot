@@ -222,7 +222,7 @@ def test_assembled_stylesheet_wraps_all_component_markers() -> None:
     responsive_css = Path(_STYLES_DIR / "90-responsive.css").read_text(encoding="utf-8")
     assert "min-height:11rem" not in responsive_css
     mobile_shell = _css_rule_body(
-        responsive_css,
+        responsive_css.split("/* Top-bar-free responsive shell. */", 1)[1],
         ".block-container {",
     )
     assert "padding:0" in mobile_shell

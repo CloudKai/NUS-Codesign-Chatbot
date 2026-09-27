@@ -172,7 +172,7 @@ def test_citation_resolution_is_bounded_and_keeps_selected_list_labels(
     retriever = IndexedChunkRetriever((4, 16))
     client = FakeAgentCoreRuntime(
         payload={
-            "mode": "coaching",
+            "mode": "qa",
             "response_text": (
                 "Lecture notes support the wait-time claim [S5] and the "
                 "crossing-time measurement [S17]."

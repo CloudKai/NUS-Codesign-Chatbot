@@ -163,6 +163,15 @@ def _forget_reads(*prefixes: tuple[Any, ...]) -> None:
     invalidate_memo(*prefixes)
 
 
+def _invalidate_legacy_backfill(thread_id: str) -> None:
+    """Allow a fresh legacy attachment scan after a relevant local mutation."""
+    if get_script_run_ctx() is not None:
+        done = st.session_state.get("_legacy_backfill_done")
+        if isinstance(done, set):
+            done.discard(thread_id)
+    _forget_reads(("backfill_legacy_sources", thread_id))
+
+
 @st.cache_resource
 def resources(
     identifier: str = "local-student",
@@ -251,21 +260,26 @@ def local_api_client() -> LocalApiClient:
     Streamlit and is not forwarded here.
     """
 
-    def _id_cookie() -> dict[str, str]:
+    def _session_cookies() -> dict[str, str]:
         try:
             from ui.auth_gate import _cookie_value
         except Exception:
             return {}
-        token = _cookie_value(str(settings.cognito_id_token_cookie_name))
-        if not token:
-            return {}
-        return {str(settings.cognito_id_token_cookie_name): token}
+        cookies: dict[str, str] = {}
+        for name in (
+            settings.cognito_id_token_cookie_name,
+            settings.guest_session_cookie_name,
+        ):
+            value = _cookie_value(str(name))
+            if value:
+                cookies[str(name)] = value
+        return cookies
 
     timeout_seconds = 120.0
     client = LocalApiClient(
         str(getattr(settings, "api_base_url", "http://127.0.0.1:8000")),
         timeout_seconds=timeout_seconds,
-        cookie_provider=_id_cookie,
+        cookie_provider=_session_cookies,
     )
     http = getattr(client, "_http", None)
     if isinstance(http, httpx.Client):
@@ -818,6 +832,8 @@ class WorkspaceFacade:
             ("get_message_page", thread_id),
             ("get_thread", thread_id),
         )
+        if (metadata or {}).get("uploads"):
+            _invalidate_legacy_backfill(thread_id)
         return added
 
     def list_sources(
@@ -882,6 +898,7 @@ class WorkspaceFacade:
         else:
             self._service().delete_source(thread_id, source_id)
         _forget_reads(("list_sources", thread_id))
+        _invalidate_legacy_backfill(thread_id)
 
     def upload_sources(
         self,
@@ -917,7 +934,20 @@ class WorkspaceFacade:
         return self._service().read_source_content(thread_id, source_id)
 
     def backfill_legacy_sources(self, thread_id: str) -> int:
-        """Import legacy message attachments."""
+        """Import legacy attachments once per notebook in a Streamlit session.
+
+        A new browser session still scans the persisted message metadata. Failed
+        scans are never marked complete, so the next render can retry.
+        """
+        done: set[str] | None = None
+        if get_script_run_ctx() is not None:
+            current = st.session_state.get("_legacy_backfill_done")
+            if not isinstance(current, set):
+                current = set()
+                st.session_state["_legacy_backfill_done"] = current
+            done = current
+            if thread_id in done:
+                return 0
 
         def load() -> int:
             if local_api_enabled():
@@ -928,7 +958,10 @@ class WorkspaceFacade:
                 _forget_reads(("list_sources", thread_id), ("get_messages", thread_id))
             return added
 
-        return _memo_read(("backfill_legacy_sources", thread_id), load)
+        added = _memo_read(("backfill_legacy_sources", thread_id), load)
+        if done is not None:
+            done.add(thread_id)
+        return added
 
     def pending_transition(self, thread_id: str) -> PendingPhaseTransition | None:
         """Return the unresolved stage recommendation for the owned notebook."""
@@ -1008,6 +1041,7 @@ class WorkspaceFacade:
                 response_language=response_language,
             )
         self.forget_run_reads(thread_id)
+        _invalidate_legacy_backfill(thread_id)
         return turn
 
     def request_course_material_sync(self, thread_id: str):

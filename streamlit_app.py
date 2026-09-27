@@ -4,9 +4,10 @@ Startup order matters: inject static CSS, drop the one-shot
 ``auth_refreshed`` query marker, gate on the FastAPI application session
 (``/api/v1/auth/me``), then initialize session (including appearance from
 the store), sync appearance, apply theme tokens, run nonvisual workspace
-preparation, and render the three-region workspace. Unauthenticated visitors see only a static shell
-plus the login dialog. Prefer ``sh scripts/start.sh`` so the local API is
-running.
+preparation, and render the three-region workspace. Guest-enabled visitors
+enter through a browser-issued guest cookie before notebook data is loaded;
+the login gate remains the fallback when guest access is disabled. Prefer
+``sh scripts/start.sh`` so the local API is running.
 
 Chat transcript scrolling is owned by ``.st-key-chat_panel`` and
 ``ui.layout.chat_scroll``; do not restore per-log overflow scrolling.
@@ -17,15 +18,20 @@ from __future__ import annotations
 import streamlit as st
 
 from ui.auth_gate import (
+    AuthServiceUnavailable,
     authenticated_user,
+    authenticated_guest,
+    clear_identity_session_state,
     consume_auth_refresh_marker,
     current_user_claims,
     display_name_from_claims,
     logout_user,
     redirect_to_session_refresh,
+    render_guest_entry,
     render_login_gate,
     render_signed_out_shell,
     should_attempt_session_refresh,
+    guest_access_available,
 )
 from ui.constants import DEFAULT_APPEARANCE
 from ui.toasts import show_corner_toasts
@@ -52,61 +58,88 @@ configure_ui_perf_logger()
 inject_template_css()
 consume_auth_refresh_marker()
 
-user = authenticated_user()
+try:
+    user = authenticated_user()
+except AuthServiceUnavailable:
+    # Verification failed without a 401: keep the current owner and refresh
+    # hints untouched, and do not try a guest or protected workspace request.
+    st.error("We couldn't check your session right now. Please retry.")
+    if st.button("Retry", key="auth-service-retry"):
+        st.rerun()
+    st.stop()
+signed_out_shell_rendered = False
 if not user:
     # Auth gate has no preference store; always use the app default (System).
     # Overwrite leftovers from a prior logged-in session in this browser tab.
     st.session_state.appearance = DEFAULT_APPEARANCE
     render_theme_css()
-    signed_out_shell_rendered = False
     if should_attempt_session_refresh():
-        # Keep the static app skeleton visible while the browser checks an
-        # existing Cognito refresh session. No protected data is loaded here.
-        render_signed_out_shell()
-        signed_out_shell_rendered = True
+        # Cognito refresh still takes priority over an existing guest cookie.
+        # The old decorative shell is only needed for the login-gated mode.
+        if not guest_access_available():
+            render_signed_out_shell()
+            signed_out_shell_rendered = True
         if redirect_to_session_refresh():
             st.stop()
-    if not signed_out_shell_rendered:
-        render_signed_out_shell()
-    render_login_gate()
+
+# A Cognito refresh hint takes precedence over a coincident guest cookie. The
+# browser refresh bridge runs before FastAPI is asked to bind a guest owner.
+guest = authenticated_guest() if not user else None
+if not user and not guest:
+    if guest_access_available():
+        render_guest_entry()
+    else:
+        if not signed_out_shell_rendered:
+            render_signed_out_shell()
+        render_login_gate()
     st.stop()
 
 # Reuse the verified /auth/me result. Calling the helper without it performs a
 # second network request on every Streamlit rerun and can strand a valid local
 # session when that duplicate request fails transiently.
-claims = current_user_claims(user)
-cognito_sub = str(user.get("cognito_sub") or claims.get("sub") or "").strip()
-if not cognito_sub:
-    logout_user()
-    st.stop()
-
-bound_sub = str(st.session_state.get("_auth_bound_sub") or "")
-store_identifier = store_identifier_for_sub(cognito_sub)
-display_name = str(user.get("display_name") or "").strip() or display_name_from_claims(
-    claims
-)
-if bound_sub != cognito_sub:
-    bind_owner_identifier(store_identifier)
-    if bound_sub:
-        # Defensive account-switch handling: never carry one student's local
-        # profile label into another authenticated identity.
-        st.session_state.display_name = display_name
-        st.session_state.pop("profile_display_name", None)
-    elif not str(st.session_state.get("display_name") or "").strip():
-        st.session_state.display_name = display_name
-    st.session_state["_auth_bound_sub"] = cognito_sub
+if guest:
+    owner_key = str(guest["guest_id"])
+    if str(st.session_state.get("_auth_bound_owner") or "") != owner_key:
+        clear_identity_session_state()
+    bind_owner_identifier(owner_key)
+    st.session_state["_auth_bound_owner"] = owner_key
+    st.session_state["_auth_bound_kind"] = "guest"
+    st.session_state["display_name"] = "Guest"
 else:
-    # Resource caches are keyed by owner, so rebinding is cheap.
+    claims = current_user_claims(user)
+    cognito_sub = str(user.get("cognito_sub") or claims.get("sub") or "").strip()
+    if not cognito_sub:
+        logout_user()
+        st.stop()
+
+    store_identifier = store_identifier_for_sub(cognito_sub)
+    if str(st.session_state.get("_auth_bound_owner") or "") != store_identifier:
+        clear_identity_session_state()
     bind_owner_identifier(store_identifier)
+    st.session_state["_auth_bound_owner"] = store_identifier
+    st.session_state["_auth_bound_kind"] = "cognito"
+    st.session_state["_auth_bound_sub"] = cognito_sub
+    display_name = str(user.get("display_name") or "").strip() or display_name_from_claims(
+        claims
+    )
+    if not str(st.session_state.get("display_name") or "").strip():
+        st.session_state.display_name = display_name
 
 if "display_name" not in st.session_state:
     st.session_state.display_name = display_name
+
+if user and st.query_params.get("guest_transfer_error") == "1":
+    st.warning(
+        "We couldn't confirm whether your guest notebooks were added. Check "
+        "your notebook list. If they are missing, sign out and sign in again "
+        "to retry; keep this browser's cookies."
+    )
 
 # Professor navigation is only a convenience; the FastAPI professor routes
 # independently verify Cognito and the persisted lecturer/admin role.  Branch
 # before student notebook/session initialisation so staff never create or alter
 # a student workspace while reviewing analytics.
-if str(user.get("role") or "").strip().lower() in {"lecturer", "admin"}:
+if user and str(user.get("role") or "").strip().lower() in {"lecturer", "admin"}:
     # Staff bypasses student session initialization, but still restores the
     # persisted appearance and synchronizes the settings widget before theme
     # CSS is injected. This branch must not create or select a notebook.
@@ -131,6 +164,18 @@ if st.session_state.pop("toast_course_materials_loading", False):
     show_corner_toasts("Course materials are loading.")
 model_id, reasoning_effort = prepare_workspace_context()
 render_workspace(model_id, reasoning_effort)
+if guest:
+    st.html(
+        """
+<script>
+fetch('/api/v1/auth/guest/renew', {
+  method: 'POST',
+  credentials: 'same-origin'
+}).catch(() => {});
+</script>
+""",
+        unsafe_allow_javascript=True,
+    )
 inject_profile_leave_helper()
 
 # Single Your Notebooks dialog: remount while an inline actions panel is pending

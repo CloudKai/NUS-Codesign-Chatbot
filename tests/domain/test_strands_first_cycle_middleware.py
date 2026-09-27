@@ -390,12 +390,18 @@ def test_fast_chat_turn_output_is_one_strands_object_tool() -> None:
     assert hmw_ready.get("type") == "boolean"
     assert "null" not in str(hmw_ready.get("type"))
     assert "hmw_scaffold_ready" in (schema.get("required") or [])
+    for field in ("needs_source_retrieval", "out_of_scope"):
+        field_schema = (schema.get("properties") or {}).get(field) or {}
+        assert field_schema.get("type") == "boolean"
+        assert field in (schema.get("required") or [])
     coaching_null = {
         "mode": "coaching",
         "response_text": "Which constraint is actually binding?",
         "recommendation": None,
         "citations": [],
         "hmw_scaffold_ready": False,
+        "needs_source_retrieval": False,
+        "out_of_scope": False,
     }
     coaching_stay = {
         "mode": "coaching",
@@ -403,6 +409,8 @@ def test_fast_chat_turn_output_is_one_strands_object_tool() -> None:
         "recommendation": "stay",
         "citations": [],
         "hmw_scaffold_ready": False,
+        "needs_source_retrieval": False,
+        "out_of_scope": False,
     }
     coaching_citations_null = {
         "mode": "coaching",
@@ -410,6 +418,8 @@ def test_fast_chat_turn_output_is_one_strands_object_tool() -> None:
         "recommendation": "stay",
         "citations": None,
         "hmw_scaffold_ready": False,
+        "needs_source_retrieval": False,
+        "out_of_scope": False,
     }
     qa_null = {
         "mode": "qa",
@@ -417,10 +427,15 @@ def test_fast_chat_turn_output_is_one_strands_object_tool() -> None:
         "recommendation": None,
         "citations": [],
         "hmw_scaffold_ready": False,
+        "needs_source_retrieval": False,
+        "out_of_scope": False,
     }
     assert _flatten_schema_allows(schema, coaching_stay)
     assert not _flatten_schema_allows(schema, coaching_null)
     assert not _flatten_schema_allows(schema, coaching_citations_null)
+    assert not _flatten_schema_allows(
+        schema, {**coaching_stay, "needs_source_retrieval": None}
+    )
     if "if" in schema:
         assert _flatten_schema_allows(schema, qa_null)
     else:

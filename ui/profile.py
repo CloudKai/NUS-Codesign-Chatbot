@@ -10,7 +10,7 @@ import streamlit.components.v1 as components
 
 from backend.student_journey import RESPONSE_DETAILS, normalize_journey
 
-from ui.auth_gate import logout_user
+from ui.auth_gate import auth_login_url, logout_user
 from ui.components import profile_initial
 from ui.constants import APPEARANCE_MODES
 from ui.html_embed import wrap_component_html
@@ -43,10 +43,11 @@ def persist_display_name() -> None:
     """Store the local display name used by the profile shell."""
     cleaned = " ".join(str(st.session_state.profile_display_name or "").split())[:80]
     st.session_state.display_name = cleaned or "Student"
-    store.update_thread(
-        st.session_state.thread_id,
-        metadata={"display_name": st.session_state.display_name},
-    )
+    if st.session_state.get("thread_id"):
+        store.update_thread(
+            st.session_state.thread_id,
+            metadata={"display_name": st.session_state.display_name},
+        )
 
 
 def _sync_profile_trigger_label(display_name: str) -> None:
@@ -117,6 +118,23 @@ def _coaching_style_caption(detail: str) -> str:
     return COACHING_STYLE_COPY[detail]
 
 
+def _open_account_sign_in() -> None:
+    """Navigate a guest to Cognito's combined sign-in and sign-up page."""
+    login_url = auth_login_url()
+    if not login_url:
+        st.error("Account sign-in is temporarily unavailable.")
+        return
+    st.html(
+        f"""
+<script>
+window.location.replace({json.dumps(login_url)});
+</script>
+""",
+        unsafe_allow_javascript=True,
+    )
+    st.stop()
+
+
 @st.fragment
 def _render_coaching_style_fragment() -> None:
     """Render response-detail preferences without redrawing the workspace."""
@@ -146,7 +164,22 @@ def _render_profile_menu_body(*, display_name: str, collapsed: bool) -> None:
             '<div class="cd-profile-menu" hidden></div>',
             unsafe_allow_html=True,
         )
-        _render_display_name_fragment(display_name, collapsed=collapsed)
+        guest_active = st.session_state.get("_auth_bound_kind") == "guest"
+        if not guest_active:
+            _render_display_name_fragment(display_name, collapsed=collapsed)
+        if guest_active:
+            st.caption(
+                "Guest work stays in this browser. Losing the cookie may make history "
+                "inaccessible. Sign in or sign up to add your guest notebooks "
+                "to your account automatically."
+            )
+            if collapsed and st.button(
+                "Sign in or sign up",
+                key="profile-guest-sign-in",
+                use_container_width=True,
+                type="secondary",
+            ):
+                _open_account_sign_in()
         st.segmented_control(
             "Appearance",
             APPEARANCE_MODES,
@@ -255,6 +288,15 @@ def render_profile_menu(*, collapsed: bool = False) -> None:
                         display_name=display_name,
                         collapsed=False,
                     )
+        if st.session_state.get("_auth_bound_kind") == "guest":
+            with st.container(key="sidebar_guest_sign_in"):
+                if st.button(
+                    "Sign in or sign up",
+                    key="profile-guest-sign-in",
+                    use_container_width=True,
+                    type="secondary",
+                ):
+                    _open_account_sign_in()
 
 
 def inject_profile_leave_helper() -> None:

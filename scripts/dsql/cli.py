@@ -74,12 +74,78 @@ _MESSAGE_REVISION_COLUMNS: tuple[tuple[str, str], ...] = (
 # Stay well under Aurora DSQL per-transaction row-modification limits (~3k).
 REVISION_NULL_BACKFILL_BATCH_SIZE = 1000
 _REVISION_BACKFILL_TABLES = frozenset({"notebooks", "messages"})
+_GUEST_SESSION_COLUMNS = frozenset(
+    {"token_digest", "owner_user_id", "created_at", "expires_at", "revoked_at"}
+)
 
 
 def is_async_index_ddl(statement: str) -> bool:
     """Return True when *statement* is a CREATE [UNIQUE] INDEX ASYNC DDL."""
     upper = " ".join(statement.upper().split())
     return upper.startswith("CREATE") and " INDEX ASYNC " in f" {upper} "
+
+
+def plan_guest_session_migration(existing_columns: set[str]) -> list[str]:
+    """Plan additive DSQL guest-session DDL after inspecting the table shape."""
+    columns = {str(name).lower() for name in existing_columns}
+    if columns and not _GUEST_SESSION_COLUMNS.issubset(columns):
+        missing = sorted(_GUEST_SESSION_COLUMNS - columns)
+        raise RuntimeError(
+            "Existing guest_sessions table has an unexpected shape; "
+            f"missing columns: {', '.join(missing)}"
+        )
+    statements: list[str] = []
+    if not columns:
+        statements.append(
+            "CREATE TABLE IF NOT EXISTS guest_sessions ("
+            "token_digest TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL, "
+            "created_at TEXT NOT NULL, expires_at TEXT NOT NULL, revoked_at TEXT, "
+            "claim_user_id TEXT, claim_operation_id TEXT, claim_result_text TEXT, "
+            "claim_expires_at TEXT, preview_user_id TEXT, preview_operation_id TEXT, "
+            "preview_fingerprint TEXT, preview_expires_at TEXT)"
+        )
+    for column in (
+        "claim_user_id", "claim_operation_id", "claim_result_text", "claim_expires_at",
+        "preview_user_id", "preview_operation_id", "preview_fingerprint", "preview_expires_at",
+    ):
+        if columns and column not in columns:
+            statements.append(f"ALTER TABLE guest_sessions ADD COLUMN {column} TEXT")
+    statements.extend(
+        [
+            "CREATE INDEX ASYNC IF NOT EXISTS idx_guest_sessions_owner_expires "
+            "ON guest_sessions(owner_user_id, expires_at)",
+            "CREATE INDEX ASYNC IF NOT EXISTS idx_guest_sessions_expires "
+            "ON guest_sessions(expires_at)",
+            "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE guest_sessions "
+            "TO co_design_app",
+        ]
+    )
+    return statements
+
+
+def inspect_guest_session_migration(
+    *,
+    endpoint: str,
+    region: str,
+    database: str = "postgres",
+    admin_user: str = "admin",
+    connect_fn: Callable[..., Any] | None = None,
+    token_provider: Callable[[], str] | None = None,
+) -> list[str]:
+    """Read the DSQL catalog as admin and return a safe additive plan."""
+    connection = _connect_admin(
+        endpoint=endpoint,
+        region=region,
+        database=database,
+        admin_user=admin_user,
+        connect_fn=connect_fn,
+        token_provider=token_provider,
+    )
+    try:
+        columns = fetch_table_columns(connection, "guest_sessions")
+    finally:
+        connection.close()
+    return plan_guest_session_migration(columns)
 
 
 def column_default_is_zero(column_default: Any) -> bool:
@@ -574,6 +640,67 @@ def _apply_admin_statements(
     return applied
 
 
+def apply_guest_session_migration(
+    *,
+    endpoint: str,
+    region: str,
+    database: str = "postgres",
+    admin_user: str = "admin",
+    connect_fn: Callable[..., Any] | None = None,
+    token_provider: Callable[[], str] | None = None,
+    dry_run: bool = False,
+) -> list[str]:
+    """Inspect and optionally apply the additive guest-session DSQL migration."""
+    planned = inspect_guest_session_migration(
+        endpoint=endpoint,
+        region=region,
+        database=database,
+        admin_user=admin_user,
+        connect_fn=connect_fn,
+        token_provider=token_provider,
+    )
+    if dry_run:
+        return planned
+    applied: list[str] = []
+    waiter = wait_for_async_index_job
+    for statement in planned:
+        connection = _connect_admin(
+            endpoint=endpoint,
+            region=region,
+            database=database,
+            admin_user=admin_user,
+            connect_fn=connect_fn,
+            token_provider=token_provider,
+        )
+        job_id: str | None = None
+        try:
+            result = connection.execute(statement)
+            if is_async_index_ddl(statement):
+                job_id = _job_id_from_result(result)
+            connection.commit()
+        except Exception:
+            try:
+                connection.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+            connection.close()
+            raise
+        else:
+            connection.close()
+        if job_id:
+            waiter(
+                job_id=job_id,
+                endpoint=endpoint,
+                region=region,
+                database=database,
+                admin_user=admin_user,
+                connect_fn=connect_fn,
+                token_provider=token_provider,
+            )
+        applied.append(statement)
+    return applied
+
+
 def initialize_empty_workflow_contract(
     *,
     endpoint: str,
@@ -844,11 +971,38 @@ def main(argv: list[str] | None = None) -> int:
         default=os.getenv("DSQL_ADMIN_USER", "admin"),
         help="Admin DB user for DDL only (default: admin). Never the runtime role.",
     )
+    parser.add_argument(
+        "--guest-sessions-only",
+        action="store_true",
+        help="Inspect/apply only the additive guest-session DSQL migration.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="With --guest-sessions-only, inspect catalog and print planned SQL.",
+    )
     args = parser.parse_args(argv)
     if (args.admin_user or "").strip().lower() == RUNTIME_ROLE_NAME.lower():
         raise SystemExit(
             f"--admin-user must not be the runtime role {RUNTIME_ROLE_NAME!r}"
         )
+    if args.dry_run and not args.guest_sessions_only:
+        parser.error("--dry-run requires --guest-sessions-only")
+    if args.guest_sessions_only:
+        planned = apply_guest_session_migration(
+            endpoint=str(args.endpoint or ""),
+            region=str(args.region or ""),
+            database=str(args.database or "postgres"),
+            admin_user=str(args.admin_user or "admin"),
+            dry_run=bool(args.dry_run),
+        )
+        heading = "Guest-session migration plan" if args.dry_run else "Applied"
+        print(f"{heading} ({len(planned)} statement(s)):")
+        for statement in planned:
+            print(statement + ";")
+        if args.dry_run:
+            print("Dry run only; no DDL or grants were applied.")
+        return 0
     applied = apply_dsql_schema(
         endpoint=str(args.endpoint or ""),
         region=str(args.region or ""),

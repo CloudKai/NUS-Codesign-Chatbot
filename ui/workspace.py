@@ -184,10 +184,10 @@ def _on_collapse_studio() -> None:
 
 
 def _on_mobile_new_chat() -> None:
-    """Create a notebook before Chat paints so one remount owns the new thread.
+    """Open an unsaved chat draft before Chat paints.
 
-    Mirrors desktop ``_on_new_chat``: close drawers, route to Chat, toast that
-    course materials are loading, then create without a nested full-app remount.
+    Mirrors desktop ``_on_new_chat``: close drawers and route to Chat without
+    a nested full-app remount.
     """
     dismiss_delete_chat_dialog()
     close_mobile_drawers()
@@ -195,7 +195,6 @@ def _on_mobile_new_chat() -> None:
     st.session_state.mobile_panel = "Chat"
     st.session_state.pending_mobile_panel = "Chat"
     st.session_state.nav_section = "Chat"
-    st.session_state.toast_course_materials_loading = True
     new_notebook(should_rerun=False)
 
 
@@ -380,7 +379,10 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
             elif center_view == "library":
                 with st.container(key="sources_panel"):
                     sources_started = time.perf_counter()
-                    render_sources_panel()
+                    if st.session_state.get("thread_id"):
+                        render_sources_panel()
+                    else:
+                        st.info("Send a message to save this chat before adding sources.")
                     log_ui_timing(
                         sources_ms=round(
                             max(
@@ -443,7 +445,11 @@ def render_workspace(model_id: str, reasoning_effort: str | None) -> None:
                             on_click=_on_close_mobile_studio,
                         )
                     studio_started = time.perf_counter()
-                    render_studio_panel()
+                    if st.session_state.get("thread_id"):
+                        render_studio_panel()
+                    else:
+                        st.markdown("**Thinking Path**")
+                        st.caption("Send a message to start your thinking path.")
                     log_ui_timing(
                         studio_ms=round(
                             max(0.0, (time.perf_counter() - studio_started) * 1000.0),

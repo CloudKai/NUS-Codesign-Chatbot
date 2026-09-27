@@ -107,7 +107,7 @@ def test_nav_rail_exposes_new_search_library_and_recents_actions() -> None:
     ):
         assert "rerun_app()" not in callback_body
     assert 'if target == current:' in open_chat
-    assert 'toast_course_materials_loading = True' in new_chat
+    assert 'toast_course_materials_loading = True' not in new_chat
     assert "dismiss_delete_chat_dialog()" in open_search
     assert "dismiss_delete_chat_dialog()" in toggle_library
     assert "dismiss_delete_chat_dialog()" in open_chat
@@ -254,6 +254,6 @@ def test_workspace_chrome_uses_on_click_without_extra_rerun() -> None:
         body = workspace.split(f"def {name}", 1)[1].split("\ndef ", 1)[0]
         assert "rerun_app()" not in body
     mobile_new = workspace.split("def _on_mobile_new_chat", 1)[1].split("\ndef ", 1)[0]
-    assert 'toast_course_materials_loading = True' in mobile_new
+    assert 'toast_course_materials_loading = True' not in mobile_new
     assert "dismiss_delete_chat_dialog()" in mobile_new
     assert "rerun_app" not in workspace
